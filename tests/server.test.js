@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { cpSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, isAbsolute } from 'node:path'
 import { createServer } from '../lib/server.js'
 import { readInstance, readModule } from '../lib/instance.js'
 import { loadDefinition } from '../lib/definition.js'
@@ -97,6 +97,9 @@ test('POST /api/instance/render/:artefact renders a real docx via the web form p
       const body = await res.json()
       assert.equal(body.artefact, 'soap')
       assert.match(body.docxPath, /out[/\\]soap\.docx$/)
+      // Absolute, not relative to wherever `gantry serve` happened to be
+      // launched from — the browser has no way to resolve a relative path.
+      assert.equal(isAbsolute(body.docxPath), true)
       assert.ok(existsSync(body.docxPath))
     })
   } finally {
