@@ -156,6 +156,34 @@ function renderModule(mod) {
   return section
 }
 
+function renderArtefactsSection(instance) {
+  const section = document.createElement('section')
+  section.className = 'artefacts'
+
+  const heading = document.createElement('h2')
+  heading.textContent = 'Render'
+  section.appendChild(heading)
+
+  const status = document.createElement('div')
+  status.className = 'save-status'
+
+  instance.artefacts.forEach((artefact) => {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.textContent = `Render ${artefact.title}`
+    button.addEventListener('click', async () => {
+      status.textContent = 'Rendering…'
+      const res = await fetch(`/api/instance/render/${artefact.id}`, { method: 'POST' })
+      const body = await res.json()
+      status.textContent = res.ok ? `Rendered to ${body.docxPath}` : `Render failed: ${body.error}`
+    })
+    section.appendChild(button)
+  })
+
+  section.appendChild(status)
+  return section
+}
+
 async function main() {
   const instance = await loadInstance()
   document.getElementById('instance-title').textContent = `${instance.slug} — ${instance.definition}`
@@ -163,6 +191,7 @@ async function main() {
 
   const modulesRoot = document.getElementById('modules')
   instance.modules.forEach((mod) => modulesRoot.appendChild(renderModule(mod)))
+  modulesRoot.appendChild(renderArtefactsSection(instance))
 }
 
 main().catch((err) => {

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync, mkdtempSync, rmSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from '../lib/server.js'
@@ -32,6 +32,7 @@ test('GET /api/instance reports the example-soap fixture, fully populated', asyn
     assert.equal(body.slug, 'example-soap')
     assert.equal(body.definition, 'design')
     assert.deepEqual(body.stage, { id: 'shape', title: 'Shape', gate: 'business-case' })
+    assert.deepEqual(body.artefacts, [{ id: 'soap', title: 'Solution on a Page' }])
 
     const context = body.modules.find((m) => m.id === 'context')
     const driver = context.fields.find((f) => f.id === 'driver')
@@ -79,6 +80,25 @@ test('PUT /api/instance/modules/:id writes the same file format the CLI reads, a
     assert.equal(data.status, 'agreed')
     assert.equal(data.fields.driver, 'Updated via the web form.')
     assert.deepEqual(data.fields['affected-domains'], ['Payments'])
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('POST /api/instance/render/:artefact renders a real docx via the web form path', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/example-soap', join(instancesDir, 'example-soap'), { recursive: true })
+    rmSync(join(instancesDir, 'example-soap', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'example-soap', instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instance/render/soap`, { method: 'POST' })
+      assert.equal(res.status, 200)
+      const body = await res.json()
+      assert.equal(body.artefact, 'soap')
+      assert.match(body.docxPath, /out[/\\]soap\.docx$/)
+      assert.ok(existsSync(body.docxPath))
+    })
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }

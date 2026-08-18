@@ -22,6 +22,12 @@ header {
   margin-top: 1.5rem;
 }
 
+.artefacts {
+  border-top: 2px solid #1a1a1a;
+  padding-top: 1rem;
+  margin-top: 2rem;
+}
+
 .purpose {
   color: #555;
   font-style: italic;
