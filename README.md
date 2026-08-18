@@ -69,7 +69,7 @@ The key rule: **artefacts are derived, modules are authored.** If you find yours
 ```bash
 git clone <repo-url>
 cd gantry
-npm install          # TODO: confirm once the engine's runtime is settled
+npm install          # installs the engine's deps AND the web form's browser deps (codemirror, markdown-it, dompurify) into node_modules/
 npm link             # makes `gantry` available on your PATH
 ```
 
@@ -77,16 +77,17 @@ npm link             # makes `gantry` available on your PATH
 
 ## Software dependencies
 
-> **TODO:** confirm and pin.
-
 | Dependency | Version | Why |
 |---|---|---|
-| Node.js | TODO | Engine runtime and CLI |
+| Node.js | 22+ | Engine runtime and CLI (`package.json` `engines.node`) |
+| `pandoc` | 3.x confirmed (3.1.3) | **Required at render time** — `gantry render` shells out to it to convert the compiled Markdown to `.docx` |
 | Git | 2.x+ | Instance history and audit trail |
 | A text editor | any | Modules are markdown; no tooling required to author them |
-| `vendor/anthropic-skills/{docx,pdf,pptx,xlsx}` | pinned to a commit, see `vendor/anthropic-skills/README.md` | Document-conversion code for the artefact rendering pipeline (docx/pdf/pptx/xlsx read/write) — source-available, not open source; see that README for the license caveat |
+| `vendor/anthropic-skills/{docx,pdf,pptx,xlsx}` | pinned to a commit, see `vendor/anthropic-skills/README.md` | Document-conversion code used to *verify* rendered artefacts during development (docx→pdf→image) — source-available, not open source; see that README for the license caveat. Not required at render time. |
 
-The web form has no build step and no runtime dependencies — it is a single static HTML page served from the repo.
+The web form (`web/`) is a static page with no build step — but it is **not** dependency-free: `gantry serve` generates a browser import map that serves CodeMirror 6, `markdown-it`, and `DOMPurify` straight out of `node_modules/`. That directory must exist wherever `gantry serve` runs — don't `npm prune --production` or ship without it.
+
+Visually verifying a rendered `.docx` (not required to *use* Gantry, only to sanity-check output during development) additionally needs LibreOffice (`soffice`) and Poppler (`pdftoppm`) — see `vendor/anthropic-skills/docx/SKILL.md`.
 
 ## Latest releases
 
@@ -100,31 +101,31 @@ Early. The engine, definition schema and design definition are under active deve
 gantry/
 ├── gantry.yaml                   # engine configuration
 ├── definitions/
-│   ├── design/
-│   │   ├── definition.yaml       # stages, gates, artefacts
-│   │   ├── modules/              # module specs
-│   │   │   ├── context.yaml
-│   │   │   ├── options.yaml
-│   │   │   └── ...
-│   │   └── templates/            # artefact templates
-│   │       ├── soap.md.tmpl
-│   │       └── detailed-design.md.tmpl
-│   ├── procurement/
-│   │   └── ...
-│   └── incident-review/
-│       └── ...
+│   └── design/                   # the only definition that exists today
+│       ├── definition.yaml       # stages, gates, artefacts
+│       ├── modules/              # module specs
+│       │   ├── context.yaml
+│       │   ├── solution-definition.yaml
+│       │   └── ...
+│       └── templates/            # artefact templates
+│           ├── soap.md.tmpl
+│           └── reference.docx    # pandoc --reference-doc, derived from the real HLD template
 ├── instances/
 │   └── <initiative-slug>/
 │       ├── instance.yaml         # which definition, which stage, metadata
 │       ├── modules/              # authored content
 │       │   ├── context.md
-│       │   └── options.md
+│       │   └── solution-definition.md
 │       └── out/                  # rendered artefacts (gitignored by default)
+├── lib/                          # the engine: definition/instance loading, render, status, the web server
+├── bin/gantry.js                 # CLI entrypoint
 └── web/
-    └── index.html                # the stage-by-stage form
+    ├── index.html                # the stage-by-stage form
+    ├── app.js
+    └── style.css
 ```
 
-Definitions sit side by side. Adding a second one requires no change to the engine.
+Definitions sit side by side — adding a second one requires no change to the engine — but `design` is the only one built out so far. `procurement` and `incident-review` are illustrative names from this README's own example, not real definitions in this repo.
 
 ## Two ways to work
 
@@ -137,13 +138,13 @@ Neither path is the "real" one. They're two front ends onto the same data.
 ## Your first instance
 
 ```bash
-gantry definitions                              # list available definitions
 gantry new design my-initiative                 # start an instance
 gantry status my-initiative                     # what does the current stage need?
-gantry serve my-initiative                      # fill it in via the form, or edit the files
-gantry check my-initiative --gate business-case # completeness against the gate
+gantry serve my-initiative                      # fill it in via the form, or edit the files by hand
 gantry render my-initiative soap                # produce the artefact
 ```
+
+> `gantry definitions`, `gantry check`, and `gantry validate` are not yet implemented — this POC covers `new` → fill in → `render`, with `status` for progress. Gate validation was explicitly out of scope for this pass. See the CLI reference below for what's live today.
 
 ---
 
@@ -151,17 +152,17 @@ gantry render my-initiative soap                # produce the artefact
 
 ## CLI
 
-| Command | Does |
-|---|---|
-| `gantry definitions` | List definitions available in this repo |
-| `gantry new <definition> <slug>` | Create an instance |
-| `gantry status <slug>` | Current stage, module completeness, what's outstanding |
-| `gantry check <slug> [--gate <id>]` | Validate an instance against a gate's requirements |
-| `gantry render <slug> <artefact>` | Render an artefact to `out/` |
-| `gantry serve [<slug>]` | Serve the stage-by-stage form |
-| `gantry validate <definition>` | Validate a definition against the schema |
+| Command | Does | Status |
+|---|---|---|
+| `gantry definitions` | List definitions available in this repo | Not yet implemented |
+| `gantry new <definition> <slug> [--owner <name>]` | Create an instance | Implemented |
+| `gantry status <slug> [--json]` | Current stage, module completeness, what's outstanding | Implemented |
+| `gantry check <slug> [--gate <id>]` | Validate an instance against a gate's requirements | Not yet implemented — out of scope for this POC |
+| `gantry render <slug> <artefact> [--dry-run]` | Render an artefact to `out/` | Implemented |
+| `gantry serve [<slug>] [--port <port>]` | Serve the stage-by-stage form (defaults to instance `example-soap`, port 3000) | Implemented |
+| `gantry validate <definition>` | Validate a definition against the schema | Not yet implemented |
 
-`status` and `check` emit structured output with `--json` for scripting and agent use.
+`status` emits structured output with `--json` for scripting and agent use (`check` will too, once implemented).
 
 ## Definition schema
 
@@ -311,29 +312,23 @@ The definition is the contract. Because every module carries a machine-readable 
 
 ```bash
 npm install
-npm run build          # TODO: confirm target and output path
 ```
 
-The web form is static and requires no build step; `gantry serve` serves `web/index.html` directly.
+There is no build/compile step — the CLI and engine (`bin/`, `lib/`) run directly as Node ESM, and the web form (`web/`) is static, served as-is by `gantry serve`.
 
 ## Test
 
 ```bash
-npm test               # engine unit tests
-npm run test:watch
+npm test               # engine unit tests (node --test)
 ```
 
-> **TODO:** confirm the runner and add coverage thresholds once the schema stabilises.
+> **TODO:** add coverage thresholds once the schema stabilises.
 
 ## Validating definitions and instances
 
-Definitions and instances are validated by the same machinery the CLI uses, so a broken definition fails fast rather than at render time:
+`gantry render my-initiative soap --dry-run` resolves the template without writing anything, and fails fast (with a descriptive error) if the definition, an instance module reference, a field type, or a `required`/`required-at` conflict is malformed.
 
-```bash
-gantry validate design                      # definition against the schema
-gantry check my-initiative --gate <id>      # instance against a gate
-gantry render my-initiative soap --dry-run  # template resolution without writing
-```
+`gantry validate <definition>` and `gantry check <slug> --gate <id>` (dedicated definition/gate validation, ahead of render time) are not yet implemented — see the CLI reference above.
 
 ## Continuous integration
 
