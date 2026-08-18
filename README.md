@@ -252,6 +252,8 @@ For a field whose requiredness genuinely differs by gate, use `required-at` inst
       or absent at `hld-tac-approved`; required by `build-ready-checklist`.
 ```
 
+Where a field's *content* genuinely changes shape across the gates its module spans — not just gains depth — model it as two fields on the shared module instead of one field with `required-at`. See `definitions/design/modules/dependencies.yaml`: `dependencies-overview` (narrative, required at the earlier gate) and `dependency-list` (structured, required at the later gate) answer the same question in two different shapes, not two depths of one answer.
+
 `required` and `required-at` are mutually exclusive on a field — use `required` for a field whose requiredness doesn't vary by gate (including fields in single-gate modules), and `required-at` only where it does. Don't reach for `required-at` by default; most fields don't need it.
 
 ## Instance module files
