@@ -1,0 +1,15 @@
+id: open-questions
+title: Open Questions
+purpose: >
+  What isn't resolved yet, put in front of TAC deliberately rather than
+  papered over. An HLD with no open questions is usually one that hasn't
+  been looked at hard enough.
+
+fields:
+  - id: questions
+    title: Open questions
+    type: markdown
+    required: false
+    guidance: >
+      Each question should be answerable — who needs to resolve it, and by
+      when it needs resolving relative to Build Readiness Confirmed.

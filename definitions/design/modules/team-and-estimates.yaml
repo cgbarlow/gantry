@@ -1,0 +1,31 @@
+id: team-and-estimates
+title: Team and Estimates
+purpose: >
+  Who is involved and roughly how big this is — the information a
+  Business Case Approved decision needs to size and staff the work, without
+  the precision a delivery plan would need later.
+
+fields:
+  - id: teams-and-contacts
+    title: Teams and contact persons
+    type: list
+    required: true
+    guidance: >
+      Every team touched by this solution and a named contact for each —
+      not just the obvious delivery team.
+
+  - id: estimates
+    title: High-level estimates
+    type: markdown
+    required: true
+    guidance: >
+      T-shirt size (or equivalent order-of-magnitude estimate) per team or
+      workstream. This is a sizing signal for planning, not a commitment.
+
+  - id: references
+    title: References
+    type: list
+    required: false
+    guidance: >
+      Links to supporting material — prior art, related initiatives, source
+      documents — that informed this instance but don't belong inline.

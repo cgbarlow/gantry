@@ -1,0 +1,16 @@
+id: alternatives-considered
+title: Alternatives Considered
+purpose: >
+  The other options that were on the table and why they weren't chosen —
+  lets TAC verify the proposed solution was actually compared against
+  something, not just asserted.
+
+fields:
+  - id: alternatives
+    title: Alternatives
+    type: markdown
+    required: true
+    guidance: >
+      For each alternative: what it was, and the specific reason it lost out
+      to the proposed solution. "Do nothing" counts as an alternative and is
+      often worth including explicitly.

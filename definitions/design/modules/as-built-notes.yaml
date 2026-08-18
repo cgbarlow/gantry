@@ -1,0 +1,41 @@
+# INFERRED / UNCONFIRMED — no Contoso template or filled example exists for the
+# Detailed Design / As-built artefact anywhere in the research corpus (see
+# docs/research/stages-gates-module-specs.md Section 4.5: "Do any templates
+# for this exist? Open question about Architecture holding the pen on this
+# as an Assurance function"). This module is a minimal placeholder drafted
+# from general as-built/handover conventions so the `handover` stage has
+# something to complete against. Expect this to be revised once a real
+# source (an existing as-built doc, or a decision on who owns this content)
+# is available.
+
+id: as-built-notes
+title: As-Built Notes
+purpose: >
+  What actually got built, as distinct from what was agreed at Build
+  Readiness Confirmed, and what a future support engineer needs to safely
+  operate and change it.
+
+fields:
+  - id: changes-from-design
+    title: Changes from the agreed design
+    type: markdown
+    required: true
+    guidance: >
+      Where the built solution diverges from the architecture/integration
+      modules agreed at Build Readiness Confirmed, and why.
+
+  - id: operational-notes
+    title: Operational notes
+    type: markdown
+    required: false
+    guidance: >
+      Anything a support engineer would need that isn't already captured in
+      `support-and-operations` — quirks, workarounds, known limitations.
+
+  - id: handover-confirmation
+    title: Handover confirmation
+    type: markdown
+    required: true
+    guidance: >
+      Confirmation that the operational handover has actually happened —
+      who received it, and when.

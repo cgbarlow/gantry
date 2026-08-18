@@ -1,0 +1,42 @@
+id: proposed-solution
+title: Proposed Solution
+purpose: >
+  The solution being put to the Technical Architecture Committee, and why
+  it's the right one — strategic fit, dependencies, and consequences. Risk,
+  security and cost-benefit content deliberately live in the shared `risks`,
+  `security` and `nfrs` modules instead of being repeated here — see those
+  modules' guidance for what they cover at this stage. Derived from the TAC
+  template's Proposed Solution section — see
+  docs/research/stages-gates-module-specs.md Section 4.2.
+
+fields:
+  - id: strategy-alignment
+    title: Alignment with strategy
+    type: markdown
+    required: true
+
+  - id: dependencies
+    title: Dependencies
+    type: markdown
+    required: true
+    guidance: >
+      What this solution depends on, and what depends on it — other
+      initiatives, platforms, teams, or decisions still in flight.
+
+  - id: implications
+    title: Implications
+    type: markdown
+    required: false
+
+  - id: trade-offs
+    title: Trade-offs
+    type: markdown
+    required: true
+    guidance: >
+      What you're giving up by choosing this solution over the alternatives
+      recorded in `alternatives-considered`.
+
+  - id: delivery-approach
+    title: Delivery approach and indicative timeline
+    type: markdown
+    required: true

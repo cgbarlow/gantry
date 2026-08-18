@@ -1,0 +1,41 @@
+id: nfrs
+title: Non-Functional Requirements
+purpose: >
+  The quality attributes the solution must meet — performance, availability,
+  scalability, capacity, continuity. Derived from the SAD template's
+  Non-Functional Requirements content and the TAC template's NFR section —
+  see docs/research/stages-gates-module-specs.md Sections 4.2–4.3.
+
+  This module is required at both HLD Definition and Detailed Design — it is
+  one module, filled in progressively, not two. At `hld-tac-approved` expect
+  it lightly filled (the NFRs that matter enough to shape the HLD decision).
+  At `build-ready-checklist` expect it complete enough to design and test
+  against.
+
+  Reviewed by the Design Authority before Build Readiness Confirmed, via the
+  instance module file's frontmatter `status`/`owner` convention — see
+  `architecture.yaml` for the same note.
+
+fields:
+  - id: performance
+    title: Performance
+    type: markdown
+    required: false
+
+  - id: availability-and-continuity
+    title: Availability and continuity
+    type: markdown
+    required: false
+
+  - id: scalability-and-capacity
+    title: Scalability and capacity
+    type: markdown
+    required: false
+
+  - id: other-nfrs
+    title: Other non-functional requirements
+    type: markdown
+    required: false
+    guidance: >
+      Anything that doesn't fit the categories above but still constrains
+      the solution — e.g. compliance-driven quality attributes.

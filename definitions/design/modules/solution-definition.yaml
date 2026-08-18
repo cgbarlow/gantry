@@ -1,0 +1,45 @@
+id: solution-definition
+title: Solution Definition
+purpose: >
+  What the solution actually is at Shape depth — enough for a reader to
+  picture how the change will work end to end without yet committing to the
+  detailed architecture that follows at HLD Definition and Detailed Design.
+  Derived from the real Confluence Epic SOAP structure (Background and
+  context; Solution definition; Teams and estimates; References) rather than
+  README's illustrative `options` module — see
+  docs/research/stages-gates-module-specs.md Section 4.2.
+
+fields:
+  - id: process-flow
+    title: Process flow
+    type: markdown
+    required: true
+    guidance: >
+      How work or data moves through the solution, step by step. A narrative
+      walk-through is fine; a diagram reference is fine too, but describe
+      what the diagram shows in words as well.
+
+  - id: high-level-solution-design
+    title: High-level solution design
+    type: markdown
+    required: true
+    guidance: >
+      The shape of the solution in outline — the main components and how
+      they relate. This is a sketch, not the Detailed Design stage's
+      `architecture` module; go only as deep as a Shape-stage reader needs.
+
+  - id: assumptions-and-considerations
+    title: Assumptions and considerations
+    type: markdown
+    required: false
+    guidance: >
+      What you're taking as given for this solution to make sense — things
+      that would change the shape of the answer if they turned out false.
+
+  - id: feature-breakdown
+    title: Feature breakdown and involved teams
+    type: markdown
+    required: true
+    guidance: >
+      The solution broken into the features or workstreams that deliver it,
+      and which teams are involved in each.

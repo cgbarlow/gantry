@@ -1,0 +1,55 @@
+id: architecture
+title: Architecture
+purpose: >
+  The solution's structure at build-ready depth — components, layers, and
+  the design decisions behind them. Derived from the SAD template's
+  Business Architecture View, High Level Architectural View and Logical
+  Components View sections — see
+  docs/research/stages-gates-module-specs.md Section 4.3. This module feeds
+  both the `sad` and `ssad` artefacts from the same data; see the `ssad`
+  artefact's note in definitions/design/definition.yaml.
+
+  Reviewed by the Design Authority before Build Readiness Confirmed. Use the
+  instance module file's frontmatter `status` (`draft` / `review` /
+  `agreed`) and an `owner`/`reviewer` field to track that review, per
+  README's "Working with agents" convention — there is no separate gate for
+  this review.
+
+fields:
+  - id: design-decisions
+    title: Design decisions
+    type: markdown
+    required: true
+    guidance: >
+      The decisions that shaped this architecture and why — not just what
+      was decided, but what else was on the table.
+
+  - id: solution-description
+    title: Solution description
+    type: markdown
+    required: true
+    guidance: >
+      The components and how they fit together. Reference a diagram if you
+      have one, but describe the structure in words too.
+
+  - id: logical-components
+    title: Logical components
+    type: list
+    required: true
+    guidance: >
+      The solution's logical components, and for each, whether it's new or
+      existing.
+
+  - id: architectural-risks
+    title: Architectural risks
+    type: markdown
+    required: false
+    guidance: >
+      Risks specific to this architecture's shape. Broader project risk
+      belongs in the `risks` module — this is for risk that's a direct
+      consequence of a structural choice made here.
+
+  - id: constraints-and-assumptions
+    title: Goals, constraints and assumptions
+    type: markdown
+    required: false

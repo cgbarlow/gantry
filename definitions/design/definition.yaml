@@ -1,0 +1,72 @@
+id: design
+title: Solution Design
+description: >
+  Design content for an initiative, from shaping through HLD approval,
+  build-ready detailed design, and operational handover.
+
+# Stage/gate topology note:
+# The real-world Contoso process resolves to four gates (see
+# docs/research/stages-gates-module-specs.md, Section 3), not the three in
+# Gantry's own illustrative README example. HLD approval at TAC is a distinct
+# gate with no analogue in the README's worked example, so `define` has been
+# split into `hld-define` and `detailed-design`. See docs/adr/0001 for why.
+
+stages:
+  - id: shape
+    title: Shape
+    gate: business-case
+    modules: [context, solution-definition, team-and-estimates]
+
+  - id: hld-define
+    title: HLD Definition
+    gate: hld-tac-approved
+    # nfrs, risks and security are introduced here in early/light form and
+    # carried forward — not re-declared — at detailed-design, where the same
+    # module ids are required in fuller form. See each module's guidance.
+    modules:
+      [problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security]
+
+  - id: detailed-design
+    title: Detailed Design
+    gate: build-ready-checklist
+    modules: [architecture, integration, nfrs, security, risks, support-and-operations]
+
+  - id: handover
+    title: Operational Handover
+    gate: operational-handover
+    modules: [as-built-notes]
+
+artefacts:
+  - id: soap
+    title: Solution on a Page
+    template: templates/soap.md.tmpl # TODO: template not yet written
+    gate: business-case
+    requires: [context, solution-definition, team-and-estimates]
+
+  - id: hld
+    title: High Level Design
+    template: templates/hld.md.tmpl # TODO: template not yet written
+    gate: hld-tac-approved
+    requires: [problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security]
+
+  - id: sad
+    title: Solution Architecture Document
+    template: templates/sad.md.tmpl # TODO: template not yet written
+    gate: build-ready-checklist
+    requires: [architecture, integration, nfrs, security, risks, support-and-operations]
+
+  - id: ssad
+    title: Solution Support Architecture Document
+    # Deliberately the same `requires` list as `sad` — SAD and SSAD are two
+    # renderings of one module set, not two independently-authored documents.
+    # See docs/research/stages-gates-module-specs.md Section 4.4 and
+    # docs/adr/0001.
+    template: templates/ssad.md.tmpl # TODO: template not yet written
+    gate: build-ready-checklist
+    requires: [architecture, integration, nfrs, security, risks, support-and-operations]
+
+  - id: as-built
+    title: Detailed Design / As-built
+    template: templates/as-built.md.tmpl # TODO: template not yet written
+    gate: operational-handover
+    requires: [as-built-notes]

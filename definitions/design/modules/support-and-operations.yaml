@@ -1,0 +1,45 @@
+id: support-and-operations
+title: Support and Operations
+purpose: >
+  What a support team needs once this solution is built and operational —
+  stakeholders, environments, release procedures and handover readiness.
+  This is the content the plain SAD structure doesn't naturally capture but
+  the SSAD framing emphasises. Derived from a single real, filled SSAD
+  example (the Family Violence Help Tool SSAD) in the explicit absence of a
+  standard SSAD template — treat this module's field list as one data point,
+  not a settled norm, and revisit it if a canonical SSAD template surfaces.
+  See docs/research/stages-gates-module-specs.md Section 4.4.
+
+  Reviewed by the Design Authority before Build Readiness Confirmed, via the
+  instance module file's frontmatter `status`/`owner` convention — see
+  `architecture.yaml` for the same note.
+
+fields:
+  - id: stakeholders
+    title: Stakeholders and support contacts
+    type: list
+    required: true
+    guidance: >
+      Who owns this solution operationally once it's live, and who to
+      contact for each part of it.
+
+  - id: environments-and-domains
+    title: Environments, URLs and domains
+    type: list
+    required: true
+    guidance: >
+      Every environment this solution runs in, and the URLs/domains
+      (including redirects) associated with each.
+
+  - id: release-procedures
+    title: Release procedures
+    type: markdown
+    required: false
+
+  - id: support-handover-readiness
+    title: Support handover readiness
+    type: markdown
+    required: true
+    guidance: >
+      What "ready to hand over to support" means for this solution
+      specifically — what the support team needs in hand before they own it.
