@@ -28,4 +28,5 @@ fields:
     required: false
     guidance: >
       Links to supporting material — prior art, related initiatives, source
-      documents — that informed this instance but don't belong inline.
+      documents, or the sizing methodology used for `estimates` — that
+      informed this instance but don't belong inline.

@@ -68,3 +68,24 @@ _Avoid_: authoring SAD and SSAD content as if they were independent
 gates (`hld-tac-approved` and `build-ready-checklist`), filled in
 progressively — not duplicated as separate lightweight/full versions.
 _Avoid_: creating a second module (e.g. `nfrs-detailed`) for the later gate
+
+**Cost-benefit vs. NFR**:
+Cost-benefit analysis lives in `proposed-solution` (HLD Definition stage),
+not in `nfrs`. It's a one-off business justification for the HLD decision,
+not a quality attribute the built solution must keep meeting.
+_Avoid_: adding cost-benefit content to `nfrs` — that module is for
+performance/availability/scalability-type requirements only
+
+**Disaster recovery and backup vs. support-and-operations**:
+RTO/RPO, backup schedule and retention live in the shared `nfrs` module
+(`disaster-recovery-and-backup`), not in `support-and-operations` — it's a
+quality attribute of the built solution, not a support-team-specific
+concern, even though a 2026-08-18 gap review found it via a real SSAD
+example.
+_Avoid_: duplicating backup/retention content in `support-and-operations`
+
+**Document history and sign-off**:
+Revision history and formal sign-off for a module are tracked via the
+instance module file's frontmatter `status`/`owner` convention and this
+repo's git history — not a module field.
+_Avoid_: adding a `sign-off` or `revision-history` field to any module

@@ -2,12 +2,15 @@ id: proposed-solution
 title: Proposed Solution
 purpose: >
   The solution being put to the Technical Architecture Committee, and why
-  it's the right one — strategic fit, dependencies, and consequences. Risk,
-  security and cost-benefit content deliberately live in the shared `risks`,
-  `security` and `nfrs` modules instead of being repeated here — see those
-  modules' guidance for what they cover at this stage. Derived from the TAC
-  template's Proposed Solution section — see
-  docs/research/stages-gates-module-specs.md Section 4.2.
+  it's the right one — strategic fit, dependencies, cost-benefit and
+  consequences. Risk and security content deliberately live in the shared
+  `risks` and `security` modules instead of being repeated here — see those
+  modules' guidance for what they cover at this stage. Cost-benefit is kept
+  here rather than in the shared `nfrs` module: it's a one-off business
+  justification for this HLD decision, not a quality attribute the built
+  solution must keep meeting. Derived from the TAC template's Proposed
+  Solution section — see docs/research/stages-gates-module-specs.md Section
+  4.2.
 
 fields:
   - id: strategy-alignment
@@ -40,3 +43,21 @@ fields:
     title: Delivery approach and indicative timeline
     type: markdown
     required: true
+
+  - id: guardrails
+    title: Guardrails
+    type: markdown
+    required: true
+    guidance: >
+      Which applicable Contoso guardrail(s) this solution follows. If it seeks an
+      exemption from one, or introduces a new guardrail, say so explicitly —
+      TAC needs to see this, not infer it.
+
+  - id: cost-benefit
+    title: Cost-benefit analysis
+    type: markdown
+    required: true
+    guidance: >
+      Cost versus benefit, including recurring costs and non-monetary
+      comparisons (e.g. person-hours saved) where a dollar figure isn't
+      meaningful.

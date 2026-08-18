@@ -34,7 +34,10 @@ fields:
     required: false
     guidance: >
       Network architecture, infrastructure architecture, hosting and sites
-      relevant to how this solution is deployed and reached.
+      relevant to how this solution is deployed and reached — including,
+      where they apply: application/software licensing, hardware sizing,
+      bandwidth requirements, and the network devices/protocols traffic
+      crosses.
 
   - id: environments
     title: Environments

@@ -24,12 +24,12 @@ stages:
     # carried forward — not re-declared — at detailed-design, where the same
     # module ids are required in fuller form. See each module's guidance.
     modules:
-      [problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security]
+      [hld-submission, problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security]
 
   - id: detailed-design
     title: Detailed Design
     gate: build-ready-checklist
-    modules: [architecture, integration, nfrs, security, risks, support-and-operations]
+    modules: [architecture, integration, data, nfrs, security, risks, support-and-operations]
 
   - id: handover
     title: Operational Handover
@@ -47,13 +47,14 @@ artefacts:
     title: High Level Design
     template: templates/hld.md.tmpl # TODO: template not yet written
     gate: hld-tac-approved
-    requires: [problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security]
+    requires:
+      [hld-submission, problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security]
 
   - id: sad
     title: Solution Architecture Document
     template: templates/sad.md.tmpl # TODO: template not yet written
     gate: build-ready-checklist
-    requires: [architecture, integration, nfrs, security, risks, support-and-operations]
+    requires: [architecture, integration, data, nfrs, security, risks, support-and-operations]
 
   - id: ssad
     title: Solution Support Architecture Document
@@ -63,7 +64,7 @@ artefacts:
     # docs/adr/0001.
     template: templates/ssad.md.tmpl # TODO: template not yet written
     gate: build-ready-checklist
-    requires: [architecture, integration, nfrs, security, risks, support-and-operations]
+    requires: [architecture, integration, data, nfrs, security, risks, support-and-operations]
 
   - id: as-built
     title: Detailed Design / As-built

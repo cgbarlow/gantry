@@ -22,8 +22,10 @@ fields:
     type: markdown
     required: true
     guidance: >
-      Each risk with its likelihood/impact and its mitigation — not just a
-      list of concerns with no response attached.
+      Each risk with an owner, its likelihood/impact, its mitigation, and —
+      where a mitigation is already underway — the current risk rating
+      versus the projected rating once the mitigation lands. Not just a list
+      of concerns with no response attached.
 
   - id: open-issues
     title: Open issues

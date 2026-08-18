@@ -1,0 +1,42 @@
+id: hld-submission
+title: HLD Submission
+purpose: >
+  The cover-page content the Technical Architecture Committee needs to
+  process this paper as a submission, not just read it as a design —
+  what's being asked of them, who was already consulted, and where it goes
+  next. Derived from the TAC template's front matter — see
+  docs/research/stages-gates-module-specs.md Section 4.2. Kept separate
+  from `problem-statement` and `proposed-solution` because it's submission
+  metadata about the paper, not content about the problem or the solution.
+
+fields:
+  - id: purpose-statement
+    title: Purpose statement
+    type: markdown
+    required: true
+    guidance: >
+      One sentence: what this document proposes and asks TAC to do about it.
+
+  - id: decision-requested
+    title: Decision requested
+    type: markdown
+    required: true
+    guidance: >
+      What TAC is being asked to do — Approve, Endorse, Discuss or Note —
+      and a short summary of the ask.
+
+  - id: consultation
+    title: Consultation
+    type: markdown
+    required: true
+    guidance: >
+      Who was consulted before this paper reached TAC — which committees or
+      people, and whether they endorsed it or raised disagreement.
+
+  - id: next-steps
+    title: Next steps
+    type: markdown
+    required: false
+    guidance: >
+      Where this paper goes after TAC, if anywhere — e.g. Design Committee,
+      PEC, or another downstream governance step.

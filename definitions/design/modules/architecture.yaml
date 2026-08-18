@@ -16,6 +16,24 @@ purpose: >
   this review.
 
 fields:
+  - id: business-context
+    title: Business context
+    type: markdown
+    required: false
+    guidance: >
+      The business process(es), users and legislative/regulatory context
+      this architecture sits within — the Business Architecture View content
+      that the rest of this module's fields assume as background.
+
+  - id: standards
+    title: Applicable standards
+    type: list
+    required: false
+    guidance: >
+      Architectural or solution standards this design follows (e.g.
+      messaging, security, UI, development framework) — and any it
+      deliberately departs from.
+
   - id: design-decisions
     title: Design decisions
     type: markdown

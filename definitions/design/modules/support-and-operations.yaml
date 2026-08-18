@@ -12,7 +12,14 @@ purpose: >
 
   Reviewed by the Design Authority before Build Readiness Confirmed, via the
   instance module file's frontmatter `status`/`owner` convention — see
-  `architecture.yaml` for the same note.
+  `architecture.yaml` for the same note. That same frontmatter convention
+  (plus this repo's own git history) is also how sign-off and revision
+  history are tracked for this module — there's no separate field for
+  either, so don't add one.
+
+  Disaster recovery, backup and retention detail lives in the shared `nfrs`
+  module (`disaster-recovery-and-backup`), not here — it's a quality
+  attribute of the built solution, not a support-team-specific concern.
 
 fields:
   - id: stakeholders
@@ -20,8 +27,9 @@ fields:
     type: list
     required: true
     guidance: >
-      Who owns this solution operationally once it's live, and who to
-      contact for each part of it.
+      Who owns this solution operationally once it's live, who to contact
+      for each part of it, and the escalation path/support map between
+      them — not just a flat contact list.
 
   - id: environments-and-domains
     title: Environments, URLs and domains
@@ -43,3 +51,33 @@ fields:
     guidance: >
       What "ready to hand over to support" means for this solution
       specifically — what the support team needs in hand before they own it.
+
+  - id: operational-accounts-and-licenses
+    title: Operational accounts and licenses
+    type: list
+    required: false
+    guidance: >
+      Third-party accounts, subscriptions or licenses the support team must
+      hold to operate this solution once it's live (e.g. a CI provider, a
+      hosted API) — distinct from the build-time dependencies in
+      `integration`.
+
+  - id: operational-security-controls
+    title: Operational security controls
+    type: markdown
+    required: false
+    guidance: >
+      Ongoing operational security posture a support team must maintain or
+      respect — e.g. restricted developer access, connectivity restrictions
+      to external APIs, read-only postures. Design-time security decisions
+      belong in the `security` module; this is what stays true in
+      production.
+
+  - id: monitoring-and-alerting
+    title: Monitoring and alerting
+    type: markdown
+    required: false
+    guidance: >
+      What's monitored once this solution is live — dashboards, alert
+      thresholds (e.g. request volume, 4xx/5xx rates) — and who gets
+      notified when they trip.

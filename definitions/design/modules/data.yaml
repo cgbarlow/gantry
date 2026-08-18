@@ -1,0 +1,56 @@
+id: data
+title: Data
+purpose: >
+  The solution's data at build-ready depth — what it holds, how sensitive it
+  is, and what happens to it over time. Derived from the SAD template's
+  Information/Data View section (Logical Data Model, Data Classification,
+  Data Replication, Data Storage/Archiving/Retention, Data Migration,
+  Records Management) — see docs/research/stages-gates-module-specs.md
+  Section 4.3. This module feeds both the `sad` and `ssad` artefacts from
+  the same data, like `architecture` and `integration`.
+
+  Reviewed by the Design Authority before Build Readiness Confirmed, via the
+  instance module file's frontmatter `status`/`owner` convention — see
+  `architecture.yaml` for the same note.
+
+fields:
+  - id: logical-data-model
+    title: Logical data model
+    type: markdown
+    required: true
+    guidance: >
+      The solution's key data entities and how they relate — enough for a
+      reader to understand what data exists without reading the schema.
+
+  - id: data-classification
+    title: Data classification
+    type: markdown
+    required: true
+    guidance: >
+      The sensitivity classification of the data this solution holds (e.g.
+      personal, health, confidential), and what that classification requires
+      of how it's handled.
+
+  - id: data-retention-and-archiving
+    title: Data retention, archiving and records management
+    type: markdown
+    required: true
+    guidance: >
+      How long data is kept, when/how it's archived, and any records-
+      management obligations that apply to it.
+
+  - id: data-migration
+    title: Data migration
+    type: markdown
+    required: false
+    guidance: >
+      Data that needs to move from an existing system into this one, and
+      the approach for doing so. Omit if there's nothing to migrate.
+
+  - id: data-replication
+    title: Data replication
+    type: markdown
+    required: false
+    guidance: >
+      Where this data is copied or synchronised to (e.g. across
+      environments, regions, or into a reporting store), and how.

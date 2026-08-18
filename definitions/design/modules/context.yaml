@@ -10,8 +10,10 @@ fields:
     type: markdown
     required: true
     guidance: >
-      The change in the world that makes this necessary — legislative,
-      operational, commercial, or a constraint that has become binding.
+      Open with a one-line summary of the initiative before the fuller
+      narrative — the change in the world that makes this necessary:
+      legislative, operational, commercial, or a constraint that has become
+      binding.
 
   - id: affected-domains
     title: Affected domains
