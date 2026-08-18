@@ -20,16 +20,17 @@ stages:
   - id: hld-define
     title: HLD Definition
     gate: hld-tac-approved
-    # nfrs, risks and security are introduced here in early/light form and
-    # carried forward — not re-declared — at detailed-design, where the same
-    # module ids are required in fuller form. See each module's guidance.
+    # nfrs, risks, security and dependencies are introduced here in
+    # early/light form and carried forward — not re-declared — at
+    # detailed-design, where the same module ids are required in fuller
+    # form. See each module's guidance.
     modules:
-      [hld-submission, problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security]
+      [hld-submission, problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies]
 
   - id: detailed-design
     title: Detailed Design
     gate: build-ready-checklist
-    modules: [architecture, integration, data, nfrs, security, risks, support-and-operations]
+    modules: [architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations]
 
   - id: handover
     title: Operational Handover
@@ -48,13 +49,13 @@ artefacts:
     template: templates/hld.md.tmpl # TODO: template not yet written
     gate: hld-tac-approved
     requires:
-      [hld-submission, problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security]
+      [hld-submission, problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies]
 
   - id: sad
     title: Solution Architecture Document
     template: templates/sad.md.tmpl # TODO: template not yet written
     gate: build-ready-checklist
-    requires: [architecture, integration, data, nfrs, security, risks, support-and-operations]
+    requires: [architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations]
 
   - id: ssad
     title: Solution Support Architecture Document
@@ -64,7 +65,7 @@ artefacts:
     # docs/adr/0001.
     template: templates/ssad.md.tmpl # TODO: template not yet written
     gate: build-ready-checklist
-    requires: [architecture, integration, data, nfrs, security, risks, support-and-operations]
+    requires: [architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations]
 
   - id: as-built
     title: Detailed Design / As-built

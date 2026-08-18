@@ -1,10 +1,11 @@
 id: integration
 title: Integration
 purpose: >
-  How this solution connects to everything around it — dependencies,
-  interfaces, and the technology/deployment surface those connections run
-  over. Derived from the SAD template's Solution Overview (Dependencies) and
-  Technology Architecture View / Deployment View sections — see
+  How this solution connects to everything around it — interfaces, and the
+  technology/deployment surface those connections run over. Dependencies
+  live in the shared `dependencies` module instead of being repeated here —
+  see its guidance for what it covers at this stage. Derived from the SAD
+  template's Technology Architecture View / Deployment View sections — see
   docs/research/stages-gates-module-specs.md Section 4.3.
 
   Reviewed by the Design Authority before Build Readiness Confirmed, via the
@@ -12,14 +13,6 @@ purpose: >
   `architecture.yaml` for the same note.
 
 fields:
-  - id: dependencies
-    title: Dependencies
-    type: list
-    required: true
-    guidance: >
-      Every system, service or team this solution depends on to function,
-      and what it depends on them for.
-
   - id: interfaces
     title: Interfaces
     type: markdown

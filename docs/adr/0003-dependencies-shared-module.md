@@ -1,0 +1,52 @@
+# Extract `dependencies` into its own shared module
+
+A 2026-08-18 audit (comparing `definitions/design` against the real Contoso
+source templates, and against Gantry's own stated intent for shared
+modules) found that dependency information was being captured twice:
+`proposed-solution.dependencies` (HLD Definition stage, a narrative
+markdown field — "what this depends on, and what depends on it") and
+`integration.dependencies` (Detailed Design stage, a required list field —
+the full dependency list). Same underlying question, asked at two depths,
+in two different modules — exactly the shape `nfrs`, `risks` and `security`
+already solve with one module required at two gates (see `docs/adr/0001`
+and `CONTEXT.md`'s "Module completeness by gate, not by authorship" entry),
+but `dependencies` hadn't been built that way.
+
+We extracted a new `dependencies` module with two fields:
+`dependencies-overview` (markdown, `required-at: [hld-tac-approved]`) and
+`dependency-list` (list, `required-at: [build-ready-checklist]`). It's
+required at both `hld-define` and `detailed-design`, and added to the
+`hld`, `sad` and `ssad` artefacts' `requires` lists. The fields it replaced
+were removed from `proposed-solution.yaml` and `integration.yaml`, with
+both modules' `purpose:` text updated to point at the shared module instead
+of silently losing the content.
+
+Two fields, not one, unlike `nfrs`/`risks`/`security` where the SAME field
+carries more depth at the later gate: a one-line narrative overview and a
+structured, complete dependency list aren't two depths of the same content,
+they're different shapes of it. Modelling them as one field with escalating
+expectations (the way `nfrs.disaster-recovery-and-backup` does) would force
+either a markdown field pretending to be a list once it matters, or a list
+field with no room for the narrative framing TAC actually needs at HLD.
+Two fields on one shared module keeps both requirements honest without
+duplicating the module.
+
+Alternatives considered and rejected:
+
+- **Leave it split across two modules.** This is the status quo the audit
+  flagged as inconsistent with the repo's own established pattern for
+  exactly this kind of content — a future reader comparing `dependencies`
+  against `nfrs`/`risks`/`security` would have no reason to believe it was
+  a deliberate exception rather than an oversight.
+- **Merge into one field, use `required-at` alone to express the depth
+  change.** Rejected per `docs/adr/0002` and `CONTEXT.md`: `required-at`
+  models requiredness, not content shape, and a markdown-then-list field
+  would need the same design already rejected there.
+
+Status: accepted, first-cut. If another shared-module candidate turns up
+(the same audit flagged `trade-offs`/`design-decisions` and
+`scope`/`constraints-and-assumptions` as lower-confidence, not-yet-actioned
+possibilities), evaluate it against this ADR's reasoning before merging:
+same field escalating in depth → one field, `required-at`; same question
+answered in a different shape at each gate → two fields, one module, like
+this one.

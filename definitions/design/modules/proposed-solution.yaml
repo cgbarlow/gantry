@@ -2,29 +2,21 @@ id: proposed-solution
 title: Proposed Solution
 purpose: >
   The solution being put to the Technical Architecture Committee, and why
-  it's the right one — strategic fit, dependencies, cost-benefit and
-  consequences. Risk and security content deliberately live in the shared
-  `risks` and `security` modules instead of being repeated here — see those
-  modules' guidance for what they cover at this stage. Cost-benefit is kept
-  here rather than in the shared `nfrs` module: it's a one-off business
-  justification for this HLD decision, not a quality attribute the built
-  solution must keep meeting. Derived from the TAC template's Proposed
-  Solution section — see docs/research/stages-gates-module-specs.md Section
-  4.2.
+  it's the right one — strategic fit, cost-benefit and consequences. Risk
+  and security content deliberately live in the shared `risks` and
+  `security` modules instead of being repeated here, and dependencies live
+  in the shared `dependencies` module — see those modules' guidance for what
+  they cover at this stage. Cost-benefit is kept here rather than in the
+  shared `nfrs` module: it's a one-off business justification for this HLD
+  decision, not a quality attribute the built solution must keep meeting.
+  Derived from the TAC template's Proposed Solution section — see
+  docs/research/stages-gates-module-specs.md Section 4.2.
 
 fields:
   - id: strategy-alignment
     title: Alignment with strategy
     type: markdown
     required: true
-
-  - id: dependencies
-    title: Dependencies
-    type: markdown
-    required: true
-    guidance: >
-      What this solution depends on, and what depends on it — other
-      initiatives, platforms, teams, or decisions still in flight.
 
   - id: implications
     title: Implications
