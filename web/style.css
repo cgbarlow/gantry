@@ -1,0 +1,91 @@
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  margin: 2rem auto;
+  max-width: 900px;
+  color: #1a1a1a;
+}
+
+header {
+  border-bottom: 2px solid #1a1a1a;
+  padding-bottom: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+#stage-line {
+  color: #555;
+  margin: 0;
+}
+
+.module {
+  border-top: 1px solid #ccc;
+  padding-top: 1rem;
+  margin-top: 1.5rem;
+}
+
+.purpose {
+  color: #555;
+  font-style: italic;
+}
+
+.field {
+  margin-top: 1rem;
+}
+
+.field label {
+  font-weight: 600;
+  display: block;
+}
+
+.guidance {
+  color: #555;
+  font-size: 0.9rem;
+  margin: 0.25rem 0;
+}
+
+.split {
+  display: flex;
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.editor-host {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #ccc;
+}
+
+.editor-host .cm-editor {
+  height: 100%;
+}
+
+.preview {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #eee;
+  background: #fafafa;
+  padding: 0.5rem 0.75rem;
+  overflow: auto;
+}
+
+.list-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.list-row input {
+  flex: 1;
+  padding: 0.25rem;
+}
+
+.save-status {
+  font-size: 0.9rem;
+  color: #333;
+  min-height: 1.2em;
+  margin-top: 0.5rem;
+}
+
+button {
+  margin-top: 0.5rem;
+  margin-right: 0.5rem;
+}

@@ -40,7 +40,7 @@ stages:
 artefacts:
   - id: soap
     title: Solution on a Page
-    template: templates/soap.md.tmpl # TODO: template not yet written
+    template: templates/soap.md.tmpl
     gate: business-case
     requires: [context, solution-definition, team-and-estimates]
 

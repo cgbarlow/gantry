@@ -1,0 +1,53 @@
+# <%~ it.instance.slug %>: Solution on a Page
+
+## Context
+
+### Business driver
+
+<%~ it.modules.context.driver %>
+
+### Affected domains
+
+<% it.modules.context['affected-domains'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+<% if (it.modules.context['out-of-scope']) { %>
+### Explicitly out of scope
+
+<%~ it.modules.context['out-of-scope'] %>
+<% } %>
+
+## Solution definition
+
+### Process flow
+
+<%~ it.modules['solution-definition']['process-flow'] %>
+
+### High-level solution design
+
+<%~ it.modules['solution-definition']['high-level-solution-design'] %>
+<% if (it.modules['solution-definition']['assumptions-and-considerations']) { %>
+### Assumptions and considerations
+
+<%~ it.modules['solution-definition']['assumptions-and-considerations'] %>
+<% } %>
+
+### Feature breakdown and involved teams
+
+<%~ it.modules['solution-definition']['feature-breakdown'] %>
+
+## Team and estimates
+
+### Teams and contact persons
+
+<% it.modules['team-and-estimates']['teams-and-contacts'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+### High-level estimates
+
+<%~ it.modules['team-and-estimates'].estimates %>
+<% if (it.modules['team-and-estimates'].references && it.modules['team-and-estimates'].references.length) { %>
+### References
+
+<% it.modules['team-and-estimates'].references.forEach(function(item) { %>- <%~ item %>
+<% }) %>
+<% } %>

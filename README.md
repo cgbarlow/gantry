@@ -84,6 +84,7 @@ npm link             # makes `gantry` available on your PATH
 | Node.js | TODO | Engine runtime and CLI |
 | Git | 2.x+ | Instance history and audit trail |
 | A text editor | any | Modules are markdown; no tooling required to author them |
+| `vendor/anthropic-skills/{docx,pdf,pptx,xlsx}` | pinned to a commit, see `vendor/anthropic-skills/README.md` | Document-conversion code for the artefact rendering pipeline (docx/pdf/pptx/xlsx read/write) — source-available, not open source; see that README for the license caveat |
 
 The web form has no build step and no runtime dependencies — it is a single static HTML page served from the repo.
 

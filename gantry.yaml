@@ -1,0 +1,7 @@
+# Engine configuration.
+#
+# Paths are relative to this file. Defaults match README's stated
+# repository layout; override here if a definition set ever needs a
+# different location.
+definitionsDir: definitions
+instancesDir: instances
