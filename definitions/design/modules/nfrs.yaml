@@ -20,17 +20,17 @@ fields:
   - id: performance
     title: Performance
     type: markdown
-    required: false
+    required-at: [build-ready-checklist]
 
   - id: availability-and-continuity
     title: Availability and continuity
     type: markdown
-    required: false
+    required-at: [build-ready-checklist]
 
   - id: disaster-recovery-and-backup
     title: Disaster recovery and backup
     type: markdown
-    required: false
+    required-at: [build-ready-checklist]
     guidance: >
       Recovery time/point objectives, backup schedule and retention, and the
       disaster-recovery approach. Light or absent at `hld-tac-approved`;
@@ -41,7 +41,7 @@ fields:
   - id: scalability-and-capacity
     title: Scalability and capacity
     type: markdown
-    required: false
+    required-at: [build-ready-checklist]
 
   - id: other-nfrs
     title: Other non-functional requirements
@@ -55,7 +55,7 @@ fields:
   - id: requirements-traceability
     title: Requirements traceability
     type: markdown
-    required: false
+    required-at: [build-ready-checklist]
     guidance: >
       How the solution's design maps back to the functional and
       non-functional requirements agreed earlier — enough for a reviewer to

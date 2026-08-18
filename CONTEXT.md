@@ -66,8 +66,16 @@ _Avoid_: authoring SAD and SSAD content as if they were independent
 **Module completeness by gate, not by authorship**:
 `nfrs`, `risks` and `security` are each a single module required at two
 gates (`hld-tac-approved` and `build-ready-checklist`), filled in
-progressively — not duplicated as separate lightweight/full versions.
-_Avoid_: creating a second module (e.g. `nfrs-detailed`) for the later gate
+progressively — not duplicated as separate lightweight/full versions. Where
+a field's requiredness genuinely differs between the two gates, that's
+expressed with the module-spec schema's `required-at` key (see README.md
+"Field requiredness across shared gates"), not by splitting the field or
+the module. Most `nfrs` and all `security` fields use `required-at:
+[build-ready-checklist]`; `risks.risk-register` is required at both gates
+as-is, since only its expected depth — not its requiredness — changes.
+_Avoid_: creating a second module (e.g. `nfrs-detailed`) for the later gate,
+or treating `required-at` as a place to encode content depth rather than
+requiredness
 
 **Cost-benefit vs. NFR**:
 Cost-benefit analysis lives in `proposed-solution` (HLD Definition stage),

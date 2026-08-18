@@ -20,14 +20,14 @@ fields:
   - id: identity-and-access
     title: Identity and access management
     type: markdown
-    required: false
+    required-at: [build-ready-checklist]
     guidance: >
       Authentication, authorisation, and the security roles involved.
 
   - id: security-architecture
     title: Security architecture
     type: markdown
-    required: false
+    required-at: [build-ready-checklist]
     guidance: >
       Goals, constraints and assumptions specific to security — not a
       restatement of the general architecture.
@@ -35,9 +35,9 @@ fields:
   - id: regulations-and-standards
     title: Regulations and standards
     type: list
-    required: false
+    required-at: [build-ready-checklist]
 
   - id: privacy-and-confidentiality
     title: Privacy and confidentiality concerns
     type: markdown
-    required: false
+    required-at: [build-ready-checklist]

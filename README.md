@@ -236,6 +236,24 @@ fields:
 
 Modules can be shared between definitions where the content genuinely is the same thing — and should not be where it merely looks similar.
 
+### Field requiredness across shared gates
+
+A module can be required at more than one gate (e.g. `nfrs` at both `hld-tac-approved` and `build-ready-checklist`), with a field expected to be filled in progressively — light at the earlier gate, complete by the later one. `required: true|false` alone can't express that: it's one value, applied wherever the module appears.
+
+For a field whose requiredness genuinely differs by gate, use `required-at` instead of `required` — a list of the gate ids at which the field becomes required. At any other gate the module is also required at, the field is optional.
+
+```yaml
+  - id: disaster-recovery-and-backup
+    title: Disaster recovery and backup
+    type: markdown
+    required-at: [build-ready-checklist]
+    guidance: >
+      Recovery time/point objectives, backup schedule and retention. Light
+      or absent at `hld-tac-approved`; required by `build-ready-checklist`.
+```
+
+`required` and `required-at` are mutually exclusive on a field — use `required` for a field whose requiredness doesn't vary by gate (including fields in single-gate modules), and `required-at` only where it does. Don't reach for `required-at` by default; most fields don't need it.
+
 ## Instance module files
 
 **`instances/my-initiative/modules/context.md`** — what someone actually writes:
