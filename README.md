@@ -133,7 +133,7 @@ Definitions sit side by side — adding a second one requires no change to the e
 
 **Use the form.** `gantry serve <slug>` opens a single HTML page that walks you through the process stage by stage, with the spec and guidance inline. A stage switcher lets you jump to any gate's screen, not just whichever stage the instance is currently at. Fill it in, hit render, get your document. Under the hood it writes the same files to the same repo — there is no second store, and no import/export step.
 
-Each gate screen also has "Populate example text" / "Clear all fields" buttons, sourced from a definition-declared example instance per stage (`instances/examples/` for `design` — one instance with real content for every stage, so `gantry serve examples` shows every gate screen already filled in). Populate copies that content into the form; it doesn't save automatically — hit each module's own Save button to persist it.
+Each gate screen also has a "Clear all fields" button, blanking every field shown for that stage without touching the saved files until you hit each module's own Save button. To see what a filled-in gate screen looks like, `gantry serve examples` — a fixture instance with real content for every stage.
 
 Neither path is the "real" one. They're two front ends onto the same data.
 

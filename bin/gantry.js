@@ -35,7 +35,9 @@ program
       return
     }
     for (const instance of instances) {
-      console.log(`${instance.slug} — ${instance.definition} (stage: ${instance.stage})`)
+      console.log(
+        `${instance.slug} — ${instance.definition} (current stage: ${instance.stage}; data for: ${instance.stagesWithData.join(', ') || 'none'})`
+      )
     }
   })
 
