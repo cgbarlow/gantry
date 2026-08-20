@@ -5,22 +5,22 @@ import { execFileSync } from 'node:child_process'
 import { renderArtefact } from '../lib/render.js'
 
 test('dry-run does not write out/ files', () => {
-  execFileSync('rm', ['-rf', 'instances/example-soap/out'])
-  const result = renderArtefact('example-soap', 'soap', { dryRun: true })
+  execFileSync('rm', ['-rf', 'instances/examples/out'])
+  const result = renderArtefact('examples', 'soap', { dryRun: true })
   assert.equal(existsSync(result.docxPath), false)
   assert.equal(existsSync(result.mdPath), false)
 })
 
 test('dry-run compiles the template without writing anything, with no HTML-entity escaping', () => {
-  const result = renderArtefact('example-soap', 'soap', { dryRun: true })
+  const result = renderArtefact('examples', 'soap', { dryRun: true })
   assert.equal(result.dryRun, true)
-  assert.match(result.markdown, /# example-soap: Solution on a Page/)
+  assert.match(result.markdown, /# examples: Solution on a Page/)
   assert.match(result.markdown, /- Client-facing self-service \(ContosoSelfService\)/)
   assert.doesNotMatch(result.markdown, /&#39;|&quot;|&amp;/)
 })
 
 test('renders a real docx styled from the HLD reference doc', () => {
-  const result = renderArtefact('example-soap', 'soap')
+  const result = renderArtefact('examples', 'soap')
   assert.equal(existsSync(result.docxPath), true)
 
   const roundTrip = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown', result.docxPath], {
@@ -55,7 +55,7 @@ test('renders a real docx styled from the HLD reference doc', () => {
 })
 
 test('suppressed optional sections do not leave runs of blank lines behind', () => {
-  const result = renderArtefact('example-hld', 'hld', { dryRun: true })
+  const result = renderArtefact('examples', 'hld', { dryRun: true })
   assert.doesNotMatch(result.markdown, /\n{3,}/)
 })
 
@@ -75,7 +75,7 @@ test('reference doc defines the paragraph styles pandoc references for list item
   )
   assert.match(referenceStyles, /w:styleId="Compact"/)
 
-  const result = renderArtefact('example-soap', 'soap')
+  const result = renderArtefact('examples', 'soap')
   const documentXml = execFileSync('unzip', ['-p', result.docxPath, 'word/document.xml'], {
     encoding: 'utf8',
   })

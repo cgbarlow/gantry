@@ -45,8 +45,8 @@ test('a module with no file on disk is reported missing, with all required field
   })
 })
 
-test('the example-soap fixture is complete', () => {
-  const status = getStatus('example-soap')
+test('the examples fixture is complete', () => {
+  const status = getStatus('examples')
   assert.equal(status.complete, true)
   for (const mod of status.modules) {
     assert.equal(mod.exists, true)
@@ -67,5 +67,5 @@ test('stageId lets a caller evaluate a stage other than the instance\'s current 
 })
 
 test('an unknown stageId throws', () => {
-  assert.throws(() => getStatus('example-soap', { stageId: 'not-a-real-stage' }), /has no stage/)
+  assert.throws(() => getStatus('examples', { stageId: 'not-a-real-stage' }), /has no stage/)
 })

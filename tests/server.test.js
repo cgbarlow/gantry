@@ -24,12 +24,12 @@ function withRunningServer(options, fn) {
   })
 }
 
-test('GET /api/instance reports the example-soap fixture, fully populated', async () => {
-  await withRunningServer({ slug: 'example-soap' }, async (base) => {
+test('GET /api/instance reports the examples fixture, fully populated', async () => {
+  await withRunningServer({ slug: 'examples' }, async (base) => {
     const res = await fetch(`${base}/api/instance`)
     assert.equal(res.status, 200)
     const body = await res.json()
-    assert.equal(body.slug, 'example-soap')
+    assert.equal(body.slug, 'examples')
     assert.equal(body.definition, 'design')
     assert.deepEqual(body.stage, { id: 'shape', title: 'Shape', gate: 'business-case' })
     assert.deepEqual(body.artefacts, [{ id: 'soap', title: 'Solution on a Page' }])
@@ -48,7 +48,7 @@ test('GET /api/instance reports the example-soap fixture, fully populated', asyn
 })
 
 test('GET /api/instance?stage=<id> browses a different stage\'s modules without changing the instance\'s persisted stage', async () => {
-  await withRunningServer({ slug: 'example-soap' }, async (base) => {
+  await withRunningServer({ slug: 'examples' }, async (base) => {
     const res = await fetch(`${base}/api/instance?stage=hld-define`)
     assert.equal(res.status, 200)
     const body = await res.json()
@@ -57,7 +57,7 @@ test('GET /api/instance?stage=<id> browses a different stage\'s modules without 
     assert.deepEqual(body.artefacts, [{ id: 'hld', title: 'High Level Design' }])
     assert.ok(body.modules.some((m) => m.id === 'hld-submission'))
 
-    const instance = readInstance('example-soap')
+    const instance = readInstance('examples')
     assert.equal(instance.stage, 'shape')
   })
 })
@@ -69,7 +69,7 @@ test('GET /api/instance?stage=<id> includes each field\'s example text from the 
     // stage.example resolves within the same instancesDir as the instance
     // being browsed — mirroring how every instance lives side by side
     // under the repo's real instances/ root.
-    cpSync('instances/example-hld', join(instancesDir, 'example-hld'), { recursive: true })
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
 
     await withRunningServer({ slug: 'my-initiative', instancesDir }, async (base) => {
       const res = await fetch(`${base}/api/instance?stage=hld-define`)
@@ -80,7 +80,7 @@ test('GET /api/instance?stage=<id> includes each field\'s example text from the 
       const hldSubmission = body.modules.find((m) => m.id === 'hld-submission')
       const purpose = hldSubmission.fields.find((f) => f.id === 'purpose-statement')
       // The new instance has no hld-define modules on disk yet — blank
-      // value, but a real example pulled from instances/example-hld/.
+      // value, but a real example pulled from instances/examples/.
       assert.equal(purpose.value, '')
       assert.match(purpose.example, /\S/)
     })
@@ -90,7 +90,7 @@ test('GET /api/instance?stage=<id> includes each field\'s example text from the 
 })
 
 test('GET /api/instance?stage=<unknown> throws', async () => {
-  await withRunningServer({ slug: 'example-soap' }, async (base) => {
+  await withRunningServer({ slug: 'examples' }, async (base) => {
     const res = await fetch(`${base}/api/instance?stage=not-a-real-stage`)
     assert.equal(res.status, 500)
   })
@@ -99,12 +99,12 @@ test('GET /api/instance?stage=<unknown> throws', async () => {
 test('PUT /api/instance/modules/:id writes the same file format the CLI reads, and returns updated status', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/example-soap', join(instancesDir, 'example-soap'), { recursive: true })
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
     // out/ isn't part of the module-file contract this endpoint touches, but drop it
     // so the scratch copy mirrors a fresh instance rather than a previously-rendered one.
-    rmSync(join(instancesDir, 'example-soap', 'out'), { recursive: true, force: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
-    await withRunningServer({ slug: 'example-soap', instancesDir }, async (base) => {
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
       const res = await fetch(`${base}/api/instance/modules/context`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -125,7 +125,7 @@ test('PUT /api/instance/modules/:id writes the same file format the CLI reads, a
     })
 
     const definition = loadDefinition('design')
-    const data = readModule(definition, 'example-soap', 'context', { instancesDir })
+    const data = readModule(definition, 'examples', 'context', { instancesDir })
     assert.equal(data.status, 'agreed')
     assert.equal(data.fields.driver, 'Updated via the web form.')
     assert.deepEqual(data.fields['affected-domains'], ['Payments'])
@@ -137,12 +137,12 @@ test('PUT /api/instance/modules/:id writes the same file format the CLI reads, a
 test('PUT /api/instance/modules/:id?stage=<id> reports status against the browsed stage, not the instance\'s current one', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/example-soap', join(instancesDir, 'example-soap'), { recursive: true })
-    rmSync(join(instancesDir, 'example-soap', 'out'), { recursive: true, force: true })
+    // A freshly-created instance, not the fully-populated examples fixture —
+    // hld-submission genuinely doesn't exist on disk yet, so this proves the
+    // PUT can write a module belonging to a stage other than the current one.
+    createInstance('design', 'my-initiative', { instancesDir })
 
-    await withRunningServer({ slug: 'example-soap', instancesDir }, async (base) => {
-      // example-soap's instance.yaml stage is "shape" — hld-submission
-      // belongs to "hld-define", a stage that stage isn't part of at all.
+    await withRunningServer({ slug: 'my-initiative', instancesDir }, async (base) => {
       const res = await fetch(`${base}/api/instance/modules/hld-submission?stage=hld-define`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -166,10 +166,10 @@ test('PUT /api/instance/modules/:id?stage=<id> reports status against the browse
 test('POST /api/instance/render/:artefact renders a real docx via the web form path', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/example-soap', join(instancesDir, 'example-soap'), { recursive: true })
-    rmSync(join(instancesDir, 'example-soap', 'out'), { recursive: true, force: true })
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
-    await withRunningServer({ slug: 'example-soap', instancesDir }, async (base) => {
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
       const res = await fetch(`${base}/api/instance/render/soap`, { method: 'POST' })
       assert.equal(res.status, 200)
       const body = await res.json()
@@ -186,7 +186,7 @@ test('POST /api/instance/render/:artefact renders a real docx via the web form p
 })
 
 test('GET / serves index.html with the import map resolved (no leftover placeholder)', async () => {
-  await withRunningServer({ slug: 'example-soap' }, async (base) => {
+  await withRunningServer({ slug: 'examples' }, async (base) => {
     const res = await fetch(`${base}/`)
     assert.equal(res.status, 200)
     const html = await res.text()
@@ -196,7 +196,7 @@ test('GET / serves index.html with the import map resolved (no leftover placehol
 })
 
 test('GET /node_modules/... serves real dependency files for the browser to import', async () => {
-  await withRunningServer({ slug: 'example-soap' }, async (base) => {
+  await withRunningServer({ slug: 'examples' }, async (base) => {
     const res = await fetch(`${base}/node_modules/codemirror/dist/index.js`)
     assert.equal(res.status, 200)
     const text = await res.text()
@@ -205,7 +205,7 @@ test('GET /node_modules/... serves real dependency files for the browser to impo
 })
 
 test('GET /app.js serves the web form script from web/', async () => {
-  await withRunningServer({ slug: 'example-soap' }, async (base) => {
+  await withRunningServer({ slug: 'examples' }, async (base) => {
     const res = await fetch(`${base}/app.js`)
     assert.equal(res.status, 200)
     const text = await res.text()
