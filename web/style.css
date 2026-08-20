@@ -31,6 +31,19 @@ header {
   color: #fff;
 }
 
+#stage-actions {
+  margin-top: 0.5rem;
+}
+
+#stage-actions button {
+  margin: 0 0.5rem 0 0;
+}
+
+#stage-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .module {
   border-top: 1px solid #ccc;
   padding-top: 1rem;

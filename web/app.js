@@ -76,7 +76,12 @@ function createMarkdownField(field) {
   const view = new EditorView({ state, parent: editorHost })
   renderPreview(preview, field.value ?? '')
 
-  return { element: wrapper, getValue: () => view.state.doc.toString() }
+  function setValue(text) {
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text ?? '' } })
+    renderPreview(preview, text ?? '')
+  }
+
+  return { element: wrapper, getValue: () => view.state.doc.toString(), setValue }
 }
 
 function createListField(field) {
@@ -113,9 +118,16 @@ function createListField(field) {
   addButton.addEventListener('click', () => addRow())
   wrapper.appendChild(addButton)
 
+  function setValue(values) {
+    rows.replaceChildren()
+    const items = values?.length ? values : ['']
+    items.forEach(addRow)
+  }
+
   return {
     element: wrapper,
     getValue: () => [...rows.querySelectorAll('input')].map((i) => i.value).filter((v) => v.trim() !== ''),
+    setValue,
   }
 }
 
@@ -168,7 +180,34 @@ function renderModule(mod, stageId) {
   })
   section.append(saveButton, status)
 
-  return section
+  return { element: section, fieldControls }
+}
+
+// One "Populate"/"Clear" pair per gate screen, acting across every module
+// shown for that stage — not per-module, since a gate's fields are what
+// you're filling in together.
+function renderStageActions(fieldEntries, hasExample) {
+  const container = document.createElement('div')
+  container.className = 'stage-actions'
+
+  const populateButton = document.createElement('button')
+  populateButton.type = 'button'
+  populateButton.textContent = 'Populate example text'
+  populateButton.disabled = !hasExample
+  populateButton.title = hasExample ? '' : 'No example instance configured for this stage'
+  populateButton.addEventListener('click', () => {
+    fieldEntries.forEach(({ field, control }) => control.setValue(field.example))
+  })
+
+  const clearButton = document.createElement('button')
+  clearButton.type = 'button'
+  clearButton.textContent = 'Clear all fields'
+  clearButton.addEventListener('click', () => {
+    fieldEntries.forEach(({ field, control }) => control.setValue(field.type === 'list' ? [] : ''))
+  })
+
+  container.append(populateButton, clearButton)
+  return container
 }
 
 function renderArtefactsSection(instance) {
@@ -214,10 +253,19 @@ async function renderInstance(stageId) {
     })
   )
 
+  const fieldEntries = []
   const modulesRoot = document.getElementById('modules')
   modulesRoot.replaceChildren()
-  instance.modules.forEach((mod) => modulesRoot.appendChild(renderModule(mod, instance.stage.id)))
+  instance.modules.forEach((mod) => {
+    const { element, fieldControls } = renderModule(mod, instance.stage.id)
+    modulesRoot.appendChild(element)
+    mod.fields.forEach((field, i) => fieldEntries.push({ field, control: fieldControls[i] }))
+  })
   modulesRoot.appendChild(renderArtefactsSection(instance))
+
+  document.getElementById('stage-actions').replaceChildren(
+    renderStageActions(fieldEntries, instance.hasExample)
+  )
 }
 
 renderInstance().catch((err) => {

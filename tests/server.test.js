@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, isAbsolute } from 'node:path'
 import { createServer } from '../lib/server.js'
-import { readInstance, readModule } from '../lib/instance.js'
+import { createInstance, readInstance, readModule } from '../lib/instance.js'
 import { loadDefinition } from '../lib/definition.js'
 
 function withRunningServer(options, fn) {
@@ -60,6 +60,33 @@ test('GET /api/instance?stage=<id> browses a different stage\'s modules without 
     const instance = readInstance('example-soap')
     assert.equal(instance.stage, 'shape')
   })
+})
+
+test('GET /api/instance?stage=<id> includes each field\'s example text from the stage\'s declared example instance', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'my-initiative', { instancesDir })
+    // stage.example resolves within the same instancesDir as the instance
+    // being browsed — mirroring how every instance lives side by side
+    // under the repo's real instances/ root.
+    cpSync('instances/example-hld', join(instancesDir, 'example-hld'), { recursive: true })
+
+    await withRunningServer({ slug: 'my-initiative', instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instance?stage=hld-define`)
+      assert.equal(res.status, 200)
+      const body = await res.json()
+      assert.equal(body.hasExample, true)
+
+      const hldSubmission = body.modules.find((m) => m.id === 'hld-submission')
+      const purpose = hldSubmission.fields.find((f) => f.id === 'purpose-statement')
+      // The new instance has no hld-define modules on disk yet — blank
+      // value, but a real example pulled from instances/example-hld/.
+      assert.equal(purpose.value, '')
+      assert.match(purpose.example, /\S/)
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
 })
 
 test('GET /api/instance?stage=<unknown> throws', async () => {
