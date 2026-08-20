@@ -3,6 +3,7 @@ import { Command } from 'commander'
 import { renderArtefact } from '../lib/render.js'
 import { getStatus } from '../lib/status.js'
 import { checkGate } from '../lib/check.js'
+import { validateDefinition } from '../lib/validate.js'
 import { createServer } from '../lib/server.js'
 import { createInstance } from '../lib/instance.js'
 
@@ -107,8 +108,22 @@ program
 program
   .command('validate <definition>')
   .description('Validate a definition against the schema')
-  .action(() => {
-    console.log('not yet implemented')
+  .option('--json', 'emit structured JSON output')
+  .action((definition, options) => {
+    const result = validateDefinition(definition)
+    if (options.json) {
+      console.log(JSON.stringify(result.problems, null, 2))
+      if (!result.valid) process.exitCode = 1
+      return
+    }
+    if (result.valid) {
+      console.log('Definition is valid.')
+      return
+    }
+    for (const problem of result.problems) {
+      console.log(`  [${problem.type}] ${problem.message}`)
+    }
+    process.exitCode = 1
   })
 
 program.parseAsync(process.argv)
