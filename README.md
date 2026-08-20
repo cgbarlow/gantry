@@ -131,7 +131,9 @@ Definitions sit side by side — adding a second one requires no change to the e
 
 **Clone and write.** The repo is flat files. Clone it, read the definition, fill in the module files in your editor. Every module carries its own spec and guidance, so you're not guessing at what "Context" is supposed to contain. This is the path for architects who'd rather write markdown than fight a form, and for agents driving the process programmatically.
 
-**Use the form.** `gantry serve` opens a single HTML page that walks you through the process stage by stage, showing only the modules the current gate requires, with the spec and guidance inline. Fill it in, hit render, get your document. Under the hood it writes the same files to the same repo — there is no second store, and no import/export step.
+**Use the form.** `gantry serve <slug>` opens a single HTML page that walks you through the process stage by stage, with the spec and guidance inline. A stage switcher lets you jump to any gate's screen, not just whichever stage the instance is currently at. Fill it in, hit render, get your document. Under the hood it writes the same files to the same repo — there is no second store, and no import/export step.
+
+Each gate screen also has "Populate example text" / "Clear all fields" buttons, sourced from a definition-declared example instance per stage (`instances/examples/` for `design` — one instance with real content for every stage, so `gantry serve examples` shows every gate screen already filled in). Populate copies that content into the form; it doesn't save automatically — hit each module's own Save button to persist it.
 
 Neither path is the "real" one. They're two front ends onto the same data.
 
@@ -140,11 +142,12 @@ Neither path is the "real" one. They're two front ends onto the same data.
 ```bash
 gantry new design my-initiative                 # start an instance
 gantry status my-initiative                     # what does the current stage need?
+gantry check my-initiative --gate business-case # does it pass the gate? (any gate, not just the current stage's)
 gantry serve my-initiative                      # fill it in via the form, or edit the files by hand
 gantry render my-initiative soap                # produce the artefact
 ```
 
-> `gantry definitions`, `gantry check`, and `gantry validate` are not yet implemented — this POC covers `new` → fill in → `render`, with `status` for progress. Gate validation was explicitly out of scope for this pass. See the CLI reference below for what's live today.
+> `gantry definitions` is not yet implemented. Everything else in the CLI reference below is live.
 
 ---
 
@@ -157,12 +160,12 @@ gantry render my-initiative soap                # produce the artefact
 | `gantry definitions` | List definitions available in this repo | Not yet implemented |
 | `gantry new <definition> <slug> [--owner <name>]` | Create an instance | Implemented |
 | `gantry status <slug> [--json]` | Current stage, module completeness, what's outstanding | Implemented |
-| `gantry check <slug> [--gate <id>]` | Validate an instance against a gate's requirements | Not yet implemented — out of scope for this POC |
+| `gantry check <slug> [--gate <id>] [--json]` | Validate an instance against a gate's requirements — any gate, not just the instance's current stage | Implemented |
 | `gantry render <slug> <artefact> [--dry-run]` | Render an artefact to `out/` | Implemented |
 | `gantry serve <slug> [--port <port>]` | Serve the stage-by-stage form (port 3000) | Implemented |
-| `gantry validate <definition>` | Validate a definition against the schema | Not yet implemented |
+| `gantry validate <definition> [--json]` | Report every structural problem with a definition in one pass | Implemented |
 
-`status` emits structured output with `--json` for scripting and agent use (`check` will too, once implemented).
+`status`, `check` and `validate` all emit structured output with `--json` for scripting and agent use.
 
 ## Definition schema
 
@@ -326,15 +329,15 @@ npm test               # engine unit tests (node --test)
 
 ## Validating definitions and instances
 
-`gantry render my-initiative soap --dry-run` resolves the template without writing anything, and fails fast (with a descriptive error) if the definition, an instance module reference, a field type, or a `required`/`required-at` conflict is malformed.
+`gantry validate <definition> [--json]` reports every structural problem with a definition in one pass — a missing module reference, an invalid field type, a `required`/`required-at` conflict — instead of fixing one, rerunning, and hitting the next.
 
-`gantry validate <definition>` and `gantry check <slug> --gate <id>` (dedicated definition/gate validation, ahead of render time) are not yet implemented — see the CLI reference above.
+`gantry check <slug> [--gate <id>] [--json]` validates an instance against a gate's requirements, PASS/FAIL with a matching exit code. Defaults to the instance's current stage; `--gate` resolves any stage's gate, so you can check readiness for a later gate before the instance actually gets there.
+
+`gantry render my-initiative soap --dry-run` resolves the template without writing anything, and fails fast (with a descriptive error) if the definition, an instance module reference, a field type, or a `required`/`required-at` conflict is malformed.
 
 ## Continuous integration
 
-> **TODO:** pipeline definition.
-
-CI should, at minimum: validate every definition in `definitions/`, run the engine tests, and render every artefact for the example instances to catch template drift.
+`azure-pipelines.yml` (repo root) runs on every pull request and push to `main`: `npm test`, then `gantry render` for every artefact the `design` definition currently defines, against the `examples` fixture instance — a failure in any step fails the build.
 
 ---
 

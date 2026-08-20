@@ -26,17 +26,17 @@ steps:
   - script: npm test
     displayName: 'Run tests'
 
-  - script: node bin/gantry.js render example-soap soap
+  - script: node bin/gantry.js render examples soap
     displayName: 'Render soap'
 
-  - script: node bin/gantry.js render example-hld hld
+  - script: node bin/gantry.js render examples hld
     displayName: 'Render hld'
 
-  - script: node bin/gantry.js render example-sad sad
+  - script: node bin/gantry.js render examples sad
     displayName: 'Render sad'
 
-  - script: node bin/gantry.js render example-sad ssad
+  - script: node bin/gantry.js render examples ssad
     displayName: 'Render ssad'
 
-  - script: node bin/gantry.js render example-as-built as-built
+  - script: node bin/gantry.js render examples as-built
     displayName: 'Render as-built'

@@ -42,8 +42,8 @@ test('a module with no file on disk fails the gate, with all its required fields
   })
 })
 
-test('passes the example-soap fixture against its current stage', () => {
-  const result = checkGate('example-soap')
+test('passes the examples fixture against its current stage', () => {
+  const result = checkGate('examples')
   assert.equal(result.pass, true)
   assert.equal(result.complete, true)
   assert.equal(result.gate, 'business-case')
