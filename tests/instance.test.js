@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { loadDefinition } from '../lib/definition.js'
-import { createInstance, readInstance, readModule, writeModule, parseModuleFile } from '../lib/instance.js'
+import { createInstance, readInstance, readModule, writeModule, parseModuleFile, listInstances } from '../lib/instance.js'
 
 function withScratchInstances(fn) {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
@@ -32,6 +32,35 @@ test('creates a design instance with blank Shape-stage module files', () => {
     assert.match(raw, /## Business driver/)
     assert.match(raw, /## Affected domains/)
     assert.match(raw, /## Explicitly out of scope/)
+  })
+})
+
+test('listInstances lists every instance, sorted by slug, with definition and stage', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'zebra-initiative', { instancesDir })
+    createInstance('design', 'alpha-initiative', { instancesDir })
+
+    const instances = listInstances({ instancesDir })
+    assert.deepEqual(instances, [
+      { slug: 'alpha-initiative', definition: 'design', stage: 'shape' },
+      { slug: 'zebra-initiative', definition: 'design', stage: 'shape' },
+    ])
+  })
+})
+
+test('listInstances returns an empty array when instancesDir has no instances', () => {
+  withScratchInstances((instancesDir) => {
+    assert.deepEqual(listInstances({ instancesDir }), [])
+  })
+})
+
+test('readInstance\'s error for an unknown slug lists the available instances', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    assert.throws(
+      () => readInstance('not-a-real-slug', { instancesDir }),
+      /Available instances: my-initiative/
+    )
   })
 })
 

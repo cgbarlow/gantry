@@ -158,6 +158,7 @@ gantry render my-initiative soap                # produce the artefact
 | Command | Does | Status |
 |---|---|---|
 | `gantry definitions` | List definitions available in this repo | Not yet implemented |
+| `gantry instances [--json]` | List instances available in this repo, with definition and current stage | Implemented |
 | `gantry new <definition> <slug> [--owner <name>]` | Create an instance | Implemented |
 | `gantry status <slug> [--json]` | Current stage, module completeness, what's outstanding | Implemented |
 | `gantry check <slug> [--gate <id>] [--json]` | Validate an instance against a gate's requirements — any gate, not just the instance's current stage | Implemented |
