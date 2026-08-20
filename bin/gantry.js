@@ -93,15 +93,14 @@ program
   })
 
 program
-  .command('serve [slug]')
+  .command('serve <slug>')
   .description('Serve the stage-by-stage form')
   .option('--port <port>', 'port to listen on', '3000')
   .action((slug, options) => {
-    const resolvedSlug = slug ?? 'example-soap'
-    const server = createServer({ slug: resolvedSlug })
+    const server = createServer({ slug })
     const port = Number(options.port)
     server.listen(port, () => {
-      console.log(`gantry serve: http://localhost:${port} (instance: ${resolvedSlug})`)
+      console.log(`gantry serve: http://localhost:${port} (instance: ${slug})`)
     })
   })
 
