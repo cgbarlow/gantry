@@ -9,7 +9,10 @@ const md = new MarkdownIt()
 async function loadInstance(stageId) {
   const url = stageId ? `/api/instance?stage=${encodeURIComponent(stageId)}` : '/api/instance'
   const res = await fetch(url)
-  if (!res.ok) throw new Error(`Failed to load instance (${res.status})`)
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error ?? `Failed to load instance (${res.status})`)
+  }
   return res.json()
 }
 

@@ -5,7 +5,7 @@ import { getStatus } from '../lib/status.js'
 import { checkGate } from '../lib/check.js'
 import { validateDefinition } from '../lib/validate.js'
 import { createServer } from '../lib/server.js'
-import { createInstance } from '../lib/instance.js'
+import { createInstance, listInstances } from '../lib/instance.js'
 
 const program = new Command()
 
@@ -18,6 +18,25 @@ program
   .description('List definitions available in this repo')
   .action(() => {
     console.log('not yet implemented')
+  })
+
+program
+  .command('instances')
+  .description('List instances available in this repo')
+  .option('--json', 'emit structured JSON output')
+  .action((options) => {
+    const instances = listInstances()
+    if (options.json) {
+      console.log(JSON.stringify(instances, null, 2))
+      return
+    }
+    if (instances.length === 0) {
+      console.log('No instances found.')
+      return
+    }
+    for (const instance of instances) {
+      console.log(`${instance.slug} — ${instance.definition} (stage: ${instance.stage})`)
+    }
   })
 
 program
