@@ -159,7 +159,7 @@ gantry render my-initiative soap                # produce the artefact
 | `gantry status <slug> [--json]` | Current stage, module completeness, what's outstanding | Implemented |
 | `gantry check <slug> [--gate <id>]` | Validate an instance against a gate's requirements | Not yet implemented — out of scope for this POC |
 | `gantry render <slug> <artefact> [--dry-run]` | Render an artefact to `out/` | Implemented |
-| `gantry serve [<slug>] [--port <port>]` | Serve the stage-by-stage form (defaults to instance `example-soap`, port 3000) | Implemented |
+| `gantry serve <slug> [--port <port>]` | Serve the stage-by-stage form (port 3000) | Implemented |
 | `gantry validate <definition>` | Validate a definition against the schema | Not yet implemented |
 
 `status` emits structured output with `--json` for scripting and agent use (`check` will too, once implemented).
