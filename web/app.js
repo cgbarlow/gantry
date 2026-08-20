@@ -186,21 +186,14 @@ function renderModule(mod, stageId) {
   return { element: section, fieldControls }
 }
 
-// One "Populate"/"Clear" pair per gate screen, acting across every module
-// shown for that stage — not per-module, since a gate's fields are what
-// you're filling in together.
-function renderStageActions(fieldEntries, hasExample) {
+// A "Clear" button per gate screen, acting across every module shown for
+// that stage — not per-module, since a gate's fields are cleared together.
+// (No "Populate example text" button — the fully-populated `examples`
+// instance is the way to explore example content now, per-field population
+// was redundant once that existed.)
+function renderStageActions(fieldEntries) {
   const container = document.createElement('div')
   container.className = 'stage-actions'
-
-  const populateButton = document.createElement('button')
-  populateButton.type = 'button'
-  populateButton.textContent = 'Populate example text'
-  populateButton.disabled = !hasExample
-  populateButton.title = hasExample ? '' : 'No example instance configured for this stage'
-  populateButton.addEventListener('click', () => {
-    fieldEntries.forEach(({ field, control }) => control.setValue(field.example))
-  })
 
   const clearButton = document.createElement('button')
   clearButton.type = 'button'
@@ -209,7 +202,7 @@ function renderStageActions(fieldEntries, hasExample) {
     fieldEntries.forEach(({ field, control }) => control.setValue(field.type === 'list' ? [] : ''))
   })
 
-  container.append(populateButton, clearButton)
+  container.appendChild(clearButton)
   return container
 }
 
@@ -266,9 +259,7 @@ async function renderInstance(stageId) {
   })
   modulesRoot.appendChild(renderArtefactsSection(instance))
 
-  document.getElementById('stage-actions').replaceChildren(
-    renderStageActions(fieldEntries, instance.hasExample)
-  )
+  document.getElementById('stage-actions').replaceChildren(renderStageActions(fieldEntries))
 }
 
 renderInstance().catch((err) => {

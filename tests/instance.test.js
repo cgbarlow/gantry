@@ -35,16 +35,30 @@ test('creates a design instance with blank Shape-stage module files', () => {
   })
 })
 
-test('listInstances lists every instance, sorted by slug, with definition and stage', () => {
+test('listInstances lists every instance, sorted by slug, with definition, stage, and which stages have data', () => {
   withScratchInstances((instancesDir) => {
     createInstance('design', 'zebra-initiative', { instancesDir })
     createInstance('design', 'alpha-initiative', { instancesDir })
 
     const instances = listInstances({ instancesDir })
     assert.deepEqual(instances, [
-      { slug: 'alpha-initiative', definition: 'design', stage: 'shape' },
-      { slug: 'zebra-initiative', definition: 'design', stage: 'shape' },
+      { slug: 'alpha-initiative', definition: 'design', stage: 'shape', stagesWithData: ['shape'] },
+      { slug: 'zebra-initiative', definition: 'design', stage: 'shape', stagesWithData: ['shape'] },
     ])
+  })
+})
+
+test('listInstances reports every stage with data, not just the instance\'s current stage', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    writeFileSync(
+      join(instancesDir, 'my-initiative', 'modules', 'hld-submission.md'),
+      '---\nmodule: hld-submission\nstatus: draft\nowner:\n---\n'
+    )
+
+    const instances = listInstances({ instancesDir })
+    const myInitiative = instances.find((i) => i.slug === 'my-initiative')
+    assert.deepEqual(myInitiative.stagesWithData, ['shape', 'hld-define'])
   })
 })
 
