@@ -141,3 +141,66 @@ test('leaves a field out of the result when its heading is missing', () => {
   assert.equal(data.fields.driver, 'Some text.')
   assert.ok(!('affected-domains' in data.fields))
 })
+
+test('matches a markdown-formatted heading against its field\'s plain-text title', () => {
+  const definition = loadDefinition('design')
+  const moduleSpec = definition.modules.get('context')
+  const data = parseModuleFile(
+    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## **Business driver**\n\nSome text.\n',
+    moduleSpec
+  )
+  assert.equal(data.fields.driver, 'Some text.')
+  assert.deepEqual(data.warnings, [])
+})
+
+test('warns (non-strict) on a heading that matches no field, leaving the parsed result unaffected', () => {
+  const definition = loadDefinition('design')
+  const moduleSpec = definition.modules.get('context')
+  const data = parseModuleFile(
+    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Business driver\n\nSome text.\n\n## Not A Real Field\n\nWhatever.\n',
+    moduleSpec
+  )
+  assert.equal(data.fields.driver, 'Some text.')
+  assert.equal(data.warnings.length, 1)
+  assert.match(data.warnings[0], /does not match any field/)
+})
+
+test('warns (non-strict) on a duplicate heading, identifying which occurrence wins', () => {
+  const definition = loadDefinition('design')
+  const moduleSpec = definition.modules.get('context')
+  const data = parseModuleFile(
+    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Business driver\n\nFirst.\n\n## Business driver\n\nSecond.\n',
+    moduleSpec
+  )
+  assert.equal(data.fields.driver, 'Second.')
+  assert.equal(data.warnings.length, 1)
+  assert.match(data.warnings[0], /duplicate heading/)
+})
+
+test('strict mode throws instead of warning on a non-matching heading', () => {
+  const definition = loadDefinition('design')
+  const moduleSpec = definition.modules.get('context')
+  assert.throws(
+    () =>
+      parseModuleFile(
+        '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Not A Real Field\n\nWhatever.\n',
+        moduleSpec,
+        { strict: true }
+      ),
+    /does not match any field/
+  )
+})
+
+test('strict mode throws instead of warning on a duplicate heading', () => {
+  const definition = loadDefinition('design')
+  const moduleSpec = definition.modules.get('context')
+  assert.throws(
+    () =>
+      parseModuleFile(
+        '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Business driver\n\nFirst.\n\n## Business driver\n\nSecond.\n',
+        moduleSpec,
+        { strict: true }
+      ),
+    /duplicate heading/
+  )
+})

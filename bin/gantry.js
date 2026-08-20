@@ -2,6 +2,8 @@
 import { Command } from 'commander'
 import { renderArtefact } from '../lib/render.js'
 import { getStatus } from '../lib/status.js'
+import { checkGate } from '../lib/check.js'
+import { validateDefinition } from '../lib/validate.js'
 import { createServer } from '../lib/server.js'
 import { createInstance } from '../lib/instance.js'
 
@@ -56,8 +58,25 @@ program
   .description("Validate an instance against a gate's requirements")
   .option('--gate <id>', 'the gate to check against')
   .option('--json', 'emit structured JSON output')
-  .action(() => {
-    console.log('not yet implemented')
+  .action((slug, options) => {
+    const result = checkGate(slug, { gate: options.gate })
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2))
+      if (!result.pass) process.exitCode = 1
+      return
+    }
+    console.log(result.pass ? 'PASS' : 'FAIL')
+    console.log(`${result.slug} — ${result.definition} / ${result.stage.title} (gate: ${result.gate})`)
+    for (const mod of result.modules) {
+      const marker = mod.complete ? '[complete]' : mod.exists ? '[incomplete]' : '[missing]'
+      console.log(`  ${marker} ${mod.title}`)
+      if (!mod.exists) {
+        console.log(`      file not found: modules/${mod.id}.md`)
+      } else if (mod.outstanding.length) {
+        console.log(`      outstanding: ${mod.outstanding.join(', ')}`)
+      }
+    }
+    if (!result.pass) process.exitCode = 1
   })
 
 program
@@ -89,8 +108,22 @@ program
 program
   .command('validate <definition>')
   .description('Validate a definition against the schema')
-  .action(() => {
-    console.log('not yet implemented')
+  .option('--json', 'emit structured JSON output')
+  .action((definition, options) => {
+    const result = validateDefinition(definition)
+    if (options.json) {
+      console.log(JSON.stringify(result.problems, null, 2))
+      if (!result.valid) process.exitCode = 1
+      return
+    }
+    if (result.valid) {
+      console.log('Definition is valid.')
+      return
+    }
+    for (const problem of result.problems) {
+      console.log(`  [${problem.type}] ${problem.message}`)
+    }
+    process.exitCode = 1
   })
 
 program.parseAsync(process.argv)
