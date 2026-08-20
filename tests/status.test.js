@@ -53,3 +53,19 @@ test('the example-soap fixture is complete', () => {
     assert.deepEqual(mod.outstanding, [])
   }
 })
+
+test('stageId lets a caller evaluate a stage other than the instance\'s current one', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    const status = getStatus('my-initiative', { instancesDir, stageId: 'hld-define' })
+
+    assert.deepEqual(status.stage, { id: 'hld-define', title: 'HLD Definition', gate: 'hld-tac-approved' })
+    assert.equal(status.complete, false)
+    const hldSubmission = status.modules.find((m) => m.id === 'hld-submission')
+    assert.equal(hldSubmission.exists, false)
+  })
+})
+
+test('an unknown stageId throws', () => {
+  assert.throws(() => getStatus('example-soap', { stageId: 'not-a-real-stage' }), /has no stage/)
+})
