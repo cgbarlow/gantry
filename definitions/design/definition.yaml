@@ -16,6 +16,9 @@ stages:
     title: Shape
     gate: business-case
     modules: [context, solution-definition, team-and-estimates]
+    # The instance the web form's "Populate example text" button reads
+    # from for this stage's fields.
+    example: example-soap
 
   - id: hld-define
     title: HLD Definition
@@ -26,16 +29,19 @@ stages:
     # form. See each module's guidance.
     modules:
       [hld-submission, problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies]
+    example: example-hld
 
   - id: detailed-design
     title: Detailed Design
     gate: build-ready-checklist
     modules: [architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations]
+    example: example-sad
 
   - id: handover
     title: Operational Handover
     gate: operational-handover
     modules: [as-built-notes]
+    example: example-as-built
 
 artefacts:
   - id: soap

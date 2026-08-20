@@ -13,6 +13,7 @@ test('loads the real design definition', () => {
 
   const shape = design.stages.find((stage) => stage.id === 'shape')
   assert.deepEqual(shape.modules, ['context', 'solution-definition', 'team-and-estimates'])
+  assert.equal(shape.example, 'example-soap')
 
   const soap = design.artefacts.find((artefact) => artefact.id === 'soap')
   assert.deepEqual(soap.requires, ['context', 'solution-definition', 'team-and-estimates'])
