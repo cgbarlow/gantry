@@ -6,10 +6,25 @@ import DOMPurify from 'dompurify'
 
 const md = new MarkdownIt()
 
-async function loadInstance() {
-  const res = await fetch('/api/instance')
+async function loadInstance(stageId) {
+  const url = stageId ? `/api/instance?stage=${encodeURIComponent(stageId)}` : '/api/instance'
+  const res = await fetch(url)
   if (!res.ok) throw new Error(`Failed to load instance (${res.status})`)
   return res.json()
+}
+
+// Free-browse stage switcher: lets you view/edit any stage's modules
+// without changing the instance's own persisted current stage.
+function renderStageNav(container, stages, currentStageId, viewedStageId, onSelect) {
+  container.replaceChildren()
+  stages.forEach((stage) => {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.textContent = stage.title + (stage.id === currentStageId ? ' (current)' : '')
+    if (stage.id === viewedStageId) button.classList.add('active')
+    button.addEventListener('click', () => onSelect(stage.id))
+    container.appendChild(button)
+  })
 }
 
 function renderPreview(container, text) {
@@ -104,7 +119,7 @@ function createListField(field) {
   }
 }
 
-function renderModule(mod) {
+function renderModule(mod, stageId) {
   const section = document.createElement('section')
   section.className = 'module'
 
@@ -136,7 +151,7 @@ function renderModule(mod) {
       fields[field.id] = fieldControls[i].getValue()
     })
     status.textContent = 'Saving…'
-    const res = await fetch(`/api/instance/modules/${mod.id}`, {
+    const res = await fetch(`/api/instance/modules/${mod.id}?stage=${encodeURIComponent(stageId)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: mod.status, owner: mod.owner, fields }),
@@ -184,16 +199,27 @@ function renderArtefactsSection(instance) {
   return section
 }
 
-async function main() {
-  const instance = await loadInstance()
+async function renderInstance(stageId) {
+  const instance = await loadInstance(stageId)
   document.getElementById('instance-title').textContent = `${instance.slug} — ${instance.definition}`
   document.getElementById('stage-line').textContent = `${instance.stage.title} (gate: ${instance.stage.gate})`
 
+  renderStageNav(
+    document.getElementById('stage-nav'),
+    instance.stages,
+    instance.currentStageId,
+    instance.stage.id,
+    (selectedStageId) => renderInstance(selectedStageId).catch((err) => {
+      document.body.textContent = `Failed to load: ${err.message}`
+    })
+  )
+
   const modulesRoot = document.getElementById('modules')
-  instance.modules.forEach((mod) => modulesRoot.appendChild(renderModule(mod)))
+  modulesRoot.replaceChildren()
+  instance.modules.forEach((mod) => modulesRoot.appendChild(renderModule(mod, instance.stage.id)))
   modulesRoot.appendChild(renderArtefactsSection(instance))
 }
 
-main().catch((err) => {
+renderInstance().catch((err) => {
   document.body.textContent = `Failed to load: ${err.message}`
 })

@@ -16,6 +16,21 @@ header {
   margin: 0;
 }
 
+#stage-nav {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+#stage-nav button {
+  margin: 0;
+}
+
+#stage-nav button.active {
+  background: #1a1a1a;
+  color: #fff;
+}
+
 .module {
   border-top: 1px solid #ccc;
   padding-top: 1rem;

@@ -47,6 +47,28 @@ test('GET /api/instance reports the example-soap fixture, fully populated', asyn
   })
 })
 
+test('GET /api/instance?stage=<id> browses a different stage\'s modules without changing the instance\'s persisted stage', async () => {
+  await withRunningServer({ slug: 'example-soap' }, async (base) => {
+    const res = await fetch(`${base}/api/instance?stage=hld-define`)
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    assert.deepEqual(body.stage, { id: 'hld-define', title: 'HLD Definition', gate: 'hld-tac-approved' })
+    assert.equal(body.currentStageId, 'shape')
+    assert.deepEqual(body.artefacts, [{ id: 'hld', title: 'High Level Design' }])
+    assert.ok(body.modules.some((m) => m.id === 'hld-submission'))
+
+    const instance = readInstance('example-soap')
+    assert.equal(instance.stage, 'shape')
+  })
+})
+
+test('GET /api/instance?stage=<unknown> throws', async () => {
+  await withRunningServer({ slug: 'example-soap' }, async (base) => {
+    const res = await fetch(`${base}/api/instance?stage=not-a-real-stage`)
+    assert.equal(res.status, 500)
+  })
+})
+
 test('PUT /api/instance/modules/:id writes the same file format the CLI reads, and returns updated status', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
@@ -80,6 +102,35 @@ test('PUT /api/instance/modules/:id writes the same file format the CLI reads, a
     assert.equal(data.status, 'agreed')
     assert.equal(data.fields.driver, 'Updated via the web form.')
     assert.deepEqual(data.fields['affected-domains'], ['Payments'])
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('PUT /api/instance/modules/:id?stage=<id> reports status against the browsed stage, not the instance\'s current one', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/example-soap', join(instancesDir, 'example-soap'), { recursive: true })
+    rmSync(join(instancesDir, 'example-soap', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'example-soap', instancesDir }, async (base) => {
+      // example-soap's instance.yaml stage is "shape" — hld-submission
+      // belongs to "hld-define", a stage that stage isn't part of at all.
+      const res = await fetch(`${base}/api/instance/modules/hld-submission?stage=hld-define`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'draft',
+          owner: '',
+          fields: { 'purpose-statement': 'Filled in while browsing HLD Definition.' },
+        }),
+      })
+      assert.equal(res.status, 200)
+      const status = await res.json()
+      assert.equal(status.stage.id, 'hld-define')
+      const hldSubmission = status.modules.find((m) => m.id === 'hld-submission')
+      assert.ok(hldSubmission, 'expected hld-submission in the browsed stage\'s status')
+    })
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }
