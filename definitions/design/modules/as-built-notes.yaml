@@ -1,21 +1,54 @@
-# INFERRED / UNCONFIRMED — no Contoso template or filled example exists for the
-# Detailed Design / As-built artefact anywhere in the research corpus (see
-# docs/research/stages-gates-module-specs.md Section 4.5: "Do any templates
-# for this exist? Open question about Architecture holding the pen on this
-# as an Assurance function"). This module is a minimal placeholder drafted
-# from general as-built/handover conventions so the `handover` stage has
-# something to complete against. Expect this to be revised once a real
-# source (an existing as-built doc, or a decision on who owns this content)
-# is available.
+# Field set confirmed 2026-08-20 (ticket #53), superseding the earlier
+# minimal placeholder. Evidence: the Post-SOAP Artefact Coverage Assessment
+# spreadsheet's "Detailed Design / As-built" column and its threaded
+# comments ("good enough for the technical person who is not familiar with
+# the system to successfully rebuild it from scratch"; "handover of the
+# document does not include the handover of responsibility"), plus a
+# direct statement on ownership and required depth: as-builts are the
+# responsibility of senior developers/tech leads or contingent Architecture
+# support, and must cover detailed business process flows, field-level
+# logic, detailed API specifications, UI wireframes, validation rules,
+# code-level sequence diagrams, and detailed acceptance criteria.
 
 id: as-built-notes
 title: As-Built Notes
 purpose: >
-  What actually got built, as distinct from what was agreed at Build
-  Readiness Confirmed, and what a future support engineer needs to safely
-  operate and change it.
+  What actually got built, in enough code-level and infrastructure-level
+  detail that an appropriately experienced engineer unfamiliar with Contoso's
+  systems could rebuild it from scratch — distinct from the architectural
+  intent captured in SAD/SSAD, and from what a future support engineer
+  needs to safely operate and change it.
 
 fields:
+  - id: business-process-flows
+    title: Business process flows
+    type: markdown
+    required: true
+    guidance: >
+      Detailed as-implemented business process flows, step by step, as the
+      system actually behaves — not the intended flows from design.
+
+  - id: detailed-technical-design
+    title: Detailed technical design
+    type: markdown
+    required: true
+    guidance: >
+      Field-level logic, API specifications, UI wireframes, validation
+      rules, and code-level sequence diagrams — the code-level detail a
+      rebuild needs. Owned by senior developers/tech leads or contingent
+      Architecture support. Distinct from SAD/SSAD, which cover
+      architectural intent, not implementation detail.
+
+  - id: infrastructure-and-configuration
+    title: Infrastructure and configuration
+    type: markdown
+    required: true
+    guidance: >
+      Environment and infrastructure detail sufficient to rebuild without
+      any Contoso-specific familiarity — IP addresses, ports, network
+      configuration, resource names, and equivalent build-time
+      configuration values.
+
   - id: changes-from-design
     title: Changes from the agreed design
     type: markdown
@@ -23,6 +56,14 @@ fields:
     guidance: >
       Where the built solution diverges from the architecture/integration
       modules agreed at Build Readiness Confirmed, and why.
+
+  - id: acceptance-criteria
+    title: Acceptance criteria
+    type: markdown
+    required: true
+    guidance: >
+      Detailed acceptance criteria confirming the build meets
+      requirements — the bar a rebuild should be tested against.
 
   - id: operational-notes
     title: Operational notes
@@ -38,4 +79,7 @@ fields:
     required: true
     guidance: >
       Confirmation that the operational handover has actually happened —
-      who received it, and when.
+      who received it, and when. Handover of the document does not
+      transfer responsibility for keeping it updated — that stays with the
+      original owner (senior developer/tech lead, or the Architecture
+      support that authored it).

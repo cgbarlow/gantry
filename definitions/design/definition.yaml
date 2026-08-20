@@ -46,14 +46,14 @@ artefacts:
 
   - id: hld
     title: High Level Design
-    template: templates/hld.md.tmpl # TODO: template not yet written
+    template: templates/hld.md.tmpl
     gate: hld-tac-approved
     requires:
       [hld-submission, problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies]
 
   - id: sad
     title: Solution Architecture Document
-    template: templates/sad.md.tmpl # TODO: template not yet written
+    template: templates/sad.md.tmpl
     gate: build-ready-checklist
     requires: [architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations]
 
@@ -63,12 +63,12 @@ artefacts:
     # renderings of one module set, not two independently-authored documents.
     # See docs/research/stages-gates-module-specs.md Section 4.4 and
     # docs/adr/0001.
-    template: templates/ssad.md.tmpl # TODO: template not yet written
+    template: templates/ssad.md.tmpl
     gate: build-ready-checklist
     requires: [architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations]
 
   - id: as-built
     title: Detailed Design / As-built
-    template: templates/as-built.md.tmpl # TODO: template not yet written
+    template: templates/as-built.md.tmpl
     gate: operational-handover
     requires: [as-built-notes]

@@ -1,0 +1,127 @@
+# <%~ it.instance.slug %>: High Level Design
+
+## Submission
+
+<%~ it.modules['hld-submission']['purpose-statement'] %>
+
+### Decision requested
+
+<%~ it.modules['hld-submission']['decision-requested'] %>
+
+### Consultation
+
+<%~ it.modules['hld-submission']['consultation'] %>
+<% if (it.modules['hld-submission']['next-steps']) { %>
+### Next steps
+
+<%~ it.modules['hld-submission']['next-steps'] %>
+<% } %>
+<% if (it.modules['hld-submission']['authors-and-contributors'] && it.modules['hld-submission']['authors-and-contributors'].length) { %>
+### Authors and contributors
+
+<%~ it.modules['hld-submission']['authors-and-contributors'].map(function(item) { return '- ' + item }).join('\n') %>
+<% } %>
+
+## Problem Statement
+
+### Current state
+
+<%~ it.modules['problem-statement']['current-state'] %>
+
+### Desired future state
+
+<%~ it.modules['problem-statement']['desired-future-state'] %>
+
+### In scope / out of scope
+
+<%~ it.modules['problem-statement'].scope %>
+
+### Success criteria
+
+<%~ it.modules['problem-statement']['success-criteria'] %>
+<%
+  const nfrs = it.modules.nfrs || {}
+  const nfrParts = [
+    nfrs.performance,
+    nfrs['availability-and-continuity'],
+    nfrs['disaster-recovery-and-backup'],
+    nfrs['scalability-and-capacity'],
+    nfrs['other-nfrs'],
+    nfrs['requirements-traceability'],
+  ].filter(Boolean)
+%>
+<% if (nfrParts.length) { %>
+### Non-functional requirements
+
+<%~ nfrParts.join('\n\n') %>
+<% } %>
+
+## Proposed solution
+
+<%~ it.modules['proposed-solution'].guardrails %>
+
+### Alignment with strategy
+
+<%~ it.modules['proposed-solution']['strategy-alignment'] %>
+
+### Dependencies
+
+<%~ it.modules.dependencies['dependencies-overview'] %>
+<% if (it.modules['proposed-solution'].implications) { %>
+### Implications
+
+<%~ it.modules['proposed-solution'].implications %>
+<% } %>
+
+### Trade-offs
+
+<%~ it.modules['proposed-solution']['trade-offs'] %>
+
+### Risks and mitigations
+
+<%~ it.modules.risks['risk-register'] %>
+<% if (it.modules.risks['open-issues']) { %>
+
+<%~ it.modules.risks['open-issues'] %>
+<% } %>
+<%
+  const security = it.modules.security || {}
+  const regulations = security['regulations-and-standards'] && security['regulations-and-standards'].length
+    ? security['regulations-and-standards'].map(function(item) { return '- ' + item }).join('\n')
+    : null
+  const securityParts = [
+    security['identity-and-access'],
+    security['security-architecture'],
+    regulations,
+    security['privacy-and-confidentiality'],
+  ].filter(Boolean)
+%>
+<% if (securityParts.length) { %>
+### Security and privacy
+
+<%~ securityParts.join('\n\n') %>
+<% } %>
+
+### Cost-benefit analysis
+
+<%~ it.modules['proposed-solution']['cost-benefit'] %>
+
+### Delivery approach and indicative timeline
+
+<%~ it.modules['proposed-solution']['delivery-approach'] %>
+
+## Alternatives considered
+
+<%~ it.modules['alternatives-considered'].alternatives %>
+<% if (it.modules['open-questions'].questions) { %>
+
+## Open questions
+
+<%~ it.modules['open-questions'].questions %>
+<% } %>
+<% if (it.modules['hld-submission'].attachments && it.modules['hld-submission'].attachments.length) { %>
+
+## Attachment/s
+
+<%~ it.modules['hld-submission'].attachments.map(function(item) { return '- ' + item }).join('\n') %>
+<% } %>

@@ -40,3 +40,23 @@ fields:
     guidance: >
       Where this paper goes after TAC, if anywhere — e.g. Design Committee,
       PEC, or another downstream governance step.
+
+  - id: authors-and-contributors
+    title: Authors and contributors
+    type: list
+    required: false
+    guidance: >
+      Who wrote or contributed to this paper — name and role (e.g.
+      "J. Smith — Architect"). Optional: this is document content for the
+      rendered artefact itself, distinct from the module instance file's own
+      frontmatter owner/git history, which already track who's editing the
+      file.
+
+  - id: attachments
+    title: Attachments
+    type: list
+    required: false
+    guidance: >
+      Supplementary documents attached to this submission (name and a
+      reference/link), if any — e.g. a diagram export or a spreadsheet TAC
+      needs alongside the paper itself.

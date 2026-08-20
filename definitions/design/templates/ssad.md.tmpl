@@ -1,0 +1,92 @@
+# <%~ it.instance.slug %>: Solution Support Architecture Document
+
+## Stakeholders and support contacts
+
+<% it.modules['support-and-operations'].stakeholders.forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+## Environments, URLs and domains
+
+<% it.modules['support-and-operations']['environments-and-domains'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+<% if (it.modules['support-and-operations']['release-procedures']) { %>
+## Release procedures
+
+<%~ it.modules['support-and-operations']['release-procedures'] %>
+<% } %>
+
+## Support handover readiness
+
+<%~ it.modules['support-and-operations']['support-handover-readiness'] %>
+<% if (it.modules['support-and-operations']['operational-accounts-and-licenses'] && it.modules['support-and-operations']['operational-accounts-and-licenses'].length) { %>
+## Operational accounts and licenses
+
+<% it.modules['support-and-operations']['operational-accounts-and-licenses'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+<% } %>
+<% if (it.modules['support-and-operations']['operational-security-controls']) { %>
+## Operational security controls
+
+<%~ it.modules['support-and-operations']['operational-security-controls'] %>
+<% } %>
+<% if (it.modules['support-and-operations']['monitoring-and-alerting']) { %>
+## Monitoring and alerting
+
+<%~ it.modules['support-and-operations']['monitoring-and-alerting'] %>
+<% } %>
+
+## Solution overview
+
+<%~ it.modules.architecture['solution-description'] %>
+
+### Logical components
+
+<% it.modules.architecture['logical-components'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+### Interfaces
+
+<%~ it.modules.integration.interfaces %>
+
+### Data classification
+
+<%~ it.modules.data['data-classification'] %>
+
+## Architectural risks
+
+<%~ it.modules.risks['risk-register'] %>
+<% if (it.modules.architecture['architectural-risks']) { %>
+<%~ it.modules.architecture['architectural-risks'] %>
+<% } %>
+<% if (it.modules.risks['open-issues']) { %>
+### Open issues
+
+<%~ it.modules.risks['open-issues'] %>
+<% } %>
+
+## Availability, continuity and security posture
+
+### Availability and continuity
+
+<%~ it.modules.nfrs['availability-and-continuity'] %>
+
+### Disaster recovery and backup
+
+<%~ it.modules.nfrs['disaster-recovery-and-backup'] %>
+
+### Scalability and capacity
+
+<%~ it.modules.nfrs['scalability-and-capacity'] %>
+
+### Identity and access management
+
+<%~ it.modules.security['identity-and-access'] %>
+
+### Privacy and confidentiality concerns
+
+<%~ it.modules.security['privacy-and-confidentiality'] %>
+
+## Dependencies
+
+<% it.modules.dependencies['dependency-list'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
