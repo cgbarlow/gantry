@@ -54,6 +54,11 @@ test('renders a real docx styled from the HLD reference doc', () => {
   }
 })
 
+test('suppressed optional sections do not leave runs of blank lines behind', () => {
+  const result = renderArtefact('example-hld', 'hld', { dryRun: true })
+  assert.doesNotMatch(result.markdown, /\n{3,}/)
+})
+
 test('reference doc defines the paragraph styles pandoc references for list items', () => {
   // The HLD template doesn't itself define "Compact" (pandoc's tight-list
   // style). Word/LibreOffice silently drop a list item's bullet/indent
