@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — throwaway. Not wired into gantry's app, not linked from web/index.html.
+  Resolves wayfinder ticket "Design the Asset insert and management UX"
+  (Azure DevOps #73, under map #66 "Design gantry's production UI").
+
+  Sub-shape note: partly sub-shape A, partly B. The "+ Insert asset" trigger
+  point (an unobtrusive affordance after every module) was already locked in
+  by "Design the enhanced module editor with the 3-way view toggle" (#72,
+  web/prototypes/module-editor.prototype.html) — this prototype extends that
+  real structure rather than re-inventing it. The asset library/management
+  view has no existing page to adjust, so it's sub-shape B — a new screen,
+  reusing the Gate Ledger design language.
+
+  Question this answers: what happens when an author clicks "+ Insert asset"
+  after a module, how the mandatory source-location reference is validated,
+  how the asset library surfaces existing assets and their usage, and how an
+  inserted Asset actually renders (in the split/rendered editor views, and —
+  per the ticket's explicit ask — in the final Pandoc-rendered artefact).
+  Switchable via ?variant=a|b|c (defaults to "a"):
+
+    A — Modal insert + thumbnail-grid library: "+ Insert asset" opens a modal
+        with two tabs, "Upload new" (file picker + mandatory source-URL field,
+        blocked with an inline field error until both are valid) and "Choose
+        existing" (click a thumbnail to insert its reference at the trigger
+        point). The library is a separate screen: a grid of thumbnail cards,
+        each showing name, source link, uploader, and a "used in N modules"
+        badge.
+    B — Inline expanding drawer + sortable-list library: "+ Insert asset"
+        expands a drawer directly below the module in the document flow (no
+        modal), same upload/choose-existing split, same inline validation.
+        The library is a sortable table (name / source / uploader / used-in
+        count) — sortable by used-in count to surface orphaned assets, which
+        the modal/grid variant can't easily do.
+    C — Persistent side panel: clicking "+ Insert asset" opens a right-hand
+        panel that stays open while editing (search/filter built in, click
+        or drag a thumbnail to insert) rather than a one-shot modal/drawer.
+        Validation shows as a warning glyph directly on the panel's own
+        upload form. This variant also carries the render-pipeline callout
+        (how the reference resolves to an embedded image in the final
+        Pandoc artefact), since the panel has room for it.
+
+  All three show the SAME inline-rendering behaviour once an asset is
+  inserted (this isn't a per-variant question): the markdown reference
+  renders as an actual thumbnail in the split view's preview pane and in
+  rendered-only view; a small callout confirms it compiles to an embedded
+  image at the same paragraph position in the Pandoc-rendered .docx.
+
+  Reuses the design language (#69) and the module/field DOM structure locked
+  in by the module editor ticket (#72) — same .module/.field-markdown/.split
+  shape, same toolbar segmented view-toggle, same after-every-module insert
+  affordance placement, restyled/extended here rather than replaced.
+
+  Fonts load from Google Fonts CDN for this preview only, matching prior
+  prototypes' same caveat.
+-->
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gantry — Asset Insertion Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+    --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --radius: 2px;
+    --hairline: 1px;
+    --border-strong: 1px;
+  }
+  [data-theme="light"] {
+    --bg: #EDEBE6;
+    --bg-raised: #F5F3EE;
+    --text: #1B1E22;
+    --text-muted: #4A4740;
+    --line: #B9B3A4;
+    --line-strong: #5B5648;
+    --focus-ring: #1B1E22;
+    --stamp-draft-bg: #8A5A1F;  --stamp-draft-fg: #F5F1E8;
+    --stamp-agreed-bg: #295C40; --stamp-agreed-fg: #F5F1E8;
+    --stamp-review-bg: #4A4740; --stamp-review-fg: #F5F1E8;
+    --stamp-error-bg: #8C3A2B;  --stamp-error-fg: #F5F1E8;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+  main.screen { max-width: 1120px; margin: 0 auto; padding: 32px 32px 140px; }
+
+  header.chrome {
+    max-width: 1120px; margin: 0 auto; padding: 24px 32px 16px;
+    border-bottom: var(--border-strong) solid var(--line-strong);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  h1 { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; font-size: 20px; margin: 0; }
+  .mono { font-family: var(--font-mono); }
+  a { color: inherit; }
+  :focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+
+  .toolbar {
+    display: flex; justify-content: space-between; align-items: center;
+    max-width: 1120px; margin: 0 auto; padding: 12px 32px;
+    background: var(--bg-raised); border-bottom: var(--hairline) solid var(--line);
+  }
+  .segmented { display: inline-flex; border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius); overflow: hidden; }
+  .segmented button { border: none; border-right: var(--hairline) solid var(--line-strong); border-radius: 0; margin: 0; }
+  .segmented button:last-child { border-right: none; }
+
+  button.btn {
+    font-family: var(--font-body); font-weight: 600; font-size: 13px;
+    padding: 8px 14px; border-radius: var(--radius);
+    border: var(--border-strong) solid var(--line-strong);
+    background: var(--bg-raised); color: var(--text); cursor: pointer;
+  }
+  button.btn.primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+  button.btn.ghost { background: transparent; border-color: var(--line); }
+  button.btn.small { padding: 5px 10px; font-size: 12px; }
+  button.btn.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+  button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  input.field, select.field {
+    font-family: var(--font-mono); font-size: 13px; padding: 8px 11px;
+    border-radius: var(--radius); border: var(--border-strong) solid var(--line-strong);
+    background: var(--bg-raised); color: var(--text); width: 100%;
+  }
+  input.field.has-error { border-color: var(--stamp-error-bg); }
+  label.field-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); margin-bottom: 6px; }
+  .inline-error { color: var(--stamp-error-bg); font-size: 12px; margin-top: 6px; }
+
+  .stamp { display: inline-block; padding: 3px 8px; border-radius: var(--radius); font-family: var(--font-display); font-weight: 700; font-size: 10px; letter-spacing: 0.07em; }
+  .stamp.agreed { background: var(--stamp-agreed-bg); color: var(--stamp-agreed-fg); }
+  .stamp.review { background: var(--stamp-review-bg); color: var(--stamp-review-fg); }
+
+  .module { border-top: var(--hairline) solid var(--line); padding-top: 20px; margin-top: 24px; }
+  .module h2 { font-family: var(--font-display); font-weight: 600; font-size: 16px; margin: 0 0 12px; }
+  .field-markdown .split { display: flex; gap: 16px; align-items: stretch; }
+  .field-markdown .editor-host, .field-markdown .preview { flex: 1; min-width: 0; border-radius: var(--radius); }
+  .field-markdown .editor-host { border: var(--border-strong) solid var(--line-strong); background: var(--bg-raised); }
+  .field-markdown .editor-host textarea { width: 100%; height: 130px; border: none; background: transparent; color: var(--text); font-family: var(--font-mono); font-size: 13px; padding: 10px 12px; resize: vertical; }
+  .field-markdown .editor-host textarea:focus { outline: none; }
+  .field-markdown .preview { border: var(--hairline) solid var(--line); background: var(--bg); padding: 10px 12px; overflow: auto; }
+  .field-markdown .preview img.asset-thumb { display: block; width: 100%; max-width: 220px; border: var(--hairline) solid var(--line); border-radius: var(--radius); margin: 6px 0; }
+  .field-markdown .preview .asset-caption { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); }
+
+  .insert-affordance { margin-top: 10px; }
+  .insert-affordance > button { background: none; border: none; color: var(--text-muted); font-family: var(--font-mono); font-size: 12px; text-decoration: underline dotted; cursor: pointer; padding: 0; }
+
+  .thumb {
+    width: 100%; aspect-ratio: 4/3; border-radius: var(--radius);
+    background: repeating-linear-gradient(45deg, var(--line) 0 8px, var(--bg-raised) 8px 16px);
+    border: var(--hairline) solid var(--line);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted); font-family: var(--font-mono); font-size: 10px;
+  }
+
+  .render-callout {
+    margin-top: 16px; padding: 10px 14px; border: 1px dashed var(--line-strong); border-radius: var(--radius);
+    font-size: 12px; color: var(--text-muted); background: var(--bg-raised);
+  }
+
+  /* ---------- Variant A: modal + grid library ---------- */
+  #variant-a .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(27,30,34,.5); z-index: 20; align-items: center; justify-content: center; }
+  #variant-a .modal-backdrop.open { display: flex; }
+  #variant-a .modal { width: 480px; max-width: 92vw; max-height: 80vh; overflow: auto; background: var(--bg-raised); border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius); padding: 20px; }
+  #variant-a .modal-tabs { display: flex; gap: 0; border-bottom: var(--border-strong) solid var(--line-strong); margin-bottom: 16px; }
+  #variant-a .modal-tabs button { flex: 1; background: none; border: none; padding: 8px; font-family: var(--font-display); font-weight: 600; font-size: 12px; color: var(--text-muted); cursor: pointer; }
+  #variant-a .modal-tabs button.active { color: var(--text); border-bottom: 2px solid var(--text); margin-bottom: -2px; }
+  #variant-a .grid-library { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  #variant-a .grid-library .card { cursor: pointer; border: var(--hairline) solid var(--line); border-radius: var(--radius); padding: 8px; }
+  #variant-a .grid-library .card:hover { border-color: var(--line-strong); }
+  #variant-a .grid-library .card .name { font-size: 11px; font-weight: 600; margin-top: 6px; }
+  #variant-a .lib-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 20px; }
+  #variant-a .lib-grid .card { border: var(--hairline) solid var(--line); border-radius: var(--radius); padding: 12px; background: var(--bg-raised); }
+  #variant-a .lib-grid .card .name { font-family: var(--font-display); font-weight: 600; font-size: 13px; margin: 8px 0 2px; }
+  #variant-a .lib-grid .card .meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+  #variant-a .lib-grid .card .used-badge { margin-top: 8px; }
+
+  /* ---------- Variant B: inline drawer + sortable list library ---------- */
+  #variant-b .drawer { display: none; margin-top: 14px; border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius); background: var(--bg-raised); padding: 16px; }
+  #variant-b .drawer.open { display: block; }
+  #variant-b .drawer-tabs { display: flex; gap: 0; border-bottom: var(--hairline) solid var(--line); margin-bottom: 14px; }
+  #variant-b .drawer-tabs button { flex: 1; background: none; border: none; padding: 6px; font-family: var(--font-display); font-weight: 600; font-size: 12px; color: var(--text-muted); cursor: pointer; }
+  #variant-b .drawer-tabs button.active { color: var(--text); border-bottom: 2px solid var(--text); margin-bottom: -1px; }
+  #variant-b .pick-row { display: flex; align-items: center; gap: 10px; padding: 6px 4px; border-bottom: var(--hairline) solid var(--line); cursor: pointer; }
+  #variant-b .pick-row:hover { background: var(--bg); }
+  #variant-b .pick-row .thumb { width: 40px; height: 30px; aspect-ratio: auto; flex-shrink: 0; }
+  #variant-b table.lib-table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 13px; }
+  #variant-b table.lib-table th { text-align: left; font-family: var(--font-display); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: 8px; border-bottom: var(--border-strong) solid var(--line-strong); cursor: pointer; }
+  #variant-b table.lib-table td { padding: 8px; border-bottom: var(--hairline) solid var(--line); vertical-align: middle; }
+  #variant-b table.lib-table .thumb { width: 44px; height: 32px; aspect-ratio: auto; }
+  #variant-b .orphan-flag { color: var(--stamp-error-bg); font-size: 11px; }
+
+  /* ---------- Variant C: persistent side panel ---------- */
+  #variant-c .layout { display: grid; grid-template-columns: 1fr 340px; gap: 0; align-items: start; }
+  #variant-c .editor-col { padding-right: 24px; }
+  #variant-c .side-panel { display: none; border-left: var(--border-strong) solid var(--line-strong); padding-left: 20px; position: sticky; top: 20px; }
+  #variant-c .side-panel.open { display: block; }
+  #variant-c .panel-search { margin-bottom: 12px; }
+  #variant-c .panel-list .row { display: flex; gap: 8px; align-items: center; padding: 6px 4px; border-radius: var(--radius); cursor: grab; }
+  #variant-c .panel-list .row:hover { background: var(--bg-raised); }
+  #variant-c .panel-list .thumb { width: 44px; height: 32px; aspect-ratio: auto; flex-shrink: 0; }
+  #variant-c .panel-list .name { font-size: 12px; font-weight: 600; }
+  #variant-c .upload-form { margin-top: 16px; padding-top: 16px; border-top: var(--hairline) solid var(--line); }
+  #variant-c .warn-glyph { color: var(--stamp-error-bg); font-size: 12px; }
+
+  /* ---------- Prototype chrome — NOT part of the design ---------- */
+  .switcher {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 10px;
+    background: #111; color: #fff; border: 1px solid #555; border-radius: 999px;
+    padding: 8px 8px 8px 16px; font-family: system-ui, sans-serif; font-size: 13px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4); z-index: 999;
+  }
+  .switcher button { background: #333; color: #fff; border: none; border-radius: 999px; width: 28px; height: 28px; cursor: pointer; font-size: 14px; }
+  .switcher button:hover { background: #555; }
+  .switcher .label { min-width: 230px; text-align: center; }
+</style>
+</head>
+<body>
+
+<!-- ============ VARIANT A: Modal insert + thumbnail-grid library ============ -->
+<div id="variant-a" style="display:none;">
+  <header class="chrome">
+    <div class="brand">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 20h18M6 20V8l6-4 6 4v12M6 8h12"/></svg>
+      <h1>claims-modernisation — design</h1>
+    </div>
+  </header>
+  <div class="toolbar">
+    <div class="segmented">
+      <button class="btn small active">Markdown</button>
+      <button class="btn small">Split</button>
+      <button class="btn small">Rendered</button>
+    </div>
+    <button class="btn small" onclick="switchLibA()">View asset library</button>
+  </div>
+  <main class="screen" id="editor-a">
+    <section class="module">
+      <h2>Problem definition</h2>
+      <div class="field field-markdown">
+        <label class="field-label">Problem statement</label>
+        <div class="split">
+          <div class="editor-host"><textarea>## Current pain
+
+Claims intake still runs on the legacy eligibility-rules engine.</textarea></div>
+          <div class="preview" id="a-preview"><h3>Current pain</h3><p>Claims intake still runs on the legacy eligibility-rules engine.</p></div>
+        </div>
+      </div>
+      <div class="insert-affordance"><button onclick="openModalA()">+ Insert asset</button></div>
+    </section>
+    <div class="render-callout" id="a-callout" style="display:none;">Compiles to an embedded image at this paragraph position in the rendered .docx artefact.</div>
+  </main>
+
+  <main class="screen" id="library-a" style="display:none;">
+    <h1 style="margin-bottom:16px;">Asset library</h1>
+    <div class="lib-grid" id="a-lib-grid"></div>
+  </main>
+
+  <div class="modal-backdrop" id="a-modal">
+    <div class="modal">
+      <div class="modal-tabs">
+        <button class="active" data-tab="upload" onclick="modalTabA('upload')">Upload new</button>
+        <button data-tab="existing" onclick="modalTabA('existing')">Choose existing</button>
+      </div>
+      <div id="a-tab-upload">
+        <label class="field-label">Image file</label>
+        <input class="field" type="file" style="margin-bottom:14px;">
+        <label class="field-label">Source location (required)</label>
+        <input class="field" id="a-source-input" placeholder="https://draw.io/diagrams/…">
+        <div id="a-source-error"></div>
+        <div style="margin-top:16px; display:flex; justify-content:flex-end; gap:8px;">
+          <button class="btn ghost" onclick="closeModalA()">Cancel</button>
+          <button class="btn primary" onclick="submitUploadA()">Insert</button>
+        </div>
+      </div>
+      <div id="a-tab-existing" style="display:none;">
+        <div class="grid-library" id="a-grid-library"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ VARIANT B: Inline drawer + sortable-list library ============ -->
+<div id="variant-b" style="display:none;">
+  <header class="chrome">
+    <div class="brand">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 20h18M6 20V8l6-4 6 4v12M6 8h12"/></svg>
+      <h1>claims-modernisation — design</h1>
+    </div>
+  </header>
+  <div class="toolbar">
+    <div class="segmented">
+      <button class="btn small active">Markdown</button>
+      <button class="btn small">Split</button>
+      <button class="btn small">Rendered</button>
+    </div>
+    <button class="btn small" onclick="switchLibB()">View asset library</button>
+  </div>
+  <main class="screen" id="editor-b">
+    <section class="module">
+      <h2>Problem definition</h2>
+      <div class="field field-markdown">
+        <label class="field-label">Problem statement</label>
+        <div class="split">
+          <div class="editor-host"><textarea>## Current pain
+
+Claims intake still runs on the legacy eligibility-rules engine.</textarea></div>
+          <div class="preview" id="b-preview"><h3>Current pain</h3><p>Claims intake still runs on the legacy eligibility-rules engine.</p></div>
+        </div>
+      </div>
+      <div class="insert-affordance"><button onclick="toggleDrawerB()">+ Insert asset</button></div>
+      <div class="drawer" id="b-drawer">
+        <div class="drawer-tabs">
+          <button class="active" data-tab="upload" onclick="drawerTabB('upload')">Upload new</button>
+          <button data-tab="existing" onclick="drawerTabB('existing')">Choose existing</button>
+        </div>
+        <div id="b-tab-upload">
+          <label class="field-label">Image file</label>
+          <input class="field" type="file" style="margin-bottom:14px;">
+          <label class="field-label">Source location (required)</label>
+          <input class="field" id="b-source-input" placeholder="https://draw.io/diagrams/…">
+          <div id="b-source-error"></div>
+          <div style="margin-top:14px;"><button class="btn primary" onclick="submitUploadB()">Insert</button></div>
+        </div>
+        <div id="b-tab-existing" style="display:none;" class="pick-list"></div>
+      </div>
+    </section>
+    <div class="render-callout" id="b-callout" style="display:none;">Compiles to an embedded image at this paragraph position in the rendered .docx artefact.</div>
+  </main>
+
+  <main class="screen" id="library-b" style="display:none;">
+    <h1 style="margin-bottom:16px;">Asset library</h1>
+    <table class="lib-table">
+      <thead><tr><th></th><th onclick="sortLibB('name')">Name</th><th>Source</th><th>Uploaded by</th><th onclick="sortLibB('usedIn')">Used in ▾</th></tr></thead>
+      <tbody id="b-lib-body"></tbody>
+    </table>
+  </main>
+</div>
+
+<!-- ============ VARIANT C: Persistent side panel ============ -->
+<div id="variant-c" style="display:none;">
+  <header class="chrome">
+    <div class="brand">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 20h18M6 20V8l6-4 6 4v12M6 8h12"/></svg>
+      <h1>claims-modernisation — design</h1>
+    </div>
+  </header>
+  <div class="toolbar">
+    <div class="segmented">
+      <button class="btn small active">Markdown</button>
+      <button class="btn small">Split</button>
+      <button class="btn small">Rendered</button>
+    </div>
+    <button class="btn small" id="c-panel-toggle" onclick="togglePanelC()">Open asset panel</button>
+  </div>
+  <main class="screen">
+    <div class="layout">
+      <div class="editor-col">
+        <section class="module">
+          <h2>Problem definition</h2>
+          <div class="field field-markdown">
+            <label class="field-label">Problem statement</label>
+            <div class="split">
+              <div class="editor-host"><textarea>## Current pain
+
+Claims intake still runs on the legacy eligibility-rules engine.</textarea></div>
+              <div class="preview" id="c-preview"><h3>Current pain</h3><p>Claims intake still runs on the legacy eligibility-rules engine.</p></div>
+            </div>
+          </div>
+          <div class="insert-affordance"><button onclick="togglePanelC(true)">+ Insert asset</button></div>
+        </section>
+        <div class="render-callout" id="c-callout" style="display:none;">Compiles to an embedded image at this paragraph position in the rendered .docx artefact — the panel keeps this note visible while you work, not tucked behind a one-shot dialog.</div>
+      </div>
+      <aside class="side-panel" id="c-side-panel">
+        <input class="field panel-search" placeholder="Search assets…" oninput="filterPanelC(this.value)">
+        <div class="panel-list" id="c-panel-list"></div>
+        <div class="upload-form">
+          <label class="field-label">Upload new — image file</label>
+          <input class="field" type="file" style="margin-bottom:10px;">
+          <label class="field-label">Source location (required)</label>
+          <input class="field" id="c-source-input" placeholder="https://draw.io/diagrams/…">
+          <div id="c-source-error"></div>
+          <div style="margin-top:12px;"><button class="btn primary small" onclick="submitUploadC()">Add to library</button></div>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+
+<div class="switcher" role="group" aria-label="Variant switcher (prototype only)">
+  <button id="prev" aria-label="Previous variant">←</button>
+  <span class="label" id="variant-label"></span>
+  <button id="next" aria-label="Next variant">→</button>
+</div>
+
+<script>
+  const ASSETS = [
+    { id: 'asset-1', name: 'eligibility-flow.png', source: 'https://draw.io/diagrams/eligibility-flow', uploadedBy: 'c.barlow', usedIn: ['Problem definition', 'Stakeholders'] },
+    { id: 'asset-2', name: 'org-chart.png', source: 'https://draw.io/diagrams/org-chart', uploadedBy: 'r.ngata', usedIn: [] },
+    { id: 'asset-3', name: 'sequence-diagram.png', source: 'https://draw.io/diagrams/sequence', uploadedBy: 'a.singh', usedIn: ['Problem definition'] },
+  ];
+
+  function thumbHtml(extraClass) { return `<div class="thumb ${extraClass ?? ''}">IMG</div>`; }
+
+  function insertAssetInto(previewId, calloutId, asset) {
+    const preview = document.getElementById(previewId);
+    preview.innerHTML += `<img class="asset-thumb" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='140'%3E%3Crect width='220' height='140' fill='%23B9B3A4'/%3E%3C/svg%3E" alt="${asset.name}"><div class="asset-caption">${asset.name} — ${asset.source}</div>`;
+    document.getElementById(calloutId).style.display = 'block';
+  }
+
+  // ---------- Variant A ----------
+  function switchLibA() {
+    const inLib = document.getElementById('library-a').style.display !== 'none';
+    document.getElementById('editor-a').style.display = inLib ? 'block' : 'none';
+    document.getElementById('library-a').style.display = inLib ? 'none' : 'block';
+  }
+  window.switchLibA = switchLibA;
+  document.getElementById('a-lib-grid').innerHTML = ASSETS.map(a => `
+    <div class="card">
+      ${thumbHtml()}
+      <div class="name">${a.name}</div>
+      <div class="meta">${a.uploadedBy} · <a href="#" onclick="return false;">${a.source}</a></div>
+      <span class="stamp ${a.usedIn.length ? 'agreed' : 'review'} used-badge">${a.usedIn.length ? `USED IN ${a.usedIn.length}` : 'UNUSED'}</span>
+    </div>`).join('');
+
+  function openModalA() { document.getElementById('a-modal').classList.add('open'); modalTabA('upload'); }
+  function closeModalA() { document.getElementById('a-modal').classList.remove('open'); }
+  function modalTabA(tab) {
+    document.querySelectorAll('#variant-a .modal-tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    document.getElementById('a-tab-upload').style.display = tab === 'upload' ? 'block' : 'none';
+    document.getElementById('a-tab-existing').style.display = tab === 'existing' ? 'block' : 'none';
+    if (tab === 'existing') {
+      document.getElementById('a-grid-library').innerHTML = ASSETS.map(a => `
+        <div class="card" onclick="pickExistingA('${a.id}')">${thumbHtml()}<div class="name">${a.name}</div></div>`).join('');
+    }
+  }
+  function submitUploadA() {
+    const input = document.getElementById('a-source-input');
+    const errorSlot = document.getElementById('a-source-error');
+    input.classList.remove('has-error'); errorSlot.innerHTML = '';
+    if (!input.value.trim()) {
+      input.classList.add('has-error');
+      errorSlot.innerHTML = `<div class="inline-error">Source location is required — link to the originating file (e.g. a Draw.io diagram).</div>`;
+      return;
+    }
+    insertAssetInto('a-preview', 'a-callout', { name: 'new-upload.png', source: input.value });
+    closeModalA();
+  }
+  function pickExistingA(id) { insertAssetInto('a-preview', 'a-callout', ASSETS.find(a => a.id === id)); closeModalA(); }
+  window.openModalA = openModalA; window.closeModalA = closeModalA; window.modalTabA = modalTabA;
+  window.submitUploadA = submitUploadA; window.pickExistingA = pickExistingA;
+
+  // ---------- Variant B ----------
+  function switchLibB() {
+    const inLib = document.getElementById('library-b').style.display !== 'none';
+    document.getElementById('editor-b').style.display = inLib ? 'block' : 'none';
+    document.getElementById('library-b').style.display = inLib ? 'none' : 'block';
+  }
+  window.switchLibB = switchLibB;
+  let bSort = 'usedIn';
+  function renderLibB() {
+    const sorted = [...ASSETS].sort((x, y) => bSort === 'usedIn' ? y.usedIn.length - x.usedIn.length : x.name.localeCompare(y.name));
+    document.getElementById('b-lib-body').innerHTML = sorted.map(a => `
+      <tr>
+        <td>${thumbHtml()}</td>
+        <td>${a.name}</td>
+        <td class="mono" style="font-size:11px;">${a.source}</td>
+        <td>${a.uploadedBy}</td>
+        <td>${a.usedIn.length ? a.usedIn.length + ' modules' : '<span class="orphan-flag">orphaned — unused</span>'}</td>
+      </tr>`).join('');
+  }
+  function sortLibB(key) { bSort = key; renderLibB(); }
+  window.sortLibB = sortLibB;
+  renderLibB();
+
+  function toggleDrawerB() { document.getElementById('b-drawer').classList.toggle('open'); drawerTabB('upload'); }
+  function drawerTabB(tab) {
+    document.querySelectorAll('#variant-b .drawer-tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    document.getElementById('b-tab-upload').style.display = tab === 'upload' ? 'block' : 'none';
+    document.getElementById('b-tab-existing').style.display = tab === 'existing' ? 'block' : 'none';
+    if (tab === 'existing') {
+      document.getElementById('b-tab-existing').innerHTML = ASSETS.map(a => `
+        <div class="pick-row" onclick="pickExistingB('${a.id}')">${thumbHtml()}<span>${a.name}</span></div>`).join('');
+    }
+  }
+  function submitUploadB() {
+    const input = document.getElementById('b-source-input');
+    const errorSlot = document.getElementById('b-source-error');
+    input.classList.remove('has-error'); errorSlot.innerHTML = '';
+    if (!input.value.trim()) {
+      input.classList.add('has-error');
+      errorSlot.innerHTML = `<div class="inline-error">Source location is required — link to the originating file (e.g. a Draw.io diagram).</div>`;
+      return;
+    }
+    insertAssetInto('b-preview', 'b-callout', { name: 'new-upload.png', source: input.value });
+    document.getElementById('b-drawer').classList.remove('open');
+  }
+  function pickExistingB(id) { insertAssetInto('b-preview', 'b-callout', ASSETS.find(a => a.id === id)); document.getElementById('b-drawer').classList.remove('open'); }
+  window.toggleDrawerB = toggleDrawerB; window.drawerTabB = drawerTabB;
+  window.submitUploadB = submitUploadB; window.pickExistingB = pickExistingB;
+
+  // ---------- Variant C ----------
+  function renderPanelListC(filter) {
+    const list = ASSETS.filter(a => !filter || a.name.toLowerCase().includes(filter.toLowerCase()));
+    document.getElementById('c-panel-list').innerHTML = list.map(a => `
+      <div class="row" draggable="true" onclick="pickExistingC('${a.id}')">${thumbHtml()}<span class="name">${a.name}</span></div>`).join('');
+  }
+  function filterPanelC(v) { renderPanelListC(v); }
+  window.filterPanelC = filterPanelC;
+  renderPanelListC('');
+
+  function togglePanelC(forceOpen) {
+    const panel = document.getElementById('c-side-panel');
+    const willOpen = forceOpen || !panel.classList.contains('open');
+    panel.classList.toggle('open', willOpen);
+    document.getElementById('c-panel-toggle').textContent = willOpen ? 'Close asset panel' : 'Open asset panel';
+  }
+  window.togglePanelC = togglePanelC;
+  function submitUploadC() {
+    const input = document.getElementById('c-source-input');
+    const errorSlot = document.getElementById('c-source-error');
+    input.classList.remove('has-error'); errorSlot.innerHTML = '';
+    if (!input.value.trim()) {
+      input.classList.add('has-error');
+      errorSlot.innerHTML = `<div class="inline-error"><span class="warn-glyph">⚠</span> Source location is required — link to the originating file (e.g. a Draw.io diagram).</div>`;
+      return;
+    }
+    insertAssetInto('c-preview', 'c-callout', { name: 'new-upload.png', source: input.value });
+  }
+  function pickExistingC(id) { insertAssetInto('c-preview', 'c-callout', ASSETS.find(a => a.id === id)); }
+  window.submitUploadC = submitUploadC; window.pickExistingC = pickExistingC;
+
+  // ---------- Variant switcher ----------
+  const variants = [
+    { key: 'a', label: 'A — Modal + thumbnail-grid library' },
+    { key: 'b', label: 'B — Inline drawer + sortable-list library' },
+    { key: 'c', label: 'C — Persistent side panel' },
+  ];
+
+  function currentIndex() {
+    const params = new URLSearchParams(location.search);
+    const v = params.get('variant') || 'a';
+    const idx = variants.findIndex(x => x.key === v);
+    return idx === -1 ? 0 : idx;
+  }
+
+  function apply(idx, pushState) {
+    const i = (idx + variants.length) % variants.length;
+    variants.forEach((v, vi) => {
+      document.getElementById('variant-' + v.key).style.display = vi === i ? 'block' : 'none';
+    });
+    document.getElementById('variant-label').textContent = variants[i].label;
+    if (pushState !== false) {
+      const params = new URLSearchParams(location.search);
+      params.set('variant', variants[i].key);
+      history.replaceState(null, '', location.pathname + '?' + params.toString());
+    }
+    return i;
+  }
+
+  let vi = currentIndex();
+  apply(vi, false);
+
+  document.getElementById('prev').addEventListener('click', () => { vi = apply(vi - 1); });
+  document.getElementById('next').addEventListener('click', () => { vi = apply(vi + 1); });
+  window.addEventListener('keydown', (e) => {
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (e.key === 'ArrowLeft') vi = apply(vi - 1);
+    if (e.key === 'ArrowRight') vi = apply(vi + 1);
+  });
+</script>
+</body>
+</html>
