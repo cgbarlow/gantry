@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — throwaway. Not wired into gantry's app, not linked from web/index.html.
+  Resolves wayfinder ticket "Establish gantry's visual and interaction design language"
+  (Azure DevOps #69, under map #66 "Design gantry's production UI").
+
+  Question this answers: what should gantry's production UI look like — type, colour,
+  the Gate Ledger signature component — across light, dark, and high-contrast themes,
+  with WCAG-verified contrast throughout?
+
+  Contrast ratios below every swatch are hand-computed against the WCAG 2.1 relative
+  luminance formula (not eyeballed) — see the calculation notes left in this session's
+  transcript. AA = 4.5:1 normal text / 3:1 UI-non-text. AAA = 7:1.
+
+  Fonts load from Google Fonts CDN for this preview only — gantry serves all other
+  browser deps out of node_modules via an import map (README "Software dependencies");
+  a production build would need to self-host Space Grotesk / IBM Plex the same way,
+  not depend on a CDN at runtime.
+-->
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gantry — Design Language Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ============ THEME TOKENS ============ */
+  :root {
+    --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+    --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+    --radius: 2px;
+    --hairline: 1px;
+    --border-strong: 1px;
+  }
+
+  /* LIGHT (default) — paper/ink/vellum */
+  [data-theme="light"] {
+    --bg: #EDEBE6;
+    --bg-raised: #F5F3EE;
+    --text: #1B1E22;
+    --text-muted: #4A4740;
+    --line: #B9B3A4;        /* decorative hairlines — not contrast-critical */
+    --line-strong: #5B5648;  /* borders on interactive elements — 6.88:1 vs bg */
+    --focus-ring: #1B1E22;
+
+    --stamp-draft-bg: #8A5A1F;   /* 5.89:1 with white text */
+    --stamp-draft-fg: #F5F1E8;
+    --stamp-agreed-bg: #295C40;  /* 7.78:1 with white text */
+    --stamp-agreed-fg: #F5F1E8;
+    --stamp-review-bg: #4A4740;  /* 9.27:1 with white text */
+    --stamp-review-fg: #F5F1E8;
+  }
+
+  /* DARK — inverted paper/ink, not pure black */
+  [data-theme="dark"] {
+    --bg: #1B1E22;
+    --bg-raised: #24272C;
+    --text: #EDEBE6;
+    --text-muted: #B9B3A4;
+    --line: #3A3D42;
+    --line-strong: #8A8578;   /* 4.55:1 vs bg */
+    --focus-ring: #EDEBE6;
+
+    --stamp-draft-bg: #D9A548;   /* 7.51:1 with ink text */
+    --stamp-draft-fg: #1B1E22;
+    --stamp-agreed-bg: #6FBF97;  /* 7.63:1 with ink text */
+    --stamp-agreed-fg: #1B1E22;
+    --stamp-review-bg: #B9B3A4;  /* 8.01:1 with ink text */
+    --stamp-review-fg: #1B1E22;
+  }
+
+  /* HIGH CONTRAST — pure black/white, bold solid borders, no hairlines */
+  [data-theme="hc"] {
+    --bg: #000000;
+    --bg-raised: #000000;
+    --text: #FFFFFF;
+    --text-muted: #FFFFFF;
+    --line: #FFFFFF;
+    --line-strong: #FFFFFF;
+    --focus-ring: #FFD400;
+
+    --stamp-draft-bg: #FFB000;   /* 11.48:1 with black text */
+    --stamp-draft-fg: #000000;
+    --stamp-agreed-bg: #00C853;  /* 9.38:1 with black text */
+    --stamp-agreed-fg: #000000;
+    --stamp-review-bg: #000000;  /* outlined, not filled */
+    --stamp-review-fg: #FFFFFF;
+
+    --hairline: 2px;
+    --border-strong: 3px;
+    --radius: 0px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.5;
+    transition: background-color .15s linear, color .15s linear;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+
+  main { max-width: 960px; margin: 0 auto; padding: 48px 32px 140px; }
+
+  h1, h2 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0 0 4px;
+  }
+  h1 { font-size: 28px; }
+  h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin-top: 56px;
+    padding-bottom: 8px;
+    border-bottom: var(--hairline) solid var(--line);
+  }
+  p.lede { color: var(--text-muted); margin: 0 0 32px; max-width: 60ch; }
+
+  code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
+
+  a { color: inherit; }
+  :focus-visible {
+    outline: 3px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  /* ---------- Gate Ledger (signature component) ---------- */
+  .ledger {
+    display: grid;
+    grid-template-columns: auto auto 1fr auto;
+    align-items: center;
+    gap: 24px;
+    padding: 14px 20px;
+    background: var(--bg-raised);
+    border: var(--border-strong) solid var(--line-strong);
+    border-radius: var(--radius);
+    margin: 16px 0;
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+  .ledger .field-label { display:block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 2px; }
+  .ledger .stage { font-family: var(--font-display); font-weight: 600; font-size: 15px; }
+  .stamp {
+    justify-self: start;
+    padding: 4px 10px;
+    border-radius: var(--radius);
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    animation: settle 220ms cubic-bezier(.2,.9,.3,1.2);
+  }
+  [data-theme="hc"] .stamp.review { border: var(--border-strong) solid var(--stamp-review-fg); }
+  .stamp.draft  { background: var(--stamp-draft-bg);  color: var(--stamp-draft-fg); }
+  .stamp.review { background: var(--stamp-review-bg); color: var(--stamp-review-fg); }
+  .stamp.agreed { background: var(--stamp-agreed-bg); color: var(--stamp-agreed-fg); }
+  @keyframes settle {
+    0% { transform: scale(1.35) rotate(-3deg); opacity: 0; }
+    70% { transform: scale(0.96) rotate(0.5deg); opacity: 1; }
+    100% { transform: scale(1) rotate(0); }
+  }
+  .ledger-row { display:flex; flex-direction: column; gap: 16px; }
+
+  /* ---------- Type scale ---------- */
+  .type-row { display:flex; align-items:baseline; gap: 20px; padding: 10px 0; border-bottom: var(--hairline) solid var(--line); }
+  .type-row .sample { font-family: var(--font-display); }
+  .type-row .meta { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); width: 190px; flex-shrink: 0; }
+
+  /* ---------- Swatches ---------- */
+  .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+  .swatch { border: var(--hairline) solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .swatch .chip { height: 64px; display:flex; align-items:center; justify-content:center; font-family: var(--font-mono); font-weight: 500; font-size: 13px; }
+  .swatch .meta { padding: 8px 10px; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+  .swatch .ratio { font-weight: 600; color: var(--text); }
+  .badge { display:inline-block; padding: 1px 6px; border-radius: var(--radius); font-size: 10px; font-weight:700; margin-left:6px; border: 1px solid var(--line-strong); }
+
+  /* ---------- Components ---------- */
+  .row { display:flex; gap: 16px; align-items:center; flex-wrap: wrap; margin-top: 16px; }
+  button.btn {
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 13px;
+    padding: 9px 16px;
+    border-radius: var(--radius);
+    border: var(--border-strong) solid var(--line-strong);
+    background: var(--bg-raised);
+    color: var(--text);
+    cursor: pointer;
+  }
+  button.btn.primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+  input.field {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    padding: 9px 12px;
+    border-radius: var(--radius);
+    border: var(--border-strong) solid var(--line-strong);
+    background: var(--bg-raised);
+    color: var(--text);
+    min-width: 280px;
+  }
+  input.field::placeholder { color: var(--text-muted); }
+  hr.hairline { border: none; border-top: var(--hairline) solid var(--line); margin: 24px 0; }
+
+  /* ---------- Theme switcher (prototype chrome — NOT part of the design) ---------- */
+  .switcher {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #111;
+    color: #fff;
+    border: 1px solid #555;
+    border-radius: 999px;
+    padding: 8px 8px 8px 16px;
+    font-family: system-ui, sans-serif;
+    font-size: 13px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4);
+    z-index: 999;
+  }
+  .switcher button {
+    background: #333; color: #fff; border: none; border-radius: 999px;
+    width: 28px; height: 28px; cursor: pointer; font-size: 14px;
+  }
+  .switcher button:hover { background: #555; }
+  .switcher .label { min-width: 150px; text-align:center; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Gantry — Design Language</h1>
+  <p class="lede">Prototype for wayfinder ticket "Establish gantry's visual and interaction design language" — an engineering-drawing vernacular for a repo-driven governance pipeline. Cycle themes with the switcher below or the ← → keys.</p>
+
+  <h2>Signature — the Gate Ledger</h2>
+  <div class="ledger-row">
+    <div class="ledger">
+      <div><span class="field-label">Stage</span><span class="stage">Shape</span></div>
+      <div><span class="field-label">Gate</span><span class="mono">business-case</span></div>
+      <div><span class="stamp draft">DRAFT</span></div>
+      <div><span class="field-label">Owner</span><span class="mono">c.barlow</span></div>
+    </div>
+    <div class="ledger">
+      <div><span class="field-label">Stage</span><span class="stage">Define</span></div>
+      <div><span class="field-label">Gate</span><span class="mono">design-authority</span></div>
+      <div><span class="stamp review">REVIEW</span></div>
+      <div><span class="field-label">Owner</span><span class="mono">c.barlow</span></div>
+    </div>
+    <div class="ledger">
+      <div><span class="field-label">Stage</span><span class="stage">Build Ready</span></div>
+      <div><span class="field-label">Gate</span><span class="mono">build-ready-checklist</span></div>
+      <div><span class="stamp agreed">AGREED</span></div>
+      <div><span class="field-label">Owner</span><span class="mono">c.barlow</span></div>
+    </div>
+  </div>
+
+  <h2>Type scale</h2>
+  <div class="type-row"><div class="meta">Space Grotesk 600 / 28px — screen title</div><div class="sample" style="font-size:28px; font-weight:600;">Design gantry's production UI</div></div>
+  <div class="type-row"><div class="meta">Space Grotesk 600 / 15px — ledger stage</div><div class="sample" style="font-size:15px; font-weight:600;">Build Ready</div></div>
+  <div class="type-row"><div class="meta">IBM Plex Sans 600 / 15px — label</div><div style="font-size:15px; font-weight:600;">Business driver</div></div>
+  <div class="type-row"><div class="meta">IBM Plex Sans 400 / 15px — body</div><div style="font-size:15px;">The change in the world that makes this necessary — legislative, operational, or a constraint that has become binding.</div></div>
+  <div class="type-row"><div class="meta">IBM Plex Mono 400 / 13px — data</div><div class="mono" style="font-size:13px;">instances/my-initiative/modules/context.md</div></div>
+  <div class="type-row"><div class="meta">IBM Plex Mono 400 / 12px — source ref</div><div class="mono" style="font-size:12px;">https://dev.azure.com/.../architecture.drawio</div></div>
+
+  <h2>Colour — current theme, WCAG-verified</h2>
+  <div class="swatches" id="swatches"><!-- filled by JS per theme --></div>
+
+  <h2>Components</h2>
+  <div class="row">
+    <button class="btn primary">Save changes</button>
+    <button class="btn">Cancel</button>
+    <input class="field" type="text" placeholder="https://dev.azure.com/…/diagram.drawio">
+  </div>
+  <hr class="hairline">
+  <p class="lede" style="margin:0;">Hairline divider above — decorative in light/dark, rendered as a bold 2px rule in high-contrast (no reliance on subtle colour differences to convey structure).</p>
+</main>
+
+<div class="switcher" role="group" aria-label="Theme switcher (prototype only)">
+  <button id="prev" aria-label="Previous theme">←</button>
+  <span class="label" id="label">A — Light (paper/ink)</span>
+  <button id="next" aria-label="Next theme">→</button>
+</div>
+
+<script>
+  const themes = [
+    { key: 'light', label: 'A — Light (paper/ink)' },
+    { key: 'dark',  label: 'B — Dark (inverted paper/ink)' },
+    { key: 'hc',    label: 'C — High contrast (black/white)' },
+  ];
+
+  const swatchData = {
+    light: [
+      { name: 'Ink on Paper', bg: '#EDEBE6', fg: '#1B1E22', ratio: '15.75:1', badge: 'AAA' },
+      { name: 'Line-strong on Paper', bg: '#EDEBE6', fg: '#5B5648', ratio: '6.88:1', badge: 'AAA (UI)' },
+      { name: 'DRAFT stamp', bg: '#8A5A1F', fg: '#F5F1E8', ratio: '5.89:1', badge: 'AA' },
+      { name: 'REVIEW stamp', bg: '#4A4740', fg: '#F5F1E8', ratio: '9.27:1', badge: 'AAA' },
+      { name: 'AGREED stamp', bg: '#295C40', fg: '#F5F1E8', ratio: '7.78:1', badge: 'AAA' },
+    ],
+    dark: [
+      { name: 'Paper on Ink', bg: '#1B1E22', fg: '#EDEBE6', ratio: '15.75:1', badge: 'AAA' },
+      { name: 'Line-strong on Ink', bg: '#1B1E22', fg: '#8A8578', ratio: '4.55:1', badge: 'AA (UI)' },
+      { name: 'DRAFT stamp', bg: '#D9A548', fg: '#1B1E22', ratio: '7.51:1', badge: 'AAA' },
+      { name: 'REVIEW stamp', bg: '#B9B3A4', fg: '#1B1E22', ratio: '8.01:1', badge: 'AAA' },
+      { name: 'AGREED stamp', bg: '#6FBF97', fg: '#1B1E22', ratio: '7.63:1', badge: 'AAA' },
+    ],
+    hc: [
+      { name: 'White on Black', bg: '#000000', fg: '#FFFFFF', ratio: '21:1', badge: 'AAA' },
+      { name: 'DRAFT stamp', bg: '#FFB000', fg: '#000000', ratio: '11.48:1', badge: 'AAA' },
+      { name: 'AGREED stamp', bg: '#00C853', fg: '#000000', ratio: '9.38:1', badge: 'AAA' },
+      { name: 'REVIEW (outlined)', bg: '#000000', fg: '#FFFFFF', ratio: '21:1', badge: 'AAA' },
+    ],
+  };
+
+  let i = 0;
+  const label = document.getElementById('label');
+  const swatchesEl = document.getElementById('swatches');
+
+  function renderSwatches(themeKey) {
+    swatchesEl.innerHTML = swatchData[themeKey].map(s => `
+      <div class="swatch">
+        <div class="chip" style="background:${s.bg}; color:${s.fg};">${s.name}</div>
+        <div class="meta">${s.bg} / ${s.fg}<br><span class="ratio">${s.ratio}</span><span class="badge">${s.badge}</span></div>
+      </div>
+    `).join('');
+  }
+
+  function apply(idx) {
+    i = (idx + themes.length) % themes.length;
+    document.documentElement.setAttribute('data-theme', themes[i].key);
+    label.textContent = themes[i].label;
+    renderSwatches(themes[i].key);
+  }
+
+  document.getElementById('prev').addEventListener('click', () => apply(i - 1));
+  document.getElementById('next').addEventListener('click', () => apply(i + 1));
+  window.addEventListener('keydown', (e) => {
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (e.key === 'ArrowLeft') apply(i - 1);
+    if (e.key === 'ArrowRight') apply(i + 1);
+  });
+
+  apply(0);
+</script>
+</body>
+</html>

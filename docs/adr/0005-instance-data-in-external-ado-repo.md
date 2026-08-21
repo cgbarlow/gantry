@@ -1,0 +1,33 @@
+# Instance data lives in an external Azure DevOps repo, not the gantry repo
+
+Today an instance (`instances/<slug>/instance.yaml` + `modules/`) lives inside
+the main gantry repo. The production UI needs to support a small team of
+architects, each running their own instances, hosted centrally, without every
+team needing write access to — or cluttering — the shared repo that holds the
+engine and definitions.
+
+We will move an instance's full data — `instance.yaml`, `modules/`, and the
+new `assets/` directory (see the Asset concept, tracked in the "Design
+gantry's production UI" wayfinder map) — into a separate Azure DevOps repo
+that the user specifies during instance setup, alongside picking which
+definition applies. The main gantry repo will hold no per-instance state at
+all going forward — only the engine, definitions, and the existing local
+example/demo instances used by CI and docs (`instances/examples`,
+`instances/demo-cli`, `instances/demo-web`), which stay as-is since they
+exist to exercise the engine, not to represent real team data.
+
+Why: this lets each team own and access-control their own instance data
+through their existing Azure DevOps permissions, keeps the shared gantry repo
+limited to what's genuinely shared (engine + definitions), and matches how
+this kind of governance content already lives in this organisation. Two
+alternatives were considered and rejected: per-team subfolders inside the
+gantry repo (no natural access-control boundary, and the repo grows
+unboundedly with every team's content); a database-backed store (contradicts
+gantry's flat-files/git-native philosophy — see README "Flat files, no
+database").
+
+Status: accepted, first-cut. The actual sync/auth mechanism (git clone vs.
+Azure DevOps REST API, credential/service-connection model) is deliberately
+*not* decided here — that is deferred, out of scope for the UI-design effort
+that produced this ADR. This ADR fixes the architectural shape — where
+instance data lives — ahead of that mechanism decision.
