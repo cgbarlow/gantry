@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — throwaway. Not wired into gantry's app, not linked from web/index.html.
+  Resolves wayfinder ticket "Design the instance dashboard" (Azure DevOps #70,
+  under map #66 "Design gantry's production UI").
+
+  Three radically different variants of the landing screen for a small
+  architect team's hosted gantry deployment, switchable via ?variant=a|b|c
+  (defaults to "a"). Each answers the ticket's open question — how do
+  check/render actions surface from the dashboard vs. from within an
+  instance's own view — differently:
+
+    A — Ledger register: a dense, flat list of instances as Gate Ledger rows.
+        Actions are persistent inline icon-buttons on every row — the most
+        direct, no-hover-required posture.
+    B — Master-detail: a compact instance list on the left, a full Gate
+        Ledger + actions in a detail pane on the right once one is selected.
+        Actions live one step removed, contextual to the selected instance.
+    C — Stage swimlanes: instances grouped into lanes by current stage
+        (shape / hld-define / detailed-design / build-ready — the design
+        definition's real four stages, ADR 0001), rendered as compact chips.
+        Actions live behind a per-chip overflow menu — the most minimal-chrome
+        posture, prioritising "where is everything in the pipeline" over
+        per-row detail.
+
+  Each variant includes an "empty state" toggle to preview the screen with
+  no instances yet — the ticket's other explicit ask.
+
+  Reuses the light-theme design tokens established in "Establish gantry's
+  visual and interaction design language" (#69, web/prototypes/design-
+  language.prototype.html) — same Gate Ledger, type scale, and component
+  styles, not re-invented here. Dark/high-contrast themes apply via the same
+  custom properties but aren't wired into a switcher in this file, to keep
+  the prototype focused on layout, not re-litigate #69.
+
+  Fonts load from Google Fonts CDN for this preview only, matching #69's
+  same caveat — a production build self-hosts these.
+-->
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gantry — Instance Dashboard Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+    --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --radius: 2px;
+    --hairline: 1px;
+    --border-strong: 1px;
+  }
+  [data-theme="light"] {
+    --bg: #EDEBE6;
+    --bg-raised: #F5F3EE;
+    --text: #1B1E22;
+    --text-muted: #4A4740;
+    --line: #B9B3A4;
+    --line-strong: #5B5648;
+    --focus-ring: #1B1E22;
+    --stamp-draft-bg: #8A5A1F;  --stamp-draft-fg: #F5F1E8;
+    --stamp-agreed-bg: #295C40; --stamp-agreed-fg: #F5F1E8;
+    --stamp-review-bg: #4A4740; --stamp-review-fg: #F5F1E8;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+  main { max-width: 1120px; margin: 0 auto; padding: 40px 32px 140px; }
+
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    font-size: 26px;
+    margin: 0;
+  }
+  p.lede { color: var(--text-muted); margin: 6px 0 28px; max-width: 70ch; }
+  .mono { font-family: var(--font-mono); }
+
+  a { color: inherit; }
+  :focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+
+  .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+
+  button.btn {
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 13px;
+    padding: 9px 16px;
+    border-radius: var(--radius);
+    border: var(--border-strong) solid var(--line-strong);
+    background: var(--bg-raised);
+    color: var(--text);
+    cursor: pointer;
+  }
+  button.btn.primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+  button.btn.ghost { background: transparent; border-color: var(--line); }
+  button.btn.small { padding: 5px 10px; font-size: 12px; }
+  button.btn.icon { padding: 5px 8px; font-size: 13px; line-height: 1; }
+
+  input.field {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    padding: 8px 11px;
+    border-radius: var(--radius);
+    border: var(--border-strong) solid var(--line-strong);
+    background: var(--bg-raised);
+    color: var(--text);
+  }
+  input.field::placeholder { color: var(--text-muted); }
+
+  hr.hairline { border: none; border-top: var(--hairline) solid var(--line); margin: 20px 0; }
+
+  .stamp {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: var(--radius);
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 10px;
+    letter-spacing: 0.07em;
+  }
+  .stamp.draft  { background: var(--stamp-draft-bg);  color: var(--stamp-draft-fg); }
+  .stamp.review { background: var(--stamp-review-bg); color: var(--stamp-review-fg); }
+  .stamp.agreed { background: var(--stamp-agreed-bg); color: var(--stamp-agreed-fg); }
+
+  .empty-toggle { margin: 20px 0 0; }
+
+  /* ---------- Variant A: Ledger register ---------- */
+  #variant-a .register { margin-top: 24px; border-top: var(--border-strong) solid var(--line-strong); }
+  #variant-a .row {
+    display: grid;
+    grid-template-columns: 2fr 1.2fr 1fr auto auto 1fr auto;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 4px;
+    border-bottom: var(--hairline) solid var(--line);
+  }
+  #variant-a .row .name { font-family: var(--font-display); font-weight: 600; font-size: 15px; }
+  #variant-a .row .field-label { display:block; font-size: 9px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); margin-bottom: 2px; }
+  #variant-a .row .owner { font-family: var(--font-mono); font-size: 12px; }
+  #variant-a .row-actions { display: flex; gap: 6px; justify-self: end; }
+  #variant-a .definition-tag { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+
+  /* ---------- Variant B: Master-detail ---------- */
+  #variant-b .layout { display: grid; grid-template-columns: 320px 1fr; gap: 0; margin-top: 24px; border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius); min-height: 480px; }
+  #variant-b .list-pane { border-right: var(--hairline) solid var(--line); padding: 16px; background: var(--bg-raised); }
+  #variant-b .list-pane .search { width: 100%; margin-bottom: 12px; }
+  #variant-b .list-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 8px; border-radius: var(--radius); cursor: pointer;
+    border: var(--hairline) solid transparent;
+  }
+  #variant-b .list-item:hover { background: var(--bg); }
+  #variant-b .list-item.selected { border-color: var(--line-strong); background: var(--bg); }
+  #variant-b .list-item .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  #variant-b .list-item .meta { display: flex; flex-direction: column; }
+  #variant-b .list-item .meta .name { font-family: var(--font-display); font-weight: 600; font-size: 14px; }
+  #variant-b .list-item .meta .def { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+  #variant-b .detail-pane { padding: 28px; }
+  #variant-b .detail-ledger { display: grid; grid-template-columns: auto auto auto 1fr; gap: 24px; align-items: center; padding: 16px 20px; background: var(--bg-raised); border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius); font-family: var(--font-mono); font-size: 13px; margin-bottom: 20px; }
+  #variant-b .detail-ledger .field-label { display:block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 2px; }
+  #variant-b .detail-ledger .stage { font-family: var(--font-display); font-weight: 600; font-size: 16px; }
+  #variant-b .detail-actions { display: flex; gap: 10px; }
+  #variant-b .placeholder { color: var(--text-muted); text-align: center; padding: 80px 20px; }
+
+  /* ---------- Variant C: Stage swimlanes ---------- */
+  #variant-c .lanes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 24px; }
+  #variant-c .lane { border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg-raised); min-height: 320px; padding: 12px; }
+  #variant-c .lane-header { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 10px; margin-bottom: 10px; border-bottom: var(--border-strong) solid var(--line-strong); }
+  #variant-c .lane-header .stage-name { font-family: var(--font-display); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+  #variant-c .lane-header .count { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+  #variant-c .chip { position: relative; border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg); padding: 10px 12px; margin-bottom: 10px; }
+  #variant-c .chip .name { font-family: var(--font-display); font-weight: 600; font-size: 13px; }
+  #variant-c .chip .def { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); margin: 3px 0 6px; }
+  #variant-c .chip .chip-foot { display: flex; justify-content: space-between; align-items: center; }
+  #variant-c .chip .owner { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+  #variant-c .chip .menu-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px; padding: 2px 6px; }
+  #variant-c .chip .menu {
+    display: none; position: absolute; right: 8px; top: 30px; z-index: 5;
+    background: var(--bg-raised); border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius);
+    box-shadow: 0 6px 16px rgba(0,0,0,.15); min-width: 130px;
+  }
+  #variant-c .chip.menu-open .menu { display: block; }
+  #variant-c .chip .menu button { display: block; width: 100%; text-align: left; background: none; border: none; padding: 8px 12px; font-size: 12px; font-family: var(--font-body); color: var(--text); cursor: pointer; }
+  #variant-c .chip .menu button:hover { background: var(--bg); }
+  #variant-c .lane .empty-lane { color: var(--text-muted); font-size: 12px; text-align: center; padding: 20px 8px; border: 1px dashed var(--line); border-radius: var(--radius); }
+
+  /* ---------- Prototype chrome — NOT part of the design ---------- */
+  .switcher {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 10px;
+    background: #111; color: #fff; border: 1px solid #555; border-radius: 999px;
+    padding: 8px 8px 8px 16px; font-family: system-ui, sans-serif; font-size: 13px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4); z-index: 999;
+  }
+  .switcher button { background: #333; color: #fff; border: none; border-radius: 999px; width: 28px; height: 28px; cursor: pointer; font-size: 14px; }
+  .switcher button:hover { background: #555; }
+  .switcher .label { min-width: 230px; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <div class="topbar">
+    <div>
+      <h1>Instances</h1>
+      <p class="lede" id="lede">Every instance running against a gantry definition, owned by whoever registered it. No login in v1 — owner is informational and filterable, not an access boundary.</p>
+    </div>
+  </div>
+
+  <!-- ============ VARIANT A: Ledger register ============ -->
+  <section id="variant-a" style="display:none;">
+    <div class="topbar">
+      <span></span>
+      <button class="btn primary" onclick="alert('→ setup wizard (#71)')">+ New instance</button>
+    </div>
+    <div class="register" id="a-register"></div>
+    <label class="empty-toggle mono" style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-muted);">
+      <input type="checkbox" id="a-empty-toggle"> simulate empty state
+    </label>
+  </section>
+
+  <!-- ============ VARIANT B: Master-detail ============ -->
+  <section id="variant-b" style="display:none;">
+    <div class="topbar">
+      <span></span>
+      <button class="btn primary" onclick="alert('→ setup wizard (#71)')">+ New instance</button>
+    </div>
+    <div class="layout">
+      <div class="list-pane">
+        <input class="field search" type="text" placeholder="Filter by name, owner…">
+        <div id="b-list"></div>
+      </div>
+      <div class="detail-pane" id="b-detail"></div>
+    </div>
+    <label class="empty-toggle mono" style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-muted);">
+      <input type="checkbox" id="b-empty-toggle"> simulate empty state
+    </label>
+  </section>
+
+  <!-- ============ VARIANT C: Stage swimlanes ============ -->
+  <section id="variant-c" style="display:none;">
+    <div class="topbar">
+      <span></span>
+      <button class="btn primary" onclick="alert('→ setup wizard (#71)')">+ New instance</button>
+    </div>
+    <div class="lanes" id="c-lanes"></div>
+    <label class="empty-toggle mono" style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-muted);">
+      <input type="checkbox" id="c-empty-toggle"> simulate empty state
+    </label>
+  </section>
+</main>
+
+<div class="switcher" role="group" aria-label="Variant switcher (prototype only)">
+  <button id="prev" aria-label="Previous variant">←</button>
+  <span class="label" id="variant-label"></span>
+  <button id="next" aria-label="Next variant">→</button>
+</div>
+
+<script>
+  const STAGES = [
+    { key: 'shape',           name: 'Shape',           gate: 'business-case-approved' },
+    { key: 'hld-define',      name: 'HLD Define',      gate: 'hld-approved-tac' },
+    { key: 'detailed-design', name: 'Detailed Design', gate: 'build-readiness-confirmed' },
+    { key: 'build-ready',     name: 'Build Ready',     gate: 'operational-handover-tac-noting' },
+  ];
+
+  const INSTANCES = [
+    { name: 'claims-modernisation',   definition: 'design', stageIdx: 0, status: 'draft',  owner: 'c.barlow' },
+    { name: 'contoso-identity-uplift',    definition: 'design', stageIdx: 1, status: 'review', owner: 'c.barlow' },
+    { name: 'benefits-data-pipeline', definition: 'design', stageIdx: 1, status: 'draft',  owner: 'r.ngata' },
+    { name: 'housing-portal-refresh', definition: 'design', stageIdx: 2, status: 'review', owner: 'r.ngata' },
+    { name: 'case-mgmt-integration',  definition: 'design', stageIdx: 3, status: 'agreed', owner: 'a.singh' },
+    { name: 'contact-centre-ivr',     definition: 'design', stageIdx: 0, status: 'draft',  owner: 'a.singh' },
+  ];
+
+  function stampHtml(status) {
+    return `<span class="stamp ${status}">${status.toUpperCase()}</span>`;
+  }
+
+  // ---------- Variant A ----------
+  function renderA(empty) {
+    const el = document.getElementById('a-register');
+    if (empty) {
+      el.innerHTML = `<div style="padding:60px 20px; text-align:center; color:var(--text-muted); border-bottom:var(--hairline) solid var(--line);">
+        No instances registered yet.<br><br>
+        <button class="btn primary" onclick="alert('→ setup wizard (#71)')">+ New instance</button>
+      </div>`;
+      return;
+    }
+    el.innerHTML = INSTANCES.map(inst => {
+      const stage = STAGES[inst.stageIdx];
+      return `<div class="row">
+        <div><span class="name">${inst.name}</span></div>
+        <div><span class="field-label">Definition</span><span class="definition-tag">${inst.definition}</span></div>
+        <div><span class="field-label">Stage</span>${stage.name}</div>
+        <div>${stampHtml(inst.status)}</div>
+        <div><span class="field-label">Owner</span><span class="owner">${inst.owner}</span></div>
+        <div></div>
+        <div class="row-actions">
+          <button class="btn icon small" title="Open">Open →</button>
+          <button class="btn icon small" title="Check">Check</button>
+          <button class="btn icon small" title="Render">Render</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // ---------- Variant B ----------
+  let bSelected = 0;
+  function renderB(empty) {
+    const listEl = document.getElementById('b-list');
+    const detailEl = document.getElementById('b-detail');
+    if (empty) {
+      listEl.innerHTML = `<p class="mono" style="font-size:12px; color:var(--text-muted);">No instances yet.</p>`;
+      detailEl.innerHTML = `<div class="placeholder">Register an instance to see it here.<br><br><button class="btn primary" onclick="alert('→ setup wizard (#71)')">+ New instance</button></div>`;
+      return;
+    }
+    listEl.innerHTML = INSTANCES.map((inst, i) => `
+      <div class="list-item ${i === bSelected ? 'selected' : ''}" onclick="selectB(${i})">
+        <span class="dot" style="background:var(--stamp-${inst.status}-bg);"></span>
+        <span class="meta"><span class="name">${inst.name}</span><span class="def">${inst.definition} · ${inst.owner}</span></span>
+      </div>`).join('');
+    const inst = INSTANCES[bSelected];
+    const stage = STAGES[inst.stageIdx];
+    detailEl.innerHTML = `
+      <div class="detail-ledger">
+        <div><span class="field-label">Stage</span><span class="stage">${stage.name}</span></div>
+        <div><span class="field-label">Gate</span><span class="mono">${stage.gate}</span></div>
+        <div>${stampHtml(inst.status)}</div>
+        <div style="text-align:right;"><span class="field-label">Owner</span><span class="mono">${inst.owner}</span></div>
+      </div>
+      <div class="detail-actions">
+        <button class="btn primary" onclick="alert('→ open ${inst.name}')">Open workspace</button>
+        <button class="btn">Check</button>
+        <button class="btn">Render</button>
+      </div>`;
+  }
+  function selectB(i) { bSelected = i; renderB(document.getElementById('b-empty-toggle').checked); }
+  window.selectB = selectB;
+
+  // ---------- Variant C ----------
+  function renderC(empty) {
+    const el = document.getElementById('c-lanes');
+    el.innerHTML = STAGES.map((stage, sIdx) => {
+      const items = empty ? [] : INSTANCES.filter(inst => inst.stageIdx === sIdx);
+      const body = items.length
+        ? items.map((inst, idx) => `
+          <div class="chip" id="c-chip-${sIdx}-${idx}">
+            <div class="name">${inst.name}</div>
+            <div class="def">${inst.definition}</div>
+            <div class="chip-foot">
+              <span class="owner">${inst.owner}</span>
+              ${stampHtml(inst.status)}
+              <button class="menu-btn" onclick="toggleMenu(${sIdx},${idx})">⋯</button>
+            </div>
+            <div class="menu">
+              <button onclick="alert('→ open ${inst.name}')">Open</button>
+              <button>Check</button>
+              <button>Render</button>
+            </div>
+          </div>`).join('')
+        : `<div class="empty-lane">No instances in ${stage.name}${sIdx === 0 ? '<br><br><button class=\"btn small\" onclick=\"alert(\'→ setup wizard (#71)\')\">+ New instance</button>' : ''}</div>`;
+      return `<div class="lane">
+        <div class="lane-header"><span class="stage-name">${stage.name}</span><span class="count">${items.length}</span></div>
+        ${body}
+      </div>`;
+    }).join('');
+  }
+  function toggleMenu(sIdx, idx) {
+    const chip = document.getElementById(`c-chip-${sIdx}-${idx}`);
+    const wasOpen = chip.classList.contains('menu-open');
+    document.querySelectorAll('#variant-c .chip.menu-open').forEach(c => c.classList.remove('menu-open'));
+    if (!wasOpen) chip.classList.add('menu-open');
+  }
+  window.toggleMenu = toggleMenu;
+
+  document.getElementById('a-empty-toggle').addEventListener('change', e => renderA(e.target.checked));
+  document.getElementById('b-empty-toggle').addEventListener('change', e => renderB(e.target.checked));
+  document.getElementById('c-empty-toggle').addEventListener('change', e => renderC(e.target.checked));
+
+  renderA(false);
+  renderB(false);
+  renderC(false);
+
+  // ---------- Variant switcher ----------
+  const variants = [
+    { key: 'a', label: 'A — Ledger register' },
+    { key: 'b', label: 'B — Master-detail' },
+    { key: 'c', label: 'C — Stage swimlanes' },
+  ];
+
+  function currentIndex() {
+    const params = new URLSearchParams(location.search);
+    const v = params.get('variant') || 'a';
+    const idx = variants.findIndex(x => x.key === v);
+    return idx === -1 ? 0 : idx;
+  }
+
+  function apply(idx, pushState) {
+    const i = (idx + variants.length) % variants.length;
+    variants.forEach((v, vi) => {
+      document.getElementById('variant-' + v.key).style.display = vi === i ? 'block' : 'none';
+    });
+    document.getElementById('variant-label').textContent = variants[i].label;
+    if (pushState !== false) {
+      const params = new URLSearchParams(location.search);
+      params.set('variant', variants[i].key);
+      history.replaceState(null, '', location.pathname + '?' + params.toString());
+    }
+    return i;
+  }
+
+  let vi = currentIndex();
+  apply(vi, false);
+
+  document.getElementById('prev').addEventListener('click', () => { vi = apply(vi - 1); });
+  document.getElementById('next').addEventListener('click', () => { vi = apply(vi + 1); });
+  window.addEventListener('keydown', (e) => {
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (e.key === 'ArrowLeft') vi = apply(vi - 1);
+    if (e.key === 'ArrowRight') vi = apply(vi + 1);
+  });
+</script>
+</body>
+</html>
