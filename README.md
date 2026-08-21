@@ -8,6 +8,8 @@ There is one set of data, not five documents that drift apart.
 
 Gantry itself knows nothing about design, procurement or anything else. Every use case is a definition, and definitions are configuration.
 
+Jump to [Executive Summary](exec-summary.md)
+
 ## The problem this solves
 
 Most governance processes accrete documents. Each gate demands its own artefact, each artefact re-states 60% of the last one in a slightly different shape, and every one of them is a separate Office file living in a separate library with a separate owner. Six months in, nobody can tell you which version is true.
