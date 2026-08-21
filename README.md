@@ -66,6 +66,36 @@ The key rule: **artefacts are derived, modules are authored.** If you find yours
 
 ## Installation
 
+Gantry runs anywhere Node.js and Pandoc do, including Windows — you don't need WSL. It's built and CI-tested on Linux, so Windows works in principle but is unverified in practice; WSL is the safer bet if you want the exact environment this project is tested against.
+
+**1. Install Node.js 22+**
+
+- **Linux (Debian/Ubuntu)**:
+  ```bash
+  curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+  sudo apt-get install -y nodejs
+  ```
+- **Windows**:
+  ```powershell
+  winget install OpenJS.NodeJS.LTS
+  ```
+  Restart your terminal afterwards so `node`/`npm` are on PATH. (Or use the installer from [nodejs.org/en/download](https://nodejs.org/en/download).)
+
+**2. Install Pandoc 3.x** (required at render time — see below)
+
+- **Linux (Debian/Ubuntu)**:
+  ```bash
+  sudo apt-get install -y pandoc
+  ```
+  Or grab the latest `.deb` from the [Pandoc releases page](https://github.com/jgm/pandoc/releases/latest) if your distro's version lags.
+- **Windows**:
+  ```powershell
+  winget install --source winget --exact --id JohnMacFarlane.Pandoc
+  ```
+  Or use the MSI installer from the [Pandoc releases page](https://github.com/jgm/pandoc/releases/latest).
+
+**3. Clone and install Gantry** (same on both platforms)
+
 ```bash
 git clone <repo-url>
 cd gantry
