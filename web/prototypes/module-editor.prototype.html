@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — throwaway. Not wired into gantry's app, not linked from web/index.html.
+  Resolves wayfinder ticket "Design the enhanced module editor with the 3-way
+  view toggle" (Azure DevOps #72, under map #66 "Design gantry's production UI").
+
+  Sub-shape note: unlike the dashboard (#70) and setup wizard (#71) prototypes,
+  the module editor already exists today (web/index.html + web/app.js — the
+  CodeMirror 6 + markdown-it + DOMPurify pipeline fixed by ADR 0004). Per
+  UI.md this should be sub-shape A (adjustment to the existing page) rather
+  than a from-scratch route. In practice, the real page needs a running
+  gantry server + instance data to render at all, which is too heavy for a
+  quick visual decision — so this file mirrors the real DOM shape (header
+  #instance-title/#stage-line/#stage-nav/#stage-actions, main#modules,
+  .module, .field-markdown, .split > .editor-host + .preview — see
+  web/app.js) with static sample content and CodeMirror faked as a plain
+  <textarea>, restyled with the Gate Ledger design language and the new
+  3-way toggle layered on top. It is NOT a parallel invented page — every
+  class name and structural nesting matches the live app so the decision
+  ports directly.
+
+  Question this answers: where does the markdown/split/rendered toggle
+  control live, how does split view divide the screen, and where does the
+  Asset "insert" toolbar action (see the follow-on ticket "Design the Asset
+  insert and management UX", #73) sit relative to it — differently per
+  variant, switchable via ?variant=a|b|c (defaults to "a"):
+
+    A — Toolbar segmented control: a full-width toolbar under the header
+        with a labelled [Markdown | Split | Rendered] segmented control.
+        Split mode is a fixed 50/50 two-column layout. Asset insert lives at
+        the toolbar's far end, always visible but disabled (greyed, not
+        hidden) in Rendered mode since it's read-only there.
+    B — Icon-only tab strip: a compact 3-icon strip pinned to the header's
+        top-right corner, no labels (title attrs only). Split mode uses a
+        draggable divider the author can drag to resize left/right. Asset
+        insert is a small icon button next to the toggle, fully hidden (not
+        just disabled) in Rendered mode.
+    C — Keyboard-first minimal chrome: no persistent toolbar at all — a
+        small text indicator in the header ("view: Split") that opens a
+        dropdown on click, or cycles via a keyboard shortcut. Split mode
+        stacks editor above rendered preview (not side-by-side) — useful on
+        narrow screens. Asset insert is an inline trigger that appears only
+        when a markdown field's editor is focused (contextual, not toolbar
+        chrome), and disappears entirely in Rendered mode.
+
+  Persistence (same in all three variants, since the ticket asks for this
+  explicitly, not left to a variant to decide): the view-mode toggle is ONE
+  global state for the whole module-editor screen — not per-module, not
+  per-field. Switching stages via the free-browse stage nav, or moving
+  between fields/modules on the same stage, does not reset it; it's an
+  in-memory session choice for as long as the screen is open (no
+  cross-session persistence needed here, unlike the dashboard's view choice
+  in #70 — this is a per-visit editing preference, not a standing setting).
+
+  Includes a small inline-SVG gantry mark in the header, next to the
+  wordmark — a simple two-strut engineering-drawing glyph in the same
+  hairline/near-zero-radius vocabulary as the rest of the design language,
+  not a full logo design (out of scope for this ticket).
+
+  Reuses the light-theme design tokens and component classes established in
+  "Establish gantry's visual and interaction design language" (#69,
+  web/prototypes/design-language.prototype.html) for the new chrome
+  (toolbar, toggle, insert button) layered on top of the real page's
+  existing structure.
+
+  Fonts load from Google Fonts CDN for this preview only, matching #69's
+  same caveat — a production build self-hosts these.
+-->
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gantry — Module Editor Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+    --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --radius: 2px;
+    --hairline: 1px;
+    --border-strong: 1px;
+  }
+  [data-theme="light"] {
+    --bg: #EDEBE6;
+    --bg-raised: #F5F3EE;
+    --text: #1B1E22;
+    --text-muted: #4A4740;
+    --line: #B9B3A4;
+    --line-strong: #5B5648;
+    --focus-ring: #1B1E22;
+    --stamp-draft-bg: #8A5A1F;  --stamp-draft-fg: #F5F1E8;
+    --stamp-agreed-bg: #295C40; --stamp-agreed-fg: #F5F1E8;
+    --stamp-review-bg: #4A4740; --stamp-review-fg: #F5F1E8;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+  main#modules { max-width: 1120px; margin: 0 auto; padding: 0 32px 140px; }
+
+  header {
+    max-width: 1120px; margin: 0 auto; padding: 32px 32px 20px;
+    border-bottom: var(--border-strong) solid var(--line-strong);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand svg { flex-shrink: 0; }
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    font-size: 22px;
+    margin: 0;
+  }
+  #stage-line { color: var(--text-muted); margin: 6px 0 0; font-size: 13px; }
+  #stage-nav { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  .mono { font-family: var(--font-mono); }
+
+  a { color: inherit; }
+  :focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+
+  button.btn {
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 13px;
+    padding: 8px 14px;
+    border-radius: var(--radius);
+    border: var(--border-strong) solid var(--line-strong);
+    background: var(--bg-raised);
+    color: var(--text);
+    cursor: pointer;
+  }
+  button.btn.primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+  button.btn.ghost { background: transparent; border-color: var(--line); }
+  button.btn.small { padding: 5px 10px; font-size: 12px; }
+  button.btn.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+  button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  #stage-nav button.btn.stage-current { border-color: var(--line-strong); }
+
+  .stamp {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: var(--radius);
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 10px;
+    letter-spacing: 0.07em;
+  }
+  .stamp.draft  { background: var(--stamp-draft-bg);  color: var(--stamp-draft-fg); }
+  .stamp.review { background: var(--stamp-review-bg); color: var(--stamp-review-fg); }
+  .stamp.agreed { background: var(--stamp-agreed-bg); color: var(--stamp-agreed-fg); }
+
+  .module { border-top: var(--hairline) solid var(--line); padding-top: 20px; margin-top: 28px; }
+  .module h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 4px; }
+  .module .purpose { color: var(--text-muted); font-style: italic; font-size: 13px; margin: 0 0 16px; }
+
+  .field { margin-top: 20px; }
+  .field label { font-family: var(--font-display); font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px; }
+  .guidance { color: var(--text-muted); font-size: 12px; margin: 0 0 8px; }
+
+  .field-markdown .split { display: flex; gap: 16px; align-items: stretch; }
+  .field-markdown .editor-host, .field-markdown .preview {
+    flex: 1; min-width: 0; border-radius: var(--radius);
+  }
+  .field-markdown .editor-host {
+    border: var(--border-strong) solid var(--line-strong); background: var(--bg-raised);
+  }
+  .field-markdown .editor-host textarea {
+    width: 100%; height: 160px; border: none; background: transparent; color: var(--text);
+    font-family: var(--font-mono); font-size: 13px; padding: 10px 12px; resize: vertical;
+  }
+  .field-markdown .editor-host textarea:focus { outline: none; }
+  .field-markdown .preview {
+    border: var(--hairline) solid var(--line); background: var(--bg); padding: 10px 12px; overflow: auto;
+  }
+  .field-markdown .preview h3, .field-markdown .preview p { margin: 0 0 8px; font-size: 14px; }
+  .field-markdown .preview code { font-family: var(--font-mono); background: var(--bg-raised); padding: 1px 4px; border-radius: var(--radius); }
+
+  .field-list .list-row { display: flex; gap: 8px; margin-bottom: 6px; }
+  .field-list input { flex: 1; font-family: var(--font-mono); font-size: 13px; padding: 7px 10px; border-radius: var(--radius); border: var(--border-strong) solid var(--line-strong); background: var(--bg-raised); color: var(--text); }
+
+  /* view-mode visibility, driven by data-view-mode on <main> */
+  main[data-view-mode="markdown"] .field-markdown .preview { display: none; }
+  main[data-view-mode="markdown"] .field-markdown .editor-host { flex: 1 1 100%; }
+  main[data-view-mode="rendered"] .field-markdown .editor-host { display: none; }
+  main[data-view-mode="rendered"] .field-markdown .preview { flex: 1 1 100%; }
+
+  /* ---------- Variant A: toolbar segmented control ---------- */
+  #variant-a .toolbar {
+    display: flex; justify-content: space-between; align-items: center;
+    max-width: 1120px; margin: 0 auto; padding: 14px 32px;
+    background: var(--bg-raised); border-bottom: var(--hairline) solid var(--line);
+  }
+  #variant-a .segmented { display: inline-flex; border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius); overflow: hidden; }
+  #variant-a .segmented button { border: none; border-right: var(--hairline) solid var(--line-strong); border-radius: 0; margin: 0; }
+  #variant-a .segmented button:last-child { border-right: none; }
+
+  /* ---------- Variant B: icon tab strip + draggable divider ---------- */
+  #variant-b header { position: relative; }
+  #variant-b .icon-tabs { position: absolute; top: 32px; right: 32px; display: inline-flex; gap: 4px; border: var(--hairline) solid var(--line); border-radius: var(--radius); padding: 3px; background: var(--bg-raised); }
+  #variant-b .icon-tabs button { width: 30px; height: 30px; padding: 0; font-size: 14px; border: none; background: transparent; }
+  #variant-b .icon-tabs button.active { background: var(--text); color: var(--bg); border-radius: var(--radius); }
+  #variant-b .insert-icon-btn { position: absolute; top: 32px; right: 132px; width: 30px; height: 30px; padding: 0; font-size: 14px; }
+  #variant-b .field-markdown .split.resizing { cursor: col-resize; user-select: none; }
+  #variant-b .divider { width: 6px; flex: 0 0 6px; background: var(--line); border-radius: var(--radius); cursor: col-resize; position: relative; }
+  #variant-b .divider:hover, #variant-b .divider.active { background: var(--line-strong); }
+
+  /* ---------- Variant C: keyboard-first minimal chrome ---------- */
+  #variant-c .view-indicator { position: relative; display: inline-block; margin-top: 12px; }
+  #variant-c .view-indicator button {
+    background: none; border: none; padding: 0; font-family: var(--font-mono); font-size: 12px;
+    color: var(--text-muted); cursor: pointer; text-decoration: underline dotted;
+  }
+  #variant-c .view-dropdown {
+    display: none; position: absolute; top: 20px; left: 0; z-index: 5; min-width: 160px;
+    background: var(--bg-raised); border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius);
+    box-shadow: 0 6px 16px rgba(0,0,0,.15);
+  }
+  #variant-c .view-dropdown.open { display: block; }
+  #variant-c .view-dropdown button { display: block; width: 100%; text-align: left; padding: 8px 12px; font-size: 12px; text-decoration: none; color: var(--text); }
+  #variant-c .view-dropdown button:hover { background: var(--bg); }
+  #variant-c .kbd-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+  #variant-c main[data-view-mode] .field-markdown .split { flex-direction: column; }
+  #variant-c .field-markdown .editor-host textarea { height: 110px; }
+  #variant-c .insert-inline { display: none; margin-top: 6px; }
+  #variant-c .insert-inline.shown { display: inline-block; }
+  #variant-c main[data-view-mode="rendered"] .insert-inline { display: none !important; }
+
+  /* ---------- Prototype chrome — NOT part of the design ---------- */
+  .switcher {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 10px;
+    background: #111; color: #fff; border: 1px solid #555; border-radius: 999px;
+    padding: 8px 8px 8px 16px; font-family: system-ui, sans-serif; font-size: 13px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4); z-index: 999;
+  }
+  .switcher button { background: #333; color: #fff; border: none; border-radius: 999px; width: 28px; height: 28px; cursor: pointer; font-size: 14px; }
+  .switcher button:hover { background: #555; }
+  .switcher .label { min-width: 230px; text-align: center; }
+</style>
+</head>
+<body>
+
+<!-- ============ VARIANT A: Toolbar segmented control ============ -->
+<div id="variant-a" style="display:none;">
+  <header>
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 20h18M6 20V8l6-4 6 4v12M6 8h12"/></svg>
+      <h1 id="instance-title-a">claims-modernisation — design</h1>
+    </div>
+    <p id="stage-line-a">HLD Define (gate: hld-approved-tac)</p>
+    <nav id="stage-nav-a">
+      <button class="btn small">Shape</button>
+      <button class="btn small stage-current">HLD Define (current)</button>
+      <button class="btn small">Detailed Design</button>
+      <button class="btn small">Build Ready</button>
+    </nav>
+  </header>
+  <div class="toolbar">
+    <div class="segmented" role="group" aria-label="View mode">
+      <button class="btn small" data-mode="markdown" onclick="setMode('a','markdown')">Markdown</button>
+      <button class="btn small active" data-mode="split" onclick="setMode('a','split')">Split</button>
+      <button class="btn small" data-mode="rendered" onclick="setMode('a','rendered')">Rendered</button>
+    </div>
+    <button class="btn small" id="a-insert" onclick="alert('→ insert asset (#73)')">+ Insert asset</button>
+  </div>
+  <main id="modules-a" data-view-mode="split"></main>
+</div>
+
+<!-- ============ VARIANT B: Icon tab strip + draggable divider ============ -->
+<div id="variant-b" style="display:none;">
+  <header>
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 20h18M6 20V8l6-4 6 4v12M6 8h12"/></svg>
+      <h1 id="instance-title-b">claims-modernisation — design</h1>
+    </div>
+    <p id="stage-line-b">HLD Define (gate: hld-approved-tac)</p>
+    <nav id="stage-nav-b">
+      <button class="btn small">Shape</button>
+      <button class="btn small stage-current">HLD Define (current)</button>
+      <button class="btn small">Detailed Design</button>
+      <button class="btn small">Build Ready</button>
+    </nav>
+    <button class="btn small insert-icon-btn" id="b-insert" title="Insert asset" onclick="alert('→ insert asset (#73)')">🖼</button>
+    <div class="icon-tabs" role="group" aria-label="View mode">
+      <button data-mode="markdown" title="Markdown" onclick="setMode('b','markdown')">📝</button>
+      <button data-mode="split" title="Split" class="active" onclick="setMode('b','split')">⬛</button>
+      <button data-mode="rendered" title="Rendered" onclick="setMode('b','rendered')">👁</button>
+    </div>
+  </header>
+  <main id="modules-b" data-view-mode="split"></main>
+</div>
+
+<!-- ============ VARIANT C: Keyboard-first minimal chrome ============ -->
+<div id="variant-c" style="display:none;">
+  <header>
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 20h18M6 20V8l6-4 6 4v12M6 8h12"/></svg>
+      <h1 id="instance-title-c">claims-modernisation — design</h1>
+    </div>
+    <p id="stage-line-c">HLD Define (gate: hld-approved-tac)</p>
+    <nav id="stage-nav-c">
+      <button class="btn small">Shape</button>
+      <button class="btn small stage-current">HLD Define (current)</button>
+      <button class="btn small">Detailed Design</button>
+      <button class="btn small">Build Ready</button>
+    </nav>
+    <div class="view-indicator">
+      <button onclick="toggleDropdownC()">view: <span id="c-view-label">Split</span> ▾</button>
+      <div class="view-dropdown" id="c-dropdown">
+        <button onclick="setMode('c','markdown')">Markdown</button>
+        <button onclick="setMode('c','split')">Split</button>
+        <button onclick="setMode('c','rendered')">Rendered</button>
+      </div>
+      <div class="kbd-hint">or press <span class="mono">Ctrl+Shift+V</span> to cycle</div>
+    </div>
+  </header>
+  <main id="modules-c" data-view-mode="split"></main>
+</div>
+
+<div class="switcher" role="group" aria-label="Variant switcher (prototype only)">
+  <button id="prev" aria-label="Previous variant">←</button>
+  <span class="label" id="variant-label"></span>
+  <button id="next" aria-label="Next variant">→</button>
+</div>
+
+<script>
+  // Sample content mirrors web/app.js's real module/field shape.
+  const MODULES = [
+    {
+      title: 'Problem definition',
+      purpose: 'Why this change is needed and what it fixes.',
+      fields: [
+        { id: 'problem', title: 'Problem statement', type: 'markdown', guidance: 'What breaks today, for whom.',
+          value: '## Current pain\n\nClaims intake still runs on the legacy **eligibility-rules** engine, which cannot express the new *income-threshold* logic without a redeploy.\n\n- Manual overrides average 40/week\n- No audit trail for overrides' },
+        { id: 'goals', title: 'Goals', type: 'markdown',
+          value: 'Replace the rules engine with a data-driven config, and add an audit log for every override.' },
+      ],
+    },
+    {
+      title: 'Stakeholders',
+      purpose: 'Who signs off and who is impacted.',
+      fields: [
+        { id: 'stakeholders', title: 'Stakeholder list', type: 'list', value: ['Claims Operations (approver)', 'Legal & Compliance (reviewer)', 'Frontline case managers (impacted)'] },
+      ],
+    },
+  ];
+
+  function renderPreview(text) {
+    // Fakes markdown-it + DOMPurify for the prototype — real pipeline per ADR 0004.
+    return text
+      .split('\n\n')
+      .map(block => {
+        if (block.startsWith('## ')) return `<h3>${block.slice(3)}</h3>`;
+        if (block.startsWith('- ')) return `<p>${block.split('\n').map(l => '• ' + l.replace(/^- /, '')).join('<br>')}</p>`;
+        return `<p>${block.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\*(.+?)\*/g, '<em>$1</em>')}</p>`;
+      })
+      .join('');
+  }
+
+  function renderModuleHtml(mod) {
+    const fieldsHtml = mod.fields.map(field => {
+      if (field.type === 'list') {
+        return `<div class="field field-list">
+          <label>${field.title}</label>
+          ${field.value.map(v => `<div class="list-row"><input type="text" value="${v}" readonly></div>`).join('')}
+        </div>`;
+      }
+      return `<div class="field field-markdown">
+        <label>${field.title}</label>
+        <p class="guidance">${field.guidance ?? ''}</p>
+        <div class="split">
+          <div class="editor-host"><textarea>${field.value}</textarea></div>
+          <div class="preview">${renderPreview(field.value)}</div>
+        </div>
+      </div>`;
+    }).join('');
+    return `<section class="module">
+      <h2>${mod.title}</h2>
+      <p class="purpose">${mod.purpose}</p>
+      ${fieldsHtml}
+    </section>`;
+  }
+
+  ['a', 'b', 'c'].forEach(key => {
+    document.getElementById('modules-' + key).innerHTML = MODULES.map(renderModuleHtml).join('');
+  });
+
+  // Draggable divider for variant B's split fields.
+  document.querySelectorAll('#variant-b .field-markdown .split').forEach(split => {
+    const divider = document.createElement('div');
+    divider.className = 'divider';
+    split.insertBefore(divider, split.children[1]);
+    let dragging = false;
+    divider.addEventListener('mousedown', () => { dragging = true; split.classList.add('resizing'); divider.classList.add('active'); });
+    window.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      const rect = split.getBoundingClientRect();
+      const pct = Math.min(80, Math.max(20, ((e.clientX - rect.left) / rect.width) * 100));
+      split.children[0].style.flex = `0 0 ${pct}%`;
+      split.children[2].style.flex = `0 0 ${100 - pct - 2}%`;
+    });
+    window.addEventListener('mouseup', () => { dragging = false; split.classList.remove('resizing'); divider.classList.remove('active'); });
+  });
+
+  // Variant C: inline asset-insert trigger appears only while a field's editor is focused.
+  document.querySelectorAll('#variant-c .field-markdown .editor-host').forEach(host => {
+    const hint = document.createElement('button');
+    hint.className = 'btn small insert-inline';
+    hint.textContent = '+ Insert asset';
+    hint.onclick = () => alert('→ insert asset (#73)');
+    host.parentElement.appendChild(hint);
+    const textarea = host.querySelector('textarea');
+    textarea.addEventListener('focus', () => hint.classList.add('shown'));
+    textarea.addEventListener('blur', () => setTimeout(() => hint.classList.remove('shown'), 150));
+  });
+
+  // ---------- Shared 3-way view-mode state (global per screen, per ticket) ----------
+  const modeState = { a: 'split', b: 'split', c: 'split' };
+  function setMode(key, mode) {
+    modeState[key] = mode;
+    document.getElementById('modules-' + key).setAttribute('data-view-mode', mode);
+    if (key === 'a') {
+      document.querySelectorAll('#variant-a .segmented button').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+      document.getElementById('a-insert').disabled = mode === 'rendered';
+    }
+    if (key === 'b') {
+      document.querySelectorAll('#variant-b .icon-tabs button').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+      document.getElementById('b-insert').style.display = mode === 'rendered' ? 'none' : '';
+    }
+    if (key === 'c') {
+      document.getElementById('c-view-label').textContent = mode[0].toUpperCase() + mode.slice(1);
+      document.getElementById('c-dropdown').classList.remove('open');
+    }
+  }
+  window.setMode = setMode;
+
+  function toggleDropdownC() { document.getElementById('c-dropdown').classList.toggle('open'); }
+  window.toggleDropdownC = toggleDropdownC;
+
+  const CYCLE = ['markdown', 'split', 'rendered'];
+  window.addEventListener('keydown', (e) => {
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
+      if (!(e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'v')) return;
+    }
+    if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'v') {
+      e.preventDefault();
+      const next = CYCLE[(CYCLE.indexOf(modeState.c) + 1) % CYCLE.length];
+      setMode('c', next);
+    }
+  });
+
+  // ---------- Variant switcher ----------
+  const variants = [
+    { key: 'a', label: 'A — Toolbar segmented control' },
+    { key: 'b', label: 'B — Icon tabs + draggable divider' },
+    { key: 'c', label: 'C — Keyboard-first minimal chrome' },
+  ];
+
+  function currentIndex() {
+    const params = new URLSearchParams(location.search);
+    const v = params.get('variant') || 'a';
+    const idx = variants.findIndex(x => x.key === v);
+    return idx === -1 ? 0 : idx;
+  }
+
+  function apply(idx, pushState) {
+    const i = (idx + variants.length) % variants.length;
+    variants.forEach((v, vi) => {
+      document.getElementById('variant-' + v.key).style.display = vi === i ? 'block' : 'none';
+    });
+    document.getElementById('variant-label').textContent = variants[i].label;
+    if (pushState !== false) {
+      const params = new URLSearchParams(location.search);
+      params.set('variant', variants[i].key);
+      history.replaceState(null, '', location.pathname + '?' + params.toString());
+    }
+    return i;
+  }
+
+  let vi = currentIndex();
+  apply(vi, false);
+
+  document.getElementById('prev').addEventListener('click', () => { vi = apply(vi - 1); });
+  document.getElementById('next').addEventListener('click', () => { vi = apply(vi + 1); });
+  window.addEventListener('keydown', (e) => {
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (e.key === 'ArrowLeft') vi = apply(vi - 1);
+    if (e.key === 'ArrowRight') vi = apply(vi + 1);
+  });
+</script>
+</body>
+</html>
