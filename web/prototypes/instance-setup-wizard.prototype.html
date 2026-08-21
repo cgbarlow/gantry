@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — throwaway. Not wired into gantry's app, not linked from web/index.html.
+  Resolves wayfinder ticket "Design the Azure DevOps instance-setup wizard"
+  (Azure DevOps #71, under map #66 "Design gantry's production UI").
+
+  Question this answers: how does a user register a new instance — pointing
+  gantry at an Azure DevOps repo that holds the instance's data (instance.yaml
+  + modules/ + assets/, per ADR 0005) and picking which definition applies —
+  when that repo might already hold an instance, might be empty, or might be
+  unreachable? The actual auth/sync mechanism (git clone vs REST API,
+  credentials) is deliberately NOT designed here — every variant assumes a
+  validate() call that just succeeds (empty | existing) or fails, and a
+  "simulate:" control stands in for the real network call.
+
+  Three radically different variants, switchable via ?variant=a|b|c
+  (defaults to "a"). Each sequences repo-entry / definition-pick / validation
+  differently, and each therefore has to solve "how do we show an existing
+  instance was found" and "how do we show a connection error" on its own terms:
+
+    A — Single form: repo URL + definition picker on one page, both fields
+        live at once, one "Validate & continue" button fires the check.
+        Existing-instance result renders as a compact inline summary card
+        under the form. Connection error renders as an inline error directly
+        under the URL field — blocks the button, fixed in place, no separate
+        error screen.
+    B — Multi-step wizard: three discrete steps (Repo → Definition → Review),
+        one visible at a time, validation happens on advancing from step 1.
+        Existing-instance result gets a full step of its own — an expandable
+        preview (instance.yaml / modules / assets as separate accordion
+        sections). Connection error replaces the whole step with a blocking
+        full-screen banner; "Try again" is the only way out, back to step 1.
+    C — Progressive single page: fields reveal one at a time as each is
+        satisfied (repo URL first; definition picker fades in only after a
+        successful check). Existing-instance result renders as a side-by-side
+        comparison — "found in repo" vs. "you're about to use" — flagging any
+        definition mismatch. Connection error is a dismissible banner that
+        appears in place without hiding the field; the user edits the URL and
+        re-checks without losing their place.
+
+  Every variant carries a "simulate:" control (prototype-only chrome, styled
+  distinctly from the real UI) to switch between the three validate() outcomes
+  — this stands in for the empty-state toggle used in the instance-dashboard
+  prototype (#70).
+
+  Sample definitions: "design" (the real definition — shape / hld-define /
+  detailed-design / build-ready, per docs/adr/0001-design-stage-gate-topology.md)
+  plus "service-onboarding", a plausible second definition, so the picker
+  reads as real rather than a single-option stub.
+
+  Reuses the light-theme design tokens and component classes established in
+  "Establish gantry's visual and interaction design language" (#69,
+  web/prototypes/design-language.prototype.html) — .field / .btn / .stamp /
+  hairlines, same type scale. One addition not in that token set: a
+  --stamp-error-bg/-fg pair, since none of the three existing stamp colours
+  (draft/agreed/review) read as an error — flagged here as a candidate to fold
+  back into the design language if a real error/danger stamp is needed
+  elsewhere.
+
+  Fonts load from Google Fonts CDN for this preview only, matching #69's same
+  caveat — a production build self-hosts these.
+-->
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gantry — Instance Setup Wizard Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+    --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --radius: 2px;
+    --hairline: 1px;
+    --border-strong: 1px;
+  }
+  [data-theme="light"] {
+    --bg: #EDEBE6;
+    --bg-raised: #F5F3EE;
+    --text: #1B1E22;
+    --text-muted: #4A4740;
+    --line: #B9B3A4;
+    --line-strong: #5B5648;
+    --focus-ring: #1B1E22;
+    --stamp-draft-bg: #8A5A1F;  --stamp-draft-fg: #F5F1E8;
+    --stamp-agreed-bg: #295C40; --stamp-agreed-fg: #F5F1E8;
+    --stamp-review-bg: #4A4740; --stamp-review-fg: #F5F1E8;
+    --stamp-error-bg: #8C3A2B;  --stamp-error-fg: #F5F1E8;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+  main { max-width: 860px; margin: 0 auto; padding: 40px 32px 140px; }
+
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    font-size: 26px;
+    margin: 0;
+  }
+  h3 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 15px;
+    margin: 0 0 10px;
+  }
+  p.lede { color: var(--text-muted); margin: 6px 0 28px; max-width: 70ch; }
+  .mono { font-family: var(--font-mono); }
+
+  a { color: inherit; }
+  :focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+
+  label.field-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); margin-bottom: 6px; }
+  .field-group { margin-bottom: 20px; }
+
+  button.btn {
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 13px;
+    padding: 9px 16px;
+    border-radius: var(--radius);
+    border: var(--border-strong) solid var(--line-strong);
+    background: var(--bg-raised);
+    color: var(--text);
+    cursor: pointer;
+  }
+  button.btn.primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+  button.btn.ghost { background: transparent; border-color: var(--line); }
+  button.btn.small { padding: 5px 10px; font-size: 12px; }
+  button.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  input.field, select.field {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    padding: 8px 11px;
+    border-radius: var(--radius);
+    border: var(--border-strong) solid var(--line-strong);
+    background: var(--bg-raised);
+    color: var(--text);
+    width: 100%;
+  }
+  input.field::placeholder { color: var(--text-muted); }
+  input.field.has-error { border-color: var(--stamp-error-bg); }
+
+  hr.hairline { border: none; border-top: var(--hairline) solid var(--line); margin: 24px 0; }
+
+  .stamp {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: var(--radius);
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 10px;
+    letter-spacing: 0.07em;
+  }
+  .stamp.draft  { background: var(--stamp-draft-bg);  color: var(--stamp-draft-fg); }
+  .stamp.review { background: var(--stamp-review-bg); color: var(--stamp-review-fg); }
+  .stamp.agreed { background: var(--stamp-agreed-bg); color: var(--stamp-agreed-fg); }
+  .stamp.error  { background: var(--stamp-error-bg);  color: var(--stamp-error-fg); }
+
+  .definition-card {
+    border: var(--hairline) solid var(--line); border-radius: var(--radius);
+    padding: 12px 14px; cursor: pointer; margin-bottom: 8px;
+  }
+  .definition-card.selected { border: var(--border-strong) solid var(--line-strong); background: var(--bg-raised); }
+  .definition-card .name { font-family: var(--font-display); font-weight: 600; font-size: 14px; }
+  .definition-card .stages { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+
+  .result-card {
+    border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius);
+    background: var(--bg-raised); padding: 16px 18px; margin-top: 16px;
+  }
+  .result-card.error { border-color: var(--stamp-error-bg); }
+  .result-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: var(--hairline) solid var(--line); font-size: 13px; }
+  .result-row:last-child { border-bottom: none; }
+  .result-row .k { color: var(--text-muted); }
+  .result-row .v { font-family: var(--font-mono); }
+
+  .sim-control {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+    border: 1px dashed var(--line); border-radius: var(--radius); padding: 6px 10px;
+    margin-bottom: 24px;
+  }
+  .sim-control select { font-family: var(--font-mono); font-size: 11px; padding: 3px 6px; }
+  .sim-flag { font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); border: 1px dashed var(--line); border-radius: var(--radius); padding: 1px 5px; }
+
+  .inline-error { color: var(--stamp-error-bg); font-size: 12px; margin-top: 6px; display: flex; align-items: center; gap: 10px; }
+
+  /* ---------- Variant B: multi-step wizard ---------- */
+  #variant-b .steps { display: flex; gap: 0; margin: 24px 0 28px; }
+  #variant-b .step-tab {
+    flex: 1; text-align: center; padding: 10px 8px; font-family: var(--font-mono); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted);
+    border-bottom: var(--border-strong) solid var(--line);
+  }
+  #variant-b .step-tab.active { color: var(--text); border-bottom-color: var(--text); font-weight: 600; }
+  #variant-b .step-tab.done { color: var(--text); }
+  #variant-b .step-body { min-height: 260px; }
+  #variant-b .wizard-nav { display: flex; justify-content: space-between; margin-top: 24px; }
+  #variant-b .accordion { border: var(--hairline) solid var(--line); border-radius: var(--radius); margin-bottom: 8px; overflow: hidden; }
+  #variant-b .accordion summary { padding: 10px 14px; cursor: pointer; font-family: var(--font-display); font-weight: 600; font-size: 13px; background: var(--bg-raised); }
+  #variant-b .accordion .accordion-body { padding: 12px 14px; font-family: var(--font-mono); font-size: 12px; }
+  #variant-b .accordion .accordion-body ul { margin: 6px 0 0; padding-left: 18px; }
+  #variant-b .blocking-error { text-align: center; padding: 48px 24px; border: var(--border-strong) solid var(--stamp-error-bg); border-radius: var(--radius); background: var(--bg-raised); }
+  #variant-b .blocking-error .stamp { margin-bottom: 14px; }
+
+  /* ---------- Variant C: progressive single page ---------- */
+  #variant-c .progressive-field { margin-bottom: 24px; }
+  #variant-c .reveal { opacity: 0; max-height: 0; overflow: hidden; transition: opacity .15s linear; }
+  #variant-c .reveal.shown { opacity: 1; max-height: none; overflow: visible; }
+  #variant-c .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+  #variant-c .compare .col { border: var(--hairline) solid var(--line); border-radius: var(--radius); padding: 14px; }
+  #variant-c .compare .col h4 { font-family: var(--font-display); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin: 0 0 10px; }
+  #variant-c .mismatch-flag { margin-top: 10px; font-size: 12px; color: var(--stamp-error-bg); }
+  #variant-c .dismiss-banner { display: flex; justify-content: space-between; align-items: center; gap: 12px; background: var(--bg-raised); border: var(--border-strong) solid var(--stamp-error-bg); border-radius: var(--radius); padding: 12px 14px; margin-top: 10px; }
+  #variant-c .dismiss-banner button { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 16px; line-height: 1; }
+
+  /* ---------- Prototype chrome — NOT part of the design ---------- */
+  .switcher {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 10px;
+    background: #111; color: #fff; border: 1px solid #555; border-radius: 999px;
+    padding: 8px 8px 8px 16px; font-family: system-ui, sans-serif; font-size: 13px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4); z-index: 999;
+  }
+  .switcher button { background: #333; color: #fff; border: none; border-radius: 999px; width: 28px; height: 28px; cursor: pointer; font-size: 14px; }
+  .switcher button:hover { background: #555; }
+  .switcher .label { min-width: 230px; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <div>
+    <h1>New instance</h1>
+    <p class="lede">Point gantry at an Azure DevOps repo to hold this instance's data, and pick which definition it follows. If the repo already has an instance in it, gantry will show what it found instead of starting fresh.</p>
+  </div>
+
+  <!-- ============ VARIANT A: Single form ============ -->
+  <section id="variant-a" style="display:none;">
+    <div class="sim-control">
+      <span class="sim-flag">prototype only</span> simulate validate() result:
+      <select id="a-sim">
+        <option value="empty">Empty repo</option>
+        <option value="existing">Existing instance found</option>
+        <option value="error">Connection error</option>
+      </select>
+    </div>
+
+    <div class="field-group">
+      <label class="field-label" for="a-repo-url">Azure DevOps repo URL</label>
+      <input class="field" id="a-repo-url" placeholder="https://dev.azure.com/org/project/_git/repo" value="https://dev.azure.com/Contoso-Production/Default/_git/claims-modernisation">
+      <div id="a-url-error"></div>
+    </div>
+    <div class="field-group">
+      <label class="field-label" for="a-definition">Definition</label>
+      <select class="field" id="a-definition">
+        <option value="design">design — shape → hld-define → detailed-design → build-ready</option>
+        <option value="service-onboarding">service-onboarding — intake → assessment → approval</option>
+      </select>
+    </div>
+    <button class="btn primary" onclick="validateA()">Validate &amp; continue</button>
+    <div id="a-result"></div>
+  </section>
+
+  <!-- ============ VARIANT B: Multi-step wizard ============ -->
+  <section id="variant-b" style="display:none;">
+    <div class="sim-control">
+      <span class="sim-flag">prototype only</span> simulate validate() result:
+      <select id="b-sim" onchange="renderB()">
+        <option value="empty">Empty repo</option>
+        <option value="existing">Existing instance found</option>
+        <option value="error">Connection error</option>
+      </select>
+    </div>
+
+    <div class="steps">
+      <div class="step-tab" id="b-tab-0">1 · Repo</div>
+      <div class="step-tab" id="b-tab-1">2 · Definition</div>
+      <div class="step-tab" id="b-tab-2">3 · Review</div>
+    </div>
+    <div class="step-body" id="b-step-body"></div>
+    <div class="wizard-nav">
+      <button class="btn" id="b-back" onclick="bBack()">← Back</button>
+      <button class="btn primary" id="b-next" onclick="bNext()">Next →</button>
+    </div>
+  </section>
+
+  <!-- ============ VARIANT C: Progressive single page ============ -->
+  <section id="variant-c" style="display:none;">
+    <div class="sim-control">
+      <span class="sim-flag">prototype only</span> simulate validate() result:
+      <select id="c-sim">
+        <option value="empty">Empty repo</option>
+        <option value="existing">Existing instance found</option>
+        <option value="error">Connection error</option>
+      </select>
+    </div>
+
+    <div class="progressive-field">
+      <label class="field-label" for="c-repo-url">Azure DevOps repo URL</label>
+      <input class="field" id="c-repo-url" placeholder="https://dev.azure.com/org/project/_git/repo" value="https://dev.azure.com/Contoso-Production/Default/_git/claims-modernisation">
+      <div style="margin-top:8px;"><button class="btn small" onclick="checkC()">Check repo</button></div>
+      <div id="c-error-slot"></div>
+    </div>
+
+    <div class="reveal" id="c-found-slot"></div>
+
+    <div class="reveal progressive-field" id="c-definition-slot">
+      <label class="field-label" for="c-definition">Definition</label>
+      <select class="field" id="c-definition" onchange="renderCCompare()">
+        <option value="design">design — shape → hld-define → detailed-design → build-ready</option>
+        <option value="service-onboarding">service-onboarding — intake → assessment → approval</option>
+      </select>
+      <div id="c-compare-slot"></div>
+    </div>
+
+    <div class="reveal" id="c-submit-slot">
+      <button class="btn primary" onclick="alert('→ instance created')">Create instance</button>
+    </div>
+  </section>
+</main>
+
+<div class="switcher" role="group" aria-label="Variant switcher (prototype only)">
+  <button id="prev" aria-label="Previous variant">←</button>
+  <span class="label" id="variant-label"></span>
+  <button id="next" aria-label="Next variant">→</button>
+</div>
+
+<script>
+  const DEFINITIONS = {
+    'design': { name: 'design', stages: ['Shape', 'HLD Define', 'Detailed Design', 'Build Ready'] },
+    'service-onboarding': { name: 'service-onboarding', stages: ['Intake', 'Assessment', 'Approval'] },
+  };
+
+  const FOUND_INSTANCE = {
+    name: 'claims-modernisation',
+    definition: 'design',
+    stage: 'HLD Define',
+    modules: ['intake-form', 'eligibility-rules', 'notification-templates', 'case-routing'],
+    assets: 12,
+    lastModified: '2026-08-14',
+  };
+
+  function stampHtml(status, label) {
+    return `<span class="stamp ${status}">${label}</span>`;
+  }
+
+  function foundSummaryRows() {
+    return `
+      <div class="result-row"><span class="k">Instance name</span><span class="v">${FOUND_INSTANCE.name}</span></div>
+      <div class="result-row"><span class="k">Definition</span><span class="v">${FOUND_INSTANCE.definition}</span></div>
+      <div class="result-row"><span class="k">Current stage</span><span class="v">${FOUND_INSTANCE.stage}</span></div>
+      <div class="result-row"><span class="k">Modules</span><span class="v">${FOUND_INSTANCE.modules.length}</span></div>
+      <div class="result-row"><span class="k">Assets</span><span class="v">${FOUND_INSTANCE.assets}</span></div>
+      <div class="result-row"><span class="k">Last modified</span><span class="v">${FOUND_INSTANCE.lastModified}</span></div>`;
+  }
+
+  // ---------- Variant A: single form ----------
+  function validateA() {
+    const sim = document.getElementById('a-sim').value;
+    const urlField = document.getElementById('a-repo-url');
+    const urlErrorSlot = document.getElementById('a-url-error');
+    const resultSlot = document.getElementById('a-result');
+    urlField.classList.remove('has-error');
+    urlErrorSlot.innerHTML = '';
+    resultSlot.innerHTML = '';
+
+    if (sim === 'error') {
+      urlField.classList.add('has-error');
+      urlErrorSlot.innerHTML = `<div class="inline-error">${stampHtml('error', 'Error')} Couldn't reach this repo — check the URL and that gantry has access. <button class="btn small" onclick="validateA()">Retry</button></div>`;
+      return;
+    }
+    if (sim === 'existing') {
+      const chosenDef = document.getElementById('a-definition').value;
+      const mismatch = chosenDef !== FOUND_INSTANCE.definition
+        ? `<div class="inline-error" style="margin-top:10px;">Picked definition (${chosenDef}) doesn't match what's in the repo (${FOUND_INSTANCE.definition}) — the repo's definition wins.</div>` : '';
+      resultSlot.innerHTML = `<div class="result-card">
+        <h3>${stampHtml('review', 'Existing instance found')}</h3>
+        ${foundSummaryRows()}
+        ${mismatch}
+        <div style="margin-top:14px;"><button class="btn primary" onclick="alert('→ open claims-modernisation')">Open instance</button></div>
+      </div>`;
+      return;
+    }
+    resultSlot.innerHTML = `<div class="result-card">
+      <h3>${stampHtml('agreed', 'Empty repo')}</h3>
+      <p style="margin:0; color:var(--text-muted); font-size:13px;">Nothing found at this location — gantry will initialize a fresh instance here on the selected definition.</p>
+      <div style="margin-top:14px;"><button class="btn primary" onclick="alert('→ instance created')">Create instance</button></div>
+    </div>`;
+  }
+
+  // ---------- Variant B: multi-step wizard ----------
+  let bStep = 0;
+  let bError = false;
+  function bBack() { if (bStep > 0) { bStep--; bError = false; renderB(); } }
+  function bNext() {
+    if (bStep === 0) {
+      const sim = document.getElementById('b-sim').value;
+      if (sim === 'error') { bError = true; renderB(); return; }
+      bError = false;
+    }
+    if (bStep < 2) { bStep++; renderB(); }
+  }
+  function bRetry() { bStep = 0; bError = false; renderB(); }
+  window.bBack = bBack; window.bNext = bNext; window.bRetry = bRetry;
+
+  function renderB() {
+    const sim = document.getElementById('b-sim').value;
+    ['b-tab-0', 'b-tab-1', 'b-tab-2'].forEach((id, i) => {
+      const tab = document.getElementById(id);
+      tab.classList.toggle('active', i === bStep && !bError);
+      tab.classList.toggle('done', i < bStep && !bError);
+    });
+    const body = document.getElementById('b-step-body');
+    const back = document.getElementById('b-back');
+    const next = document.getElementById('b-next');
+
+    if (bError) {
+      body.innerHTML = `<div class="blocking-error">
+        ${stampHtml('error', 'Connection error')}
+        <p style="margin:14px 0; color:var(--text-muted);">Couldn't reach this repo — check the URL and that gantry has access.</p>
+        <button class="btn primary" onclick="bRetry()">Try again</button>
+      </div>`;
+      back.style.visibility = 'hidden';
+      next.style.visibility = 'hidden';
+      return;
+    }
+    back.style.visibility = bStep === 0 ? 'hidden' : 'visible';
+    next.style.visibility = bStep === 2 ? 'hidden' : 'visible';
+
+    if (bStep === 0) {
+      body.innerHTML = `
+        <div class="field-group">
+          <label class="field-label" for="b-repo-url">Azure DevOps repo URL</label>
+          <input class="field" id="b-repo-url" placeholder="https://dev.azure.com/org/project/_git/repo" value="https://dev.azure.com/Contoso-Production/Default/_git/claims-modernisation">
+        </div>
+        <p style="color:var(--text-muted); font-size:12px;">Validated when you hit Next.</p>`;
+    } else if (bStep === 1) {
+      body.innerHTML = Object.values(DEFINITIONS).map(d => `
+        <div class="definition-card ${d.name === 'design' ? 'selected' : ''}" onclick="selectBDefinition('${d.name}')">
+          <div class="name">${d.name}</div>
+          <div class="stages">${d.stages.join(' → ')}</div>
+        </div>`).join('');
+    } else if (bStep === 2) {
+      if (sim === 'existing') {
+        body.innerHTML = `
+          <div class="stamp review" style="margin-bottom:12px;">Existing instance found</div>
+          <details class="accordion" open>
+            <summary>instance.yaml</summary>
+            <div class="accordion-body">name: ${FOUND_INSTANCE.name}<br>definition: ${FOUND_INSTANCE.definition}<br>stage: ${FOUND_INSTANCE.stage}</div>
+          </details>
+          <details class="accordion">
+            <summary>modules/ (${FOUND_INSTANCE.modules.length})</summary>
+            <div class="accordion-body"><ul>${FOUND_INSTANCE.modules.map(m => `<li>${m}</li>`).join('')}</ul></div>
+          </details>
+          <details class="accordion">
+            <summary>assets/ (${FOUND_INSTANCE.assets})</summary>
+            <div class="accordion-body">12 files, 4.1 MB total</div>
+          </details>
+          <div style="margin-top:16px;"><button class="btn primary" onclick="alert('→ open claims-modernisation')">Open instance</button></div>`;
+      } else {
+        body.innerHTML = `
+          <div class="stamp agreed" style="margin-bottom:12px;">Empty repo</div>
+          <p style="color:var(--text-muted); font-size:13px;">Nothing found at this location — gantry will initialize a fresh instance here.</p>
+          <div style="margin-top:16px;"><button class="btn primary" onclick="alert('→ instance created')">Create instance</button></div>`;
+      }
+    }
+  }
+  function selectBDefinition(name) {
+    document.querySelectorAll('#variant-b .definition-card').forEach(c => c.classList.remove('selected'));
+    Array.from(document.querySelectorAll('#variant-b .definition-card')).find(c => c.querySelector('.name').textContent === name).classList.add('selected');
+  }
+  window.selectBDefinition = selectBDefinition;
+
+  // ---------- Variant C: progressive single page ----------
+  function checkC() {
+    const sim = document.getElementById('c-sim').value;
+    const errorSlot = document.getElementById('c-error-slot');
+    const foundSlot = document.getElementById('c-found-slot');
+    const defSlot = document.getElementById('c-definition-slot');
+    const submitSlot = document.getElementById('c-submit-slot');
+    errorSlot.innerHTML = '';
+    foundSlot.classList.remove('shown');
+    defSlot.classList.remove('shown');
+    submitSlot.classList.remove('shown');
+
+    if (sim === 'error') {
+      errorSlot.innerHTML = `<div class="dismiss-banner">
+        <span>${stampHtml('error', 'Error')} Couldn't reach this repo — check the URL and that gantry has access.</span>
+        <button aria-label="Dismiss" onclick="this.closest('.dismiss-banner').remove()">×</button>
+      </div>`;
+      return;
+    }
+    if (sim === 'existing') {
+      foundSlot.innerHTML = `<div class="result-card"><h3>${stampHtml('review', 'Existing instance found')}</h3>${foundSummaryRows()}</div>`;
+    } else {
+      foundSlot.innerHTML = `<div class="result-card"><h3>${stampHtml('agreed', 'Empty repo')}</h3><p style="margin:0; color:var(--text-muted); font-size:13px;">Nothing found — gantry will initialize a fresh instance here.</p></div>`;
+    }
+    foundSlot.classList.add('shown');
+    defSlot.classList.add('shown');
+    renderCCompare();
+    submitSlot.classList.add('shown');
+  }
+  function renderCCompare() {
+    const sim = document.getElementById('c-sim').value;
+    const compareSlot = document.getElementById('c-compare-slot');
+    if (sim !== 'existing') { compareSlot.innerHTML = ''; return; }
+    const chosenDef = document.getElementById('c-definition').value;
+    const mismatch = chosenDef !== FOUND_INSTANCE.definition;
+    compareSlot.innerHTML = `
+      <div class="compare">
+        <div class="col"><h4>Found in repo</h4><div class="mono" style="font-size:13px;">${FOUND_INSTANCE.definition}<br>${FOUND_INSTANCE.stage}</div></div>
+        <div class="col"><h4>You're about to use</h4><div class="mono" style="font-size:13px;">${chosenDef}</div></div>
+      </div>
+      ${mismatch ? `<div class="mismatch-flag">These don't match — the repo's own definition (${FOUND_INSTANCE.definition}) will be used, not your selection.</div>` : ''}`;
+  }
+  window.checkC = checkC;
+  window.renderCCompare = renderCCompare;
+
+  renderB();
+
+  // ---------- Variant switcher ----------
+  const variants = [
+    { key: 'a', label: 'A — Single form' },
+    { key: 'b', label: 'B — Multi-step wizard' },
+    { key: 'c', label: 'C — Progressive single page' },
+  ];
+
+  function currentIndex() {
+    const params = new URLSearchParams(location.search);
+    const v = params.get('variant') || 'a';
+    const idx = variants.findIndex(x => x.key === v);
+    return idx === -1 ? 0 : idx;
+  }
+
+  function apply(idx, pushState) {
+    const i = (idx + variants.length) % variants.length;
+    variants.forEach((v, vi) => {
+      document.getElementById('variant-' + v.key).style.display = vi === i ? 'block' : 'none';
+    });
+    document.getElementById('variant-label').textContent = variants[i].label;
+    if (pushState !== false) {
+      const params = new URLSearchParams(location.search);
+      params.set('variant', variants[i].key);
+      history.replaceState(null, '', location.pathname + '?' + params.toString());
+    }
+    return i;
+  }
+
+  let vi = currentIndex();
+  apply(vi, false);
+
+  document.getElementById('prev').addEventListener('click', () => { vi = apply(vi - 1); });
+  document.getElementById('next').addEventListener('click', () => { vi = apply(vi + 1); });
+  window.addEventListener('keydown', (e) => {
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (e.key === 'ArrowLeft') vi = apply(vi - 1);
+    if (e.key === 'ArrowRight') vi = apply(vi + 1);
+  });
+</script>
+</body>
+</html>
