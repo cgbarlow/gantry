@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, isAbsolute } from 'node:path'
+import { join, isAbsolute, relative } from 'node:path'
 import { createServer } from '../lib/server.js'
 import { createInstance, readInstance, readModule } from '../lib/instance.js'
 import { loadDefinition } from '../lib/definition.js'
@@ -211,4 +211,146 @@ test('GET /app.js serves the web form script from web/', async () => {
     const text = await res.text()
     assert.match(text, /from 'codemirror'/)
   })
+})
+
+test('GET /api/instances lists every registered instance, without the server being pinned to one slug', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'zebra-initiative', { instancesDir })
+    createInstance('design', 'alpha-initiative', { instancesDir, owner: 'c.barlow' })
+
+    // No `slug` option at all — the server still starts and serves instance
+    // data via the listing endpoint, proving it no longer requires a single
+    // fixed slug at startup.
+    await withRunningServer({ instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instances`)
+      assert.equal(res.status, 200)
+      const body = await res.json()
+      assert.deepEqual(body, [
+        { slug: 'alpha-initiative', definition: 'design', stage: 'shape', status: 'incomplete', owner: 'c.barlow' },
+        { slug: 'zebra-initiative', definition: 'design', stage: 'shape', status: 'incomplete', owner: '' },
+      ])
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('GET /api/instances reflects instances registered after server startup', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withRunningServer({ instancesDir }, async (base) => {
+      const before = await (await fetch(`${base}/api/instances`)).json()
+      assert.deepEqual(before, [])
+
+      createInstance('design', 'my-initiative', { instancesDir })
+
+      const after = await (await fetch(`${base}/api/instances`)).json()
+      assert.deepEqual(after.map((i) => i.slug), ['my-initiative'])
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('GET /api/instance?slug=<slug> serves instance data per-request even when the server has no default slug', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instance?slug=examples`)
+      assert.equal(res.status, 200)
+      const body = await res.json()
+      assert.equal(body.slug, 'examples')
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('GET /api/instance with no slug given (no default, no query param) reports a 400, not a crash', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withRunningServer({ instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instance`)
+      assert.equal(res.status, 400)
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// `slug` arrives from request input now (`?slug=<slug>`), not only a trusted
+// CLI argument at startup — these lock in that a path-traversal slug is
+// rejected before it ever reaches the filesystem, for every route that
+// resolves a slug per-request, rather than escaping `instancesDir`.
+test('GET /api/instance?slug=<traversal> is rejected with 400, never reading outside instancesDir', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  const outsideDir = mkdtempSync(join(tmpdir(), 'gantry-outside-'))
+  try {
+    // A real instance sitting just outside instancesDir — `traversalSlug` is
+    // the exact relative path from instancesDir to it (not merely a `../`
+    // prefix), so if the check below were absent, this is genuinely the
+    // directory `join(instancesDir, traversalSlug)` would resolve to and
+    // expose, not an arbitrary escape into an unrelated/nonexistent path.
+    cpSync('instances/examples', join(outsideDir, 'examples'), { recursive: true })
+    rmSync(join(outsideDir, 'examples', 'out'), { recursive: true, force: true })
+    const traversalSlug = relative(instancesDir, join(outsideDir, 'examples'))
+    assert.ok(traversalSlug.includes('/'), 'test setup sanity check: traversal slug must span directories')
+
+    await withRunningServer({ instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instance?slug=${encodeURIComponent(traversalSlug)}`)
+      assert.equal(res.status, 400)
+      const body = await res.json()
+      assert.match(body.error, /Invalid instance slug/)
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+    rmSync(outsideDir, { recursive: true, force: true })
+  }
+})
+
+test('PUT /api/instance/modules/:id?slug=<traversal> is rejected with 400, never writing outside instancesDir', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  const outsideDir = mkdtempSync(join(tmpdir(), 'gantry-outside-'))
+  try {
+    createInstance('design', 'planted', { instancesDir: outsideDir })
+    // The exact relative path from instancesDir to the planted instance —
+    // if the check below were absent, this is genuinely where the write
+    // would land, not an arbitrary escape into an unrelated/nonexistent path.
+    const traversalSlug = relative(instancesDir, join(outsideDir, 'planted'))
+    assert.ok(traversalSlug.includes('/'), 'test setup sanity check: traversal slug must span directories')
+
+    await withRunningServer({ instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instance/modules/context?slug=${encodeURIComponent(traversalSlug)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'agreed', owner: 'attacker', fields: { driver: 'should never be written' } }),
+      })
+      assert.equal(res.status, 400)
+    })
+
+    const contextPath = join(outsideDir, 'planted', 'modules', 'context.md')
+    const raw = readFileSync(contextPath, 'utf8')
+    assert.doesNotMatch(raw, /should never be written/)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+    rmSync(outsideDir, { recursive: true, force: true })
+  }
+})
+
+test('slugs containing ".." or a path separator are rejected outright, even without traversing to a real target', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withRunningServer({ instancesDir }, async (base) => {
+      for (const badSlug of ['..', '.', 'foo/bar', 'foo\\bar', '../../etc']) {
+        const res = await fetch(`${base}/api/instance?slug=${encodeURIComponent(badSlug)}`)
+        assert.equal(res.status, 400, `expected 400 for slug ${JSON.stringify(badSlug)}`)
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
 })

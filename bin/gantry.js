@@ -114,14 +114,21 @@ program
   })
 
 program
-  .command('serve <slug>')
-  .description('Serve the stage-by-stage form')
+  .command('serve [slug]')
+  .description(
+    'Serve the stage-by-stage form for <slug>. Without a slug, the JSON API still serves every ' +
+      'instance (e.g. GET /api/instances) — the bundled form itself still needs one instance ' +
+      'selected via ?slug=<slug>, since it has no instance-picker screen yet'
+  )
   .option('--port <port>', 'port to listen on', '3000')
   .action((slug, options) => {
     const server = createServer({ slug })
     const port = Number(options.port)
     server.listen(port, () => {
-      console.log(`gantry serve: http://localhost:${port} (instance: ${slug})`)
+      const label = slug
+        ? `instance: ${slug}`
+        : 'no default instance — API only (GET /api/instances, or ?slug=<slug> per request); the bundled form has no instance-picker yet'
+      console.log(`gantry serve: http://localhost:${port} (${label})`)
     })
   })
 
