@@ -17,6 +17,8 @@ import { markdown } from '@codemirror/lang-markdown'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import { theme, cycleTheme } from './lib/theme.js'
+import { pat, clearPat, requestPat, promptOpen, resolvePromptWith } from './lib/credential.js'
+import { apiFetch } from './lib/apiFetch.js'
 import { SetupWizardPage } from './pages/setup-wizard.js'
 // Two distinct "view mode" concepts collide on the same export names — the
 // dashboard's (#77) master-detail/swimlanes toggle and the module editor's
@@ -58,32 +60,32 @@ async function loadInstance(slug, stageId) {
   if (slug) params.set('slug', slug)
   if (stageId) params.set('stage', stageId)
   const qs = params.toString()
-  const res = await fetch(qs ? `/api/instance?${qs}` : '/api/instance')
+  const res = await apiFetch(qs ? `/api/instance?${qs}` : '/api/instance')
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
-    throw new Error(body.error ?? `Failed to load instance (${res.status})`)
+    throw new Error(body.message ?? body.error ?? `Failed to load instance (${res.status})`)
   }
   return res.json()
 }
 
 async function fetchAssets() {
-  const res = await fetch('/api/instance/assets')
+  const res = await apiFetch('/api/instance/assets')
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
-    throw new Error(body.error ?? `Failed to load assets (${res.status})`)
+    throw new Error(body.message ?? body.error ?? `Failed to load assets (${res.status})`)
   }
   return res.json()
 }
 
 async function uploadAsset({ filename, dataBase64, name, source, uploadedBy }) {
-  const res = await fetch('/api/instance/assets', {
+  const res = await apiFetch('/api/instance/assets', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ filename, dataBase64, name, source, uploadedBy }),
   })
   const body = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new Error(body.error ?? `Failed to upload asset (${res.status})`)
+    throw new Error(body.message ?? body.error ?? `Failed to upload asset (${res.status})`)
   }
   return body
 }
@@ -300,7 +302,7 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
       fields[field.id] = controlsRef.current[i].getValue()
     })
     setStatus('Saving…')
-    const res = await fetch(`/api/instance/modules/${mod.id}?stage=${encodeURIComponent(stageId)}`, {
+    const res = await apiFetch(`/api/instance/modules/${mod.id}?stage=${encodeURIComponent(stageId)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: mod.status, owner: mod.owner, fields }),
@@ -552,9 +554,9 @@ function ArtefactsSection({ instance }) {
 
   async function handleRender(artefact) {
     setStatus('Rendering…')
-    const res = await fetch(`/api/instance/render/${artefact.id}`, { method: 'POST' })
+    const res = await apiFetch(`/api/instance/render/${artefact.id}`, { method: 'POST' })
     const body = await res.json()
-    setStatus(res.ok ? `Rendered to ${body.docxPath}` : `Render failed: ${body.error}`)
+    setStatus(res.ok ? `Rendered to ${body.docxPath}` : `Render failed: ${body.message ?? body.error}`)
   }
 
   return html`
@@ -667,6 +669,14 @@ function AppHeader({ instance }) {
         <button type="button" class="btn small ghost theme-toggle" onClick=${cycleTheme} title="Cycle theme">
           Theme: ${theme.value}
         </button>
+        ${pat.value
+          ? html`
+              <button type="button" class="btn small ghost" onClick=${() => requestPat()}>
+                Replace Azure DevOps PAT
+              </button>
+              <button type="button" class="btn small ghost" onClick=${clearPat}>Clear Azure DevOps PAT</button>
+            `
+          : null}
       </div>
       <p id="stage-line">${instance.stage.title} (gate: ${instance.stage.gate})</p>
       <nav id="stage-nav">
@@ -726,10 +736,10 @@ function ModuleEditorPage({ slug }) {
 // ============================================================
 
 async function loadInstances() {
-  const res = await fetch('/api/instances')
+  const res = await apiFetch('/api/instances')
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
-    throw new Error(body.error ?? `Failed to load instances (${res.status})`)
+    throw new Error(body.message ?? body.error ?? `Failed to load instances (${res.status})`)
   }
   return res.json()
 }
@@ -781,24 +791,24 @@ function EmptyState() {
 // whichever single instance is currently open) — the dashboard can trigger
 // either action for any listed instance without navigating away from it.
 async function runCheck(slug) {
-  const res = await fetch(`/api/instance/check?slug=${encodeURIComponent(slug)}`)
+  const res = await apiFetch(`/api/instance/check?slug=${encodeURIComponent(slug)}`)
   const body = await res.json()
-  if (!res.ok) return `Check failed: ${body.error}`
+  if (!res.ok) return `Check failed: ${body.message ?? body.error}`
   if (body.pass) return 'PASS — gate requirements met.'
   const outstanding = body.modules.filter((m) => !m.complete).map((m) => m.title)
   return `FAIL — outstanding: ${outstanding.join(', ') || 'see modules'}`
 }
 
 async function runRender(slug) {
-  const detailRes = await fetch(`/api/instance?slug=${encodeURIComponent(slug)}`)
+  const detailRes = await apiFetch(`/api/instance?slug=${encodeURIComponent(slug)}`)
   const detail = await detailRes.json()
-  if (!detailRes.ok) return `Render failed: ${detail.error}`
+  if (!detailRes.ok) return `Render failed: ${detail.message ?? detail.error}`
   if (!detail.artefacts.length) return 'No artefact available to render for this stage yet.'
   const results = []
   for (const artefact of detail.artefacts) {
-    const res = await fetch(`/api/instance/render/${artefact.id}?slug=${encodeURIComponent(slug)}`, { method: 'POST' })
+    const res = await apiFetch(`/api/instance/render/${artefact.id}?slug=${encodeURIComponent(slug)}`, { method: 'POST' })
     const body = await res.json()
-    results.push(res.ok ? `Rendered ${artefact.title}` : `${artefact.title} failed: ${body.error}`)
+    results.push(res.ok ? `Rendered ${artefact.title}` : `${artefact.title} failed: ${body.message ?? body.error}`)
   }
   return results.join(' · ')
 }
@@ -827,7 +837,7 @@ function MasterDetailView({ instances }) {
     setDetail(null)
     setDetailError(null)
     setActionStatus('')
-    fetch(`/api/instance?slug=${encodeURIComponent(effectiveSlug)}`)
+    apiFetch(`/api/instance?slug=${encodeURIComponent(effectiveSlug)}`)
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to load "${effectiveSlug}" (${res.status})`)
         return res.json()
@@ -998,7 +1008,7 @@ function SwimlaneView({ instances }) {
 
   useEffect(() => {
     definitionIds.forEach((definitionId) => {
-      fetch(`/api/definitions/${encodeURIComponent(definitionId)}/stages`)
+      apiFetch(`/api/definitions/${encodeURIComponent(definitionId)}/stages`)
         .then((res) => {
           if (!res.ok) throw new Error(`Failed to load stages for "${definitionId}" (${res.status})`)
           return res.json()
@@ -1063,6 +1073,66 @@ function DashboardPage() {
   `
 }
 
+// ---------- Azure DevOps PAT prompt (#87) ----------
+// Rendered globally (see App() below) rather than scoped to any one screen —
+// `apiFetch` (web/lib/apiFetch.js) opens it (via `requestPat()`) the moment
+// *any* request against gantry's own API comes back with the structured
+// "authentication required" response, regardless of which route triggered
+// it. Local instances never produce that response, so this never opens for
+// them — nothing here checks "is this instance local" itself.
+function PatPromptModal() {
+  const [value, setValue] = useState('')
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key === 'Escape') resolvePromptWith(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  function handleSubmit() {
+    if (!value.trim()) {
+      setError('Paste a Personal Access Token to continue.')
+      return
+    }
+    resolvePromptWith(value.trim())
+  }
+
+  return html`
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Azure DevOps sign-in required">
+        <h3>Azure DevOps sign-in required</h3>
+        <p class="guidance">
+          This instance's data lives in Azure DevOps. Paste a Personal Access Token (PAT) to continue — it needs
+          <strong>Code (Read & write)</strong> and <strong>Work Items (Read & write)</strong> scope.
+          It's stored only in this browser and sent solely to your own gantry server.
+        </p>
+        <input
+          class=${'text-field' + (error ? ' has-error' : '')}
+          type="password"
+          autocomplete="off"
+          placeholder="Paste your Azure DevOps PAT"
+          value=${value}
+          onInput=${(e) => {
+            setValue(e.currentTarget.value)
+            if (error) setError('')
+          }}
+          onKeyDown=${(e) => {
+            if (e.key === 'Enter') handleSubmit()
+          }}
+        />
+        ${error ? html`<div class="inline-error">${error}</div>` : null}
+        <div class="modal-actions">
+          <button type="button" class="btn ghost" onClick=${() => resolvePromptWith(null)}>Cancel</button>
+          <button type="button" class="btn primary" onClick=${handleSubmit}>Continue</button>
+        </div>
+      </div>
+    </div>
+  `
+}
+
 // ---------- App shell: preact-iso routing ----------
 // Five routes: the dashboard (#77, default/landing), the module editor per
 // instance, the instance-setup wizard (#78), and the asset library (#80).
@@ -1080,6 +1150,7 @@ function App() {
         <${Route} default component=${DashboardPage} />
       <//>
     <//>
+    ${promptOpen.value ? html`<${PatPromptModal} />` : null}
   `
 }
 

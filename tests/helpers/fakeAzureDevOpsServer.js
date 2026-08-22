@@ -11,10 +11,11 @@ function objectIdFor(n) {
  * talks to over real `fetch` calls, never a mock of `fetch` itself.
  *
  * `files` seeds the fake repo's initial content on `main`, keyed by
- * repo-relative path (leading "/" optional). `validPat` is the only PAT
- * accepted as the password half of HTTP Basic auth (empty username) —
- * anything else, or no Authorization header at all, gets a 401, mirroring
- * how a rejected PAT surfaces from the real API.
+ * repo-relative path (leading "/" optional). `validPat` is the PAT (or, if
+ * an array, any one of several PATs — e.g. to exercise replacing one valid
+ * PAT with another) accepted as the password half of HTTP Basic auth (empty
+ * username) — anything else, or no Authorization header at all, gets a 401,
+ * mirroring how a rejected PAT surfaces from the real API.
  *
  * `failAfterPushes`, if given, makes every push (POST .../pushes) once
  * `failAfterPushes` pushes have already committed successfully *during this
@@ -52,7 +53,8 @@ export function createFakeAzureDevOpsServer({ organization, project, repository,
     const [, encoded] = (req.headers['authorization'] ?? '').split(' ')
     const decoded = encoded ? Buffer.from(encoded, 'base64').toString('utf8') : ''
     const providedPat = decoded.startsWith(':') ? decoded.slice(1) : undefined
-    if (providedPat !== validPat) {
+    const validPats = Array.isArray(validPat) ? validPat : [validPat]
+    if (!validPats.includes(providedPat)) {
       return json(401, { message: 'TF400813: The user is not authorized (fake: invalid or missing PAT).' })
     }
 
