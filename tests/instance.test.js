@@ -382,6 +382,39 @@ test('readModule against Azure DevOps reports a missing module the same way the 
   })
 })
 
+// Regression test for a review finding: readModule used to never forward
+// `options.strict` to parseModuleFile on either storage backend, so a
+// caller asking for strict parsing (as evaluateStage's `check` mode does)
+// would silently get non-strict semantics regardless. `strict` must now
+// throw on a parser anomaly the same way on both the local and Azure
+// DevOps-backed paths.
+test('readModule forwards options.strict to parseModuleFile on both the local and Azure DevOps-backed paths', async () => {
+  const badModuleText = '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Not A Real Field\n\nWhatever.\n'
+  const definition = loadDefinition('design')
+
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    writeFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), badModuleText)
+    assert.throws(
+      () => readModule(definition, 'my-initiative', 'context', { instancesDir, strict: true }),
+      /does not match any field/
+    )
+    // Without strict, the same anomaly warns instead of throwing.
+    const data = readModule(definition, 'my-initiative', 'context', { instancesDir })
+    assert.equal(data.warnings.length, 1)
+  })
+
+  await withFakeRepo({ '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n', '/modules/context.md': badModuleText }, async (baseUrl) => {
+    const azureDevOps = azureDevOpsOptions(baseUrl)
+    await assert.rejects(
+      () => readModule(definition, 'my-initiative', 'context', { azureDevOps, strict: true }),
+      /does not match any field/
+    )
+    const data = await readModule(definition, 'my-initiative', 'context', { azureDevOps })
+    assert.equal(data.warnings.length, 1)
+  })
+})
+
 test('a PAT the (fake) Azure DevOps server rejects surfaces from readInstance/readModule/writeModule/createInstance as AzureDevOpsAuthenticationError', async () => {
   await withFakeRepo({ '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n' }, async (baseUrl) => {
     const badAzureDevOps = azureDevOpsOptions(baseUrl, { pat: 'a-pat-the-server-does-not-recognize' })
