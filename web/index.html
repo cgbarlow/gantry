@@ -8,15 +8,38 @@
 <script type="importmap">
 "__IMPORT_MAP__"
 </script>
+<script>
+  // Resolve the theme before first paint so there's no flash of the wrong
+  // theme. An explicit prior choice (localStorage) wins; otherwise follow
+  // the OS's contrast/colour-scheme preference. Kept as a plain inline
+  // script (not a module) so it runs before CSS paints, ahead of app.js
+  // loading Preact — duplicated from (rather than importing) the same
+  // fallback chain in web/lib/theme.js's preferredTheme()/initialTheme();
+  // keep the two in sync.
+  //
+  // localStorage and matchMedia can both throw rather than just being
+  // absent (blocked storage; a sandboxed iframe with no allow-same-origin;
+  // an environment with no matchMedia) — the whole resolution is guarded,
+  // matching theme.js's own defensiveness, so a throw here can't leave
+  // data-theme unset and the page unstyled.
+  (function () {
+    var theme = 'light';
+    try {
+      var stored = localStorage.getItem('gantry:theme');
+      theme = stored || (
+        typeof matchMedia !== 'function' ? 'light' :
+        matchMedia('(prefers-contrast: more)').matches ? 'hc' :
+        matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+      );
+    } catch {
+      theme = 'light';
+    }
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
 </head>
 <body>
-<header>
-  <h1 id="instance-title">gantry</h1>
-  <p id="stage-line"></p>
-  <nav id="stage-nav"></nav>
-  <div id="stage-actions"></div>
-</header>
-<main id="modules"></main>
+<div id="app"></div>
 <script type="module" src="/app.js"></script>
 </body>
 </html>

@@ -1,125 +1,227 @@
-body {
-  font-family: system-ui, -apple-system, sans-serif;
-  margin: 2rem auto;
-  max-width: 900px;
-  color: #1a1a1a;
+/*
+ * Gate Ledger design language — light/dark/high-contrast themes, WCAG-checked
+ * contrast. Tokens and component styles ported from
+ * web/prototypes/design-language.prototype.html (#69) and
+ * web/prototypes/module-editor.prototype.html (#72), the two prototypes this
+ * screen's restyle is based on. See those files' own header comments for the
+ * hand-computed WCAG 2.1 contrast ratios behind each colour pair.
+ *
+ * Fonts: the prototypes loaded Space Grotesk / IBM Plex from Google Fonts for
+ * preview purposes only — gantry has no CDN-at-runtime dependency (every
+ * other browser dep is served from node_modules via the import map), so this
+ * stylesheet lists them as the *preferred* family with a system-font fallback
+ * chain, rather than fetching them. Self-hosting those two families under
+ * node_modules is follow-on work, not part of this ticket.
+ */
+
+:root {
+  --font-display: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+  --font-body: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --radius: 2px;
+  --hairline: 1px;
+  --border-strong: 1px;
 }
+
+/* LIGHT (default) — paper/ink/vellum */
+[data-theme='light'] {
+  --bg: #EDEBE6;
+  --bg-raised: #F5F3EE;
+  --text: #1B1E22;
+  --text-muted: #4A4740;
+  --line: #B9B3A4;
+  --line-strong: #5B5648; /* 6.88:1 vs bg */
+  --focus-ring: #1B1E22;
+
+  --stamp-draft-bg: #8A5A1F;
+  --stamp-draft-fg: #F5F1E8;
+  --stamp-agreed-bg: #295C40;
+  --stamp-agreed-fg: #F5F1E8;
+  --stamp-review-bg: #4A4740;
+  --stamp-review-fg: #F5F1E8;
+}
+
+/* DARK — inverted paper/ink, not pure black */
+[data-theme='dark'] {
+  --bg: #1B1E22;
+  --bg-raised: #24272C;
+  --text: #EDEBE6;
+  --text-muted: #B9B3A4;
+  --line: #3A3D42;
+  --line-strong: #8A8578; /* 4.55:1 vs bg */
+  --focus-ring: #EDEBE6;
+
+  --stamp-draft-bg: #D9A548;
+  --stamp-draft-fg: #1B1E22;
+  --stamp-agreed-bg: #6FBF97;
+  --stamp-agreed-fg: #1B1E22;
+  --stamp-review-bg: #B9B3A4;
+  --stamp-review-fg: #1B1E22;
+}
+
+/* HIGH CONTRAST — pure black/white, bold solid borders, no hairlines */
+[data-theme='hc'] {
+  --bg: #000000;
+  --bg-raised: #000000;
+  --text: #FFFFFF;
+  --text-muted: #FFFFFF;
+  --line: #FFFFFF;
+  --line-strong: #FFFFFF;
+  --focus-ring: #FFD400;
+
+  --stamp-draft-bg: #FFB000;
+  --stamp-draft-fg: #000000;
+  --stamp-agreed-bg: #00C853;
+  --stamp-agreed-fg: #000000;
+  --stamp-review-bg: #000000;
+  --stamp-review-fg: #FFFFFF;
+
+  --hairline: 2px;
+  --border-strong: 3px;
+  --radius: 0px;
+}
+
+* { box-sizing: border-box; }
+
+html { background: var(--bg); }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+
+a { color: inherit; }
+:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 
 header {
-  border-bottom: 2px solid #1a1a1a;
-  padding-bottom: 0.5rem;
-  margin-bottom: 1rem;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 32px 32px 20px;
+  border-bottom: var(--border-strong) solid var(--line-strong);
 }
-
-#stage-line {
-  color: #555;
-  margin: 0;
-}
-
-#stage-nav {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-}
-
-#stage-nav button {
-  margin: 0;
-}
-
-#stage-nav button.active {
-  background: #1a1a1a;
-  color: #fff;
-}
-
-#stage-actions {
-  margin-top: 0.5rem;
-}
-
-#stage-actions button {
-  margin: 0 0.5rem 0 0;
-}
-
-#stage-actions button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.module {
-  border-top: 1px solid #ccc;
-  padding-top: 1rem;
-  margin-top: 1.5rem;
-}
-
-.artefacts {
-  border-top: 2px solid #1a1a1a;
-  padding-top: 1rem;
-  margin-top: 2rem;
-}
-
-.purpose {
-  color: #555;
-  font-style: italic;
-}
-
-.field {
-  margin-top: 1rem;
-}
-
-.field label {
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand svg { flex-shrink: 0; }
+.brand h1 {
+  font-family: var(--font-display);
   font-weight: 600;
-  display: block;
+  letter-spacing: -0.01em;
+  font-size: 22px;
+  margin: 0;
+  flex: 1;
 }
+.theme-toggle { margin: 0; text-transform: capitalize; }
 
-.guidance {
-  color: #555;
-  font-size: 0.9rem;
-  margin: 0.25rem 0;
+#stage-line { color: var(--text-muted); margin: 6px 0 0; font-size: 13px; }
+#stage-nav { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+#stage-nav button.stage-current { border-color: var(--line-strong); }
+
+main#modules, .stage-actions, .load-error, .loading {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 32px 140px;
 }
+.stage-actions { padding-top: 20px; padding-bottom: 0; }
 
-.split {
-  display: flex;
-  gap: 1rem;
-  align-items: stretch;
+button.btn {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  border: var(--border-strong) solid var(--line-strong);
+  background: var(--bg-raised);
+  color: var(--text);
+  cursor: pointer;
+  margin: 0.5rem 0.5rem 0 0;
 }
+button.btn.primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+button.btn.ghost { background: transparent; border-color: var(--line); }
+button.btn.small { padding: 5px 10px; font-size: 12px; }
+button.btn.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.editor-host {
+/*
+ * Not yet used by this screen (module status/owner aren't shown here, per
+ * this ticket's "no new user-facing capability" scope) — kept because #77
+ * ("Instance dashboard") needs a stage/gate/status/owner detail pane and is
+ * the next ticket to consume these tokens/classes.
+ */
+.stamp {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: var(--radius);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.07em;
+}
+.stamp.draft  { background: var(--stamp-draft-bg);  color: var(--stamp-draft-fg); }
+.stamp.review { background: var(--stamp-review-bg); color: var(--stamp-review-fg); }
+.stamp.agreed { background: var(--stamp-agreed-bg); color: var(--stamp-agreed-fg); }
+
+.module { border-top: var(--hairline) solid var(--line); padding-top: 20px; margin-top: 28px; }
+.module h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 4px; }
+.module .purpose { color: var(--text-muted); font-style: italic; font-size: 13px; margin: 0 0 16px; }
+
+.artefacts { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 32px; }
+.artefacts h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }
+
+.field { margin-top: 20px; }
+.field label { font-family: var(--font-display); font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px; }
+.guidance { color: var(--text-muted); font-size: 12px; margin: 0 0 8px; }
+
+.field-markdown .split { display: flex; gap: 16px; align-items: stretch; }
+.field-markdown .editor-host,
+.field-markdown .preview {
   flex: 1;
   min-width: 0;
-  border: 1px solid #ccc;
+  border-radius: var(--radius);
 }
-
-.editor-host .cm-editor {
-  height: 100%;
+.field-markdown .editor-host {
+  border: var(--border-strong) solid var(--line-strong);
+  background: var(--bg-raised);
 }
-
-.preview {
-  flex: 1;
-  min-width: 0;
-  border: 1px solid #eee;
-  background: #fafafa;
-  padding: 0.5rem 0.75rem;
+.field-markdown .editor-host .cm-editor { height: 100%; }
+.field-markdown .editor-host .cm-content,
+.field-markdown .editor-host .cm-gutters {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.field-markdown .preview {
+  border: var(--hairline) solid var(--line);
+  background: var(--bg);
+  padding: 10px 12px;
   overflow: auto;
+  color: var(--text);
+}
+.field-markdown .preview code {
+  font-family: var(--font-mono);
+  background: var(--bg-raised);
+  padding: 1px 4px;
+  border-radius: var(--radius);
 }
 
-.list-row {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 0.25rem;
-}
-
-.list-row input {
+.field-list .list-row { display: flex; gap: 8px; margin-bottom: 6px; }
+.field-list input {
   flex: 1;
-  padding: 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  border: var(--border-strong) solid var(--line-strong);
+  background: var(--bg-raised);
+  color: var(--text);
 }
+.field-list input::placeholder { color: var(--text-muted); }
 
-.save-status {
-  font-size: 0.9rem;
-  color: #333;
-  min-height: 1.2em;
-  margin-top: 0.5rem;
-}
-
-button {
-  margin-top: 0.5rem;
-  margin-right: 0.5rem;
-}
+.save-status { font-size: 0.9rem; color: var(--text-muted); min-height: 1.2em; margin-top: 0.5rem; }
+.load-error, .loading { padding-top: 48px; color: var(--text-muted); }
