@@ -40,6 +40,8 @@
   --stamp-agreed-fg: #F5F1E8;
   --stamp-review-bg: #4A4740;
   --stamp-review-fg: #F5F1E8;
+  --stamp-error-bg: #8C3A2B;  /* 6.40:1 vs bg, 6.76:1 vs fg */
+  --stamp-error-fg: #F5F1E8;
 }
 
 /* DARK — inverted paper/ink, not pure black */
@@ -58,6 +60,8 @@
   --stamp-agreed-fg: #1B1E22;
   --stamp-review-bg: #B9B3A4;
   --stamp-review-fg: #1B1E22;
+  --stamp-error-bg: #F2836B;  /* 6.56:1 vs bg */
+  --stamp-error-fg: #1B1E22;
 }
 
 /* HIGH CONTRAST — pure black/white, bold solid borders, no hairlines */
@@ -76,6 +80,8 @@
   --stamp-agreed-fg: #000000;
   --stamp-review-bg: #000000;
   --stamp-review-fg: #FFFFFF;
+  --stamp-error-bg: #FF6B57;  /* 7.49:1 vs bg */
+  --stamp-error-fg: #000000;
 
   --hairline: 2px;
   --border-strong: 3px;
@@ -123,6 +129,31 @@ header {
 #stage-line { color: var(--text-muted); margin: 6px 0 0; font-size: 13px; }
 #stage-nav { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
 #stage-nav button.stage-current { border-color: var(--line-strong); }
+
+/*
+ * View-mode toolbar (#79) — a toolbar segmented control (Markdown / Split /
+ * Rendered) for the whole module-editor screen, ported from Variant A of
+ * web/prototypes/module-editor.prototype.html (#72).
+ */
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 14px 32px;
+  background: var(--bg-raised);
+  border-bottom: var(--hairline) solid var(--line);
+}
+.segmented { display: inline-flex; border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius); overflow: hidden; }
+.segmented button { border: none; border-right: var(--hairline) solid var(--line-strong); border-radius: 0; margin: 0; }
+.segmented button:last-child { border-right: none; }
+
+/* View-mode visibility, driven by data-view-mode on main#modules (#79). */
+main[data-view-mode='markdown'] .field-markdown .preview { display: none; }
+main[data-view-mode='markdown'] .field-markdown .editor-host { flex: 1 1 100%; }
+main[data-view-mode='rendered'] .field-markdown .editor-host { display: none; }
+main[data-view-mode='rendered'] .field-markdown .preview { flex: 1 1 100%; }
 
 main#modules, .stage-actions, .load-error, .loading {
   max-width: 1120px;
@@ -354,3 +385,146 @@ main.dashboard {
   box-sizing: border-box;
 }
 .chip .menu button:hover, .chip .menu a:hover { background: var(--bg); }
+
+/*
+ * Asset insertion (#80) — ported from Variant A of
+ * web/prototypes/asset-insertion.prototype.html (locked in by #73): an
+ * unobtrusive "+ Insert asset" affordance after every module, a two-tab
+ * modal (Upload new / Choose existing), and a separate thumbnail-grid
+ * library screen.
+ */
+.insert-affordance { margin-top: 14px; }
+.insert-affordance > button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-decoration: underline dotted;
+  cursor: pointer;
+  padding: 0;
+}
+.insert-affordance > button:hover { color: var(--text); }
+
+.field-markdown .preview img.asset-thumb {
+  display: block;
+  width: 100%;
+  max-width: 260px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  margin: 6px 0;
+}
+
+.modal-backdrop {
+  display: flex;
+  position: fixed;
+  inset: 0;
+  background: rgba(27, 30, 34, 0.5);
+  z-index: 20;
+  align-items: center;
+  justify-content: center;
+}
+.modal {
+  width: 520px;
+  max-width: 92vw;
+  max-height: 85vh;
+  overflow: auto;
+  background: var(--bg-raised);
+  border: var(--border-strong) solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+.modal h3 { font-family: var(--font-display); font-weight: 600; font-size: 16px; margin: 0 0 16px; }
+.modal-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: var(--border-strong) solid var(--line-strong);
+  margin-bottom: 16px;
+}
+.modal-tabs button {
+  flex: 1;
+  background: none;
+  border: none;
+  padding: 8px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.modal-tabs button.active { color: var(--text); border-bottom: 2px solid var(--text); margin-bottom: -2px; }
+.modal-actions { margin-top: 16px; display: flex; justify-content: flex-end; gap: 8px; }
+
+.field-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+input.text-field {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 8px 11px;
+  border-radius: var(--radius);
+  border: var(--border-strong) solid var(--line-strong);
+  background: var(--bg);
+  color: var(--text);
+  width: 100%;
+}
+input.text-field.has-error { border-color: var(--stamp-error-bg); }
+.inline-error { color: var(--stamp-error-bg); font-size: 12px; margin-top: 6px; }
+.upload-field { margin-bottom: 14px; }
+
+.grid-library {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.grid-library .card {
+  cursor: pointer;
+  border: none;
+  background: none;
+  text-align: left;
+  padding: 8px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  font-family: var(--font-body);
+  color: var(--text);
+}
+.grid-library .card:hover { border-color: var(--line-strong); }
+.grid-library .card img,
+.lib-grid .card img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4/3;
+  object-fit: cover;
+  border-radius: var(--radius);
+  border: var(--hairline) solid var(--line);
+}
+.grid-library .card .name { font-size: 11px; font-weight: 600; margin-top: 6px; }
+.grid-library .empty, .lib-grid .empty { color: var(--text-muted); font-size: 13px; grid-column: 1 / -1; }
+
+.asset-library {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 32px 32px 140px;
+}
+.asset-library h1 { font-family: var(--font-display); font-weight: 600; font-size: 22px; margin: 0 0 4px; }
+.asset-library .back-link { display: inline-block; margin-bottom: 20px; font-size: 13px; }
+.lib-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+.lib-grid .card {
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: var(--bg-raised);
+}
+.lib-grid .card .name { font-family: var(--font-display); font-weight: 600; font-size: 13px; margin: 8px 0 2px; }
+.lib-grid .card .meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); overflow-wrap: anywhere; }
+.lib-grid .card .used-badge { margin-top: 8px; }

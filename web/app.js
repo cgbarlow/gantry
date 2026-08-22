@@ -11,14 +11,45 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { signal, effect } from '@preact/signals'
 import { LocationProvider, Router, Route } from 'preact-iso'
 import { EditorView, basicSetup } from 'codemirror'
-import { EditorState } from '@codemirror/state'
+import { EditorState, Compartment } from '@codemirror/state'
 import { markdown } from '@codemirror/lang-markdown'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import { theme, cycleTheme } from './lib/theme.js'
-import { VIEW_MODES, viewMode } from './lib/dashboardView.js'
+// Two distinct "view mode" concepts collide on the same export names — the
+// dashboard's (#77) master-detail/swimlanes toggle and the module editor's
+// (#79) markdown/split/rendered toggle are unrelated signals that happen to
+// share a shape. The dashboard's is aliased here; the module editor's keeps
+// the bare names since it's used throughout the rest of this file.
+import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
+import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
+import { assetReference, resolveAssetRefs } from './lib/assetRefs.js'
 
 const md = new MarkdownIt()
+
+// The server always serves the real image bytes for an asset id, regardless
+// of which `asset:<id>` reference resolved to it — matches the other
+// single-instance routes' convention (defaulting to the server's startup
+// slug rather than requiring a `?slug=` the client doesn't otherwise track).
+// Known gap exposed by #77's multi-instance routing, not fixed by this
+// merge: this (and fetchAssets/uploadAsset below) still resolve against the
+// server's default startup instance regardless of which slug the module
+// editor is actually viewing — pre-existing from #80's single-instance-era
+// scope, worth its own follow-up ticket rather than silently expanding here.
+function assetFileUrl(assetId) {
+  return `/api/instance/assets/${encodeURIComponent(assetId)}/file`
+}
+
+// `image` tokens whose src resolves to gantry's own asset-file route get an
+// `asset-thumb` class, so the Gate Ledger stylesheet can size/border an
+// inserted asset as a real thumbnail rather than an arbitrary inline image
+// (#80's "renders as an actual thumbnail" acceptance criterion).
+const defaultImageRenderer = md.renderer.rules.image
+md.renderer.rules.image = (tokens, idx, options, env, self) => {
+  const src = tokens[idx].attrGet('src') ?? ''
+  if (src.startsWith('/api/instance/assets/')) tokens[idx].attrJoin('class', 'asset-thumb')
+  return defaultImageRenderer(tokens, idx, options, env, self)
+}
 
 async function loadInstance(slug, stageId) {
   const params = new URLSearchParams()
@@ -33,9 +64,44 @@ async function loadInstance(slug, stageId) {
   return res.json()
 }
 
+async function fetchAssets() {
+  const res = await fetch('/api/instance/assets')
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error ?? `Failed to load assets (${res.status})`)
+  }
+  return res.json()
+}
+
+async function uploadAsset({ filename, dataBase64, name, source, uploadedBy }) {
+  const res = await fetch('/api/instance/assets', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename, dataBase64, name, source, uploadedBy }),
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(body.error ?? `Failed to upload asset (${res.status})`)
+  }
+  return body
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '')
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read file'))
+    reader.readAsDataURL(file)
+  })
+}
+
+// `asset:<id>` references are resolved to the real, fetchable asset-file
+// URL before markdown-it ever sees the text — the *stored* markdown source
+// keeps the portable `asset:<id>` convention (see web/lib/assetRefs.js),
+// only the live preview's rendered HTML points at a real URL.
 function renderPreview(node, text) {
   if (!node) return
-  node.innerHTML = DOMPurify.sanitize(md.render(text ?? ''))
+  node.innerHTML = DOMPurify.sanitize(md.render(resolveAssetRefs(text ?? '', assetFileUrl)))
 }
 
 // ---------- Instance-scoped state ----------
@@ -64,21 +130,33 @@ effect(() => {
     })
 })
 
+// A Rendered-mode editor must be genuinely read-only (#79's acceptance
+// criteria: "no edits possible, none saved"), not just visually hidden by
+// CSS — `EditorState.readOnly` rejects direct-edit transactions and
+// `EditorView.editable` drops `contenteditable`, so neither typing nor
+// paste nor drag-drop can land a change while Rendered is active.
+function editableExtension(mode) {
+  const editable = mode !== 'rendered'
+  return [EditorState.readOnly.of(!editable), EditorView.editable.of(editable)]
+}
+
 // ---------- Markdown field ----------
 // EditorView.updateListener -> markdown-it -> DOMPurify -> sibling preview
 // pane, per docs/adr/0004-markdown-editor-codemirror.md. The CodeMirror
 // instance is the source of truth for the field's value, so getValue/setValue
 // read and write it directly rather than duplicating it into component state.
-function MarkdownField({ field, onRegister }) {
+function MarkdownField({ field, onRegister, onFocus }) {
   const hostRef = useRef(null)
   const previewRef = useRef(null)
 
   useEffect(() => {
+    const editableCompartment = new Compartment()
     const state = EditorState.create({
       doc: field.value ?? '',
       extensions: [
         basicSetup,
         markdown(),
+        editableCompartment.of(editableExtension(viewMode.value)),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) renderPreview(previewRef.current, update.state.doc.toString())
         }),
@@ -87,15 +165,49 @@ function MarkdownField({ field, onRegister }) {
     const view = new EditorView({ state, parent: hostRef.current })
     renderPreview(previewRef.current, field.value ?? '')
 
+    // Track the global view-mode signal for as long as this editor is
+    // mounted, so switching into/out of Rendered toggles read-only live —
+    // the ticket requires it enforced immediately, not just on next mount.
+    const stopViewModeSync = effect(() => {
+      view.dispatch({ effects: editableCompartment.reconfigure(editableExtension(viewMode.value)) })
+    })
+
+    // Reports focus up to ModuleCard so its single, per-module
+    // "+ Insert asset" affordance (#80) knows which field's cursor to
+    // insert the reference at — the module's fields aren't otherwise
+    // tracked anywhere once mounted.
+    function handleFocusIn() {
+      onFocus?.()
+    }
+    view.dom.addEventListener('focusin', handleFocusIn)
+
     onRegister({
       getValue: () => view.state.doc.toString(),
       setValue: (text) => {
         view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text ?? '' } })
         renderPreview(previewRef.current, text ?? '')
       },
+      // Inserts an asset reference at the current cursor position (or over
+      // the current selection), on its own line — "clicking one inserts
+      // its reference at the trigger point" (#80). The preview updates via
+      // the same updateListener/docChanged path a normal edit takes.
+      insertAtCursor: (snippet) => {
+        const { from, to } = view.state.selection.main
+        const needsLeadingNewline = from > 0 && view.state.doc.sliceString(from - 1, from) !== '\n'
+        const insertText = `${needsLeadingNewline ? '\n' : ''}${snippet}\n`
+        view.dispatch({
+          changes: { from, to, insert: insertText },
+          selection: { anchor: from + insertText.length },
+        })
+        view.focus()
+      },
     })
 
-    return () => view.destroy()
+    return () => {
+      view.dom.removeEventListener('focusin', handleFocusIn)
+      stopViewModeSync()
+      view.destroy()
+    }
     // One editor per mount — the enclosing stage screen remounts wholesale
     // (keyed by stage id) on stage switch, matching the old full-rebuild
     // behaviour, so this never needs to react to `field` changing in place.
@@ -166,7 +278,13 @@ function ListField({ field, onRegister }) {
 // ---------- One module's card: fields + its own Save button/status ----------
 function ModuleCard({ mod, stageId, onFieldRegistered }) {
   const [status, setStatus] = useState('')
+  const [modalOpen, setModalOpen] = useState(false)
   const controlsRef = useRef([])
+  // Which field an inserted asset lands in: whichever markdown field the
+  // author last focused, defaulting to the module's first markdown field
+  // (a module may have none — all-list modules simply get no insert
+  // affordance at all, see hasMarkdownField below).
+  const activeFieldIndexRef = useRef(mod.fields.findIndex((f) => f.type !== 'list'))
 
   async function handleSave() {
     const fields = {}
@@ -190,6 +308,14 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
     )
   }
 
+  function handleInsert(asset) {
+    const control = controlsRef.current[activeFieldIndexRef.current]
+    control?.insertAtCursor?.(assetReference(asset))
+    setModalOpen(false)
+  }
+
+  const hasMarkdownField = mod.fields.some((f) => f.type !== 'list')
+
   return html`
     <section class="module">
       <h2>${mod.title}</h2>
@@ -201,11 +327,214 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
         }
         return field.type === 'list'
           ? html`<${ListField} key=${field.id} field=${field} onRegister=${onRegister} />`
-          : html`<${MarkdownField} key=${field.id} field=${field} onRegister=${onRegister} />`
+          : html`<${MarkdownField}
+              key=${field.id}
+              field=${field}
+              onRegister=${onRegister}
+              onFocus=${() => (activeFieldIndexRef.current = i)}
+            />`
       })}
       <div class="save-status">${status}</div>
       <button type="button" class="btn primary" onClick=${handleSave}>Save ${mod.title}</button>
+      ${hasMarkdownField && viewMode.value !== 'rendered'
+        ? html`
+            <div class="insert-affordance">
+              <button type="button" onClick=${() => setModalOpen(true)}>+ Insert asset</button>
+            </div>
+          `
+        : null}
+      ${modalOpen ? html`<${AssetInsertModal} onInsert=${handleInsert} onClose=${() => setModalOpen(false)} />` : null}
     </section>
+  `
+}
+
+// ---------- Insert-asset modal: Upload new / Choose existing ----------
+// Opened by a module's "+ Insert asset" affordance (hidden in Rendered-only
+// view, since that view is read-only — see ModuleCard). Ported from
+// Variant A of web/prototypes/asset-insertion.prototype.html (#73), the
+// variant #74 locked in: a modal with two tabs, the "Upload new" tab
+// blocked by an inline error until both the file and the mandatory
+// source-location field are valid.
+function AssetInsertModal({ onInsert, onClose }) {
+  const [tab, setTab] = useState('upload')
+  const [file, setFile] = useState(null)
+  const [name, setName] = useState('')
+  const [source, setSource] = useState('')
+  const [sourceError, setSourceError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [existing, setExisting] = useState(null)
+  const [existingError, setExistingError] = useState('')
+
+  useEffect(() => {
+    if (tab !== 'existing' || existing !== null) return
+    fetchAssets()
+      .then(setExisting)
+      .catch((err) => setExistingError(err.message))
+  }, [tab, existing])
+
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  async function handleSubmitUpload() {
+    if (!source.trim()) {
+      setSourceError('Source location is required — link to the originating file (e.g. a Draw.io diagram).')
+      return
+    }
+    if (!file) {
+      setSourceError('An image file is required.')
+      return
+    }
+    setSourceError('')
+    setSubmitting(true)
+    try {
+      const dataBase64 = await readFileAsBase64(file)
+      const asset = await uploadAsset({ filename: file.name, dataBase64, name, source })
+      onInsert(asset)
+    } catch (err) {
+      setSourceError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return html`
+    <div class="modal-backdrop" role="presentation" onClick=${(e) => e.target === e.currentTarget && onClose()}>
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Insert asset">
+        <h3>Insert asset</h3>
+        <div class="modal-tabs">
+          <button
+            type="button"
+            class=${tab === 'upload' ? 'active' : ''}
+            aria-pressed=${tab === 'upload'}
+            onClick=${() => setTab('upload')}
+          >
+            Upload new
+          </button>
+          <button
+            type="button"
+            class=${tab === 'existing' ? 'active' : ''}
+            aria-pressed=${tab === 'existing'}
+            onClick=${() => setTab('existing')}
+          >
+            Choose existing
+          </button>
+        </div>
+
+        ${tab === 'upload'
+          ? html`
+              <div class="upload-field">
+                <label class="field-label">Image file</label>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  onChange=${(e) => setFile(e.currentTarget.files?.[0] ?? null)}
+                />
+              </div>
+              <div class="upload-field">
+                <label class="field-label">Name (optional)</label>
+                <input
+                  class="text-field"
+                  type="text"
+                  value=${name}
+                  placeholder=${file?.name ?? 'Defaults to the file name'}
+                  onInput=${(e) => setName(e.currentTarget.value)}
+                />
+              </div>
+              <div class="upload-field">
+                <label class="field-label">Source location (required)</label>
+                <input
+                  class=${'text-field' + (sourceError ? ' has-error' : '')}
+                  type="text"
+                  value=${source}
+                  placeholder="https://draw.io/diagrams/…"
+                  onInput=${(e) => {
+                    setSource(e.currentTarget.value)
+                    if (sourceError) setSourceError('')
+                  }}
+                />
+                ${sourceError ? html`<div class="inline-error">${sourceError}</div>` : null}
+              </div>
+              <div class="modal-actions">
+                <button type="button" class="btn ghost" onClick=${onClose}>Cancel</button>
+                <button type="button" class="btn primary" disabled=${submitting} onClick=${handleSubmitUpload}>
+                  ${submitting ? 'Inserting…' : 'Insert'}
+                </button>
+              </div>
+            `
+          : html`
+              ${existingError ? html`<p class="load-error">${existingError}</p>` : null}
+              ${existing === null && !existingError ? html`<p class="loading">Loading…</p>` : null}
+              ${existing !== null
+                ? html`
+                    <div class="grid-library">
+                      ${existing.length === 0
+                        ? html`<p class="empty">No assets yet — switch to "Upload new" to add the first one.</p>`
+                        : existing.map(
+                            (asset) => html`
+                              <button type="button" class="card" key=${asset.id} onClick=${() => onInsert(asset)}>
+                                <img src=${assetFileUrl(asset.id)} alt=${asset.name} />
+                                <div class="name">${asset.name}</div>
+                              </button>
+                            `
+                          )}
+                    </div>
+                  `
+                : null}
+            `}
+      </div>
+    </div>
+  `
+}
+
+// ---------- Asset library screen ----------
+// A new instance-level screen (#80): every asset registered against this
+// instance as a thumbnail-grid card, each flagged USED IN N / UNUSED so
+// orphaned assets are visible without opening every module.
+function AssetLibraryPage() {
+  const [assets, setAssets] = useState(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    fetchAssets()
+      .then(setAssets)
+      .catch((err) => setError(err.message))
+  }, [])
+
+  return html`
+    <main class="asset-library">
+      <a class="back-link" href="/">← Back to module editor</a>
+      <h1>Asset library</h1>
+      ${error ? html`<p class="load-error">${error}</p>` : null}
+      ${assets === null && !error ? html`<p class="loading">Loading…</p>` : null}
+      ${assets !== null
+        ? html`
+            <div class="lib-grid">
+              ${assets.length === 0
+                ? html`<p class="empty">No assets registered yet.</p>`
+                : assets.map(
+                    (asset) => html`
+                      <div class="card" key=${asset.id}>
+                        <img src=${assetFileUrl(asset.id)} alt=${asset.name} />
+                        <div class="name">${asset.name}</div>
+                        <div class="meta">
+                          ${asset.uploadedBy ? html`${asset.uploadedBy} · ` : null}
+                          <a href=${asset.source} target="_blank" rel="noreferrer">${asset.source}</a>
+                        </div>
+                        <span class=${'stamp used-badge ' + (asset.usedIn.length ? 'agreed' : 'review')}>
+                          ${asset.usedIn.length ? `USED IN ${asset.usedIn.length}` : 'UNUSED'}
+                        </span>
+                      </div>
+                    `
+                  )}
+            </div>
+          `
+        : null}
+    </main>
   `
 }
 
@@ -254,7 +583,7 @@ function StageScreen({ instance }) {
     <div class="stage-actions">
       <button type="button" class="btn" onClick=${clearAllFields}>Clear all fields</button>
     </div>
-    <main id="modules">
+    <main id="modules" data-view-mode=${viewMode.value}>
       ${instance.modules.map(
         (mod) => html`
           <${ModuleCard}
@@ -267,6 +596,52 @@ function StageScreen({ instance }) {
       )}
       <${ArtefactsSection} instance=${instance} />
     </main>
+  `
+}
+
+// ---------- View-mode toolbar: Markdown/Split/Rendered segmented control ----------
+// One toolbar for the whole editor screen (see web/lib/viewMode.js) — sits
+// below AppHeader, above the viewed stage's screen, and (like AppHeader) is
+// never remounted by a stage switch, so `viewMode` reads back the same
+// value the author left it in after navigating fields/modules/stages.
+const VIEW_MODE_LABELS = { markdown: 'Markdown', split: 'Split', rendered: 'Rendered' }
+const VIEW_MODE_HOTKEY = { ctrlKey: true, shiftKey: true, key: 'v' }
+
+function ViewModeToolbar() {
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key.toLowerCase() !== VIEW_MODE_HOTKEY.key) return
+      if (e.ctrlKey !== VIEW_MODE_HOTKEY.ctrlKey || e.shiftKey !== VIEW_MODE_HOTKEY.shiftKey) return
+      // Fires even while a CodeMirror editor or other field has focus —
+      // it's a distinctive combo unlikely to collide with normal editing,
+      // and the ticket asks for a hotkey that cycles the whole screen's
+      // view regardless of what the author was just doing.
+      e.preventDefault()
+      cycleViewMode()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  return html`
+    <div class="toolbar">
+      <div class="segmented" role="group" aria-label="View mode">
+        ${VIEW_MODES.map(
+          (mode) => html`
+            <button
+              type="button"
+              key=${mode}
+              class=${'btn small' + (viewMode.value === mode ? ' active' : '')}
+              aria-pressed=${viewMode.value === mode}
+              onClick=${() => (viewMode.value = mode)}
+            >
+              ${VIEW_MODE_LABELS[mode]}
+            </button>
+          `
+        )}
+      </div>
+      <a class="btn small" href="/assets">View asset library</a>
+    </div>
   `
 }
 
@@ -328,6 +703,7 @@ function ModuleEditorPage({ slug }) {
 
   return html`
     <${AppHeader} instance=${instance} />
+    <${ViewModeToolbar} />
     <${StageScreen} key=${instance.stage.id} instance=${instance} />
   `
 }
@@ -365,14 +741,14 @@ function StatusStamp({ status }) {
 function ViewToggle() {
   return html`
     <div class="view-toggle" role="group" aria-label="Dashboard view">
-      ${VIEW_MODES.map(
+      ${DASHBOARD_VIEW_MODES.map(
         (mode) => html`
           <button
             type="button"
             key=${mode}
-            class=${'btn small' + (viewMode.value === mode ? ' active' : '')}
-            aria-pressed=${viewMode.value === mode}
-            onClick=${() => (viewMode.value = mode)}
+            class=${'btn small' + (dashboardViewMode.value === mode ? ' active' : '')}
+            aria-pressed=${dashboardViewMode.value === mode}
+            onClick=${() => (dashboardViewMode.value = mode)}
           >
             ${mode === 'master-detail' ? 'Master-detail' : 'Stage swimlanes'}
           </button>
@@ -671,7 +1047,7 @@ function DashboardPage() {
           ? html`<p class="loading">Loading…</p>`
           : instances.length === 0
             ? html`<${EmptyState} />`
-            : viewMode.value === 'swimlanes'
+            : dashboardViewMode.value === 'swimlanes'
               ? html`<${SwimlaneView} instances=${instances} />`
               : html`<${MasterDetailView} instances=${instances} />`}
     </main>
@@ -696,12 +1072,19 @@ function InstanceSetupPlaceholderPage() {
 }
 
 // ---------- App shell: preact-iso routing ----------
+// Four routes: the dashboard (#77, default/landing), the module editor per
+// instance, the setup-wizard placeholder, and the asset library (#80).
+// `instanceData`/`loadError` above are populated regardless of which route
+// is active (the `effect()` isn't scoped to a component), so the library
+// screen never has to re-fetch instance data just to know which instance
+// it's browsing.
 function App() {
   return html`
     <${LocationProvider}>
       <${Router}>
         <${Route} path="/instance/:slug" component=${ModuleEditorPage} />
         <${Route} path="/instances/new" component=${InstanceSetupPlaceholderPage} />
+        <${Route} path="/assets" component=${AssetLibraryPage} />
         <${Route} default component=${DashboardPage} />
       <//>
     <//>
