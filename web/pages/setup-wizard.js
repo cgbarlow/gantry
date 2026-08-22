@@ -139,12 +139,13 @@ async function createNewInstance() {
   }
 }
 
-// A full navigation (not preact-iso client-side routing) so the module
-// editor's bootstrap load picks up the new `?slug=` from a fresh page load
-// — it isn't reactive to in-place URL changes, only to what it reads at
-// load time.
+// A full navigation (not preact-iso client-side routing) to the module
+// editor's real per-instance route. The module editor is reactive to its
+// route-param `slug` prop now (#77), so a client-side route() would work
+// too — a full navigation is kept anyway for a clean reload of this fresh
+// instance's state, matching the "Open workspace" links elsewhere.
 function openInstance(slug) {
-  window.location.assign(`/?slug=${encodeURIComponent(slug)}`)
+  window.location.assign(`/instance/${encodeURIComponent(slug)}`)
 }
 
 function stampClass(status) {
@@ -163,7 +164,7 @@ function WizardHeader() {
           Theme: ${theme.value}
         </button>
       </div>
-      <a class="btn small ghost" href="/">← Module editor</a>
+      <a class="btn small ghost" href="/">← Instances</a>
     </header>
   `
 }
