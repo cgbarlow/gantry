@@ -1,57 +1,99 @@
-// Stubbed validate(repoUrl) contract for the instance-setup wizard (Azure
-// DevOps #78). The real Azure DevOps sync/auth mechanism — git clone vs
-// REST API, credentials/service connections — is deliberately deferred,
-// per docs/adr/0005-instance-data-in-external-ado-repo.md ("the actual
-// sync/auth mechanism is deliberately *not* decided here"). Every variant
-// in web/prototypes/instance-setup-wizard.prototype.html stood this call in
-// with a "simulate:" dropdown; this is the real (if stubbed) contract that
-// UI ends up wired to.
+// Real validate(repoUrl) contract for the instance-setup wizard (#94, under
+// #88), replacing the original stub (#78): `web/lib/validateRepo.js` used
+// to never contact Azure DevOps at all, only compare the URL's last path
+// segment against gantry's own already-known instances (`GET
+// /api/instances`, #76). Now it parses the standard Azure DevOps repo URL
+// shape and asks the live repo-check route (`GET
+// /api/azure-devops/repo-check`, #90) whether that location already holds
+// instance data — the same three-way `empty`/`existing`/`error` contract
+// callers (web/pages/setup-wizard.js) already depend on, just genuinely
+// backed by Azure DevOps now.
 //
-// Rather than a pure fake, this treats the repo's name (the last path
-// segment of its URL) as an instance slug, and checks it against gantry's
-// *own* multi-instance registry (`GET /api/instances`, #76) — not against
-// Azure DevOps itself. That's still an honest stand-in: a slug already
-// registered there is `existing` (returning that instance's real
-// definition/stage/status/owner for the wizard's found-vs-picked
-// comparison); an unregistered-but-well-formed URL is `empty`; a URL
-// gantry can't even parse a repo name out of, or a registry lookup that
-// fails outright, is `error` — the same failure mode a real
-// unreachable-repo network error would eventually replace this with.
+// A non-`dev.azure.com` base URL (an on-premises Azure DevOps Server) is an
+// explicit, known gap — out of scope here per docs/adr/0005 and #88's own
+// "out of scope" list: this parser only recognizes the standard
+// `https://dev.azure.com/{organization}/{project}/_git/{repository}` shape,
+// and reports a clear `error` result for anything else, the same failure
+// mode as a URL with no recognizable repo path at all.
+//
+// Uses `apiFetch` (not raw `fetch`), so a missing/rejected Azure DevOps PAT
+// during the check triggers the same prompt-and-retry-once modal every
+// other Azure-DevOps-backed request in the app already uses (#87) — this
+// module never rolls its own credential handling.
+import { apiFetch } from './apiFetch.js'
 
-const REPO_URL_RE = /\/([^/]+?)(?:\.git)?\/?$/
+const AZURE_DEVOPS_REPO_URL_RE = /^https:\/\/dev\.azure\.com\/([^/]+)\/([^/]+)\/_git\/([^/]+?)\/?$/
 
-/** The last path segment of a repo URL, treated as the instance slug — '' if none can be parsed out. */
+/**
+ * Parses a repo URL into its Azure DevOps location —
+ * `{ organization, project, repository }` — or `null` if it doesn't match
+ * the standard `https://dev.azure.com/{organization}/{project}/_git/{repository}`
+ * shape (including any non-`dev.azure.com` base URL, or a malformed
+ * percent-escape in one of the path segments).
+ */
+export function parseRepoUrl(repoUrl) {
+  const match = typeof repoUrl === 'string' ? repoUrl.trim().match(AZURE_DEVOPS_REPO_URL_RE) : null
+  if (!match) return null
+  const [, organization, project, repository] = match
+  try {
+    return {
+      organization: decodeURIComponent(organization),
+      project: decodeURIComponent(project),
+      repository: decodeURIComponent(repository),
+    }
+  } catch {
+    return null
+  }
+}
+
+/** The repository name a repo URL parses to as its instance slug — '' if it doesn't parse at all. */
 export function repoSlug(repoUrl) {
-  const match = typeof repoUrl === 'string' ? repoUrl.trim().match(REPO_URL_RE) : null
-  return match ? match[1] : ''
+  return parseRepoUrl(repoUrl)?.repository ?? ''
 }
 
 /**
  * @param {string} repoUrl
  * @returns {Promise<
- *   | { result: 'empty', slug: string }
- *   | { result: 'existing', slug: string, instance: { slug: string, definition: string, stage: string, status: string, owner: string } }
+ *   | { result: 'empty', slug: string, location: { organization: string, project: string, repository: string } }
+ *   | { result: 'existing', slug: string, instance: { slug: string, definition: string, stage: string, status: string, owner: string }, location: { organization: string, project: string, repository: string } }
  *   | { result: 'error', message: string }
  * >}
  */
 export async function validateRepo(repoUrl) {
-  const slug = repoSlug(repoUrl)
-  if (!slug) {
+  const location = parseRepoUrl(repoUrl)
+  if (!location) {
     return {
       result: 'error',
-      message: "Couldn't parse a repo name from this URL — check it's a full Azure DevOps repo URL.",
+      message:
+        "Couldn't parse this as an Azure DevOps repo URL — expected " +
+        'https://dev.azure.com/{organization}/{project}/_git/{repository} ' +
+        '(an on-premises Azure DevOps Server URL is not yet supported).',
     }
   }
 
-  let registry
+  const qs = new URLSearchParams(location).toString()
+  let res
   try {
-    const res = await fetch('/api/instances')
-    if (!res.ok) throw new Error(`registry lookup failed (${res.status})`)
-    registry = await res.json()
-  } catch {
-    return { result: 'error', message: "Couldn't reach this repo — check the URL and that gantry has access." }
+    res = await apiFetch(`/api/azure-devops/repo-check?${qs}`)
+  } catch (err) {
+    return { result: 'error', message: `Couldn't reach this repo — ${err.message}` }
   }
 
-  const instance = registry.find((i) => i.slug === slug)
-  return instance ? { result: 'existing', slug, instance } : { result: 'empty', slug }
+  const body = await res.json().catch(() => null)
+  if (!res.ok) {
+    return {
+      result: 'error',
+      message:
+        body?.message ??
+        body?.error ??
+        `Couldn't reach this repo — check the URL and that gantry has access (HTTP ${res.status}).`,
+    }
+  }
+
+  if (body?.result === 'found') {
+    const instance = { slug: body.slug, definition: body.definition, stage: body.stage, status: body.status, owner: body.owner }
+    return { result: 'existing', slug: instance.slug, instance, location }
+  }
+
+  return { result: 'empty', slug: location.repository, location }
 }

@@ -9,7 +9,8 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal, effect } from '@preact/signals'
-import { validateRepo, repoSlug } from '../lib/validateRepo.js'
+import { validateRepo } from '../lib/validateRepo.js'
+import { apiFetch } from '../lib/apiFetch.js'
 import { theme, cycleTheme } from '../lib/theme.js'
 
 // Wizard state as `@preact/signals` — per docs/adr/0006-preact-frontend-framework.md,
@@ -22,10 +23,28 @@ const checkStatus = signal('idle') // idle | checking | empty | existing | error
 const checkErrorMessage = signal('')
 const errorDismissed = signal(false)
 const foundInstance = signal(null) // registry-shaped instance, once checkStatus === 'existing'
+// The Azure DevOps location (`{ organization, project, repository }`)
+// `checkRepo()`'s validateRepo() call parsed the current `repoUrl` into —
+// kept alongside the check result rather than re-parsed at
+// create/adopt-time so `createNewInstance`/`openExistingInstance` send
+// exactly the location the check itself just confirmed, never a second,
+// possibly-differently-parsed value. Reset to `null` by resetCheck()
+// exactly like every other check-scoped signal.
+const checkedLocation = signal(null)
 const selectedDefinitionId = signal('')
 const createStatus = signal('idle') // idle | creating | done | failed
 const createErrorMessage = signal('')
 const createdSlug = signal('')
+// State for the "existing instance found" outcome's own "Open instance"
+// action: unlike the "empty repo" path (which registers as a side effect
+// of `createNewInstance`'s own POST /api/instances call), opening an
+// already-existing instance first needs its own request — `POST
+// /api/instances/adopt` — to register that (already-existing, previously
+// unknown-to-gantry) location before a navigation to it can resolve
+// anything (#92's per-request registry lookup has nothing to find
+// otherwise).
+const opening = signal(false)
+const openErrorMessage = signal('')
 // Fetched once on mount (see SetupWizardPage's effect below); read from here
 // rather than threaded through as a prop so `checkRepo` — a plain function,
 // not a component — can default a fresh check's definition selection
@@ -60,9 +79,12 @@ function resetCheck() {
   checkErrorMessage.value = ''
   errorDismissed.value = false
   foundInstance.value = null
+  checkedLocation.value = null
   createStatus.value = 'idle'
   createErrorMessage.value = ''
   createdSlug.value = ''
+  opening.value = false
+  openErrorMessage.value = ''
   sessionToken.value++
 }
 
@@ -95,8 +117,10 @@ async function checkRepo() {
   if (result.result === 'error') {
     checkStatus.value = 'error'
     checkErrorMessage.value = result.message
+    checkedLocation.value = null
     return
   }
+  checkedLocation.value = result.location
   if (result.result === 'existing') {
     foundInstance.value = result.instance
     selectedDefinitionId.value = result.instance.definition
@@ -111,12 +135,13 @@ async function createNewInstance() {
   const token = sessionToken.value
   createStatus.value = 'creating'
   createErrorMessage.value = ''
-  const slug = repoSlug(repoUrl.value)
+  const location = checkedLocation.value
+  const slug = location?.repository ?? ''
   try {
-    const res = await fetch('/api/instances', {
+    const res = await apiFetch('/api/instances', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ definition: selectedDefinitionId.value, slug }),
+      body: JSON.stringify({ definition: selectedDefinitionId.value, slug, azureDevOps: location }),
     })
     const body = await res.json()
     // The user may have abandoned this create (edited the URL, moving on to
@@ -127,7 +152,7 @@ async function createNewInstance() {
     if (sessionToken.value !== token) return
     if (!res.ok) {
       createStatus.value = 'failed'
-      createErrorMessage.value = body.error ?? `Failed to create instance (${res.status})`
+      createErrorMessage.value = body.message ?? body.error ?? `Failed to create instance (${res.status})`
       return
     }
     createStatus.value = 'done'
@@ -136,6 +161,44 @@ async function createNewInstance() {
     if (sessionToken.value !== token) return
     createStatus.value = 'failed'
     createErrorMessage.value = err.message
+  }
+}
+
+// The "existing instance found" outcome's own "Open instance" action:
+// registers the already-existing Azure DevOps location the check just
+// confirmed (`POST /api/instances/adopt`, #94) so the module editor's
+// per-request registry lookup (#92) has something to resolve, then
+// navigates exactly as the "empty repo" path's post-create "Open instance"
+// already does. A location previously adopted through this same wizard
+// (the common "come back and open it again" case) adopts idempotently
+// server-side — this never re-prompts or re-fails on a second visit.
+async function openExistingInstance() {
+  const token = sessionToken.value
+  const location = checkedLocation.value
+  if (!location) return
+  opening.value = true
+  openErrorMessage.value = ''
+  try {
+    const res = await apiFetch('/api/instances/adopt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ azureDevOps: location }),
+    })
+    const body = await res.json().catch(() => ({}))
+    // Mirrors createNewInstance's own stale-response guard: the user may
+    // have abandoned this open (edited the URL, moving on to a different
+    // check) while the POST was in flight.
+    if (sessionToken.value !== token) return
+    if (!res.ok) {
+      opening.value = false
+      openErrorMessage.value = body.message ?? body.error ?? `Failed to open instance (${res.status})`
+      return
+    }
+    openInstance(body.slug ?? foundInstance.value?.slug)
+  } catch (err) {
+    if (sessionToken.value !== token) return
+    opening.value = false
+    openErrorMessage.value = err.message
   }
 }
 
@@ -287,9 +350,10 @@ function SubmitAction() {
   if (status === 'existing') {
     return html`
       <div class="wizard-field">
-        <button type="button" class="btn primary" onClick=${() => openInstance(foundInstance.value.slug)}>
-          Open instance
+        <button type="button" class="btn primary" disabled=${opening.value} onClick=${openExistingInstance}>
+          ${opening.value ? 'Opening…' : 'Open instance'}
         </button>
+        ${openErrorMessage.value ? html`<div class="inline-error">${openErrorMessage.value}</div>` : null}
       </div>
     `
   }

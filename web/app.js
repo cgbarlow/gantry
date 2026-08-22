@@ -302,7 +302,16 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
       fields[field.id] = controlsRef.current[i].getValue()
     })
     setStatus('Saving…')
-    const res = await apiFetch(`/api/instance/modules/${mod.id}?stage=${encodeURIComponent(stageId)}`, {
+    // `slug` is required here (not just `stage`) now that a server can host
+    // any number of instances at once with no fixed default (#88/#92) —
+    // without it, this PUT only ever resolved against whichever slug (if
+    // any) the server happened to be started with, silently 400ing for
+    // every other instance a multi-instance deployment serves. Surfaced by
+    // #94's own "Open instance ... allows editing end-to-end" acceptance
+    // criterion once a freshly adopted/created instance had no such
+    // server-pinned default to fall back on.
+    const params = new URLSearchParams({ stage: stageId, slug: currentSlug.value })
+    const res = await apiFetch(`/api/instance/modules/${mod.id}?${params}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: mod.status, owner: mod.owner, fields }),
@@ -554,7 +563,11 @@ function ArtefactsSection({ instance }) {
 
   async function handleRender(artefact) {
     setStatus('Rendering…')
-    const res = await apiFetch(`/api/instance/render/${artefact.id}`, { method: 'POST' })
+    // See ModuleCard's handleSave for why `?slug=` is required here now —
+    // the same gap, for the module editor's own "Render" action.
+    const res = await apiFetch(`/api/instance/render/${artefact.id}?slug=${encodeURIComponent(currentSlug.value)}`, {
+      method: 'POST',
+    })
     const body = await res.json()
     setStatus(res.ok ? `Rendered to ${body.docxPath}` : `Render failed: ${body.message ?? body.error}`)
   }
