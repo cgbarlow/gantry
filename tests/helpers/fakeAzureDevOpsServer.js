@@ -1,0 +1,85 @@
+import { createServer } from 'node:http'
+
+function objectIdFor(n) {
+  return String(n).padStart(40, '0')
+}
+
+/**
+ * A minimal in-process fake of the Azure DevOps Git Items/Refs/Pushes REST
+ * API, standing in for a real `dev.azure.com` org/project/repo in tests
+ * (#84) — a real HTTP server on an ephemeral port that lib/azureDevOpsClient.js
+ * talks to over real `fetch` calls, never a mock of `fetch` itself.
+ *
+ * `files` seeds the fake repo's initial content on `main`, keyed by
+ * repo-relative path (leading "/" optional). `validPat` is the only PAT
+ * accepted as the password half of HTTP Basic auth (empty username) —
+ * anything else, or no Authorization header at all, gets a 401, mirroring
+ * how a rejected PAT surfaces from the real API.
+ */
+export function createFakeAzureDevOpsServer({ organization, project, repository, validPat, files = {} }) {
+  const store = new Map(Object.entries(files).map(([path, content]) => [path.startsWith('/') ? path : `/${path}`, content]))
+  let commitCount = store.size > 0 ? 1 : 0
+  let currentObjectId = commitCount > 0 ? objectIdFor(commitCount) : objectIdFor(0)
+
+  const basePath = `/${organization}/${project}/_apis/git/repositories/${repository}`
+
+  return createServer(async (req, res) => {
+    const url = new URL(req.url, 'http://fake-azure-devops.invalid')
+    // Decode percent-encoded path segments before route-matching, the way
+    // a real HTTP server/router does — lets this fake exercise the
+    // client's URL-encoding of organisation/project/repository names
+    // (which may contain spaces or other reserved characters) rather than
+    // only matching when those names happen to need no encoding.
+    const pathname = decodeURIComponent(url.pathname)
+    const json = (status, body) => {
+      res.writeHead(status, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(body))
+    }
+
+    const [, encoded] = (req.headers['authorization'] ?? '').split(' ')
+    const decoded = encoded ? Buffer.from(encoded, 'base64').toString('utf8') : ''
+    const providedPat = decoded.startsWith(':') ? decoded.slice(1) : undefined
+    if (providedPat !== validPat) {
+      return json(401, { message: 'TF400813: The user is not authorized (fake: invalid or missing PAT).' })
+    }
+
+    if (req.method === 'GET' && pathname === `${basePath}/items`) {
+      const path = url.searchParams.get('path')
+      if (!store.has(path)) {
+        return json(404, { message: `TF401174: Item ${path} not found (fake server).` })
+      }
+      return json(200, { path, content: store.get(path), objectId: currentObjectId })
+    }
+
+    if (req.method === 'GET' && pathname === `${basePath}/refs`) {
+      const value = commitCount > 0 ? [{ name: 'refs/heads/main', objectId: currentObjectId }] : []
+      return json(200, { count: value.length, value })
+    }
+
+    if (req.method === 'POST' && pathname === `${basePath}/pushes`) {
+      let raw = ''
+      for await (const chunk of req) raw += chunk
+      const push = JSON.parse(raw)
+      const [refUpdate] = push.refUpdates
+
+      const expectedOldObjectId = commitCount > 0 ? currentObjectId : objectIdFor(0)
+      if (refUpdate.oldObjectId !== expectedOldObjectId) {
+        return json(409, { message: `TF401028: The push (oldObjectId ${refUpdate.oldObjectId}) is out of date (fake server).` })
+      }
+
+      for (const commit of push.commits) {
+        for (const change of commit.changes) {
+          store.set(change.item.path, change.newContent.content)
+        }
+      }
+      commitCount += 1
+      currentObjectId = objectIdFor(commitCount)
+      return json(201, {
+        pushId: commitCount,
+        refUpdates: [{ name: refUpdate.name, newObjectId: currentObjectId }],
+      })
+    }
+
+    return json(404, { message: `No fake route for ${req.method} ${pathname}` })
+  })
+}
