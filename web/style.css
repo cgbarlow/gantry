@@ -40,6 +40,11 @@
   --stamp-agreed-fg: #F5F1E8;
   --stamp-review-bg: #4A4740;
   --stamp-review-fg: #F5F1E8;
+  /* 6.76:1 vs fg, per web/prototypes/instance-setup-wizard.prototype.html's
+     own header comment flagging this as a candidate to fold back in once a
+     real error/danger stamp was needed elsewhere (#78 is that use). */
+  --stamp-error-bg: #8C3A2B;
+  --stamp-error-fg: #F5F1E8;
 }
 
 /* DARK — inverted paper/ink, not pure black */
@@ -58,6 +63,8 @@
   --stamp-agreed-fg: #1B1E22;
   --stamp-review-bg: #B9B3A4;
   --stamp-review-fg: #1B1E22;
+  --stamp-error-bg: #E5786B; /* 5.76:1 vs fg */
+  --stamp-error-fg: #1B1E22;
 }
 
 /* HIGH CONTRAST — pure black/white, bold solid borders, no hairlines */
@@ -76,6 +83,8 @@
   --stamp-agreed-fg: #000000;
   --stamp-review-bg: #000000;
   --stamp-review-fg: #FFFFFF;
+  --stamp-error-bg: #FF3B30; /* 5.92:1 vs fg */
+  --stamp-error-fg: #000000;
 
   --hairline: 2px;
   --border-strong: 3px;
@@ -167,6 +176,7 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .stamp.draft  { background: var(--stamp-draft-bg);  color: var(--stamp-draft-fg); }
 .stamp.review { background: var(--stamp-review-bg); color: var(--stamp-review-fg); }
 .stamp.agreed { background: var(--stamp-agreed-bg); color: var(--stamp-agreed-fg); }
+.stamp.error  { background: var(--stamp-error-bg);  color: var(--stamp-error-fg); }
 
 .module { border-top: var(--hairline) solid var(--line); padding-top: 20px; margin-top: 28px; }
 .module h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 4px; }
@@ -225,3 +235,86 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .save-status { font-size: 0.9rem; color: var(--text-muted); min-height: 1.2em; margin-top: 0.5rem; }
 .load-error, .loading { padding-top: 48px; color: var(--text-muted); }
+
+/*
+ * ---------- Instance setup wizard (#78) ----------
+ * Ported from web/prototypes/instance-setup-wizard.prototype.html's variant
+ * C ("progressive single page") — the tokens/classes above (fonts, .btn,
+ * .stamp, hairlines) are reused as-is; these are the wizard-specific
+ * additions, scoped with a `wizard-` prefix or nested under .wizard-page so
+ * they can't collide with the module editor's own `.field`/`.result` naming.
+ */
+.wizard-header {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 32px 32px 20px;
+  border-bottom: var(--border-strong) solid var(--line-strong);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.wizard-header h1 { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; font-size: 20px; margin: 0; flex: 1; }
+
+.wizard-page { max-width: 860px; margin: 0 auto; padding: 32px 32px 140px; }
+.wizard-page h2 { font-family: var(--font-display); font-weight: 600; font-size: 22px; margin: 0; }
+.wizard-page .lede { color: var(--text-muted); margin: 6px 0 28px; max-width: 70ch; }
+
+.wizard-field { margin-bottom: 24px; }
+.wizard-field label { font-family: var(--font-display); font-weight: 600; font-size: 13px; display: block; margin-bottom: 8px; }
+.wizard-input {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 8px 11px;
+  border-radius: var(--radius);
+  border: var(--border-strong) solid var(--line-strong);
+  background: var(--bg-raised);
+  color: var(--text);
+  width: 100%;
+}
+.check-row { margin-top: 10px; }
+.wizard-field-hint { margin: 8px 0 0; color: var(--text-muted); font-size: 12px; }
+
+.result-card {
+  border: var(--border-strong) solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  padding: 16px 18px;
+  margin-bottom: 24px;
+}
+.result-card h3 { margin: 0 0 12px; }
+.result-card .result-note { margin: 0; color: var(--text-muted); font-size: 13px; }
+.result-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: var(--hairline) solid var(--line); font-size: 13px; }
+.result-row:last-child { border-bottom: none; }
+.result-row .k { color: var(--text-muted); }
+.result-row .v { font-family: var(--font-mono); }
+
+.dismiss-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-raised);
+  border: var(--border-strong) solid var(--stamp-error-bg);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-top: 10px;
+}
+.dismiss-banner button { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 16px; line-height: 1; }
+.inline-error { color: var(--stamp-error-bg); font-size: 12px; margin-top: 8px; }
+
+.definition-card {
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+.definition-card.selected { border: var(--border-strong) solid var(--line-strong); background: var(--bg-raised); }
+.definition-card .name { font-family: var(--font-display); font-weight: 600; font-size: 14px; }
+.definition-card .stages { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+.compare .col { border: var(--hairline) solid var(--line); border-radius: var(--radius); padding: 14px; }
+.compare .col h4 { font-family: var(--font-display); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin: 0 0 10px; }
+.compare .mono { font-family: var(--font-mono); font-size: 13px; }
+.mismatch-flag { margin-top: 10px; font-size: 12px; color: var(--stamp-error-bg); }

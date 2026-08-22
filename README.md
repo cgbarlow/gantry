@@ -195,7 +195,7 @@ gantry render my-initiative soap                # produce the artefact
 | `gantry status <slug> [--json]` | Current stage, module completeness, what's outstanding | Implemented |
 | `gantry check <slug> [--gate <id>] [--json]` | Validate an instance against a gate's requirements — any gate, not just the instance's current stage | Implemented |
 | `gantry render <slug> <artefact> [--dry-run]` | Render an artefact to `out/` | Implemented |
-| `gantry serve [slug] [--port <port>]` | Serve the stage-by-stage form for `<slug>` (port 3000). With no `slug`, the JSON API still serves every instance per-request via `?slug=<slug>` (e.g. `GET /api/instances` for the full listing) — but the bundled form itself has no instance-picker screen yet, so it still needs one instance selected to be usable | Implemented |
+| `gantry serve [slug] [--port <port>]` | Serve the stage-by-stage form for `<slug>` (port 3000). With no `slug`, the JSON API still serves every instance per-request via `?slug=<slug>` (e.g. `GET /api/instances` for the full listing); the bundled form itself picks up the same `?slug=` on its own URL, and `/setup` is a "New instance" screen for registering one (see the wizard's own "+ New instance" link) — but there's still no full instance-picker/dashboard screen yet for browsing every registered instance visually | Implemented |
 | `gantry validate <definition> [--json]` | Report every structural problem with a definition in one pass | Implemented |
 
 `status`, `check` and `validate` all emit structured output with `--json` for scripting and agent use.

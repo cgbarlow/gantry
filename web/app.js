@@ -1,14 +1,15 @@
 // gantry's production UI entry point — Preact, delivered via HTM tagged
 // templates with no build step, per docs/adr/0006-preact-frontend-framework.md.
-// `preact-iso` provides the routing shell (one route today — the module
-// editor — so later screens have somewhere to add sibling routes) and
+// `preact-iso` provides the routing shell (the module editor as the default
+// route, plus the instance-setup wizard at /setup — see web/pages/setup-wizard.js
+// — so later screens have somewhere to add further sibling routes) and
 // `@preact/signals` holds the instance-scoped state (the viewed stage, the
 // fetched instance data) that's shared across this screen's header, nav,
 // and module list, exactly as today's DOM version threaded a `stageId`
 // through a single re-render function.
 import { html, render } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { signal, effect } from '@preact/signals'
+import { signal } from '@preact/signals'
 import { LocationProvider, Router, Route } from 'preact-iso'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
@@ -16,12 +17,23 @@ import { markdown } from '@codemirror/lang-markdown'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import { theme, cycleTheme } from './lib/theme.js'
+import { SetupWizardPage } from './pages/setup-wizard.js'
 
 const md = new MarkdownIt()
 
 async function loadInstance(stageId) {
-  const url = stageId ? `/api/instance?stage=${encodeURIComponent(stageId)}` : '/api/instance'
-  const res = await fetch(url)
+  // `?slug=` on the page's own URL — set by the setup wizard's (#78)
+  // "Open instance" action via a full navigation — takes precedence over
+  // the server's startup default, mirroring the `?slug=` the server-side
+  // routes already accept per-request (see lib/server.js's resolveSlugParam).
+  // Absent, this falls back to whatever `gantry serve [slug]` was started
+  // with, exactly as before this existed.
+  const slug = new URLSearchParams(window.location.search).get('slug')
+  const params = new URLSearchParams()
+  if (slug) params.set('slug', slug)
+  if (stageId) params.set('stage', stageId)
+  const query = params.toString()
+  const res = await fetch(`/api/instance${query ? `?${query}` : ''}`)
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new Error(body.error ?? `Failed to load instance (${res.status})`)
@@ -43,17 +55,31 @@ const viewedStage = signal(null)
 const instanceData = signal(null)
 const loadError = signal(null)
 
-effect(() => {
+// Fetches on mount and whenever `viewedStage` changes — scoped to
+// ModuleEditorPage's own lifecycle (a `useEffect` inside that component,
+// not a bare top-level `effect()`) so this fires only while that route is
+// actually the one mounted, not on every page load regardless of route —
+// otherwise landing on a sibling route with no default instance configured
+// (e.g. /setup, the instance-setup wizard, #78) would still fire this
+// fetch and surface a spurious "no instance slug given" failure.
+function useLoadInstance() {
   const stageId = viewedStage.value
-  loadInstance(stageId)
-    .then((data) => {
-      instanceData.value = data
-      loadError.value = null
-    })
-    .catch((err) => {
-      loadError.value = err.message
-    })
-})
+  useEffect(() => {
+    let cancelled = false
+    loadInstance(stageId)
+      .then((data) => {
+        if (cancelled) return
+        instanceData.value = data
+        loadError.value = null
+      })
+      .catch((err) => {
+        if (!cancelled) loadError.value = err.message
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [stageId])
+}
 
 // ---------- Markdown field ----------
 // EditorView.updateListener -> markdown-it -> DOMPurify -> sibling preview
@@ -270,6 +296,7 @@ function AppHeader({ instance }) {
           <path d="M3 20h18M6 20V8l6-4 6 4v12M6 8h12" />
         </svg>
         <h1>${instance.slug} — ${instance.definition}</h1>
+        <a class="btn small ghost" href="/setup">+ New instance</a>
         <button type="button" class="btn small ghost theme-toggle" onClick=${cycleTheme} title="Cycle theme">
           Theme: ${theme.value}
         </button>
@@ -297,6 +324,7 @@ function AppHeader({ instance }) {
 
 // ---------- Page: composes header + the viewed stage's screen ----------
 function ModuleEditorPage() {
+  useLoadInstance()
   const instance = instanceData.value
   const error = loadError.value
 
@@ -309,11 +337,16 @@ function ModuleEditorPage() {
   `
 }
 
-// ---------- App shell: preact-iso routing, one route today ----------
+// ---------- App shell: preact-iso routing ----------
+// The module editor remains the default (fallback) route — /setup is the
+// one sibling route added so far (the instance-setup wizard, #78), per
+// docs/adr/0006-preact-frontend-framework.md's "later screens have
+// somewhere to add sibling routes".
 function App() {
   return html`
     <${LocationProvider}>
       <${Router}>
+        <${Route} path="/setup" component=${SetupWizardPage} />
         <${Route} default component=${ModuleEditorPage} />
       <//>
     <//>

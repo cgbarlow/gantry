@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, isAbsolute, relative } from 'node:path'
 import { createServer } from '../lib/server.js'
@@ -195,6 +195,23 @@ test('GET / serves index.html with the import map resolved (no leftover placehol
   })
 })
 
+test('GET /setup (a client-side route with no matching static file) falls back to index.html, not a 404', async () => {
+  await withRunningServer({ slug: 'examples' }, async (base) => {
+    const res = await fetch(`${base}/setup`)
+    assert.equal(res.status, 200)
+    const html = await res.text()
+    assert.doesNotMatch(html, /__IMPORT_MAP__/)
+    assert.match(html, /<div id="app">/)
+  })
+})
+
+test('GET /does-not-exist.js (a missing file with an extension) still 404s rather than falling back to index.html', async () => {
+  await withRunningServer({ slug: 'examples' }, async (base) => {
+    const res = await fetch(`${base}/does-not-exist.js`)
+    assert.equal(res.status, 404)
+  })
+})
+
 test('GET /node_modules/... serves real dependency files for the browser to import', async () => {
   await withRunningServer({ slug: 'examples' }, async (base) => {
     const res = await fetch(`${base}/node_modules/codemirror/dist/index.js`)
@@ -347,6 +364,148 @@ test('slugs containing ".." or a path separator are rejected outright, even with
     await withRunningServer({ instancesDir }, async (base) => {
       for (const badSlug of ['..', '.', 'foo/bar', 'foo\\bar', '../../etc']) {
         const res = await fetch(`${base}/api/instance?slug=${encodeURIComponent(badSlug)}`)
+        assert.equal(res.status, 400, `expected 400 for slug ${JSON.stringify(badSlug)}`)
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// ---------- /api/definitions and POST /api/instances (instance-setup wizard, #78) ----------
+
+test('GET /api/definitions lists every definition with its stages, for the setup wizard\'s definition picker', async () => {
+  await withRunningServer({}, async (base) => {
+    const res = await fetch(`${base}/api/definitions`)
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    const design = body.find((d) => d.id === 'design')
+    assert.equal(design.title, 'Solution Design')
+    assert.deepEqual(design.stages, [
+      { id: 'shape', title: 'Shape' },
+      { id: 'hld-define', title: 'HLD Definition' },
+      { id: 'detailed-design', title: 'Detailed Design' },
+      { id: 'handover', title: 'Operational Handover' },
+    ])
+  })
+})
+
+test('POST /api/instances registers a new instance, which then appears in GET /api/instances', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withRunningServer({ instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instances`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ definition: 'design', slug: 'claims-modernisation' }),
+      })
+      assert.equal(res.status, 201)
+      const created = await res.json()
+      assert.deepEqual(created, {
+        slug: 'claims-modernisation',
+        definition: 'design',
+        stage: 'shape',
+        status: 'incomplete',
+        owner: '',
+      })
+
+      const listing = await (await fetch(`${base}/api/instances`)).json()
+      assert.ok(listing.some((i) => i.slug === 'claims-modernisation'))
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('POST /api/instances with a slug that already exists reports 409, not 500', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'claims-modernisation', { instancesDir })
+
+    await withRunningServer({ instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instances`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ definition: 'design', slug: 'claims-modernisation' }),
+      })
+      assert.equal(res.status, 409)
+      const body = await res.json()
+      assert.match(body.error, /already exists/)
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('POST /api/instances with an unknown definition reports 400, not 500', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withRunningServer({ instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instances`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ definition: 'not-a-real-definition', slug: 'claims-modernisation' }),
+      })
+      assert.equal(res.status, 400)
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// Regression test for a path-traversal hole found in review: `definition`
+// used to flow straight into `loadDefinition` (`join(definitionsDir,
+// definitionId)`) with no equivalent of `slug`'s isValidSlug guard, so a
+// `definition` value escaping `definitionsDir` (paired with a planted
+// `definition.yaml` whose own `id` field echoed the traversal string back)
+// could read, and fully register an instance against, an arbitrary
+// directory outside definitionsDir. `definition` must now exactly match one
+// of `listDefinitions()`'s real ids, so a traversal payload is rejected as
+// simply "unknown" before it ever reaches the filesystem.
+test('POST /api/instances rejects a path-traversal "definition" outright, never reaching loadDefinition', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  const outsideDir = mkdtempSync(join(tmpdir(), 'gantry-outside-'))
+  try {
+    // A real, well-formed definition planted just outside `definitionsDir`
+    // — if the traversal were still possible, this is genuinely what it
+    // would resolve to and successfully load, not an arbitrary/nonexistent
+    // escape.
+    writeFileSync(
+      join(outsideDir, 'definition.yaml'),
+      'id: planted\ntitle: Planted outside definitionsDir\nstages: []\nartefacts: []\n'
+    )
+    const traversalDefinitionId = relative('definitions', outsideDir)
+    assert.ok(traversalDefinitionId.includes('/'), 'test setup sanity check: traversal payload must span directories')
+
+    await withRunningServer({ instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instances`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ definition: traversalDefinitionId, slug: 'traversal-test' }),
+      })
+      assert.equal(res.status, 400)
+      const body = await res.json()
+      assert.match(body.error, /Unknown definition/)
+
+      const listing = await (await fetch(`${base}/api/instances`)).json()
+      assert.deepEqual(listing, [])
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+    rmSync(outsideDir, { recursive: true, force: true })
+  }
+})
+
+test('POST /api/instances with an invalid slug reports 400, never reaching createInstance', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withRunningServer({ instancesDir }, async (base) => {
+      for (const badSlug of ['..', '.', 'foo/bar', '../../etc']) {
+        const res = await fetch(`${base}/api/instances`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ definition: 'design', slug: badSlug }),
+        })
         assert.equal(res.status, 400, `expected 400 for slug ${JSON.stringify(badSlug)}`)
       }
     })
