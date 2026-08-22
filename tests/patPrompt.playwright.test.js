@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { createServer } from '../lib/server.js'
+import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
 // Frontend PAT entry & storage (#87): the web form recognizes the
@@ -65,17 +66,25 @@ function withRunningServer(options, fn) {
   })
 }
 
+// Registers "my-initiative" in the instance registry (#89) as Azure-DevOps-
+// backed — the only thing that now marks a slug as such (#92) — against a
+// scratch instancesDir, rather than pinning the whole server to one fixed
+// location at startup.
 function withAzureDevOpsBackedServer(fn) {
   return withFakeAzureDevOpsServer(
     { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: [VALID_PAT, VALID_PAT_2], files: SEED_FILES },
     async (adoBaseUrl) => {
-      await withRunningServer(
-        {
-          slug: 'my-initiative',
-          azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
-        },
-        fn
-      )
+      const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+      try {
+        registerInstance(
+          'my-initiative',
+          { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          { instancesDir }
+        )
+        await withRunningServer({ slug: 'my-initiative', instancesDir }, fn)
+      } finally {
+        rmSync(instancesDir, { recursive: true, force: true })
+      }
     }
   )
 }

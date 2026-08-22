@@ -1,18 +1,24 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createServer as createHttpServer } from 'node:http'
 import { createServer } from '../lib/server.js'
+import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
-// Server-level credential gating (#86): `createServer({ azureDevOps })`
-// marks its single-instance routes (GET /api/instance, PUT
-// /api/instance/modules/:id, POST /api/instance/render/:artefact) as
-// Azure-DevOps-backed. These tests exercise that gating with real HTTP
-// requests against a running gantry server (mirroring tests/server.test.js's
-// existing `withRunningServer` pattern), backed by the same fake in-process
-// Azure DevOps server tests/instance.test.js and tests/azureDevOpsClient.test.js
-// use — never the real dev.azure.com.
+// Server-level credential gating (#86), now driven by per-request
+// resolution against the instance registry (#89/#92) rather than a fixed
+// `createServer({ azureDevOps })` location: a slug the registry says is
+// Azure-DevOps-backed marks that one request's single-instance routes (GET
+// /api/instance, PUT /api/instance/modules/:id, POST
+// /api/instance/render/:artefact) as such. These tests exercise that
+// gating with real HTTP requests against a running gantry server
+// (mirroring tests/server.test.js's existing `withRunningServer` pattern),
+// backed by the same fake in-process Azure DevOps server
+// tests/instance.test.js and tests/azureDevOpsClient.test.js use — never
+// the real dev.azure.com.
 
 const ORGANIZATION = 'fake-org'
 const PROJECT = 'fake-project'
@@ -42,20 +48,33 @@ function withRunningServer(options, fn) {
 
 // Seeds a fake Azure DevOps repo with a real "my-initiative" design
 // instance at the "shape" stage — the same shape createInstance's own
-// Azure DevOps path (#85) writes — then runs `fn(baseUrl)` with a gantry
-// server started against it.
+// Azure DevOps path (#85) writes — registers that slug in the instance
+// registry (#89) as Azure-DevOps-backed (the only thing that now marks a
+// slug as such, per #92), then runs `fn(baseUrl)` with a gantry server
+// started against a scratch `instancesDir` with no fixed location of its
+// own at all.
 function withAzureDevOpsBackedServer(files, serverOptions, fn) {
   return withFakeAzureDevOpsServer(
     { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files },
     async (adoBaseUrl) => {
-      await withRunningServer(
-        {
-          slug: 'my-initiative',
-          azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
-          ...serverOptions,
-        },
-        fn
-      )
+      const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+      try {
+        registerInstance(
+          'my-initiative',
+          { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          { instancesDir }
+        )
+        await withRunningServer(
+          {
+            slug: 'my-initiative',
+            instancesDir,
+            ...serverOptions,
+          },
+          fn
+        )
+      } finally {
+        rmSync(instancesDir, { recursive: true, force: true })
+      }
     }
   )
 }
@@ -168,34 +187,41 @@ test('GET /api/instance surfaces a genuine Azure DevOps read failure (a 500, not
     return json(404, { message: `no fake route for ${req.method} ${url.pathname}` })
   })
 
-  await new Promise((resolvePromise, rejectPromise) => {
-    fakeAdo.listen(0, async () => {
-      const { port: adoPort } = fakeAdo.address()
-      const server = createServer({
-        slug: 'my-initiative',
-        azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: `http://localhost:${adoPort}` },
-      })
-      server.listen(0, async () => {
-        try {
-          const { port } = server.address()
-          const res = await fetch(`http://localhost:${port}/api/instance`, {
-            headers: { Authorization: basicAuthHeader(VALID_PAT) },
-          })
-          // A real failure, not a 200 with the module quietly reported as
-          // an empty draft.
-          assert.equal(res.status, 500)
-          const body = await res.json()
-          assert.match(body.error, /HTTP 500/)
-          resolvePromise()
-        } catch (err) {
-          rejectPromise(err)
-        } finally {
-          server.close()
-          fakeAdo.close()
-        }
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await new Promise((resolvePromise, rejectPromise) => {
+      fakeAdo.listen(0, async () => {
+        const { port: adoPort } = fakeAdo.address()
+        registerInstance(
+          'my-initiative',
+          { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: `http://localhost:${adoPort}` },
+          { instancesDir }
+        )
+        const server = createServer({ slug: 'my-initiative', instancesDir })
+        server.listen(0, async () => {
+          try {
+            const { port } = server.address()
+            const res = await fetch(`http://localhost:${port}/api/instance`, {
+              headers: { Authorization: basicAuthHeader(VALID_PAT) },
+            })
+            // A real failure, not a 200 with the module quietly reported as
+            // an empty draft.
+            assert.equal(res.status, 500)
+            const body = await res.json()
+            assert.match(body.error, /HTTP 500/)
+            resolvePromise()
+          } catch (err) {
+            rejectPromise(err)
+          } finally {
+            server.close()
+            fakeAdo.close()
+          }
+        })
       })
     })
-  })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
 })
 
 // ---------- PUT /api/instance/modules/:id ----------
@@ -287,7 +313,7 @@ test('POST /api/instance/render/:artefact against an Azure-DevOps-backed instanc
 
 // ---------- Local instances are unaffected ----------
 
-test('local instances (no options.azureDevOps at server startup) never require a credential, even against the examples fixture', async () => {
+test('local instances (a slug the registry has never seen, or resolves as local) never require a credential, even against the examples fixture', async () => {
   await withRunningServer({ slug: 'examples' }, async (base) => {
     const res = await fetch(`${base}/api/instance`)
     assert.equal(res.status, 200)
