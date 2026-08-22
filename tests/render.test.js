@@ -1,8 +1,19 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { renderArtefact } from '../lib/render.js'
+import { createAsset } from '../lib/assets.js'
+import { loadDefinition } from '../lib/definition.js'
+import { readModule, writeModule } from '../lib/instance.js'
+
+// A minimal real 1x1 red PNG, base64-encoded — small enough to inline, real
+// enough to round-trip through the same file-write/render path a genuine
+// upload takes. Matches the fixture tests/assets.test.js uses.
+const ONE_PX_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
 test('dry-run does not write out/ files', () => {
   execFileSync('rm', ['-rf', 'instances/examples/out'])
@@ -89,5 +100,79 @@ test('reference doc defines the paragraph styles pandoc references for list item
   )
   for (const styleId of listParagraphStyles) {
     assert.match(outputStyles, new RegExp(`w:styleId="${styleId}"`), `list paragraphs reference an undefined style "${styleId}"`)
+  }
+})
+
+test('an asset:<id> reference (#80) inserted into a module field compiles into an embedded image at the same paragraph position in the rendered artefact (#81)', () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    const pngBytes = Buffer.from(ONE_PX_PNG_BASE64, 'base64')
+    const asset = createAsset(
+      'examples',
+      {
+        filename: 'eligibility-flow.png',
+        buffer: pngBytes,
+        name: 'Eligibility flow',
+        source: 'https://draw.io/diagrams/eligibility-flow',
+      },
+      { instancesDir }
+    )
+
+    const definition = loadDefinition('design')
+    const context = readModule(definition, 'examples', 'context', { instancesDir })
+    writeModule(
+      definition,
+      'examples',
+      'context',
+      {
+        status: context.status,
+        owner: context.owner,
+        fields: {
+          ...context.fields,
+          driver: `${context.fields.driver}\n\n![Eligibility flow](asset:${asset.id})\n`,
+        },
+      },
+      { instancesDir }
+    )
+
+    const result = renderArtefact('examples', 'soap', { instancesDir })
+    assert.equal(existsSync(result.docxPath), true)
+
+    // The Pandoc render step resolved the asset reference to the real file
+    // in assets/, not a broken/literal "asset:<id>" link.
+    assert.doesNotMatch(result.markdown, /asset:/)
+
+    // The final rendered artefact contains an embedded image — not merely
+    // a hyperlink or literal text — at the correct paragraph position: the
+    // round-tripped markdown places it between the business-driver
+    // paragraph the reference was appended to and the next heading
+    // ("Affected domains"), matching where the reference appears in the
+    // source module field.
+    const roundTrip = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown', result.docxPath], {
+      encoding: 'utf8',
+    })
+    const driverIndex = roundTrip.indexOf('Business driver')
+    const imageIndex = roundTrip.indexOf('![Eligibility flow]')
+    const affectedDomainsIndex = roundTrip.indexOf('Affected domains')
+    assert.ok(driverIndex >= 0 && imageIndex >= 0 && affectedDomainsIndex >= 0)
+    assert.ok(driverIndex < imageIndex, 'expected the image after the Business driver section')
+    assert.ok(imageIndex < affectedDomainsIndex, 'expected the image before the next heading, Affected domains')
+
+    // The embedded image is a real, extractable media file in the docx
+    // (not just referenced by a URL), and its bytes match what was
+    // uploaded.
+    const mediaListing = execFileSync('unzip', ['-l', result.docxPath], { encoding: 'utf8' })
+    const mediaFile = mediaListing
+      .split('\n')
+      .map((line) => line.trim().split(/\s+/).pop())
+      .find((name) => name && /^word\/media\/.*\.png$/.test(name) && name !== 'word/media/image1.png')
+    assert.ok(mediaFile, 'expected an embedded PNG media file for the inserted asset')
+    const extractedBytes = execFileSync('unzip', ['-p', result.docxPath, mediaFile])
+    assert.deepEqual(extractedBytes, pngBytes)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
   }
 })
