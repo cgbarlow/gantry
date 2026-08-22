@@ -1058,7 +1058,12 @@ function DashboardPage() {
     <main class="dashboard">
       <div class="dashboard-topbar">
         <h1>Instances</h1>
-        ${instances?.length ? html`<${ViewToggle} />` : null}
+        <div class="dashboard-controls">
+          ${instances?.length ? html`<${ViewToggle} />` : null}
+          <button type="button" class="btn small ghost theme-toggle" onClick=${cycleTheme} title="Cycle theme">
+            Theme: ${theme.value}
+          </button>
+        </div>
       </div>
       ${error
         ? html`<p class="load-error">Failed to load: ${error}</p>`
