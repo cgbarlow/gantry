@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInstance, writeModule } from '../lib/instance.js'
@@ -62,6 +62,40 @@ test('listRegistry falls back to \'\' for owner when no current-stage module has
 test('listRegistry returns an empty array when instancesDir has no instances', () => {
   withScratchInstances((instancesDir) => {
     assert.deepEqual(listRegistry({ instancesDir }), [])
+  })
+})
+
+test('listRegistry skips a stale registry entry (instance deleted from disk after being registered), without failing the whole listing', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'alpha-initiative', { instancesDir })
+    createInstance('design', 'zebra-initiative', { instancesDir })
+    // Backfills both slugs into the registry file.
+    listRegistry({ instancesDir })
+
+    // Simulates an instance directory removed after the registry already
+    // knows about it (manual cleanup, a rename, a future delete feature) —
+    // the registry itself has no way to notice this on its own.
+    rmSync(join(instancesDir, 'alpha-initiative'), { recursive: true, force: true })
+
+    const registry = listRegistry({ instancesDir })
+    assert.deepEqual(
+      registry.map((i) => i.slug),
+      ['zebra-initiative']
+    )
+  })
+})
+
+test('listRegistry still throws on a genuine read failure, rather than silently skipping it the way a stale/missing entry is', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'broken-initiative', { instancesDir })
+    // Unlike a *missing* instance.yaml (readInstance's "No instance ..."
+    // error, which listRegistry deliberately skips), a present-but-
+    // unparseable instance.yaml is a real problem that must still surface
+    // — it isn't the "instance was deleted after being registered" case
+    // the stale-entry skip above exists for.
+    writeFileSync(join(instancesDir, 'broken-initiative', 'instance.yaml'), ': not: valid: yaml: [')
+
+    assert.throws(() => listRegistry({ instancesDir }), /Nested mappings/)
   })
 })
 

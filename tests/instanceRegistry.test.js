@@ -1,0 +1,151 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createInstance } from '../lib/instance.js'
+import { resolveInstanceLocation, registerInstance, listRegisteredInstances } from '../lib/instanceRegistry.js'
+
+function withScratchInstances(fn) {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    fn(instancesDir)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+}
+
+test('resolveInstanceLocation returns undefined for a slug that is neither registered nor on disk', () => {
+  withScratchInstances((instancesDir) => {
+    assert.equal(resolveInstanceLocation('nowhere', { instancesDir }), undefined)
+  })
+})
+
+test('registerInstance then resolveInstanceLocation round-trips a local location', () => {
+  withScratchInstances((instancesDir) => {
+    registerInstance('my-initiative', { kind: 'local' }, { instancesDir })
+    assert.deepEqual(resolveInstanceLocation('my-initiative', { instancesDir }), { kind: 'local' })
+  })
+})
+
+test('registerInstance then resolveInstanceLocation round-trips an Azure DevOps location', () => {
+  withScratchInstances((instancesDir) => {
+    const location = {
+      kind: 'azureDevOps',
+      organization: 'fake-org',
+      project: 'fake-project',
+      repository: 'fake-repo',
+    }
+    registerInstance('remote-initiative', location, { instancesDir })
+    assert.deepEqual(resolveInstanceLocation('remote-initiative', { instancesDir }), location)
+  })
+})
+
+test('registerInstance persists an optional baseUrl on an Azure DevOps location', () => {
+  withScratchInstances((instancesDir) => {
+    const location = {
+      kind: 'azureDevOps',
+      organization: 'fake-org',
+      project: 'fake-project',
+      repository: 'fake-repo',
+      baseUrl: 'https://ado.example.internal',
+    }
+    registerInstance('remote-initiative', location, { instancesDir })
+    assert.deepEqual(resolveInstanceLocation('remote-initiative', { instancesDir }), location)
+  })
+})
+
+test('registerInstance rejects an unknown location kind', () => {
+  withScratchInstances((instancesDir) => {
+    assert.throws(() => registerInstance('bad', { kind: 'ftp' }, { instancesDir }), /Unknown registry location kind/)
+  })
+})
+
+test('registerInstance rejects an Azure DevOps location missing required fields', () => {
+  withScratchInstances((instancesDir) => {
+    assert.throws(
+      () => registerInstance('bad', { kind: 'azureDevOps', organization: 'org' }, { instancesDir }),
+      /missing: project, repository/
+    )
+  })
+})
+
+test('an instance.yaml already on disk with no registry entry is auto-backfilled as local, with no manual step', () => {
+  withScratchInstances((instancesDir) => {
+    // Simulates a pre-existing instance created before the registry ever
+    // existed (or by a caller that bypassed registerInstance entirely,
+    // e.g. createInstance's local path, which never calls it).
+    createInstance('design', 'pre-existing', { instancesDir })
+
+    assert.deepEqual(resolveInstanceLocation('pre-existing', { instancesDir }), { kind: 'local' })
+  })
+})
+
+test('auto-backfill persists to the registry file, not just the in-memory result', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'pre-existing', { instancesDir })
+    resolveInstanceLocation('pre-existing', { instancesDir })
+
+    const registryPath = join(instancesDir, 'instance-registry.json')
+    const persisted = JSON.parse(readFileSync(registryPath, 'utf8'))
+    assert.deepEqual(persisted['pre-existing'], { kind: 'local' })
+  })
+})
+
+test('listRegisteredInstances lists every entry, sorted by slug, mixing registered and backfilled instances', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'zebra-initiative', { instancesDir })
+    registerInstance('alpha-remote', { kind: 'azureDevOps', organization: 'org', project: 'proj', repository: 'repo' }, { instancesDir })
+
+    assert.deepEqual(listRegisteredInstances({ instancesDir }), [
+      { slug: 'alpha-remote', location: { kind: 'azureDevOps', organization: 'org', project: 'proj', repository: 'repo' } },
+      { slug: 'zebra-initiative', location: { kind: 'local' } },
+    ])
+  })
+})
+
+test('listRegisteredInstances returns an empty array when there is nothing registered or on disk', () => {
+  withScratchInstances((instancesDir) => {
+    assert.deepEqual(listRegisteredInstances({ instancesDir }), [])
+  })
+})
+
+test('the registry survives across multiple reads/writes (a fresh call sees a previous call\'s registration)', () => {
+  withScratchInstances((instancesDir) => {
+    registerInstance('first', { kind: 'local' }, { instancesDir })
+    registerInstance('second', { kind: 'local' }, { instancesDir })
+
+    // Each of these calls re-reads the registry file from scratch — no
+    // shared in-memory state — so this only passes if persistence is real.
+    assert.deepEqual(resolveInstanceLocation('first', { instancesDir }), { kind: 'local' })
+    assert.deepEqual(resolveInstanceLocation('second', { instancesDir }), { kind: 'local' })
+    assert.equal(listRegisteredInstances({ instancesDir }).length, 2)
+  })
+})
+
+test('instance.yaml\'s own (descriptive) azureDevOps field is never consulted — the registry alone decides kind', () => {
+  withScratchInstances((instancesDir) => {
+    // A local instance.yaml can't itself carry an azureDevOps field the way
+    // createInstance's Azure DevOps path writes one — but even if a local
+    // instance.yaml were hand-edited to include one, resolving a slug's
+    // location must come from the registry file alone, never from
+    // reading/parsing instance.yaml's own content.
+    createInstance('design', 'local-only', { instancesDir })
+    assert.deepEqual(resolveInstanceLocation('local-only', { instancesDir }), { kind: 'local' })
+  })
+})
+
+test('a custom registryPath overrides the default instancesDir-colocated file', () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  const registryDir = mkdtempSync(join(tmpdir(), 'gantry-registry-'))
+  const registryPath = join(registryDir, 'custom-registry.json')
+  try {
+    registerInstance('somewhere', { kind: 'local' }, { instancesDir, registryPath })
+    assert.deepEqual(resolveInstanceLocation('somewhere', { instancesDir, registryPath }), { kind: 'local' })
+    // Not written to the default location when an explicit path is given.
+    assert.deepEqual(listRegisteredInstances({ instancesDir }), [])
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+    rmSync(registryDir, { recursive: true, force: true })
+  }
+})
