@@ -101,7 +101,7 @@ Gantry runs anywhere Node.js and Pandoc do, including Windows — you don't need
 ```bash
 git clone <repo-url>
 cd gantry
-npm install          # installs the engine's deps AND the web form's browser deps (codemirror, markdown-it, dompurify) into node_modules/
+npm install          # installs the engine's deps AND the web form's browser deps (preact, preact-iso, @preact/signals, htm, codemirror, markdown-it, dompurify) into node_modules/
 npm link             # makes `gantry` available on your PATH
 ```
 
@@ -117,7 +117,7 @@ npm link             # makes `gantry` available on your PATH
 | A text editor | any | Modules are markdown; no tooling required to author them |
 | `vendor/anthropic-skills/{docx,pdf,pptx,xlsx}` | pinned to a commit, see `vendor/anthropic-skills/README.md` | Document-conversion code used to *verify* rendered artefacts during development (docx→pdf→image) — source-available, not open source; see that README for the license caveat. Not required at render time. |
 
-The web form (`web/`) is a static page with no build step — but it is **not** dependency-free: `gantry serve` generates a browser import map that serves CodeMirror 6, `markdown-it`, and `DOMPurify` straight out of `node_modules/`. That directory must exist wherever `gantry serve` runs — don't `npm prune --production` or ship without it.
+The web form (`web/`) is a static page with no build step — but it is **not** dependency-free: `gantry serve` generates a browser import map that serves Preact, `preact-iso`, `@preact/signals`, `htm`, CodeMirror 6, `markdown-it`, and `DOMPurify` straight out of `node_modules/` (see `docs/adr/0006-preact-frontend-framework.md`). That directory must exist wherever `gantry serve` runs — don't `npm prune --production` or ship without it.
 
 Visually verifying a rendered `.docx` (not required to *use* Gantry, only to sanity-check output during development) additionally needs LibreOffice (`soffice`) and Poppler (`pdftoppm`) — see `vendor/anthropic-skills/docx/SKILL.md`.
 

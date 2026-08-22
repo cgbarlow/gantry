@@ -1,8 +1,21 @@
+// gantry's production UI entry point — Preact, delivered via HTM tagged
+// templates with no build step, per docs/adr/0006-preact-frontend-framework.md.
+// `preact-iso` provides the routing shell (one route today — the module
+// editor — so later screens have somewhere to add sibling routes) and
+// `@preact/signals` holds the instance-scoped state (the viewed stage, the
+// fetched instance data) that's shared across this screen's header, nav,
+// and module list, exactly as today's DOM version threaded a `stageId`
+// through a single re-render function.
+import { html, render } from 'htm/preact'
+import { useEffect, useRef, useState } from 'preact/hooks'
+import { signal, effect } from '@preact/signals'
+import { LocationProvider, Router, Route } from 'preact-iso'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
 import { markdown } from '@codemirror/lang-markdown'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
+import { theme, cycleTheme } from './lib/theme.js'
 
 const md = new MarkdownIt()
 
@@ -16,252 +29,295 @@ async function loadInstance(stageId) {
   return res.json()
 }
 
-// Free-browse stage switcher: lets you view/edit any stage's modules
-// without changing the instance's own persisted current stage.
-function renderStageNav(container, stages, currentStageId, viewedStageId, onSelect) {
-  container.replaceChildren()
-  stages.forEach((stage) => {
-    const button = document.createElement('button')
-    button.type = 'button'
-    button.textContent = stage.title + (stage.id === currentStageId ? ' (current)' : '')
-    if (stage.id === viewedStageId) button.classList.add('active')
-    button.addEventListener('click', () => onSelect(stage.id))
-    container.appendChild(button)
-  })
+function renderPreview(node, text) {
+  if (!node) return
+  node.innerHTML = DOMPurify.sanitize(md.render(text ?? ''))
 }
 
-function renderPreview(container, text) {
-  container.innerHTML = DOMPurify.sanitize(md.render(text))
-}
+// ---------- Instance-scoped state ----------
+// `viewedStage` mirrors the free-browse stage switcher: the stage the form
+// is currently displaying, distinct from the instance's own persisted
+// current stage until the user picks a different one. `null` means "let
+// the server default to the instance's current stage" (the bootstrap case).
+const viewedStage = signal(null)
+const instanceData = signal(null)
+const loadError = signal(null)
 
-function fieldLabel(field) {
-  const label = document.createElement('label')
-  label.textContent = field.title + (field.required ? ' *' : '')
-  return label
-}
+effect(() => {
+  const stageId = viewedStage.value
+  loadInstance(stageId)
+    .then((data) => {
+      instanceData.value = data
+      loadError.value = null
+    })
+    .catch((err) => {
+      loadError.value = err.message
+    })
+})
 
-function fieldGuidance(field) {
-  if (!field.guidance) return null
-  const p = document.createElement('p')
-  p.className = 'guidance'
-  p.textContent = field.guidance
-  return p
-}
-
+// ---------- Markdown field ----------
 // EditorView.updateListener -> markdown-it -> DOMPurify -> sibling preview
-// pane, per docs/adr/0004-markdown-editor-codemirror.md.
-function createMarkdownField(field) {
-  const wrapper = document.createElement('div')
-  wrapper.className = 'field field-markdown'
-  wrapper.appendChild(fieldLabel(field))
-  const guidance = fieldGuidance(field)
-  if (guidance) wrapper.appendChild(guidance)
+// pane, per docs/adr/0004-markdown-editor-codemirror.md. The CodeMirror
+// instance is the source of truth for the field's value, so getValue/setValue
+// read and write it directly rather than duplicating it into component state.
+function MarkdownField({ field, onRegister }) {
+  const hostRef = useRef(null)
+  const previewRef = useRef(null)
 
-  const split = document.createElement('div')
-  split.className = 'split'
-  const editorHost = document.createElement('div')
-  editorHost.className = 'editor-host'
-  const preview = document.createElement('div')
-  preview.className = 'preview'
-  split.append(editorHost, preview)
-  wrapper.appendChild(split)
+  useEffect(() => {
+    const state = EditorState.create({
+      doc: field.value ?? '',
+      extensions: [
+        basicSetup,
+        markdown(),
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged) renderPreview(previewRef.current, update.state.doc.toString())
+        }),
+      ],
+    })
+    const view = new EditorView({ state, parent: hostRef.current })
+    renderPreview(previewRef.current, field.value ?? '')
 
-  const state = EditorState.create({
-    doc: field.value ?? '',
-    extensions: [
-      basicSetup,
-      markdown(),
-      EditorView.updateListener.of((update) => {
-        if (update.docChanged) renderPreview(preview, update.state.doc.toString())
-      }),
-    ],
-  })
-  const view = new EditorView({ state, parent: editorHost })
-  renderPreview(preview, field.value ?? '')
+    onRegister({
+      getValue: () => view.state.doc.toString(),
+      setValue: (text) => {
+        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text ?? '' } })
+        renderPreview(previewRef.current, text ?? '')
+      },
+    })
 
-  function setValue(text) {
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text ?? '' } })
-    renderPreview(preview, text ?? '')
-  }
+    return () => view.destroy()
+    // One editor per mount — the enclosing stage screen remounts wholesale
+    // (keyed by stage id) on stage switch, matching the old full-rebuild
+    // behaviour, so this never needs to react to `field` changing in place.
+    // eslint-disable-next-line
+  }, [])
 
-  return { element: wrapper, getValue: () => view.state.doc.toString(), setValue }
+  return html`
+    <div class="field field-markdown">
+      <label>${field.title}${field.required ? ' *' : ''}</label>
+      ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
+      <div class="split">
+        <div class="editor-host" ref=${hostRef}></div>
+        <div class="preview" ref=${previewRef}></div>
+      </div>
+    </div>
+  `
 }
 
-function createListField(field) {
-  const wrapper = document.createElement('div')
-  wrapper.className = 'field field-list'
-  wrapper.appendChild(fieldLabel(field))
-  const guidance = fieldGuidance(field)
-  if (guidance) wrapper.appendChild(guidance)
+// ---------- List field ----------
+function ListField({ field, onRegister }) {
+  const rowsRef = useRef(field.value?.length ? [...field.value] : [''])
+  const [, bump] = useState(0)
+  const rerender = () => bump((n) => n + 1)
 
-  const rows = document.createElement('div')
-  rows.className = 'list-rows'
-  wrapper.appendChild(rows)
+  useEffect(() => {
+    onRegister({
+      getValue: () => rowsRef.current.filter((v) => v.trim() !== ''),
+      setValue: (values) => {
+        rowsRef.current = values?.length ? [...values] : ['']
+        rerender()
+      },
+    })
+    // eslint-disable-next-line
+  }, [])
 
-  function addRow(value) {
-    const row = document.createElement('div')
-    row.className = 'list-row'
-    const input = document.createElement('input')
-    input.type = 'text'
-    input.value = value ?? ''
-    const remove = document.createElement('button')
-    remove.type = 'button'
-    remove.textContent = 'Remove'
-    remove.addEventListener('click', () => row.remove())
-    row.append(input, remove)
-    rows.appendChild(row)
+  function updateRow(i, value) {
+    rowsRef.current = rowsRef.current.map((v, idx) => (idx === i ? value : v))
+    rerender()
+  }
+  function removeRow(i) {
+    rowsRef.current = rowsRef.current.filter((_, idx) => idx !== i)
+    rerender()
+  }
+  function addRow() {
+    rowsRef.current = [...rowsRef.current, '']
+    rerender()
   }
 
-  const initialValues = field.value?.length ? field.value : ['']
-  initialValues.forEach(addRow)
-
-  const addButton = document.createElement('button')
-  addButton.type = 'button'
-  addButton.textContent = 'Add'
-  addButton.addEventListener('click', () => addRow())
-  wrapper.appendChild(addButton)
-
-  function setValue(values) {
-    rows.replaceChildren()
-    const items = values?.length ? values : ['']
-    items.forEach(addRow)
-  }
-
-  return {
-    element: wrapper,
-    getValue: () => [...rows.querySelectorAll('input')].map((i) => i.value).filter((v) => v.trim() !== ''),
-    setValue,
-  }
+  return html`
+    <div class="field field-list">
+      <label>${field.title}${field.required ? ' *' : ''}</label>
+      ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
+      <div class="list-rows">
+        ${rowsRef.current.map(
+          (value, i) => html`
+            <div class="list-row" key=${i}>
+              <input type="text" value=${value} onInput=${(e) => updateRow(i, e.currentTarget.value)} />
+              <button type="button" class="btn small" onClick=${() => removeRow(i)}>Remove</button>
+            </div>
+          `
+        )}
+      </div>
+      <button type="button" class="btn small" onClick=${addRow}>Add</button>
+    </div>
+  `
 }
 
-function renderModule(mod, stageId) {
-  const section = document.createElement('section')
-  section.className = 'module'
+// ---------- One module's card: fields + its own Save button/status ----------
+function ModuleCard({ mod, stageId, onFieldRegistered }) {
+  const [status, setStatus] = useState('')
+  const controlsRef = useRef([])
 
-  const heading = document.createElement('h2')
-  heading.textContent = mod.title
-  section.appendChild(heading)
-
-  if (mod.purpose) {
-    const purpose = document.createElement('p')
-    purpose.className = 'purpose'
-    purpose.textContent = mod.purpose
-    section.appendChild(purpose)
-  }
-
-  const fieldControls = mod.fields.map((field) =>
-    field.type === 'list' ? createListField(field) : createMarkdownField(field)
-  )
-  fieldControls.forEach((control) => section.appendChild(control.element))
-
-  const status = document.createElement('div')
-  status.className = 'save-status'
-
-  const saveButton = document.createElement('button')
-  saveButton.type = 'button'
-  saveButton.textContent = `Save ${mod.title}`
-  saveButton.addEventListener('click', async () => {
+  async function handleSave() {
     const fields = {}
     mod.fields.forEach((field, i) => {
-      fields[field.id] = fieldControls[i].getValue()
+      fields[field.id] = controlsRef.current[i].getValue()
     })
-    status.textContent = 'Saving…'
+    setStatus('Saving…')
     const res = await fetch(`/api/instance/modules/${mod.id}?stage=${encodeURIComponent(stageId)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: mod.status, owner: mod.owner, fields }),
     })
     if (!res.ok) {
-      status.textContent = 'Save failed.'
+      setStatus('Save failed.')
       return
     }
     const instanceStatus = await res.json()
     const thisModule = instanceStatus.modules.find((m) => m.id === mod.id)
-    status.textContent = thisModule?.complete
-      ? 'Saved — complete.'
-      : `Saved — outstanding: ${thisModule?.outstanding.join(', ') || 'none'}`
-  })
-  section.append(saveButton, status)
+    setStatus(
+      thisModule?.complete ? 'Saved — complete.' : `Saved — outstanding: ${thisModule?.outstanding.join(', ') || 'none'}`
+    )
+  }
 
-  return { element: section, fieldControls }
+  return html`
+    <section class="module">
+      <h2>${mod.title}</h2>
+      ${mod.purpose ? html`<p class="purpose">${mod.purpose}</p>` : null}
+      ${mod.fields.map((field, i) => {
+        const onRegister = (control) => {
+          controlsRef.current[i] = control
+          onFieldRegistered(field, control)
+        }
+        return field.type === 'list'
+          ? html`<${ListField} key=${field.id} field=${field} onRegister=${onRegister} />`
+          : html`<${MarkdownField} key=${field.id} field=${field} onRegister=${onRegister} />`
+      })}
+      <div class="save-status">${status}</div>
+      <button type="button" class="btn primary" onClick=${handleSave}>Save ${mod.title}</button>
+    </section>
+  `
 }
 
-// A "Clear" button per gate screen, acting across every module shown for
-// that stage — not per-module, since a gate's fields are cleared together.
-// (No "Populate example text" button — the fully-populated `examples`
-// instance is the way to explore example content now, per-field population
-// was redundant once that existed.)
-function renderStageActions(fieldEntries) {
-  const container = document.createElement('div')
-  container.className = 'stage-actions'
+// ---------- Render section ----------
+function ArtefactsSection({ instance }) {
+  const [status, setStatus] = useState('')
 
-  const clearButton = document.createElement('button')
-  clearButton.type = 'button'
-  clearButton.textContent = 'Clear all fields'
-  clearButton.addEventListener('click', () => {
-    fieldEntries.forEach(({ field, control }) => control.setValue(field.type === 'list' ? [] : ''))
-  })
+  async function handleRender(artefact) {
+    setStatus('Rendering…')
+    const res = await fetch(`/api/instance/render/${artefact.id}`, { method: 'POST' })
+    const body = await res.json()
+    setStatus(res.ok ? `Rendered to ${body.docxPath}` : `Render failed: ${body.error}`)
+  }
 
-  container.appendChild(clearButton)
-  return container
+  return html`
+    <section class="artefacts">
+      <h2>Render</h2>
+      ${instance.artefacts.map(
+        (artefact) => html`
+          <button type="button" class="btn" key=${artefact.id} onClick=${() => handleRender(artefact)}>
+            Render ${artefact.title}
+          </button>
+        `
+      )}
+      <div class="save-status">${status}</div>
+    </section>
+  `
 }
 
-function renderArtefactsSection(instance) {
-  const section = document.createElement('section')
-  section.className = 'artefacts'
+// ---------- The viewed stage's whole screen: stage actions, modules, artefacts ----------
+// Keyed by stage id from the parent (see ModuleEditorPage) so switching
+// stages remounts this wholesale — fresh CodeMirror instances and a fresh
+// field registry per stage, matching the old full-DOM-rebuild behaviour.
+function StageScreen({ instance }) {
+  const registryRef = useRef([])
 
-  const heading = document.createElement('h2')
-  heading.textContent = 'Render'
-  section.appendChild(heading)
+  function registerField(field, control) {
+    registryRef.current.push({ field, control })
+  }
 
-  const status = document.createElement('div')
-  status.className = 'save-status'
+  function clearAllFields() {
+    registryRef.current.forEach(({ field, control }) => control.setValue(field.type === 'list' ? [] : ''))
+  }
 
-  instance.artefacts.forEach((artefact) => {
-    const button = document.createElement('button')
-    button.type = 'button'
-    button.textContent = `Render ${artefact.title}`
-    button.addEventListener('click', async () => {
-      status.textContent = 'Rendering…'
-      const res = await fetch(`/api/instance/render/${artefact.id}`, { method: 'POST' })
-      const body = await res.json()
-      status.textContent = res.ok ? `Rendered to ${body.docxPath}` : `Render failed: ${body.error}`
-    })
-    section.appendChild(button)
-  })
-
-  section.appendChild(status)
-  return section
+  return html`
+    <div class="stage-actions">
+      <button type="button" class="btn" onClick=${clearAllFields}>Clear all fields</button>
+    </div>
+    <main id="modules">
+      ${instance.modules.map(
+        (mod) => html`
+          <${ModuleCard}
+            key=${mod.id}
+            mod=${mod}
+            stageId=${instance.stage.id}
+            onFieldRegistered=${registerField}
+          />
+        `
+      )}
+      <${ArtefactsSection} instance=${instance} />
+    </main>
+  `
 }
 
-async function renderInstance(stageId) {
-  const instance = await loadInstance(stageId)
-  document.getElementById('instance-title').textContent = `${instance.slug} — ${instance.definition}`
-  document.getElementById('stage-line').textContent = `${instance.stage.title} (gate: ${instance.stage.gate})`
-
-  renderStageNav(
-    document.getElementById('stage-nav'),
-    instance.stages,
-    instance.currentStageId,
-    instance.stage.id,
-    (selectedStageId) => renderInstance(selectedStageId).catch((err) => {
-      document.body.textContent = `Failed to load: ${err.message}`
-    })
-  )
-
-  const fieldEntries = []
-  const modulesRoot = document.getElementById('modules')
-  modulesRoot.replaceChildren()
-  instance.modules.forEach((mod) => {
-    const { element, fieldControls } = renderModule(mod, instance.stage.id)
-    modulesRoot.appendChild(element)
-    mod.fields.forEach((field, i) => fieldEntries.push({ field, control: fieldControls[i] }))
-  })
-  modulesRoot.appendChild(renderArtefactsSection(instance))
-
-  document.getElementById('stage-actions').replaceChildren(renderStageActions(fieldEntries))
+// ---------- Header: title, stage line, free-browse stage nav, theme ----------
+function AppHeader({ instance }) {
+  return html`
+    <header>
+      <div class="brand">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 20h18M6 20V8l6-4 6 4v12M6 8h12" />
+        </svg>
+        <h1>${instance.slug} — ${instance.definition}</h1>
+        <button type="button" class="btn small ghost theme-toggle" onClick=${cycleTheme} title="Cycle theme">
+          Theme: ${theme.value}
+        </button>
+      </div>
+      <p id="stage-line">${instance.stage.title} (gate: ${instance.stage.gate})</p>
+      <nav id="stage-nav">
+        ${instance.stages.map((stage) => {
+          const isCurrent = stage.id === instance.currentStageId
+          const isViewed = stage.id === instance.stage.id
+          return html`
+            <button
+              type="button"
+              key=${stage.id}
+              class=${'btn small' + (isViewed ? ' active' : '') + (isCurrent ? ' stage-current' : '')}
+              onClick=${() => (viewedStage.value = stage.id)}
+            >
+              ${stage.title}${isCurrent ? ' (current)' : ''}
+            </button>
+          `
+        })}
+      </nav>
+    </header>
+  `
 }
 
-renderInstance().catch((err) => {
-  document.body.textContent = `Failed to load: ${err.message}`
-})
+// ---------- Page: composes header + the viewed stage's screen ----------
+function ModuleEditorPage() {
+  const instance = instanceData.value
+  const error = loadError.value
+
+  if (error) return html`<p class="load-error">Failed to load: ${error}</p>`
+  if (!instance) return html`<p class="loading">Loading…</p>`
+
+  return html`
+    <${AppHeader} instance=${instance} />
+    <${StageScreen} key=${instance.stage.id} instance=${instance} />
+  `
+}
+
+// ---------- App shell: preact-iso routing, one route today ----------
+function App() {
+  return html`
+    <${LocationProvider}>
+      <${Router}>
+        <${Route} default component=${ModuleEditorPage} />
+      <//>
+    <//>
+  `
+}
+
+render(html`<${App} />`, document.getElementById('app'))

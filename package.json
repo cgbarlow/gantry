@@ -15,11 +15,15 @@
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.2",
+    "@preact/signals": "^2.11.1",
     "codemirror": "^6.0.2",
     "commander": "^13.0.0",
     "dompurify": "^3.4.13",
     "eta": "^4.6.0",
+    "htm": "^3.1.1",
     "markdown-it": "^15.0.0",
+    "preact": "^10.29.8",
+    "preact-iso": "^2.12.2",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
