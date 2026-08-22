@@ -15,11 +15,24 @@ function objectIdFor(n) {
  * accepted as the password half of HTTP Basic auth (empty username) —
  * anything else, or no Authorization header at all, gets a 401, mirroring
  * how a rejected PAT surfaces from the real API.
+ *
+ * `failAfterPushes`, if given, makes every push (POST .../pushes) once
+ * `failAfterPushes` pushes have already committed successfully *during this
+ * server's lifetime* fail with a 500 — simulating a mid-flow outage (a
+ * network blip, an expired PAT) for tests that need to exercise a caller's
+ * partial-failure handling (e.g. a multi-file create like createInstance's
+ * Azure DevOps path) without that test depending on how many GETs the
+ * client happens to make per push. Counted separately from `commitCount`
+ * (which seeds at 1 when `files` is non-empty) so `failAfterPushes` always
+ * means "N real pushes made against this server", regardless of whether
+ * `files` seeded an initial commit. Reads (`items`/`refs`) are never
+ * affected by this — only the write path.
  */
-export function createFakeAzureDevOpsServer({ organization, project, repository, validPat, files = {} }) {
+export function createFakeAzureDevOpsServer({ organization, project, repository, validPat, files = {}, failAfterPushes } = {}) {
   const store = new Map(Object.entries(files).map(([path, content]) => [path.startsWith('/') ? path : `/${path}`, content]))
   let commitCount = store.size > 0 ? 1 : 0
   let currentObjectId = commitCount > 0 ? objectIdFor(commitCount) : objectIdFor(0)
+  let pushesMade = 0
 
   const basePath = `/${organization}/${project}/_apis/git/repositories/${repository}`
 
@@ -57,6 +70,9 @@ export function createFakeAzureDevOpsServer({ organization, project, repository,
     }
 
     if (req.method === 'POST' && pathname === `${basePath}/pushes`) {
+      if (failAfterPushes !== undefined && pushesMade >= failAfterPushes) {
+        return json(500, { message: 'Simulated Azure DevOps outage (fake server, for fault-injection tests).' })
+      }
       let raw = ''
       for await (const chunk of req) raw += chunk
       const push = JSON.parse(raw)
@@ -73,6 +89,7 @@ export function createFakeAzureDevOpsServer({ organization, project, repository,
         }
       }
       commitCount += 1
+      pushesMade += 1
       currentObjectId = objectIdFor(commitCount)
       return json(201, {
         pushId: commitCount,
@@ -81,5 +98,29 @@ export function createFakeAzureDevOpsServer({ organization, project, repository,
     }
 
     return json(404, { message: `No fake route for ${req.method} ${pathname}` })
+  })
+}
+
+/**
+ * Starts a `createFakeAzureDevOpsServer` on an ephemeral port for the
+ * duration of `fn(baseUrl)`, then closes it — mirrors
+ * `tests/server.test.js`'s `withRunningServer` helper's shape (per #82's
+ * testing decisions). Shared by `tests/azureDevOpsClient.test.js` and
+ * `tests/instance.test.js` so this lifecycle isn't duplicated across both.
+ */
+export function withFakeAzureDevOpsServer({ organization, project, repository, validPat, files, failAfterPushes }, fn) {
+  return new Promise((resolve, reject) => {
+    const server = createFakeAzureDevOpsServer({ organization, project, repository, validPat, files, failAfterPushes })
+    server.listen(0, async () => {
+      const { port } = server.address()
+      try {
+        await fn(`http://localhost:${port}`)
+        resolve()
+      } catch (err) {
+        reject(err)
+      } finally {
+        server.close()
+      }
+    })
   })
 }
