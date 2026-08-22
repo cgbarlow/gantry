@@ -124,6 +124,31 @@ header {
 #stage-nav { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
 #stage-nav button.stage-current { border-color: var(--line-strong); }
 
+/*
+ * View-mode toolbar (#79) — a toolbar segmented control (Markdown / Split /
+ * Rendered) for the whole module-editor screen, ported from Variant A of
+ * web/prototypes/module-editor.prototype.html (#72).
+ */
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 14px 32px;
+  background: var(--bg-raised);
+  border-bottom: var(--hairline) solid var(--line);
+}
+.segmented { display: inline-flex; border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius); overflow: hidden; }
+.segmented button { border: none; border-right: var(--hairline) solid var(--line-strong); border-radius: 0; margin: 0; }
+.segmented button:last-child { border-right: none; }
+
+/* View-mode visibility, driven by data-view-mode on main#modules (#79). */
+main[data-view-mode='markdown'] .field-markdown .preview { display: none; }
+main[data-view-mode='markdown'] .field-markdown .editor-host { flex: 1 1 100%; }
+main[data-view-mode='rendered'] .field-markdown .editor-host { display: none; }
+main[data-view-mode='rendered'] .field-markdown .preview { flex: 1 1 100%; }
+
 main#modules, .stage-actions, .load-error, .loading {
   max-width: 1120px;
   margin: 0 auto;

@@ -11,11 +11,12 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { signal, effect } from '@preact/signals'
 import { LocationProvider, Router, Route } from 'preact-iso'
 import { EditorView, basicSetup } from 'codemirror'
-import { EditorState } from '@codemirror/state'
+import { EditorState, Compartment } from '@codemirror/state'
 import { markdown } from '@codemirror/lang-markdown'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import { theme, cycleTheme } from './lib/theme.js'
+import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
 
 const md = new MarkdownIt()
 
@@ -55,6 +56,16 @@ effect(() => {
     })
 })
 
+// A Rendered-mode editor must be genuinely read-only (#79's acceptance
+// criteria: "no edits possible, none saved"), not just visually hidden by
+// CSS — `EditorState.readOnly` rejects direct-edit transactions and
+// `EditorView.editable` drops `contenteditable`, so neither typing nor
+// paste nor drag-drop can land a change while Rendered is active.
+function editableExtension(mode) {
+  const editable = mode !== 'rendered'
+  return [EditorState.readOnly.of(!editable), EditorView.editable.of(editable)]
+}
+
 // ---------- Markdown field ----------
 // EditorView.updateListener -> markdown-it -> DOMPurify -> sibling preview
 // pane, per docs/adr/0004-markdown-editor-codemirror.md. The CodeMirror
@@ -65,11 +76,13 @@ function MarkdownField({ field, onRegister }) {
   const previewRef = useRef(null)
 
   useEffect(() => {
+    const editableCompartment = new Compartment()
     const state = EditorState.create({
       doc: field.value ?? '',
       extensions: [
         basicSetup,
         markdown(),
+        editableCompartment.of(editableExtension(viewMode.value)),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) renderPreview(previewRef.current, update.state.doc.toString())
         }),
@@ -77,6 +90,13 @@ function MarkdownField({ field, onRegister }) {
     })
     const view = new EditorView({ state, parent: hostRef.current })
     renderPreview(previewRef.current, field.value ?? '')
+
+    // Track the global view-mode signal for as long as this editor is
+    // mounted, so switching into/out of Rendered toggles read-only live —
+    // the ticket requires it enforced immediately, not just on next mount.
+    const stopViewModeSync = effect(() => {
+      view.dispatch({ effects: editableCompartment.reconfigure(editableExtension(viewMode.value)) })
+    })
 
     onRegister({
       getValue: () => view.state.doc.toString(),
@@ -86,7 +106,10 @@ function MarkdownField({ field, onRegister }) {
       },
     })
 
-    return () => view.destroy()
+    return () => {
+      stopViewModeSync()
+      view.destroy()
+    }
     // One editor per mount — the enclosing stage screen remounts wholesale
     // (keyed by stage id) on stage switch, matching the old full-rebuild
     // behaviour, so this never needs to react to `field` changing in place.
@@ -245,7 +268,7 @@ function StageScreen({ instance }) {
     <div class="stage-actions">
       <button type="button" class="btn" onClick=${clearAllFields}>Clear all fields</button>
     </div>
-    <main id="modules">
+    <main id="modules" data-view-mode=${viewMode.value}>
       ${instance.modules.map(
         (mod) => html`
           <${ModuleCard}
@@ -258,6 +281,51 @@ function StageScreen({ instance }) {
       )}
       <${ArtefactsSection} instance=${instance} />
     </main>
+  `
+}
+
+// ---------- View-mode toolbar: Markdown/Split/Rendered segmented control ----------
+// One toolbar for the whole editor screen (see web/lib/viewMode.js) — sits
+// below AppHeader, above the viewed stage's screen, and (like AppHeader) is
+// never remounted by a stage switch, so `viewMode` reads back the same
+// value the author left it in after navigating fields/modules/stages.
+const VIEW_MODE_LABELS = { markdown: 'Markdown', split: 'Split', rendered: 'Rendered' }
+const VIEW_MODE_HOTKEY = { ctrlKey: true, shiftKey: true, key: 'v' }
+
+function ViewModeToolbar() {
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key.toLowerCase() !== VIEW_MODE_HOTKEY.key) return
+      if (e.ctrlKey !== VIEW_MODE_HOTKEY.ctrlKey || e.shiftKey !== VIEW_MODE_HOTKEY.shiftKey) return
+      // Fires even while a CodeMirror editor or other field has focus —
+      // it's a distinctive combo unlikely to collide with normal editing,
+      // and the ticket asks for a hotkey that cycles the whole screen's
+      // view regardless of what the author was just doing.
+      e.preventDefault()
+      cycleViewMode()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  return html`
+    <div class="toolbar">
+      <div class="segmented" role="group" aria-label="View mode">
+        ${VIEW_MODES.map(
+          (mode) => html`
+            <button
+              type="button"
+              key=${mode}
+              class=${'btn small' + (viewMode.value === mode ? ' active' : '')}
+              aria-pressed=${viewMode.value === mode}
+              onClick=${() => (viewMode.value = mode)}
+            >
+              ${VIEW_MODE_LABELS[mode]}
+            </button>
+          `
+        )}
+      </div>
+    </div>
   `
 }
 
@@ -305,6 +373,7 @@ function ModuleEditorPage() {
 
   return html`
     <${AppHeader} instance=${instance} />
+    <${ViewModeToolbar} />
     <${StageScreen} key=${instance.stage.id} instance=${instance} />
   `
 }
