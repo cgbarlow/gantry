@@ -131,7 +131,15 @@ main#modules, .stage-actions, .load-error, .loading {
 }
 .stage-actions { padding-top: 20px; padding-bottom: 0; }
 
-button.btn {
+/*
+ * `.btn` styles any `<button class="btn">` or `<a class="btn">` alike —
+ * the instance dashboard (#77) uses real `<a>` navigation (e.g. "Open
+ * workspace", "+ New instance") so preact-iso's anchor-click interception
+ * handles it as client-side routing, not a `<button onClick>` that would
+ * need its own manual `route()` call to the same effect.
+ */
+.btn {
+  display: inline-block;
   font-family: var(--font-body);
   font-weight: 600;
   font-size: 13px;
@@ -140,20 +148,20 @@ button.btn {
   border: var(--border-strong) solid var(--line-strong);
   background: var(--bg-raised);
   color: var(--text);
+  text-decoration: none;
   cursor: pointer;
   margin: 0.5rem 0.5rem 0 0;
 }
-button.btn.primary { background: var(--text); color: var(--bg); border-color: var(--text); }
-button.btn.ghost { background: transparent; border-color: var(--line); }
-button.btn.small { padding: 5px 10px; font-size: 12px; }
-button.btn.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+.btn.primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+.btn.ghost { background: transparent; border-color: var(--line); }
+.btn.small { padding: 5px 10px; font-size: 12px; }
+.btn.active { background: var(--text); color: var(--bg); border-color: var(--text); }
 button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /*
- * Not yet used by this screen (module status/owner aren't shown here, per
- * this ticket's "no new user-facing capability" scope) — kept because #77
- * ("Instance dashboard") needs a stage/gate/status/owner detail pane and is
- * the next ticket to consume these tokens/classes.
+ * Status pill — used by the module editor's own module status (not
+ * currently surfaced in this screen's markup) and by the instance
+ * dashboard's (#77) stage/gate/status/owner detail pane and swimlane chips.
  */
 .stamp {
   display: inline-block;
@@ -225,3 +233,124 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .save-status { font-size: 0.9rem; color: var(--text-muted); min-height: 1.2em; margin-top: 0.5rem; }
 .load-error, .loading { padding-top: 48px; color: var(--text-muted); }
+
+/*
+ * Instance dashboard (#77) — the landing screen at `/`. Layout treatments
+ * adapted from web/prototypes/instance-dashboard.prototype.html's variants
+ * B (master-detail, the default) and C (stage swimlanes); variant A
+ * (ledger register) wasn't chosen and isn't implemented. Same tokens and
+ * `.btn`/`.stamp` components as the rest of this stylesheet — nothing
+ * dashboard-specific is re-invented here beyond layout.
+ */
+main.dashboard {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 40px 32px 140px;
+}
+.dashboard-topbar { display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; margin-bottom: 24px; }
+.dashboard-topbar h1 { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; font-size: 26px; margin: 0; }
+.dashboard-controls { display: flex; align-items: center; gap: 10px; }
+.lede { color: var(--text-muted); margin: 6px 0 0; max-width: 70ch; }
+
+.view-toggle { display: flex; gap: 8px; }
+
+.dashboard-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 80px 20px;
+  border: var(--hairline) dashed var(--line);
+  border-radius: var(--radius);
+}
+.dashboard-empty p { margin: 0 0 16px; }
+
+/* ---------- Master-detail ---------- */
+.master-detail {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  border: var(--border-strong) solid var(--line-strong);
+  border-radius: var(--radius);
+  min-height: 480px;
+}
+.master-detail .list-pane { border-right: var(--hairline) solid var(--line); padding: 16px; background: var(--bg-raised); }
+.master-detail .list-pane .search { width: 100%; margin-bottom: 12px; box-sizing: border-box; }
+.master-detail .list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  border: var(--hairline) solid transparent;
+}
+.master-detail .list-item:hover { background: var(--bg); }
+.master-detail .list-item.selected { border-color: var(--line-strong); background: var(--bg); }
+.master-detail .list-item .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.master-detail .list-item .dot.agreed { background: var(--stamp-agreed-bg); }
+.master-detail .list-item .dot.draft { background: var(--stamp-draft-bg); }
+.master-detail .list-item .meta { display: flex; flex-direction: column; min-width: 0; }
+.master-detail .list-item .meta .name { font-family: var(--font-display); font-weight: 600; font-size: 14px; }
+.master-detail .list-item .meta .def { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.master-detail .detail-pane { padding: 28px; }
+.master-detail .detail-pane h2 { font-family: var(--font-display); font-weight: 600; font-size: 20px; margin: 0 0 16px; }
+.master-detail .detail-ledger {
+  display: grid;
+  grid-template-columns: auto auto auto 1fr;
+  gap: 24px;
+  align-items: center;
+  padding: 16px 20px;
+  background: var(--bg-raised);
+  border: var(--border-strong) solid var(--line-strong);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+.detail-ledger .field-label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 2px; }
+.master-detail .detail-ledger .stage { font-family: var(--font-display); font-weight: 600; font-size: 16px; }
+.master-detail .detail-actions { display: flex; gap: 10px; }
+.master-detail .placeholder { color: var(--text-muted); text-align: center; padding: 80px 20px; }
+
+/* ---------- Stage swimlanes ---------- */
+.swimlane-group + .swimlane-group { margin-top: 32px; }
+.swimlane-group-title { font-family: var(--font-display); font-weight: 600; font-size: 15px; margin: 0 0 12px; }
+.swimlanes .lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+.swimlanes .lane { border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg-raised); min-height: 200px; padding: 12px; }
+.swimlanes .lane-header { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 10px; margin-bottom: 10px; border-bottom: var(--border-strong) solid var(--line-strong); }
+.swimlanes .lane-header .stage-name { font-family: var(--font-display); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+.swimlanes .lane-header .count { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+.swimlanes .empty-lane { color: var(--text-muted); font-size: 12px; text-align: center; padding: 20px 8px; border: 1px dashed var(--line); border-radius: var(--radius); }
+
+.chip { position: relative; border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg); padding: 10px 12px; margin-bottom: 10px; }
+.chip .name { font-family: var(--font-display); font-weight: 600; font-size: 13px; }
+.chip .def { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); margin: 3px 0 6px; }
+.chip .chip-foot { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.chip .owner { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+.chip .menu-btn { line-height: 1; }
+.chip .menu {
+  display: none;
+  position: absolute;
+  right: 8px;
+  top: 34px;
+  z-index: 5;
+  background: var(--bg-raised);
+  border: var(--border-strong) solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+  min-width: 130px;
+}
+.chip.menu-open .menu { display: block; }
+.chip .menu button, .chip .menu a {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-family: var(--font-body);
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+.chip .menu button:hover, .chip .menu a:hover { background: var(--bg); }

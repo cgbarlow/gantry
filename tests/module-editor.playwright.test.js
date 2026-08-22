@@ -14,6 +14,11 @@ import { loadDefinition } from '../lib/definition.js'
 // save round-trips to the module file on disk — the same guarantee
 // tests/server.test.js checks at the HTTP layer, exercised here through an
 // actual rendered page and a real CodeMirror 6 editor instance.
+//
+// The module editor now lives at /instance/<slug> — the instance dashboard
+// (#77) is the landing screen at / — so this navigates straight there
+// rather than relying on a server-pinned default slug being shown at /.
+// See tests/dashboard.playwright.test.js for the dashboard's own smoke test.
 function withRunningServer(options, fn) {
   return new Promise((resolve, reject) => {
     const server = createServer(options)
@@ -47,7 +52,7 @@ test('the ported module editor page loads with no errors and a markdown field sa
           if (msg.type() === 'error') pageErrors.push(msg.text())
         })
 
-        await page.goto(base)
+        await page.goto(`${base}/instance/examples`)
         await page.waitForSelector('.module', { timeout: 10_000 })
 
         assert.equal(await page.locator('header h1').textContent(), 'examples — design')

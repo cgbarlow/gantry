@@ -185,6 +185,60 @@ test('POST /api/instance/render/:artefact renders a real docx via the web form p
   }
 })
 
+test('GET /api/instance/check reports pass/fail for the instance\'s current gate, mirroring `gantry check`', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+    createInstance('design', 'my-initiative', { instancesDir })
+
+    await withRunningServer({ instancesDir }, async (base) => {
+      const passing = await (await fetch(`${base}/api/instance/check?slug=examples`)).json()
+      assert.equal(passing.pass, true)
+      assert.deepEqual(passing.stage, { id: 'shape', title: 'Shape', gate: 'business-case' })
+
+      const failing = await (await fetch(`${base}/api/instance/check?slug=my-initiative`)).json()
+      assert.equal(failing.pass, false)
+      assert.ok(failing.modules.some((m) => m.outstanding.length > 0))
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('GET /api/instance/check with no slug given reports a 400, not a crash', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withRunningServer({ instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instance/check`)
+      assert.equal(res.status, 400)
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('GET /api/definitions/:id/stages reports the definition\'s stages in order, for dashboard swimlane lanes', async () => {
+  await withRunningServer({}, async (base) => {
+    const res = await fetch(`${base}/api/definitions/design/stages`)
+    assert.equal(res.status, 200)
+    const stages = await res.json()
+    assert.deepEqual(stages, [
+      { id: 'shape', title: 'Shape', gate: 'business-case' },
+      { id: 'hld-define', title: 'HLD Definition', gate: 'hld-tac-approved' },
+      { id: 'detailed-design', title: 'Detailed Design', gate: 'build-ready-checklist' },
+      { id: 'handover', title: 'Operational Handover', gate: 'operational-handover' },
+    ])
+  })
+})
+
+test('GET /api/definitions/:id/stages for an unknown definition reports a 500, not a crash', async () => {
+  await withRunningServer({}, async (base) => {
+    const res = await fetch(`${base}/api/definitions/not-a-real-definition/stages`)
+    assert.equal(res.status, 500)
+  })
+})
+
 test('GET / serves index.html with the import map resolved (no leftover placeholder)', async () => {
   await withRunningServer({ slug: 'examples' }, async (base) => {
     const res = await fetch(`${base}/`)
@@ -201,6 +255,16 @@ test('GET /node_modules/... serves real dependency files for the browser to impo
     assert.equal(res.status, 200)
     const text = await res.text()
     assert.match(text, /basicSetup/)
+  })
+})
+
+test('GET /instance/<slug> (a client-side preact-iso route, not a real file) serves the app shell, not a 404', async () => {
+  await withRunningServer({ slug: 'examples' }, async (base) => {
+    const res = await fetch(`${base}/instance/examples`)
+    assert.equal(res.status, 200)
+    const html = await res.text()
+    assert.doesNotMatch(html, /__IMPORT_MAP__/)
+    assert.match(html, /<div id="app">/)
   })
 })
 
