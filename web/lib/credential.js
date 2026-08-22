@@ -11,9 +11,22 @@
 // this: their routes never return `authentication_required`, so `requestPat`
 // is never called and no prompt ever appears — there's no separate
 // "is this instance local" check anywhere in here.
-import { signal } from '@preact/signals'
+import { signal, computed } from '@preact/signals'
 
 const STORAGE_KEY = 'gantry:ado-pat'
+
+// Internal storage is a map from Azure DevOps organization name to that
+// organization's PAT — a primitive for future multi-org support, mirroring
+// how ADR-0007's credential-provider seam already keeps an unused-but-ready
+// shape for a future Entra ID implementation (see #88, #91). Only this one
+// key is ever populated today: there is no UI anywhere for adding,
+// selecting, or switching between organizations, and the server itself
+// only ever proxies requests for a single organization per instance. Kept
+// as a private constant (not exported) precisely because nothing outside
+// this module needs — or should need — to know an organization key exists
+// yet; `web/lib/apiFetch.js`'s call sites keep resolving "the" PAT with no
+// argument.
+const DEFAULT_ORGANIZATION = 'default'
 
 // `localStorage` can throw on access rather than just being absent — e.g.
 // storage blocked by browser privacy settings, or a sandboxed iframe with no
@@ -43,13 +56,22 @@ function safeRemoveItem(key) {
   }
 }
 
+// PATs keyed by organization — `{}` when none is stored. Persisted to
+// `localStorage` as a single bare value (not a serialized map): only
+// `DEFAULT_ORGANIZATION`'s entry is ever read from/written to
+// `STORAGE_KEY`, so today's on-disk format is byte-for-byte what it always
+// was, even though the in-memory shape is now a map.
+const initialPat = safeGetItem(STORAGE_KEY)
+const patsByOrganization = signal(initialPat === null ? {} : { [DEFAULT_ORGANIZATION]: initialPat })
+
 // The one stored PAT — `null` when none is stored, matching
-// `getCredential(req)`'s own "no usable credential" return value. A single
-// signal rather than per-instance storage: today's server serves exactly
-// one Azure-DevOps-backed instance per running process (see lib/server.js's
-// own comment on `options.azureDevOps`), so there is only ever one PAT to
-// remember at a time.
-export const pat = signal(safeGetItem(STORAGE_KEY))
+// `getCredential(req)`'s own "no usable credential" return value. Derived
+// from `patsByOrganization` rather than its own writable signal: today's
+// server serves exactly one Azure-DevOps-backed instance per running
+// process (see lib/server.js's own comment on `options.azureDevOps`), so
+// there is only ever one organization's PAT to expose here, but the
+// underlying map is what actually owns the value.
+export const pat = computed(() => patsByOrganization.value[DEFAULT_ORGANIZATION] ?? null)
 
 /**
  * Stores a newly-pasted PAT (trimmed; blank clears it instead). Persisted
@@ -57,9 +79,13 @@ export const pat = signal(safeGetItem(STORAGE_KEY))
  */
 export function setPat(value) {
   const trimmed = (value ?? '').trim()
-  pat.value = trimmed === '' ? null : trimmed
-  if (pat.value === null) safeRemoveItem(STORAGE_KEY)
-  else safeSetItem(STORAGE_KEY, pat.value)
+  if (trimmed === '') {
+    clearPat()
+    return
+  }
+  const next = { ...patsByOrganization.value, [DEFAULT_ORGANIZATION]: trimmed }
+  patsByOrganization.value = next
+  safeSetItem(STORAGE_KEY, trimmed)
 }
 
 /**
@@ -70,7 +96,9 @@ export function setPat(value) {
  * re-prompt itself.
  */
 export function clearPat() {
-  pat.value = null
+  const next = { ...patsByOrganization.value }
+  delete next[DEFAULT_ORGANIZATION]
+  patsByOrganization.value = next
   safeRemoveItem(STORAGE_KEY)
 }
 
