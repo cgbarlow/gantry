@@ -6,6 +6,9 @@ import { join, isAbsolute, relative } from 'node:path'
 import { createServer } from '../lib/server.js'
 import { createInstance, readInstance, readModule } from '../lib/instance.js'
 import { loadDefinition } from '../lib/definition.js'
+import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
+import { registerInstance } from '../lib/instanceRegistry.js'
+import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
 function withRunningServer(options, fn) {
   return new Promise((resolve, reject) => {
@@ -572,6 +575,324 @@ test('POST /api/instances with an invalid slug reports 400, never reaching creat
         })
         assert.equal(res.status, 400, `expected 400 for slug ${JSON.stringify(badSlug)}`)
       }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// ---------- POST /api/instances with an Azure DevOps location (#93) ----------
+//
+// Unlike tests/serverAzureDevOpsAuth.test.js (a server *started* already
+// pinned to one Azure DevOps location via `options.azureDevOps`), these
+// exercise the per-request location this ticket adds: a plain
+// `withRunningServer({ instancesDir })` server — no `options.azureDevOps`
+// at all — accepting an `azureDevOps` field in the POST body itself.
+
+const ORGANIZATION = 'fake-org'
+const PROJECT = 'fake-project'
+const REPOSITORY = 'fake-repo'
+const VALID_PAT = 'valid-test-pat'
+
+function basicAuthHeader(pat) {
+  return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
+}
+
+test('POST /api/instances with an Azure DevOps location and no PAT returns the structured "authentication required" response, and writes nothing', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT }, async (adoBaseUrl) => {
+      await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+        const res = await fetch(`${base}/api/instances`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            definition: 'design',
+            slug: 'remote-initiative',
+            azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          }),
+        })
+        assert.equal(res.status, 401)
+        const body = await res.json()
+        assert.equal(body.error, 'authentication_required')
+
+        const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
+        await assert.rejects(() => client.getFileContent('instance.yaml'))
+      })
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('POST /api/instances with an Azure DevOps location and a PAT the fake server rejects returns the same structured response', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT }, async (adoBaseUrl) => {
+      await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+        const res = await fetch(`${base}/api/instances`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader('wrong-pat') },
+          body: JSON.stringify({
+            definition: 'design',
+            slug: 'remote-initiative',
+            azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          }),
+        })
+        assert.equal(res.status, 401)
+        const body = await res.json()
+        assert.equal(body.error, 'authentication_required')
+      })
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('POST /api/instances with an Azure DevOps location missing required fields reports 400, not 500', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withRunningServer({ instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instances`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ definition: 'design', slug: 'remote-initiative', azureDevOps: { organization: ORGANIZATION } }),
+      })
+      assert.equal(res.status, 400)
+      const body = await res.json()
+      assert.match(body.error, /missing: project, repository/)
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// Security regression test: without an explicit server-level opt-in, a
+// caller-supplied `baseUrl` must never be honored — see createServer's own
+// doc comment on `allowAzureDevOpsBaseUrlOverride`. Before this guard
+// existed, any HTTP caller could register an Azure-DevOps-backed instance
+// pointing at a server *they* control; since `GET /api/instances` forwards
+// whatever PAT the *current* caller presents to every registered
+// Azure-DevOps-backed entry (to build the unified listing), that let one
+// caller register a location that silently exfiltrated every other
+// caller's real Azure DevOps PAT the next time anyone loaded the
+// dashboard.
+test('POST /api/instances with an azureDevOps.baseUrl reports 400 on a server that has not opted into allowAzureDevOpsBaseUrlOverride, and writes nothing', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT }, async (adoBaseUrl) => {
+      // Note: no `allowAzureDevOpsBaseUrlOverride` here — the default,
+      // and what any real deployment would run with.
+      await withRunningServer({ instancesDir }, async (base) => {
+        const res = await fetch(`${base}/api/instances`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+          body: JSON.stringify({
+            definition: 'design',
+            slug: 'remote-initiative',
+            azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          }),
+        })
+        assert.equal(res.status, 400)
+        const body = await res.json()
+        assert.match(body.error, /baseUrl/)
+
+        const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
+        await assert.rejects(() => client.getFileContent('instance.yaml'))
+      })
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('POST /api/instances with a valid Azure DevOps location and PAT creates instance.yaml + first-stage module files in that repo, registers it, and the instance then appears in GET /api/instances', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT }, async (adoBaseUrl) => {
+      // No `options.azureDevOps` at server startup — #93's whole point is
+      // that one running gantry server can register any number of
+      // Azure-DevOps-backed instances at once, chosen per request.
+      // `allowAzureDevOpsBaseUrlOverride` is a test-only opt-in (see
+      // createServer's doc comment) so this can point at the fake server.
+      await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+        const res = await fetch(`${base}/api/instances`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+          body: JSON.stringify({
+            definition: 'design',
+            slug: 'remote-initiative',
+            owner: 'c.barlow',
+            azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          }),
+        })
+        assert.equal(res.status, 201)
+        const created = await res.json()
+        assert.deepEqual(created, {
+          slug: 'remote-initiative',
+          definition: 'design',
+          stage: 'shape',
+          status: 'incomplete',
+          owner: 'c.barlow',
+        })
+
+        // Verified directly against the fake Azure DevOps repo — exactly
+        // as createInstance's own Azure DevOps path already does when
+        // called directly (#85) — not just gantry's own idea of what it
+        // wrote.
+        const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
+        const instanceYaml = await client.getFileContent('instance.yaml')
+        assert.match(instanceYaml, /definition: design/)
+        assert.match(instanceYaml, /slug: remote-initiative/)
+        assert.match(instanceYaml, /stage: shape/)
+        const definition = loadDefinition('design')
+        for (const moduleId of definition.stages[0].modules) {
+          await client.getFileContent(`modules/${moduleId}.md`)
+        }
+
+        // Not just written to the fake repo — immediately resolvable and
+        // visible in the same server's own instance listing, with no
+        // instancesDir directory ever created for it locally.
+        assert.equal(existsSync(join(instancesDir, 'remote-initiative')), false)
+
+        const listingRes = await fetch(`${base}/api/instances`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })
+        assert.equal(listingRes.status, 200)
+        const listing = await listingRes.json()
+        assert.deepEqual(
+          listing.find((i) => i.slug === 'remote-initiative'),
+          { slug: 'remote-initiative', definition: 'design', stage: 'shape', status: 'incomplete', owner: 'c.barlow' }
+        )
+      })
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('POST /api/instances with an Azure DevOps location that already has an instance reports 409, not 500', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    const seedFiles = { '/instance.yaml': 'definition: design\nslug: remote-initiative\nstage: shape\n' }
+    await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: seedFiles }, async (adoBaseUrl) => {
+      await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+        const res = await fetch(`${base}/api/instances`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+          body: JSON.stringify({
+            definition: 'design',
+            slug: 'remote-initiative',
+            azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          }),
+        })
+        assert.equal(res.status, 409)
+        const body = await res.json()
+        assert.match(body.error, /already exists/)
+      })
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// Regression test for a cross-backend slug-collision hole found in review:
+// createInstance's own "already exists" check only ever looks at the *one*
+// backend the current request is writing to, so registering a *new*
+// azureDevOps location under a slug some pre-existing *local* instance
+// already uses used to succeed (201) and silently overwrite that slug's
+// registry entry — orphaning the local instance's data (still on disk, but
+// no longer resolvable/listed).
+test('POST /api/instances with an Azure DevOps location reusing a slug that already exists locally reports 409, and does not overwrite the registry entry', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'local-initiative', { instancesDir, owner: 'local-owner' })
+
+    await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT }, async (adoBaseUrl) => {
+      await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+        const res = await fetch(`${base}/api/instances`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+          body: JSON.stringify({
+            definition: 'design',
+            slug: 'local-initiative',
+            azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          }),
+        })
+        assert.equal(res.status, 409)
+        const body = await res.json()
+        assert.match(body.error, /already exists/)
+
+        // Still routed locally — never overwritten — and still listed.
+        const listing = await (await fetch(`${base}/api/instances`)).json()
+        assert.deepEqual(
+          listing.find((i) => i.slug === 'local-initiative'),
+          { slug: 'local-initiative', definition: 'design', stage: 'shape', status: 'incomplete', owner: 'local-owner' }
+        )
+      })
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('GET /api/instances without a PAT still lists local instances, simply omitting an Azure-DevOps-backed one it cannot yet read', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'local-initiative', { instancesDir })
+    await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT }, async (adoBaseUrl) => {
+      await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+        await fetch(`${base}/api/instances`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+          body: JSON.stringify({
+            definition: 'design',
+            slug: 'remote-initiative',
+            azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          }),
+        })
+
+        const res = await fetch(`${base}/api/instances`)
+        assert.equal(res.status, 200)
+        const listing = await res.json()
+        assert.ok(listing.some((i) => i.slug === 'local-initiative'))
+        assert.ok(!listing.some((i) => i.slug === 'remote-initiative'))
+      })
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// Regression test for an availability hole found in review: one
+// unreachable/erroring Azure-DevOps-backed registry entry (a network
+// error, an outage, a renamed host) used to make `buildAzureDevOpsRow`
+// rethrow, which crashed the *entire* `GET /api/instances` response (a
+// 500) — hiding every other, including purely local, instance in the same
+// unified listing.
+test('GET /api/instances still lists local instances even when a registered Azure-DevOps-backed entry is completely unreachable', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'healthy-local', { instancesDir })
+    registerInstance(
+      'unreachable-remote',
+      {
+        kind: 'azureDevOps',
+        organization: ORGANIZATION,
+        project: PROJECT,
+        repository: REPOSITORY,
+        // Nothing listens here — simulates a network error / outage
+        // talking to this one registered org, distinct from an
+        // authentication rejection.
+        baseUrl: 'http://127.0.0.1:1',
+      },
+      { instancesDir }
+    )
+
+    await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+      const res = await fetch(`${base}/api/instances`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })
+      assert.equal(res.status, 200)
+      const listing = await res.json()
+      assert.ok(listing.some((i) => i.slug === 'healthy-local'))
+      assert.ok(!listing.some((i) => i.slug === 'unreachable-remote'))
     })
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
