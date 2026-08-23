@@ -17,9 +17,10 @@ import { markdown } from '@codemirror/lang-markdown'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import { theme, cycleTheme } from './lib/theme.js'
-import { pat, clearPat, requestPat, promptOpen, resolvePromptWith } from './lib/credential.js'
+import { promptOpen, resolvePromptWith } from './lib/credential.js'
 import { apiFetch } from './lib/apiFetch.js'
 import { SetupWizardPage } from './pages/setup-wizard.js'
+import { SettingsPage } from './pages/settings.js'
 // Two distinct "view mode" concepts collide on the same export names — the
 // dashboard's (#77) master-detail/swimlanes toggle and the module editor's
 // (#79) markdown/split/rendered toggle are unrelated signals that happen to
@@ -686,17 +687,10 @@ function AppHeader({ instance }) {
         <a class="btn small ghost" href="/">← Instances</a>
         <h1>${instance.slug} — ${instance.definition}</h1>
         <a class="btn small ghost" href="/setup">+ New instance</a>
+        <a class="btn small ghost" href="/settings">Settings</a>
         <button type="button" class="btn small ghost theme-toggle" onClick=${cycleTheme} title="Cycle theme">
           Theme: ${theme.value}
         </button>
-        ${pat.value
-          ? html`
-              <button type="button" class="btn small ghost" onClick=${() => requestPat()}>
-                Replace Azure DevOps PAT
-              </button>
-              <button type="button" class="btn small ghost" onClick=${clearPat}>Clear Azure DevOps PAT</button>
-            `
-          : null}
       </div>
       <p id="stage-line">${instance.stage.title} (gate: ${instance.stage.gate})</p>
       <nav id="stage-nav">
@@ -1092,6 +1086,7 @@ function DashboardPage() {
         <div class="dashboard-controls">
           ${instances?.length ? html`<${ViewToggle} />` : null}
           <a class="btn small ghost" href="/setup">+ New instance</a>
+          <a class="btn small ghost" href="/settings">Settings</a>
           <button type="button" class="btn small ghost theme-toggle" onClick=${cycleTheme} title="Cycle theme">
             Theme: ${theme.value}
           </button>
@@ -1171,12 +1166,13 @@ function PatPromptModal() {
 }
 
 // ---------- App shell: preact-iso routing ----------
-// Five routes: the dashboard (#77, default/landing), the module editor per
-// instance, the instance-setup wizard (#78), and the asset library (#80).
-// `instanceData`/`loadError` above are populated regardless of which route
-// is active (the `effect()` isn't scoped to a component), so the library
-// screen never has to re-fetch instance data just to know which instance
-// it's browsing.
+// Six routes: the dashboard (#77, default/landing), the module editor per
+// instance, the instance-setup wizard (#78), the asset library (#80), and
+// the tabbed settings screen (#101, currently just its Global Defaults
+// tab). `instanceData`/`loadError` above are populated regardless of which
+// route is active (the `effect()` isn't scoped to a component), so the
+// library screen never has to re-fetch instance data just to know which
+// instance it's browsing.
 function App() {
   return html`
     <${LocationProvider}>
@@ -1184,6 +1180,7 @@ function App() {
         <${Route} path="/instance/:slug" component=${ModuleEditorPage} />
         <${Route} path="/setup" component=${SetupWizardPage} />
         <${Route} path="/assets" component=${AssetLibraryPage} />
+        <${Route} path="/settings" component=${SettingsPage} />
         <${Route} default component=${DashboardPage} />
       <//>
     <//>

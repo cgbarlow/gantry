@@ -615,3 +615,55 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .compare .col h4 { font-family: var(--font-display); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin: 0 0 10px; }
 .compare .mono { font-family: var(--font-mono); font-size: 13px; }
 .mismatch-flag { margin-top: 10px; font-size: 12px; color: var(--stamp-error-bg); }
+
+/*
+ * ---------- Settings screen (#101) ----------
+ * A new top-level tabbed screen (`/settings`) — currently just the Global
+ * Defaults tab (PAT management moved off the module editor's own header,
+ * plus the global ticketing-system default). Shares the wizard's simple
+ * centered-column page chrome (`.wizard-page`, reused here alongside
+ * `.settings-page`) but gets its own header class rather than reusing
+ * `.wizard-header`, since a settings screen isn't itself a wizard step.
+ */
+.settings-header {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 32px 32px 20px;
+  border-bottom: var(--border-strong) solid var(--line-strong);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.settings-header h1 { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; font-size: 20px; margin: 0; flex: 1; }
+
+.settings-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: var(--border-strong) solid var(--line-strong);
+  margin-bottom: 28px;
+}
+.settings-tabs button {
+  background: none;
+  border: none;
+  padding: 10px 4px;
+  margin-right: 28px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.settings-tabs button.active { color: var(--text); border-bottom: 2px solid var(--text); margin-bottom: -2px; }
+.settings-tabs button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.settings-page .settings-section { margin-bottom: 36px; }
+.settings-page .settings-section h2 { font-family: var(--font-display); font-weight: 600; font-size: 16px; margin: 0 0 6px; }
+.settings-page .settings-section .guidance { margin: 0 0 14px; max-width: 60ch; }
+.settings-pat-status { margin-bottom: 10px; }
+.settings-actions { display: flex; gap: 10px; }
+
+.settings-radio-group { display: flex; flex-direction: column; gap: 10px; }
+.settings-radio { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.settings-radio.disabled { color: var(--text-muted); cursor: not-allowed; }
+.settings-radio input[disabled] { cursor: not-allowed; }
+.settings-radio .stamp { margin-left: 2px; }
