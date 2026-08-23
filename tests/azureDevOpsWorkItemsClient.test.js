@@ -4,6 +4,7 @@ import {
   createAzureDevOpsWorkItemsClient,
   AzureDevOpsAuthenticationError,
   AzureDevOpsNotFoundError,
+  AzureDevOpsRequestError,
   DEFAULT_BASE_URL,
 } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer as withFakeServer } from './helpers/fakeAzureDevOpsServer.js'
@@ -114,6 +115,16 @@ test('a rejected PAT surfaces as AzureDevOpsAuthenticationError on getWorkItemTy
     const badClient = client(baseUrl, { pat: 'wrong' })
     await assert.rejects(() => badClient.getWorkItemTypeStates('Task'), AzureDevOpsAuthenticationError)
   })
+})
+
+test('a network failure reaching the Azure DevOps API surfaces as AzureDevOpsRequestError, not the auth or not-found errors', async () => {
+  // Nothing listens on this port — a real connection failure, not a mock
+  // of fetch — exercising the client's network-error branch, distinct
+  // from the HTTP-level auth/not-found branches covered above. Mirrors
+  // the equivalent test in tests/azureDevOpsClient.test.js.
+  const unreachableBaseUrl = 'http://127.0.0.1:1'
+  const c = client(unreachableBaseUrl)
+  await assert.rejects(() => c.createWorkItem('Task', { 'System.Title': 'X' }), AzureDevOpsRequestError)
 })
 
 test('base URL defaults to the real Azure DevOps API but is configurable/overridable for tests', async () => {
