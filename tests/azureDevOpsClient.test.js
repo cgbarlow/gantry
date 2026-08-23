@@ -82,6 +82,20 @@ test('writeFile survives a second write to the same path (branch ref moves forwa
   })
 })
 
+test('writeFile with contentType: "base64encoded" pushes binary content (e.g. a rendered .docx), not raw text', async () => {
+  await withFakeAzureDevOpsServer({}, async (baseUrl) => {
+    const c = client(baseUrl)
+    const bytes = Buffer.from('PK\x03\x04 fake docx bytes', 'binary')
+    const result = await c.writeFile('/out/soap.docx', bytes.toString('base64'), {
+      contentType: 'base64encoded',
+      message: 'Render soap',
+    })
+    assert.equal(result.changeType, 'add')
+    const pushedContent = await c.getFileContent('/out/soap.docx')
+    assert.equal(Buffer.from(pushedContent, 'base64').toString('binary'), bytes.toString('binary'))
+  })
+})
+
 test('base URL defaults to the real Azure DevOps API but is configurable/overridable for tests', async () => {
   assert.equal(DEFAULT_BASE_URL, 'https://dev.azure.com')
   assert.equal(client(undefined).baseUrl, 'https://dev.azure.com')

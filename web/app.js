@@ -569,7 +569,15 @@ function ArtefactsSection({ instance }) {
       method: 'POST',
     })
     const body = await res.json()
-    setStatus(res.ok ? `Rendered to ${body.docxPath}` : `Render failed: ${body.message ?? body.error}`)
+    // Azure-DevOps-backed instances report `azureDevOpsPath` (where the
+    // pandoc-rendered .docx was pushed back to, in the same repo the rest
+    // of the instance's data lives in); local instances report `docxPath`
+    // (a path on the machine running `gantry serve`).
+    setStatus(
+      res.ok
+        ? `Rendered to ${body.azureDevOpsPath ?? body.docxPath}`
+        : `Render failed: ${body.message ?? body.error}`
+    )
   }
 
   return html`

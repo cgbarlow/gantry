@@ -1,11 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer as createHttpServer } from 'node:http'
 import { createServer } from '../lib/server.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
+import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
 // Server-level credential gating (#86), now driven by per-request
@@ -70,7 +71,7 @@ function withAzureDevOpsBackedServer(files, serverOptions, fn) {
             instancesDir,
             ...serverOptions,
           },
-          fn
+          (base) => fn(base, adoBaseUrl)
         )
       } finally {
         rmSync(instancesDir, { recursive: true, force: true })
@@ -293,13 +294,13 @@ test('POST /api/instance/render/:artefact against an Azure-DevOps-backed instanc
   })
 })
 
-test('POST /api/instance/render/:artefact against an Azure-DevOps-backed instance with a valid PAT renders a real docx, reading module data from Azure DevOps', async () => {
+test('POST /api/instance/render/:artefact against an Azure-DevOps-backed instance with a valid PAT renders a real docx, reading module data from Azure DevOps, and pushes it back to that same repo', async () => {
   const fullFiles = {
     ...SEED_FILES,
     '/modules/solution-definition.md': readFileSync('instances/examples/modules/solution-definition.md', 'utf8'),
     '/modules/team-and-estimates.md': readFileSync('instances/examples/modules/team-and-estimates.md', 'utf8'),
   }
-  await withAzureDevOpsBackedServer(fullFiles, {}, async (base) => {
+  await withAzureDevOpsBackedServer(fullFiles, {}, async (base, adoBaseUrl) => {
     const res = await fetch(`${base}/api/instance/render/soap`, {
       method: 'POST',
       headers: { Authorization: basicAuthHeader(VALID_PAT) },
@@ -307,7 +308,42 @@ test('POST /api/instance/render/:artefact against an Azure-DevOps-backed instanc
     assert.equal(res.status, 200)
     const body = await res.json()
     assert.equal(body.artefact, 'soap')
-    assert.ok(existsSync(body.docxPath))
+    // No local docxPath reported — the rendered artefact's real location is
+    // now the Azure DevOps repo it was rendered from, not a scratch path on
+    // whichever machine `gantry serve` happens to run on.
+    assert.equal(body.docxPath, undefined)
+    assert.equal(body.azureDevOpsPath, 'out/soap.docx')
+
+    const client = createAzureDevOpsClient({
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      pat: VALID_PAT,
+      baseUrl: adoBaseUrl,
+    })
+    const pushedContent = await client.getFileContent('out/soap.docx')
+    const pushedBytes = Buffer.from(pushedContent, 'base64')
+    // A real .docx is a zip archive — starts with the "PK" magic bytes.
+    assert.equal(pushedBytes.subarray(0, 2).toString(), 'PK')
+  })
+})
+
+test('rendering the same artefact against an Azure-DevOps-backed instance twice overwrites the previous render rather than accumulating files', async () => {
+  const fullFiles = {
+    ...SEED_FILES,
+    '/modules/solution-definition.md': readFileSync('instances/examples/modules/solution-definition.md', 'utf8'),
+    '/modules/team-and-estimates.md': readFileSync('instances/examples/modules/team-and-estimates.md', 'utf8'),
+  }
+  await withAzureDevOpsBackedServer(fullFiles, {}, async (base) => {
+    for (let i = 0; i < 2; i++) {
+      const res = await fetch(`${base}/api/instance/render/soap`, {
+        method: 'POST',
+        headers: { Authorization: basicAuthHeader(VALID_PAT) },
+      })
+      assert.equal(res.status, 200)
+      const body = await res.json()
+      assert.equal(body.azureDevOpsPath, 'out/soap.docx')
+    }
   })
 })
 
