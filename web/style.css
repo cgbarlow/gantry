@@ -673,3 +673,27 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .settings-radio.disabled { color: var(--text-muted); cursor: not-allowed; }
 .settings-radio input[disabled] { cursor: not-allowed; }
 .settings-radio .stamp { margin-left: 2px; }
+
+/*
+ * ---------- Workspace overrides tab (#104) ----------
+ * One `.workspace-row` per registered workspace: repo URL, then three
+ * `.workspace-field` blocks (owner, PAT override, ticketing-system
+ * override) — reuses `.wizard-input`/`.settings-radio-group`/`.stamp`
+ * wholesale rather than inventing parallel input/radio/badge styling.
+ */
+.workspace-list { display: flex; flex-direction: column; gap: 20px; }
+.workspace-empty { color: var(--text-muted); }
+.workspace-row {
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.workspace-repo-url { font-family: var(--font-mono); font-size: 13px; word-break: break-all; }
+.workspace-field label { font-family: var(--font-display); font-weight: 600; font-size: 12px; display: block; margin-bottom: 6px; }
+.workspace-field-row { display: flex; align-items: center; gap: 8px; }
+.workspace-field-row .wizard-input { flex: 1; }
+.workspace-pat-status, .workspace-ticketing-state { margin-bottom: 8px; }
+.workspace-field-status { margin-top: 6px; font-size: 12px; color: var(--text-muted); min-height: 1em; }

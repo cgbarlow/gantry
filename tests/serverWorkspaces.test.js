@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from '../lib/server.js'
+import { registerWorkspace } from '../lib/workspaceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
 // GET/POST /api/workspaces (#96): the HTTP-API-boundary half of the
@@ -307,4 +308,99 @@ test('adopting an instance at an Azure DevOps location already backing a registe
       )
     }
   )
+})
+
+// ---------- PATCH /api/workspaces/:id (#104: owner viewed/edited, ticketing-system override, from the Settings Workspace tab) ----------
+
+function patchWorkspace(base, id, body) {
+  return fetch(`${base}/api/workspaces/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+test('PATCH /api/workspaces/:id updates owner, with no PAT required', async () => {
+  await withScratchServer({}, async (base, instancesDir) => {
+    const workspace = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }, { instancesDir })
+
+    const res = await patchWorkspace(base, workspace.id, { owner: 'c.barlow' })
+    assert.equal(res.status, 200)
+    const updated = await res.json()
+    assert.equal(updated.owner, 'c.barlow')
+    assert.equal(updated.organization, ORGANIZATION)
+
+    const listing = await (await fetch(`${base}/api/workspaces`)).json()
+    assert.equal(listing.find((w) => w.id === workspace.id).owner, 'c.barlow')
+  })
+})
+
+test('PATCH /api/workspaces/:id updates ticketingSystem to a supported value, overriding that workspace alone', async () => {
+  await withScratchServer({}, async (base, instancesDir) => {
+    const workspaceA = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }, { instancesDir })
+    const workspaceB = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: 'fake-repo-2' }, { instancesDir })
+
+    const res = await patchWorkspace(base, workspaceA.id, { ticketingSystem: 'azure-devops' })
+    assert.equal(res.status, 200)
+    const updated = await res.json()
+    assert.equal(updated.ticketingSystem, 'azure-devops')
+
+    // The other workspace is unaffected — an override is per-workspace.
+    const listing = await (await fetch(`${base}/api/workspaces`)).json()
+    assert.equal(listing.find((w) => w.id === workspaceB.id).ticketingSystem, 'azure-devops')
+  })
+})
+
+test('PATCH /api/workspaces/:id rejects ticketingSystem "jira" with 400, and persists nothing', async () => {
+  await withScratchServer({}, async (base, instancesDir) => {
+    const workspace = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }, { instancesDir })
+
+    const res = await patchWorkspace(base, workspace.id, { ticketingSystem: 'jira' })
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.match(body.error, /not supported yet/)
+
+    const listing = await (await fetch(`${base}/api/workspaces`)).json()
+    assert.equal(listing.find((w) => w.id === workspace.id).ticketingSystem, 'azure-devops')
+  })
+})
+
+test('PATCH /api/workspaces/:id for an unknown id reports 404, not 500', async () => {
+  await withScratchServer({}, async (base) => {
+    const res = await patchWorkspace(base, 'nonexistent-id', { owner: 'someone' })
+    assert.equal(res.status, 404)
+    const body = await res.json()
+    assert.match(body.error, /Unknown workspace/)
+  })
+})
+
+test('PATCH /api/workspaces/:id leaves organization/project/repository untouched — those fields are not accepted by this route', async () => {
+  await withScratchServer({}, async (base, instancesDir) => {
+    const workspace = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }, { instancesDir })
+
+    const res = await fetch(`${base}/api/workspaces/${encodeURIComponent(workspace.id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ organization: 'attacker-org', owner: 'c.barlow' }),
+    })
+    assert.equal(res.status, 200)
+    const updated = await res.json()
+    assert.equal(updated.organization, ORGANIZATION)
+    assert.equal(updated.owner, 'c.barlow')
+  })
+})
+
+test('PATCH /api/workspaces/:id rejects a non-string owner (e.g. null) with 400, rather than persisting it verbatim', async () => {
+  await withScratchServer({}, async (base, instancesDir) => {
+    const workspace = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, owner: 'c.barlow' }, { instancesDir })
+
+    const res = await patchWorkspace(base, workspace.id, { owner: null })
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.match(body.error, /owner must be a string/)
+
+    // Rejected before anything was persisted — the existing owner is untouched.
+    const listing = await (await fetch(`${base}/api/workspaces`)).json()
+    assert.equal(listing.find((w) => w.id === workspace.id).owner, 'c.barlow')
+  })
 })
