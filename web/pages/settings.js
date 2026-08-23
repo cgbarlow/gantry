@@ -126,7 +126,7 @@ export function SettingsPage() {
 
   return html`
     <${SettingsHeader} />
-    <main class="wizard-page settings-page">
+    <main class="settings-page">
       <${SettingsTabs} activeTab=${activeTab} onSelect=${setActiveTab} />
       ${activeTab === 'global-defaults' ? html`<${GlobalDefaultsTab} />` : null}
     </main>

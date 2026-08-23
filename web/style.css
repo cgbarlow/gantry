@@ -541,8 +541,19 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
  * .stamp, hairlines) are reused as-is; these are the wizard-specific
  * additions, scoped with a `wizard-` prefix or nested under .wizard-page so
  * they can't collide with the module editor's own `.field`/`.result` naming.
+ *
+ * `.wizard-header`/`.wizard-page`'s base proportions (max-width/margin/
+ * padding) are grouped with `.settings-header`/`.settings-page` below —
+ * both are the same simple centered-single-column screen shell, just with
+ * genuinely different content per screen (no `h2`/`.lede`-style rules are
+ * shared, only this literal box model), so writing the same four
+ * declarations out twice under two unrelated-looking class names would be
+ * pure duplication with no corresponding difference in intent. Each screen
+ * still only ever carries its own class in markup — this is a shared rule,
+ * not one screen's class applied to the other's markup (the coupling a
+ * #101 review pass flagged and this replaces).
  */
-.wizard-header {
+.wizard-header, .settings-header {
   max-width: 860px;
   margin: 0 auto;
   padding: 32px 32px 20px;
@@ -551,9 +562,9 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
   align-items: center;
   justify-content: space-between;
 }
-.wizard-header h1 { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; font-size: 20px; margin: 0; flex: 1; }
+.wizard-header h1, .settings-header h1 { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; font-size: 20px; margin: 0; flex: 1; }
 
-.wizard-page { max-width: 860px; margin: 0 auto; padding: 32px 32px 140px; }
+.wizard-page, .settings-page { max-width: 860px; margin: 0 auto; padding: 32px 32px 140px; }
 .wizard-page h2 { font-family: var(--font-display); font-weight: 600; font-size: 22px; margin: 0; }
 .wizard-page .lede { color: var(--text-muted); margin: 6px 0 28px; max-width: 70ch; }
 
@@ -620,22 +631,17 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
  * ---------- Settings screen (#101) ----------
  * A new top-level tabbed screen (`/settings`) — currently just the Global
  * Defaults tab (PAT management moved off the module editor's own header,
- * plus the global ticketing-system default). Shares the wizard's simple
- * centered-column page chrome (`.wizard-page`, reused here alongside
- * `.settings-page`) but gets its own header class rather than reusing
- * `.wizard-header`, since a settings screen isn't itself a wizard step.
+ * plus the global ticketing-system default). `.settings-header`/
+ * `.settings-page` have their own classes rather than reusing
+ * `.wizard-header`/`.wizard-page` directly in markup — a review pass on
+ * #101 flagged that as a fragile, undocumented coupling (this screen isn't
+ * itself a wizard step, and `.wizard-page h2`/`.lede` etc. would otherwise
+ * apply here too, only overridden by luck of selector specificity). Their
+ * shared base proportions are still declared once, grouped with the
+ * wizard's own rules above (see that section's own comment), since it's
+ * the same generic page shell, not wizard-specific styling — everything
+ * below here is genuinely settings-only.
  */
-.settings-header {
-  max-width: 860px;
-  margin: 0 auto;
-  padding: 32px 32px 20px;
-  border-bottom: var(--border-strong) solid var(--line-strong);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.settings-header h1 { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; font-size: 20px; margin: 0; flex: 1; }
-
 .settings-tabs {
   display: flex;
   gap: 0;
