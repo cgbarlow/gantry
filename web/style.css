@@ -219,6 +219,11 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .artefacts { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 32px; }
 .artefacts h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }
 
+.work-item-panel { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 32px; }
+.work-item-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }
+.work-item-panel .link-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
+.work-item-panel .link-form .text-field { max-width: 220px; }
+
 .field { margin-top: 20px; }
 .field label { font-family: var(--font-display); font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px; }
 .guidance { color: var(--text-muted); font-size: 12px; margin: 0 0 8px; }
@@ -547,8 +552,19 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
  * .stamp, hairlines) are reused as-is; these are the wizard-specific
  * additions, scoped with a `wizard-` prefix or nested under .wizard-page so
  * they can't collide with the module editor's own `.field`/`.result` naming.
+ *
+ * `.wizard-header`/`.wizard-page`'s base proportions (max-width/margin/
+ * padding) are grouped with `.settings-header`/`.settings-page` below —
+ * both are the same simple centered-single-column screen shell, just with
+ * genuinely different content per screen (no `h2`/`.lede`-style rules are
+ * shared, only this literal box model), so writing the same four
+ * declarations out twice under two unrelated-looking class names would be
+ * pure duplication with no corresponding difference in intent. Each screen
+ * still only ever carries its own class in markup — this is a shared rule,
+ * not one screen's class applied to the other's markup (the coupling a
+ * #101 review pass flagged and this replaces).
  */
-.wizard-header {
+.wizard-header, .settings-header {
   max-width: 860px;
   margin: 0 auto;
   padding: 32px 32px 20px;
@@ -557,9 +573,9 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
   align-items: center;
   justify-content: space-between;
 }
-.wizard-header h1 { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; font-size: 20px; margin: 0; flex: 1; }
+.wizard-header h1, .settings-header h1 { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; font-size: 20px; margin: 0; flex: 1; }
 
-.wizard-page { max-width: 860px; margin: 0 auto; padding: 32px 32px 140px; }
+.wizard-page, .settings-page { max-width: 860px; margin: 0 auto; padding: 32px 32px 140px; }
 .wizard-page h2 { font-family: var(--font-display); font-weight: 600; font-size: 22px; margin: 0; }
 .wizard-page .lede { color: var(--text-muted); margin: 6px 0 28px; max-width: 70ch; }
 
@@ -621,3 +637,74 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .compare .col h4 { font-family: var(--font-display); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin: 0 0 10px; }
 .compare .mono { font-family: var(--font-mono); font-size: 13px; }
 .mismatch-flag { margin-top: 10px; font-size: 12px; color: var(--stamp-error-bg); }
+
+/*
+ * ---------- Settings screen (#101) ----------
+ * A new top-level tabbed screen (`/settings`) — currently just the Global
+ * Defaults tab (PAT management moved off the module editor's own header,
+ * plus the global ticketing-system default). `.settings-header`/
+ * `.settings-page` have their own classes rather than reusing
+ * `.wizard-header`/`.wizard-page` directly in markup — a review pass on
+ * #101 flagged that as a fragile, undocumented coupling (this screen isn't
+ * itself a wizard step, and `.wizard-page h2`/`.lede` etc. would otherwise
+ * apply here too, only overridden by luck of selector specificity). Their
+ * shared base proportions are still declared once, grouped with the
+ * wizard's own rules above (see that section's own comment), since it's
+ * the same generic page shell, not wizard-specific styling — everything
+ * below here is genuinely settings-only.
+ */
+.settings-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: var(--border-strong) solid var(--line-strong);
+  margin-bottom: 28px;
+}
+.settings-tabs button {
+  background: none;
+  border: none;
+  padding: 10px 4px;
+  margin-right: 28px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.settings-tabs button.active { color: var(--text); border-bottom: 2px solid var(--text); margin-bottom: -2px; }
+.settings-tabs button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.settings-page .settings-section { margin-bottom: 36px; }
+.settings-page .settings-section h2 { font-family: var(--font-display); font-weight: 600; font-size: 16px; margin: 0 0 6px; }
+.settings-page .settings-section .guidance { margin: 0 0 14px; max-width: 60ch; }
+.settings-pat-status { margin-bottom: 10px; }
+.settings-actions { display: flex; gap: 10px; }
+
+.settings-radio-group { display: flex; flex-direction: column; gap: 10px; }
+.settings-radio { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.settings-radio.disabled { color: var(--text-muted); cursor: not-allowed; }
+.settings-radio input[disabled] { cursor: not-allowed; }
+.settings-radio .stamp { margin-left: 2px; }
+
+/*
+ * ---------- Workspace overrides tab (#104) ----------
+ * One `.workspace-row` per registered workspace: repo URL, then three
+ * `.workspace-field` blocks (owner, PAT override, ticketing-system
+ * override) — reuses `.wizard-input`/`.settings-radio-group`/`.stamp`
+ * wholesale rather than inventing parallel input/radio/badge styling.
+ */
+.workspace-list { display: flex; flex-direction: column; gap: 20px; }
+.workspace-empty { color: var(--text-muted); }
+.workspace-row {
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.workspace-repo-url { font-family: var(--font-mono); font-size: 13px; word-break: break-all; }
+.workspace-field label { font-family: var(--font-display); font-weight: 600; font-size: 12px; display: block; margin-bottom: 6px; }
+.workspace-field-row { display: flex; align-items: center; gap: 8px; }
+.workspace-field-row .wizard-input { flex: 1; }
+.workspace-pat-status, .workspace-ticketing-state { margin-bottom: 8px; }
+.workspace-field-status { margin-top: 6px; font-size: 12px; color: var(--text-muted); min-height: 1em; }

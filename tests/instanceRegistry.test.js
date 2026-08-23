@@ -4,8 +4,13 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInstance } from '../lib/instance.js'
-import { resolveInstanceLocation, registerInstance, listRegisteredInstances } from '../lib/instanceRegistry.js'
-import { listWorkspaces, resolveWorkspace } from '../lib/workspaceRegistry.js'
+import {
+  resolveInstanceLocation,
+  registerInstance,
+  listRegisteredInstances,
+  resolveInstanceWorkspaceId,
+} from '../lib/instanceRegistry.js'
+import { listWorkspaces, resolveWorkspace, findWorkspaceByLocation } from '../lib/workspaceRegistry.js'
 
 function withScratchInstances(fn) {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
@@ -276,5 +281,48 @@ test('migrating two legacy entries for the same organization/project/repository 
     assert.equal(listWorkspaces({ instancesDir }).length, 1)
     const migrated = JSON.parse(readFileSync(registryPath, 'utf8'))
     assert.equal(migrated['legacy-one'].workspaceId, migrated['legacy-two'].workspaceId)
+  })
+})
+
+// ---------- #104: resolveInstanceWorkspaceId ----------
+
+test('resolveInstanceWorkspaceId returns null for a local instance', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'local-only', { instancesDir })
+    assert.equal(resolveInstanceWorkspaceId('local-only', { instancesDir }), null)
+  })
+})
+
+test('resolveInstanceWorkspaceId returns null for a slug neither registered nor on disk', () => {
+  withScratchInstances((instancesDir) => {
+    assert.equal(resolveInstanceWorkspaceId('nowhere', { instancesDir }), null)
+  })
+})
+
+test('resolveInstanceWorkspaceId returns the real workspace id for an Azure-DevOps-backed instance', () => {
+  withScratchInstances((instancesDir) => {
+    registerInstance(
+      'remote-initiative',
+      { kind: 'azureDevOps', organization: 'fake-org', project: 'fake-project', repository: 'fake-repo' },
+      { instancesDir }
+    )
+    const location = resolveInstanceLocation('remote-initiative', { instancesDir })
+    const workspace = findWorkspaceByLocation(location, { instancesDir })
+    assert.equal(resolveInstanceWorkspaceId('remote-initiative', { instancesDir }), workspace.id)
+  })
+})
+
+test('resolveInstanceWorkspaceId resolves correctly even against a pre-#96 legacy-shape registry file (migrated on read)', () => {
+  withScratchInstances((instancesDir) => {
+    const registryPath = join(instancesDir, 'instance-registry.json')
+    writeFileSync(
+      registryPath,
+      JSON.stringify({
+        'legacy-initiative': { kind: 'azureDevOps', organization: 'legacy-org', project: 'legacy-project', repository: 'legacy-repo' },
+      })
+    )
+    const workspaceId = resolveInstanceWorkspaceId('legacy-initiative', { instancesDir })
+    assert.equal(typeof workspaceId, 'string')
+    assert.equal(resolveWorkspace(workspaceId, { instancesDir }).organization, 'legacy-org')
   })
 })

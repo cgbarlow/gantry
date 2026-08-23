@@ -99,7 +99,10 @@ test('dashboard: selecting a workspace with multiple instances shows every one o
   const PROJECT = 'fake-project'
   const REPOSITORY = 'fake-repo'
   const VALID_PAT = 'valid-test-pat'
-  const SEED_FILES = { '/instance.yaml': 'definition: design\nstage: shape\nassignee: c.barlow\n' }
+  const SEED_FILES = {
+    '/gantry-workspace/instance-one/instance.yaml': 'definition: design\nstage: shape\nassignee: c.barlow\n',
+    '/gantry-workspace/instance-two/instance.yaml': 'definition: design\nstage: shape\nassignee: c.barlow\n',
+  }
 
   await withFakeAzureDevOpsServer(
     { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: SEED_FILES },
@@ -108,12 +111,10 @@ test('dashboard: selecting a workspace with multiple instances shows every one o
       try {
         // Two slugs registered directly against the exact same Azure DevOps
         // location share one auto-created workspace (lib/workspaceRegistry.js,
-        // #96 — verified independently in tests/serverWorkspaces.test.js) —
-        // this is what a workspace genuinely holding more than one instance
-        // will look like once #100's gantry-workspace/<slug>/ directory
-        // migration lands; registered directly here (rather than through two
-        // real, distinct Azure DevOps repos) since that migration is still a
-        // separate, not-yet-implemented ticket.
+        // #96 — verified independently in tests/serverWorkspaces.test.js),
+        // each holding its own data under #100's gantry-workspace/<slug>/
+        // directory layout; registered directly here (rather than through
+        // two real, distinct Azure DevOps repos) for test simplicity.
         const location = { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl }
         registerInstance('instance-one', location, { instancesDir })
         registerInstance('instance-two', location, { instancesDir })

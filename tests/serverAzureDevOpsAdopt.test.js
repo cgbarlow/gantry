@@ -154,6 +154,33 @@ test('POST /api/instances/adopt against a repo with no instance.yaml yet reports
   })
 })
 
+// #100: adopting a location that already holds more than one instance
+// under gantry-workspace/<slug>/ is a distinct, honest 400 (this route has
+// no slug input to say which one to adopt) — never silently treated as
+// "nothing to adopt" (that would be misleading: data genuinely is there),
+// and never guessed at.
+test('POST /api/instances/adopt against a repo already holding more than one instance reports 400 naming them, and registers nothing', async () => {
+  const filesWithTwoInstances = {
+    '/gantry-workspace/alpha-initiative/instance.yaml': 'definition: design\nslug: alpha-initiative\nstage: shape\n',
+    '/gantry-workspace/beta-initiative/instance.yaml': 'definition: design\nslug: beta-initiative\nstage: shape\n',
+  }
+  await withFakeAzureDevOpsAndGantryServer(filesWithTwoInstances, {}, async (gantryBase, adoBaseUrl) => {
+    const res = await fetch(`${gantryBase}/api/instances/adopt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+      body: adoptBody(adoBaseUrl),
+    })
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.match(body.error, /more than one instance/)
+    assert.match(body.error, /alpha-initiative/)
+    assert.match(body.error, /beta-initiative/)
+
+    const listing = await (await fetch(`${gantryBase}/api/instances`)).json()
+    assert.equal(listing.length, 0)
+  })
+})
+
 // ---------- Successful adoption ----------
 
 test('POST /api/instances/adopt against a repo with an existing instance registers it (without writing anything), and it becomes resolvable/listed', async () => {

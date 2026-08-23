@@ -132,7 +132,11 @@ const ORGANIZATION = 'fake-org'
 const PROJECT = 'fake-project'
 const REPOSITORY = 'fake-repo'
 const VALID_PAT = 'valid-test-pat'
-const SEED_FILES = { '/instance.yaml': 'definition: design\nstage: shape\nassignee: c.barlow\n' }
+const SEED_FILES = {
+  '/gantry-workspace/remote-initiative/instance.yaml': 'definition: design\nstage: shape\nassignee: c.barlow\n',
+  '/gantry-workspace/instance-one/instance.yaml': 'definition: design\nstage: shape\nassignee: c.barlow\n',
+  '/gantry-workspace/instance-two/instance.yaml': 'definition: design\nstage: shape\nassignee: c.barlow\n',
+}
 
 test('listRegistry has no `workspace` field on a local row — Workspace is an Azure-DevOps-repo concept only', () => {
   withScratchInstances((instancesDir) => {
