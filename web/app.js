@@ -844,17 +844,37 @@ async function runRender(slug) {
   return results.join(' · ')
 }
 
+// Persists the instance record's own stored `assignee` (#97) — the instance
+// detail pane's edit affordance for it, distinct from `PUT
+// /api/instance/modules/:id`'s module-level `owner` (the untouched Design
+// Authority sign-off convention). Not routed through ModuleCard's per-module
+// save flow: this is instance-scoped, not module-scoped.
+async function saveAssignee(slug, assignee) {
+  const res = await apiFetch(`/api/instance/assignee?slug=${encodeURIComponent(slug)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assignee }),
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(body.message ?? body.error ?? `Failed to save assignee (${res.status})`)
+  }
+  return body
+}
+
 // ---------- Master-detail view ----------
-function MasterDetailView({ instances }) {
+function MasterDetailView({ instances, onInstancesChange }) {
   const [filter, setFilter] = useState('')
   const [selectedSlug, setSelectedSlug] = useState(null)
   const [detail, setDetail] = useState(null)
   const [detailError, setDetailError] = useState(null)
   const [actionStatus, setActionStatus] = useState('')
+  const [assigneeDraft, setAssigneeDraft] = useState('')
+  const [assigneeStatus, setAssigneeStatus] = useState('')
 
   const needle = filter.trim().toLowerCase()
   const filtered = needle
-    ? instances.filter((inst) => inst.slug.toLowerCase().includes(needle) || inst.owner.toLowerCase().includes(needle))
+    ? instances.filter((inst) => inst.slug.toLowerCase().includes(needle) || inst.assignee.toLowerCase().includes(needle))
     : instances
 
   const effectiveSlug = filtered.some((inst) => inst.slug === selectedSlug) ? selectedSlug : (filtered[0]?.slug ?? null)
@@ -878,6 +898,16 @@ function MasterDetailView({ instances }) {
     // eslint-disable-next-line
   }, [effectiveSlug])
 
+  // Mirrors the registry's own `assignee` into the editable draft whenever
+  // the selected instance changes — never while it's still the same
+  // instance (that would clobber an in-progress edit on every unrelated
+  // `instances` refresh).
+  useEffect(() => {
+    setAssigneeDraft(selectedInstance?.assignee ?? '')
+    setAssigneeStatus('')
+    // eslint-disable-next-line
+  }, [effectiveSlug])
+
   async function handleCheck() {
     setActionStatus('Checking…')
     setActionStatus(await runCheck(effectiveSlug))
@@ -888,13 +918,27 @@ function MasterDetailView({ instances }) {
     setActionStatus(await runRender(effectiveSlug))
   }
 
+  async function handleAssigneeSave() {
+    if (!effectiveSlug || assigneeDraft === (selectedInstance?.assignee ?? '')) return
+    setAssigneeStatus('Saving…')
+    try {
+      const saved = await saveAssignee(effectiveSlug, assigneeDraft)
+      setAssigneeStatus('Saved.')
+      onInstancesChange?.((prev) =>
+        prev.map((inst) => (inst.slug === effectiveSlug ? { ...inst, assignee: saved.assignee } : inst))
+      )
+    } catch (err) {
+      setAssigneeStatus(`Failed to save: ${err.message}`)
+    }
+  }
+
   return html`
     <div class="master-detail">
       <div class="list-pane">
         <input
           class="field search"
           type="text"
-          placeholder="Filter by name, owner…"
+          placeholder="Filter by name, assignee…"
           value=${filter}
           onInput=${(e) => setFilter(e.currentTarget.value)}
         />
@@ -914,7 +958,7 @@ function MasterDetailView({ instances }) {
                 <span class=${'dot ' + statusStampClass(inst.status)}></span>
                 <span class="meta">
                   <span class="name">${inst.slug}</span>
-                  <span class="def">${inst.definition} · ${inst.owner || 'unowned'}</span>
+                  <span class="def">${inst.definition} · ${inst.assignee || 'unassigned'}</span>
                 </span>
               </div>
             `
@@ -934,9 +978,21 @@ function MasterDetailView({ instances }) {
                   <div><span class="field-label">Gate</span><span class="mono">${detail.stage.gate}</span></div>
                   <div><${StatusStamp} status=${selectedInstance.status} /></div>
                   <div style="text-align:right;">
-                    <span class="field-label">Owner</span><span class="mono">${selectedInstance.owner || '—'}</span>
+                    <span class="field-label">Assignee</span>
+                    <input
+                      class="text-field mono assignee-input"
+                      type="text"
+                      placeholder="Unassigned"
+                      value=${assigneeDraft}
+                      onInput=${(e) => setAssigneeDraft(e.currentTarget.value)}
+                      onBlur=${handleAssigneeSave}
+                      onKeyDown=${(e) => {
+                        if (e.key === 'Enter') e.currentTarget.blur()
+                      }}
+                    />
                   </div>
                 </div>
+                <div class="save-status assignee-save-status">${assigneeStatus}</div>
                 <div class="detail-actions">
                   <a class="btn primary" href="/instance/${detail.slug}">Open workspace</a>
                   <button type="button" class="btn" onClick=${handleCheck}>Check</button>
@@ -959,7 +1015,7 @@ function SwimlaneChip({ instance, menuOpen, onToggleMenu, onAction }) {
       <div class="name">${instance.slug}</div>
       <div class="def">${instance.definition}</div>
       <div class="chip-foot">
-        <span class="owner">${instance.owner || 'unowned'}</span>
+        <span class="assignee">${instance.assignee || 'unassigned'}</span>
         <${StatusStamp} status=${instance.status} />
         <button
           type="button"
@@ -1105,7 +1161,7 @@ function DashboardPage() {
             ? html`<${EmptyState} />`
             : dashboardViewMode.value === 'swimlanes'
               ? html`<${SwimlaneView} instances=${instances} />`
-              : html`<${MasterDetailView} instances=${instances} />`}
+              : html`<${MasterDetailView} instances=${instances} onInstancesChange=${setInstances} />`}
     </main>
   `
 }

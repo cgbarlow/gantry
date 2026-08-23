@@ -16,22 +16,22 @@ function withScratchInstances(fn) {
   }
 }
 
-test('listRegistry lists every instance, sorted by slug, with definition, current stage, status and owner', () => {
+test('listRegistry lists every instance, sorted by slug, with definition, current stage, status and assignee', () => {
   withScratchInstances((instancesDir) => {
     createInstance('design', 'zebra-initiative', { instancesDir })
-    createInstance('design', 'alpha-initiative', { instancesDir, owner: 'c.barlow' })
+    createInstance('design', 'alpha-initiative', { instancesDir, assignee: 'c.barlow' })
 
     const registry = listRegistry({ instancesDir })
     assert.deepEqual(registry, [
-      { slug: 'alpha-initiative', definition: 'design', stage: 'shape', status: 'incomplete', owner: 'c.barlow' },
-      { slug: 'zebra-initiative', definition: 'design', stage: 'shape', status: 'incomplete', owner: '' },
+      { slug: 'alpha-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: 'c.barlow' },
+      { slug: 'zebra-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: '' },
     ])
   })
 })
 
-test('listRegistry reports "complete" once every required field for the current stage is filled in', () => {
+test('listRegistry reports "complete" once every required field for the current stage is filled in, independently of assignee', () => {
   withScratchInstances((instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir })
+    createInstance('design', 'my-initiative', { instancesDir, assignee: 'c.barlow' })
     const definition = loadDefinition('design')
 
     for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
@@ -40,22 +40,33 @@ test('listRegistry reports "complete" once every required field for the current 
       for (const field of moduleSpec.fields) {
         if (field.required) fields[field.id] = field.type === 'list' ? ['Filled in.'] : 'Filled in.'
       }
-      writeModule(definition, 'my-initiative', moduleId, { status: 'agreed', owner: 'c.barlow', fields }, { instancesDir })
+      writeModule(definition, 'my-initiative', moduleId, { status: 'agreed', owner: '', fields }, { instancesDir })
     }
 
     const registry = listRegistry({ instancesDir })
     const myInitiative = registry.find((i) => i.slug === 'my-initiative')
     assert.equal(myInitiative.status, 'complete')
-    assert.equal(myInitiative.owner, 'c.barlow')
+    assert.equal(myInitiative.assignee, 'c.barlow')
   })
 })
 
-test('listRegistry falls back to \'\' for owner when no current-stage module has one set', () => {
+// The instance-level assignee (#97) is a plain field on the instance
+// record, not derived by scanning any module's frontmatter `owner` — even
+// though every module below has one set, it must not leak into this row.
+test('listRegistry falls back to \'\' for assignee when the instance record has none set, regardless of module frontmatter owner', () => {
   withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
+    const definition = loadDefinition('design')
+    writeModule(
+      definition,
+      'my-initiative',
+      'context',
+      { status: 'draft', owner: 'c.barlow', fields: {} },
+      { instancesDir }
+    )
 
     const registry = listRegistry({ instancesDir })
-    assert.equal(registry[0].owner, '')
+    assert.equal(registry[0].assignee, '')
   })
 })
 
@@ -110,5 +121,5 @@ test('listRegistry reflects the real examples/demo-cli/demo-web fixtures in this
   assert.equal(examples.definition, 'design')
   assert.equal(examples.stage, 'shape')
   assert.equal(examples.status, 'complete')
-  assert.equal(examples.owner, 'c.barlow')
+  assert.equal(examples.assignee, 'c.barlow')
 })

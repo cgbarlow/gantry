@@ -217,7 +217,7 @@ gantry render my-initiative soap                # produce the artefact
 |---|---|---|
 | `gantry definitions` | List definitions available in this repo | Not yet implemented |
 | `gantry instances [--json]` | List instances available in this repo, with definition and current stage | Implemented |
-| `gantry new <definition> <slug> [--owner <name>]` | Create an instance | Implemented |
+| `gantry new <definition> <slug> [--owner <name>] [--assignee <name>]` | Create an instance — `--owner` seeds each first-stage module file's own frontmatter `owner`; `--assignee` sets the instance record's own stored assignee | Implemented |
 | `gantry status <slug> [--json]` | Current stage, module completeness, what's outstanding | Implemented |
 | `gantry check <slug> [--gate <id>] [--json]` | Validate an instance against a gate's requirements — any gate, not just the instance's current stage | Implemented |
 | `gantry render <slug> <artefact> [--dry-run]` | Render an artefact to `out/` | Implemented |
