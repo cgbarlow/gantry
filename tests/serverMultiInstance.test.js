@@ -43,8 +43,8 @@ function withRunningServer(options, fn) {
 }
 
 const SEED_FILES = {
-  '/instance.yaml': 'definition: design\nslug: remote-initiative\nstage: shape\n',
-  '/modules/context.md': [
+  '/gantry-workspace/remote-initiative/instance.yaml': 'definition: design\nslug: remote-initiative\nstage: shape\n',
+  '/gantry-workspace/remote-initiative/modules/context.md': [
     '---',
     'module: context',
     'status: draft',

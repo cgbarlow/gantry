@@ -26,8 +26,8 @@ const VALID_PAT = 'valid-test-pat'
 const VALID_PAT_2 = `${VALID_PAT}-2`
 
 const SEED_FILES = {
-  '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-  '/modules/context.md': [
+  '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
+  '/gantry-workspace/my-initiative/modules/context.md': [
     '---',
     'module: context',
     'status: draft',
