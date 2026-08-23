@@ -17,9 +17,10 @@ import { markdown } from '@codemirror/lang-markdown'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import { theme, cycleTheme } from './lib/theme.js'
-import { pat, clearPat, requestPat, promptOpen, resolvePromptWith } from './lib/credential.js'
-import { apiFetch } from './lib/apiFetch.js'
+import { promptOpen, resolvePromptWith } from './lib/credential.js'
+import { apiFetch, apiFetchForInstance } from './lib/apiFetch.js'
 import { SetupWizardPage } from './pages/setup-wizard.js'
+import { SettingsPage } from './pages/settings.js'
 // Two distinct "view mode" concepts collide on the same export names — the
 // dashboard's (#77) master-detail/swimlanes toggle and the module editor's
 // (#79) markdown/split/rendered toggle are unrelated signals that happen to
@@ -60,7 +61,10 @@ async function loadInstance(slug, stageId) {
   if (slug) params.set('slug', slug)
   if (stageId) params.set('stage', stageId)
   const qs = params.toString()
-  const res = await apiFetch(qs ? `/api/instance?${qs}` : '/api/instance')
+  // `apiFetchForInstance` (not plain `apiFetch`) — this request may target
+  // a workspace with its own PAT override (#104), which must be resolved
+  // and attached before the first attempt, not just on a 401 retry.
+  const res = await apiFetchForInstance(slug, qs ? `/api/instance?${qs}` : '/api/instance')
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new Error(body.message ?? body.error ?? `Failed to load instance (${res.status})`)
@@ -311,7 +315,7 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
     // criterion once a freshly adopted/created instance had no such
     // server-pinned default to fall back on.
     const params = new URLSearchParams({ stage: stageId, slug: currentSlug.value })
-    const res = await apiFetch(`/api/instance/modules/${mod.id}?${params}`, {
+    const res = await apiFetchForInstance(currentSlug.value, `/api/instance/modules/${mod.id}?${params}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: mod.status, owner: mod.owner, fields }),
@@ -565,7 +569,8 @@ function ArtefactsSection({ instance }) {
     setStatus('Rendering…')
     // See ModuleCard's handleSave for why `?slug=` is required here now —
     // the same gap, for the module editor's own "Render" action.
-    const res = await apiFetch(`/api/instance/render/${artefact.id}?slug=${encodeURIComponent(currentSlug.value)}`, {
+    const slug = currentSlug.value
+    const res = await apiFetchForInstance(slug, `/api/instance/render/${artefact.id}?slug=${encodeURIComponent(slug)}`, {
       method: 'POST',
     })
     const body = await res.json()
@@ -855,17 +860,10 @@ function AppHeader({ instance }) {
         <a class="btn small ghost" href="/">← Instances</a>
         <h1>${instance.slug} — ${instance.definition}</h1>
         <a class="btn small ghost" href="/setup">+ New instance</a>
+        <a class="btn small ghost" href="/settings">Settings</a>
         <button type="button" class="btn small ghost theme-toggle" onClick=${cycleTheme} title="Cycle theme">
           Theme: ${theme.value}
         </button>
-        ${pat.value
-          ? html`
-              <button type="button" class="btn small ghost" onClick=${() => requestPat()}>
-                Replace Azure DevOps PAT
-              </button>
-              <button type="button" class="btn small ghost" onClick=${clearPat}>Clear Azure DevOps PAT</button>
-            `
-          : null}
       </div>
       <p id="stage-line">${instance.stage.title} (gate: ${instance.stage.gate})</p>
       <nav id="stage-nav">
@@ -991,7 +989,7 @@ function EmptyState() {
 // whichever single instance is currently open) — the dashboard can trigger
 // either action for any listed instance without navigating away from it.
 async function runCheck(slug) {
-  const res = await apiFetch(`/api/instance/check?slug=${encodeURIComponent(slug)}`)
+  const res = await apiFetchForInstance(slug, `/api/instance/check?slug=${encodeURIComponent(slug)}`)
   const body = await res.json()
   if (!res.ok) return `Check failed: ${body.message ?? body.error}`
   if (body.pass) return 'PASS — gate requirements met.'
@@ -1000,13 +998,13 @@ async function runCheck(slug) {
 }
 
 async function runRender(slug) {
-  const detailRes = await apiFetch(`/api/instance?slug=${encodeURIComponent(slug)}`)
+  const detailRes = await apiFetchForInstance(slug, `/api/instance?slug=${encodeURIComponent(slug)}`)
   const detail = await detailRes.json()
   if (!detailRes.ok) return `Render failed: ${detail.message ?? detail.error}`
   if (!detail.artefacts.length) return 'No artefact available to render for this stage yet.'
   const results = []
   for (const artefact of detail.artefacts) {
-    const res = await apiFetch(`/api/instance/render/${artefact.id}?slug=${encodeURIComponent(slug)}`, { method: 'POST' })
+    const res = await apiFetchForInstance(slug, `/api/instance/render/${artefact.id}?slug=${encodeURIComponent(slug)}`, { method: 'POST' })
     const body = await res.json()
     results.push(res.ok ? `Rendered ${artefact.title}` : `${artefact.title} failed: ${body.message ?? body.error}`)
   }
@@ -1037,7 +1035,7 @@ function MasterDetailView({ instances }) {
     setDetail(null)
     setDetailError(null)
     setActionStatus('')
-    apiFetch(`/api/instance?slug=${encodeURIComponent(effectiveSlug)}`)
+    apiFetchForInstance(effectiveSlug, `/api/instance?slug=${encodeURIComponent(effectiveSlug)}`)
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to load "${effectiveSlug}" (${res.status})`)
         return res.json()
@@ -1261,6 +1259,7 @@ function DashboardPage() {
         <div class="dashboard-controls">
           ${instances?.length ? html`<${ViewToggle} />` : null}
           <a class="btn small ghost" href="/setup">+ New instance</a>
+          <a class="btn small ghost" href="/settings">Settings</a>
           <button type="button" class="btn small ghost theme-toggle" onClick=${cycleTheme} title="Cycle theme">
             Theme: ${theme.value}
           </button>
@@ -1340,12 +1339,13 @@ function PatPromptModal() {
 }
 
 // ---------- App shell: preact-iso routing ----------
-// Five routes: the dashboard (#77, default/landing), the module editor per
-// instance, the instance-setup wizard (#78), and the asset library (#80).
-// `instanceData`/`loadError` above are populated regardless of which route
-// is active (the `effect()` isn't scoped to a component), so the library
-// screen never has to re-fetch instance data just to know which instance
-// it's browsing.
+// Six routes: the dashboard (#77, default/landing), the module editor per
+// instance, the instance-setup wizard (#78), the asset library (#80), and
+// the tabbed settings screen (#101, currently just its Global Defaults
+// tab). `instanceData`/`loadError` above are populated regardless of which
+// route is active (the `effect()` isn't scoped to a component), so the
+// library screen never has to re-fetch instance data just to know which
+// instance it's browsing.
 function App() {
   return html`
     <${LocationProvider}>
@@ -1353,6 +1353,7 @@ function App() {
         <${Route} path="/instance/:slug" component=${ModuleEditorPage} />
         <${Route} path="/setup" component=${SetupWizardPage} />
         <${Route} path="/assets" component=${AssetLibraryPage} />
+        <${Route} path="/settings" component=${SettingsPage} />
         <${Route} default component=${DashboardPage} />
       <//>
     <//>

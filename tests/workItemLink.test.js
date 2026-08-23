@@ -295,7 +295,7 @@ test('syncGatePassToWorkItem pushes a state drawn from the work item type\'s own
 test('syncGatePassToWorkItem works against an Azure-DevOps-backed instance\'s data, checking the gate against that same backend', async () => {
   await withFakeWorkItemsServer({}, async (wiBaseUrl) => {
     const seedFiles = {
-      '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
+      '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
     }
     await withFakeAzureDevOpsServer(
       { organization: 'git-org', project: 'git-project', repository: 'git-repo', validPat: VALID_PAT, files: seedFiles },
@@ -314,7 +314,7 @@ test('syncGatePassToWorkItem works against an Azure-DevOps-backed instance\'s da
         const gitClient = createAzureDevOpsClient(azureDevOps)
         for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
           const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
-          await gitClient.writeFile(`modules/${moduleId}.md`, text)
+          await gitClient.writeFile(`gantry-workspace/my-initiative/modules/${moduleId}.md`, text)
         }
 
         const parentId = await createParentWorkItem(wiBaseUrl)

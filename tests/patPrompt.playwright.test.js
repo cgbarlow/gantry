@@ -26,8 +26,8 @@ const VALID_PAT = 'valid-test-pat'
 const VALID_PAT_2 = `${VALID_PAT}-2`
 
 const SEED_FILES = {
-  '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-  '/modules/context.md': [
+  '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
+  '/gantry-workspace/my-initiative/modules/context.md': [
     '---',
     'module: context',
     'status: draft',
@@ -160,29 +160,33 @@ test('a stored PAT is attached automatically on every subsequent request — no 
   })
 })
 
-test('clearing the stored PAT re-triggers the prompt on the next Azure-DevOps-touching action', async () => {
+test('clearing the stored PAT (from the Settings screen, #101) re-triggers the prompt on the next Azure-DevOps-touching action', async () => {
   await withAzureDevOpsBackedServer(async (base) => {
     const browser = await chromium.launch()
     try {
       const page = await browser.newPage()
-      await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
 
-      await page.goto(`${base}/instance/my-initiative`)
-      await page.waitForSelector('.module', { timeout: 10_000 })
-
+      // PAT management moved off the per-instance editor header entirely
+      // (#101) onto the global Settings screen's "Global Defaults" tab —
+      // exercised there instead of on `/instance/my-initiative`. Seeded via
+      // `page.evaluate` after an initial navigation (not `addInitScript`,
+      // which reruns on *every* subsequent navigation this test makes —
+      // including the one right after clearing — and would silently
+      // re-seed the very value this test clears).
+      await page.goto(`${base}/settings`)
+      await page.evaluate((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+      await page.reload()
       await page.getByRole('button', { name: 'Clear Azure DevOps PAT' }).click()
       const storedAfterClear = await page.evaluate(() => localStorage.getItem('gantry:ado-pat'))
       assert.equal(storedAfterClear, null)
 
-      // Clearing the PAT does not, by itself, touch the API again (the
-      // currently-displayed view is left alone rather than eagerly
-      // re-fetching) — the prompt reappears only once a genuine subsequent
-      // action needs the API again, here: switching to a different stage.
+      // Clearing the PAT does not, by itself, touch any Azure-DevOps-backed
+      // API — the prompt reappears only once a genuine subsequent action
+      // needs the API again, here: opening the Azure-DevOps-backed instance.
       const modal = page.locator('.modal[aria-label="Azure DevOps sign-in required"]')
       assert.equal(await modal.count(), 0)
 
-      const otherStageButton = page.locator('#stage-nav button').nth(1)
-      await otherStageButton.click()
+      await page.goto(`${base}/instance/my-initiative`)
       await modal.waitFor({ state: 'visible', timeout: 10_000 })
 
       await modal.locator('input[type=password]').fill(VALID_PAT)
@@ -195,15 +199,22 @@ test('clearing the stored PAT re-triggers the prompt on the next Azure-DevOps-to
   })
 })
 
-test('the "Replace Azure DevOps PAT" control opens the prompt directly (with no failed request needed first) and overwrites the stored value', async () => {
+test('the Settings screen\'s "Replace Azure DevOps PAT" control (#101) opens the prompt directly (with no failed request needed first) and overwrites the stored value', async () => {
   await withAzureDevOpsBackedServer(async (base) => {
     const browser = await chromium.launch()
     try {
       const page = await browser.newPage()
-      await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
 
-      await page.goto(`${base}/instance/my-initiative`)
-      await page.waitForSelector('.module', { timeout: 10_000 })
+      // Seeded via `page.evaluate` + `reload` after an initial navigation,
+      // not `addInitScript` — see the previous test's own comment on why
+      // `addInitScript` is unsafe once a test navigates more than once
+      // (it would re-seed VALID_PAT right before the later
+      // `/instance/my-initiative` navigation below, silently overwriting
+      // the replacement PAT this test proves gets used instead).
+      await page.goto(`${base}/settings`)
+      await page.evaluate((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+      await page.reload()
+      await page.locator('.settings-pat-status .stamp.agreed').waitFor({ state: 'visible', timeout: 5_000 })
 
       await page.getByRole('button', { name: 'Replace Azure DevOps PAT' }).click()
       const modal = page.locator('.modal[aria-label="Azure DevOps sign-in required"]')
@@ -212,7 +223,7 @@ test('the "Replace Azure DevOps PAT" control opens the prompt directly (with no 
       // A genuinely different, still-valid replacement — the fake server
       // accepts either PAT (see withAzureDevOpsBackedServer's `validPat`
       // array) — so this proves both the overwrite itself and that the
-      // replaced view keeps working, not just that the modal closes.
+      // replaced value keeps working, not just that the modal closes.
       const replacementPat = VALID_PAT_2
       await modal.locator('input[type=password]').fill(replacementPat)
       await modal.getByRole('button', { name: 'Continue' }).click()
@@ -221,9 +232,11 @@ test('the "Replace Azure DevOps PAT" control opens the prompt directly (with no 
       const stored = await page.evaluate(() => localStorage.getItem('gantry:ado-pat'))
       assert.equal(stored, replacementPat)
 
-      // The replaced PAT is what's now attached — a subsequent save still
-      // round-trips, proving the new value is genuinely in effect, not just
-      // recorded in storage.
+      // The replaced PAT is what's now attached — a subsequent save on the
+      // Azure-DevOps-backed instance still round-trips, proving the new
+      // value is genuinely in effect, not just recorded in storage.
+      await page.goto(`${base}/instance/my-initiative`)
+      await page.waitForSelector('.module', { timeout: 10_000 })
       await page.locator('.field-markdown .cm-content').first().click()
       await page.keyboard.press('ControlOrMeta+a')
       await page.keyboard.type('Edited after replacing the PAT.')
@@ -235,7 +248,7 @@ test('the "Replace Azure DevOps PAT" control opens the prompt directly (with no 
   })
 })
 
-test('a local instance never shows the PAT prompt, and shows no PAT management controls', async () => {
+test('a local instance never shows the PAT prompt, and its editor header shows no PAT management controls (moved to Settings, #101)', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
@@ -254,6 +267,7 @@ test('a local instance never shows the PAT prompt, and shows no PAT management c
         assert.equal(await page.locator('.modal[aria-label="Azure DevOps sign-in required"]').count(), 0)
         assert.equal(await page.getByRole('button', { name: 'Replace Azure DevOps PAT' }).count(), 0)
         assert.equal(await page.getByRole('button', { name: 'Clear Azure DevOps PAT' }).count(), 0)
+        assert.equal(await page.getByRole('button', { name: 'Set Azure DevOps PAT' }).count(), 0)
 
         assert.deepEqual(pageErrors, [])
       } finally {

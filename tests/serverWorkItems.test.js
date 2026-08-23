@@ -283,9 +283,9 @@ test('GET /api/instance/check now actually checks an Azure-DevOps-backed instanc
   const REPOSITORY = 'fake-repo'
   const GIT_PAT = 'valid-git-pat'
 
-  const seedFiles = { '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n' }
+  const seedFiles = { '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n' }
   for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
-    seedFiles[`/modules/${moduleId}.md`] = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
+    seedFiles[`/gantry-workspace/my-initiative/modules/${moduleId}.md`] = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
   }
 
   await withFakeAzureDevOpsServer(

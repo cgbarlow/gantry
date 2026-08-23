@@ -95,5 +95,21 @@ export async function validateRepo(repoUrl) {
     return { result: 'existing', slug: instance.slug, instance, location }
   }
 
+  // `'multiple'` (#100: one repo can now hold more than one instance under
+  // gantry-workspace/<slug>/) means data *was* found here — reporting it
+  // as `'empty'` (this function's fallback for "nothing recognizable
+  // here") would invite creating a new instance that could collide with
+  // one of the existing ones. This wizard has no way yet to let the user
+  // pick which of several existing instances to open (#101/#104), so this
+  // is surfaced as an error rather than silently treated as empty.
+  if (body?.result === 'multiple') {
+    return {
+      result: 'error',
+      message:
+        body.message ??
+        `This repo already holds more than one gantry instance (${(body.slugs ?? []).join(', ')}) — opening a specific one isn't supported by this wizard yet.`,
+    }
+  }
+
   return { result: 'empty', slug: location.repository, location }
 }

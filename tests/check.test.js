@@ -107,9 +107,9 @@ test('checkGate against Azure DevOps fails a freshly-created instance the same w
 })
 
 test('checkGate against Azure DevOps passes once the Shape-stage modules are filled in, the same content that passes locally', async () => {
-  const seedFiles = { '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n' }
+  const seedFiles = { '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n' }
   for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
-    seedFiles[`/modules/${moduleId}.md`] = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
+    seedFiles[`/gantry-workspace/my-initiative/modules/${moduleId}.md`] = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
   }
 
   await withFakeRepo(seedFiles, async (baseUrl) => {
@@ -121,7 +121,7 @@ test('checkGate against Azure DevOps passes once the Shape-stage modules are fil
 })
 
 test('checkGate against Azure DevOps honours --gate, resolving a stage other than the instance\'s current one', async () => {
-  const seedFiles = { '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n' }
+  const seedFiles = { '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n' }
   await withFakeRepo(seedFiles, async (baseUrl) => {
     const azureDevOps = azureDevOpsOptions(baseUrl)
     const result = await checkGate('my-initiative', { azureDevOps, gate: 'hld-tac-approved' })
@@ -148,8 +148,8 @@ test('checkGate against Azure DevOps fails hard on a parser anomaly, via strict 
     '',
   ].join('\n')
   const seedFiles = {
-    '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-    '/modules/context.md': badModuleText,
+    '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
+    '/gantry-workspace/my-initiative/modules/context.md': badModuleText,
   }
   await withFakeRepo(seedFiles, async (baseUrl) => {
     const azureDevOps = azureDevOpsOptions(baseUrl)

@@ -122,6 +122,38 @@ export function createFakeAzureDevOpsServer({
     }
 
     if (req.method === 'GET' && pathname === `${basePath}/items`) {
+      const scopePath = url.searchParams.get('scopePath')
+      // A `scopePath` (+`recursionLevel`, always `OneLevel` for this fake's
+      // one real caller, lib/azureDevOpsClient.js's `listFolder`) requests
+      // a folder listing instead of a single file's content — the fake
+      // repo's flat `store` has no real notion of folders, so a folder's
+      // existence/children are derived from whatever file paths happen to
+      // start with `${scopePath}/`: the first remaining path segment is an
+      // immediate child, a folder itself if more segments follow it, a
+      // file otherwise. 404s (matching a real not-found path) if nothing
+      // in the store starts with that prefix, mirroring how a single-file
+      // `path` lookup 404s below.
+      if (scopePath !== null) {
+        const normalizedScope = scopePath === '/' ? '' : scopePath.replace(/\/+$/, '')
+        const prefix = `${normalizedScope}/`
+        const children = new Map() // name -> isFolder
+        for (const key of store.keys()) {
+          if (!key.startsWith(prefix)) continue
+          const rest = key.slice(prefix.length)
+          if (rest === '') continue
+          const [name, ...more] = rest.split('/')
+          const isFolder = more.length > 0
+          children.set(name, (children.get(name) ?? false) || isFolder)
+        }
+        if (children.size === 0) {
+          return json(404, { message: `TF401174: Item ${scopePath} not found (fake server).` })
+        }
+        const value = [...children.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([name, isFolder]) => ({ path: `${normalizedScope}/${name}`, isFolder }))
+        return json(200, { count: value.length, value })
+      }
+
       const path = url.searchParams.get('path')
       if (!store.has(path)) {
         return json(404, { message: `TF401174: Item ${path} not found (fake server).` })
@@ -150,7 +182,11 @@ export function createFakeAzureDevOpsServer({
 
       for (const commit of push.commits) {
         for (const change of commit.changes) {
-          store.set(change.item.path, change.newContent.content)
+          if (change.changeType === 'delete') {
+            store.delete(change.item.path)
+          } else {
+            store.set(change.item.path, change.newContent.content)
+          }
         }
       }
       commitCount += 1
