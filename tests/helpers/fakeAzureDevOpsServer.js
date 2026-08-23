@@ -4,11 +4,24 @@ function objectIdFor(n) {
   return String(n).padStart(40, '0')
 }
 
+// Generic fallback states for any work item type not given an explicit
+// entry in `workItemTypeStates` — plausible-looking but not meant to match
+// any one real process template exactly (tests that care about a specific
+// type's states pass `workItemTypeStates` explicitly).
+const DEFAULT_WORK_ITEM_TYPE_STATES = [
+  { name: 'New', category: 'Proposed', color: 'b2b2b2' },
+  { name: 'Active', category: 'InProgress', color: '007acc' },
+  { name: 'Resolved', category: 'Resolved', color: 'ff9d00' },
+  { name: 'Closed', category: 'Completed', color: '339933' },
+]
+
 /**
  * A minimal in-process fake of the Azure DevOps Git Items/Refs/Pushes REST
  * API, standing in for a real `dev.azure.com` org/project/repo in tests
  * (#84) — a real HTTP server on an ephemeral port that lib/azureDevOpsClient.js
- * talks to over real `fetch` calls, never a mock of `fetch` itself.
+ * talks to over real `fetch` calls, never a mock of `fetch` itself. Extended
+ * by #99 to also fake the Work Items create/update/get-type-states
+ * endpoints lib/azureDevOpsWorkItemsClient.js talks to, the same way.
  *
  * `files` seeds the fake repo's initial content on `main`, keyed by
  * repo-relative path (leading "/" optional). `validPat` is the PAT (or, if
@@ -28,14 +41,64 @@ function objectIdFor(n) {
  * means "N real pushes made against this server", regardless of whether
  * `files` seeded an initial commit. Reads (`items`/`refs`) are never
  * affected by this — only the write path.
+ *
+ * `workItemTypeStates`, if given, maps a work item type name (e.g. "Task")
+ * to the array of valid states GET .../workitemtypes/{type}/states should
+ * report for it — either full `{ name, category, color }` entries (Azure
+ * DevOps's own shape) or plain state-name strings (auto-filled with
+ * placeholder category/color). Falls back to a generic 4-state list for any
+ * type not given an explicit entry.
  */
-export function createFakeAzureDevOpsServer({ organization, project, repository, validPat, files = {}, failAfterPushes } = {}) {
+export function createFakeAzureDevOpsServer({
+  organization,
+  project,
+  repository,
+  validPat,
+  files = {},
+  failAfterPushes,
+  workItemTypeStates = {},
+} = {}) {
   const store = new Map(Object.entries(files).map(([path, content]) => [path.startsWith('/') ? path : `/${path}`, content]))
   let commitCount = store.size > 0 ? 1 : 0
   let currentObjectId = commitCount > 0 ? objectIdFor(commitCount) : objectIdFor(0)
   let pushesMade = 0
 
   const basePath = `/${organization}/${project}/_apis/git/repositories/${repository}`
+  const witBasePath = `/${organization}/${project}/_apis/wit`
+  const orgWorkItemsPath = `/${organization}/_apis/wit/workItems`
+
+  // In-memory Work Items store, separate from the Git `store` above —
+  // keyed by numeric id, seeded empty (no `files`-style seeding option;
+  // tests create whatever work items they need via the client itself).
+  const workItems = new Map()
+  let nextWorkItemId = 1
+
+  // Applies an Azure DevOps JSON Patch document (as sent by
+  // lib/azureDevOpsWorkItemsClient.js's fieldsToPatch) to a fake work
+  // item's fields/relations — only the "add a field" and "append a
+  // relation" shapes that client actually produces, not general JSON
+  // Patch (this fake only needs to satisfy its one real caller).
+  function applyWorkItemPatch(workItem, patch) {
+    for (const op of patch) {
+      if (op.path === '/relations/-' && op.op === 'add') {
+        workItem.relations.push(op.value)
+      } else if (op.path.startsWith('/fields/')) {
+        const field = op.path.slice('/fields/'.length)
+        if (op.op === 'remove') delete workItem.fields[field]
+        else workItem.fields[field] = op.value
+      }
+    }
+  }
+
+  function workItemResponseBody(workItem) {
+    return {
+      id: workItem.id,
+      rev: workItem.rev,
+      fields: workItem.fields,
+      relations: workItem.relations,
+      url: `${orgWorkItemsPath}/${workItem.id}`,
+    }
+  }
 
   return createServer(async (req, res) => {
     const url = new URL(req.url, 'http://fake-azure-devops.invalid')
@@ -99,6 +162,59 @@ export function createFakeAzureDevOpsServer({ organization, project, repository,
       })
     }
 
+    if (req.method === 'POST' && pathname.startsWith(`${witBasePath}/workitems/$`)) {
+      const type = pathname.slice(`${witBasePath}/workitems/$`.length)
+      let raw = ''
+      for await (const chunk of req) raw += chunk
+      const patch = JSON.parse(raw)
+
+      const now = new Date().toISOString()
+      const id = nextWorkItemId++
+      const workItem = {
+        id,
+        rev: 1,
+        fields: {
+          'System.WorkItemType': type,
+          'System.TeamProject': project,
+          'System.State': 'New',
+          'System.CreatedDate': now,
+          'System.ChangedDate': now,
+        },
+        relations: [],
+      }
+      applyWorkItemPatch(workItem, patch)
+      workItems.set(id, workItem)
+      // Azure DevOps itself returns 200 (not 201) for work item creation.
+      return json(200, workItemResponseBody(workItem))
+    }
+
+    if (req.method === 'PATCH' && pathname.startsWith(`${witBasePath}/workitems/`)) {
+      const idSegment = pathname.slice(`${witBasePath}/workitems/`.length)
+      if (/^\d+$/.test(idSegment)) {
+        const id = Number(idSegment)
+        const workItem = workItems.get(id)
+        if (!workItem) {
+          return json(404, { message: `TF401232: Work item ${id} does not exist (fake server).` })
+        }
+        let raw = ''
+        for await (const chunk of req) raw += chunk
+        const patch = JSON.parse(raw)
+        applyWorkItemPatch(workItem, patch)
+        workItem.rev += 1
+        workItem.fields['System.ChangedDate'] = new Date().toISOString()
+        return json(200, workItemResponseBody(workItem))
+      }
+    }
+
+    if (req.method === 'GET' && pathname.startsWith(`${witBasePath}/workitemtypes/`) && pathname.endsWith('/states')) {
+      const type = pathname.slice(`${witBasePath}/workitemtypes/`.length, -'/states'.length)
+      const states = workItemTypeStates[type] ?? DEFAULT_WORK_ITEM_TYPE_STATES
+      const value = states.map((state) =>
+        typeof state === 'string' ? { name: state, category: 'InProgress', color: '007acc' } : state
+      )
+      return json(200, { count: value.length, value })
+    }
+
     return json(404, { message: `No fake route for ${req.method} ${pathname}` })
   })
 }
@@ -110,9 +226,20 @@ export function createFakeAzureDevOpsServer({ organization, project, repository,
  * testing decisions). Shared by `tests/azureDevOpsClient.test.js` and
  * `tests/instance.test.js` so this lifecycle isn't duplicated across both.
  */
-export function withFakeAzureDevOpsServer({ organization, project, repository, validPat, files, failAfterPushes }, fn) {
+export function withFakeAzureDevOpsServer(
+  { organization, project, repository, validPat, files, failAfterPushes, workItemTypeStates },
+  fn
+) {
   return new Promise((resolve, reject) => {
-    const server = createFakeAzureDevOpsServer({ organization, project, repository, validPat, files, failAfterPushes })
+    const server = createFakeAzureDevOpsServer({
+      organization,
+      project,
+      repository,
+      validPat,
+      files,
+      failAfterPushes,
+      workItemTypeStates,
+    })
     server.listen(0, async () => {
       const { port } = server.address()
       try {
