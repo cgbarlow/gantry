@@ -279,3 +279,67 @@ test('migrateLegacyAzureDevOpsInstance moves instance.yaml and every module file
     }
   )
 })
+
+// Branch-aware storage path (#118): checkAzureDevOpsRepo and
+// migrateLegacyAzureDevOpsInstance both thread an optional `branch` through
+// to every read/write/list, defaulting to 'main' (the client's own
+// default) when omitted, exactly as every test above already relies on.
+
+test('migrateLegacyAzureDevOpsInstance moves a legacy instance on a non-default branch, never touching \'main\'', async () => {
+  await withFakeRepo({}, async (baseUrl) => {
+    const client = createAzureDevOpsClient(locationFor(baseUrl))
+    const branch = 'stage/hld-definition'
+    const instanceYamlText = 'definition: design\nslug: my-initiative\nstage: shape\n'
+    await client.writeFile('instance.yaml', instanceYamlText, { branch })
+    await client.writeFile('modules/context.md', CONTEXT_MODULE, { branch })
+
+    await migrateLegacyAzureDevOpsInstance(client, 'my-initiative', instanceYamlText, branch)
+
+    assert.equal(
+      await client.getFileContent('gantry-workspace/my-initiative/instance.yaml', { branch }),
+      instanceYamlText
+    )
+    assert.equal(await client.getFileContent('gantry-workspace/my-initiative/modules/context.md', { branch }), CONTEXT_MODULE)
+    await assert.rejects(() => client.getFileContent('instance.yaml', { branch }), AzureDevOpsNotFoundError)
+
+    // 'main' was never touched by any of the above — it has no ref at all.
+    await assert.rejects(() => client.getFileContent('instance.yaml'), AzureDevOpsNotFoundError)
+    await assert.rejects(() => client.getFileContent('gantry-workspace/my-initiative/instance.yaml'), AzureDevOpsNotFoundError)
+  })
+})
+
+test('checkAzureDevOpsRepo reads/migrates/evaluates against the caller-supplied branch, not \'main\'', async () => {
+  const branch = 'stage/hld-definition'
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      files: {},
+      branchFiles: {
+        [branch]: {
+          '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
+          '/modules/context.md': CONTEXT_MODULE,
+        },
+      },
+    },
+    async (baseUrl) => {
+      const result = await checkAzureDevOpsRepo({ ...locationFor(baseUrl), branch })
+      assert.equal(result.result, 'found')
+      assert.equal(result.slug, 'my-initiative')
+
+      // Migrated onto that same branch, not 'main'.
+      const client = createAzureDevOpsClient(locationFor(baseUrl))
+      assert.match(
+        await client.getFileContent('gantry-workspace/my-initiative/instance.yaml', { branch }),
+        /slug: my-initiative/
+      )
+      await assert.rejects(() => client.getFileContent('gantry-workspace/my-initiative/instance.yaml'), AzureDevOpsNotFoundError)
+
+      // Checking the default branch instead finds nothing there at all.
+      const mainResult = await checkAzureDevOpsRepo(locationFor(baseUrl))
+      assert.equal(mainResult.result, 'empty')
+    }
+  )
+})

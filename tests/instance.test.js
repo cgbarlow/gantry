@@ -650,6 +650,89 @@ test('a PAT the (fake) Azure DevOps server rejects surfaces from readInstance/re
   )
 })
 
+// Branch-aware storage path (#118): every Azure-DevOps-backed function
+// above threads `options.azureDevOps.branch` through to the client instead
+// of only ever touching the client's own `'main'` default — prep for #122,
+// which will pick a real per-stage branch and pass it in here. Every test
+// above this point supplies no `branch` at all, proving the default is
+// unaffected; these instead supply one explicitly.
+
+test('createInstance/readInstance/readModule/writeModule all write to and read from the caller-supplied branch, not \'main\'', async () => {
+  await withFakeRepo({}, async (baseUrl) => {
+    const azureDevOps = azureDevOpsOptions(baseUrl, { branch: 'stage/hld-definition' })
+    await createInstance('design', 'my-initiative', { azureDevOps, owner: 'c.barlow' })
+
+    // Nothing landed on 'main' — only the branch this call actually targeted.
+    const client = createAzureDevOpsClient(azureDevOpsOptions(baseUrl))
+    await assert.rejects(
+      () => client.getFileContent('/gantry-workspace/my-initiative/instance.yaml'),
+      AzureDevOpsNotFoundError
+    )
+    const onBranch = await client.getFileContent('/gantry-workspace/my-initiative/instance.yaml', {
+      branch: 'stage/hld-definition',
+    })
+    assert.match(onBranch, /slug: my-initiative/)
+
+    const instance = await readInstance('my-initiative', { azureDevOps })
+    assert.equal(instance.stage, 'shape')
+
+    const definition = loadDefinition('design')
+    await writeModule(
+      definition,
+      'my-initiative',
+      'context',
+      { status: 'in-review', owner: 'c.barlow', fields: { driver: 'Because.' } },
+      { azureDevOps }
+    )
+    const data = await readModule(definition, 'my-initiative', 'context', { azureDevOps })
+    assert.equal(data.status, 'in-review')
+    assert.equal(data.fields.driver, 'Because.')
+
+    // The module write above never touched `main` either.
+    await assert.rejects(
+      () => client.getFileContent('/gantry-workspace/my-initiative/modules/context.md'),
+      AzureDevOpsNotFoundError
+    )
+  })
+})
+
+test('updateInstanceAssignee against Azure DevOps updates instance.yaml on the caller-supplied branch, leaving \'main\' untouched', async () => {
+  await withFakeRepo({}, async (baseUrl) => {
+    const mainAzureDevOps = azureDevOpsOptions(baseUrl)
+    await createInstance('design', 'my-initiative', { azureDevOps: mainAzureDevOps })
+
+    const branchAzureDevOps = azureDevOpsOptions(baseUrl, { branch: 'stage/hld-definition' })
+    const client = createAzureDevOpsClient(azureDevOpsOptions(baseUrl))
+    // Seed the branch with a copy of instance.yaml so updateInstanceAssignee
+    // (a read-modify-write) has something to read on that branch.
+    const mainText = await client.getFileContent('/gantry-workspace/my-initiative/instance.yaml')
+    await client.writeFile('/gantry-workspace/my-initiative/instance.yaml', mainText, {
+      branch: 'stage/hld-definition',
+    })
+
+    await updateInstanceAssignee('my-initiative', 'c.barlow', { azureDevOps: branchAzureDevOps })
+
+    const updatedOnBranch = await readInstance('my-initiative', { azureDevOps: branchAzureDevOps })
+    assert.equal(updatedOnBranch.assignee, 'c.barlow')
+
+    const stillOnMain = await readInstance('my-initiative', { azureDevOps: mainAzureDevOps })
+    assert.equal(stillOnMain.assignee, '')
+  })
+})
+
+test('a module missing on the requested branch is reported as "no saved data", even when it exists on \'main\'', async () => {
+  await withFakeRepo({}, async (baseUrl) => {
+    const azureDevOps = azureDevOpsOptions(baseUrl)
+    await createInstance('design', 'my-initiative', { azureDevOps })
+
+    const definition = loadDefinition('design')
+    await assert.rejects(
+      () => readModule(definition, 'my-initiative', 'context', { azureDevOps: { ...azureDevOps, branch: 'stage/hld-definition' } }),
+      /has no saved data/
+    )
+  })
+})
+
 test('createInstance/readInstance/readModule/writeModule stay fully synchronous (not Promises) with no Azure DevOps location given — the three local instances make zero Azure DevOps calls and are provably unaffected by this path existing', () => {
   withScratchInstances((instancesDir) => {
     const created = createInstance('design', 'my-initiative', { instancesDir })

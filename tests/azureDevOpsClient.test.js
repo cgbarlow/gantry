@@ -267,6 +267,132 @@ test('a rejected PAT on listFolder/deleteFile also surfaces as AzureDevOpsAuthen
   })
 })
 
+// Branch-aware storage path (#118): getFileContent/writeFile/listFolder/
+// deleteFile all accept a `branch` option (default `'main'`) — these prove
+// the fake server itself genuinely isolates one branch's content from
+// another, the same way real Azure DevOps branches do, rather than every
+// branch name secretly sharing the one flat store every test above (which
+// never passes `branch` at all, so exercises only the default) implicitly
+// relied on before #118.
+
+test('getFileContent/writeFile default to \'main\' when no branch is given, exactly as every existing caller assumes', async () => {
+  await withFakeAzureDevOpsServer({ '/instance.yaml': 'on: main\n' }, async (baseUrl) => {
+    const c = client(baseUrl)
+    assert.equal(await c.getFileContent('/instance.yaml'), 'on: main\n')
+    assert.equal(await c.getFileContent('/instance.yaml', { branch: 'main' }), 'on: main\n')
+  })
+})
+
+test('writeFile to a non-default branch does not affect \'main\', and vice versa', async () => {
+  await withFakeAzureDevOpsServer({ '/instance.yaml': 'on: main\n' }, async (baseUrl) => {
+    const c = client(baseUrl)
+    await c.writeFile('/instance.yaml', 'on: feature\n', { branch: 'feature/foo', message: 'Write on a branch' })
+
+    assert.equal(await c.getFileContent('/instance.yaml'), 'on: main\n')
+    assert.equal(await c.getFileContent('/instance.yaml', { branch: 'feature/foo' }), 'on: feature\n')
+
+    await c.writeFile('/instance.yaml', 'on: main v2\n', { message: 'Update main' })
+    assert.equal(await c.getFileContent('/instance.yaml'), 'on: main v2\n')
+    // The branch write from earlier is untouched by this second `main` push.
+    assert.equal(await c.getFileContent('/instance.yaml', { branch: 'feature/foo' }), 'on: feature\n')
+  })
+})
+
+test('getFileContent throws AzureDevOpsNotFoundError for a path that exists on a different branch but not the requested one', async () => {
+  await withFakeAzureDevOpsServer({ '/instance.yaml': 'on: main\n' }, async (baseUrl) => {
+    const c = client(baseUrl)
+    await assert.rejects(
+      () => c.getFileContent('/instance.yaml', { branch: 'not-created-yet' }),
+      AzureDevOpsNotFoundError
+    )
+  })
+})
+
+test('writeFile creates a brand-new branch from an empty state, not seeded from \'main\' or any other existing branch', async () => {
+  await withFakeAzureDevOpsServer(
+    { '/gantry-workspace/foo/instance.yaml': 'slug: foo\n' },
+    async (baseUrl) => {
+      const c = client(baseUrl)
+      await c.writeFile('/gantry-workspace/foo/other.md', 'only on new-branch\n', { branch: 'new-branch' })
+
+      // The file that was only ever on `main` doesn't leak onto the new branch.
+      await assert.rejects(
+        () => c.getFileContent('/gantry-workspace/foo/instance.yaml', { branch: 'new-branch' }),
+        AzureDevOpsNotFoundError
+      )
+      assert.equal(
+        await c.getFileContent('/gantry-workspace/foo/other.md', { branch: 'new-branch' }),
+        'only on new-branch\n'
+      )
+    }
+  )
+})
+
+test('listFolder is scoped to the requested branch, not every branch\'s combined content', async () => {
+  await withFakeAzureDevOpsServer(
+    { '/gantry-workspace/main-only/instance.yaml': 'slug: main-only\n' },
+    async (baseUrl) => {
+      const c = client(baseUrl)
+      await c.writeFile('/gantry-workspace/branch-only/instance.yaml', 'slug: branch-only\n', { branch: 'feature' })
+
+      const mainEntries = await c.listFolder('/gantry-workspace')
+      assert.deepEqual(
+        mainEntries.map((e) => e.path),
+        ['/gantry-workspace/main-only']
+      )
+
+      const branchEntries = await c.listFolder('/gantry-workspace', { branch: 'feature' })
+      assert.deepEqual(
+        branchEntries.map((e) => e.path),
+        ['/gantry-workspace/branch-only']
+      )
+    }
+  )
+})
+
+test('deleteFile on one branch does not remove the same path from another branch', async () => {
+  await withFakeAzureDevOpsServer({ '/instance.yaml': 'on: main\n' }, async (baseUrl) => {
+    const c = client(baseUrl)
+    await c.writeFile('/instance.yaml', 'on: feature\n', { branch: 'feature' })
+
+    await c.deleteFile('/instance.yaml', { branch: 'feature' })
+
+    await assert.rejects(() => c.getFileContent('/instance.yaml', { branch: 'feature' }), AzureDevOpsNotFoundError)
+    assert.equal(await c.getFileContent('/instance.yaml'), 'on: main\n')
+  })
+})
+
+test('writing to the same branch twice moves that branch\'s own ref forward independently of any other branch', async () => {
+  await withFakeAzureDevOpsServer({}, async (baseUrl) => {
+    const c = client(baseUrl)
+    await c.writeFile('/f.md', 'main v1\n')
+    await c.writeFile('/f.md', 'branch v1\n', { branch: 'feature' })
+    await c.writeFile('/f.md', 'main v2\n')
+    await c.writeFile('/f.md', 'branch v2\n', { branch: 'feature' })
+
+    assert.equal(await c.getFileContent('/f.md'), 'main v2\n')
+    assert.equal(await c.getFileContent('/f.md', { branch: 'feature' }), 'branch v2\n')
+  })
+})
+
+test('createFakeAzureDevOpsServer\'s branchFiles option seeds a non-main branch directly, without an initial real push', async () => {
+  await withFakeServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      files: { '/instance.yaml': 'on: main\n' },
+      branchFiles: { 'stage/hld-definition': { '/instance.yaml': 'on: stage branch\n' } },
+    },
+    async (baseUrl) => {
+      const c = client(baseUrl)
+      assert.equal(await c.getFileContent('/instance.yaml'), 'on: main\n')
+      assert.equal(await c.getFileContent('/instance.yaml', { branch: 'stage/hld-definition' }), 'on: stage branch\n')
+    }
+  )
+})
+
 test('createAzureDevOpsClient requires organization, project, repository and pat', () => {
   assert.throws(() => createAzureDevOpsClient({ project: PROJECT, repository: REPOSITORY, pat: VALID_PAT }), /organization/)
   assert.throws(() => createAzureDevOpsClient({ organization: ORGANIZATION, repository: REPOSITORY, pat: VALID_PAT }), /project/)

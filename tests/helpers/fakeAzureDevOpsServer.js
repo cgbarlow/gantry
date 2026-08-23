@@ -34,26 +34,36 @@ const DEFAULT_WORK_ITEM_TYPE_STATES = [
  * (#84) — a real HTTP server on an ephemeral port that lib/azureDevOpsClient.js
  * talks to over real `fetch` calls, never a mock of `fetch` itself. Extended
  * by #99 to also fake the Work Items create/update/get-type-states
- * endpoints lib/azureDevOpsWorkItemsClient.js talks to, the same way.
+ * endpoints lib/azureDevOpsWorkItemsClient.js talks to, the same way, and by
+ * #118 to actually track each branch's content independently (previously
+ * every read/write landed in one flat store regardless of what branch the
+ * client asked for — fine while no caller ever passed anything but the
+ * client's own `'main'` default, but unable to prove a non-`'main'` branch
+ * is genuinely isolated).
  *
- * `files` seeds the fake repo's initial content on `main`, keyed by
- * repo-relative path (leading "/" optional). `validPat` is the PAT (or, if
- * an array, any one of several PATs — e.g. to exercise replacing one valid
- * PAT with another) accepted as the password half of HTTP Basic auth (empty
- * username) — anything else, or no Authorization header at all, gets a 401,
- * mirroring how a rejected PAT surfaces from the real API.
+ * `files` seeds `main`'s initial content, keyed by repo-relative path
+ * (leading "/" optional). `branchFiles`, if given, seeds one or more
+ * *other* branches the same way (`{ [branchName]: { [path]: content } }`) —
+ * for a test that needs a second branch to already exist (e.g. to prove a
+ * write to it doesn't leak into `main`) without first driving a real push
+ * to create it. `validPat` is the PAT (or, if an array, any one of several
+ * PATs — e.g. to exercise replacing one valid PAT with another) accepted as
+ * the password half of HTTP Basic auth (empty username) — anything else, or
+ * no Authorization header at all, gets a 401, mirroring how a rejected PAT
+ * surfaces from the real API.
  *
  * `failAfterPushes`, if given, makes every push (POST .../pushes) once
  * `failAfterPushes` pushes have already committed successfully *during this
- * server's lifetime* fail with a 500 — simulating a mid-flow outage (a
- * network blip, an expired PAT) for tests that need to exercise a caller's
- * partial-failure handling (e.g. a multi-file create like createInstance's
- * Azure DevOps path) without that test depending on how many GETs the
- * client happens to make per push. Counted separately from `commitCount`
- * (which seeds at 1 when `files` is non-empty) so `failAfterPushes` always
- * means "N real pushes made against this server", regardless of whether
- * `files` seeded an initial commit. Reads (`items`/`refs`) are never
- * affected by this — only the write path.
+ * server's lifetime, across every branch* fail with a 500 — simulating a
+ * mid-flow outage (a network blip, an expired PAT) for tests that need to
+ * exercise a caller's partial-failure handling (e.g. a multi-file create
+ * like createInstance's Azure DevOps path) without that test depending on
+ * how many GETs the client happens to make per push. Counted separately
+ * from any branch's own commit count (each of which seeds at 1 when that
+ * branch is given non-empty `files`/`branchFiles` content) so
+ * `failAfterPushes` always means "N real pushes made against this server",
+ * regardless of how many branches were seeded with an initial commit.
+ * Reads (`items`/`refs`) are never affected by this — only the write path.
  *
  * `workItemTypeStates`, if given, maps a work item type name (e.g. "Task")
  * to the array of valid states GET .../workitemtypes/{type}/states should
@@ -68,12 +78,34 @@ export function createFakeAzureDevOpsServer({
   repository,
   validPat,
   files = {},
+  branchFiles = {},
   failAfterPushes,
   workItemTypeStates = {},
 } = {}) {
-  const store = new Map(Object.entries(files).map(([path, content]) => [path.startsWith('/') ? path : `/${path}`, content]))
-  let commitCount = store.size > 0 ? 1 : 0
-  let currentObjectId = commitCount > 0 ? objectIdFor(commitCount) : objectIdFor(0)
+  // One independent { store, objectId } per branch — a branch with no
+  // entry here has never had a commit (mirrors the pre-#118 "commitCount
+  // === 0" case for `main`): its ref doesn't exist yet and every path
+  // under it 404s/lists empty, exactly like an unset repo did before any
+  // branch other than `main` existed at all.
+  const branches = new Map()
+  // A single counter shared across every branch, not one per branch —
+  // real Azure DevOps commit ids are globally unique regardless of which
+  // ref they're reachable from, and `failAfterPushes`'s "N real pushes"
+  // contract (above) already depends on counting pushes globally too.
+  let globalCommitCount = 0
+
+  function seedBranch(name, seedFiles) {
+    const entries = Object.entries(seedFiles)
+    if (entries.length === 0) return
+    const store = new Map(entries.map(([path, content]) => [path.startsWith('/') ? path : `/${path}`, content]))
+    globalCommitCount += 1
+    branches.set(name, { store, objectId: objectIdFor(globalCommitCount) })
+  }
+  seedBranch('main', files)
+  for (const [branchName, seedFiles] of Object.entries(branchFiles)) {
+    seedBranch(branchName, seedFiles)
+  }
+
   let pushesMade = 0
 
   const basePath = `/${organization}/${project}/_apis/git/repositories/${repository}`
@@ -135,6 +167,16 @@ export function createFakeAzureDevOpsServer({
     }
 
     if (req.method === 'GET' && pathname === `${basePath}/items`) {
+      // Every real call here (lib/azureDevOpsClient.js's getFileContent/
+      // listFolder) always sends `versionDescriptor.version` — defaulting
+      // to `'main'` here too only guards a test hitting this fake directly
+      // without going through that client. #118: this is what makes reads
+      // branch-aware — each branch has its own independent store below,
+      // never one shared flat one.
+      const branchName = url.searchParams.get('versionDescriptor.version') ?? 'main'
+      const branch = branches.get(branchName)
+      const store = branch?.store ?? new Map()
+
       const scopePath = url.searchParams.get('scopePath')
       // A `scopePath` (+`recursionLevel`, always `OneLevel` for this fake's
       // one real caller, lib/azureDevOpsClient.js's `listFolder`) requests
@@ -171,11 +213,17 @@ export function createFakeAzureDevOpsServer({
       if (!store.has(path)) {
         return json(404, { message: `TF401174: Item ${path} not found (fake server).` })
       }
-      return json(200, { path, content: store.get(path), objectId: currentObjectId })
+      return json(200, { path, content: store.get(path), objectId: branch.objectId })
     }
 
     if (req.method === 'GET' && pathname === `${basePath}/refs`) {
-      const value = commitCount > 0 ? [{ name: 'refs/heads/main', objectId: currentObjectId }] : []
+      // Real Azure DevOps filters server-side by the `filter` query param
+      // (e.g. `heads/<branch>`) — this fake instead always returns every
+      // branch that has at least one commit and lets the one real caller,
+      // lib/azureDevOpsClient.js's getBranchObjectId, find its own exact
+      // `refs/heads/<branch>` match, the same way it would against a real
+      // server's (possibly broader) filtered result set.
+      const value = [...branches.entries()].map(([name, b]) => ({ name: `refs/heads/${name}`, objectId: b.objectId }))
       return json(200, { count: value.length, value })
     }
 
@@ -187,12 +235,26 @@ export function createFakeAzureDevOpsServer({
       for await (const chunk of req) raw += chunk
       const push = JSON.parse(raw)
       const [refUpdate] = push.refUpdates
+      // e.g. "refs/heads/feature/foo" -> "feature/foo" — the exact inverse
+      // of how lib/azureDevOpsClient.js's writeFile/deleteFile build
+      // `refUpdates[0].name` from a branch name.
+      const branchName = refUpdate.name.replace(/^refs\/heads\//, '')
+      const existingBranch = branches.get(branchName)
 
-      const expectedOldObjectId = commitCount > 0 ? currentObjectId : objectIdFor(0)
+      // A branch with no commits yet (never seeded, never pushed to)
+      // pushes from the zero object id — Azure DevOps's own documented
+      // convention for "this ref doesn't exist yet" — exactly like `main`
+      // did pre-#118, just per-branch now: pushing a brand-new branch name
+      // starts it with an empty store of its own, never main's or any
+      // other branch's content (creating a branch that stacks on another
+      // branch's real history, #119/#122, is a distinct, later capability
+      // from this fake's push-to-an-empty-new-ref support).
+      const expectedOldObjectId = existingBranch ? existingBranch.objectId : objectIdFor(0)
       if (refUpdate.oldObjectId !== expectedOldObjectId) {
         return json(409, { message: `TF401028: The push (oldObjectId ${refUpdate.oldObjectId}) is out of date (fake server).` })
       }
 
+      const store = existingBranch ? existingBranch.store : new Map()
       for (const commit of push.commits) {
         for (const change of commit.changes) {
           if (change.changeType === 'delete') {
@@ -202,9 +264,10 @@ export function createFakeAzureDevOpsServer({
           }
         }
       }
-      commitCount += 1
+      globalCommitCount += 1
       pushesMade += 1
-      currentObjectId = objectIdFor(commitCount)
+      const newObjectId = objectIdFor(globalCommitCount)
+      branches.set(branchName, { store, objectId: newObjectId })
       // A real push response's `commits[]` entries carry full commit
       // metadata (author/committer name+date, not just the commitId) —
       // this is what lib/render.js's Azure-DevOps-backed render path (#98)
@@ -213,11 +276,11 @@ export function createFakeAzureDevOpsServer({
       // `{ commitId }` a caller uninterested in it might expect.
       const now = new Date().toISOString()
       return json(201, {
-        pushId: commitCount,
+        pushId: globalCommitCount,
         date: now,
-        refUpdates: [{ name: refUpdate.name, newObjectId: currentObjectId }],
+        refUpdates: [{ name: refUpdate.name, newObjectId }],
         commits: push.commits.map((commit) => ({
-          commitId: currentObjectId,
+          commitId: newObjectId,
           comment: commit.comment,
           author: { name: 'Fake Pusher', date: now },
           committer: { name: 'Fake Pusher', date: now },
@@ -290,7 +353,7 @@ export function createFakeAzureDevOpsServer({
  * `tests/instance.test.js` so this lifecycle isn't duplicated across both.
  */
 export function withFakeAzureDevOpsServer(
-  { organization, project, repository, validPat, files, failAfterPushes, workItemTypeStates },
+  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates },
   fn
 ) {
   return new Promise((resolve, reject) => {
@@ -300,6 +363,7 @@ export function withFakeAzureDevOpsServer(
       repository,
       validPat,
       files,
+      branchFiles,
       failAfterPushes,
       workItemTypeStates,
     })

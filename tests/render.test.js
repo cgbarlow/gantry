@@ -8,7 +8,7 @@ import { renderArtefact } from '../lib/render.js'
 import { createAsset } from '../lib/assets.js'
 import { loadDefinition } from '../lib/definition.js'
 import { readModule, writeModule } from '../lib/instance.js'
-import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
+import { createAzureDevOpsClient, AzureDevOpsNotFoundError } from '../lib/azureDevOpsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
 // A minimal real 1x1 red PNG, base64-encoded — small enough to inline, real
@@ -334,6 +334,41 @@ test('if the follow-up push that adds the footer fails, the error names the comm
       await assert.rejects(() => renderArtefact('examples', 'soap', { azureDevOps }), {
         message: /pushed it to Azure DevOps as commit [0-9a-f]{7}, but the follow-up push that adds the commit-hash\/date footer failed/,
       })
+    }
+  )
+})
+
+// Branch-aware storage path (#118): renderArtefact reads instance/module
+// data from, and pushes the rendered artefact to, `options.azureDevOps.branch`
+// (falling through to the client's own 'main' default when omitted) —
+// prep for #122, which renders/commits to a stage's own branch on every
+// save.
+test('a render against Azure DevOps reads instance/module data from, and pushes the artefact to, the caller-supplied branch — never \'main\'', async () => {
+  const branch = 'stage/hld-definition'
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      files: {},
+      branchFiles: { [branch]: seedExamplesAzureDevOpsFiles() },
+    },
+    async (baseUrl) => {
+      const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl, branch }
+      const result = await renderArtefact('examples', 'soap', { azureDevOps })
+
+      const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl })
+      const pushedContent = await client.getFileContent(result.azureDevOpsPath, { branch })
+      const pushedMarkdown = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown'], {
+        input: Buffer.from(pushedContent, 'base64'),
+        encoding: 'utf8',
+      })
+      assert.match(pushedMarkdown, /Solution on a Page/)
+
+      // 'main' has no ref at all — nothing was ever read from or pushed to
+      // it by this render.
+      await assert.rejects(() => client.getFileContent(result.azureDevOpsPath), AzureDevOpsNotFoundError)
     }
   )
 })
