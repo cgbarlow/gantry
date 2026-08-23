@@ -119,6 +119,8 @@ npm link             # makes `gantry` available on your PATH
 
 The web form (`web/`) is a static page with no build step — but it is **not** dependency-free: `gantry serve` generates a browser import map that serves Preact, `preact-iso`, `@preact/signals`, `htm`, CodeMirror 6, `markdown-it`, and `DOMPurify` straight out of `node_modules/` (see `docs/adr/0006-preact-frontend-framework.md`). That directory must exist wherever `gantry serve` runs — don't `npm prune --production` or ship without it.
 
+Backing an instance with Azure DevOps needs nothing installed locally — no Azure CLI, no `az` login. It needs an Azure DevOps **Personal Access Token** (Code + Work Items, Read & write), entered once through the browser when prompted (see "Backing an instance with Azure DevOps" above).
+
 Visually verifying a rendered `.docx` (not required to *use* Gantry, only to sanity-check output during development) additionally needs LibreOffice (`soffice`) and Poppler (`pdftoppm`) — see `vendor/anthropic-skills/docx/SKILL.md`.
 
 ## Latest releases
@@ -143,17 +145,27 @@ gantry/
 │           ├── soap.md.tmpl
 │           └── reference.docx    # pandoc --reference-doc, derived from the real HLD template
 ├── instances/
-│   └── <initiative-slug>/
-│       ├── instance.yaml         # which definition, which stage, metadata
+│   ├── instance-registry.json    # slug -> location (local/Azure DevOps) map, gitignored
+│   └── <initiative-slug>/        # local instances only — an Azure DevOps-backed
+│       ├── instance.yaml         # instance has no on-disk folder here at all
 │       ├── modules/              # authored content
 │       │   ├── context.md
 │       │   └── solution-definition.md
 │       └── out/                  # rendered artefacts (gitignored by default)
 ├── lib/                          # the engine: definition/instance loading, render, status, the web server
+│   ├── server.js                 # HTTP routes, incl. the Azure DevOps repo-check/adopt endpoints
+│   ├── instanceRegistry.js       # slug -> location lookup/registration (the registry above)
+│   ├── azureDevOpsClient.js      # PAT-authenticated Azure DevOps REST client
+│   ├── repoCheck.js              # "does this Azure DevOps repo already hold instance data"
+│   └── credential.js             # extracts a forwarded PAT from a request
 ├── bin/gantry.js                 # CLI entrypoint
 └── web/
-    ├── index.html                # the stage-by-stage form
-    ├── app.js
+    ├── index.html                # app shell
+    ├── app.js                     # dashboard + module editor
+    ├── pages/setup-wizard.js     # "+ New instance" — local or Azure DevOps
+    ├── lib/credential.js         # client-side PAT storage/prompt
+    ├── lib/apiFetch.js           # fetch wrapper: attaches the PAT, retries once on 401
+    ├── lib/validateRepo.js       # parses/checks the wizard's Azure DevOps repo URL
     └── style.css
 ```
 
@@ -163,11 +175,25 @@ Definitions sit side by side — adding a second one requires no change to the e
 
 **Clone and write.** The repo is flat files. Clone it, read the definition, fill in the module files in your editor. Every module carries its own spec and guidance, so you're not guessing at what "Context" is supposed to contain. This is the path for architects who'd rather write markdown than fight a form, and for agents driving the process programmatically.
 
-**Use the form.** `gantry serve <slug>` opens a single HTML page that walks you through the process stage by stage, with the spec and guidance inline. A stage switcher lets you jump to any gate's screen, not just whichever stage the instance is currently at. Fill it in, hit render, get your document. Under the hood it writes the same files to the same repo — there is no second store, and no import/export step.
+**Use the form.** `gantry serve` opens a dashboard of every registered instance, local or Azure DevOps-backed (see below). Opening one walks you through the process stage by stage, with the spec and guidance inline. A stage switcher lets you jump to any gate's screen, not just whichever stage the instance is currently at. Fill it in, hit render, get your document. Under the hood it writes the same files to the same repo (or the same Azure DevOps repo) — there is no second store, and no import/export step.
 
-Each gate screen also has a "Clear all fields" button, blanking every field shown for that stage without touching the saved files until you hit each module's own Save button. To see what a filled-in gate screen looks like, `gantry serve examples` — a fixture instance with real content for every stage.
+Each gate screen also has a "Clear all fields" button, blanking every field shown for that stage without touching the saved files until you hit each module's own Save button. To see what a filled-in gate screen looks like, `gantry serve` and open `examples` from the dashboard — a fixture instance with real content for every stage.
 
 Neither path is the "real" one. They're two front ends onto the same data.
+
+## Backing an instance with Azure DevOps
+
+An instance's data doesn't have to live on the machine running `gantry serve` — it can live in an Azure DevOps repo instead, with gantry acting as a form over it. This is useful when the people filling in modules aren't the people running the server.
+
+From the dashboard, **"+ New instance"** opens the setup wizard:
+
+1. Paste the target repo's URL — the standard `https://dev.azure.com/{organization}/{project}/_git/{repository}` shape (an on-premises Azure DevOps Server base URL isn't supported here yet).
+2. **Check repo** looks for an existing `instance.yaml` at that location. If one's already there, you can open it directly ("adopt" it into this server's dashboard) rather than creating a new instance over the top of it.
+3. If the repo is empty, pick a definition to create a fresh instance there.
+
+The first request against an Azure DevOps-backed instance prompts for a **Personal Access Token** with **Code (Read & write)** and **Work Items (Read & write)** scope. It's stored in the browser (`localStorage`), sent only to your own gantry server, and forwarded from there to Azure DevOps as an HTTP Basic credential — gantry's own server never persists it. "Replace"/"Clear" controls in the module editor header let you swap or drop a stored PAT.
+
+Once registered, a local and an Azure DevOps-backed instance are indistinguishable from the dashboard's point of view — same listing, same module editor, same render command. Where each one's data actually lives is tracked server-side in a registry file (`instances/instance-registry.json`, gitignored — application state, not source), not in any client-visible config.
 
 ## Your first instance
 
@@ -195,7 +221,7 @@ gantry render my-initiative soap                # produce the artefact
 | `gantry status <slug> [--json]` | Current stage, module completeness, what's outstanding | Implemented |
 | `gantry check <slug> [--gate <id>] [--json]` | Validate an instance against a gate's requirements — any gate, not just the instance's current stage | Implemented |
 | `gantry render <slug> <artefact> [--dry-run]` | Render an artefact to `out/` | Implemented |
-| `gantry serve [slug] [--port <port>]` | Serve the stage-by-stage form for `<slug>` (port 3000). With no `slug`, the JSON API still serves every instance per-request via `?slug=<slug>` (e.g. `GET /api/instances` for the full listing); the bundled form itself picks up the same `?slug=` on its own URL, and `/setup` is a "New instance" screen for registering one (see the wizard's own "+ New instance" link) — but there's still no full instance-picker/dashboard screen yet for browsing every registered instance visually | Implemented |
+| `gantry serve [slug] [--port <port>]` | Serve the web form (port 3000): a dashboard of every registered instance at `/`, local or Azure DevOps-backed, and the stage-by-stage form at `/instance/<slug>`. `[slug]` only sets a fallback default for API requests made with no `?slug=<slug>` of their own — it doesn't change what the dashboard shows or require picking one instance up front. `/setup` is the instance-setup wizard (see "Backing an instance with Azure DevOps" above) | Implemented |
 | `gantry validate <definition> [--json]` | Report every structural problem with a definition in one pass | Implemented |
 
 `status`, `check` and `validate` all emit structured output with `--json` for scripting and agent use.
