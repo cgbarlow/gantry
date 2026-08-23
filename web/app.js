@@ -600,6 +600,174 @@ function ArtefactsSection({ instance }) {
   `
 }
 
+// ---------- Azure DevOps work-item link + confirmed gate-pass sync (#103) ----------
+// One instance-level panel, shown once per stage screen (below the modules,
+// alongside Render — see StageScreen) rather than in AppHeader, since
+// "which stage's work item" is stage-scoped even though the *link* itself
+// is instance-level. Unlinked: a small inline form (organization/project/
+// parent work item id/type) posts to POST /api/instance/work-items/link.
+// Linked: shows the parent id and this stage's own child work item id, plus
+// a "Check gate & sync" action that runs the existing check first and only
+// opens the confirm-before-push modal (mirroring PatPromptModal's shape)
+// if the gate genuinely passes — declining it (or the gate failing) never
+// calls POST /api/instance/work-items/sync at all, so the work item's state
+// is left exactly as it was (#103's "declining leaves the work item's state
+// unchanged" acceptance criterion).
+function WorkItemPanel({ instance }) {
+  const [status, setStatus] = useState('')
+  const [confirming, setConfirming] = useState(false)
+  const [linkForm, setLinkForm] = useState({ organization: '', project: '', parentId: '', workItemType: '' })
+  const [linking, setLinking] = useState(false)
+  const [linkError, setLinkError] = useState('')
+
+  const stageId = instance.stage.id
+  const workItem = instance.workItem
+  const stageWorkItemId = workItem?.stages?.[stageId]
+
+  async function reloadInstance() {
+    instanceData.value = await loadInstance(currentSlug.value, viewedStage.value)
+  }
+
+  async function handleLink() {
+    setLinkError('')
+    if (!linkForm.organization.trim() || !linkForm.project.trim() || !linkForm.parentId.trim()) {
+      setLinkError('Organization, project, and parent work item id are required.')
+      return
+    }
+    setLinking(true)
+    try {
+      const res = await apiFetch(`/api/instance/work-items/link?slug=${encodeURIComponent(currentSlug.value)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          organization: linkForm.organization.trim(),
+          project: linkForm.project.trim(),
+          parentId: Number(linkForm.parentId.trim()),
+          ...(linkForm.workItemType.trim() ? { workItemType: linkForm.workItemType.trim() } : {}),
+        }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.message ?? body.error ?? `Link failed (${res.status})`)
+      await reloadInstance()
+    } catch (err) {
+      setLinkError(err.message)
+    } finally {
+      setLinking(false)
+    }
+  }
+
+  // "Check gate & sync": runs the same check the dashboard's own Check
+  // action does — only once it genuinely PASSes does this open the confirm
+  // modal; a FAIL (or a check-request failure) reports status and stops
+  // there, exactly as if no linked work item existed at all.
+  async function handleCheckAndMaybeConfirm() {
+    setStatus('Checking gate…')
+    const res = await apiFetch(`/api/instance/check?slug=${encodeURIComponent(currentSlug.value)}`)
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setStatus(`Check failed: ${body.message ?? body.error}`)
+      return
+    }
+    if (!body.pass) {
+      const outstanding = body.modules.filter((m) => !m.complete).map((m) => m.title)
+      setStatus(`FAIL — outstanding: ${outstanding.join(', ') || 'see modules'}`)
+      return
+    }
+    setStatus('Gate passed.')
+    setConfirming(true)
+  }
+
+  async function handleConfirmSync() {
+    setConfirming(false)
+    setStatus('Pushing state to work item…')
+    const res = await apiFetch(`/api/instance/work-items/sync?slug=${encodeURIComponent(currentSlug.value)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    const body = await res.json().catch(() => ({}))
+    setStatus(
+      res.ok
+        ? `Pushed state "${body.state}" to work item #${body.workItemId}.`
+        : `Sync failed: ${body.message ?? body.error}`
+    )
+  }
+
+  function handleDecline() {
+    setConfirming(false)
+    setStatus('Declined — work item state left unchanged.')
+  }
+
+  return html`
+    <section class="work-item-panel">
+      <h2>Azure DevOps work item</h2>
+      ${!workItem
+        ? html`
+            <div class="link-form">
+              <input
+                class="text-field"
+                type="text"
+                placeholder="Organization"
+                value=${linkForm.organization}
+                onInput=${(e) => setLinkForm({ ...linkForm, organization: e.currentTarget.value })}
+              />
+              <input
+                class="text-field"
+                type="text"
+                placeholder="Project"
+                value=${linkForm.project}
+                onInput=${(e) => setLinkForm({ ...linkForm, project: e.currentTarget.value })}
+              />
+              <input
+                class="text-field"
+                type="text"
+                placeholder="Parent work item id"
+                value=${linkForm.parentId}
+                onInput=${(e) => setLinkForm({ ...linkForm, parentId: e.currentTarget.value })}
+              />
+              <input
+                class="text-field"
+                type="text"
+                placeholder="Work item type (default: Task)"
+                value=${linkForm.workItemType}
+                onInput=${(e) => setLinkForm({ ...linkForm, workItemType: e.currentTarget.value })}
+              />
+              <button type="button" class="btn primary" disabled=${linking} onClick=${handleLink}>
+                ${linking ? 'Linking…' : 'Link instance'}
+              </button>
+              ${linkError ? html`<div class="inline-error">${linkError}</div>` : null}
+            </div>
+          `
+        : html`
+            <p>
+              Linked to parent work item #${workItem.parentId} (${workItem.organization}/${workItem.project}, type "${workItem.workItemType}").
+            </p>
+            <p>This stage's work item: ${stageWorkItemId ? html`#${stageWorkItemId}` : '—'}</p>
+            <button type="button" class="btn" onClick=${handleCheckAndMaybeConfirm}>Check gate & sync work item</button>
+          `}
+      <div class="save-status">${status}</div>
+      ${confirming
+        ? html`
+            <div class="modal-backdrop" role="presentation">
+              <div class="modal" role="dialog" aria-modal="true" aria-label="Confirm work item state update">
+                <h3>Push a state update?</h3>
+                <p class="guidance">
+                  The gate for stage "${instance.stage.title}" has passed. Confirm to push a new state — drawn from
+                  work item #${stageWorkItemId}'s own configured type — to Azure DevOps. Declining leaves that work
+                  item's state unchanged.
+                </p>
+                <div class="modal-actions">
+                  <button type="button" class="btn ghost" onClick=${handleDecline}>Decline</button>
+                  <button type="button" class="btn primary" onClick=${handleConfirmSync}>Confirm & push</button>
+                </div>
+              </div>
+            </div>
+          `
+        : null}
+    </section>
+  `
+}
+
 // ---------- The viewed stage's whole screen: stage actions, modules, artefacts ----------
 // Keyed by stage id from the parent (see ModuleEditorPage) so switching
 // stages remounts this wholesale — fresh CodeMirror instances and a fresh
@@ -631,6 +799,7 @@ function StageScreen({ instance }) {
         `
       )}
       <${ArtefactsSection} instance=${instance} />
+      <${WorkItemPanel} instance=${instance} />
     </main>
   `
 }

@@ -219,6 +219,11 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .artefacts { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 32px; }
 .artefacts h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }
 
+.work-item-panel { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 32px; }
+.work-item-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }
+.work-item-panel .link-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
+.work-item-panel .link-form .text-field { max-width: 220px; }
+
 .field { margin-top: 20px; }
 .field label { font-family: var(--font-display); font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px; }
 .guidance { color: var(--text-muted); font-size: 12px; margin: 0 0 8px; }
