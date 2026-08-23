@@ -71,6 +71,15 @@ const DEFAULT_WORK_ITEM_TYPE_STATES = [
  * DevOps's own shape) or plain state-name strings (auto-filled with
  * placeholder category/color). Falls back to a generic 4-state list for any
  * type not given an explicit entry.
+ *
+ * Extended by #120 to also fake the Pull Requests create/get/complete
+ * endpoints lib/azureDevOpsPullRequestsClient.js talks to, plus the "cast a
+ * vote" endpoint (PUT .../pullrequests/{id}/reviewers/{reviewerId}) — not
+ * something that client itself exposes (voting is the Owner's own action,
+ * performed in Azure DevOps's real UI, per ADR-0014), but faked here so
+ * tests can simulate "the Owner approved/rejected this" via a plain
+ * `fetch` call against this same fake server, the same way a real test
+ * would exercise "Check status" detecting that vote.
  */
 export function createFakeAzureDevOpsServer({
   organization,
@@ -118,6 +127,12 @@ export function createFakeAzureDevOpsServer({
   const workItems = new Map()
   let nextWorkItemId = 1
 
+  // In-memory Pull Requests store, separate from both the Git `store` and
+  // the Work Items store above — keyed by numeric id, seeded empty (tests
+  // create whatever pull requests they need via the client itself).
+  const pullRequests = new Map()
+  let nextPullRequestId = 1
+
   // Applies an Azure DevOps JSON Patch document (as sent by
   // lib/azureDevOpsWorkItemsClient.js's fieldsToPatch) to a fake work
   // item's fields/relations — only the "add a field" and "append a
@@ -142,6 +157,26 @@ export function createFakeAzureDevOpsServer({
       fields: workItem.fields,
       relations: workItem.relations,
       url: `${orgWorkItemsPath}/${workItem.id}`,
+    }
+  }
+
+  function pullRequestResponseBody(pr) {
+    return {
+      pullRequestId: pr.pullRequestId,
+      codeReviewId: pr.pullRequestId,
+      status: pr.status,
+      title: pr.title,
+      description: pr.description,
+      sourceRefName: pr.sourceRefName,
+      targetRefName: pr.targetRefName,
+      reviewers: pr.reviewers,
+      creationDate: pr.creationDate,
+      closedDate: pr.closedDate,
+      mergeStatus: pr.mergeStatus,
+      lastMergeSourceCommit: pr.lastMergeSourceCommit,
+      lastMergeTargetCommit: pr.lastMergeTargetCommit,
+      completionOptions: pr.completionOptions,
+      url: `${basePath}/pullRequests/${pr.pullRequestId}`,
     }
   }
 
@@ -339,6 +374,82 @@ export function createFakeAzureDevOpsServer({
         typeof state === 'string' ? { name: state, category: 'InProgress', color: '007acc' } : state
       )
       return json(200, { count: value.length, value })
+    }
+
+    if (req.method === 'POST' && pathname === `${basePath}/pullrequests`) {
+      let raw = ''
+      for await (const chunk of req) raw += chunk
+      const body = JSON.parse(raw)
+
+      const id = nextPullRequestId++
+      const now = new Date().toISOString()
+      const pr = {
+        pullRequestId: id,
+        status: 'active',
+        title: body.title,
+        description: body.description,
+        sourceRefName: body.sourceRefName,
+        targetRefName: body.targetRefName,
+        reviewers: (body.reviewers ?? []).map((r) => ({ id: r.id, displayName: r.displayName ?? r.id, vote: 0 })),
+        creationDate: now,
+        mergeStatus: 'succeeded',
+        // Not a real merge simulation (this fake's Git store has no
+        // per-branch head tracking yet — see #118/#122) — just a stable,
+        // distinguishable-from-real-pushes fake commit id so a caller
+        // completing this pull request (which must echo it back, per
+        // Azure DevOps's own optimistic-concurrency check) has something
+        // consistent to round-trip.
+        lastMergeSourceCommit: { commitId: objectIdFor(1000000 + id) },
+        lastMergeTargetCommit: { commitId: currentObjectId },
+      }
+      pullRequests.set(id, pr)
+      return json(201, pullRequestResponseBody(pr))
+    }
+
+    if (pathname.startsWith(`${basePath}/pullrequests/`)) {
+      const rest = pathname.slice(`${basePath}/pullrequests/`.length)
+      const [idSegment, subResource, reviewerId] = rest.split('/')
+      const id = Number(idSegment)
+      const pr = /^\d+$/.test(idSegment) ? pullRequests.get(id) : undefined
+
+      if (!pr) {
+        return json(404, { message: `TF401180: Pull request ${idSegment} does not exist (fake server).` })
+      }
+
+      if (subResource === undefined && req.method === 'GET') {
+        return json(200, pullRequestResponseBody(pr))
+      }
+
+      if (subResource === undefined && req.method === 'PATCH') {
+        let raw = ''
+        for await (const chunk of req) raw += chunk
+        const patch = JSON.parse(raw)
+        if (patch.status !== undefined) pr.status = patch.status
+        if (patch.completionOptions !== undefined) pr.completionOptions = patch.completionOptions
+        if (patch.title !== undefined) pr.title = patch.title
+        if (patch.description !== undefined) pr.description = patch.description
+        if (patch.status === 'completed') pr.closedDate = new Date().toISOString()
+        return json(200, pullRequestResponseBody(pr))
+      }
+
+      // Not exercised by lib/azureDevOpsPullRequestsClient.js itself (that
+      // client deliberately exposes no "cast a vote" function — voting is
+      // the Owner's own action in Azure DevOps's real UI, per ADR-0014) —
+      // faked here purely so a test can simulate that vote directly (a
+      // plain `fetch` PUT against this server), then assert the client's
+      // own `getPullRequest` reads it back correctly.
+      if (subResource === 'reviewers' && reviewerId !== undefined && req.method === 'PUT') {
+        let raw = ''
+        for await (const chunk of req) raw += chunk
+        const body = JSON.parse(raw)
+        let reviewer = pr.reviewers.find((r) => r.id === reviewerId)
+        if (!reviewer) {
+          reviewer = { id: reviewerId, displayName: body.displayName ?? reviewerId, vote: 0 }
+          pr.reviewers.push(reviewer)
+        }
+        if (body.vote !== undefined) reviewer.vote = body.vote
+        return json(200, reviewer)
+      }
     }
 
     return json(404, { message: `No fake route for ${req.method} ${pathname}` })
