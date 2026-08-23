@@ -81,8 +81,8 @@ function withAzureDevOpsBackedServer(files, serverOptions, fn) {
 }
 
 const SEED_FILES = {
-  '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-  '/modules/context.md': [
+  '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
+  '/gantry-workspace/my-initiative/modules/context.md': [
     '---',
     'module: context',
     'status: draft',
@@ -176,10 +176,14 @@ test('GET /api/instance surfaces a genuine Azure DevOps read failure (a 500, not
 
     if (req.method === 'GET' && url.pathname === `${basePath}/items`) {
       const path = url.searchParams.get('path')
-      if (path === '/instance.yaml') {
-        return json(200, { path, content: SEED_FILES['/instance.yaml'], objectId: '1'.padStart(40, '0') })
+      if (path === '/gantry-workspace/my-initiative/instance.yaml') {
+        return json(200, {
+          path,
+          content: SEED_FILES['/gantry-workspace/my-initiative/instance.yaml'],
+          objectId: '1'.padStart(40, '0'),
+        })
       }
-      if (path === '/modules/context.md') {
+      if (path === '/gantry-workspace/my-initiative/modules/context.md') {
         // A genuine Azure DevOps-side failure — an outage, not a missing file.
         return json(500, { message: 'TF999999: simulated internal server error (fake, for this regression test)' })
       }
@@ -297,7 +301,7 @@ test('PUT /api/instance/assignee against an Azure-DevOps-backed instance with no
     assert.equal(body.error, 'authentication_required')
 
     const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
-    const instanceYaml = await client.getFileContent('instance.yaml')
+    const instanceYaml = await client.getFileContent('gantry-workspace/my-initiative/instance.yaml')
     assert.doesNotMatch(instanceYaml, /should-never-be-written/)
   })
 })
@@ -330,7 +334,7 @@ test('PUT /api/instance/assignee against an Azure-DevOps-backed instance with a 
     // DevOps repo's instance.yaml, not just in the response, and that the
     // instance's other fields (stage) survived the update untouched.
     const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
-    const instanceYaml = await client.getFileContent('instance.yaml')
+    const instanceYaml = await client.getFileContent('gantry-workspace/my-initiative/instance.yaml')
     assert.match(instanceYaml, /assignee: j\.smith/)
     assert.match(instanceYaml, /stage: shape/)
 
@@ -361,8 +365,8 @@ test('POST /api/instance/render/:artefact against an Azure-DevOps-backed instanc
 test('POST /api/instance/render/:artefact against an Azure-DevOps-backed instance with a valid PAT renders a real docx, reading module data from Azure DevOps, and pushes it back to that same repo', async () => {
   const fullFiles = {
     ...SEED_FILES,
-    '/modules/solution-definition.md': readFileSync('instances/examples/modules/solution-definition.md', 'utf8'),
-    '/modules/team-and-estimates.md': readFileSync('instances/examples/modules/team-and-estimates.md', 'utf8'),
+    '/gantry-workspace/my-initiative/modules/solution-definition.md': readFileSync('instances/examples/modules/solution-definition.md', 'utf8'),
+    '/gantry-workspace/my-initiative/modules/team-and-estimates.md': readFileSync('instances/examples/modules/team-and-estimates.md', 'utf8'),
   }
   await withAzureDevOpsBackedServer(fullFiles, {}, async (base, adoBaseUrl) => {
     const res = await fetch(`${base}/api/instance/render/soap`, {
@@ -376,7 +380,7 @@ test('POST /api/instance/render/:artefact against an Azure-DevOps-backed instanc
     // now the Azure DevOps repo it was rendered from, not a scratch path on
     // whichever machine `gantry serve` happens to run on.
     assert.equal(body.docxPath, undefined)
-    assert.equal(body.azureDevOpsPath, 'out/soap.docx')
+    assert.equal(body.azureDevOpsPath, 'gantry-workspace/my-initiative/out/soap.docx')
 
     const client = createAzureDevOpsClient({
       organization: ORGANIZATION,
@@ -385,7 +389,7 @@ test('POST /api/instance/render/:artefact against an Azure-DevOps-backed instanc
       pat: VALID_PAT,
       baseUrl: adoBaseUrl,
     })
-    const pushedContent = await client.getFileContent('out/soap.docx')
+    const pushedContent = await client.getFileContent('gantry-workspace/my-initiative/out/soap.docx')
     const pushedBytes = Buffer.from(pushedContent, 'base64')
     // A real .docx is a zip archive — starts with the "PK" magic bytes.
     assert.equal(pushedBytes.subarray(0, 2).toString(), 'PK')
@@ -395,8 +399,8 @@ test('POST /api/instance/render/:artefact against an Azure-DevOps-backed instanc
 test('rendering the same artefact against an Azure-DevOps-backed instance twice overwrites the previous render rather than accumulating files', async () => {
   const fullFiles = {
     ...SEED_FILES,
-    '/modules/solution-definition.md': readFileSync('instances/examples/modules/solution-definition.md', 'utf8'),
-    '/modules/team-and-estimates.md': readFileSync('instances/examples/modules/team-and-estimates.md', 'utf8'),
+    '/gantry-workspace/my-initiative/modules/solution-definition.md': readFileSync('instances/examples/modules/solution-definition.md', 'utf8'),
+    '/gantry-workspace/my-initiative/modules/team-and-estimates.md': readFileSync('instances/examples/modules/team-and-estimates.md', 'utf8'),
   }
   await withAzureDevOpsBackedServer(fullFiles, {}, async (base) => {
     for (let i = 0; i < 2; i++) {
@@ -406,7 +410,7 @@ test('rendering the same artefact against an Azure-DevOps-backed instance twice 
       })
       assert.equal(res.status, 200)
       const body = await res.json()
-      assert.equal(body.azureDevOpsPath, 'out/soap.docx')
+      assert.equal(body.azureDevOpsPath, 'gantry-workspace/my-initiative/out/soap.docx')
     }
   })
 })
