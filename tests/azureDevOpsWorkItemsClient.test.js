@@ -17,8 +17,11 @@ const VALID_PAT = 'valid-test-pat'
 // fixed organization/project/PAT constants so call sites below only need
 // to supply whatever varies (usually just `workItemTypeStates`). No
 // `repository` is passed — Work Items endpoints aren't repository-scoped.
-function withFakeAzureDevOpsServer({ workItemTypeStates } = {}, fn) {
-  return withFakeServer({ organization: ORGANIZATION, project: PROJECT, validPat: VALID_PAT, workItemTypeStates }, fn)
+function withFakeAzureDevOpsServer({ workItemTypeStates, workItemTypes } = {}, fn) {
+  return withFakeServer(
+    { organization: ORGANIZATION, project: PROJECT, validPat: VALID_PAT, workItemTypeStates, workItemTypes },
+    fn
+  )
 }
 
 function client(baseUrl, overrides = {}) {
@@ -100,6 +103,100 @@ test('getWorkItemTypeStates falls back to a generic state list for a type with n
     const states = await client(baseUrl).getWorkItemTypeStates('Bug')
     assert.ok(states.length > 0)
     assert.ok(states.every((s) => typeof s.name === 'string' && typeof s.category === 'string'))
+  })
+})
+
+test('getWorkItem fetches a work item\'s current field values by id', async () => {
+  await withFakeAzureDevOpsServer({}, async (baseUrl) => {
+    const c = client(baseUrl)
+    const created = await c.createWorkItem('Task', { 'System.Title': 'Render soap stage' })
+
+    const fetched = await c.getWorkItem(created.id)
+    assert.equal(fetched.id, created.id)
+    assert.equal(fetched.rev, created.rev)
+    assert.equal(fetched.fields['System.Title'], 'Render soap stage')
+    assert.equal(fetched.fields['System.WorkItemType'], 'Task')
+  })
+})
+
+test('getWorkItem reflects a prior update\'s fields, not a stale snapshot', async () => {
+  await withFakeAzureDevOpsServer({}, async (baseUrl) => {
+    const c = client(baseUrl)
+    const created = await c.createWorkItem('Task', { 'System.Title': 'Draft stage' })
+    await c.updateWorkItem(created.id, { 'System.State': 'Active', 'System.AssignedTo': 'a@example.com' })
+
+    const fetched = await c.getWorkItem(created.id)
+    assert.equal(fetched.rev, 2)
+    assert.equal(fetched.fields['System.State'], 'Active')
+    assert.equal(fetched.fields['System.AssignedTo'], 'a@example.com')
+  })
+})
+
+test('getWorkItem narrows the response to the requested fields when given a `fields` list', async () => {
+  await withFakeAzureDevOpsServer({}, async (baseUrl) => {
+    const c = client(baseUrl)
+    const created = await c.createWorkItem('Task', { 'System.Title': 'Draft stage', 'System.AssignedTo': 'a@example.com' })
+
+    const fetched = await c.getWorkItem(created.id, { fields: ['System.Title'] })
+    assert.deepEqual(Object.keys(fetched.fields), ['System.Title'])
+    assert.equal(fetched.fields['System.Title'], 'Draft stage')
+  })
+})
+
+test('getWorkItem throws AzureDevOpsNotFoundError for a work item id that does not exist', async () => {
+  await withFakeAzureDevOpsServer({}, async (baseUrl) => {
+    await assert.rejects(() => client(baseUrl).getWorkItem(999999), AzureDevOpsNotFoundError)
+  })
+})
+
+test('a rejected PAT surfaces as AzureDevOpsAuthenticationError on getWorkItem', async () => {
+  await withFakeAzureDevOpsServer({}, async (baseUrl) => {
+    const c = client(baseUrl)
+    const created = await c.createWorkItem('Task', { 'System.Title': 'X' })
+    const badClient = client(baseUrl, { pat: 'wrong' })
+    await assert.rejects(() => badClient.getWorkItem(created.id), AzureDevOpsAuthenticationError)
+  })
+})
+
+test('listWorkItemTypes returns the configured work item types available in the project', async () => {
+  await withFakeAzureDevOpsServer(
+    { workItemTypes: ['Task', 'Bug', 'User Story'] },
+    async (baseUrl) => {
+      const types = await client(baseUrl).listWorkItemTypes()
+      assert.deepEqual(
+        types.map((t) => t.name),
+        ['Task', 'Bug', 'User Story']
+      )
+    }
+  )
+})
+
+test('listWorkItemTypes falls back to a generic type list when the project has no explicit configuration', async () => {
+  await withFakeAzureDevOpsServer({}, async (baseUrl) => {
+    const types = await client(baseUrl).listWorkItemTypes()
+    assert.ok(types.length > 0)
+    assert.ok(types.every((t) => typeof t.name === 'string' && typeof t.referenceName === 'string'))
+  })
+})
+
+test('listWorkItemTypes does not confuse the project-wide list with a single type\'s states', async () => {
+  await withFakeAzureDevOpsServer(
+    { workItemTypes: ['Task'], workItemTypeStates: { Task: ['To Do', 'Doing', 'Done'] } },
+    async (baseUrl) => {
+      const c = client(baseUrl)
+      const types = await c.listWorkItemTypes()
+      assert.deepEqual(types.map((t) => t.name), ['Task'])
+
+      const states = await c.getWorkItemTypeStates('Task')
+      assert.deepEqual(states.map((s) => s.name), ['To Do', 'Doing', 'Done'])
+    }
+  )
+})
+
+test('a rejected PAT surfaces as AzureDevOpsAuthenticationError on listWorkItemTypes', async () => {
+  await withFakeAzureDevOpsServer({}, async (baseUrl) => {
+    const badClient = client(baseUrl, { pat: 'wrong' })
+    await assert.rejects(() => badClient.listWorkItemTypes(), AzureDevOpsAuthenticationError)
   })
 })
 

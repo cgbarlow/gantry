@@ -28,6 +28,18 @@ const DEFAULT_WORK_ITEM_TYPE_STATES = [
   { name: 'Closed', category: 'Completed', color: '339933' },
 ]
 
+// Generic fallback project work item type list, used when a test doesn't
+// pass its own `workItemTypes` — plausible-looking (mirrors a stock Basic
+// process template) but not meant to match any one real process template
+// exactly, the same "generic, not authoritative" spirit as
+// DEFAULT_WORK_ITEM_TYPE_STATES above.
+const DEFAULT_WORK_ITEM_TYPES = [
+  { name: 'Epic', referenceName: 'Microsoft.VSTS.WorkItemTypes.Epic', description: 'Tracks a big initiative', color: 'ff7b00', icon: { id: 'icon_crown', url: '' }, isDisabled: false },
+  { name: 'Feature', referenceName: 'Microsoft.VSTS.WorkItemTypes.Feature', description: 'Tracks a feature', color: '773b93', icon: { id: 'icon_trophy', url: '' }, isDisabled: false },
+  { name: 'Task', referenceName: 'Microsoft.VSTS.WorkItemTypes.Task', description: 'Tracks work to be done', color: 'f2cb1d', icon: { id: 'icon_clipboard', url: '' }, isDisabled: false },
+  { name: 'Bug', referenceName: 'Microsoft.VSTS.WorkItemTypes.Bug', description: 'Tracks a defect', color: 'cc293d', icon: { id: 'icon_insect', url: '' }, isDisabled: false },
+]
+
 /**
  * A minimal in-process fake of the Azure DevOps Git Items/Refs/Pushes REST
  * API, standing in for a real `dev.azure.com` org/project/repo in tests
@@ -80,6 +92,12 @@ const DEFAULT_WORK_ITEM_TYPE_STATES = [
  * tests can simulate "the Owner approved/rejected this" via a plain
  * `fetch` call against this same fake server, the same way a real test
  * would exercise "Check status" detecting that vote.
+ *
+ * `workItemTypes`, if given, is the array GET .../workitemtypes (the whole
+ * project's list of work item types, #121) should report — either full
+ * Azure-DevOps-shaped entries or plain type-name strings (auto-filled with
+ * placeholder description/color/icon). Falls back to a generic 4-type list
+ * (Epic/Feature/Task/Bug) when omitted.
  */
 export function createFakeAzureDevOpsServer({
   organization,
@@ -90,6 +108,7 @@ export function createFakeAzureDevOpsServer({
   branchFiles = {},
   failAfterPushes,
   workItemTypeStates = {},
+  workItemTypes,
 } = {}) {
   // One independent { store, objectId } per branch — a branch with no
   // entry here has never had a commit (mirrors the pre-#118 "commitCount
@@ -467,6 +486,44 @@ export function createFakeAzureDevOpsServer({
       }
     }
 
+    // Project-wide work item type list (#121) — distinct from the
+    // per-type `/workitemtypes/{type}/states` route above, so this must be
+    // matched only when nothing follows `workitemtypes` (no trailing
+    // `/{type}/states` segment).
+    if (req.method === 'GET' && pathname === `${witBasePath}/workitemtypes`) {
+      const types = workItemTypes ?? DEFAULT_WORK_ITEM_TYPES
+      const value = types.map((type) =>
+        typeof type === 'string'
+          ? { name: type, referenceName: `Custom.WorkItemTypes.${type}`, description: '', color: '999999', icon: { id: 'icon_clipboard', url: '' }, isDisabled: false }
+          : type
+      )
+      return json(200, { count: value.length, value })
+    }
+
+    // Single work item read by id (#121 — "fetch a specific work item's
+    // current field values by id"), distinct from the create (POST
+    // .../workitems/$Type) and update (PATCH .../workitems/{id}) routes
+    // above. `fields` (if supplied) narrows the response the same way the
+    // real API does, rather than this fake always returning every field.
+    if (req.method === 'GET' && pathname.startsWith(`${witBasePath}/workitems/`)) {
+      const idSegment = pathname.slice(`${witBasePath}/workitems/`.length)
+      if (/^\d+$/.test(idSegment)) {
+        const id = Number(idSegment)
+        const workItem = workItems.get(id)
+        if (!workItem) {
+          return json(404, { message: `TF401232: Work item ${id} does not exist (fake server).` })
+        }
+        const fieldsParam = url.searchParams.get('fields')
+        if (!fieldsParam) return json(200, workItemResponseBody(workItem))
+
+        const requestedFields = fieldsParam.split(',').map((f) => f.trim())
+        const narrowedFields = Object.fromEntries(
+          requestedFields.filter((f) => f in workItem.fields).map((f) => [f, workItem.fields[f]])
+        )
+        return json(200, { ...workItemResponseBody(workItem), fields: narrowedFields })
+      }
+    }
+
     return json(404, { message: `No fake route for ${req.method} ${pathname}` })
   })
 }
@@ -479,7 +536,7 @@ export function createFakeAzureDevOpsServer({
  * `tests/instance.test.js` so this lifecycle isn't duplicated across both.
  */
 export function withFakeAzureDevOpsServer(
-  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates },
+  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes },
   fn
 ) {
   return new Promise((resolve, reject) => {
@@ -492,6 +549,7 @@ export function withFakeAzureDevOpsServer(
       branchFiles,
       failAfterPushes,
       workItemTypeStates,
+      workItemTypes,
     })
     server.listen(0, async () => {
       const { port } = server.address()
