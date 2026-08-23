@@ -781,13 +781,18 @@ test('POST /api/instances with a valid Azure DevOps location and PAT creates ins
         })
         assert.equal(res.status, 201)
         const created = await res.json()
-        assert.deepEqual(created, {
-          slug: 'remote-initiative',
-          definition: 'design',
-          stage: 'shape',
-          status: 'incomplete',
-          assignee: 'c.barlow',
-        })
+        assert.equal(created.slug, 'remote-initiative')
+        assert.equal(created.definition, 'design')
+        assert.equal(created.stage, 'shape')
+        assert.equal(created.status, 'incomplete')
+        assert.equal(created.assignee, 'c.barlow')
+        // An Azure-DevOps-backed row carries its workspace (#96/#102) —
+        // auto-created for this organization/project/repository the
+        // moment the instance was registered against it.
+        assert.equal(created.workspace.organization, ORGANIZATION)
+        assert.equal(created.workspace.project, PROJECT)
+        assert.equal(created.workspace.repository, REPOSITORY)
+        assert.equal(typeof created.workspace.id, 'string')
 
         // Verified directly against the fake Azure DevOps repo — exactly
         // as createInstance's own Azure DevOps path already does when
@@ -813,10 +818,12 @@ test('POST /api/instances with a valid Azure DevOps location and PAT creates ins
         const listingRes = await fetch(`${base}/api/instances`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })
         assert.equal(listingRes.status, 200)
         const listing = await listingRes.json()
-        assert.deepEqual(
-          listing.find((i) => i.slug === 'remote-initiative'),
-          { slug: 'remote-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: 'c.barlow' }
-        )
+        const listedRow = listing.find((i) => i.slug === 'remote-initiative')
+        assert.equal(listedRow.definition, 'design')
+        assert.equal(listedRow.stage, 'shape')
+        assert.equal(listedRow.status, 'incomplete')
+        assert.equal(listedRow.assignee, 'c.barlow')
+        assert.equal(listedRow.workspace.repository, REPOSITORY)
       })
     })
   } finally {

@@ -206,7 +206,9 @@ async function openExistingInstance() {
 // editor's real per-instance route. The module editor is reactive to its
 // route-param `slug` prop now (#77), so a client-side route() would work
 // too — a full navigation is kept anyway for a clean reload of this fresh
-// instance's state, matching the "Open workspace" links elsewhere.
+// instance's state, matching the "Open editor" links elsewhere (#102 —
+// this used to say "Open workspace", renamed to avoid colliding with the
+// Workspace entity, #96).
 function openInstance(slug) {
   window.location.assign(`/instance/${encodeURIComponent(slug)}`)
 }
