@@ -857,7 +857,7 @@ function AppHeader({ instance }) {
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M3 20h18M6 20V8l6-4 6 4v12M6 8h12" />
         </svg>
-        <a class="btn small ghost" href="/">← Instances</a>
+        <a class="btn small ghost" href="/">← Workspaces</a>
         <h1>${instance.slug} — ${instance.definition}</h1>
         <a class="btn small ghost" href="/setup">+ New instance</a>
         <a class="btn small ghost" href="/settings">Settings</a>
@@ -890,8 +890,10 @@ function AppHeader({ instance }) {
 // `slug` arrives as a route param from `/instance/:slug` (preact-iso passes
 // matched params as top-level props). Re-pins the shared instance-scoped
 // signals to this slug on mount and whenever the route's slug changes —
-// e.g. following an "Open workspace" link from one instance straight to
-// another without an intervening full page load — clearing the previous
+// e.g. following an "Open editor" link (#102 — this screen used to call
+// that link "Open workspace", renamed to avoid colliding with the
+// Workspace entity, #96) from one instance straight to another without an
+// intervening full page load — clearing the previous
 // instance's stale data first so it's never shown against the new slug.
 // `batch()` matters here: without it, `currentSlug.value = slug` alone
 // fires the instance-loading effect below (it's already subscribed to
@@ -926,11 +928,15 @@ function ModuleEditorPage({ slug }) {
 }
 
 // ============================================================
-// Instance dashboard (#77) — the landing screen at `/`. Two togglable
-// views over the multi-instance registry (`GET /api/instances`, #76):
-// master-detail (default) and stage swimlanes. The view choice is a
-// persisted signal (web/lib/dashboardView.js), not local state, so it
-// survives remounting this page and reloading the app.
+// Workspaces landing page (#77, restructured by #102) — the landing screen
+// at `/`, titled "Workspaces". Two togglable views over the multi-instance
+// registry (`GET /api/instances`, #76): master-detail (default, grouping
+// instances by workspace — see groupInstancesByWorkspace above) and stage
+// swimlanes (still one chip per instance, ungrouped — the ticket's own
+// acceptance criteria describe the *list*, i.e. master-detail's list pane,
+// not this alternate view). The view choice is a persisted signal
+// (web/lib/dashboardView.js), not local state, so it survives remounting
+// this page and reloading the app.
 // ============================================================
 
 async function loadInstances() {
@@ -1029,73 +1035,122 @@ async function saveAssignee(slug, assignee) {
   return body
 }
 
+// ---------- Grouping instances by workspace (#102) ----------
+// The Workspaces landing page's core grouping rule: an Azure-DevOps-backed
+// row carries a `workspace` (lib/registry.js, #102) — every instance
+// sharing that workspace's `id` groups into one row, one entry per
+// workspace, per the ticket's acceptance criteria. A local instance has no
+// `workspace` at all (Workspace is an Azure-DevOps-repo concept only,
+// #96) — it groups on its own, keyed by its own slug, so a repo (or local
+// instance) holding just one instance still renders through the exact
+// same group shape as one holding several — nothing here special-cases a
+// single-instance group.
+function groupInstancesByWorkspace(instances) {
+  const groups = new Map()
+  for (const inst of instances) {
+    const key = inst.workspace ? `workspace:${inst.workspace.id}` : `local:${inst.slug}`
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        title: inst.workspace ? inst.workspace.repository : inst.slug,
+        subtitle: inst.workspace ? `${inst.workspace.organization}/${inst.workspace.project}` : 'Local instance',
+        instances: [],
+      })
+    }
+    groups.get(key).instances.push(inst)
+  }
+  return [...groups.values()].sort((a, b) => a.title.localeCompare(b.title))
+}
+
+// The list-pane row's secondary line — deliberately the same shape whether
+// the group holds one instance or several (count · distinct definitions),
+// rather than branching into a one-off "single instance" format, so a
+// single-instance workspace is never visually singled out from a
+// multi-instance one (the ticket's own "no special-casing visible to the
+// user" acceptance criterion).
+function groupSummaryText(group) {
+  const definitions = [...new Set(group.instances.map((inst) => inst.definition))]
+  const count = group.instances.length
+  return `${count} instance${count === 1 ? '' : 's'} · ${definitions.join(', ')}`
+}
+
+// A group's dot in the list pane reflects every one of its instances being
+// complete, not just the first — a multi-instance workspace with even one
+// outstanding instance is "in progress" as a whole.
+function groupStatusClass(group) {
+  return group.instances.every((inst) => inst.status === 'complete') ? 'agreed' : 'draft'
+}
+
 // ---------- Master-detail view ----------
+// The Workspaces landing page's default view (#102, superseding #77's
+// flat per-instance listing): the list pane shows one row per workspace
+// (groupInstancesByWorkspace above); selecting one shows every instance it
+// holds in the detail pane, each its own card with definition/assignee/
+// status and the same Check/Render/Open-editor actions the old flat list
+// offered per instance.
 function MasterDetailView({ instances, onInstancesChange }) {
   const [filter, setFilter] = useState('')
-  const [selectedSlug, setSelectedSlug] = useState(null)
-  const [detail, setDetail] = useState(null)
-  const [detailError, setDetailError] = useState(null)
-  const [actionStatus, setActionStatus] = useState('')
-  const [assigneeDraft, setAssigneeDraft] = useState('')
-  const [assigneeStatus, setAssigneeStatus] = useState('')
+  const [selectedKey, setSelectedKey] = useState(null)
+  // Keyed by instance slug (not the single shared string the old flat
+  // list used) — several instances can be in flight for the *same*
+  // selected workspace at once (one Check, one Render, one assignee save),
+  // and each must report its own status independently.
+  const [actionStatus, setActionStatus] = useState({})
+  const [assigneeDrafts, setAssigneeDrafts] = useState({})
+  const [assigneeStatus, setAssigneeStatus] = useState({})
+
+  const groups = groupInstancesByWorkspace(instances)
 
   const needle = filter.trim().toLowerCase()
   const filtered = needle
-    ? instances.filter((inst) => inst.slug.toLowerCase().includes(needle) || inst.assignee.toLowerCase().includes(needle))
-    : instances
-
-  const effectiveSlug = filtered.some((inst) => inst.slug === selectedSlug) ? selectedSlug : (filtered[0]?.slug ?? null)
-  const selectedInstance = instances.find((inst) => inst.slug === effectiveSlug) ?? null
-
-  useEffect(() => {
-    if (!effectiveSlug) {
-      setDetail(null)
-      return
-    }
-    setDetail(null)
-    setDetailError(null)
-    setActionStatus('')
-    apiFetchForInstance(effectiveSlug, `/api/instance?slug=${encodeURIComponent(effectiveSlug)}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`Failed to load "${effectiveSlug}" (${res.status})`)
-        return res.json()
-      })
-      .then(setDetail)
-      .catch((err) => setDetailError(err.message))
-    // eslint-disable-next-line
-  }, [effectiveSlug])
-
-  // Mirrors the registry's own `assignee` into the editable draft whenever
-  // the selected instance changes — never while it's still the same
-  // instance (that would clobber an in-progress edit on every unrelated
-  // `instances` refresh).
-  useEffect(() => {
-    setAssigneeDraft(selectedInstance?.assignee ?? '')
-    setAssigneeStatus('')
-    // eslint-disable-next-line
-  }, [effectiveSlug])
-
-  async function handleCheck() {
-    setActionStatus('Checking…')
-    setActionStatus(await runCheck(effectiveSlug))
-  }
-
-  async function handleRender() {
-    setActionStatus('Rendering…')
-    setActionStatus(await runRender(effectiveSlug))
-  }
-
-  async function handleAssigneeSave() {
-    if (!effectiveSlug || assigneeDraft === (selectedInstance?.assignee ?? '')) return
-    setAssigneeStatus('Saving…')
-    try {
-      const saved = await saveAssignee(effectiveSlug, assigneeDraft)
-      setAssigneeStatus('Saved.')
-      onInstancesChange?.((prev) =>
-        prev.map((inst) => (inst.slug === effectiveSlug ? { ...inst, assignee: saved.assignee } : inst))
+    ? groups.filter(
+        (group) =>
+          group.title.toLowerCase().includes(needle) ||
+          group.subtitle.toLowerCase().includes(needle) ||
+          group.instances.some(
+            (inst) => inst.slug.toLowerCase().includes(needle) || inst.assignee.toLowerCase().includes(needle)
+          )
       )
+    : groups
+
+  const effectiveKey = filtered.some((group) => group.key === selectedKey) ? selectedKey : (filtered[0]?.key ?? null)
+  const selectedGroup = groups.find((group) => group.key === effectiveKey) ?? null
+
+  // Resets every instance-scoped edit/action state whenever the selected
+  // workspace changes — never while it's still the same workspace (that
+  // would clobber an in-progress edit or Check/Render status on every
+  // unrelated `instances` refresh), and seeds the assignee drafts from the
+  // newly-selected workspace's own instances.
+  useEffect(() => {
+    setActionStatus({})
+    setAssigneeStatus({})
+    setAssigneeDrafts(Object.fromEntries((selectedGroup?.instances ?? []).map((inst) => [inst.slug, inst.assignee ?? ''])))
+    // eslint-disable-next-line
+  }, [effectiveKey])
+
+  async function handleCheck(slug) {
+    setActionStatus((prev) => ({ ...prev, [slug]: 'Checking…' }))
+    const result = await runCheck(slug)
+    setActionStatus((prev) => ({ ...prev, [slug]: result }))
+  }
+
+  async function handleRender(slug) {
+    setActionStatus((prev) => ({ ...prev, [slug]: 'Rendering…' }))
+    const result = await runRender(slug)
+    setActionStatus((prev) => ({ ...prev, [slug]: result }))
+  }
+
+  async function handleAssigneeSave(slug) {
+    const inst = selectedGroup?.instances.find((i) => i.slug === slug)
+    const draft = assigneeDrafts[slug] ?? ''
+    if (!inst || draft === (inst.assignee ?? '')) return
+    setAssigneeStatus((prev) => ({ ...prev, [slug]: 'Saving…' }))
+    try {
+      const saved = await saveAssignee(slug, draft)
+      setAssigneeStatus((prev) => ({ ...prev, [slug]: 'Saved.' }))
+      onInstancesChange?.((prev) => prev.map((i) => (i.slug === slug ? { ...i, assignee: saved.assignee } : i)))
     } catch (err) {
-      setAssigneeStatus(`Failed to save: ${err.message}`)
+      setAssigneeStatus((prev) => ({ ...prev, [slug]: `Failed to save: ${err.message}` }))
     }
   }
 
@@ -1105,68 +1160,78 @@ function MasterDetailView({ instances, onInstancesChange }) {
         <input
           class="field search"
           type="text"
-          placeholder="Filter by name, assignee…"
+          placeholder="Filter by workspace, instance, assignee…"
           value=${filter}
           onInput=${(e) => setFilter(e.currentTarget.value)}
         />
         <div class="instance-list">
           ${filtered.map(
-            (inst) => html`
+            (group) => html`
               <div
-                key=${inst.slug}
-                class=${'list-item' + (inst.slug === effectiveSlug ? ' selected' : '')}
+                key=${group.key}
+                class=${'list-item' + (group.key === effectiveKey ? ' selected' : '')}
                 role="button"
                 tabindex="0"
-                onClick=${() => setSelectedSlug(inst.slug)}
+                onClick=${() => setSelectedKey(group.key)}
                 onKeyDown=${(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') setSelectedSlug(inst.slug)
+                  if (e.key === 'Enter' || e.key === ' ') setSelectedKey(group.key)
                 }}
               >
-                <span class=${'dot ' + statusStampClass(inst.status)}></span>
+                <span class=${'dot ' + groupStatusClass(group)}></span>
                 <span class="meta">
-                  <span class="name">${inst.slug}</span>
-                  <span class="def">${inst.definition} · ${inst.assignee || 'unassigned'}</span>
+                  <span class="name">${group.title}</span>
+                  <span class="def">${groupSummaryText(group)}</span>
                 </span>
               </div>
             `
           )}
-          ${filtered.length === 0 ? html`<p class="loading">No instances match "${filter}".</p>` : null}
+          ${filtered.length === 0 ? html`<p class="loading">No workspaces match "${filter}".</p>` : null}
         </div>
       </div>
       <div class="detail-pane">
-        ${detailError
-          ? html`<p class="load-error">Failed to load: ${detailError}</p>`
-          : !detail || !selectedInstance
-            ? html`<div class="placeholder">Select an instance to see its details.</div>`
-            : html`
-                <h2>${detail.slug}</h2>
-                <div class="detail-ledger">
-                  <div><span class="field-label">Stage</span><span class="stage">${detail.stage.title}</span></div>
-                  <div><span class="field-label">Gate</span><span class="mono">${detail.stage.gate}</span></div>
-                  <div><${StatusStamp} status=${selectedInstance.status} /></div>
-                  <div style="text-align:right;">
-                    <span class="field-label">Assignee</span>
-                    <input
-                      class="text-field mono assignee-input"
-                      type="text"
-                      placeholder="Unassigned"
-                      value=${assigneeDraft}
-                      onInput=${(e) => setAssigneeDraft(e.currentTarget.value)}
-                      onBlur=${handleAssigneeSave}
-                      onKeyDown=${(e) => {
-                        if (e.key === 'Enter') e.currentTarget.blur()
-                      }}
-                    />
-                  </div>
-                </div>
-                <div class="save-status assignee-save-status">${assigneeStatus}</div>
-                <div class="detail-actions">
-                  <a class="btn primary" href="/instance/${detail.slug}">Open workspace</a>
-                  <button type="button" class="btn" onClick=${handleCheck}>Check</button>
-                  <button type="button" class="btn" onClick=${handleRender}>Render</button>
-                </div>
-                <div class="save-status">${actionStatus}</div>
-              `}
+        ${!selectedGroup
+          ? html`<div class="placeholder">Select a workspace to see its instances.</div>`
+          : html`
+              <h2>${selectedGroup.title}</h2>
+              <p class="workspace-subtitle">${selectedGroup.subtitle}</p>
+              <div class="workspace-instances">
+                ${selectedGroup.instances.map(
+                  (inst) => html`
+                    <div class="instance-card" key=${inst.slug}>
+                      <div class="instance-card-header">
+                        <span class="name">${inst.slug}</span>
+                        <span class="def">${inst.definition}</span>
+                        <${StatusStamp} status=${inst.status} />
+                      </div>
+                      <div class="instance-card-row">
+                        <span class="field-label">Assignee</span>
+                        <input
+                          class="text-field mono assignee-input"
+                          type="text"
+                          placeholder="Unassigned"
+                          value=${assigneeDrafts[inst.slug] ?? ''}
+                          onInput=${(e) => {
+                            const value = e.currentTarget.value
+                            setAssigneeDrafts((prev) => ({ ...prev, [inst.slug]: value }))
+                          }}
+                          onBlur=${() => handleAssigneeSave(inst.slug)}
+                          onKeyDown=${(e) => {
+                            if (e.key === 'Enter') e.currentTarget.blur()
+                          }}
+                        />
+                      </div>
+                      <div class="save-status assignee-save-status">${assigneeStatus[inst.slug] ?? ''}</div>
+                      <div class="detail-actions">
+                        <a class="btn primary" href="/instance/${inst.slug}">Open editor</a>
+                        <button type="button" class="btn" onClick=${() => handleCheck(inst.slug)}>Check</button>
+                        <button type="button" class="btn" onClick=${() => handleRender(inst.slug)}>Render</button>
+                      </div>
+                      <div class="save-status">${actionStatus[inst.slug] ?? ''}</div>
+                    </div>
+                  `
+                )}
+              </div>
+            `}
       </div>
     </div>
   `
@@ -1311,7 +1376,7 @@ function DashboardPage() {
   return html`
     <main class="dashboard">
       <div class="dashboard-topbar">
-        <h1>Instances</h1>
+        <h1>Workspaces</h1>
         <div class="dashboard-controls">
           ${instances?.length ? html`<${ViewToggle} />` : null}
           <a class="btn small ghost" href="/setup">+ New instance</a>

@@ -192,7 +192,14 @@ test('POST /api/instances/adopt against a repo with an existing instance registe
     })
     assert.equal(res.status, 200)
     const body = await res.json()
-    assert.deepEqual(body, { slug: 'my-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: 'c.barlow' })
+    assert.equal(body.slug, 'my-initiative')
+    assert.equal(body.definition, 'design')
+    assert.equal(body.stage, 'shape')
+    assert.equal(body.status, 'incomplete')
+    assert.equal(body.assignee, 'c.barlow')
+    // An Azure-DevOps-backed row carries its workspace (#96/#102).
+    assert.equal(body.workspace.organization, ORGANIZATION)
+    assert.equal(body.workspace.repository, REPOSITORY)
 
     // Genuinely registered — resolvable by the single-instance routes
     // (#92), not merely reported back in this one response.
