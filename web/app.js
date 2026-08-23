@@ -1073,6 +1073,7 @@ function DashboardPage() {
         <h1>Instances</h1>
         <div class="dashboard-controls">
           ${instances?.length ? html`<${ViewToggle} />` : null}
+          <a class="btn small ghost" href="/setup">+ New instance</a>
           <button type="button" class="btn small ghost theme-toggle" onClick=${cycleTheme} title="Cycle theme">
             Theme: ${theme.value}
           </button>
