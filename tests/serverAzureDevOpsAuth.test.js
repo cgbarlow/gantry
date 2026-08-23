@@ -283,6 +283,70 @@ test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance with
   })
 })
 
+// ---------- PUT /api/instance/assignee (#97) ----------
+
+test('PUT /api/instance/assignee against an Azure-DevOps-backed instance with no PAT returns the structured "authentication required" response, and writes nothing', async () => {
+  await withAzureDevOpsBackedServer(SEED_FILES, {}, async (base, adoBaseUrl) => {
+    const res = await fetch(`${base}/api/instance/assignee`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignee: 'should-never-be-written' }),
+    })
+    assert.equal(res.status, 401)
+    const body = await res.json()
+    assert.equal(body.error, 'authentication_required')
+
+    const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
+    const instanceYaml = await client.getFileContent('instance.yaml')
+    assert.doesNotMatch(instanceYaml, /should-never-be-written/)
+  })
+})
+
+test('PUT /api/instance/assignee against an Azure-DevOps-backed instance with a PAT the fake server rejects returns the same structured response', async () => {
+  await withAzureDevOpsBackedServer(SEED_FILES, {}, async (base) => {
+    const res = await fetch(`${base}/api/instance/assignee`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader('not-a-valid-pat') },
+      body: JSON.stringify({ assignee: 'c.barlow' }),
+    })
+    assert.equal(res.status, 401)
+    const body = await res.json()
+    assert.equal(body.error, 'authentication_required')
+  })
+})
+
+test('PUT /api/instance/assignee against an Azure-DevOps-backed instance with a valid PAT writes through to instance.yaml, leaving module frontmatter untouched', async () => {
+  await withAzureDevOpsBackedServer(SEED_FILES, {}, async (base, adoBaseUrl) => {
+    const res = await fetch(`${base}/api/instance/assignee`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+      body: JSON.stringify({ assignee: 'j.smith' }),
+    })
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    assert.deepEqual(body, { slug: 'my-initiative', assignee: 'j.smith' })
+
+    // Reading it back proves the write actually landed in the fake Azure
+    // DevOps repo's instance.yaml, not just in the response, and that the
+    // instance's other fields (stage) survived the update untouched.
+    const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
+    const instanceYaml = await client.getFileContent('instance.yaml')
+    assert.match(instanceYaml, /assignee: j\.smith/)
+    assert.match(instanceYaml, /stage: shape/)
+
+    const readRes = await fetch(`${base}/api/instance`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })
+    const readBody = await readRes.json()
+    const context = readBody.modules.find((m) => m.id === 'context')
+    // The module's own frontmatter owner ("c.barlow", seeded by SEED_FILES)
+    // is a separate, untouched field — not overwritten by the assignee update.
+    assert.equal(context.owner, 'c.barlow')
+
+    const listingRes = await fetch(`${base}/api/instances`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })
+    const listing = await listingRes.json()
+    assert.equal(listing.find((i) => i.slug === 'my-initiative').assignee, 'j.smith')
+  })
+})
+
 // ---------- POST /api/instance/render/:artefact ----------
 
 test('POST /api/instance/render/:artefact against an Azure-DevOps-backed instance with no PAT returns the structured "authentication required" response', async () => {

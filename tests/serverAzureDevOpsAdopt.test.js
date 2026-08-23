@@ -21,7 +21,7 @@ const REPOSITORY = 'fake-repo'
 const VALID_PAT = 'valid-test-pat'
 
 const SEED_FILES = {
-  '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
+  '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\nassignee: c.barlow\n',
   '/modules/context.md': [
     '---',
     'module: context',
@@ -165,7 +165,7 @@ test('POST /api/instances/adopt against a repo with an existing instance registe
     })
     assert.equal(res.status, 200)
     const body = await res.json()
-    assert.deepEqual(body, { slug: 'my-initiative', definition: 'design', stage: 'shape', status: 'incomplete', owner: 'c.barlow' })
+    assert.deepEqual(body, { slug: 'my-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: 'c.barlow' })
 
     // Genuinely registered — resolvable by the single-instance routes
     // (#92), not merely reported back in this one response.
@@ -211,7 +211,7 @@ test('POST /api/instances/adopt reports 409 when the found slug is already regis
   await withFakeAzureDevOpsAndGantryServer(SEED_FILES, {}, async (gantryBase, adoBaseUrl, instancesDir) => {
     // "my-initiative" already exists as a genuine *local* instance under
     // this same slug before the adopt is ever attempted.
-    createInstance('design', 'my-initiative', { instancesDir, owner: 'local-owner' })
+    createInstance('design', 'my-initiative', { instancesDir, assignee: 'local-assignee' })
 
     const res = await fetch(`${gantryBase}/api/instances/adopt`, {
       method: 'POST',
@@ -226,7 +226,7 @@ test('POST /api/instances/adopt reports 409 when the found slug is already regis
     const listing = await (await fetch(`${gantryBase}/api/instances`)).json()
     assert.deepEqual(
       listing.find((i) => i.slug === 'my-initiative'),
-      { slug: 'my-initiative', definition: 'design', stage: 'shape', status: 'incomplete', owner: 'local-owner' }
+      { slug: 'my-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: 'local-assignee' }
     )
   })
 })

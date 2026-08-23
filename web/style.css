@@ -360,7 +360,7 @@ main.dashboard {
 .chip .name { font-family: var(--font-display); font-weight: 600; font-size: 13px; }
 .chip .def { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); margin: 3px 0 6px; }
 .chip .chip-foot { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
-.chip .owner { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+.chip .assignee { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
 .chip .menu-btn { line-height: 1; }
 .chip .menu {
   display: none;

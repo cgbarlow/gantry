@@ -290,7 +290,7 @@ function FoundResultCard() {
       <div class="result-row"><span class="k">Definition</span><span class="v">${found.definition}</span></div>
       <div class="result-row"><span class="k">Current stage</span><span class="v">${found.stage}</span></div>
       <div class="result-row"><span class="k">Status</span><span class="v"><span class="stamp ${stampClass(found.status)}">${found.status}</span></span></div>
-      <div class="result-row"><span class="k">Owner</span><span class="v">${found.owner || '—'}</span></div>
+      <div class="result-row"><span class="k">Assignee</span><span class="v">${found.assignee || '—'}</span></div>
     </div>
   `
 }
