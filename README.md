@@ -153,9 +153,11 @@ gantry/
 │       │   └── solution-definition.md
 │       └── out/                  # rendered artefacts (gitignored by default)
 ├── lib/                          # the engine: definition/instance loading, render, status, the web server
-│   ├── server.js                 # HTTP routes, incl. the Azure DevOps repo-check/adopt endpoints
+│   ├── server.js                 # HTTP routes, incl. the Azure DevOps repo-check/adopt/work-item endpoints
 │   ├── instanceRegistry.js       # slug -> location lookup/registration (the registry above)
-│   ├── azureDevOpsClient.js      # PAT-authenticated Azure DevOps REST client
+│   ├── azureDevOpsClient.js      # PAT-authenticated Azure DevOps REST client (Git)
+│   ├── azureDevOpsWorkItemsClient.js  # PAT-authenticated Azure DevOps REST client (Work Items)
+│   ├── workItemLink.js           # link an instance to a work item; confirmed gate-pass state sync
 │   ├── repoCheck.js              # "does this Azure DevOps repo already hold instance data"
 │   └── credential.js             # extracts a forwarded PAT from a request
 ├── bin/gantry.js                 # CLI entrypoint
@@ -194,6 +196,12 @@ From the dashboard, **"+ New instance"** opens the setup wizard:
 The first request against an Azure DevOps-backed instance prompts for a **Personal Access Token** with **Code (Read & write)** and **Work Items (Read & write)** scope. It's stored in the browser (`localStorage`), sent only to your own gantry server, and forwarded from there to Azure DevOps as an HTTP Basic credential — gantry's own server never persists it. "Replace"/"Clear" controls in the module editor header let you swap or drop a stored PAT.
 
 Once registered, a local and an Azure DevOps-backed instance are indistinguishable from the dashboard's point of view — same listing, same module editor, same render command. Where each one's data actually lives is tracked server-side in a registry file (`instances/instance-registry.json`, gitignored — application state, not source), not in any client-visible config.
+
+## Linking an instance to an Azure DevOps work item
+
+Optionally, and independently of where an instance's own data lives (local or Azure DevOps-backed — the two are unrelated), an instance can be linked to a parent Azure DevOps work item. The module editor's **Azure DevOps work item** panel (below Render) offers a small form — organization, project, parent work item id, and an optional work item type (defaulting to `Task`, a safe default across every stock process template; override it to match your organization's own template).
+
+Linking creates one child work item per stage in the instance's definition underneath that parent, in one step. From then on, the panel's **Check gate & sync work item** action checks the currently-viewed stage's gate and, only if it passes, opens a confirmation dialog before pushing a new state to that stage's own work item — declining the confirmation leaves the work item's state untouched. The state actually pushed is drawn from whatever states the configured work item type genuinely supports in your project (via its own `getWorkItemTypeStates` lookup), never a fixed list Gantry invents — see `docs/adr/0009-azure-devops-work-item-linking.md` for the full mapping rationale.
 
 ## Your first instance
 

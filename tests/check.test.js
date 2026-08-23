@@ -1,10 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInstance } from '../lib/instance.js'
 import { checkGate } from '../lib/check.js'
+import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
 function withScratchInstances(fn) {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
@@ -13,6 +14,19 @@ function withScratchInstances(fn) {
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }
+}
+
+const ORGANIZATION = 'fake-org'
+const PROJECT = 'fake-project'
+const REPOSITORY = 'fake-repo'
+const VALID_PAT = 'valid-test-pat'
+
+function azureDevOpsOptions(baseUrl, overrides = {}) {
+  return { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl, ...overrides }
+}
+
+function withFakeRepo(files, fn) {
+  return withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files }, fn)
 }
 
 test('fails a freshly-created instance against its current stage, with every required field outstanding', () => {
@@ -70,6 +84,76 @@ test('an unknown --gate throws', () => {
       () => checkGate('my-initiative', { instancesDir, gate: 'not-a-real-gate' }),
       /has no stage with gate/
     )
+  })
+})
+
+// ---------- Azure-DevOps-backed checkGate (#103) ----------
+// checkGate previously only ever read from the local filesystem — an
+// Azure-DevOps-backed instance's gate could never actually be checked at
+// all (a pre-existing gap #103's own confirmed gate-pass-sync flow depends
+// on not existing). These mirror the local-path tests above, one storage
+// backend removed.
+
+test('checkGate against Azure DevOps fails a freshly-created instance the same way the local path does', async () => {
+  await withFakeRepo({}, async (baseUrl) => {
+    const azureDevOps = azureDevOpsOptions(baseUrl)
+    await createInstance('design', 'my-initiative', { azureDevOps })
+
+    const result = await checkGate('my-initiative', { azureDevOps })
+    assert.equal(result.pass, false)
+    assert.equal(result.gate, 'business-case')
+    assert.deepEqual(result.stage, { id: 'shape', title: 'Shape', gate: 'business-case' })
+  })
+})
+
+test('checkGate against Azure DevOps passes once the Shape-stage modules are filled in, the same content that passes locally', async () => {
+  const seedFiles = { '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n' }
+  for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
+    seedFiles[`/modules/${moduleId}.md`] = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
+  }
+
+  await withFakeRepo(seedFiles, async (baseUrl) => {
+    const azureDevOps = azureDevOpsOptions(baseUrl)
+    const result = await checkGate('my-initiative', { azureDevOps })
+    assert.equal(result.pass, true)
+    assert.equal(result.complete, true)
+  })
+})
+
+test('checkGate against Azure DevOps honours --gate, resolving a stage other than the instance\'s current one', async () => {
+  const seedFiles = { '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n' }
+  await withFakeRepo(seedFiles, async (baseUrl) => {
+    const azureDevOps = azureDevOpsOptions(baseUrl)
+    const result = await checkGate('my-initiative', { azureDevOps, gate: 'hld-tac-approved' })
+    assert.deepEqual(result.stage, { id: 'hld-define', title: 'HLD Definition', gate: 'hld-tac-approved' })
+    assert.equal(result.pass, false)
+  })
+})
+
+test('checkGate against Azure DevOps fails hard on a parser anomaly, via strict parsing, exactly as the local path does', async () => {
+  const badModuleText = [
+    '---',
+    'module: context',
+    'status: draft',
+    'owner:',
+    '---',
+    '',
+    '## Business driver',
+    '',
+    'One.',
+    '',
+    '## Business driver',
+    '',
+    'Duplicate.',
+    '',
+  ].join('\n')
+  const seedFiles = {
+    '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
+    '/modules/context.md': badModuleText,
+  }
+  await withFakeRepo(seedFiles, async (baseUrl) => {
+    const azureDevOps = azureDevOpsOptions(baseUrl)
+    await assert.rejects(() => checkGate('my-initiative', { azureDevOps }), /duplicate heading/)
   })
 })
 
