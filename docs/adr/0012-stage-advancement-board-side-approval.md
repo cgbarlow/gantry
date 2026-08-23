@@ -49,4 +49,11 @@ names (`getWorkItemTypeStates`) — it has never fetched a specific work
 item's own current field values. "Check status" is the first thing that
 needs that read.
 
-Status: accepted.
+Status: superseded by ADR-0014. The "no mechanism for stage advancement
+exists yet" problem statement, the self-serve no-ticketing-system mode, and
+the gate-fail/multi-stage-in-flight/no-opt-out rules all still stand as
+written here. What ADR-0014 replaces is specifically the ticketing-mode
+*mechanism* — a Pull Request the Owner reviews, rather than a work item's
+state — once it became clear a Workspace-backed instance always has a real
+git repo behind it, which a Pull Request fits far more precisely than an
+inferred work-item state category.
