@@ -145,18 +145,21 @@ gantry/
 │           ├── soap.md.tmpl
 │           └── reference.docx    # pandoc --reference-doc, derived from the real HLD template
 ├── instances/
-│   ├── instance-registry.json    # slug -> location (local/Azure DevOps) map, gitignored
+│   ├── instance-registry.json    # slug -> workspace/location map, gitignored
+│   ├── workspace-registry.json   # Azure DevOps org/project/repo entities, gitignored
 │   └── <initiative-slug>/        # local instances only — an Azure DevOps-backed
-│       ├── instance.yaml         # instance has no on-disk folder here at all
-│       ├── modules/              # authored content
+│       ├── instance.yaml         # instance lives at gantry-workspace/<slug>/ in
+│       ├── modules/              # its own repo instead (see below), never here
 │       │   ├── context.md
 │       │   └── solution-definition.md
 │       └── out/                  # rendered artefacts (gitignored by default)
 ├── lib/                          # the engine: definition/instance loading, render, status, the web server
 │   ├── server.js                 # HTTP routes, incl. the Azure DevOps repo-check/adopt endpoints
-│   ├── instanceRegistry.js       # slug -> location lookup/registration (the registry above)
+│   ├── instanceRegistry.js       # slug -> workspace/location lookup/registration (the registry above)
+│   ├── workspaceRegistry.js      # Azure DevOps org/project/repository entities instances reference
 │   ├── azureDevOpsClient.js      # PAT-authenticated Azure DevOps REST client
-│   ├── repoCheck.js              # "does this Azure DevOps repo already hold instance data"
+│   ├── repoCheck.js              # "does this Azure DevOps repo already hold instance data", incl.
+│   │                             # the legacy-root-to-gantry-workspace/<slug>/ migration routine
 │   └── credential.js             # extracts a forwarded PAT from a request
 ├── bin/gantry.js                 # CLI entrypoint
 └── web/
@@ -185,15 +188,17 @@ Neither path is the "real" one. They're two front ends onto the same data.
 
 An instance's data doesn't have to live on the machine running `gantry serve` — it can live in an Azure DevOps repo instead, with gantry acting as a form over it. This is useful when the people filling in modules aren't the people running the server.
 
+A repo backing instance data this way is a **workspace**: `instance.yaml` and `modules/` live at `gantry-workspace/<slug>/` inside it, not at repo root — so one workspace (one Azure DevOps repo) can hold more than one instance, each in its own slug-named subdirectory, rather than being permanently tied to exactly one.
+
 From the dashboard, **"+ New instance"** opens the setup wizard:
 
 1. Paste the target repo's URL — the standard `https://dev.azure.com/{organization}/{project}/_git/{repository}` shape (an on-premises Azure DevOps Server base URL isn't supported here yet).
-2. **Check repo** looks for an existing `instance.yaml` at that location. If one's already there, you can open it directly ("adopt" it into this server's dashboard) rather than creating a new instance over the top of it.
-3. If the repo is empty, pick a definition to create a fresh instance there.
+2. **Check repo** looks for existing instance data at that location. If it's already there, you can open it directly ("adopt" it into this server's dashboard) rather than creating a new instance over the top of it. A repo written before this per-slug layout existed (a lone `instance.yaml` at repo root) is migrated into `gantry-workspace/<slug>/` automatically the first time it's checked — no separate step.
+3. If nothing's there yet, pick a definition to create a fresh instance there.
 
 The first request against an Azure DevOps-backed instance prompts for a **Personal Access Token** with **Code (Read & write)** and **Work Items (Read & write)** scope. It's stored in the browser (`localStorage`), sent only to your own gantry server, and forwarded from there to Azure DevOps as an HTTP Basic credential — gantry's own server never persists it. "Replace"/"Clear" controls in the module editor header let you swap or drop a stored PAT.
 
-Once registered, a local and an Azure DevOps-backed instance are indistinguishable from the dashboard's point of view — same listing, same module editor, same render command. Where each one's data actually lives is tracked server-side in a registry file (`instances/instance-registry.json`, gitignored — application state, not source), not in any client-visible config.
+Once registered, a local and an Azure DevOps-backed instance are indistinguishable from the dashboard's point of view — same listing, same module editor, same render command. Where each one's data actually lives is tracked server-side across two registry files (`instances/instance-registry.json`: slug -> workspace; `instances/workspace-registry.json`: workspace -> organization/project/repository — both gitignored, application state, not source), not in any client-visible config.
 
 ## Your first instance
 

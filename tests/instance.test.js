@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { loadDefinition } from '../lib/definition.js'
 import { createInstance, readInstance, readModule, writeModule, parseModuleFile, listInstances } from '../lib/instance.js'
-import { AzureDevOpsAuthenticationError } from '../lib/azureDevOpsClient.js'
+import { AzureDevOpsAuthenticationError, AzureDevOpsNotFoundError, createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
 const ORGANIZATION = 'fake-org'
@@ -299,6 +299,92 @@ test('createInstance writes instance.yaml and blank module files to Azure DevOps
   })
 })
 
+// #100: an Azure-DevOps-backed instance's data lives under a per-slug
+// gantry-workspace/<slug>/ subdirectory, not repo root — this is what one
+// repo ("workspace") hosting more than one instance actually depends on.
+test('createInstance writes an Azure-DevOps-backed instance under gantry-workspace/<slug>/, not repo root', async () => {
+  await withFakeRepo({}, async (baseUrl) => {
+    const azureDevOps = azureDevOpsOptions(baseUrl)
+    await createInstance('design', 'my-initiative', { azureDevOps })
+
+    const client = createAzureDevOpsClient(azureDevOps)
+    const instanceYaml = await client.getFileContent('gantry-workspace/my-initiative/instance.yaml')
+    assert.match(instanceYaml, /slug: my-initiative/)
+    await client.getFileContent('gantry-workspace/my-initiative/modules/context.md')
+
+    // Nothing at all at the legacy repo-root paths.
+    await assert.rejects(() => client.getFileContent('instance.yaml'), AzureDevOpsNotFoundError)
+    await assert.rejects(() => client.getFileContent('modules/context.md'), AzureDevOpsNotFoundError)
+  })
+})
+
+// Acceptance criterion (#100): "A new instance created in a workspace that
+// already has one is written to gantry-workspace/<slug>/, not repo root."
+test('a second instance can be created in the same Azure DevOps repo as an existing one, each isolated under its own gantry-workspace/<slug>/', async () => {
+  await withFakeRepo({}, async (baseUrl) => {
+    const azureDevOps = azureDevOpsOptions(baseUrl)
+    await createInstance('design', 'first-initiative', { azureDevOps, owner: 'first-owner' })
+    await createInstance('design', 'second-initiative', { azureDevOps, owner: 'second-owner' })
+
+    const firstInstance = await readInstance('first-initiative', { azureDevOps })
+    const secondInstance = await readInstance('second-initiative', { azureDevOps })
+    assert.equal(firstInstance.slug, 'first-initiative')
+    assert.equal(secondInstance.slug, 'second-initiative')
+
+    const definition = loadDefinition('design')
+    const firstContext = await readModule(definition, 'first-initiative', 'context', { azureDevOps })
+    const secondContext = await readModule(definition, 'second-initiative', 'context', { azureDevOps })
+    assert.equal(firstContext.owner, 'first-owner')
+    assert.equal(secondContext.owner, 'second-owner')
+
+    // Writing to one instance's module never touches the other's.
+    await writeModule(
+      definition,
+      'first-initiative',
+      'context',
+      { status: 'review', owner: 'first-owner', fields: { driver: 'First initiative driver.' } },
+      { azureDevOps }
+    )
+    const secondContextAfter = await readModule(definition, 'second-initiative', 'context', { azureDevOps })
+    assert.equal(secondContextAfter.status, 'draft')
+    assert.equal(secondContextAfter.owner, 'second-owner')
+
+    const client = createAzureDevOpsClient(azureDevOps)
+    await client.getFileContent('gantry-workspace/first-initiative/instance.yaml')
+    await client.getFileContent('gantry-workspace/second-initiative/instance.yaml')
+  })
+})
+
+// Defense-in-depth regression test: every real caller of the Azure-DevOps-
+// backed functions below already validates `slug` before reaching them
+// (lib/server.js's isValidSlug for request input, lib/repoCheck.js's own
+// check for a slug discovered from a remote repo) — but these functions
+// must also refuse a path-traversal-shaped slug themselves, rather than
+// silently building a `gantry-workspace/../evil/...` path, in case a
+// future or overlooked caller ever reaches them without validating first.
+test('createInstance/readInstance/writeModule/readModule against Azure DevOps reject a path-traversal-shaped slug outright, rather than building a path from it', async () => {
+  await withFakeRepo({}, async (baseUrl) => {
+    const azureDevOps = azureDevOpsOptions(baseUrl)
+    const definition = loadDefinition('design')
+
+    await assert.rejects(() => createInstance('design', '../evil', { azureDevOps }), /Invalid instance slug|invalid instance slug/i)
+    await assert.rejects(() => readInstance('../evil', { azureDevOps }), /Invalid instance slug|invalid instance slug/i)
+    await assert.rejects(
+      () => readModule(definition, '../evil', 'context', { azureDevOps }),
+      /Invalid instance slug|invalid instance slug/i
+    )
+    await assert.rejects(
+      () => writeModule(definition, '../evil', 'context', { fields: {} }, { azureDevOps }),
+      /Invalid instance slug|invalid instance slug/i
+    )
+
+    // Nothing was ever written anywhere as a result of the attempt.
+    const client = createAzureDevOpsClient(azureDevOps)
+    await assert.rejects(() => client.getFileContent('gantry-workspace/../evil/instance.yaml'), AzureDevOpsNotFoundError)
+    await assert.rejects(() => client.getFileContent('evil/instance.yaml'), AzureDevOpsNotFoundError)
+  })
+})
+
 test('writeModule/readModule against Azure DevOps are the exact inverse of each other, same as the local-filesystem path', async () => {
   await withFakeRepo({}, async (baseUrl) => {
     const azureDevOps = azureDevOpsOptions(baseUrl)
@@ -404,36 +490,45 @@ test('readModule forwards options.strict to parseModuleFile on both the local an
     assert.equal(data.warnings.length, 1)
   })
 
-  await withFakeRepo({ '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n', '/modules/context.md': badModuleText }, async (baseUrl) => {
-    const azureDevOps = azureDevOpsOptions(baseUrl)
-    await assert.rejects(
-      () => readModule(definition, 'my-initiative', 'context', { azureDevOps, strict: true }),
-      /does not match any field/
-    )
-    const data = await readModule(definition, 'my-initiative', 'context', { azureDevOps })
-    assert.equal(data.warnings.length, 1)
-  })
+  await withFakeRepo(
+    {
+      '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
+      '/gantry-workspace/my-initiative/modules/context.md': badModuleText,
+    },
+    async (baseUrl) => {
+      const azureDevOps = azureDevOpsOptions(baseUrl)
+      await assert.rejects(
+        () => readModule(definition, 'my-initiative', 'context', { azureDevOps, strict: true }),
+        /does not match any field/
+      )
+      const data = await readModule(definition, 'my-initiative', 'context', { azureDevOps })
+      assert.equal(data.warnings.length, 1)
+    }
+  )
 })
 
 test('a PAT the (fake) Azure DevOps server rejects surfaces from readInstance/readModule/writeModule/createInstance as AzureDevOpsAuthenticationError', async () => {
-  await withFakeRepo({ '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n' }, async (baseUrl) => {
-    const badAzureDevOps = azureDevOpsOptions(baseUrl, { pat: 'a-pat-the-server-does-not-recognize' })
-    const definition = loadDefinition('design')
+  await withFakeRepo(
+    { '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n' },
+    async (baseUrl) => {
+      const badAzureDevOps = azureDevOpsOptions(baseUrl, { pat: 'a-pat-the-server-does-not-recognize' })
+      const definition = loadDefinition('design')
 
-    await assert.rejects(() => readInstance('my-initiative', { azureDevOps: badAzureDevOps }), AzureDevOpsAuthenticationError)
-    await assert.rejects(
-      () => readModule(definition, 'my-initiative', 'context', { azureDevOps: badAzureDevOps }),
-      AzureDevOpsAuthenticationError
-    )
-    await assert.rejects(
-      () => writeModule(definition, 'my-initiative', 'context', { fields: {} }, { azureDevOps: badAzureDevOps }),
-      AzureDevOpsAuthenticationError
-    )
-    await assert.rejects(
-      () => createInstance('design', 'another-initiative', { azureDevOps: badAzureDevOps }),
-      AzureDevOpsAuthenticationError
-    )
-  })
+      await assert.rejects(() => readInstance('my-initiative', { azureDevOps: badAzureDevOps }), AzureDevOpsAuthenticationError)
+      await assert.rejects(
+        () => readModule(definition, 'my-initiative', 'context', { azureDevOps: badAzureDevOps }),
+        AzureDevOpsAuthenticationError
+      )
+      await assert.rejects(
+        () => writeModule(definition, 'my-initiative', 'context', { fields: {} }, { azureDevOps: badAzureDevOps }),
+        AzureDevOpsAuthenticationError
+      )
+      await assert.rejects(
+        () => createInstance('design', 'another-initiative', { azureDevOps: badAzureDevOps }),
+        AzureDevOpsAuthenticationError
+      )
+    }
+  )
 })
 
 test('createInstance/readInstance/readModule/writeModule stay fully synchronous (not Promises) with no Azure DevOps location given — the three local instances make zero Azure DevOps calls and are provably unaffected by this path existing', () => {

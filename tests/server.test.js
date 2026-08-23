@@ -741,13 +741,13 @@ test('POST /api/instances with a valid Azure DevOps location and PAT creates ins
         // called directly (#85) — not just gantry's own idea of what it
         // wrote.
         const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
-        const instanceYaml = await client.getFileContent('instance.yaml')
+        const instanceYaml = await client.getFileContent('gantry-workspace/remote-initiative/instance.yaml')
         assert.match(instanceYaml, /definition: design/)
         assert.match(instanceYaml, /slug: remote-initiative/)
         assert.match(instanceYaml, /stage: shape/)
         const definition = loadDefinition('design')
         for (const moduleId of definition.stages[0].modules) {
-          await client.getFileContent(`modules/${moduleId}.md`)
+          await client.getFileContent(`gantry-workspace/remote-initiative/modules/${moduleId}.md`)
         }
 
         // Not just written to the fake repo — immediately resolvable and
@@ -772,7 +772,9 @@ test('POST /api/instances with a valid Azure DevOps location and PAT creates ins
 test('POST /api/instances with an Azure DevOps location that already has an instance reports 409, not 500', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    const seedFiles = { '/instance.yaml': 'definition: design\nslug: remote-initiative\nstage: shape\n' }
+    const seedFiles = {
+      '/gantry-workspace/remote-initiative/instance.yaml': 'definition: design\nslug: remote-initiative\nstage: shape\n',
+    }
     await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: seedFiles }, async (adoBaseUrl) => {
       await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
         const res = await fetch(`${base}/api/instances`, {
