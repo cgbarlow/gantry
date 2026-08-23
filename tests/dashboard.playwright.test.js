@@ -49,10 +49,10 @@ function withPage(fn) {
   }
 }
 
-test('dashboard: master-detail is the default view, lists instances, and its detail pane shows stage/gate/status/owner', async () => {
+test('dashboard: master-detail is the default view, lists instances, and its detail pane shows stage/gate/status/assignee', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    createInstance('design', 'alpha-initiative', { instancesDir, owner: 'c.barlow' })
+    createInstance('design', 'alpha-initiative', { instancesDir, assignee: 'c.barlow' })
     createInstance('design', 'zebra-initiative', { instancesDir })
 
     await withRunningServer(
@@ -70,9 +70,39 @@ test('dashboard: master-detail is the default view, lists instances, and its det
         assert.equal(await page.locator('.detail-pane h2').textContent(), 'alpha-initiative')
         assert.match(await page.locator('.detail-ledger .stage').textContent(), /Shape/)
         assert.match(await page.locator('.detail-ledger').textContent(), /business-case/)
-        assert.match(await page.locator('.detail-ledger').textContent(), /c\.barlow/)
+        assert.equal(await page.locator('.assignee-input').inputValue(), 'c.barlow')
         assert.ok(await page.getByRole('button', { name: 'Check' }).isVisible())
         assert.ok(await page.getByRole('button', { name: 'Render' }).isVisible())
+      })
+    )
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('dashboard: editing the assignee field in the detail pane saves it, and it survives a reload', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'alpha-initiative', { instancesDir })
+
+    await withRunningServer(
+      { instancesDir },
+      withPage(async (page, base) => {
+        await page.goto(base)
+        await page.waitForSelector('.detail-ledger', { timeout: 10_000 })
+
+        assert.equal(await page.locator('.assignee-input').inputValue(), '')
+
+        await page.locator('.assignee-input').fill('j.smith')
+        await page.locator('.assignee-input').press('Enter')
+        await page.waitForFunction(() => document.querySelector('.assignee-save-status')?.textContent?.includes('Saved.'))
+
+        // The list-pane row reflects the save immediately, with no reload.
+        assert.match(await page.locator('.instance-list .list-item .def').first().textContent(), /j\.smith/)
+
+        await page.reload()
+        await page.waitForSelector('.detail-ledger', { timeout: 10_000 })
+        assert.equal(await page.locator('.assignee-input').inputValue(), 'j.smith')
       })
     )
   } finally {

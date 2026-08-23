@@ -55,7 +55,7 @@ export function repoSlug(repoUrl) {
  * @param {string} repoUrl
  * @returns {Promise<
  *   | { result: 'empty', slug: string, location: { organization: string, project: string, repository: string } }
- *   | { result: 'existing', slug: string, instance: { slug: string, definition: string, stage: string, status: string, owner: string }, location: { organization: string, project: string, repository: string } }
+ *   | { result: 'existing', slug: string, instance: { slug: string, definition: string, stage: string, status: string, assignee: string }, location: { organization: string, project: string, repository: string } }
  *   | { result: 'error', message: string }
  * >}
  */
@@ -91,7 +91,7 @@ export async function validateRepo(repoUrl) {
   }
 
   if (body?.result === 'found') {
-    const instance = { slug: body.slug, definition: body.definition, stage: body.stage, status: body.status, owner: body.owner }
+    const instance = { slug: body.slug, definition: body.definition, stage: body.stage, status: body.status, assignee: body.assignee }
     return { result: 'existing', slug: instance.slug, instance, location }
   }
 

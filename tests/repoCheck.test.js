@@ -68,7 +68,7 @@ test('checkAzureDevOpsRepo migrates a legacy repo-root instance to gantry-worksp
         definition: 'design',
         stage: 'shape',
         status: 'incomplete',
-        owner: 'c.barlow',
+        assignee: '',
       })
 
       const client = createAzureDevOpsClient(locationFor(baseUrl))
@@ -102,7 +102,7 @@ test('checkAzureDevOpsRepo discovers an already-migrated instance (no legacy roo
         definition: 'design',
         stage: 'shape',
         status: 'incomplete',
-        owner: 'c.barlow',
+        assignee: '',
       })
     }
   )
@@ -227,12 +227,12 @@ test('checkAzureDevOpsRepo resumes and completes a previously-interrupted migrat
     async (baseUrl) => {
       const result = await checkAzureDevOpsRepo(locationFor(baseUrl))
       assert.equal(result.result, 'found')
-      // "context" (this stage's first module) still has its owner,
-      // correctly read from its new gantry-workspace/ location —
-      // "team-and-estimates" (the third module) was never seeded here, so
-      // status stays "incomplete"; that rollup isn't what this test is
-      // about.
-      assert.equal(result.owner, 'c.barlow')
+      // Neither seed instance.yaml sets an assignee — the instance record's
+      // own stored field (#97), no longer derived from module frontmatter —
+      // so it defaults to ''. "team-and-estimates" (the third module) was
+      // never seeded here, so status stays "incomplete"; that rollup isn't
+      // what this test is about.
+      assert.equal(result.assignee, '')
 
       const client = createAzureDevOpsClient(locationFor(baseUrl))
 

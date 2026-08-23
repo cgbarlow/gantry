@@ -166,6 +166,58 @@ test('PUT /api/instance/modules/:id?stage=<id> reports status against the browse
   }
 })
 
+test('PUT /api/instance/assignee sets the instance record\'s stored assignee, leaving module frontmatter owner untouched, and GET /api/instances reflects it', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'my-initiative', { instancesDir })
+
+    await withRunningServer({ slug: 'my-initiative', instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instance/assignee`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignee: 'c.barlow' }),
+      })
+      assert.equal(res.status, 200)
+      const body = await res.json()
+      assert.deepEqual(body, { slug: 'my-initiative', assignee: 'c.barlow' })
+
+      const instance = readInstance('my-initiative', { instancesDir })
+      assert.equal(instance.assignee, 'c.barlow')
+      assert.equal(instance.stage, 'shape')
+
+      const listing = await (await fetch(`${base}/api/instances`)).json()
+      assert.equal(listing.find((i) => i.slug === 'my-initiative').assignee, 'c.barlow')
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('PUT /api/instance/assignee?slug=<traversal> is rejected with 400, never writing outside instancesDir', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  const outsideDir = mkdtempSync(join(tmpdir(), 'gantry-outside-'))
+  try {
+    createInstance('design', 'planted', { instancesDir: outsideDir })
+    const traversalSlug = relative(instancesDir, join(outsideDir, 'planted'))
+    assert.ok(traversalSlug.includes('/'), 'test setup sanity check: traversal slug must span directories')
+
+    await withRunningServer({ instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instance/assignee?slug=${encodeURIComponent(traversalSlug)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignee: 'attacker' }),
+      })
+      assert.equal(res.status, 400)
+    })
+
+    const instance = readInstance('planted', { instancesDir: outsideDir })
+    assert.equal(instance.assignee, '')
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+    rmSync(outsideDir, { recursive: true, force: true })
+  }
+})
+
 test('POST /api/instance/render/:artefact renders a real docx via the web form path', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
@@ -301,7 +353,7 @@ test('GET /api/instances lists every registered instance, without the server bei
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     createInstance('design', 'zebra-initiative', { instancesDir })
-    createInstance('design', 'alpha-initiative', { instancesDir, owner: 'c.barlow' })
+    createInstance('design', 'alpha-initiative', { instancesDir, assignee: 'c.barlow' })
 
     // No `slug` option at all — the server still starts and serves instance
     // data via the listing endpoint, proving it no longer requires a single
@@ -311,8 +363,8 @@ test('GET /api/instances lists every registered instance, without the server bei
       assert.equal(res.status, 200)
       const body = await res.json()
       assert.deepEqual(body, [
-        { slug: 'alpha-initiative', definition: 'design', stage: 'shape', status: 'incomplete', owner: 'c.barlow' },
-        { slug: 'zebra-initiative', definition: 'design', stage: 'shape', status: 'incomplete', owner: '' },
+        { slug: 'alpha-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: 'c.barlow' },
+        { slug: 'zebra-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: '' },
       ])
     })
   } finally {
@@ -473,7 +525,7 @@ test('POST /api/instances registers a new instance, which then appears in GET /a
         definition: 'design',
         stage: 'shape',
         status: 'incomplete',
-        owner: '',
+        assignee: '',
       })
 
       const listing = await (await fetch(`${base}/api/instances`)).json()
@@ -722,7 +774,8 @@ test('POST /api/instances with a valid Azure DevOps location and PAT creates ins
           body: JSON.stringify({
             definition: 'design',
             slug: 'remote-initiative',
-            owner: 'c.barlow',
+            owner: 'a-module-owner',
+            assignee: 'c.barlow',
             azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
           }),
         })
@@ -733,7 +786,7 @@ test('POST /api/instances with a valid Azure DevOps location and PAT creates ins
           definition: 'design',
           stage: 'shape',
           status: 'incomplete',
-          owner: 'c.barlow',
+          assignee: 'c.barlow',
         })
 
         // Verified directly against the fake Azure DevOps repo — exactly
@@ -745,9 +798,11 @@ test('POST /api/instances with a valid Azure DevOps location and PAT creates ins
         assert.match(instanceYaml, /definition: design/)
         assert.match(instanceYaml, /slug: remote-initiative/)
         assert.match(instanceYaml, /stage: shape/)
+        assert.match(instanceYaml, /assignee: c\.barlow/)
         const definition = loadDefinition('design')
         for (const moduleId of definition.stages[0].modules) {
-          await client.getFileContent(`gantry-workspace/remote-initiative/modules/${moduleId}.md`)
+          const moduleText = await client.getFileContent(`gantry-workspace/remote-initiative/modules/${moduleId}.md`)
+          assert.match(moduleText, /owner: a-module-owner/)
         }
 
         // Not just written to the fake repo — immediately resolvable and
@@ -760,7 +815,7 @@ test('POST /api/instances with a valid Azure DevOps location and PAT creates ins
         const listing = await listingRes.json()
         assert.deepEqual(
           listing.find((i) => i.slug === 'remote-initiative'),
-          { slug: 'remote-initiative', definition: 'design', stage: 'shape', status: 'incomplete', owner: 'c.barlow' }
+          { slug: 'remote-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: 'c.barlow' }
         )
       })
     })
@@ -806,7 +861,7 @@ test('POST /api/instances with an Azure DevOps location that already has an inst
 test('POST /api/instances with an Azure DevOps location reusing a slug that already exists locally reports 409, and does not overwrite the registry entry', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    createInstance('design', 'local-initiative', { instancesDir, owner: 'local-owner' })
+    createInstance('design', 'local-initiative', { instancesDir, assignee: 'local-assignee' })
 
     await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT }, async (adoBaseUrl) => {
       await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
@@ -827,7 +882,7 @@ test('POST /api/instances with an Azure DevOps location reusing a slug that alre
         const listing = await (await fetch(`${base}/api/instances`)).json()
         assert.deepEqual(
           listing.find((i) => i.slug === 'local-initiative'),
-          { slug: 'local-initiative', definition: 'design', stage: 'shape', status: 'incomplete', owner: 'local-owner' }
+          { slug: 'local-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: 'local-assignee' }
         )
       })
     })
