@@ -76,7 +76,7 @@ function repoCheckUrl(gantryBase, adoBaseUrl) {
 }
 
 const SEED_FILES = {
-  '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
+  '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\nassignee: c.barlow\n',
   '/modules/context.md': [
     '---',
     'module: context',
@@ -128,7 +128,7 @@ test('GET /api/azure-devops/repo-check with a PAT Azure DevOps itself rejects re
 
 // ---------- Valid PAT, instance.yaml already present ----------
 
-test('GET /api/azure-devops/repo-check with a valid PAT against a repo that already has an instance.yaml returns that instance\'s real definition/stage/status/owner', async () => {
+test('GET /api/azure-devops/repo-check with a valid PAT against a repo that already has an instance.yaml returns that instance\'s real definition/stage/status/assignee', async () => {
   await withFakeAzureDevOpsAndGantryServer(SEED_FILES, async (gantryBase, adoBaseUrl) => {
     const res = await fetch(repoCheckUrl(gantryBase, adoBaseUrl), {
       headers: { Authorization: basicAuthHeader(VALID_PAT) },
@@ -143,7 +143,10 @@ test('GET /api/azure-devops/repo-check with a valid PAT against a repo that alre
     // solution-definition, team-and-estimates) was seeded, so the stage is
     // not complete yet.
     assert.equal(body.status, 'incomplete')
-    assert.equal(body.owner, 'c.barlow')
+    // The instance record's own stored assignee (#97) — not derived from
+    // "context"'s own module frontmatter owner (also 'c.barlow' above,
+    // coincidentally the same value, but read from a different field).
+    assert.equal(body.assignee, 'c.barlow')
   })
 })
 
@@ -175,6 +178,28 @@ test('GET /api/azure-devops/repo-check with a valid PAT against a repo with no i
     const body = await res.json()
     assert.deepEqual(body, { result: 'empty', message: 'No instance data found at this location yet.' })
   })
+})
+
+// #100: one Azure DevOps repo can now hold more than one instance under
+// gantry-workspace/<slug>/ — this route has no slug input to disambiguate
+// with, so a location holding several is reported distinctly from
+// "empty" rather than silently guessing one.
+test('GET /api/azure-devops/repo-check with a valid PAT against a repo already holding more than one instance reports "multiple", not "empty"', async () => {
+  await withFakeAzureDevOpsAndGantryServer(
+    {
+      '/gantry-workspace/alpha-initiative/instance.yaml': 'definition: design\nslug: alpha-initiative\nstage: shape\n',
+      '/gantry-workspace/beta-initiative/instance.yaml': 'definition: design\nslug: beta-initiative\nstage: shape\n',
+    },
+    async (gantryBase, adoBaseUrl) => {
+      const res = await fetch(repoCheckUrl(gantryBase, adoBaseUrl), {
+        headers: { Authorization: basicAuthHeader(VALID_PAT) },
+      })
+      assert.equal(res.status, 200)
+      const body = await res.json()
+      assert.equal(body.result, 'multiple')
+      assert.deepEqual(body.slugs, ['alpha-initiative', 'beta-initiative'])
+    }
+  )
 })
 
 // ---------- Missing query parameters ----------

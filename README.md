@@ -45,7 +45,8 @@ Git is the audit trail. Who changed what, when, and why is a `git log`, not a ve
 | **Stage** | A phase of the process. Stages are ordered, and each has an exit gate. |
 | **Gate** | The decision point a stage feeds. Gates declare which artefacts and which modules must be complete to pass. |
 | **Module** | The atomic unit of content — a single, self-contained piece of the process (context, options, non-functional requirements, security posture). Modules are the source of truth. |
-| **Instance** | One run of a definition against one initiative. A folder of module files. |
+| **Instance** | One run of a definition against one initiative — a folder of module files, local or living inside a workspace. Its own stored `assignee` (a single named person, editable from the dashboard or `gantry new --assignee`) is a distinct instance-level field, stable across stage transitions — separate from each module's own frontmatter `owner`, which is still just the first non-empty value found among its current stage's modules (see "Instance module files" below), unrelated and unchanged. |
+| **Workspace** | An Azure DevOps organization/project/repository that backs one or more instances' data (see "Backing an instance with Azure DevOps" below). Auto-created the first time an instance is registered against that repo, and reused by every later instance registered against the same one. Holds its own free-text owner label (a workspace-level field, distinct from the per-module `owner` above) and a ticketing-system selection — edited from the Settings screen's "Workspace overrides" tab. |
 | **Artefact** | A rendered output. A document, a page, a summary. Generated, never hand-edited. Every artefact, `.md` and `.docx`, ends with a footer naming a short commit hash and date it was rendered from — the current local `HEAD` for a local instance, or (for an Azure DevOps-backed one) the commit its content was pushed as, one commit behind the file's own latest history entry, since a commit can't name its own hash — so a document can always be traced back to close to the exact version that produced it. |
 
 The key rule: **artefacts are derived, modules are authored.** If you find yourself editing a rendered artefact, something is wrong with the module spec.
@@ -145,26 +146,33 @@ gantry/
 │           ├── soap.md.tmpl
 │           └── reference.docx    # pandoc --reference-doc, derived from the real HLD template
 ├── instances/
-│   ├── instance-registry.json    # slug -> location (local/Azure DevOps) map, gitignored
+│   ├── instance-registry.json    # slug -> workspace/location map, gitignored
+│   ├── workspace-registry.json   # Azure DevOps org/project/repo entities, gitignored
 │   └── <initiative-slug>/        # local instances only — an Azure DevOps-backed
-│       ├── instance.yaml         # instance has no on-disk folder here at all
-│       ├── modules/              # authored content
+│       ├── instance.yaml         # instance lives at gantry-workspace/<slug>/ in
+│       ├── modules/              # its own repo instead (see below), never here
 │       │   ├── context.md
 │       │   └── solution-definition.md
 │       └── out/                  # rendered artefacts (gitignored by default)
 ├── lib/                          # the engine: definition/instance loading, render, status, the web server
-│   ├── server.js                 # HTTP routes, incl. the Azure DevOps repo-check/adopt endpoints
-│   ├── instanceRegistry.js       # slug -> location lookup/registration (the registry above)
-│   ├── azureDevOpsClient.js      # PAT-authenticated Azure DevOps REST client
-│   ├── repoCheck.js              # "does this Azure DevOps repo already hold instance data"
+│   ├── server.js                 # HTTP routes, incl. the Azure DevOps repo-check/adopt/work-item endpoints
+│   ├── instanceRegistry.js       # slug -> workspace/location lookup/registration (the registry above)
+│   ├── workspaceRegistry.js      # Azure DevOps org/project/repository entities instances reference
+│   ├── azureDevOpsClient.js      # PAT-authenticated Azure DevOps REST client (Git)
+│   ├── azureDevOpsWorkItemsClient.js  # PAT-authenticated Azure DevOps REST client (Work Items)
+│   ├── workItemLink.js           # link an instance to a work item; confirmed gate-pass state sync
+│   ├── repoCheck.js              # "does this Azure DevOps repo already hold instance data", incl.
+│   │                             # the legacy-root-to-gantry-workspace/<slug>/ migration routine
 │   └── credential.js             # extracts a forwarded PAT from a request
 ├── bin/gantry.js                 # CLI entrypoint
 └── web/
     ├── index.html                # app shell
     ├── app.js                     # dashboard + module editor
     ├── pages/setup-wizard.js     # "+ New instance" — local or Azure DevOps
-    ├── lib/credential.js         # client-side PAT storage/prompt
-    ├── lib/apiFetch.js           # fetch wrapper: attaches the PAT, retries once on 401
+    ├── pages/settings.js         # /settings — Global Defaults + Workspace overrides tabs
+    ├── lib/credential.js         # client-side PAT storage/prompt, incl. per-workspace overrides
+    ├── lib/ticketingSystem.js    # client-side default-ticketing-system setting
+    ├── lib/apiFetch.js           # fetch wrapper: attaches the right PAT, retries once on 401
     ├── lib/validateRepo.js       # parses/checks the wizard's Azure DevOps repo URL
     └── style.css
 ```
@@ -185,15 +193,28 @@ Neither path is the "real" one. They're two front ends onto the same data.
 
 An instance's data doesn't have to live on the machine running `gantry serve` — it can live in an Azure DevOps repo instead, with gantry acting as a form over it. This is useful when the people filling in modules aren't the people running the server.
 
+A repo backing instance data this way is a **workspace**: `instance.yaml` and `modules/` live at `gantry-workspace/<slug>/` inside it, not at repo root — so one workspace (one Azure DevOps repo) can hold more than one instance, each in its own slug-named subdirectory, rather than being permanently tied to exactly one. A workspace isn't something you create up front — it's found-or-created automatically the first time an instance is registered or adopted against a given organization/project/repository, and reused by every instance registered against that same repo afterwards.
+
 From the dashboard, **"+ New instance"** opens the setup wizard:
 
 1. Paste the target repo's URL — the standard `https://dev.azure.com/{organization}/{project}/_git/{repository}` shape (an on-premises Azure DevOps Server base URL isn't supported here yet).
-2. **Check repo** looks for an existing `instance.yaml` at that location. If one's already there, you can open it directly ("adopt" it into this server's dashboard) rather than creating a new instance over the top of it.
-3. If the repo is empty, pick a definition to create a fresh instance there.
+2. **Check repo** looks for existing instance data at that location. If it's already there, you can open it directly ("adopt" it into this server's dashboard) rather than creating a new instance over the top of it. A repo written before this per-slug layout existed (a lone `instance.yaml` at repo root) is migrated into `gantry-workspace/<slug>/` automatically the first time it's checked — no separate step.
+3. If nothing's there yet, pick a definition to create a fresh instance there.
 
-The first request against an Azure DevOps-backed instance prompts for a **Personal Access Token** with **Code (Read & write)** and **Work Items (Read & write)** scope. It's stored in the browser (`localStorage`), sent only to your own gantry server, and forwarded from there to Azure DevOps as an HTTP Basic credential — gantry's own server never persists it. "Replace"/"Clear" controls in the module editor header let you swap or drop a stored PAT.
+The first request against an Azure DevOps-backed instance prompts for a **Personal Access Token** with **Code (Read & write)** and **Work Items (Read & write)** scope. It's stored in the browser (`localStorage`), sent only to your own gantry server, and forwarded from there to Azure DevOps as an HTTP Basic credential — gantry's own server never persists it.
 
-Once registered, a local and an Azure DevOps-backed instance are indistinguishable from the dashboard's point of view — same listing, same module editor, same render command. Where each one's data actually lives is tracked server-side in a registry file (`instances/instance-registry.json`, gitignored — application state, not source), not in any client-visible config.
+The **Settings screen** (`/settings`, linked from the dashboard and the module editor) manages this PAT and everything else workspace-related, in two tabs:
+
+- **Global Defaults** — set, replace or clear the Azure DevOps PAT ahead of ever being prompted for one, and pick the default **ticketing system** new workspaces use. Azure DevOps is the only ticketing system gantry actually talks to today; a second option is listed but disabled ("coming soon") so the schema and UI don't need a migration once a second one ships.
+- **Workspace overrides** — every registered workspace, listed with its Azure DevOps repo URL and three editable fields: a free-text **owner** label, a **PAT override** for that workspace alone (falls back to the Global Defaults PAT when unset, and — like the global PAT — never leaves the browser), and a per-workspace **ticketing-system** override.
+
+Once registered, a local and an Azure DevOps-backed instance are indistinguishable from the dashboard's point of view — same listing, same module editor, same render command. Where each one's data actually lives is tracked server-side across two registry files (`instances/instance-registry.json`: slug -> workspace; `instances/workspace-registry.json`: workspace -> organization/project/repository/owner/ticketing-system — both gitignored, application state, not source), not in any client-visible config.
+
+## Linking an instance to an Azure DevOps work item
+
+Optionally, and independently of where an instance's own data lives (local or Azure DevOps-backed — the two are unrelated), an instance can be linked to a parent Azure DevOps work item. The module editor's **Azure DevOps work item** panel (below Render) offers a small form — organization, project, parent work item id, and an optional work item type (defaulting to `Task`, a safe default across every stock process template; override it to match your organization's own template).
+
+Linking creates one child work item per stage in the instance's definition underneath that parent, in one step. From then on, the panel's **Check gate & sync work item** action checks the currently-viewed stage's gate and, only if it passes, opens a confirmation dialog before pushing a new state to that stage's own work item — declining the confirmation leaves the work item's state untouched. The state actually pushed is drawn from whatever states the configured work item type genuinely supports in your project (via its own `getWorkItemTypeStates` lookup), never a fixed list Gantry invents — see `docs/adr/0009-azure-devops-work-item-linking.md` for the full mapping rationale.
 
 ## Your first instance
 
@@ -217,11 +238,11 @@ gantry render my-initiative soap                # produce the artefact
 |---|---|---|
 | `gantry definitions` | List definitions available in this repo | Not yet implemented |
 | `gantry instances [--json]` | List instances available in this repo, with definition and current stage | Implemented |
-| `gantry new <definition> <slug> [--owner <name>]` | Create an instance | Implemented |
+| `gantry new <definition> <slug> [--owner <name>] [--assignee <name>]` | Create an instance — `--owner` seeds each first-stage module file's own frontmatter `owner`; `--assignee` sets the instance record's own stored assignee | Implemented |
 | `gantry status <slug> [--json]` | Current stage, module completeness, what's outstanding | Implemented |
 | `gantry check <slug> [--gate <id>] [--json]` | Validate an instance against a gate's requirements — any gate, not just the instance's current stage | Implemented |
 | `gantry render <slug> <artefact> [--dry-run]` | Render an artefact to `out/` | Implemented |
-| `gantry serve [slug] [--port <port>]` | Serve the web form (port 3000): a dashboard of every registered instance at `/`, local or Azure DevOps-backed, and the stage-by-stage form at `/instance/<slug>`. `[slug]` only sets a fallback default for API requests made with no `?slug=<slug>` of their own — it doesn't change what the dashboard shows or require picking one instance up front. `/setup` is the instance-setup wizard (see "Backing an instance with Azure DevOps" above) | Implemented |
+| `gantry serve [slug] [--port <port>]` | Serve the web form (port 3000): a dashboard of every registered instance at `/`, local or Azure DevOps-backed, and the stage-by-stage form at `/instance/<slug>`. `[slug]` only sets a fallback default for API requests made with no `?slug=<slug>` of their own — it doesn't change what the dashboard shows or require picking one instance up front. `/setup` is the instance-setup wizard, `/settings` is the Settings screen (see "Backing an instance with Azure DevOps" above) | Implemented |
 | `gantry validate <definition> [--json]` | Report every structural problem with a definition in one pass | Implemented |
 
 `status`, `check` and `validate` all emit structured output with `--json` for scripting and agent use.

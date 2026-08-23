@@ -258,10 +258,10 @@ const VALID_PAT = 'valid-test-pat'
 // way the local-path tests above do, rather than a bespoke minimal fixture.
 function seedExamplesAzureDevOpsFiles() {
   return {
-    '/instance.yaml': readFileSync('instances/examples/instance.yaml', 'utf8'),
-    '/modules/context.md': readFileSync('instances/examples/modules/context.md', 'utf8'),
-    '/modules/solution-definition.md': readFileSync('instances/examples/modules/solution-definition.md', 'utf8'),
-    '/modules/team-and-estimates.md': readFileSync('instances/examples/modules/team-and-estimates.md', 'utf8'),
+    '/gantry-workspace/examples/instance.yaml': readFileSync('instances/examples/instance.yaml', 'utf8'),
+    '/gantry-workspace/examples/modules/context.md': readFileSync('instances/examples/modules/context.md', 'utf8'),
+    '/gantry-workspace/examples/modules/solution-definition.md': readFileSync('instances/examples/modules/solution-definition.md', 'utf8'),
+    '/gantry-workspace/examples/modules/team-and-estimates.md': readFileSync('instances/examples/modules/team-and-estimates.md', 'utf8'),
   }
 }
 

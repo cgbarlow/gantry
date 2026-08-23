@@ -207,6 +207,66 @@ test('organisation and project names containing URL-reserved characters (space, 
   })
 })
 
+// listFolder/deleteFile back lib/repoCheck.js's legacy-root-to-
+// gantry-workspace/<slug>/ migration (#100).
+
+test('listFolder lists the immediate children of a folder, distinguishing files from subfolders', async () => {
+  await withFakeAzureDevOpsServer(
+    {
+      '/gantry-workspace/foo/instance.yaml': 'slug: foo\n',
+      '/gantry-workspace/foo/modules/context.md': '# Context\n',
+      '/gantry-workspace/bar/instance.yaml': 'slug: bar\n',
+    },
+    async (baseUrl) => {
+      const c = client(baseUrl)
+      const entries = await c.listFolder('/gantry-workspace')
+      const byPath = Object.fromEntries(entries.map((e) => [e.path, e.isFolder]))
+      assert.deepEqual(byPath, { '/gantry-workspace/bar': true, '/gantry-workspace/foo': true })
+    }
+  )
+})
+
+test('listFolder lists files (not just folders) directly inside the scoped path', async () => {
+  await withFakeAzureDevOpsServer(
+    {
+      '/gantry-workspace/foo/modules/context.md': '# Context\n',
+      '/gantry-workspace/foo/modules/solution-definition.md': '# Solution\n',
+    },
+    async (baseUrl) => {
+      const c = client(baseUrl)
+      const entries = await c.listFolder('/gantry-workspace/foo/modules')
+      const byPath = Object.fromEntries(entries.map((e) => [e.path, e.isFolder]))
+      assert.deepEqual(byPath, {
+        '/gantry-workspace/foo/modules/context.md': false,
+        '/gantry-workspace/foo/modules/solution-definition.md': false,
+      })
+    }
+  )
+})
+
+test('listFolder returns an empty array (not an error) for a folder that does not exist', async () => {
+  await withFakeAzureDevOpsServer({}, async (baseUrl) => {
+    const entries = await client(baseUrl).listFolder('/gantry-workspace')
+    assert.deepEqual(entries, [])
+  })
+})
+
+test('deleteFile removes an existing file', async () => {
+  await withFakeAzureDevOpsServer({ '/instance.yaml': 'slug: demo\n' }, async (baseUrl) => {
+    const c = client(baseUrl)
+    await c.deleteFile('/instance.yaml', { message: 'Remove legacy instance.yaml' })
+    await assert.rejects(() => c.getFileContent('/instance.yaml'), AzureDevOpsNotFoundError)
+  })
+})
+
+test('a rejected PAT on listFolder/deleteFile also surfaces as AzureDevOpsAuthenticationError', async () => {
+  await withFakeAzureDevOpsServer({ '/instance.yaml': 'slug: demo\n' }, async (baseUrl) => {
+    const badClient = client(baseUrl, { pat: 'wrong' })
+    await assert.rejects(() => badClient.listFolder('/gantry-workspace'), AzureDevOpsAuthenticationError)
+    await assert.rejects(() => badClient.deleteFile('/instance.yaml'), AzureDevOpsAuthenticationError)
+  })
+})
+
 test('createAzureDevOpsClient requires organization, project, repository and pat', () => {
   assert.throws(() => createAzureDevOpsClient({ project: PROJECT, repository: REPOSITORY, pat: VALID_PAT }), /organization/)
   assert.throws(() => createAzureDevOpsClient({ organization: ORGANIZATION, repository: REPOSITORY, pat: VALID_PAT }), /project/)

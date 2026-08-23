@@ -17,9 +17,10 @@ import { markdown } from '@codemirror/lang-markdown'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import { theme, cycleTheme } from './lib/theme.js'
-import { pat, clearPat, requestPat, promptOpen, resolvePromptWith } from './lib/credential.js'
-import { apiFetch } from './lib/apiFetch.js'
+import { promptOpen, resolvePromptWith } from './lib/credential.js'
+import { apiFetch, apiFetchForInstance } from './lib/apiFetch.js'
 import { SetupWizardPage } from './pages/setup-wizard.js'
+import { SettingsPage } from './pages/settings.js'
 // Two distinct "view mode" concepts collide on the same export names — the
 // dashboard's (#77) master-detail/swimlanes toggle and the module editor's
 // (#79) markdown/split/rendered toggle are unrelated signals that happen to
@@ -60,7 +61,10 @@ async function loadInstance(slug, stageId) {
   if (slug) params.set('slug', slug)
   if (stageId) params.set('stage', stageId)
   const qs = params.toString()
-  const res = await apiFetch(qs ? `/api/instance?${qs}` : '/api/instance')
+  // `apiFetchForInstance` (not plain `apiFetch`) — this request may target
+  // a workspace with its own PAT override (#104), which must be resolved
+  // and attached before the first attempt, not just on a 401 retry.
+  const res = await apiFetchForInstance(slug, qs ? `/api/instance?${qs}` : '/api/instance')
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new Error(body.message ?? body.error ?? `Failed to load instance (${res.status})`)
@@ -311,7 +315,7 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
     // criterion once a freshly adopted/created instance had no such
     // server-pinned default to fall back on.
     const params = new URLSearchParams({ stage: stageId, slug: currentSlug.value })
-    const res = await apiFetch(`/api/instance/modules/${mod.id}?${params}`, {
+    const res = await apiFetchForInstance(currentSlug.value, `/api/instance/modules/${mod.id}?${params}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: mod.status, owner: mod.owner, fields }),
@@ -565,7 +569,8 @@ function ArtefactsSection({ instance }) {
     setStatus('Rendering…')
     // See ModuleCard's handleSave for why `?slug=` is required here now —
     // the same gap, for the module editor's own "Render" action.
-    const res = await apiFetch(`/api/instance/render/${artefact.id}?slug=${encodeURIComponent(currentSlug.value)}`, {
+    const slug = currentSlug.value
+    const res = await apiFetchForInstance(slug, `/api/instance/render/${artefact.id}?slug=${encodeURIComponent(slug)}`, {
       method: 'POST',
     })
     const body = await res.json()
@@ -591,6 +596,174 @@ function ArtefactsSection({ instance }) {
         `
       )}
       <div class="save-status">${status}</div>
+    </section>
+  `
+}
+
+// ---------- Azure DevOps work-item link + confirmed gate-pass sync (#103) ----------
+// One instance-level panel, shown once per stage screen (below the modules,
+// alongside Render — see StageScreen) rather than in AppHeader, since
+// "which stage's work item" is stage-scoped even though the *link* itself
+// is instance-level. Unlinked: a small inline form (organization/project/
+// parent work item id/type) posts to POST /api/instance/work-items/link.
+// Linked: shows the parent id and this stage's own child work item id, plus
+// a "Check gate & sync" action that runs the existing check first and only
+// opens the confirm-before-push modal (mirroring PatPromptModal's shape)
+// if the gate genuinely passes — declining it (or the gate failing) never
+// calls POST /api/instance/work-items/sync at all, so the work item's state
+// is left exactly as it was (#103's "declining leaves the work item's state
+// unchanged" acceptance criterion).
+function WorkItemPanel({ instance }) {
+  const [status, setStatus] = useState('')
+  const [confirming, setConfirming] = useState(false)
+  const [linkForm, setLinkForm] = useState({ organization: '', project: '', parentId: '', workItemType: '' })
+  const [linking, setLinking] = useState(false)
+  const [linkError, setLinkError] = useState('')
+
+  const stageId = instance.stage.id
+  const workItem = instance.workItem
+  const stageWorkItemId = workItem?.stages?.[stageId]
+
+  async function reloadInstance() {
+    instanceData.value = await loadInstance(currentSlug.value, viewedStage.value)
+  }
+
+  async function handleLink() {
+    setLinkError('')
+    if (!linkForm.organization.trim() || !linkForm.project.trim() || !linkForm.parentId.trim()) {
+      setLinkError('Organization, project, and parent work item id are required.')
+      return
+    }
+    setLinking(true)
+    try {
+      const res = await apiFetch(`/api/instance/work-items/link?slug=${encodeURIComponent(currentSlug.value)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          organization: linkForm.organization.trim(),
+          project: linkForm.project.trim(),
+          parentId: Number(linkForm.parentId.trim()),
+          ...(linkForm.workItemType.trim() ? { workItemType: linkForm.workItemType.trim() } : {}),
+        }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.message ?? body.error ?? `Link failed (${res.status})`)
+      await reloadInstance()
+    } catch (err) {
+      setLinkError(err.message)
+    } finally {
+      setLinking(false)
+    }
+  }
+
+  // "Check gate & sync": runs the same check the dashboard's own Check
+  // action does — only once it genuinely PASSes does this open the confirm
+  // modal; a FAIL (or a check-request failure) reports status and stops
+  // there, exactly as if no linked work item existed at all.
+  async function handleCheckAndMaybeConfirm() {
+    setStatus('Checking gate…')
+    const res = await apiFetch(`/api/instance/check?slug=${encodeURIComponent(currentSlug.value)}`)
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setStatus(`Check failed: ${body.message ?? body.error}`)
+      return
+    }
+    if (!body.pass) {
+      const outstanding = body.modules.filter((m) => !m.complete).map((m) => m.title)
+      setStatus(`FAIL — outstanding: ${outstanding.join(', ') || 'see modules'}`)
+      return
+    }
+    setStatus('Gate passed.')
+    setConfirming(true)
+  }
+
+  async function handleConfirmSync() {
+    setConfirming(false)
+    setStatus('Pushing state to work item…')
+    const res = await apiFetch(`/api/instance/work-items/sync?slug=${encodeURIComponent(currentSlug.value)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    const body = await res.json().catch(() => ({}))
+    setStatus(
+      res.ok
+        ? `Pushed state "${body.state}" to work item #${body.workItemId}.`
+        : `Sync failed: ${body.message ?? body.error}`
+    )
+  }
+
+  function handleDecline() {
+    setConfirming(false)
+    setStatus('Declined — work item state left unchanged.')
+  }
+
+  return html`
+    <section class="work-item-panel">
+      <h2>Azure DevOps work item</h2>
+      ${!workItem
+        ? html`
+            <div class="link-form">
+              <input
+                class="text-field"
+                type="text"
+                placeholder="Organization"
+                value=${linkForm.organization}
+                onInput=${(e) => setLinkForm({ ...linkForm, organization: e.currentTarget.value })}
+              />
+              <input
+                class="text-field"
+                type="text"
+                placeholder="Project"
+                value=${linkForm.project}
+                onInput=${(e) => setLinkForm({ ...linkForm, project: e.currentTarget.value })}
+              />
+              <input
+                class="text-field"
+                type="text"
+                placeholder="Parent work item id"
+                value=${linkForm.parentId}
+                onInput=${(e) => setLinkForm({ ...linkForm, parentId: e.currentTarget.value })}
+              />
+              <input
+                class="text-field"
+                type="text"
+                placeholder="Work item type (default: Task)"
+                value=${linkForm.workItemType}
+                onInput=${(e) => setLinkForm({ ...linkForm, workItemType: e.currentTarget.value })}
+              />
+              <button type="button" class="btn primary" disabled=${linking} onClick=${handleLink}>
+                ${linking ? 'Linking…' : 'Link instance'}
+              </button>
+              ${linkError ? html`<div class="inline-error">${linkError}</div>` : null}
+            </div>
+          `
+        : html`
+            <p>
+              Linked to parent work item #${workItem.parentId} (${workItem.organization}/${workItem.project}, type "${workItem.workItemType}").
+            </p>
+            <p>This stage's work item: ${stageWorkItemId ? html`#${stageWorkItemId}` : '—'}</p>
+            <button type="button" class="btn" onClick=${handleCheckAndMaybeConfirm}>Check gate & sync work item</button>
+          `}
+      <div class="save-status">${status}</div>
+      ${confirming
+        ? html`
+            <div class="modal-backdrop" role="presentation">
+              <div class="modal" role="dialog" aria-modal="true" aria-label="Confirm work item state update">
+                <h3>Push a state update?</h3>
+                <p class="guidance">
+                  The gate for stage "${instance.stage.title}" has passed. Confirm to push a new state — drawn from
+                  work item #${stageWorkItemId}'s own configured type — to Azure DevOps. Declining leaves that work
+                  item's state unchanged.
+                </p>
+                <div class="modal-actions">
+                  <button type="button" class="btn ghost" onClick=${handleDecline}>Decline</button>
+                  <button type="button" class="btn primary" onClick=${handleConfirmSync}>Confirm & push</button>
+                </div>
+              </div>
+            </div>
+          `
+        : null}
     </section>
   `
 }
@@ -626,6 +799,7 @@ function StageScreen({ instance }) {
         `
       )}
       <${ArtefactsSection} instance=${instance} />
+      <${WorkItemPanel} instance=${instance} />
     </main>
   `
 }
@@ -683,20 +857,13 @@ function AppHeader({ instance }) {
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M3 20h18M6 20V8l6-4 6 4v12M6 8h12" />
         </svg>
-        <a class="btn small ghost" href="/">← Instances</a>
+        <a class="btn small ghost" href="/">← Workspaces</a>
         <h1>${instance.slug} — ${instance.definition}</h1>
         <a class="btn small ghost" href="/setup">+ New instance</a>
+        <a class="btn small ghost" href="/settings">Settings</a>
         <button type="button" class="btn small ghost theme-toggle" onClick=${cycleTheme} title="Cycle theme">
           Theme: ${theme.value}
         </button>
-        ${pat.value
-          ? html`
-              <button type="button" class="btn small ghost" onClick=${() => requestPat()}>
-                Replace Azure DevOps PAT
-              </button>
-              <button type="button" class="btn small ghost" onClick=${clearPat}>Clear Azure DevOps PAT</button>
-            `
-          : null}
       </div>
       <p id="stage-line">${instance.stage.title} (gate: ${instance.stage.gate})</p>
       <nav id="stage-nav">
@@ -723,8 +890,10 @@ function AppHeader({ instance }) {
 // `slug` arrives as a route param from `/instance/:slug` (preact-iso passes
 // matched params as top-level props). Re-pins the shared instance-scoped
 // signals to this slug on mount and whenever the route's slug changes —
-// e.g. following an "Open workspace" link from one instance straight to
-// another without an intervening full page load — clearing the previous
+// e.g. following an "Open editor" link (#102 — this screen used to call
+// that link "Open workspace", renamed to avoid colliding with the
+// Workspace entity, #96) from one instance straight to another without an
+// intervening full page load — clearing the previous
 // instance's stale data first so it's never shown against the new slug.
 // `batch()` matters here: without it, `currentSlug.value = slug` alone
 // fires the instance-loading effect below (it's already subscribed to
@@ -759,11 +928,15 @@ function ModuleEditorPage({ slug }) {
 }
 
 // ============================================================
-// Instance dashboard (#77) — the landing screen at `/`. Two togglable
-// views over the multi-instance registry (`GET /api/instances`, #76):
-// master-detail (default) and stage swimlanes. The view choice is a
-// persisted signal (web/lib/dashboardView.js), not local state, so it
-// survives remounting this page and reloading the app.
+// Workspaces landing page (#77, restructured by #102) — the landing screen
+// at `/`, titled "Workspaces". Two togglable views over the multi-instance
+// registry (`GET /api/instances`, #76): master-detail (default, grouping
+// instances by workspace — see groupInstancesByWorkspace above) and stage
+// swimlanes (still one chip per instance, ungrouped — the ticket's own
+// acceptance criteria describe the *list*, i.e. master-detail's list pane,
+// not this alternate view). The view choice is a persisted signal
+// (web/lib/dashboardView.js), not local state, so it survives remounting
+// this page and reloading the app.
 // ============================================================
 
 async function loadInstances() {
@@ -822,7 +995,7 @@ function EmptyState() {
 // whichever single instance is currently open) — the dashboard can trigger
 // either action for any listed instance without navigating away from it.
 async function runCheck(slug) {
-  const res = await apiFetch(`/api/instance/check?slug=${encodeURIComponent(slug)}`)
+  const res = await apiFetchForInstance(slug, `/api/instance/check?slug=${encodeURIComponent(slug)}`)
   const body = await res.json()
   if (!res.ok) return `Check failed: ${body.message ?? body.error}`
   if (body.pass) return 'PASS — gate requirements met.'
@@ -831,61 +1004,154 @@ async function runCheck(slug) {
 }
 
 async function runRender(slug) {
-  const detailRes = await apiFetch(`/api/instance?slug=${encodeURIComponent(slug)}`)
+  const detailRes = await apiFetchForInstance(slug, `/api/instance?slug=${encodeURIComponent(slug)}`)
   const detail = await detailRes.json()
   if (!detailRes.ok) return `Render failed: ${detail.message ?? detail.error}`
   if (!detail.artefacts.length) return 'No artefact available to render for this stage yet.'
   const results = []
   for (const artefact of detail.artefacts) {
-    const res = await apiFetch(`/api/instance/render/${artefact.id}?slug=${encodeURIComponent(slug)}`, { method: 'POST' })
+    const res = await apiFetchForInstance(slug, `/api/instance/render/${artefact.id}?slug=${encodeURIComponent(slug)}`, { method: 'POST' })
     const body = await res.json()
     results.push(res.ok ? `Rendered ${artefact.title}` : `${artefact.title} failed: ${body.message ?? body.error}`)
   }
   return results.join(' · ')
 }
 
+// Persists the instance record's own stored `assignee` (#97) — the instance
+// detail pane's edit affordance for it, distinct from `PUT
+// /api/instance/modules/:id`'s module-level `owner` (the untouched Design
+// Authority sign-off convention). Not routed through ModuleCard's per-module
+// save flow: this is instance-scoped, not module-scoped.
+async function saveAssignee(slug, assignee) {
+  const res = await apiFetch(`/api/instance/assignee?slug=${encodeURIComponent(slug)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assignee }),
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(body.message ?? body.error ?? `Failed to save assignee (${res.status})`)
+  }
+  return body
+}
+
+// ---------- Grouping instances by workspace (#102) ----------
+// The Workspaces landing page's core grouping rule: an Azure-DevOps-backed
+// row carries a `workspace` (lib/registry.js, #102) — every instance
+// sharing that workspace's `id` groups into one row, one entry per
+// workspace, per the ticket's acceptance criteria. A local instance has no
+// `workspace` at all (Workspace is an Azure-DevOps-repo concept only,
+// #96) — it groups on its own, keyed by its own slug, so a repo (or local
+// instance) holding just one instance still renders through the exact
+// same group shape as one holding several — nothing here special-cases a
+// single-instance group.
+function groupInstancesByWorkspace(instances) {
+  const groups = new Map()
+  for (const inst of instances) {
+    const key = inst.workspace ? `workspace:${inst.workspace.id}` : `local:${inst.slug}`
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        title: inst.workspace ? inst.workspace.repository : inst.slug,
+        subtitle: inst.workspace ? `${inst.workspace.organization}/${inst.workspace.project}` : 'Local instance',
+        instances: [],
+      })
+    }
+    groups.get(key).instances.push(inst)
+  }
+  return [...groups.values()].sort((a, b) => a.title.localeCompare(b.title))
+}
+
+// The list-pane row's secondary line — deliberately the same shape whether
+// the group holds one instance or several (count · distinct definitions),
+// rather than branching into a one-off "single instance" format, so a
+// single-instance workspace is never visually singled out from a
+// multi-instance one (the ticket's own "no special-casing visible to the
+// user" acceptance criterion).
+function groupSummaryText(group) {
+  const definitions = [...new Set(group.instances.map((inst) => inst.definition))]
+  const count = group.instances.length
+  return `${count} instance${count === 1 ? '' : 's'} · ${definitions.join(', ')}`
+}
+
+// A group's dot in the list pane reflects every one of its instances being
+// complete, not just the first — a multi-instance workspace with even one
+// outstanding instance is "in progress" as a whole.
+function groupStatusClass(group) {
+  return group.instances.every((inst) => inst.status === 'complete') ? 'agreed' : 'draft'
+}
+
 // ---------- Master-detail view ----------
-function MasterDetailView({ instances }) {
+// The Workspaces landing page's default view (#102, superseding #77's
+// flat per-instance listing): the list pane shows one row per workspace
+// (groupInstancesByWorkspace above); selecting one shows every instance it
+// holds in the detail pane, each its own card with definition/assignee/
+// status and the same Check/Render/Open-editor actions the old flat list
+// offered per instance.
+function MasterDetailView({ instances, onInstancesChange }) {
   const [filter, setFilter] = useState('')
-  const [selectedSlug, setSelectedSlug] = useState(null)
-  const [detail, setDetail] = useState(null)
-  const [detailError, setDetailError] = useState(null)
-  const [actionStatus, setActionStatus] = useState('')
+  const [selectedKey, setSelectedKey] = useState(null)
+  // Keyed by instance slug (not the single shared string the old flat
+  // list used) — several instances can be in flight for the *same*
+  // selected workspace at once (one Check, one Render, one assignee save),
+  // and each must report its own status independently.
+  const [actionStatus, setActionStatus] = useState({})
+  const [assigneeDrafts, setAssigneeDrafts] = useState({})
+  const [assigneeStatus, setAssigneeStatus] = useState({})
+
+  const groups = groupInstancesByWorkspace(instances)
 
   const needle = filter.trim().toLowerCase()
   const filtered = needle
-    ? instances.filter((inst) => inst.slug.toLowerCase().includes(needle) || inst.owner.toLowerCase().includes(needle))
-    : instances
+    ? groups.filter(
+        (group) =>
+          group.title.toLowerCase().includes(needle) ||
+          group.subtitle.toLowerCase().includes(needle) ||
+          group.instances.some(
+            (inst) => inst.slug.toLowerCase().includes(needle) || inst.assignee.toLowerCase().includes(needle)
+          )
+      )
+    : groups
 
-  const effectiveSlug = filtered.some((inst) => inst.slug === selectedSlug) ? selectedSlug : (filtered[0]?.slug ?? null)
-  const selectedInstance = instances.find((inst) => inst.slug === effectiveSlug) ?? null
+  const effectiveKey = filtered.some((group) => group.key === selectedKey) ? selectedKey : (filtered[0]?.key ?? null)
+  const selectedGroup = groups.find((group) => group.key === effectiveKey) ?? null
 
+  // Resets every instance-scoped edit/action state whenever the selected
+  // workspace changes — never while it's still the same workspace (that
+  // would clobber an in-progress edit or Check/Render status on every
+  // unrelated `instances` refresh), and seeds the assignee drafts from the
+  // newly-selected workspace's own instances.
   useEffect(() => {
-    if (!effectiveSlug) {
-      setDetail(null)
-      return
-    }
-    setDetail(null)
-    setDetailError(null)
-    setActionStatus('')
-    apiFetch(`/api/instance?slug=${encodeURIComponent(effectiveSlug)}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`Failed to load "${effectiveSlug}" (${res.status})`)
-        return res.json()
-      })
-      .then(setDetail)
-      .catch((err) => setDetailError(err.message))
+    setActionStatus({})
+    setAssigneeStatus({})
+    setAssigneeDrafts(Object.fromEntries((selectedGroup?.instances ?? []).map((inst) => [inst.slug, inst.assignee ?? ''])))
     // eslint-disable-next-line
-  }, [effectiveSlug])
+  }, [effectiveKey])
 
-  async function handleCheck() {
-    setActionStatus('Checking…')
-    setActionStatus(await runCheck(effectiveSlug))
+  async function handleCheck(slug) {
+    setActionStatus((prev) => ({ ...prev, [slug]: 'Checking…' }))
+    const result = await runCheck(slug)
+    setActionStatus((prev) => ({ ...prev, [slug]: result }))
   }
 
-  async function handleRender() {
-    setActionStatus('Rendering…')
-    setActionStatus(await runRender(effectiveSlug))
+  async function handleRender(slug) {
+    setActionStatus((prev) => ({ ...prev, [slug]: 'Rendering…' }))
+    const result = await runRender(slug)
+    setActionStatus((prev) => ({ ...prev, [slug]: result }))
+  }
+
+  async function handleAssigneeSave(slug) {
+    const inst = selectedGroup?.instances.find((i) => i.slug === slug)
+    const draft = assigneeDrafts[slug] ?? ''
+    if (!inst || draft === (inst.assignee ?? '')) return
+    setAssigneeStatus((prev) => ({ ...prev, [slug]: 'Saving…' }))
+    try {
+      const saved = await saveAssignee(slug, draft)
+      setAssigneeStatus((prev) => ({ ...prev, [slug]: 'Saved.' }))
+      onInstancesChange?.((prev) => prev.map((i) => (i.slug === slug ? { ...i, assignee: saved.assignee } : i)))
+    } catch (err) {
+      setAssigneeStatus((prev) => ({ ...prev, [slug]: `Failed to save: ${err.message}` }))
+    }
   }
 
   return html`
@@ -894,56 +1160,78 @@ function MasterDetailView({ instances }) {
         <input
           class="field search"
           type="text"
-          placeholder="Filter by name, owner…"
+          placeholder="Filter by workspace, instance, assignee…"
           value=${filter}
           onInput=${(e) => setFilter(e.currentTarget.value)}
         />
         <div class="instance-list">
           ${filtered.map(
-            (inst) => html`
+            (group) => html`
               <div
-                key=${inst.slug}
-                class=${'list-item' + (inst.slug === effectiveSlug ? ' selected' : '')}
+                key=${group.key}
+                class=${'list-item' + (group.key === effectiveKey ? ' selected' : '')}
                 role="button"
                 tabindex="0"
-                onClick=${() => setSelectedSlug(inst.slug)}
+                onClick=${() => setSelectedKey(group.key)}
                 onKeyDown=${(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') setSelectedSlug(inst.slug)
+                  if (e.key === 'Enter' || e.key === ' ') setSelectedKey(group.key)
                 }}
               >
-                <span class=${'dot ' + statusStampClass(inst.status)}></span>
+                <span class=${'dot ' + groupStatusClass(group)}></span>
                 <span class="meta">
-                  <span class="name">${inst.slug}</span>
-                  <span class="def">${inst.definition} · ${inst.owner || 'unowned'}</span>
+                  <span class="name">${group.title}</span>
+                  <span class="def">${groupSummaryText(group)}</span>
                 </span>
               </div>
             `
           )}
-          ${filtered.length === 0 ? html`<p class="loading">No instances match "${filter}".</p>` : null}
+          ${filtered.length === 0 ? html`<p class="loading">No workspaces match "${filter}".</p>` : null}
         </div>
       </div>
       <div class="detail-pane">
-        ${detailError
-          ? html`<p class="load-error">Failed to load: ${detailError}</p>`
-          : !detail || !selectedInstance
-            ? html`<div class="placeholder">Select an instance to see its details.</div>`
-            : html`
-                <h2>${detail.slug}</h2>
-                <div class="detail-ledger">
-                  <div><span class="field-label">Stage</span><span class="stage">${detail.stage.title}</span></div>
-                  <div><span class="field-label">Gate</span><span class="mono">${detail.stage.gate}</span></div>
-                  <div><${StatusStamp} status=${selectedInstance.status} /></div>
-                  <div style="text-align:right;">
-                    <span class="field-label">Owner</span><span class="mono">${selectedInstance.owner || '—'}</span>
-                  </div>
-                </div>
-                <div class="detail-actions">
-                  <a class="btn primary" href="/instance/${detail.slug}">Open workspace</a>
-                  <button type="button" class="btn" onClick=${handleCheck}>Check</button>
-                  <button type="button" class="btn" onClick=${handleRender}>Render</button>
-                </div>
-                <div class="save-status">${actionStatus}</div>
-              `}
+        ${!selectedGroup
+          ? html`<div class="placeholder">Select a workspace to see its instances.</div>`
+          : html`
+              <h2>${selectedGroup.title}</h2>
+              <p class="workspace-subtitle">${selectedGroup.subtitle}</p>
+              <div class="workspace-instances">
+                ${selectedGroup.instances.map(
+                  (inst) => html`
+                    <div class="instance-card" key=${inst.slug}>
+                      <div class="instance-card-header">
+                        <span class="name">${inst.slug}</span>
+                        <span class="def">${inst.definition}</span>
+                        <${StatusStamp} status=${inst.status} />
+                      </div>
+                      <div class="instance-card-row">
+                        <span class="field-label">Assignee</span>
+                        <input
+                          class="text-field mono assignee-input"
+                          type="text"
+                          placeholder="Unassigned"
+                          value=${assigneeDrafts[inst.slug] ?? ''}
+                          onInput=${(e) => {
+                            const value = e.currentTarget.value
+                            setAssigneeDrafts((prev) => ({ ...prev, [inst.slug]: value }))
+                          }}
+                          onBlur=${() => handleAssigneeSave(inst.slug)}
+                          onKeyDown=${(e) => {
+                            if (e.key === 'Enter') e.currentTarget.blur()
+                          }}
+                        />
+                      </div>
+                      <div class="save-status assignee-save-status">${assigneeStatus[inst.slug] ?? ''}</div>
+                      <div class="detail-actions">
+                        <a class="btn primary" href="/instance/${inst.slug}">Open editor</a>
+                        <button type="button" class="btn" onClick=${() => handleCheck(inst.slug)}>Check</button>
+                        <button type="button" class="btn" onClick=${() => handleRender(inst.slug)}>Render</button>
+                      </div>
+                      <div class="save-status">${actionStatus[inst.slug] ?? ''}</div>
+                    </div>
+                  `
+                )}
+              </div>
+            `}
       </div>
     </div>
   `
@@ -959,7 +1247,7 @@ function SwimlaneChip({ instance, menuOpen, onToggleMenu, onAction }) {
       <div class="name">${instance.slug}</div>
       <div class="def">${instance.definition}</div>
       <div class="chip-foot">
-        <span class="owner">${instance.owner || 'unowned'}</span>
+        <span class="assignee">${instance.assignee || 'unassigned'}</span>
         <${StatusStamp} status=${instance.status} />
         <button
           type="button"
@@ -1088,10 +1376,11 @@ function DashboardPage() {
   return html`
     <main class="dashboard">
       <div class="dashboard-topbar">
-        <h1>Instances</h1>
+        <h1>Workspaces</h1>
         <div class="dashboard-controls">
           ${instances?.length ? html`<${ViewToggle} />` : null}
           <a class="btn small ghost" href="/setup">+ New instance</a>
+          <a class="btn small ghost" href="/settings">Settings</a>
           <button type="button" class="btn small ghost theme-toggle" onClick=${cycleTheme} title="Cycle theme">
             Theme: ${theme.value}
           </button>
@@ -1105,7 +1394,7 @@ function DashboardPage() {
             ? html`<${EmptyState} />`
             : dashboardViewMode.value === 'swimlanes'
               ? html`<${SwimlaneView} instances=${instances} />`
-              : html`<${MasterDetailView} instances=${instances} />`}
+              : html`<${MasterDetailView} instances=${instances} onInstancesChange=${setInstances} />`}
     </main>
   `
 }
@@ -1171,12 +1460,13 @@ function PatPromptModal() {
 }
 
 // ---------- App shell: preact-iso routing ----------
-// Five routes: the dashboard (#77, default/landing), the module editor per
-// instance, the instance-setup wizard (#78), and the asset library (#80).
-// `instanceData`/`loadError` above are populated regardless of which route
-// is active (the `effect()` isn't scoped to a component), so the library
-// screen never has to re-fetch instance data just to know which instance
-// it's browsing.
+// Six routes: the dashboard (#77, default/landing), the module editor per
+// instance, the instance-setup wizard (#78), the asset library (#80), and
+// the tabbed settings screen (#101, currently just its Global Defaults
+// tab). `instanceData`/`loadError` above are populated regardless of which
+// route is active (the `effect()` isn't scoped to a component), so the
+// library screen never has to re-fetch instance data just to know which
+// instance it's browsing.
 function App() {
   return html`
     <${LocationProvider}>
@@ -1184,6 +1474,7 @@ function App() {
         <${Route} path="/instance/:slug" component=${ModuleEditorPage} />
         <${Route} path="/setup" component=${SetupWizardPage} />
         <${Route} path="/assets" component=${AssetLibraryPage} />
+        <${Route} path="/settings" component=${SettingsPage} />
         <${Route} default component=${DashboardPage} />
       <//>
     <//>

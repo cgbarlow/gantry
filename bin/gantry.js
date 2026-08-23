@@ -45,8 +45,9 @@ program
   .command('new <definition> <slug>')
   .description('Create an instance')
   .option('--owner <owner>', 'owner to record in each module file\'s frontmatter')
+  .option('--assignee <assignee>', 'assignee to record on the instance record itself (#97)')
   .action((definition, slug, options) => {
-    const result = createInstance(definition, slug, { owner: options.owner })
+    const result = createInstance(definition, slug, { owner: options.owner, assignee: options.assignee })
     console.log(`Created instance "${result.slug}" (${result.definitionId}, stage: ${result.stage})`)
     console.log(`Modules: ${result.modules.join(', ')}`)
   })
