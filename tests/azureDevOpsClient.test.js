@@ -82,6 +82,27 @@ test('writeFile survives a second write to the same path (branch ref moves forwa
   })
 })
 
+// Regression test for a fake-server bug found in review: an earlier version
+// of objectIdFor (tests/helpers/fakeAzureDevOpsServer.js) end-padded a hex
+// encoding of the commit count with zeroes, which is not actually
+// collision-free — e.g. commit 1 ("1" + 39 zeroes) and commit 16 ("10" + 38
+// zeroes) produced the exact same 40-character id. That would silently
+// break the optimistic-concurrency (oldObjectId) check any real Azure
+// DevOps repo relies on, and any test asserting on a commit id's
+// uniqueness, once a fake-server session crossed 16 pushes.
+test('writeFile assigns a distinct newObjectId to every one of many pushes against the same fake server, never repeating one', async () => {
+  await withFakeAzureDevOpsServer({}, async (baseUrl) => {
+    const c = client(baseUrl)
+    const seen = new Set()
+    for (let i = 0; i < 20; i++) {
+      const result = await c.writeFile('/modules/context.md', `v${i}\n`)
+      assert.equal(seen.has(result.push.refUpdates[0].newObjectId), false, `newObjectId repeated at push ${i}`)
+      seen.add(result.push.refUpdates[0].newObjectId)
+    }
+    assert.equal(seen.size, 20)
+  })
+})
+
 test('writeFile with contentType: "base64encoded" pushes binary content (e.g. a rendered .docx), not raw text', async () => {
   await withFakeAzureDevOpsServer({}, async (baseUrl) => {
     const c = client(baseUrl)

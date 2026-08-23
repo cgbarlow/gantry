@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -8,6 +8,8 @@ import { renderArtefact } from '../lib/render.js'
 import { createAsset } from '../lib/assets.js'
 import { loadDefinition } from '../lib/definition.js'
 import { readModule, writeModule } from '../lib/instance.js'
+import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
+import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
 // A minimal real 1x1 red PNG, base64-encoded — small enough to inline, real
 // enough to round-trip through the same file-write/render path a genuine
@@ -175,4 +177,163 @@ test('an asset:<id> reference (#80) inserted into a module field compiles into a
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }
+})
+
+// --- Rendered-output commit-hash/date footer (#98) ------------------------
+//
+// Every rendered artefact — md and docx, across every definition, not just
+// "design" — gets a footer naming the short commit hash and date of the
+// source it was rendered from. For a local instance that's this repo's own
+// current git HEAD; for an Azure-DevOps-backed instance it's read off the
+// response Azure DevOps already returns when the artefact is pushed.
+
+test('a local render\'s footer names this repo\'s actual current HEAD commit hash and date', () => {
+  const expectedHash = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim()
+  const expectedDate = execFileSync('git', ['log', '-1', '--format=%cs'], { encoding: 'utf8' }).trim()
+
+  const result = renderArtefact('examples', 'soap', { dryRun: true })
+  assert.match(
+    result.markdown,
+    new RegExp(`Rendered from commit \`${expectedHash}\` \\(${expectedDate}\\)\\.`)
+  )
+})
+
+test('the footer also survives the pandoc conversion into the rendered .docx, not just the intermediate markdown', () => {
+  const result = renderArtefact('examples', 'soap')
+  const roundTrip = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown', result.docxPath], {
+    encoding: 'utf8',
+  })
+  assert.match(roundTrip, /Rendered from commit `[0-9a-f]+`/)
+})
+
+test('a definition other than "design" also gets the footer — it is not special-cased to one definition\'s templates', () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'gantry-definitions-'))
+  try {
+    cpSync('definitions/design', join(definitionsDir, 'design'), { recursive: true })
+    cpSync(join(definitionsDir, 'design'), join(definitionsDir, 'another-definition'), { recursive: true })
+    // Give the copy a distinct id, matching loadDefinition's "directory must
+    // match id" requirement — otherwise it would just be "design" again
+    // under a different path, not a genuinely distinct definition.
+    const definitionYamlPath = join(definitionsDir, 'another-definition', 'definition.yaml')
+    const definitionYaml = readFileSync(definitionYamlPath, 'utf8').replace(/^id: design$/m, 'id: another-definition')
+    writeFileSync(definitionYamlPath, definitionYaml)
+
+    cpSync('instances/examples', join(instancesDir, 'other-instance'), { recursive: true })
+    const instanceYamlPath = join(instancesDir, 'other-instance', 'instance.yaml')
+    const instanceYaml = readFileSync(instanceYamlPath, 'utf8').replace(/^definition: design$/m, 'definition: another-definition')
+    writeFileSync(instanceYamlPath, instanceYaml)
+
+    const result = renderArtefact('other-instance', 'soap', { dryRun: true, instancesDir, definitionsDir })
+    assert.match(result.markdown, /Rendered from commit `[0-9a-f]+` \(\d{4}-\d{2}-\d{2}\)\./)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+    rmSync(definitionsDir, { recursive: true, force: true })
+  }
+})
+
+// Regression test for a review finding: rendering a local instance never
+// used to depend on `git` at all — a local render against a directory with
+// no git checkout (a missing/uninitialised repo) now fails, but should fail
+// with one clear, actionable error rather than git's own raw stderr.
+test('a local render against a directory with no git checkout fails with one clear error, not a raw git stderr', () => {
+  const notARepoDir = mkdtempSync(join(tmpdir(), 'gantry-not-a-git-repo-'))
+  try {
+    assert.throws(() => renderArtefact('examples', 'soap', { dryRun: true, repoDir: notARepoDir }), {
+      message: /Cannot determine the local git commit for this render's footer/,
+    })
+  } finally {
+    rmSync(notARepoDir, { recursive: true, force: true })
+  }
+})
+
+const ORGANIZATION = 'fake-org'
+const PROJECT = 'fake-project'
+const REPOSITORY = 'fake-repo'
+const VALID_PAT = 'valid-test-pat'
+
+// Seeds a fake Azure DevOps repo with the exact same instance/module data
+// as the local "examples" fixture, so the Azure-DevOps-backed render tests
+// below exercise the real "soap" template against real content, the same
+// way the local-path tests above do, rather than a bespoke minimal fixture.
+function seedExamplesAzureDevOpsFiles() {
+  return {
+    '/gantry-workspace/examples/instance.yaml': readFileSync('instances/examples/instance.yaml', 'utf8'),
+    '/gantry-workspace/examples/modules/context.md': readFileSync('instances/examples/modules/context.md', 'utf8'),
+    '/gantry-workspace/examples/modules/solution-definition.md': readFileSync('instances/examples/modules/solution-definition.md', 'utf8'),
+    '/gantry-workspace/examples/modules/team-and-estimates.md': readFileSync('instances/examples/modules/team-and-estimates.md', 'utf8'),
+  }
+}
+
+test('a render against Azure DevOps carries a footer whose commit hash/date come from the push response, and the same footer ends up in what is actually stored there', async () => {
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: seedExamplesAzureDevOpsFiles() },
+    async (baseUrl) => {
+      const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl }
+      const result = await renderArtefact('examples', 'soap', { azureDevOps })
+
+      // The function's own return value reports the commit its footer
+      // names — a real (fake-server-assigned) commit hash/date, not a
+      // placeholder.
+      assert.match(result.commit.hash, /^[0-9a-f]{7}$/)
+      assert.match(result.commit.date, /^\d{4}-\d{2}-\d{2}$/)
+      assert.match(
+        result.markdown,
+        new RegExp(`Rendered from commit \`${result.commit.hash}\` \\(${result.commit.date}\\)\\.`)
+      )
+
+      // What is actually sitting in the (fake) Azure DevOps repo at
+      // out/soap.docx right now — not just the local scratch copy — also
+      // carries that exact same footer.
+      const client = createAzureDevOpsClient(azureDevOps)
+      const pushedContent = await client.getFileContent(result.azureDevOpsPath)
+      const pushedMarkdown = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown'], {
+        input: Buffer.from(pushedContent, 'base64'),
+        encoding: 'utf8',
+      })
+      assert.match(pushedMarkdown, new RegExp(`Rendered from commit \`${result.commit.hash}\` \\(${result.commit.date}\\)\\.`))
+      assert.match(pushedMarkdown, /Solution on a Page/)
+    }
+  )
+})
+
+test('a dry run against Azure DevOps pushes nothing and has no commit-hash footer — there is no push response to source one from', async () => {
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: seedExamplesAzureDevOpsFiles() },
+    async (baseUrl) => {
+      const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl }
+      const result = await renderArtefact('examples', 'soap', { azureDevOps, dryRun: true })
+
+      assert.equal(result.dryRun, true)
+      assert.equal(result.commit, undefined)
+      assert.doesNotMatch(result.markdown, /Rendered from commit/)
+    }
+  )
+})
+
+// Regression test for a review finding: the ADO-backed render path pushes
+// twice (a footer-less "draft", then the footer-carrying final version) —
+// see renderArtefactFromAzureDevOps's doc comment for why. If the second
+// push fails, the render must surface a clear error naming the commit the
+// (footer-less) first push already landed as, not a bare network error that
+// leaves a reader thinking nothing was written at all.
+test('if the follow-up push that adds the footer fails, the error names the commit the footer-less content already landed as', async () => {
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      files: seedExamplesAzureDevOpsFiles(),
+      // The first (draft) push succeeds; the second (footer) push is the
+      // one that then fails.
+      failAfterPushes: 1,
+    },
+    async (baseUrl) => {
+      const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl }
+      await assert.rejects(() => renderArtefact('examples', 'soap', { azureDevOps }), {
+        message: /pushed it to Azure DevOps as commit [0-9a-f]{7}, but the follow-up push that adds the commit-hash\/date footer failed/,
+      })
+    }
+  )
 })
