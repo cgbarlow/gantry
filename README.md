@@ -155,10 +155,12 @@ gantry/
 │       │   └── solution-definition.md
 │       └── out/                  # rendered artefacts (gitignored by default)
 ├── lib/                          # the engine: definition/instance loading, render, status, the web server
-│   ├── server.js                 # HTTP routes, incl. the Azure DevOps repo-check/adopt endpoints
+│   ├── server.js                 # HTTP routes, incl. the Azure DevOps repo-check/adopt/work-item endpoints
 │   ├── instanceRegistry.js       # slug -> workspace/location lookup/registration (the registry above)
 │   ├── workspaceRegistry.js      # Azure DevOps org/project/repository entities instances reference
-│   ├── azureDevOpsClient.js      # PAT-authenticated Azure DevOps REST client
+│   ├── azureDevOpsClient.js      # PAT-authenticated Azure DevOps REST client (Git)
+│   ├── azureDevOpsWorkItemsClient.js  # PAT-authenticated Azure DevOps REST client (Work Items)
+│   ├── workItemLink.js           # link an instance to a work item; confirmed gate-pass state sync
 │   ├── repoCheck.js              # "does this Azure DevOps repo already hold instance data", incl.
 │   │                             # the legacy-root-to-gantry-workspace/<slug>/ migration routine
 │   └── credential.js             # extracts a forwarded PAT from a request
@@ -208,6 +210,12 @@ The **Settings screen** (`/settings`, linked from the dashboard and the module e
 
 Once registered, a local and an Azure DevOps-backed instance are indistinguishable from the dashboard's point of view — same listing, same module editor, same render command. Where each one's data actually lives is tracked server-side across two registry files (`instances/instance-registry.json`: slug -> workspace; `instances/workspace-registry.json`: workspace -> organization/project/repository/owner/ticketing-system — both gitignored, application state, not source), not in any client-visible config.
 
+## Linking an instance to an Azure DevOps work item
+
+Optionally, and independently of where an instance's own data lives (local or Azure DevOps-backed — the two are unrelated), an instance can be linked to a parent Azure DevOps work item. The module editor's **Azure DevOps work item** panel (below Render) offers a small form — organization, project, parent work item id, and an optional work item type (defaulting to `Task`, a safe default across every stock process template; override it to match your organization's own template).
+
+Linking creates one child work item per stage in the instance's definition underneath that parent, in one step. From then on, the panel's **Check gate & sync work item** action checks the currently-viewed stage's gate and, only if it passes, opens a confirmation dialog before pushing a new state to that stage's own work item — declining the confirmation leaves the work item's state untouched. The state actually pushed is drawn from whatever states the configured work item type genuinely supports in your project (via its own `getWorkItemTypeStates` lookup), never a fixed list Gantry invents — see `docs/adr/0009-azure-devops-work-item-linking.md` for the full mapping rationale.
+
 ## Your first instance
 
 ```bash
@@ -230,7 +238,7 @@ gantry render my-initiative soap                # produce the artefact
 |---|---|---|
 | `gantry definitions` | List definitions available in this repo | Not yet implemented |
 | `gantry instances [--json]` | List instances available in this repo, with definition and current stage | Implemented |
-| `gantry new <definition> <slug> [--owner <name>]` | Create an instance | Implemented |
+| `gantry new <definition> <slug> [--owner <name>] [--assignee <name>]` | Create an instance — `--owner` seeds each first-stage module file's own frontmatter `owner`; `--assignee` sets the instance record's own stored assignee | Implemented |
 | `gantry status <slug> [--json]` | Current stage, module completeness, what's outstanding | Implemented |
 | `gantry check <slug> [--gate <id>] [--json]` | Validate an instance against a gate's requirements — any gate, not just the instance's current stage | Implemented |
 | `gantry render <slug> <artefact> [--dry-run]` | Render an artefact to `out/` | Implemented |

@@ -4,7 +4,15 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { loadDefinition } from '../lib/definition.js'
-import { createInstance, readInstance, readModule, writeModule, parseModuleFile, listInstances } from '../lib/instance.js'
+import {
+  createInstance,
+  readInstance,
+  readModule,
+  writeModule,
+  parseModuleFile,
+  listInstances,
+  updateInstanceAssignee,
+} from '../lib/instance.js'
 import { AzureDevOpsAuthenticationError, AzureDevOpsNotFoundError, createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
@@ -40,6 +48,117 @@ test('creates a design instance with blank Shape-stage module files', () => {
     assert.match(raw, /## Affected domains/)
     assert.match(raw, /## Explicitly out of scope/)
   })
+})
+
+// --- Instance-level assignee (#97) ----------------------------------------
+//
+// An explicit, stored field on the instance record itself — replacing the
+// old "derive an owner by scanning the current stage's module frontmatter"
+// behaviour (now lib/registry.js/lib/repoCheck.js). Distinct from
+// `options.owner` above, which still only seeds each first-stage module
+// file's own frontmatter `owner` — the separate, untouched Design Authority
+// sign-off convention.
+
+test('createInstance defaults the instance record\'s assignee to empty', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    const instance = readInstance('my-initiative', { instancesDir })
+    assert.equal(instance.assignee, '')
+  })
+})
+
+test('createInstance records an explicitly given assignee on the instance record, independently of options.owner\'s module-frontmatter seeding', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir, assignee: 'c.barlow', owner: 'a-different-module-owner' })
+    const instance = readInstance('my-initiative', { instancesDir })
+    assert.equal(instance.assignee, 'c.barlow')
+
+    const contextPath = join(instancesDir, 'my-initiative', 'modules', 'context.md')
+    assert.match(readFileSync(contextPath, 'utf8'), /owner: a-different-module-owner/)
+  })
+})
+
+test('a hand-written instance.yaml that predates #97 (no assignee field at all) reads back with assignee defaulting to \'\', not undefined', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    writeFileSync(
+      join(instancesDir, 'my-initiative', 'instance.yaml'),
+      'definition: design\nslug: my-initiative\nstage: shape\n'
+    )
+    const instance = readInstance('my-initiative', { instancesDir })
+    assert.equal(instance.assignee, '')
+  })
+})
+
+// Regression test: `assignee`'s '' default must not paper over a genuinely
+// blank/malformed instance.yaml. `yaml.parse('')` returns `null` (not an
+// object), and naively spreading it (`{ assignee: '', ...null }`) would
+// silently turn that `null` into `{ assignee: '' }` — masking a read that
+// should fail immediately (the same way it always has) behind a
+// later, less clear error wherever the caller next uses the "successfully"
+// read instance (e.g. `loadDefinition` rejecting an `undefined` id).
+test('readInstance returns null (not a default-filled object) for a blank instance.yaml, the same as before #97', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    writeFileSync(join(instancesDir, 'my-initiative', 'instance.yaml'), '')
+    assert.equal(readInstance('my-initiative', { instancesDir }), null)
+  })
+})
+
+test('updateInstanceAssignee sets the stored assignee and preserves every other instance.yaml field', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    const updated = updateInstanceAssignee('my-initiative', 'c.barlow', { instancesDir })
+    assert.equal(updated.assignee, 'c.barlow')
+    assert.equal(updated.definition, 'design')
+    assert.equal(updated.stage, 'shape')
+
+    const instance = readInstance('my-initiative', { instancesDir })
+    assert.equal(instance.assignee, 'c.barlow')
+    assert.equal(instance.stage, 'shape')
+  })
+})
+
+test('updateInstanceAssignee can clear a previously set assignee back to \'\'', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir, assignee: 'c.barlow' })
+    updateInstanceAssignee('my-initiative', '', { instancesDir })
+    assert.equal(readInstance('my-initiative', { instancesDir }).assignee, '')
+  })
+})
+
+test('assignee stays stable across a stage change — updating stage does not touch or clear it', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir, assignee: 'c.barlow' })
+    // No real "advance a stage" API exists yet (#97's own investigation
+    // found none) — this simulates a stage transition the way one would
+    // actually land today, a direct instance.yaml edit, to prove assignee
+    // isn't wiped out or recomputed as a side effect of it.
+    writeFileSync(
+      join(instancesDir, 'my-initiative', 'instance.yaml'),
+      'definition: design\nslug: my-initiative\nstage: hld-define\nassignee: c.barlow\n'
+    )
+    const instance = readInstance('my-initiative', { instancesDir })
+    assert.equal(instance.stage, 'hld-define')
+    assert.equal(instance.assignee, 'c.barlow')
+  })
+})
+
+test('updateInstanceAssignee against Azure DevOps updates instance.yaml there, preserving its azureDevOps location field', async () => {
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT },
+    async (baseUrl) => {
+      const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl }
+      await createInstance('design', 'my-initiative', { azureDevOps })
+
+      const updated = await updateInstanceAssignee('my-initiative', 'c.barlow', { azureDevOps })
+      assert.equal(updated.assignee, 'c.barlow')
+      assert.deepEqual(updated.azureDevOps, { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY })
+
+      const instance = await readInstance('my-initiative', { azureDevOps })
+      assert.equal(instance.assignee, 'c.barlow')
+    }
+  )
 })
 
 test('listInstances lists every instance, sorted by slug, with definition, stage, and which stages have data', () => {

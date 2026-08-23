@@ -6,14 +6,19 @@ import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { createServer } from '../lib/server.js'
 import { createInstance } from '../lib/instance.js'
+import { registerInstance } from '../lib/instanceRegistry.js'
+import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
-// Browser smoke test for the instance dashboard (#77) — the landing screen
-// at `/`, backed by the multi-instance registry (`GET /api/instances`, #76).
-// Mirrors tests/module-editor.playwright.test.js's pattern: a real server,
-// a real Chromium page, asserting no console/page errors alongside the
-// ticket's acceptance criteria — master-detail default, a working toggle
-// to stage swimlanes, the view choice persisting across a reload (via
-// localStorage), and the empty state's "new instance" call to action.
+// Browser smoke test for the Workspaces landing page (#77, restructured by
+// #102) — the landing screen at `/`, backed by the multi-instance registry
+// (`GET /api/instances`, #76). Mirrors tests/module-editor.playwright.test.js's
+// pattern: a real server, a real Chromium page, asserting no console/page
+// errors alongside the ticket's acceptance criteria — the "Workspaces"
+// title, master-detail grouping instances by workspace (one row per
+// workspace, a multi-instance workspace's detail column listing every
+// instance it holds), a working toggle to stage swimlanes, the view choice
+// persisting across a reload (via localStorage), and the empty state's
+// "new instance" call to action.
 function withRunningServer(options, fn) {
   return new Promise((resolve, reject) => {
     const server = createServer(options)
@@ -49,10 +54,15 @@ function withPage(fn) {
   }
 }
 
-test('dashboard: master-detail is the default view, lists instances, and its detail pane shows stage/gate/status/owner', async () => {
+test('dashboard: titled "Workspaces", master-detail is the default view, and its detail column shows each instance\'s definition/status/assignee with Check/Render reachable', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    createInstance('design', 'alpha-initiative', { instancesDir, owner: 'c.barlow' })
+    // Local instances have no workspace (#96 — Workspace is an
+    // Azure-DevOps-repo concept only), so each groups on its own, one row
+    // per instance — the single-instance case the ticket's own "a
+    // workspace with only one instance still displays correctly" criterion
+    // describes.
+    createInstance('design', 'alpha-initiative', { instancesDir, assignee: 'c.barlow' })
     createInstance('design', 'zebra-initiative', { instancesDir })
 
     await withRunningServer(
@@ -61,18 +71,117 @@ test('dashboard: master-detail is the default view, lists instances, and its det
         await page.goto(base)
         await page.waitForSelector('.master-detail', { timeout: 10_000 })
 
-        assert.equal(await page.locator('.dashboard-topbar h1').textContent(), 'Instances')
+        assert.equal(await page.locator('.dashboard-topbar h1').textContent(), 'Workspaces')
         assert.equal(await page.locator('.instance-list .list-item').count(), 2)
         assert.equal(await page.locator('.view-toggle button.active').textContent(), 'Master-detail')
 
-        // First instance (sorted: alpha-initiative) is selected by default.
-        await page.waitForSelector('.detail-ledger', { timeout: 10_000 })
+        // First group (sorted by title: alpha-initiative) is selected by
+        // default — its one instance shows up as its own card in the
+        // detail column.
+        await page.waitForSelector('.instance-card', { timeout: 10_000 })
         assert.equal(await page.locator('.detail-pane h2').textContent(), 'alpha-initiative')
-        assert.match(await page.locator('.detail-ledger .stage').textContent(), /Shape/)
-        assert.match(await page.locator('.detail-ledger').textContent(), /business-case/)
-        assert.match(await page.locator('.detail-ledger').textContent(), /c\.barlow/)
+        assert.equal(await page.locator('.instance-card').count(), 1)
+        assert.equal(await page.locator('.instance-card .name').textContent(), 'alpha-initiative')
+        assert.match(await page.locator('.instance-card .def').textContent(), /design/)
+        assert.equal(await page.locator('.assignee-input').inputValue(), 'c.barlow')
         assert.ok(await page.getByRole('button', { name: 'Check' }).isVisible())
         assert.ok(await page.getByRole('button', { name: 'Render' }).isVisible())
+        assert.ok(await page.getByRole('link', { name: 'Open editor' }).isVisible())
+      })
+    )
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('dashboard: selecting a workspace with multiple instances shows every one of them in the detail column, each its own card', async () => {
+  const ORGANIZATION = 'fake-org'
+  const PROJECT = 'fake-project'
+  const REPOSITORY = 'fake-repo'
+  const VALID_PAT = 'valid-test-pat'
+  const SEED_FILES = {
+    '/gantry-workspace/instance-one/instance.yaml': 'definition: design\nstage: shape\nassignee: c.barlow\n',
+    '/gantry-workspace/instance-two/instance.yaml': 'definition: design\nstage: shape\nassignee: c.barlow\n',
+  }
+
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: SEED_FILES },
+    async (adoBaseUrl) => {
+      const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+      try {
+        // Two slugs registered directly against the exact same Azure DevOps
+        // location share one auto-created workspace (lib/workspaceRegistry.js,
+        // #96 — verified independently in tests/serverWorkspaces.test.js),
+        // each holding its own data under #100's gantry-workspace/<slug>/
+        // directory layout; registered directly here (rather than through
+        // two real, distinct Azure DevOps repos) for test simplicity.
+        const location = { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl }
+        registerInstance('instance-one', location, { instancesDir })
+        registerInstance('instance-two', location, { instancesDir })
+
+        await withRunningServer(
+          { instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true },
+          withPage(async (page, base) => {
+            // A PAT is required to enrich an Azure-DevOps-backed row (see
+            // lib/registry.js's buildAzureDevOpsRow) — seeded into
+            // localStorage before navigating, mirroring
+            // tests/patPrompt.playwright.test.js's own technique, so
+            // GET /api/instances attaches it from the very first request.
+            await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+            await page.goto(base)
+            await page.waitForSelector('.master-detail', { timeout: 10_000 })
+
+            // One row for the shared workspace, not two.
+            assert.equal(await page.locator('.instance-list .list-item').count(), 1)
+            assert.equal(await page.locator('.instance-list .list-item .name').textContent(), REPOSITORY)
+            assert.match(await page.locator('.instance-list .list-item .def').textContent(), /2 instances/)
+
+            await page.locator('.instance-list .list-item').click()
+            await page.waitForSelector('.instance-card', { timeout: 10_000 })
+            assert.equal(await page.locator('.detail-pane h2').textContent(), REPOSITORY)
+            assert.match(await page.locator('.workspace-subtitle').textContent(), new RegExp(`${ORGANIZATION}/${PROJECT}`))
+
+            // Both instances, each its own card, each independently
+            // showing definition/assignee/status and its own Check/Render/
+            // Open-editor actions.
+            const cards = page.locator('.instance-card')
+            assert.equal(await cards.count(), 2)
+            const names = await page.locator('.instance-card .name').allTextContents()
+            assert.deepEqual([...names].sort(), ['instance-one', 'instance-two'])
+            assert.equal(await page.locator('.instance-card .assignee-input').count(), 2)
+            assert.equal(await page.locator('.instance-card').first().locator('.assignee-input').inputValue(), 'c.barlow')
+            assert.equal(await page.getByRole('button', { name: 'Check' }).count(), 2)
+            assert.equal(await page.getByRole('button', { name: 'Render' }).count(), 2)
+            assert.equal(await page.getByRole('link', { name: 'Open editor' }).count(), 2)
+          })
+        )
+      } finally {
+        rmSync(instancesDir, { recursive: true, force: true })
+      }
+    }
+  )
+})
+
+test('dashboard: editing an instance card\'s assignee field saves it, and it survives a reload', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'alpha-initiative', { instancesDir })
+
+    await withRunningServer(
+      { instancesDir },
+      withPage(async (page, base) => {
+        await page.goto(base)
+        await page.waitForSelector('.instance-card', { timeout: 10_000 })
+
+        assert.equal(await page.locator('.assignee-input').inputValue(), '')
+
+        await page.locator('.assignee-input').fill('j.smith')
+        await page.locator('.assignee-input').press('Enter')
+        await page.waitForFunction(() => document.querySelector('.assignee-save-status')?.textContent?.includes('Saved.'))
+
+        await page.reload()
+        await page.waitForSelector('.instance-card', { timeout: 10_000 })
+        assert.equal(await page.locator('.assignee-input').inputValue(), 'j.smith')
       })
     )
   } finally {

@@ -169,7 +169,7 @@ main#modules, .stage-actions, .load-error, .loading {
 /*
  * `.btn` styles any `<button class="btn">` or `<a class="btn">` alike —
  * the instance dashboard (#77) uses real `<a>` navigation (e.g. "Open
- * workspace", "+ New instance") so preact-iso's anchor-click interception
+ * editor", "+ New instance") so preact-iso's anchor-click interception
  * handles it as client-side routing, not a `<button onClick>` that would
  * need its own manual `route()` call to the same effect.
  */
@@ -218,6 +218,11 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .artefacts { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 32px; }
 .artefacts h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }
+
+.work-item-panel { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 32px; }
+.work-item-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }
+.work-item-panel .link-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
+.work-item-panel .link-form .text-field { max-width: 220px; }
 
 .field { margin-top: 20px; }
 .field label { font-family: var(--font-display); font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px; }
@@ -327,24 +332,30 @@ main.dashboard {
 .master-detail .list-item .meta .name { font-family: var(--font-display); font-weight: 600; font-size: 14px; }
 .master-detail .list-item .meta .def { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
 .master-detail .detail-pane { padding: 28px; }
-.master-detail .detail-pane h2 { font-family: var(--font-display); font-weight: 600; font-size: 20px; margin: 0 0 16px; }
-.master-detail .detail-ledger {
-  display: grid;
-  grid-template-columns: auto auto auto 1fr;
-  gap: 24px;
-  align-items: center;
+.master-detail .detail-pane h2 { font-family: var(--font-display); font-weight: 600; font-size: 20px; margin: 0 0 4px; }
+.master-detail .workspace-subtitle { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); margin: 0 0 20px; }
+.instance-card .field-label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 2px; }
+.master-detail .detail-actions { display: flex; gap: 10px; }
+.master-detail .placeholder { color: var(--text-muted); text-align: center; padding: 80px 20px; }
+
+/*
+ * One card per instance under the selected workspace (#102) — replaces
+ * the single-instance `.detail-ledger` the old flat dashboard showed:
+ * a workspace can hold several instances at once, so the detail pane
+ * lists one of these per instance rather than one ledger for "the"
+ * selected instance.
+ */
+.workspace-instances { display: flex; flex-direction: column; gap: 16px; }
+.instance-card {
   padding: 16px 20px;
   background: var(--bg-raised);
   border: var(--border-strong) solid var(--line-strong);
   border-radius: var(--radius);
-  font-family: var(--font-mono);
-  font-size: 13px;
-  margin-bottom: 20px;
 }
-.detail-ledger .field-label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 2px; }
-.master-detail .detail-ledger .stage { font-family: var(--font-display); font-weight: 600; font-size: 16px; }
-.master-detail .detail-actions { display: flex; gap: 10px; }
-.master-detail .placeholder { color: var(--text-muted); text-align: center; padding: 80px 20px; }
+.instance-card-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.instance-card-header .name { font-family: var(--font-display); font-weight: 600; font-size: 16px; }
+.instance-card-header .def { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+.instance-card-row { margin-bottom: 4px; }
 
 /* ---------- Stage swimlanes ---------- */
 .swimlane-group + .swimlane-group { margin-top: 32px; }
@@ -360,7 +371,7 @@ main.dashboard {
 .chip .name { font-family: var(--font-display); font-weight: 600; font-size: 13px; }
 .chip .def { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); margin: 3px 0 6px; }
 .chip .chip-foot { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
-.chip .owner { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+.chip .assignee { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
 .chip .menu-btn { line-height: 1; }
 .chip .menu {
   display: none;
