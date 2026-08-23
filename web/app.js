@@ -9,7 +9,7 @@
 // through a single re-render function.
 import { html, render } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { signal, effect } from '@preact/signals'
+import { signal, effect, batch } from '@preact/signals'
 import { LocationProvider, Router, Route } from 'preact-iso'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState, Compartment } from '@codemirror/state'
@@ -663,7 +663,6 @@ function ViewModeToolbar() {
           `
         )}
       </div>
-      <a class="btn small" href="/assets">View asset library</a>
     </div>
   `
 }
@@ -719,12 +718,23 @@ function AppHeader({ instance }) {
 // e.g. following an "Open workspace" link from one instance straight to
 // another without an intervening full page load — clearing the previous
 // instance's stale data first so it's never shown against the new slug.
+// `batch()` matters here: without it, `currentSlug.value = slug` alone
+// fires the instance-loading effect below (it's already subscribed to
+// `currentSlug`) using whatever `viewedStage` was still left over from the
+// instance just navigated away from — a stage that may not even be this
+// new instance's current one — before the very next line resets it. That
+// fires a real, wasted request for the wrong stage, whose response can
+// race the correct one. Batching applies all four writes as one update, so
+// the effect runs exactly once, with the new slug and `viewedStage: null`
+// together.
 function ModuleEditorPage({ slug }) {
   useEffect(() => {
-    currentSlug.value = slug
-    viewedStage.value = null
-    instanceData.value = null
-    loadError.value = null
+    batch(() => {
+      currentSlug.value = slug
+      viewedStage.value = null
+      instanceData.value = null
+      loadError.value = null
+    })
   }, [slug])
 
   const instance = instanceData.value

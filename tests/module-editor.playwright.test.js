@@ -278,8 +278,10 @@ test('inserting an asset (upload, then choose-existing) renders a real thumbnail
         await page.waitForSelector('text=Saved', { timeout: 5_000 })
 
         // Asset library screen: the inserted asset shows USED IN >= 1;
-        // uploading one more, never referenced, shows UNUSED.
-        await page.getByRole('link', { name: 'View asset library' }).click()
+        // uploading one more, never referenced, shows UNUSED. Navigated to
+        // directly — the toolbar's "View asset library" link was removed as
+        // redundant once assets are insertable inline from the editor.
+        await page.goto(`${base}/assets`)
         await page.waitForSelector('.asset-library', { timeout: 10_000 })
         const usedCard = page.locator('.lib-grid .card', { hasText: 'eligibility-flow.png' })
         await usedCard.waitFor({ timeout: 5_000 })
