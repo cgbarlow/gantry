@@ -46,7 +46,7 @@ Git is the audit trail. Who changed what, when, and why is a `git log`, not a ve
 | **Gate** | The decision point a stage feeds. Gates declare which artefacts and which modules must be complete to pass. |
 | **Module** | The atomic unit of content — a single, self-contained piece of the process (context, options, non-functional requirements, security posture). Modules are the source of truth. |
 | **Instance** | One run of a definition against one initiative. A folder of module files. |
-| **Artefact** | A rendered output. A document, a page, a summary. Generated, never hand-edited. |
+| **Artefact** | A rendered output. A document, a page, a summary. Generated, never hand-edited. Every artefact, `.md` and `.docx`, ends with a footer naming a short commit hash and date it was rendered from — the current local `HEAD` for a local instance, or (for an Azure DevOps-backed one) the commit its content was pushed as, one commit behind the file's own latest history entry, since a commit can't name its own hash — so a document can always be traced back to close to the exact version that produced it. |
 
 The key rule: **artefacts are derived, modules are authored.** If you find yourself editing a rendered artefact, something is wrong with the module spec.
 

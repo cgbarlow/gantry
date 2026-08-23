@@ -1,7 +1,20 @@
 import { createServer } from 'node:http'
 
+// n's hex digits, zero-padded to a *fixed* width (7) and placed at the
+// *front* of the 40-character id, followed by a fixed run of zeroes — not
+// simply end-padded ("n.toString(16).padEnd(40, '0')"), which is not
+// actually collision-free: end-padding drops any distinction between how
+// many significant hex digits n has, so e.g. objectIdFor(1) ("1" + 39
+// zeroes) and objectIdFor(16) ("10" + 38 zeroes) produce the exact same
+// 40-character string. Fixing the width of the leading hex digits before
+// the zero-fill avoids that collision for any n below 16^7 — far more
+// pushes than any test here performs — while still keeping distinct commit
+// numbers distinguishable in their first few characters (e.g.
+// objectIdFor(1) -> "0000001...", objectIdFor(16) -> "0000010..."), which
+// tests asserting on a render footer's short (first-N-character) commit
+// hash (#98) need.
 function objectIdFor(n) {
-  return String(n).padStart(40, '0')
+  return n.toString(16).padStart(7, '0') + '0'.repeat(33)
 }
 
 /**
@@ -93,9 +106,23 @@ export function createFakeAzureDevOpsServer({ organization, project, repository,
       commitCount += 1
       pushesMade += 1
       currentObjectId = objectIdFor(commitCount)
+      // A real push response's `commits[]` entries carry full commit
+      // metadata (author/committer name+date, not just the commitId) —
+      // this is what lib/render.js's Azure-DevOps-backed render path (#98)
+      // reads its footer's commit hash/date from, rather than a separate
+      // call, so the fake mirrors that shape rather than the bare
+      // `{ commitId }` a caller uninterested in it might expect.
+      const now = new Date().toISOString()
       return json(201, {
         pushId: commitCount,
+        date: now,
         refUpdates: [{ name: refUpdate.name, newObjectId: currentObjectId }],
+        commits: push.commits.map((commit) => ({
+          commitId: currentObjectId,
+          comment: commit.comment,
+          author: { name: 'Fake Pusher', date: now },
+          committer: { name: 'Fake Pusher', date: now },
+        })),
       })
     }
 
