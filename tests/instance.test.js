@@ -263,6 +263,78 @@ test('writeModule is the exact inverse of readModule', () => {
   })
 })
 
+// The editor's save payload (#132): `layout` carries the document sequence —
+// including a custom Section inserted between two defined fields — and
+// writeModule must replay it exactly, so the section stays below its
+// neighbour across save/reload instead of sinking to the end of the file.
+test('writeModule replays a supplied layout exactly, preserving a custom Section interleaved between defined fields', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    const definition = loadDefinition('design')
+
+    writeModule(
+      definition,
+      'my-initiative',
+      'context',
+      {
+        status: 'draft',
+        owner: '',
+        fields: {
+          driver: 'A new law requires this by June.',
+          'affected-domains': ['Payments'],
+          'out-of-scope': 'Nothing yet.',
+        },
+        layout: [
+          { field: 'driver' },
+          { custom: { id: 'custom:risks-we-carry', title: 'Risks we carry', value: 'The June deadline.' } },
+          { field: 'affected-domains' },
+          { field: 'out-of-scope' },
+        ],
+      },
+      { instancesDir }
+    )
+
+    // On disk: the custom block sits between Business driver and Affected domains, exactly where it was inserted.
+    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
+    assert.ok(stored.indexOf('## Risks we carry') > stored.indexOf('## Business driver'))
+    assert.ok(stored.indexOf('## Risks we carry') < stored.indexOf('## Affected domains'))
+
+    // And reading it back yields the same interleaved layout — the round-trip is stable.
+    const data = readModule(definition, 'my-initiative', 'context', { instancesDir })
+    assert.deepEqual(data.customFields, [
+      { id: 'custom:risks-we-carry', title: 'Risks we carry', value: 'The June deadline.' },
+    ])
+    assert.deepEqual(data.layout, [
+      { field: 'driver' },
+      { custom: { id: 'custom:risks-we-carry', title: 'Risks we carry', value: 'The June deadline.' } },
+      { field: 'affected-domains' },
+      { field: 'out-of-scope' },
+    ])
+  })
+})
+
+// Every caller that predates #132 supplies no layout; their output must stay byte-for-byte what it always was.
+test('writeModule without a layout still emits defined-field sections in definition order only', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    const definition = loadDefinition('design')
+
+    writeModule(
+      definition,
+      'my-initiative',
+      'context',
+      { status: 'review', owner: '', fields: { driver: 'Because.', 'affected-domains': [], 'out-of-scope': '' } },
+      { instancesDir }
+    )
+
+    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
+    assert.deepEqual(
+      [...stored.matchAll(/^## (.+)$/gm)].map((m) => m[1]),
+      ['Business driver', 'Affected domains', 'Explicitly out of scope']
+    )
+  })
+})
+
 test('folds a wrapped list-item continuation line onto the item it follows, instead of dropping it', () => {
   const definition = loadDefinition('design')
   const moduleSpec = definition.modules.get('context')
@@ -311,16 +383,65 @@ test('matches a markdown-formatted heading against its field\'s plain-text title
   assert.deepEqual(data.warnings, [])
 })
 
-test('warns (non-strict) on a heading that matches no field, leaving the parsed result unaffected', () => {
+// A `##` heading matching no defined field is no longer an anomaly (#132): Insert ▾ → Section makes such blocks first-class custom fields, preserved verbatim in `customFields` and positioned by `layout`, so warning (let alone throwing) would fail every instance that ever used the feature.
+test('preserves a heading that matches no field as a custom field instead of warning', () => {
   const definition = loadDefinition('design')
   const moduleSpec = definition.modules.get('context')
   const data = parseModuleFile(
-    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Business driver\n\nSome text.\n\n## Not A Real Field\n\nWhatever.\n',
+    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Business driver\n\nSome text.\n\n## Risks we carry\n\nThe June deadline.\n',
     moduleSpec
   )
   assert.equal(data.fields.driver, 'Some text.')
-  assert.equal(data.warnings.length, 1)
-  assert.match(data.warnings[0], /does not match any field/)
+  assert.deepEqual(data.warnings, [])
+  assert.deepEqual(data.customFields, [{ id: 'custom:risks-we-carry', title: 'Risks we carry', value: 'The June deadline.' }])
+  assert.deepEqual(data.layout, [
+    { field: 'driver' },
+    { custom: { id: 'custom:risks-we-carry', title: 'Risks we carry', value: 'The June deadline.' } },
+  ])
+})
+
+// Untitled sections are exactly what Insert ▾ → Section inserts when the author skips the optional title prompt (#132): the heading is still preserved as structure, with a deterministic fallback id rather than an empty-slug one.
+test('preserves an untitled custom section with a fallback id', () => {
+  const definition = loadDefinition('design')
+  const moduleSpec = definition.modules.get('context')
+  const data = parseModuleFile(
+    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## \n\nBody of an untitled block.\n',
+    moduleSpec
+  )
+  assert.deepEqual(data.customFields, [
+    { id: 'custom:section', title: '', value: 'Body of an untitled block.' },
+  ])
+})
+
+// Same-slug headings must not collide into one custom field — the second gets a numeric suffix, deterministically, so round-trips stay stable.
+test('suffixes colliding custom-field ids instead of merging the sections', () => {
+  const definition = loadDefinition('design')
+  const moduleSpec = definition.modules.get('context')
+  const data = parseModuleFile(
+    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Risks\n\nOne.\n\n## Risks\n\nTwo.\n\n## Risks\n\nThree.\n',
+    moduleSpec
+  )
+  assert.deepEqual(
+    data.customFields.map((f) => f.id),
+    ['custom:risks', 'custom:risks-2', 'custom:risks-3']
+  )
+  assert.equal(data.customFields[2].value, 'Three.')
+  assert.deepEqual(data.warnings, [])
+})
+
+// The layout is the full document sequence — defined and custom entries interleaved exactly as written — which is what lets writeModule replay a Section inserted between two defined fields (#132).
+test('layout records the interleaved order of defined and custom sections', () => {
+  const definition = loadDefinition('design')
+  const moduleSpec = definition.modules.get('context')
+  const data = parseModuleFile(
+    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Business driver\n\nText.\n\n## Extra notes\n\nNotes.\n\n## Affected domains\n\n- Payments\n',
+    moduleSpec
+  )
+  assert.deepEqual(data.layout, [
+    { field: 'driver' },
+    { custom: { id: 'custom:extra-notes', title: 'Extra notes', value: 'Notes.' } },
+    { field: 'affected-domains' },
+  ])
 })
 
 test('warns (non-strict) on a duplicate heading, identifying which occurrence wins', () => {
@@ -333,20 +454,6 @@ test('warns (non-strict) on a duplicate heading, identifying which occurrence wi
   assert.equal(data.fields.driver, 'Second.')
   assert.equal(data.warnings.length, 1)
   assert.match(data.warnings[0], /duplicate heading/)
-})
-
-test('strict mode throws instead of warning on a non-matching heading', () => {
-  const definition = loadDefinition('design')
-  const moduleSpec = definition.modules.get('context')
-  assert.throws(
-    () =>
-      parseModuleFile(
-        '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Not A Real Field\n\nWhatever.\n',
-        moduleSpec,
-        { strict: true }
-      ),
-    /does not match any field/
-  )
 })
 
 test('strict mode throws instead of warning on a duplicate heading', () => {
@@ -703,8 +810,9 @@ test('readModule against Azure DevOps performs the same lazy migration, pushing 
 })
 
 test('readModule forwards options.strict to parseModuleFile on both the local and Azure DevOps-backed paths', async () => {
+  // A duplicate defined-field heading is the anomaly strict mode exists to catch (#132 made unknown headings legal custom fields, so they can no longer play this role).
   const badModuleText =
-    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n# Context\n\n## Not A Real Field\n\nWhatever.\n'
+    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n# Context\n\n## Business driver\n\nFirst.\n\n## Business driver\n\nSecond.\n'
   const definition = loadDefinition('design')
 
   withScratchInstances((instancesDir) => {
@@ -712,7 +820,7 @@ test('readModule forwards options.strict to parseModuleFile on both the local an
     writeFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), badModuleText)
     assert.throws(
       () => readModule(definition, 'my-initiative', 'context', { instancesDir, strict: true }),
-      /does not match any field/
+      /duplicate heading/
     )
     // Without strict, the same anomaly warns instead of throwing.
     const data = readModule(definition, 'my-initiative', 'context', { instancesDir })
@@ -728,7 +836,7 @@ test('readModule forwards options.strict to parseModuleFile on both the local an
       const azureDevOps = azureDevOpsOptions(baseUrl)
       await assert.rejects(
         () => readModule(definition, 'my-initiative', 'context', { azureDevOps, strict: true }),
-        /does not match any field/
+        /duplicate heading/
       )
       const data = await readModule(definition, 'my-initiative', 'context', { azureDevOps })
       assert.equal(data.warnings.length, 1)

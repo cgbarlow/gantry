@@ -51,7 +51,7 @@ async function fetchAssets() {
   const res = await apiFetch('/api/instance/assets')
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
-    throw new Error(body.message ?? body.error ?? `Failed to load assets (${res.status})`)
+    throw new Error(body.message ?? body.error ?? `Failed to load images (${res.status})`)
   }
   return res.json()
 }
@@ -64,7 +64,7 @@ async function uploadAsset({ filename, dataBase64, name, source, uploadedBy }) {
   })
   const body = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new Error(body.message ?? body.error ?? `Failed to upload asset (${res.status})`)
+    throw new Error(body.message ?? body.error ?? `Failed to upload image (${res.status})`)
   }
   return body
 }
@@ -114,9 +114,40 @@ function editableExtension(mode) {
 
 // ---------- Markdown field ----------
 // EditorView.updateListener -> markdown-it -> DOMPurify -> sibling preview pane, per docs/adr/0004-markdown-editor-codemirror.md. The CodeMirror instance is the source of truth for the field's value, so getValue/setValue read and write it directly rather than duplicating it into component state.
-function MarkdownField({ field, onRegister, onFocus }) {
+//
+// Every markdown field carries its own generic **Insert ▾** dropdown (#132) — Image (opens the shared image-insert modal), Table (a starter GFM pipe table at the cursor), Section (a new custom field appended below this one) — replacing the single per-module "+ Insert asset" button that preceded it. Hidden in Rendered view along with every other editing affordance, since that view is read-only.
+const STARTER_TABLE = ['| Column 1 | Column 2 |', '| -------- | -------- |', '|          |          |'].join('\n')
+
+// The three-item menu behind every field's Insert ▾ (#132). Openness is controlled (the shared Dropdown's contract); each item closes the menu before acting, matching how SwimlaneChip's items dismiss through their parent.
+function InsertDropdown({ onImage, onTable, onSection }) {
+  const [open, setOpen] = useState(false)
+
+  function pick(action) {
+    setOpen(false)
+    action()
+  }
+
+  return html`
+    <${Dropdown}
+      className="insert-dropdown"
+      triggerLabel="Insert ▾"
+      triggerClass="insert-trigger"
+      menuRole="menu"
+      open=${open}
+      onOpenChange=${setOpen}
+    >
+      <button type="button" role="menuitem" onClick=${() => pick(onImage)}>Image</button>
+      <button type="button" role="menuitem" onClick=${() => pick(onTable)}>Table</button>
+      <button type="button" role="menuitem" onClick=${() => pick(onSection)}>Section</button>
+    <//>
+  `
+}
+
+function MarkdownField({ field, onRegister, onRequestImage, onRequestSection }) {
   const hostRef = useRef(null)
   const previewRef = useRef(null)
+  // The editor-control methods registered up to ModuleCard (getValue/setValue/insertAtCursor) are captured here too, so this field's own Insert ▾ items act on its own cursor without round-tripping through the module.
+  const controlRef = useRef(null)
 
   useEffect(() => {
     const editableCompartment = new Compartment()
@@ -139,11 +170,18 @@ function MarkdownField({ field, onRegister, onFocus }) {
       view.dispatch({ effects: editableCompartment.reconfigure(editableExtension(viewMode.value)) })
     })
 
-    // Reports focus up to ModuleCard so its single, per-module "+ Insert asset" affordance (#80) knows which field's cursor to insert the reference at — the module's fields aren't otherwise tracked anywhere once mounted.
-    function handleFocusIn() {
-      onFocus?.()
+    // Inserts a snippet at the current cursor position (or over the current selection), on its own line — "clicking one inserts its reference at the trigger point" (#80). The preview updates via the same updateListener/docChanged path a normal edit takes.
+    function insertAtCursor(snippet) {
+      const { from, to } = view.state.selection.main
+      const needsLeadingNewline = from > 0 && view.state.doc.sliceString(from - 1, from) !== '\n'
+      const insertText = `${needsLeadingNewline ? '\n' : ''}${snippet}\n`
+      view.dispatch({
+        changes: { from, to, insert: insertText },
+        selection: { anchor: from + insertText.length },
+      })
+      view.focus()
     }
-    view.dom.addEventListener('focusin', handleFocusIn)
+    controlRef.current = { insertAtCursor }
 
     onRegister({
       getValue: () => view.state.doc.toString(),
@@ -151,21 +189,10 @@ function MarkdownField({ field, onRegister, onFocus }) {
         view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text ?? '' } })
         renderPreview(previewRef.current, text ?? '')
       },
-      // Inserts an asset reference at the current cursor position (or over the current selection), on its own line — "clicking one inserts its reference at the trigger point" (#80). The preview updates via the same updateListener/docChanged path a normal edit takes.
-      insertAtCursor: (snippet) => {
-        const { from, to } = view.state.selection.main
-        const needsLeadingNewline = from > 0 && view.state.doc.sliceString(from - 1, from) !== '\n'
-        const insertText = `${needsLeadingNewline ? '\n' : ''}${snippet}\n`
-        view.dispatch({
-          changes: { from, to, insert: insertText },
-          selection: { anchor: from + insertText.length },
-        })
-        view.focus()
-      },
+      insertAtCursor,
     })
 
     return () => {
-      view.dom.removeEventListener('focusin', handleFocusIn)
       stopViewModeSync()
       view.destroy()
     }
@@ -181,6 +208,15 @@ function MarkdownField({ field, onRegister, onFocus }) {
         <div class="editor-host" ref=${hostRef}></div>
         <div class="preview" ref=${previewRef}></div>
       </div>
+      ${viewMode.value !== 'rendered'
+        ? html`
+            <${InsertDropdown}
+              onImage=${() => onRequestImage?.()}
+              onTable=${() => controlRef.current?.insertAtCursor(STARTER_TABLE)}
+              onSection=${() => onRequestSection?.()}
+            />
+          `
+        : null}
     </div>
   `
 }
@@ -237,15 +273,21 @@ function ListField({ field, onRegister }) {
 // ---------- One module's card: fields + its own Save button/status ----------
 function ModuleCard({ mod, stageId, onFieldRegistered }) {
   const [status, setStatus] = useState('')
-  const [modalOpen, setModalOpen] = useState(false)
-  const controlsRef = useRef([])
-  // Which field an inserted asset lands in: whichever markdown field the author last focused, defaulting to the module's first markdown field (a module may have none — all-list modules simply get no insert affordance at all, see hasMarkdownField below).
-  const activeFieldIndexRef = useRef(mod.fields.findIndex((f) => f.type !== 'list'))
+  // Which markdown field the image-insert modal targets: the one whose own Insert ▾ → Image was clicked (each field owns its dropdown now, #132 — no more module-level affordance guessing from focus). Null = closed.
+  const [imageFieldId, setImageFieldId] = useState(null)
+  // Which field the new Section goes below: the one whose Insert ▾ → Section was clicked. Null = dialog closed.
+  const [sectionAfterId, setSectionAfterId] = useState(null)
+  // Editor controls keyed by FIELD ID (not array index): inserting a Section shifts every later field's display index without remounting it (components are keyed by field id), so index-keyed lookups would go stale mid-session. Ids never shift.
+  const controlsRef = useRef({})
 
   async function handleSave() {
     const fields = {}
-    mod.fields.forEach((field, i) => {
-      fields[field.id] = controlsRef.current[i].getValue()
+    // The document's section sequence, replayed for the writer (#132): defined fields and custom fields in exactly the displayed order, so a Section inserted below its neighbour stays there across save/reload.
+    const layout = []
+    mod.fields.forEach((field) => {
+      const value = controlsRef.current[field.id]?.getValue()
+      fields[field.id] = value
+      layout.push(field.custom ? { custom: { id: field.id, title: field.title, value } } : { field: field.id })
     })
     setStatus('Saving…')
     // `slug` is required here (not just `stage`) now that a server can host any number of instances at once with no fixed default (#88/#92) — without it, this PUT only ever resolved against whichever slug (if any) the server happened to be started with, silently 400ing for every other instance a multi-instance deployment serves. Surfaced by #94's own "Open instance ... allows editing end-to-end" acceptance criterion once a freshly adopted/created instance had no such server-pinned default to fall back on.
@@ -253,7 +295,7 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
     const res = await apiFetchForInstance(currentSlug.value, `/api/instance/modules/${mod.id}?${params}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: mod.status, owner: mod.owner, fields }),
+      body: JSON.stringify({ status: mod.status, owner: mod.owner, fields, layout }),
     })
     if (!res.ok) {
       setStatus('Save failed.')
@@ -266,21 +308,40 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
     )
   }
 
-  function handleInsert(asset) {
-    const control = controlsRef.current[activeFieldIndexRef.current]
-    control?.insertAtCursor?.(assetReference(asset))
-    setModalOpen(false)
+  function handleInsertImage(asset) {
+    controlsRef.current[imageFieldId]?.insertAtCursor?.(assetReference(asset))
+    setImageFieldId(null)
   }
 
-  const hasMarkdownField = mod.fields.some((f) => f.type !== 'list')
+  // Insert ▾ → Section (#132): appends a new custom markdown field immediately below the requesting field. Client-side only until the next Save — the custom field joins the module's field list (and hence the save payload's layout), and the parser preserves its `## <title>` block from then on.
+  function handleInsertSection(title) {
+    const afterIndex = mod.fields.findIndex((f) => f.id === sectionAfterId)
+    const newField = {
+      id: uniqueCustomFieldClientId(),
+      title: title.trim() ? title.trim() : 'Untitled section',
+      type: 'markdown',
+      required: false,
+      guidance: null,
+      value: '',
+      example: null,
+      custom: true,
+    }
+    const fields = [...mod.fields]
+    fields.splice(afterIndex + 1, 0, newField)
+    instanceData.value = {
+      ...instanceData.value,
+      modules: instanceData.value.modules.map((m) => (m.id === mod.id ? { ...m, fields } : m)),
+    }
+    setSectionAfterId(null)
+  }
 
   return html`
     <section class="module">
       <h2>${mod.title}</h2>
       ${mod.purpose ? html`<p class="purpose">${mod.purpose}</p>` : null}
-      ${mod.fields.map((field, i) => {
+      ${mod.fields.map((field) => {
         const onRegister = (control) => {
-          controlsRef.current[i] = control
+          controlsRef.current[field.id] = control
           onFieldRegistered(field, control)
         }
         return field.type === 'list'
@@ -289,25 +350,72 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
               key=${field.id}
               field=${field}
               onRegister=${onRegister}
-              onFocus=${() => (activeFieldIndexRef.current = i)}
+              onRequestImage=${() => setImageFieldId(field.id)}
+              onRequestSection=${() => setSectionAfterId(field.id)}
             />`
       })}
       <div class="save-status">${status}</div>
       <button type="button" class="btn primary" onClick=${handleSave}>Save ${mod.title}</button>
-      ${hasMarkdownField && viewMode.value !== 'rendered'
-        ? html`
-            <div class="insert-affordance">
-              <button type="button" onClick=${() => setModalOpen(true)}>+ Insert asset</button>
-            </div>
-          `
+      ${imageFieldId !== null
+        ? html`<${AssetInsertModal} onInsert=${handleInsertImage} onClose=${() => setImageFieldId(null)} />`
         : null}
-      ${modalOpen ? html`<${AssetInsertModal} onInsert=${handleInsert} onClose=${() => setModalOpen(false)} />` : null}
+      ${sectionAfterId !== null
+        ? html`<${SectionDialog} onConfirm=${handleInsertSection} onClose=${() => setSectionAfterId(null)} />`
+        : null}
     </section>
   `
 }
 
-// ---------- Insert-asset modal: Upload new / Choose existing ----------
-// Opened by a module's "+ Insert asset" affordance (hidden in Rendered-only view, since that view is read-only — see ModuleCard). Ported from Variant A of web/prototypes/asset-insertion.prototype.html (#73), the variant #74 locked in: a modal with two tabs, the "Upload new" tab blocked by an inline error until both the file and the mandatory source-location field are valid.
+// A client-side-unique id for a just-inserted custom field (#132) — only ever a handle for component keys and the in-flight save payload; the server re-derives deterministic ids from the stored headings on every read.
+function uniqueCustomFieldClientId() {
+  return `custom:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+// The Insert ▾ → Section prompt (#132): asks for the optional one-line title (rendered as the block's ## heading; blank becomes "Untitled section") and inserts the new block below the requesting field on confirm. Same modal shape as AssetInsertModal and the confirm dialogs above.
+function SectionDialog({ onConfirm, onClose }) {
+  const [title, setTitle] = useState('')
+  const inputRef = useRef(null)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  return html`
+    <div class="modal-backdrop" role="presentation" onClick=${(e) => e.target === e.currentTarget && onClose()}>
+      <div class="modal" role="dialog" aria-modal="true" aria-label="New section">
+        <h3>New section</h3>
+        <div class="upload-field">
+          <label class="field-label">Title (optional)</label>
+          <input
+            ref=${inputRef}
+            class="text-field"
+            type="text"
+            placeholder="e.g. Risks we're carrying forward"
+            value=${title}
+            onInput=${(e) => setTitle(e.currentTarget.value)}
+            onKeyDown=${(e) => e.key === 'Enter' && onConfirm(title)}
+          />
+        </div>
+        <p class="guidance">Adds an editable block below this field. Its title renders as a "##" heading and is preserved across saves.</p>
+        <div class="modal-actions">
+          <button type="button" class="btn ghost" onClick=${onClose}>Cancel</button>
+          <button type="button" class="btn primary" onClick=${() => onConfirm(title)}>Insert section</button>
+        </div>
+      </div>
+    </div>
+  `
+}
+
+// ---------- Insert-image modal: Upload new / Choose existing ----------
+// Opened by any markdown field's Insert ▾ → Image item (#132, which renamed the wording Asset → Image throughout the UI while leaving `asset:<id>` storage and the /api routes untouched). Hidden in Rendered view along with every other editing affordance (see MarkdownField/ModuleCard). Ported from Variant A of web/prototypes/asset-insertion.prototype.html (#73), the variant #74 locked in: a modal with two tabs, the "Upload new" tab blocked by an inline error until both the file and the mandatory source-location field are valid.
 function AssetInsertModal({ onInsert, onClose }) {
   const [tab, setTab] = useState('upload')
   const [file, setFile] = useState(null)
@@ -357,8 +465,8 @@ function AssetInsertModal({ onInsert, onClose }) {
 
   return html`
     <div class="modal-backdrop" role="presentation" onClick=${(e) => e.target === e.currentTarget && onClose()}>
-      <div class="modal" role="dialog" aria-modal="true" aria-label="Insert asset">
-        <h3>Insert asset</h3>
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Insert image">
+        <h3>Insert image</h3>
         <div class="modal-tabs">
           <button
             type="button"
@@ -426,7 +534,7 @@ function AssetInsertModal({ onInsert, onClose }) {
                 ? html`
                     <div class="grid-library">
                       ${existing.length === 0
-                        ? html`<p class="empty">No assets yet — switch to "Upload new" to add the first one.</p>`
+                        ? html`<p class="empty">No images yet — switch to "Upload new" to add the first one.</p>`
                         : existing.map(
                             (asset) => html`
                               <button type="button" class="card" key=${asset.id} onClick=${() => onInsert(asset)}>
@@ -444,8 +552,8 @@ function AssetInsertModal({ onInsert, onClose }) {
   `
 }
 
-// ---------- Asset library screen ----------
-// A new instance-level screen (#80): every asset registered against this instance as a thumbnail-grid card, each flagged USED IN N / UNUSED so orphaned assets are visible without opening every module.
+// ---------- Image library screen ----------
+// The instance-level screen (#80, wording renamed Asset → Image by #132): every asset registered against this instance as a thumbnail-grid card, each flagged USED IN N / UNUSED so orphaned images are visible without opening every module. The route stays /assets and the storage/API naming stays "asset" (#132's own constraint) — only the visible words changed.
 function AssetLibraryPage() {
   const [assets, setAssets] = useState(null)
   const [error, setError] = useState('')
@@ -459,14 +567,14 @@ function AssetLibraryPage() {
   return html`
     <main class="asset-library">
       <a class="back-link" href="/">← Back to module editor</a>
-      <h1>Asset library</h1>
+      <h1>Image library</h1>
       ${error ? html`<p class="load-error">${error}</p>` : null}
       ${assets === null && !error ? html`<p class="loading">Loading…</p>` : null}
       ${assets !== null
         ? html`
             <div class="lib-grid">
               ${assets.length === 0
-                ? html`<p class="empty">No assets registered yet.</p>`
+                ? html`<p class="empty">No images registered yet.</p>`
                 : assets.map(
                     (asset) => html`
                       <div class="card" key=${asset.id}>

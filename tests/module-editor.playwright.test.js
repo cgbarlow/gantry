@@ -252,8 +252,8 @@ test('Render and Clear all fields live in the view-toggle bar; Render opens a di
   }
 })
 
-// Coverage for #80 — the "+ Insert asset" affordance, the Upload new / Choose existing modal, inline validation, live-preview thumbnail rendering, the hand-typed markdown convention, and the asset library screen's USED IN / UNUSED badges.
-test('inserting an asset (upload, then choose-existing) renders a real thumbnail, and the library reflects usage', async () => {
+// Coverage for #132 — every markdown field carries its own generic "Insert ▾" dropdown (Image / Table / Section), replacing #80's single per-module "+ Insert asset" button. This test walks the Image path through both tabs of the (renamed) Insert image modal — including inline validation and live-preview thumbnails — proves per-field targeting (the second field's own dropdown inserts into the second field), that the dropdowns vanish in Rendered view, and that the library screen still reflects usage. Table and Section get their own tests below.
+test("each markdown field has an Insert ▾ dropdown whose Image flow uploads, inserts, and reflects usage; wording says Image, never Asset", async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
@@ -275,21 +275,34 @@ test('inserting an asset (upload, then choose-existing) renders a real thumbnail
         // The Shape stage's first module (per definitions/design/definition.yaml).
         const contextModule = page.locator('.module').first()
         await assert.doesNotReject(contextModule.locator('h2', { hasText: 'Context' }).waitFor({ timeout: 2_000 }))
-        const insertButton = contextModule.getByRole('button', { name: '+ Insert asset' })
 
-        // Appears after the module, and is hidden once the screen switches to Rendered-only view (that view is read-only).
-        await assert.doesNotReject(insertButton.waitFor({ state: 'visible', timeout: 5_000 }))
+        // The old single affordance is gone; each of the context module's two markdown fields has its own generic dropdown instead.
+        assert.equal(await page.getByRole('button', { name: '+ Insert asset' }).count(), 0)
+        const triggers = contextModule.getByRole('button', { name: 'Insert ▾' })
+        assert.equal(await triggers.count(), 2)
+        const firstTrigger = triggers.nth(0)
+
+        // Hidden once the screen switches to Rendered-only view (that view is read-only).
+        await assert.doesNotReject(firstTrigger.waitFor({ state: 'visible', timeout: 5_000 }))
         await page.locator('.segmented').getByRole('button', { name: 'Rendered' }).click()
-        await assert.doesNotReject(insertButton.waitFor({ state: 'hidden', timeout: 5_000 }))
+        await assert.doesNotReject(firstTrigger.waitFor({ state: 'hidden', timeout: 5_000 }))
         await page.locator('.segmented').getByRole('button', { name: 'Split' }).click()
-        await insertButton.waitFor({ state: 'visible', timeout: 5_000 })
+        await firstTrigger.waitFor({ state: 'visible', timeout: 5_000 })
 
-        // Click into the "Business driver" field so the insert lands there.
-        await contextModule.locator('.field-markdown .cm-content').first().click()
+        // Open the FIRST field's dropdown: the menu offers exactly Image / Table / Section, and choosing Image opens the renamed modal.
+        await firstTrigger.click()
+        const menu = contextModule.locator('.insert-dropdown .menu')
+        await menu.waitFor({ state: 'visible', timeout: 5_000 })
+        assert.deepEqual(
+          await menu.getByRole('menuitem').allTextContents(),
+          ['Image', 'Table', 'Section']
+        )
+        await menu.getByRole('menuitem', { name: 'Image' }).click()
 
-        await insertButton.click()
         const modal = page.locator('.modal')
         await modal.waitFor({ state: 'visible', timeout: 5_000 })
+        assert.equal(await modal.getAttribute('aria-label'), 'Insert image')
+        assert.equal(await modal.locator('h3').textContent(), 'Insert image')
         await assert.doesNotReject(page.getByRole('button', { name: 'Upload new' }).waitFor({ timeout: 2_000 }))
         await assert.doesNotReject(page.getByRole('button', { name: 'Choose existing' }).waitFor({ timeout: 2_000 }))
 
@@ -303,36 +316,34 @@ test('inserting an asset (upload, then choose-existing) renders a real thumbnail
         await assert.doesNotReject(page.locator('.inline-error').waitFor({ timeout: 2_000 }))
         assert.match(await page.locator('.inline-error').textContent(), /[Ss]ource location is required/)
 
-        // Filling in the source location clears the block and the upload succeeds, inserting a real thumbnail into the preview pane.
+        // Filling in the source location clears the block and the upload succeeds, inserting a real thumbnail into the FIRST field's preview pane.
         await modal.locator('input[placeholder^="https://draw.io"]').fill('https://draw.io/diagrams/eligibility-flow')
         await modal.getByRole('button', { name: 'Insert' }).click()
         await modal.waitFor({ state: 'hidden', timeout: 5_000 })
 
-        const preview = contextModule.locator('.field-markdown .preview').first()
-        await assert.doesNotReject(preview.locator('img.asset-thumb').waitFor({ timeout: 5_000 }))
-        assert.equal(await preview.locator('img.asset-thumb').count(), 1)
+        const firstPreview = contextModule.locator('.field-markdown .preview').nth(0)
+        await assert.doesNotReject(firstPreview.locator('img.asset-thumb').waitFor({ timeout: 5_000 }))
+        assert.equal(await firstPreview.locator('img.asset-thumb').count(), 1)
 
-        // "Choose existing" — pick the same asset again from the grid, inserted at the trigger point without re-uploading.
-        await insertButton.click()
+        // "Choose existing" via the SECOND field's own dropdown — the insert must land in the second field, proving the dropdowns target their own field rather than whichever one was focused last.
+        await triggers.nth(1).click()
+        await contextModule.locator('.insert-dropdown .menu').getByRole('menuitem', { name: 'Image' }).click()
+        await modal.waitFor({ state: 'visible', timeout: 5_000 })
         await page.getByRole('button', { name: 'Choose existing' }).click()
         await modal.locator('.grid-library .card').first().waitFor({ timeout: 5_000 })
         await modal.locator('.grid-library .card').first().click()
         await modal.waitFor({ state: 'hidden', timeout: 5_000 })
-        assert.equal(await preview.locator('img.asset-thumb').count(), 2)
+        const secondField = contextModule.locator('.field-markdown').nth(1)
+        await assert.doesNotReject(secondField.locator('.preview img.asset-thumb').first().waitFor({ timeout: 5_000 }))
+        assert.equal(await firstPreview.locator('img.asset-thumb').count(), 1, 'the first field must be untouched')
 
         // Hand-typing the same `asset:<id>` convention directly into the markdown (bypassing the modal entirely) renders identically.
-        const assetHref = await preview.locator('img.asset-thumb').first().getAttribute('src')
+        const assetHref = await firstPreview.locator('img.asset-thumb').first().getAttribute('src')
         const assetId = assetHref.match(/\/api\/instance\/assets\/([^/]+)\/file/)[1]
-        // The context module's second markdown field renders via the same preview path — type directly into its CodeMirror editor.
-        const secondField = contextModule.locator('.field-markdown').nth(1)
-        if ((await secondField.count()) > 0) {
-          await secondField.locator('.cm-content').click()
-          // insertText (one input event), not type (key-by-key) — CodeMirror's auto-close-brackets extension would otherwise pair every "(" typed with an immediate ")", making each intermediate keystroke briefly resolve to its own (broken, 404ing) partial image URL.
-          await page.keyboard.insertText(`![Hand-typed](asset:${assetId})`)
-          await assert.doesNotReject(
-            secondField.locator('.preview img.asset-thumb').first().waitFor({ timeout: 5_000 })
-          )
-        }
+        await secondField.locator('.cm-content').click()
+        // insertText (one input event), not type (key-by-key) — CodeMirror's auto-close-brackets extension would otherwise pair every "(" typed with an immediate ")", making each intermediate keystroke briefly resolve to its own (broken, 404ing) partial image URL.
+        await page.keyboard.insertText(`![Hand-typed](asset:${assetId})`)
+        await assert.doesNotReject(secondField.locator('.preview img.asset-thumb').nth(1).waitFor({ timeout: 5_000 }))
 
         assert.deepEqual(pageErrors, [])
 
@@ -343,6 +354,7 @@ test('inserting an asset (upload, then choose-existing) renders a real thumbnail
         // Asset library screen: the inserted asset shows USED IN >= 1; uploading one more, never referenced, shows UNUSED. Navigated to directly — the toolbar's "View asset library" link was removed as redundant once assets are insertable inline from the editor.
         await page.goto(`${base}/assets`)
         await page.waitForSelector('.asset-library', { timeout: 10_000 })
+        assert.equal(await page.locator('.asset-library h1').textContent(), 'Image library')
         const usedCard = page.locator('.lib-grid .card', { hasText: 'eligibility-flow.png' })
         await usedCard.waitFor({ timeout: 5_000 })
         assert.match(await usedCard.locator('.stamp').textContent(), /USED IN \d+/)
@@ -356,6 +368,135 @@ test('inserting an asset (upload, then choose-existing) renders a real thumbnail
     const definition = loadDefinition('design')
     const data = readModule(definition, 'examples', 'context', { instancesDir })
     assert.match(data.fields.driver, /asset:/)
+    assert.match(data.fields['out-of-scope'], /asset:/)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// Coverage for #132's Table item: a starter GFM pipe table lands at the cursor, renders as a real table immediately, and round-trips to the module file verbatim on save.
+test('Insert ▾ → Table inserts a starter pipe table that renders live and survives save/reload', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const contextModule = page.locator('.module').first()
+        const firstField = contextModule.locator('.field-markdown').nth(0)
+
+        // Replace the seeded content with a lead-in line, then insert the table at the cursor (end of that line).
+        await firstField.locator('.cm-content').click()
+        await page.keyboard.press('ControlOrMeta+a')
+        await page.keyboard.type('Key decisions:')
+        await firstField.getByRole('button', { name: 'Insert ▾' }).click()
+        await contextModule.locator('.insert-dropdown .menu').getByRole('menuitem', { name: 'Table' }).click()
+
+        // The starter table renders as a real GFM table in the sibling preview pane.
+        await assert.doesNotReject(firstField.locator('.preview table').waitFor({ timeout: 5_000 }))
+        assert.equal(await firstField.locator('.preview table th').count(), 2)
+
+        // Round-trip: save, then read the module file back off disk.
+        await contextModule.getByRole('button', { name: 'Save Context' }).click()
+        await page.waitForSelector('text=Saved', { timeout: 5_000 })
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+
+    const definition = loadDefinition('design')
+    const data = readModule(definition, 'examples', 'context', { instancesDir })
+    // The table lands directly after the lead-in line (insert-at-cursor), with the GFM separator row intact.
+    assert.match(data.fields.driver, /^Key decisions:\n\| Column 1 \| Column 2 \|\n\| -{8,} \| -{8,} \|/)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// Coverage for #132's Section item: a titled custom block is appended BELOW the requesting field, survives save/reload as a preserved custom section, and comes back on a fresh page load in the right place.
+test('Insert ▾ → Section adds a titled custom field below the requesting field that survives save/reload', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const contextModule = page.locator('.module').first()
+        const firstField = contextModule.locator('.field-markdown').nth(0)
+
+        // Insert ▾ → Section opens the title prompt.
+        await firstField.getByRole('button', { name: 'Insert ▾' }).click()
+        await contextModule.locator('.insert-dropdown .menu').getByRole('menuitem', { name: 'Section' }).click()
+        const dialog = page.locator('.modal[aria-label="New section"]')
+        await dialog.waitFor({ state: 'visible', timeout: 5_000 })
+
+        // A blank title is allowed (optional); give this one a real title instead.
+        await dialog.locator('input[type=text]').fill('Risks we carry')
+        await dialog.getByRole('button', { name: 'Insert section' }).click()
+        await dialog.waitFor({ state: 'hidden', timeout: 5_000 })
+
+        // The new editable block appears directly below Business driver (before the list and out-of-scope fields), with its own Insert ▾ beneath it.
+        const titles = await contextModule.locator('.field > label').allTextContents()
+        assert.deepEqual(
+          titles.map((t) => t.replace(/ \*$/, '')),
+          ['Business driver', 'Risks we carry', 'Affected domains', 'Explicitly out of scope']
+        )
+        assert.equal(await contextModule.getByRole('button', { name: 'Insert ▾' }).count(), 3)
+
+        // Type into the new block, then save everything to disk.
+        const newField = contextModule.locator('.field-markdown').nth(1)
+        await newField.locator('.cm-content').click()
+        await page.keyboard.type('The June deadline.')
+        await contextModule.getByRole('button', { name: 'Save Context' }).click()
+        await page.waitForSelector('text=Saved', { timeout: 5_000 })
+        assert.deepEqual(pageErrors, [])
+
+        // Fresh page load: the custom section comes back below Business driver, exactly where it was inserted.
+        await page.reload()
+        await page.waitForSelector('.module', { timeout: 10_000 })
+        const reloadedTitles = await contextModule.locator('.field > label').allTextContents()
+        assert.equal(reloadedTitles[1].replace(/ \*$/, ''), 'Risks we carry')
+      } finally {
+        await browser.close()
+      }
+    })
+
+    const definition = loadDefinition('design')
+    const data = readModule(definition, 'examples', 'context', { instancesDir })
+    assert.deepEqual(data.customFields, [
+      { id: 'custom:risks-we-carry', title: 'Risks we carry', value: 'The June deadline.' },
+    ])
+    assert.deepEqual(data.layout, [
+      { field: 'driver' },
+      { custom: { id: 'custom:risks-we-carry', title: 'Risks we carry', value: 'The June deadline.' } },
+      { field: 'affected-domains' },
+      { field: 'out-of-scope' },
+    ])
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }

@@ -454,10 +454,15 @@ main.dashboard {
 .chip .menu button:hover, .chip .menu a:hover { background: var(--bg); }
 
 /*
- * Asset insertion (#80) — ported from Variant A of web/prototypes/asset-insertion.prototype.html (locked in by #73): an unobtrusive "+ Insert asset" affordance after every module, a two-tab modal (Upload new / Choose existing), and a separate thumbnail-grid library screen.
+ * Per-field Insert dropdown (#132) — every markdown field carries its own
+ * "Insert ▾" control offering Image / Table / Section, replacing #80's single
+ * "+ Insert asset" button after each module. The trigger keeps that button's
+ * quiet mono-underlined look so it reads as an affordance, not chrome; the
+ * popup reuses the exact menu shape of .settings-menu (#107), just anchored
+ * under the field instead of the header.
  */
-.insert-affordance { margin-top: 14px; }
-.insert-affordance > button {
+.insert-dropdown { position: relative; display: inline-flex; margin-top: 10px; }
+.insert-trigger {
   background: none;
   border: none;
   color: var(--text-muted);
@@ -467,7 +472,36 @@ main.dashboard {
   cursor: pointer;
   padding: 0;
 }
-.insert-affordance > button:hover { color: var(--text); }
+.insert-trigger:hover { color: var(--text); }
+.insert-dropdown .menu {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: 100%;
+  margin-top: 6px;
+  z-index: 5;
+  background: var(--bg-raised);
+  border: var(--border-strong) solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+  min-width: 120px;
+}
+.insert-dropdown.menu-open .menu { display: block; }
+.insert-dropdown .menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-family: var(--font-body);
+  color: var(--text);
+  background: none;
+  border: none;
+  cursor: pointer;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
+.insert-dropdown .menu button:hover { background: var(--bg); }
 
 .field-markdown .preview img.asset-thumb {
   display: block;
