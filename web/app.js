@@ -938,6 +938,164 @@ function SettingsMenu({ instance }) {
   `
 }
 
+// ---------- Instance switcher (#112) ----------
+// A workspace-scoped switcher living in AppHeader: defaults to the viewed
+// instance's own workspace's *other* instances (so jumping to a sibling
+// instance never requires returning to the Workspaces landing page — #112's
+// own acceptance criteria), with an explicit escape hatch to cross into a
+// different workspace's instances instead. Reuses the same unified
+// `GET /api/instances` listing and `groupInstancesByWorkspace` grouping the
+// dashboard (#102) already relies on, rather than adding a second
+// server-side listing route — the client already has everything this
+// needs, since every row already carries its own `workspace` (or none, for
+// a local instance).
+//
+// The escape hatch's own UI copy deliberately avoids the word "workspace"
+// ("Browse other instances" / "← Back", not "Switch workspace" / "← This
+// workspace") — `groupInstancesByWorkspace` groups a local instance onto
+// its own single-instance "group" exactly like a real Azure-DevOps-backed
+// one (#102's own convention), so the escape hatch's *other groups* can
+// just as easily be another unrelated local instance as a genuine
+// Workspace. Workspace is a specific, reserved entity in this codebase (an
+// Azure DevOps organization/project/repository, docs/adr/0009) — this file
+// already renamed "Open workspace" to "Open editor" once (#96 vs #102) to
+// avoid exactly this kind of collision, so new copy here must not
+// re-introduce it by implying every escape-hatch destination is a
+// Workspace when it may just be another local instance.
+//
+// Navigating a sibling instance is a plain `<a href="/instance/:slug">` —
+// exactly the link ModuleEditorPage's own doc comment already documents as
+// re-pinning every instance-scoped signal on slug change, so this needs no
+// extra plumbing of its own.
+function isWorkspaceGroup(group) {
+  return Boolean(group?.instances[0]?.workspace)
+}
+
+function InstanceSwitcher({ slug }) {
+  const [open, setOpen] = useState(false)
+  const [instances, setInstances] = useState(null)
+  const [error, setError] = useState('')
+  // Resets to the default (own-workspace) view every time the menu is
+  // freshly opened — a stale "cross-workspace" view left open from a
+  // previous visit would otherwise greet the user with the wrong list.
+  const [crossWorkspace, setCrossWorkspace] = useState(false)
+
+  useEffect(() => {
+    if (!open || instances !== null || error) return
+    // Passes `slug` so this attaches *this* instance's own workspace PAT
+    // override (#104), not just the global default — see loadInstances's
+    // own doc comment for why that matters here specifically.
+    loadInstances(slug)
+      .then(setInstances)
+      .catch((err) => setError(err.message))
+  }, [open, instances, error, slug])
+
+  // Closes on Escape (matches every other dismissible panel in this file —
+  // AssetInsertModal, PatPromptModal) and on any click outside the
+  // switcher itself. There's no natural ancestor element to hang a
+  // click-outside-to-close on the way SwimlaneChip's own menu does (a
+  // whole swimlane-group wrapper) — the header isn't otherwise a click
+  // target — so this listens on the window directly instead, same as the
+  // Escape handling right alongside it.
+  useEffect(() => {
+    if (!open) return
+    function onKeyDown(e) {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    function onWindowClick() {
+      setOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('click', onWindowClick)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('click', onWindowClick)
+    }
+  }, [open])
+
+  function toggle(e) {
+    e.stopPropagation()
+    setCrossWorkspace(false)
+    setOpen((prev) => !prev)
+  }
+
+  const groups = instances ? groupInstancesByWorkspace(instances) : []
+  const currentGroup = groups.find((group) => group.instances.some((inst) => inst.slug === slug)) ?? null
+  const siblings = currentGroup ? currentGroup.instances.filter((inst) => inst.slug !== slug) : []
+  const otherGroups = groups.filter((group) => group.key !== currentGroup?.key)
+
+  function renderInstanceLink(inst) {
+    return html`
+      <a key=${inst.slug} class="switcher-item" href="/instance/${inst.slug}" onClick=${() => setOpen(false)}>
+        <span class="name">${inst.slug}</span>
+        <span class="def">${inst.definition}</span>
+      </a>
+    `
+  }
+
+  return html`
+    <div class="instance-switcher" onClick=${(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        class="btn small ghost"
+        aria-haspopup="true"
+        aria-expanded=${open}
+        onClick=${toggle}
+      >
+        Switch instance ▾
+      </button>
+      ${open
+        ? html`
+            <div class="menu">
+              ${error ? html`<p class="load-error">${error}</p>` : null}
+              ${!error && instances === null ? html`<p class="loading">Loading…</p>` : null}
+              ${instances !== null && !crossWorkspace
+                ? html`
+                    <div class="switcher-section">
+                      <div class="switcher-heading">${isWorkspaceGroup(currentGroup) ? currentGroup.title : 'Local instance'}</div>
+                      ${siblings.length > 0
+                        ? siblings.map(renderInstanceLink)
+                        : isWorkspaceGroup(currentGroup)
+                          ? html`<p class="switcher-empty">No other instances in this workspace.</p>`
+                          : html`<p class="switcher-empty">No other instances — not part of a workspace.</p>`}
+                      ${otherGroups.length > 0
+                        ? html`
+                            <button
+                              type="button"
+                              class="switcher-escape"
+                              onClick=${() => setCrossWorkspace(true)}
+                            >
+                              Browse other instances →
+                            </button>
+                          `
+                        : null}
+                    </div>
+                  `
+                : null}
+              ${instances !== null && crossWorkspace
+                ? html`
+                    <div class="switcher-section">
+                      <button type="button" class="switcher-back" onClick=${() => setCrossWorkspace(false)}>
+                        ← Back
+                      </button>
+                      ${otherGroups.map(
+                        (group) => html`
+                          <div class="switcher-group" key=${group.key}>
+                            <div class="switcher-heading">${group.title}</div>
+                            ${group.instances.map(renderInstanceLink)}
+                          </div>
+                        `
+                      )}
+                    </div>
+                  `
+                : null}
+            </div>
+          `
+        : null}
+    </div>
+  `
+}
+
 // ---------- Header: title, stage line, free-browse stage nav, theme ----------
 function AppHeader({ instance }) {
   return html`
@@ -948,6 +1106,7 @@ function AppHeader({ instance }) {
         </svg>
         <a class="btn small ghost" href="/">← Workspaces</a>
         <h1>${instance.slug} — ${instance.definition}</h1>
+        <${InstanceSwitcher} slug=${instance.slug} />
         <a class="btn small ghost" href="/setup">+ New instance</a>
         <${SettingsMenu} instance=${instance} />
         <button type="button" class="btn small ghost theme-toggle" onClick=${cycleTheme} title="Cycle theme">
@@ -1053,8 +1212,21 @@ function ModuleEditorPage({ slug }) {
 // this page and reloading the app.
 // ============================================================
 
-async function loadInstances() {
-  const res = await apiFetch('/api/instances')
+// `slug` is optional: the Workspaces landing page (DashboardPage) calls
+// this with none, since it has no single "current" workspace in mind and
+// only ever wants the global-default PAT's best-effort view (see
+// lib/registry.js's buildAzureDevOpsRow — an entry this PAT can't
+// authenticate to is simply left out, not treated as a fatal error). A
+// caller that *does* already know which instance it's asking on behalf of
+// (InstanceSwitcher, below) should pass its slug, so this resolves and
+// attaches that instance's own workspace PAT override (#104) via
+// `apiFetchForInstance` instead of only ever trying the global default —
+// otherwise a workspace whose override PAT differs from the global default
+// would silently drop out of the response entirely (every one of its rows
+// failing to authenticate), even for the one instance whose own page is
+// making this exact request and already knows the right credential.
+async function loadInstances(slug) {
+  const res = slug ? await apiFetchForInstance(slug, '/api/instances') : await apiFetch('/api/instances')
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new Error(body.message ?? body.error ?? `Failed to load instances (${res.status})`)
