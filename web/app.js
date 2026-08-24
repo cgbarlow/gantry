@@ -854,11 +854,25 @@ function AdvanceStagePanel({ instance }) {
       return
     }
     setStatus(`Advanced to "${body.toStage.title}".`)
-    // Re-fetch with no explicit stage so the form now shows the instance's
-    // new current stage — otherwise `viewedStage` would still hold this
+    // Reset to no explicit stage so the form now shows the instance's new
+    // current stage — otherwise `viewedStage` would still hold this
     // (now-completed) stage's id and the screen would appear unchanged.
+    //
+    // Assigning `viewedStage.value` here already re-triggers the shared
+    // instance-loading effect (near the top of this file) *whenever it's
+    // a genuine change* — e.g. the user had at some point explicitly
+    // clicked this (the current) stage's own nav button, leaving
+    // `viewedStage.value` set to its id rather than `null`. Also calling
+    // `loadInstance` directly below in that case would race that effect's
+    // own fetch (mirrors the exact hazard `ModuleEditorPage`'s own
+    // `batch()` comment describes) — so this only fetches directly when
+    // `viewedStage.value` was already `null`, the one case where setting
+    // it to `null` again is a no-op the effect will never react to.
+    const effectWillReload = viewedStage.value !== null
     viewedStage.value = null
-    instanceData.value = await loadInstance(currentSlug.value, null)
+    if (!effectWillReload) {
+      instanceData.value = await loadInstance(currentSlug.value, null)
+    }
   }
 
   function handleDecline() {

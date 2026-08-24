@@ -167,6 +167,67 @@ test('confirming advances the instance to its next stage, and the header reflect
   })
 })
 
+test('confirming advances the instance exactly once, even after the current stage\'s own nav button was clicked first', async () => {
+  // Regression test for a race a prior review pass found and fixed:
+  // clicking the current stage's own nav button sets `viewedStage.value`
+  // to that stage's id (a non-null value distinct from the bootstrap
+  // `null` every fresh page load starts with) — see AppHeader's stage-nav
+  // buttons, which set `viewedStage.value = stage.id` unconditionally,
+  // including for whichever stage is already current. Confirming an
+  // advance from that state must still trigger exactly one reload, not
+  // two racing ones (which could otherwise leave a stale "Failed to load"
+  // error banner showing despite a successful advance — see
+  // AdvanceStagePanel's own handleConfirmAdvance comment).
+  await withScratchInstances(async (instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    fillShapeStage(instancesDir, 'my-initiative')
+
+    await withRunningServer({ slug: 'my-initiative', instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        let getInstanceRequestCount = 0
+        page.on('request', (req) => {
+          if (req.method() === 'GET' && new URL(req.url()).pathname === '/api/instance') getInstanceRequestCount++
+        })
+
+        await page.goto(`${base}/instance/my-initiative`)
+        await page.waitForSelector('.advance-stage-panel', { timeout: 10_000 })
+
+        // The ordinary interaction that sets `viewedStage.value` to a
+        // non-null value: click the current stage's own nav button.
+        await page.getByRole('button', { name: 'Shape (current)' }).click()
+        await page.waitForTimeout(200)
+
+        getInstanceRequestCount = 0
+        const panel = page.locator('.advance-stage-panel')
+        await panel.getByRole('button', { name: 'Advance to next stage' }).click()
+        const modal = page.locator('.modal[aria-label="Confirm stage advancement"]')
+        await modal.waitFor({ state: 'visible', timeout: 10_000 })
+        await modal.getByRole('button', { name: 'Confirm & advance' }).click()
+
+        await assert.doesNotReject(page.locator('#stage-line', { hasText: 'HLD Definition' }).waitFor({ timeout: 10_000 }))
+        // Never a stale error banner masking the successful advance.
+        assert.equal(await page.locator('.load-error').count(), 0)
+        // Exactly one reload, not two racing ones.
+        assert.equal(getInstanceRequestCount, 1)
+
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+
+    assert.equal(readInstance('my-initiative', { instancesDir }).stage, 'hld-define')
+  })
+})
+
 test('the Stage advancement panel is never shown for a Workspace-backed instance', async () => {
   await withFakeAzureDevOpsServer(
     {
