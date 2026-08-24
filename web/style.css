@@ -263,6 +263,16 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .render-artefact-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .render-artefact-list .btn { width: 100%; margin: 0; text-align: left; }
 
+/* Synced-fields panel (#111) — sits at the top of the instance screen, above the modules, so it reads as a header card rather than one more section: a raised box (the only bordered panel on this screen) with its five fields laid out as a wrapping grid, each distinct. */
+.synced-fields-panel { border: var(--border-strong) solid var(--line-strong); background: var(--bg-raised); padding: 16px 20px; margin-bottom: 32px; }
+.synced-fields-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 12px; }
+.synced-fields-grid { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; }
+.synced-field { display: flex; flex-direction: column; gap: 4px; min-width: 160px; }
+.synced-field .field-label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+.synced-field .text-field { max-width: 320px; }
+.synced-field-wide { flex: 1 1 260px; }
+.synced-value { font-size: 14px; padding: 6px 0; }
+
 .work-item-panel { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 32px; }
 .work-item-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }
 .work-item-panel .link-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
