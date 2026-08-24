@@ -402,6 +402,11 @@ export function createFakeAzureDevOpsServer({
 
       const id = nextPullRequestId++
       const now = new Date().toISOString()
+      // #118 made the store branch-aware — the target branch's *current*
+      // objectId (not a single flat `currentObjectId`, which no longer
+      // exists) is whatever that branch's own head happens to be right now.
+      const targetBranchName = body.targetRefName.replace(/^refs\/heads\//, '')
+      const targetObjectId = branches.get(targetBranchName)?.objectId ?? objectIdFor(0)
       const pr = {
         pullRequestId: id,
         status: 'active',
@@ -413,13 +418,13 @@ export function createFakeAzureDevOpsServer({
         creationDate: now,
         mergeStatus: 'succeeded',
         // Not a real merge simulation (this fake's Git store has no
-        // per-branch head tracking yet — see #118/#122) — just a stable,
+        // merge-commit-graph modeling — see #122) — just a stable,
         // distinguishable-from-real-pushes fake commit id so a caller
         // completing this pull request (which must echo it back, per
         // Azure DevOps's own optimistic-concurrency check) has something
         // consistent to round-trip.
         lastMergeSourceCommit: { commitId: objectIdFor(1000000 + id) },
-        lastMergeTargetCommit: { commitId: currentObjectId },
+        lastMergeTargetCommit: { commitId: targetObjectId },
       }
       pullRequests.set(id, pr)
       return json(201, pullRequestResponseBody(pr))
