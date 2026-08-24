@@ -559,6 +559,181 @@ function RenderDialog({ instance, onClose }) {
   `
 }
 
+// ---------- Synced-fields panel (#111) ----------
+// A new panel at the top of the instance screen (above the modules — see
+// StageScreen) showing the current stage's synced fields, each its own
+// distinct field rather than collapsed together: the work item type
+// (defaulting to "Task"), a title auto-populated as "{instance name} —
+// {stage title}" but overridable per stage, the linked work item's own
+// current Status (read straight from Azure DevOps via #121's getWorkItem),
+// the stage's Pull Request state (#120/#125's read), and the Assignee —
+// inherited from the instance's own stored assignee but overridable per
+// stage. Backed by GET/PUT /api/instance/synced-fields; title/assignee
+// edits save on blur or Enter (the same affordance the dashboard's own
+// assignee field uses), and an emptied field clears that override so the
+// default/inherited value comes back. An instance with no parent work item
+// linked at all shows a "Link to a work item" prompt in this panel's place
+// instead of any fields.
+function SyncedFieldsPanel({ instance }) {
+  const [data, setData] = useState(null)
+  const [error, setError] = useState('')
+  const [status, setStatus] = useState('')
+  // Null means "not editing" — the input then shows the server's current value. Mirrors the dashboard assignee drafts' pattern without clobbering the loaded value on every unrelated rerender.
+  const [titleDraft, setTitleDraft] = useState(null)
+  const [assigneeDraft, setAssigneeDraft] = useState(null)
+  // A ref (not state): save() reads it synchronously to debounce itself, and no render ever depends on it — the status line already reports the in-flight save.
+  const savingRef = useRef(false)
+
+  const stageId = instance.stage.id
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      const params = new URLSearchParams({ slug: currentSlug.value, stage: stageId })
+      try {
+        // `apiFetchForInstance` (not plain `apiFetch`) — same reason loadInstance uses it: this request may target a workspace with its own PAT override (#104).
+        const res = await apiFetchForInstance(currentSlug.value, `/api/instance/synced-fields?${params}`)
+        const body = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(body.message ?? body.error ?? `Failed to load synced fields (${res.status})`)
+        if (cancelled) return
+        setData(body)
+        setTitleDraft(null)
+        setAssigneeDraft(null)
+      } catch (err) {
+        if (!cancelled) setError(err.message)
+      }
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+    // StageScreen remounts this panel wholesale on stage switch (keyed by stage id), so this only ever fires once per mount.
+    // eslint-disable-next-line
+  }, [])
+
+  async function save(updates) {
+    // One save in flight at a time — a rapid double-Enter (or blur-then-Enter) must not fire two PUTs.
+    if (savingRef.current) return
+    savingRef.current = true
+    setStatus('Saving…')
+    try {
+      const params = new URLSearchParams({ slug: currentSlug.value, stage: stageId })
+      const res = await apiFetchForInstance(currentSlug.value, `/api/instance/synced-fields?${params}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.message ?? body.error ?? `Save failed (${res.status})`)
+      setData(body)
+      setTitleDraft(null)
+      setAssigneeDraft(null)
+      setStatus('Saved.')
+    } catch (err) {
+      setStatus(`Save failed: ${err.message}`)
+    } finally {
+      savingRef.current = false
+    }
+  }
+
+  function commitTitle() {
+    if (!data || titleDraft === null || titleDraft === data.title) return
+    // An emptied (or whitespace-only) field clears the override — the auto-populated default comes back. Saved trimmed, matching the assignee field below.
+    const trimmed = titleDraft.trim()
+    save({ title: trimmed ? trimmed : '' })
+  }
+
+  function commitAssignee() {
+    if (!data || assigneeDraft === null || assigneeDraft === data.assignee) return
+    // Same rule: emptying the field reverts to the inherited instance assignee.
+    save({ assignee: assigneeDraft.trim() ? assigneeDraft.trim() : '' })
+  }
+
+  if (error) {
+    return html`
+      <section class="synced-fields-panel">
+        <h2>Synced fields</h2>
+        <p class="load-error">${error}</p>
+      </section>
+    `
+  }
+
+  if (!data) {
+    return html`
+      <section class="synced-fields-panel">
+        <h2>Synced fields</h2>
+        <p class="loading">Loading…</p>
+      </section>
+    `
+  }
+
+  // Unlinked at all: the prompt takes this panel's place — no fields shown.
+  if (!data.linked) {
+    return html`
+      <section class="synced-fields-panel">
+        <h2>Synced fields</h2>
+        <p class="guidance">
+          <strong>Link to a work item</strong> to see this stage's synced fields (type, title, status, Pull Request
+          state and assignee). Use the Azure DevOps work item panel below to link one.
+        </p>
+      </section>
+    `
+  }
+
+  const pr = data.pullRequest
+
+  return html`
+    <section class="synced-fields-panel">
+      <h2>Synced fields</h2>
+      <div class="synced-fields-grid">
+        <div class="synced-field">
+          <span class="field-label">Type</span>
+          <span class="synced-value">${data.type}</span>
+        </div>
+        <div class="synced-field synced-field-wide">
+          <label class="field-label" for="synced-title">Title${data.titleOverridden ? ' · overridden' : ''}</label>
+          <input
+            id="synced-title"
+            class="text-field"
+            type="text"
+            placeholder=${`${instance.slug} — ${instance.stage.title}`}
+            value=${titleDraft ?? data.title}
+            onInput=${(e) => setTitleDraft(e.currentTarget.value)}
+            onBlur=${commitTitle}
+            onKeyDown=${(e) => e.key === 'Enter' && e.currentTarget.blur()}
+          />
+        </div>
+        <div class="synced-field">
+          <span class="field-label">Status</span>
+          <span class="synced-value">${data.workItemId ? html`#${data.workItemId} · ${data.workItemState ?? '—'}` : '—'}</span>
+        </div>
+        <div class="synced-field synced-field-wide">
+          <span class="field-label">Pull request</span>
+          <span class="synced-value">
+            ${pr
+              ? html`#${pr.id} — ${pr.status}${pr.reviewState !== 'pending' ? ` (${pr.reviewState})` : ''}`
+              : 'No pull request open'}
+          </span>
+        </div>
+        <div class="synced-field">
+          <label class="field-label" for="synced-assignee">Assignee${data.assigneeInherited ? '' : ' · overridden'}</label>
+          <input
+            id="synced-assignee"
+            class="text-field"
+            type="text"
+            placeholder=${instance.assignee ? `${instance.assignee} (inherited)` : 'Inherited from the instance'}
+            value=${assigneeDraft ?? data.assignee}
+            onInput=${(e) => setAssigneeDraft(e.currentTarget.value)}
+            onBlur=${commitAssignee}
+            onKeyDown=${(e) => e.key === 'Enter' && e.currentTarget.blur()}
+          />
+        </div>
+      </div>
+      <div class="save-status">${status}</div>
+    </section>
+  `
+}
+
 // ---------- Azure DevOps work-item link + confirmed gate-pass sync (#103) ----------
 // One instance-level panel, shown once per stage screen (below the modules — see StageScreen; Render itself moved to the view-toggle bar, #114) rather than in AppHeader, since "which stage's work item" is stage-scoped even though the *link* itself is instance-level. Unlinked: a small inline form (organization/project/parent work item id/type) posts to POST /api/instance/work-items/link. Linked: shows the parent id and this stage's own child work item id, plus a "Check gate & sync" action that runs the existing check first and only opens the confirm-before-push modal (mirroring PatPromptModal's shape) if the gate genuinely passes — declining it (or the gate failing) never calls POST /api/instance/work-items/sync at all, so the work item's state is left exactly as it was (#103's "declining leaves the work item's state unchanged" acceptance criterion).
 function WorkItemPanel({ instance }) {
@@ -969,6 +1144,7 @@ function RequestApprovalPanel({ instance }) {
 function StageScreen({ instance, onFieldRegistered }) {
   return html`
     <main id="modules" data-view-mode=${viewMode.value}>
+      <${SyncedFieldsPanel} key=${instance.workItem ? 'linked' : 'unlinked'} instance=${instance} />
       ${instance.modules.map(
         (mod) => html`
           <${ModuleCard}
