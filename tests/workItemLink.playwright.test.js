@@ -9,11 +9,15 @@ import { createInstance, readInstance } from '../lib/instance.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
-// Browser smoke test for #95/#103's Work Item panel (web/app.js's WorkItemPanel): linking an unlinked instance through the real form, and the confirmed gate-pass-then-sync flow (both the confirm and the decline path), driven through a real rendered page against a real running gantry server and the fake in-process Azure DevOps Work Items server — nothing mocked at the browser or HTTP layer.
+// Browser smoke test for #95/#103's Work Item panel (web/app.js's WorkItemPanel), post-#127: an unlinked instance renders no work-item panel at all (the freetext link form was removed — linking happens at instance creation, via the + New Workspace wizard), and a linked instance's panel drives the confirmed gate-pass-then-sync flow (both the confirm and the decline path) through a real rendered page against a real running gantry server and the fake in-process Azure DevOps Work Items server — nothing mocked at the browser or HTTP layer.
 
 const WI_ORGANIZATION = 'wi-org'
 const WI_PROJECT = 'wi-project'
 const VALID_PAT = 'valid-test-pat'
+
+function basicAuthHeader(pat) {
+  return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
+}
 
 function withRunningServer(options, fn) {
   return new Promise((resolve, reject) => {
@@ -42,13 +46,19 @@ async function createParentWorkItem(baseUrl) {
   return parent.id
 }
 
-// The Work Item panel's link form has no `baseUrl` field (production only ever targets the real dev.azure.com — mirrors the setup wizard's own repo-URL field, per #94's own "no on-premises baseUrl support" note) — the one piece of test wiring the real form has no way to express itself. Mirrors tests/setup-wizard.playwright.test.js's own `installRoutes`: intercept the outgoing request client-side and inject the fake server's `baseUrl` before it reaches the real gantry server, rather than adding a test-only field to production UI.
-function installWorkItemsLinkRoute(page, wiBaseUrl) {
-  return page.route('**/api/instance/work-items/link*', async (route) => {
-    const body = JSON.parse(route.request().postData() ?? '{}')
-    body.baseUrl = wiBaseUrl
-    await route.continue({ postData: JSON.stringify(body) })
+// Links through the same server route the "+ New Workspace" wizard's link step (#126) calls at creation time — the UI surface #127 removed was only ever one of this route's callers.
+async function linkViaApi(gantryBase, wiBaseUrl, parentId) {
+  const res = await fetch(`${gantryBase}/api/instance/work-items/link?slug=my-initiative`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+    body: JSON.stringify({
+      organization: WI_ORGANIZATION,
+      project: WI_PROJECT,
+      parentId,
+      baseUrl: wiBaseUrl,
+    }),
   })
+  assert.equal(res.status, 200)
 }
 
 // A gantry server backed by a scratch local instance ("my-initiative") whose Shape stage is pre-filled with the `examples` fixture's own real content, so the "Check gate & sync" action's check can genuinely PASS — wired to trust the fake Azure DevOps Work Items server's base URL, the same opt-in every other Azure-DevOps-backed test in this repo uses.
@@ -79,9 +89,39 @@ function withLinkableInstanceServer(fn) {
   })
 }
 
-test('the Work Item panel links an unlinked instance through the form, then confirms a gate-pass state push', async () => {
+test('an unlinked instance renders no work-item panel at all (#127 removed its freetext link form)', async () => {
+  await withLinkableInstanceServer(async (gantryBase) => {
+    const browser = await chromium.launch()
+    try {
+      const page = await browser.newPage()
+      const pageErrors = []
+      page.on('pageerror', (err) => pageErrors.push(err.message))
+      page.on('console', (msg) => {
+        if (msg.type() === 'error') pageErrors.push(msg.text())
+      })
+
+      await page.goto(`${gantryBase}/instance/my-initiative`)
+      await page.locator('.synced-fields-panel').waitFor({ timeout: 10_000 })
+
+      // No form, no panel shell — nothing to link with on this screen any more.
+      assert.equal(await page.locator('.work-item-panel').count(), 0)
+      assert.equal(await page.getByPlaceholder('Organization').count(), 0)
+      assert.equal(await page.getByRole('button', { name: 'Link instance' }).count(), 0)
+
+      // Discovery still has its surface: the synced-fields panel's "Link to a work item" prompt.
+      await assert.doesNotReject(page.locator('.synced-fields-panel').getByText('Link to a work item').waitFor({ timeout: 5_000 }))
+
+      assert.deepEqual(pageErrors, [])
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
+test('a linked instance\'s Work Item panel confirms a gate-pass state push', async () => {
   await withLinkableInstanceServer(async (gantryBase, wiBaseUrl, instancesDir) => {
     const parentId = await createParentWorkItem(wiBaseUrl)
+    await linkViaApi(gantryBase, wiBaseUrl, parentId)
 
     const browser = await chromium.launch()
     try {
@@ -92,24 +132,14 @@ test('the Work Item panel links an unlinked instance through the form, then conf
         if (msg.type() === 'error') pageErrors.push(msg.text())
       })
 
-      // This instance's own data is local (never returns "authentication_required"), but the new work-items/link and work-items/sync routes do require a PAT (Work Items scope) — seed one up front, as if already entered in a prior session, so this test can drive the panel itself rather than the (separately covered, tests/patPrompt.playwright.test.js) PAT-prompt flow.
+      // The sync route does require a PAT (Work Items scope) — seed one up front, as if already entered in a prior session, so this test can drive the panel itself rather than the (separately covered, tests/patPrompt.playwright.test.js) PAT-prompt flow.
       await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
-      await installWorkItemsLinkRoute(page, wiBaseUrl)
 
       await page.goto(`${gantryBase}/instance/my-initiative`)
       await page.waitForSelector('.work-item-panel', { timeout: 10_000 })
 
-      // Unlinked: the inline link form is shown, no "linked to" text yet.
       const panel = page.locator('.work-item-panel')
-      await assert.doesNotReject(panel.locator('.link-form').waitFor({ timeout: 5_000 }))
-      assert.equal(await panel.locator('text=Linked to parent work item').count(), 0)
-
-      await panel.locator('input[placeholder="Organization"]').fill(WI_ORGANIZATION)
-      await panel.locator('input[placeholder="Project"]').fill(WI_PROJECT)
-      await panel.locator('input[placeholder="Parent work item id"]').fill(String(parentId))
-      await panel.getByRole('button', { name: 'Link instance' }).click()
-
-      // Linking succeeds — the panel flips to the linked view, reporting this stage's own child work item id.
+      // Linked view straight away — no inline link form to fill in.
       await assert.doesNotReject(panel.locator(`text=Linked to parent work item #${parentId}`).waitFor({ timeout: 10_000 }))
       await assert.doesNotReject(panel.locator("text=This stage's work item: #").waitFor({ timeout: 5_000 }))
 
@@ -143,6 +173,7 @@ test('the Work Item panel links an unlinked instance through the form, then conf
 test('declining the confirmation leaves the linked work item\'s state unchanged', async () => {
   await withLinkableInstanceServer(async (gantryBase, wiBaseUrl, instancesDir) => {
     const parentId = await createParentWorkItem(wiBaseUrl)
+    await linkViaApi(gantryBase, wiBaseUrl, parentId)
 
     const browser = await chromium.launch()
     try {
@@ -154,16 +185,10 @@ test('declining the confirmation leaves the linked work item\'s state unchanged'
       })
 
       await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
-      await installWorkItemsLinkRoute(page, wiBaseUrl)
 
       await page.goto(`${gantryBase}/instance/my-initiative`)
       await page.waitForSelector('.work-item-panel', { timeout: 10_000 })
       const panel = page.locator('.work-item-panel')
-
-      await panel.locator('input[placeholder="Organization"]').fill(WI_ORGANIZATION)
-      await panel.locator('input[placeholder="Project"]').fill(WI_PROJECT)
-      await panel.locator('input[placeholder="Parent work item id"]').fill(String(parentId))
-      await panel.getByRole('button', { name: 'Link instance' }).click()
       await panel.locator(`text=Linked to parent work item #${parentId}`).waitFor({ timeout: 10_000 })
 
       const instance = readInstance('my-initiative', { instancesDir })

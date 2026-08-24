@@ -275,8 +275,6 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .work-item-panel { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 32px; }
 .work-item-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }
-.work-item-panel .link-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
-.work-item-panel .link-form .text-field { max-width: 220px; }
 
 .advance-stage-panel { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 32px; }
 .advance-stage-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }

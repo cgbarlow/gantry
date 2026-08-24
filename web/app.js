@@ -777,13 +777,17 @@ function SyncedFieldsPanel({ instance }) {
   }
 
   // Unlinked at all: the prompt takes this panel's place — no fields shown.
+  // (#127 removed the instance screen's own freetext link form, so this is
+  // the only linking surface left for a pre-existing unlinked instance to
+  // discover — pointing at where linking actually happens now.)
   if (!data.linked) {
     return html`
       <section class="synced-fields-panel">
         <h2>Synced fields</h2>
         <p class="guidance">
           <strong>Link to a work item</strong> to see this stage's synced fields (type, title, status, Pull Request
-          state and assignee). Use the Azure DevOps work item panel below to link one.
+          state and assignee). Linking happens when the instance is created, via the "+ New Workspace" wizard's
+          work-item step.
         </p>
       </section>
     `
@@ -844,49 +848,16 @@ function SyncedFieldsPanel({ instance }) {
 }
 
 // ---------- Azure DevOps work-item link + confirmed gate-pass sync (#103) ----------
-// One instance-level panel, shown once per stage screen (below the modules — see StageScreen; Render itself moved to the view-toggle bar, #114) rather than in AppHeader, since "which stage's work item" is stage-scoped even though the *link* itself is instance-level. Unlinked: a small inline form (organization/project/parent work item id/type) posts to POST /api/instance/work-items/link. Linked: shows the parent id and this stage's own child work item id, plus a "Check gate & sync" action that runs the existing check first and only opens the confirm-before-push modal (mirroring PatPromptModal's shape) if the gate genuinely passes — declining it (or the gate failing) never calls POST /api/instance/work-items/sync at all, so the work item's state is left exactly as it was (#103's "declining leaves the work item's state unchanged" acceptance criterion).
+// One instance-level panel, shown once per stage screen (below the modules — see StageScreen; Render itself moved to the view-toggle bar, #114) rather than in AppHeader, since "which stage's work item" is stage-scoped even though the *link* itself is instance-level. Unlinked: renders nothing at all — #127 removed this panel's freetext link form (organization/project/parent id/type) entirely, since linking now happens at instance creation (the "+ New Workspace" wizard's link step) and an unlinked instance's "Link to a work item" prompt already takes the synced-fields panel's place above (see SyncedFieldsPanel). Linked: shows the parent id and this stage's own child work item id, plus a "Check gate & sync" action that runs the existing check first and only opens the confirm-before-push modal (mirroring PatPromptModal's shape) if the gate genuinely passes — declining it (or the gate failing) never calls POST /api/instance/work-items/sync at all, so the work item's state is left exactly as it was (#103's "declining leaves the work item's state unchanged" acceptance criterion).
 function WorkItemPanel({ instance }) {
   const [status, setStatus] = useState('')
   const [confirming, setConfirming] = useState(false)
-  const [linkForm, setLinkForm] = useState({ organization: '', project: '', parentId: '', workItemType: '' })
-  const [linking, setLinking] = useState(false)
-  const [linkError, setLinkError] = useState('')
 
   const stageId = instance.stage.id
   const workItem = instance.workItem
   const stageWorkItemId = workItem?.stages?.[stageId]
 
-  async function reloadInstance() {
-    instanceData.value = await loadInstance(currentSlug.value, viewedStage.value)
-  }
-
-  async function handleLink() {
-    setLinkError('')
-    if (!linkForm.organization.trim() || !linkForm.project.trim() || !linkForm.parentId.trim()) {
-      setLinkError('Organization, project, and parent work item id are required.')
-      return
-    }
-    setLinking(true)
-    try {
-      const res = await apiFetch(`/api/instance/work-items/link?slug=${encodeURIComponent(currentSlug.value)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          organization: linkForm.organization.trim(),
-          project: linkForm.project.trim(),
-          parentId: Number(linkForm.parentId.trim()),
-          ...(linkForm.workItemType.trim() ? { workItemType: linkForm.workItemType.trim() } : {}),
-        }),
-      })
-      const body = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(body.message ?? body.error ?? `Link failed (${res.status})`)
-      await reloadInstance()
-    } catch (err) {
-      setLinkError(err.message)
-    } finally {
-      setLinking(false)
-    }
-  }
+  if (!workItem) return null
 
   // "Check gate & sync": runs the same check the dashboard's own Check action does — only once it genuinely PASSes does this open the confirm modal; a FAIL (or a check-request failure) reports status and stops there, exactly as if no linked work item existed at all.
   async function handleCheckAndMaybeConfirm() {
@@ -930,50 +901,11 @@ function WorkItemPanel({ instance }) {
   return html`
     <section class="work-item-panel">
       <h2>Azure DevOps work item</h2>
-      ${!workItem
-        ? html`
-            <div class="link-form">
-              <input
-                class="text-field"
-                type="text"
-                placeholder="Organization"
-                value=${linkForm.organization}
-                onInput=${(e) => setLinkForm({ ...linkForm, organization: e.currentTarget.value })}
-              />
-              <input
-                class="text-field"
-                type="text"
-                placeholder="Project"
-                value=${linkForm.project}
-                onInput=${(e) => setLinkForm({ ...linkForm, project: e.currentTarget.value })}
-              />
-              <input
-                class="text-field"
-                type="text"
-                placeholder="Parent work item id"
-                value=${linkForm.parentId}
-                onInput=${(e) => setLinkForm({ ...linkForm, parentId: e.currentTarget.value })}
-              />
-              <input
-                class="text-field"
-                type="text"
-                placeholder="Work item type (default: Task)"
-                value=${linkForm.workItemType}
-                onInput=${(e) => setLinkForm({ ...linkForm, workItemType: e.currentTarget.value })}
-              />
-              <button type="button" class="btn primary" disabled=${linking} onClick=${handleLink}>
-                ${linking ? 'Linking…' : 'Link instance'}
-              </button>
-              ${linkError ? html`<div class="inline-error">${linkError}</div>` : null}
-            </div>
-          `
-        : html`
-            <p>
-              Linked to parent work item #${workItem.parentId} (${workItem.organization}/${workItem.project}, type "${workItem.workItemType}").
-            </p>
-            <p>This stage's work item: ${stageWorkItemId ? html`#${stageWorkItemId}` : '—'}</p>
-            <button type="button" class="btn" onClick=${handleCheckAndMaybeConfirm}>Check gate & sync work item</button>
-          `}
+      <p>
+        Linked to parent work item #${workItem.parentId} (${workItem.organization}/${workItem.project}, type "${workItem.workItemType}").
+      </p>
+      <p>This stage's work item: ${stageWorkItemId ? html`#${stageWorkItemId}` : '—'}</p>
+      <button type="button" class="btn" onClick=${handleCheckAndMaybeConfirm}>Check gate & sync work item</button>
       <div class="save-status">${status}</div>
       ${confirming
         ? html`

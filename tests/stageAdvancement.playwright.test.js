@@ -270,11 +270,11 @@ test('the Stage advancement panel is never shown for a Workspace-backed instance
               await page.waitForSelector('#modules', { timeout: 10_000 })
 
               assert.equal(await page.locator('.advance-stage-panel').count(), 0)
-              // The Work Item panel (an unrelated, always-shown panel) is
+              // The synced-fields panel (an unrelated, always-shown panel) is
               // still there — confirming the page genuinely loaded this
               // instance's real stage screen, rather than the advancement
               // panel simply being missing because nothing rendered.
-              await assert.doesNotReject(page.locator('.work-item-panel').waitFor({ timeout: 5_000 }))
+              await assert.doesNotReject(page.locator('.synced-fields-panel').waitFor({ timeout: 5_000 }))
 
               assert.deepEqual(pageErrors, [])
             } finally {
@@ -306,11 +306,11 @@ test('the Stage advancement panel is never shown once the instance is already at
         await page.waitForSelector('#modules', { timeout: 10_000 })
 
         assert.equal(await page.locator('.advance-stage-panel').count(), 0)
-        // The Work Item panel (an unrelated, always-shown panel) is still
+        // The synced-fields panel (an unrelated, always-shown panel) is still
         // there — confirming the page genuinely loaded this instance's
         // real (final) stage screen, rather than the advancement panel
         // simply being missing because nothing rendered.
-        await assert.doesNotReject(page.locator('.work-item-panel').waitFor({ timeout: 5_000 }))
+        await assert.doesNotReject(page.locator('.synced-fields-panel').waitFor({ timeout: 5_000 }))
 
         assert.deepEqual(pageErrors, [])
       } finally {
