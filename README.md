@@ -46,7 +46,8 @@ Git is the audit trail. Who changed what, when, and why is a `git log`, not a ve
 | **Gate** | The decision point a stage feeds. Gates declare which artefacts and which modules must be complete to pass. |
 | **Module** | The atomic unit of content — a single, self-contained piece of the process (context, options, non-functional requirements, security posture). Modules are the source of truth. |
 | **Instance** | One run of a definition against one initiative — a folder of module files, local or living inside a workspace. Its own stored `assignee` (a single named person, editable from the dashboard, its own Instance Settings screen, or `gantry new --assignee`) is a distinct instance-level field, stable across stage transitions — separate from each module's own frontmatter `owner`, which is still just the first non-empty value found among its current stage's modules (see "Instance module files" below), unrelated and unchanged. |
-| **Workspace** | An Azure DevOps organization/project/repository that backs one or more instances' data (see "Backing an instance with Azure DevOps" below). Auto-created the first time an instance is registered against that repo, and reused by every later instance registered against the same one. Holds its own free-text owner label (a workspace-level field, distinct from the per-module `owner` above) and a ticketing-system selection — edited from an instance's own Workspace Settings screen. |
+| **Workspace** | An Azure DevOps organization/project/repository that backs one or more instances' data (see "Backing an instance with Azure DevOps" below). Registered through the "+ New Workspace" wizard's first step the first time you create an instance against that repo, and reused by every later instance created against the same one. Holds its own free-text owner label — set right in the wizard when the workspace is first registered, since nothing else asks for it — and a ticketing-system selection; both remain editable from an instance's own Workspace Settings screen. |
+| **Stage advancement** | How an instance moves from one stage to the next — which depends entirely on whether it's local or Workspace-backed (see "Stage advancement and approval" below). A **local** instance advances self-serve via "Advance to next stage", blocked until its current gate has passed. A **Workspace-backed** instance never advances self-serve: its stage's work lives on its own **stage branch** (`gantry-workspace/<slug>/<stageId>`, stacked on the prior stage's branch while that one's still open — so `main` only ever reflects fully-approved, merged stages), and it advances only when that stage's Pull Request is approved in Azure DevOps and gantry merges it. There is no third mode and no per-instance opt-out. |
 | **Artefact** | A rendered output. A document, a page, a summary. Generated, never hand-edited. Every artefact, `.md` and `.docx`, ends with a footer naming a short commit hash and date it was rendered from — the current local `HEAD` for a local instance, or (for an Azure DevOps-backed one) the commit its content was pushed as, one commit behind the file's own latest history entry, since a commit can't name its own hash — so a document can always be traced back to close to the exact version that produced it. |
 
 The key rule: **artefacts are derived, modules are authored.** If you find yourself editing a rendered artefact, something is wrong with the module spec.
@@ -155,11 +156,21 @@ gantry/
 │       │   └── solution-definition.md
 │       └── out/                  # rendered artefacts (gitignored by default)
 ├── lib/                          # the engine: definition/instance loading, render, status, the web server
-│   ├── server.js                 # HTTP routes, incl. the Azure DevOps repo-check/adopt/work-item endpoints
+│   ├── server.js                 # HTTP routes, incl. the work-item, workspace, stage-advancement/approval
+│   │                             # and synced-fields endpoints
 │   ├── instanceRegistry.js       # slug -> workspace/location lookup/registration (the registry above)
 │   ├── workspaceRegistry.js      # Azure DevOps org/project/repository entities instances reference
-│   ├── azureDevOpsClient.js      # PAT-authenticated Azure DevOps REST client (Git)
+│   ├── azureDevOpsClient.js       # PAT-authenticated Azure DevOps REST client (Git)
 │   ├── azureDevOpsWorkItemsClient.js  # PAT-authenticated Azure DevOps REST client (Work Items)
+│   ├── azureDevOpsPullRequestsClient.js # PAT-authenticated Azure DevOps REST client (Pull Requests):
+│   │                              # create a PR, read reviewer votes, complete/merge it
+│   ├── stageBranch.js             # per-stage branch names/lifecycle for Workspace-backed instances
+│   │                              # (gantry-workspace/<slug>/<stageId>, stacked on an open prior stage's branch)
+│   ├── stageAdvancement.js        # local instances' gate-gated self-serve "Advance to next stage"
+│   ├── stageApproval.js           # Workspace-backed "Request approval": open the stage's gate-pass-gated PR
+│   ├── stageStatus.js             # "Check status": read the PR's reviewer votes; on approval, merge,
+│   │                              # advance the stage and push the linked work item
+│   ├── syncedFields.js            # the instance screen's synced-fields panel (type/title/status/PR state/assignee)
 │   ├── workItemLink.js           # link an instance to a work item; confirmed gate-pass state sync
 │   ├── repoCheck.js              # "does this Azure DevOps repo already hold instance data", incl.
 │   │                             # the legacy-root-to-gantry-workspace/<slug>/ migration routine
@@ -167,8 +178,9 @@ gantry/
 ├── bin/gantry.js                 # CLI entrypoint
 └── web/
     ├── index.html                # app shell
-    ├── app.js                     # dashboard + module editor
-    ├── pages/setup-wizard.js     # "+ New instance" — local or Azure DevOps
+    ├── app.js                     # dashboard + module editor (incl. stage advancement/approval panels,
+    │                              # the synced-fields panel and the workspace-scoped instance switcher)
+    ├── pages/new-workspace-wizard.js # "+ New Workspace" — pick/register a workspace, then instance fields
     ├── pages/settings.js         # /settings, /settings/workspace, /settings/instance — tab-free
     ├── lib/credential.js         # client-side PAT storage/prompt, incl. per-workspace overrides
     ├── lib/ticketingSystem.js    # client-side default-ticketing-system setting
@@ -193,13 +205,13 @@ Neither path is the "real" one. They're two front ends onto the same data.
 
 An instance's data doesn't have to live on the machine running `gantry serve` — it can live in an Azure DevOps repo instead, with gantry acting as a form over it. This is useful when the people filling in modules aren't the people running the server.
 
-A repo backing instance data this way is a **workspace**: `instance.yaml` and `modules/` live at `gantry-workspace/<slug>/` inside it, not at repo root — so one workspace (one Azure DevOps repo) can hold more than one instance, each in its own slug-named subdirectory, rather than being permanently tied to exactly one. A workspace isn't something you create up front — it's found-or-created automatically the first time an instance is registered or adopted against a given organization/project/repository, and reused by every instance registered against that same repo afterwards.
+A repo backing instance data this way is a **workspace**: `instance.yaml` and `modules/` live at `gantry-workspace/<slug>/` inside it, not at repo root — so one workspace (one Azure DevOps repo) can hold more than one instance, each in its own slug-named subdirectory, rather than being permanently tied to exactly one.
 
-From the dashboard, **"+ New instance"** opens the setup wizard:
+The landing page's sole creation entry point is **"+ New Workspace"** (`/new-workspace`) — a single wizard that covers both registering a brand-new workspace and adding another instance to one that already exists (there is no separate "+ New instance" action, and no paste-a-URL-first flow any more):
 
-1. Paste the target repo's URL — the standard `https://dev.azure.com/{organization}/{project}/_git/{repository}` shape (an on-premises Azure DevOps Server base URL isn't supported here yet).
-2. **Check repo** looks for existing instance data at that location. If it's already there, you can open it directly ("adopt" it into this server's dashboard) rather than creating a new instance over the top of it. A repo written before this per-slug layout existed (a lone `instance.yaml` at repo root) is migrated into `gantry-workspace/<slug>/` automatically the first time it's checked — no separate step.
-3. If nothing's there yet, pick a definition to create a fresh instance there.
+1. **Pick an existing workspace** from those this server already knows, or **register a new one** against a `https://dev.azure.com/{organization}/{project}/_git/{repository}` location (an on-premises Azure DevOps Server base URL isn't supported here yet). Registering sets that workspace's **Owner** and ticketing system in the same step — nothing else asks for either ahead of an instance existing in it. The PAT you're prompted for here proves real access to that exact repo before anything is recorded.
+2. **Instance fields** — Name, Directory (defaulting to the slugified Name, overridable), and an initial Assignee.
+3. **Work-item link** — only when the chosen workspace has a ticketing system configured: the Azure DevOps parent-work-item link, with Organization *and* Project auto-filled read-only from the workspace's own pinned values, and Parent work item id / Work item type as real PAT-backed lookups rather than freetext. Skipped entirely for a workspace with no ticketing system.
 
 The first request against an Azure DevOps-backed instance prompts for a **Personal Access Token** with **Code (Read & write)** and **Work Items (Read & write)** scope. It's stored in the browser (`localStorage`), sent only to your own gantry server, and forwarded from there to Azure DevOps as an HTTP Basic credential — gantry's own server never persists it.
 
@@ -212,15 +224,33 @@ Each screen's own back control returns to wherever it was actually opened from (
 
 - **Global Settings** (`/settings`) — set, replace or clear the Azure DevOps PAT ahead of ever being prompted for one, and pick the default **ticketing system** new workspaces use. Azure DevOps is the only ticketing system gantry actually talks to today; a second option is listed but disabled ("coming soon") so the schema and UI don't need a migration once a second one ships.
 - **Workspace Settings** (`/settings/workspace`, from an instance's own Settings dropdown) — the workspace *behind that one instance* (never a picker across every registered workspace): its Azure DevOps repo URL and three editable fields — a free-text **owner** label, a **PAT override** for that workspace alone (falls back to the Global Settings PAT when unset, and — like the global PAT — never leaves the browser), and a per-workspace **ticketing-system** override. A local instance has no workspace, so this screen reports that instead.
-- **Instance Settings** (`/settings/instance`, from an instance's own Settings dropdown) — that instance's own stored **Assignee** (editable), read-only instance info (slug, definition, current stage), and a read-only view of its Azure DevOps work-item link (organization/project/parent work item/type, and each stage's own child work item id). Re-linking isn't supported here — that's still the module editor's own work-item panel (see "Linking an instance to an Azure DevOps work item" below).
+- **Instance Settings** (`/settings/instance`, from an instance's own Settings dropdown) — that instance's own stored **Assignee** (editable), read-only instance info (slug, definition, current stage), and a read-only view of its Azure DevOps work-item link (organization/project/parent work item/type, and each stage's own child work item id). Re-linking isn't supported here or anywhere else after creation — linking happens only at instance creation (see "Linking an instance to an Azure DevOps work item" below).
 
 Once registered, a local and an Azure DevOps-backed instance are indistinguishable from the dashboard's point of view — same listing, same module editor, same render command. Where each one's data actually lives is tracked server-side across two registry files (`instances/instance-registry.json`: slug -> workspace; `instances/workspace-registry.json`: workspace -> organization/project/repository/owner/ticketing-system — both gitignored, application state, not source), not in any client-visible config.
 
 ## Linking an instance to an Azure DevOps work item
 
-Optionally, and independently of where an instance's own data lives (local or Azure DevOps-backed — the two are unrelated), an instance can be linked to a parent Azure DevOps work item. The module editor's **Azure DevOps work item** panel (below Render) offers a small form — organization, project, parent work item id, and an optional work item type (defaulting to `Task`, a safe default across every stock process template; override it to match your organization's own template).
+Optionally, an instance can be linked to a parent Azure DevOps work item so its progress is trackable on the board. Linking happens when the instance is created, via the "+ New Workspace" wizard's work-item step (above) — a step only instances created inside a ticketing-enabled workspace get, so an instance has no linking path outside creation (the module editor's old free-text link form is gone, and an instance created without a link shows a "Link to a work item" prompt in its place pointing back at creation; re-linking isn't supported after the fact).
 
-Linking creates one child work item per stage in the instance's definition underneath that parent, in one step. From then on, the panel's **Check gate & sync work item** action checks the currently-viewed stage's gate and, only if it passes, opens a confirmation dialog before pushing a new state to that stage's own work item — declining the confirmation leaves the work item's state untouched. The state actually pushed is drawn from whatever states the configured work item type genuinely supports in your project (via its own `getWorkItemTypeStates` lookup), never a fixed list Gantry invents — see `docs/adr/0011-azure-devops-work-item-linking.md` for the full mapping rationale.
+Linking creates one child work item per stage in the instance's definition underneath that parent, in one step. From then on:
+
+- A **synced-fields panel** at the top of the instance screen shows the current stage's live tracking fields at a glance: the work item type (default `Task`), a title auto-populated as "{instance name} — {stage title}" but overridable per stage, the linked work item's own current Status read straight from Azure DevOps, the stage's Pull Request state, and the Assignee (inherited from the instance's stored assignee, overridable per stage).
+- The **Azure DevOps work item** panel below the modules keeps the existing **Check gate & sync work item** action — it checks the currently-viewed stage's gate and, only if it passes, opens a confirmation dialog before pushing a new state to that stage's own work item; declining leaves the state untouched. The state actually pushed is drawn from whatever states the configured work item type genuinely supports in your project (via its own `getWorkItemTypeStates` lookup), never a fixed list Gantry invents — see `docs/adr/0011-azure-devops-work-item-linking.md`.
+- For a **Workspace-backed** instance the linked work item is a board-visible tracking surface only (title, status, assignee) — it plays no part in gating stage advancement any more; that's the stage's Pull Request (see below).
+
+## Stage advancement and approval
+
+Nothing moves an instance from one stage to the next by itself — advancement is always explicit, and how it works depends entirely on whether the instance is local or Workspace-backed (`docs/adr/0012-stage-advancement-board-side-approval.md`, as reworked by `docs/adr/0014-pull-request-stage-approval.md`, which supersedes ADR-0012's ticketing-mode mechanism). In both modes the action is blocked until the current stage's gate has genuinely passed — re-checked server-side at the moment of the action, never trusted from an earlier client-side check — and multiple stages may sit pending approval concurrently: starting the next stage never waits on the previous one's approval.
+
+**Local instances** advance self-serve: an "Advance to next stage" panel runs the gate check, asks for confirmation, and moves the instance's stage pointer directly — nothing is pushed anywhere else. The panel isn't rendered for a Workspace-backed instance at all, which has no self-serve path out of a stage.
+
+**Workspace-backed instances** are gated by a real Azure DevOps Pull Request the Owner reviews *in Azure DevOps* — there is no separate approve button inside gantry:
+
+1. The moment the first save of a stage lands, that stage gets its own branch — `gantry-workspace/<slug>/<stageId>` — and every subsequent read/write targets it. If the previous stage's branch is still open (its PR unmerged), the new branch stacks on top of it rather than forking fresh from `main`, so work continues in sequence through approval latency; `main` itself only ever reflects fully-approved, merged stages.
+2. Every module save re-renders whichever of the stage's artefacts have enough data and commits them to the same branch, so the eventual Pull Request's diff always carries the generated documents alongside the module files.
+3. **Request approval** opens that stage's Pull Request into `main` — the actual approval gate — but only once the stage's gate has passed. Committing to the branch before that is unrestricted throughout the stage; opening the PR is what's gated.
+4. The Owner reviews and votes on the Pull Request directly in Azure DevOps. **Check status** then reads the PR's reviewer votes — explicitly distinguishing a rejection or changes-requested vote from a merely-still-pending review, so "the Owner asked for changes" never reads as an ambiguous "not yet approved".
+5. On detecting approval, gantry completes (merges) the Pull Request itself, advances the instance's stage pointer, and pushes the linked work item's state where one is linked — one click resolves everything, with no second manual merge step. Detection stays manual (this explicit "Check status" click): no polling, no webhooks.
 
 ## Your first instance
 
@@ -248,7 +278,7 @@ gantry render my-initiative soap                # produce the artefact
 | `gantry status <slug> [--json]` | Current stage, module completeness, what's outstanding | Implemented |
 | `gantry check <slug> [--gate <id>] [--json]` | Validate an instance against a gate's requirements — any gate, not just the instance's current stage | Implemented |
 | `gantry render <slug> <artefact> [--dry-run]` | Render an artefact to `out/` | Implemented |
-| `gantry serve [slug] [--port <port>]` | Serve the web form (port 3000): a dashboard of every registered instance at `/`, local or Azure DevOps-backed, and the stage-by-stage form at `/instance/<slug>`. `[slug]` only sets a fallback default for API requests made with no `?slug=<slug>` of their own — it doesn't change what the dashboard shows or require picking one instance up front. `/setup` is the instance-setup wizard, `/settings` is the Settings screen (see "Backing an instance with Azure DevOps" above) | Implemented |
+| `gantry serve [slug] [--port <port>]` | Serve the web form (port 3000): a dashboard of every registered instance at `/`, local or Azure DevOps-backed, and the stage-by-stage form at `/instance/<slug>`. `[slug]` only sets a fallback default for API requests made with no `?slug=<slug>` of their own — it doesn't change what the dashboard shows or require picking one instance up front. `/new-workspace` is the "+ New Workspace" wizard, `/settings` is the Settings screen (see "Backing an instance with Azure DevOps" above) | Implemented |
 | `gantry validate <definition> [--json]` | Report every structural problem with a definition in one pass | Implemented |
 
 `status`, `check` and `validate` all emit structured output with `--json` for scripting and agent use.
