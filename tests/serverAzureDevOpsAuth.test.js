@@ -266,6 +266,61 @@ test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance with
   })
 })
 
+test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance also renders and commits the stage\'s own artefact(s) to the same stage branch (#123, ADR-0014)', async () => {
+  const fullFiles = {
+    ...SEED_FILES,
+    '/gantry-workspace/my-initiative/modules/solution-definition.md': readFileSync('instances/examples/modules/solution-definition.md', 'utf8'),
+    '/gantry-workspace/my-initiative/modules/team-and-estimates.md': readFileSync('instances/examples/modules/team-and-estimates.md', 'utf8'),
+  }
+  await withAzureDevOpsBackedServer(fullFiles, {}, async (base, adoBaseUrl) => {
+    const res = await fetch(`${base}/api/instance/modules/context`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+      body: JSON.stringify({
+        status: 'agreed',
+        owner: 'c.barlow',
+        fields: { driver: 'Updated via Azure DevOps.', 'affected-domains': ['Payments'], 'out-of-scope': '' },
+      }),
+    })
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    assert.deepEqual(
+      body.rendered.map((r) => r.artefactId),
+      ['soap']
+    )
+    assert.equal(body.rendered[0].rendered, true)
+    assert.equal(body.rendered[0].azureDevOpsPath, 'gantry-workspace/my-initiative/out/soap.docx')
+
+    // The rendered artefact actually landed on the "shape" stage's own branch, not 'main' — the same write path (#122) the module save itself used.
+    const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
+    const stageBranch = stageBranchName('my-initiative', 'shape')
+    const pushedContent = await client.getFileContent('gantry-workspace/my-initiative/out/soap.docx', { branch: stageBranch })
+    const pushedBytes = Buffer.from(pushedContent, 'base64')
+    assert.equal(pushedBytes.subarray(0, 2).toString(), 'PK')
+  })
+})
+
+test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance still saves and reports success even when the stage\'s artefact(s) can\'t be rendered yet', async () => {
+  // SEED_FILES seeds only "context" — "soap" also requires solution-definition and team-and-estimates, so this save's own follow-up render has nothing complete enough to render.
+  await withAzureDevOpsBackedServer(SEED_FILES, {}, async (base) => {
+    const res = await fetch(`${base}/api/instance/modules/context`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+      body: JSON.stringify({ status: 'agreed', owner: 'c.barlow', fields: { driver: 'Still just getting started.' } }),
+    })
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    // The save itself still succeeded and is reported as such (this is not a save-failure test) — only the follow-up render is what's incomplete.
+    assert.ok(body.modules.find((m) => m.id === 'context'))
+    assert.deepEqual(
+      body.rendered.map((r) => r.artefactId),
+      ['soap']
+    )
+    assert.equal(body.rendered[0].rendered, false)
+    assert.equal(body.rendered[0].skipped, true)
+  })
+})
+
 // ---------- PUT /api/instance/assignee (#97) ----------
 
 test('PUT /api/instance/assignee against an Azure-DevOps-backed instance with no PAT returns the structured "authentication required" response, and writes nothing', async () => {

@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { renderArtefact } from '../lib/render.js'
+import { renderArtefact, renderStageArtefacts } from '../lib/render.js'
 import { createAsset } from '../lib/assets.js'
 import { loadDefinition } from '../lib/definition.js'
 import { readModule, writeModule } from '../lib/instance.js'
@@ -330,6 +330,157 @@ test('a render against Azure DevOps reads instance/module data from, and pushes 
       // 'main' has no ref at all — nothing was ever read from or pushed to
       // it by this render.
       await assert.rejects(() => client.getFileContent(result.azureDevOpsPath), AzureDevOpsNotFoundError)
+    }
+  )
+})
+
+// ---------- renderStageArtefacts (#123): render-to-branch on every save ----------
+
+// The Detailed Design stage's own two artefacts (sad/ssad) share the exact same `requires` list (docs/adr/0001) — a real multi-artefact stage, unlike Shape's single "soap", so these tests can prove renderStageArtefacts handles more than one artefact per gate without a bespoke fixture.
+function seedDetailedDesignAzureDevOpsFiles() {
+  return {
+    '/gantry-workspace/examples/instance.yaml': 'definition: design\nslug: examples\nstage: detailed-design\n',
+    '/gantry-workspace/examples/modules/architecture.md': readFileSync('instances/examples/modules/architecture.md', 'utf8'),
+    '/gantry-workspace/examples/modules/integration.md': readFileSync('instances/examples/modules/integration.md', 'utf8'),
+    '/gantry-workspace/examples/modules/data.md': readFileSync('instances/examples/modules/data.md', 'utf8'),
+    '/gantry-workspace/examples/modules/nfrs.md': readFileSync('instances/examples/modules/nfrs.md', 'utf8'),
+    '/gantry-workspace/examples/modules/security.md': readFileSync('instances/examples/modules/security.md', 'utf8'),
+    '/gantry-workspace/examples/modules/risks.md': readFileSync('instances/examples/modules/risks.md', 'utf8'),
+    '/gantry-workspace/examples/modules/dependencies.md': readFileSync('instances/examples/modules/dependencies.md', 'utf8'),
+    '/gantry-workspace/examples/modules/support-and-operations.md': readFileSync(
+      'instances/examples/modules/support-and-operations.md',
+      'utf8'
+    ),
+  }
+}
+
+test('renderStageArtefacts renders every one of a stage\'s own artefacts (matched by gate) and commits each to the caller-supplied branch', async () => {
+  const branch = 'gantry-workspace/examples/detailed-design'
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      files: {},
+      branchFiles: { [branch]: seedDetailedDesignAzureDevOpsFiles() },
+    },
+    async (baseUrl) => {
+      const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl, branch }
+      const definition = loadDefinition('design')
+      const stage = definition.stages.find((s) => s.id === 'detailed-design')
+
+      const results = await renderStageArtefacts('examples', definition, stage, { azureDevOps })
+
+      assert.deepEqual(
+        results.map((r) => r.artefactId),
+        ['sad', 'ssad']
+      )
+      assert.ok(results.every((r) => r.rendered === true), `expected every artefact rendered, got ${JSON.stringify(results)}`)
+
+      const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl })
+      for (const result of results) {
+        const pushedContent = await client.getFileContent(result.azureDevOpsPath, { branch })
+        const pushedBytes = Buffer.from(pushedContent, 'base64')
+        assert.equal(pushedBytes.subarray(0, 2).toString(), 'PK', `${result.artefactId} should be a real docx`)
+      }
+    }
+  )
+})
+
+test('renderStageArtefacts reports an artefact as skipped, not failed, when its required module data hasn\'t all been saved yet', async () => {
+  const branch = 'gantry-workspace/examples/shape'
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      files: {},
+      // Only "context" has been saved so far — "soap" also requires solution-definition and team-and-estimates, neither of which exist yet, exactly the state a stage is in after its very first module save.
+      branchFiles: {
+        [branch]: {
+          '/gantry-workspace/examples/instance.yaml': 'definition: design\nslug: examples\nstage: shape\n',
+          '/gantry-workspace/examples/modules/context.md': readFileSync('instances/examples/modules/context.md', 'utf8'),
+        },
+      },
+    },
+    async (baseUrl) => {
+      const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl, branch }
+      const definition = loadDefinition('design')
+      const stage = definition.stages.find((s) => s.id === 'shape')
+
+      const results = await renderStageArtefacts('examples', definition, stage, { azureDevOps })
+
+      assert.equal(results.length, 1)
+      assert.equal(results[0].artefactId, 'soap')
+      assert.equal(results[0].rendered, false)
+      assert.equal(results[0].skipped, true)
+      assert.match(results[0].reason, /has no saved data/)
+
+      // Nothing was ever pushed for an artefact that couldn't be rendered.
+      const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl })
+      await assert.rejects(() => client.getFileContent('gantry-workspace/examples/out/soap.docx', { branch }), AzureDevOpsNotFoundError)
+    }
+  )
+})
+
+test('renderStageArtefacts reports a genuine render failure per-artefact rather than throwing, and still attempts the stage\'s other artefacts', async () => {
+  const branch = 'gantry-workspace/examples/detailed-design'
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      files: {},
+      branchFiles: { [branch]: seedDetailedDesignAzureDevOpsFiles() },
+      // The branch's own seed content already counts as its first "push" against this fake server, so failAfterPushes: 1 lets exactly one further real push through (sad's footer-less draft) before every push after it starts failing — including sad's own follow-up footer push and both of ssad's pushes.
+      failAfterPushes: 1,
+    },
+    async (baseUrl) => {
+      const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl, branch }
+      const definition = loadDefinition('design')
+      const stage = definition.stages.find((s) => s.id === 'detailed-design')
+
+      const results = await renderStageArtefacts('examples', definition, stage, { azureDevOps })
+
+      assert.deepEqual(
+        results.map((r) => r.artefactId),
+        ['sad', 'ssad']
+      )
+      for (const result of results) {
+        assert.equal(result.rendered, false, `expected ${result.artefactId} to fail to render`)
+        assert.equal(result.skipped, undefined, `expected ${result.artefactId}'s failure not to be reported as merely "not ready yet"`)
+        assert.ok(result.error, `expected ${result.artefactId} to carry an error message`)
+      }
+    }
+  )
+})
+
+test('renderStageArtefacts only considers artefacts belonging to the given stage\'s own gate', async () => {
+  const branch = 'gantry-workspace/examples/shape'
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      files: {},
+      branchFiles: { [branch]: seedExamplesAzureDevOpsFiles() },
+    },
+    async (baseUrl) => {
+      const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl, branch }
+      const definition = loadDefinition('design')
+      const stage = definition.stages.find((s) => s.id === 'shape')
+
+      const results = await renderStageArtefacts('examples', definition, stage, { azureDevOps })
+
+      // Only "soap" belongs to the "business-case" gate the Shape stage closes on — "hld"/"sad"/"ssad"/"as-built" all belong to later stages' gates and must never be attempted here.
+      assert.deepEqual(
+        results.map((r) => r.artefactId),
+        ['soap']
+      )
     }
   )
 })
