@@ -805,6 +805,93 @@ function WorkItemPanel({ instance }) {
   `
 }
 
+// ---------- Stage advancement (local instances only; #115, ADR-0012) ----------
+// The self-serve "Advance to next stage" action: never rendered at all for
+// a Workspace-backed instance (`instance.workspaceBacked` — that one always
+// advances via its own Pull Request flow instead, ADR-0014/#122-#125), and
+// only while viewing the instance's own *current* stage (`instance.stage.id
+// === instance.currentStageId`) — advancing moves this instance's own
+// persisted stage pointer forward from wherever it currently sits, so it
+// never makes sense to offer it while browsing an earlier or later stage
+// via the stage switcher. Mirrors WorkItemPanel's own check-then-confirm
+// shape: "Advance to next stage" runs the same gate check every other
+// gated action in this app runs, and only a genuine PASS opens the confirm
+// dialog — declining it (or a FAIL) leaves the instance's stage genuinely
+// unchanged.
+function AdvanceStagePanel({ instance }) {
+  const [status, setStatus] = useState('')
+  const [confirming, setConfirming] = useState(false)
+
+  const isFinalStage = instance.stages[instance.stages.length - 1]?.id === instance.stage.id
+  if (instance.workspaceBacked || instance.stage.id !== instance.currentStageId || isFinalStage) return null
+
+  async function handleCheckAndMaybeConfirm() {
+    setStatus('Checking gate…')
+    const res = await apiFetch(`/api/instance/check?slug=${encodeURIComponent(currentSlug.value)}`)
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setStatus(`Check failed: ${body.message ?? body.error}`)
+      return
+    }
+    if (!body.pass) {
+      const outstanding = body.modules.filter((m) => !m.complete).map((m) => m.title)
+      setStatus(`FAIL — outstanding: ${outstanding.join(', ') || 'see modules'}`)
+      return
+    }
+    setStatus('Gate passed.')
+    setConfirming(true)
+  }
+
+  async function handleConfirmAdvance() {
+    setConfirming(false)
+    setStatus('Advancing…')
+    const res = await apiFetch(`/api/instance/advance-stage?slug=${encodeURIComponent(currentSlug.value)}`, {
+      method: 'POST',
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setStatus(`Advance failed: ${body.message ?? body.error}`)
+      return
+    }
+    setStatus(`Advanced to "${body.toStage.title}".`)
+    // Re-fetch with no explicit stage so the form now shows the instance's
+    // new current stage — otherwise `viewedStage` would still hold this
+    // (now-completed) stage's id and the screen would appear unchanged.
+    viewedStage.value = null
+    instanceData.value = await loadInstance(currentSlug.value, null)
+  }
+
+  function handleDecline() {
+    setConfirming(false)
+    setStatus('Declined — stage left unchanged.')
+  }
+
+  return html`
+    <section class="advance-stage-panel">
+      <h2>Stage advancement</h2>
+      <button type="button" class="btn" onClick=${handleCheckAndMaybeConfirm}>Advance to next stage</button>
+      <div class="save-status">${status}</div>
+      ${confirming
+        ? html`
+            <div class="modal-backdrop" role="presentation">
+              <div class="modal" role="dialog" aria-modal="true" aria-label="Confirm stage advancement">
+                <h3>Advance to the next stage?</h3>
+                <p class="guidance">
+                  The gate for stage "${instance.stage.title}" has passed. Confirm to move this instance on to its
+                  next stage. Declining leaves it at "${instance.stage.title}".
+                </p>
+                <div class="modal-actions">
+                  <button type="button" class="btn ghost" onClick=${handleDecline}>Decline</button>
+                  <button type="button" class="btn primary" onClick=${handleConfirmAdvance}>Confirm & advance</button>
+                </div>
+              </div>
+            </div>
+          `
+        : null}
+    </section>
+  `
+}
+
 // ---------- The viewed stage's whole screen: modules + work-item panel ----------
 // Keyed by stage id from the parent (see ModuleEditorPage) so switching
 // stages remounts this wholesale — fresh CodeMirror instances, matching the
@@ -825,6 +912,7 @@ function StageScreen({ instance, onFieldRegistered }) {
           />
         `
       )}
+      <${AdvanceStagePanel} instance=${instance} />
       <${WorkItemPanel} instance=${instance} />
     </main>
   `
