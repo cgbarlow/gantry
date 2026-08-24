@@ -1,0 +1,290 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { checkStageApprovalStatus, interpretReviewerVotes } from '../lib/stageStatus.js'
+import { requestStageApproval } from '../lib/stageApproval.js'
+import { readInstance } from '../lib/instance.js'
+import { linkInstanceToWorkItem } from '../lib/workItemLink.js'
+import { registerInstance } from '../lib/instanceRegistry.js'
+import { loadDefinition } from '../lib/definition.js'
+import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
+import { resolveStageBranch } from '../lib/stageBranch.js'
+import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+
+// Lib-level tests for #125's "Check status" action (ADR-0014): reading a
+// stage's Pull Request reviewer votes and distinguishing an explicit
+// rejection/changes-requested from a merely-still-pending review, plus the
+// full approve → auto-merge → advance-the-stage flow (including the linked
+// work item's state push). Real HTTP against the fake in-process Azure
+// DevOps server throughout — the Owner's vote is cast exactly as it would
+// be in Azure DevOps's own UI, via the fake server's reviewers endpoint,
+// the same way a real vote would exercise "Check status"'s detection.
+
+const ORGANIZATION = 'fake-org'
+const PROJECT = 'fake-project'
+const REPOSITORY = 'fake-repo'
+const VALID_PAT = 'valid-test-pat'
+const SLUG = 'remote-initiative'
+
+const definition = loadDefinition('design')
+const [SHAPE] = definition.stages
+
+function basicAuthHeader(pat) {
+  return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
+}
+
+function withScratchInstances(fn) {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  return (async () => fn(instancesDir))().finally(() => rmSync(instancesDir, { recursive: true, force: true }))
+}
+
+async function fillShapeStage(azureDevOps, branch) {
+  const client = createAzureDevOpsClient(azureDevOps)
+  for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
+    const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
+    await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
+  }
+}
+
+async function castVote(adoBaseUrl, pullRequestId, vote) {
+  const res = await fetch(
+    `${adoBaseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/${REPOSITORY}/pullrequests/${pullRequestId}/reviewers/owner-1`,
+    {
+      method: 'PUT',
+      headers: { Authorization: basicAuthHeader(VALID_PAT), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: 'The Owner', vote }),
+    }
+  )
+  assert.equal(res.status, 200)
+}
+
+test('interpretReviewerVotes distinguishes approval, rejection, changes-requested and pending', () => {
+  assert.equal(interpretReviewerVotes([]), 'pending')
+  assert.equal(interpretReviewerVotes([{ displayName: 'a', vote: 0 }]), 'pending')
+  assert.equal(interpretReviewerVotes([{ displayName: 'a', vote: 10 }]), 'approved')
+  assert.equal(interpretReviewerVotes([{ displayName: 'a', vote: 5 }]), 'approved')
+  assert.equal(interpretReviewerVotes([{ displayName: 'a', vote: -10 }]), 'rejected')
+  assert.equal(interpretReviewerVotes([{ displayName: 'a', vote: -5 }]), 'changes-requested')
+  // A single rejection blocks, no matter who else approved.
+  assert.equal(interpretReviewerVotes([{ displayName: 'a', vote: 10 }, { displayName: 'b', vote: -10 }]), 'rejected')
+})
+
+test('checkStageApprovalStatus is Workspace-backed only', async () => {
+  await assert.rejects(() => checkStageApprovalStatus('any-slug'), /Workspace-backed/)
+})
+
+test('checkStageApprovalStatus throws when no Pull Request has been opened for the stage yet', async () => {
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      files: { [`/gantry-workspace/${SLUG}/instance.yaml`]: `definition: design\nslug: ${SLUG}\nstage: shape\n` },
+    },
+    async (adoBaseUrl) => {
+      await withScratchInstances(async (instancesDir) => {
+        registerInstance(
+          SLUG,
+          { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          { instancesDir }
+        )
+        const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl }
+
+        await assert.rejects(
+          () => checkStageApprovalStatus(SLUG, { azureDevOps }),
+          /has no Pull Request open requesting approval for stage "shape"/
+        )
+      })
+    }
+  )
+})
+
+async function withOpenPullRequest(fn) {
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      files: { [`/gantry-workspace/${SLUG}/instance.yaml`]: `definition: design\nslug: ${SLUG}\nstage: shape\n` },
+    },
+    async (adoBaseUrl) => {
+      await withScratchInstances(async (instancesDir) => {
+        registerInstance(
+          SLUG,
+          { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          { instancesDir }
+        )
+        const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl }
+        const branch = await resolveStageBranch(azureDevOps, definition, SLUG, SHAPE.id)
+        await fillShapeStage(azureDevOps, branch)
+
+        const opened = await requestStageApproval(SLUG, { azureDevOps })
+        await fn({ adoBaseUrl, azureDevOps, instancesDir, branch, pullRequestId: opened.pullRequestId })
+      })
+    }
+  )
+}
+
+async function getPrStatus(azureDevOps, pullRequestId) {
+  const res = await fetch(`${azureDevOps.baseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/${REPOSITORY}/pullrequests/${pullRequestId}`, {
+    headers: { Authorization: `Basic ${Buffer.from(`:${azureDevOps.pat}`, 'utf8').toString('base64')}` },
+  })
+  return (await res.json()).status
+}
+
+test('a still-pending review reports pending and merges nothing', async () => {
+  await withOpenPullRequest(async ({ azureDevOps, pullRequestId }) => {
+    await castVote(azureDevOps.baseUrl, pullRequestId, 0)
+
+    const result = await checkStageApprovalStatus(SLUG, { azureDevOps })
+    assert.equal(result.review.state, 'pending')
+    assert.equal(result.merged, false)
+    assert.equal(result.advancedTo, null)
+    assert.equal(result.prStatus, 'active')
+    assert.equal(await getPrStatus(azureDevOps, pullRequestId), 'active')
+
+    const instance = await readInstanceAfter(azureDevOps)
+    assert.equal(instance.stage, 'shape')
+  })
+})
+
+test('an explicit rejection is reported as rejected — not merged, stage untouched', async () => {
+  await withOpenPullRequest(async ({ azureDevOps, pullRequestId }) => {
+    await castVote(azureDevOps.baseUrl, pullRequestId, -10)
+
+    const result = await checkStageApprovalStatus(SLUG, { azureDevOps })
+    assert.equal(result.review.state, 'rejected')
+    assert.equal(result.merged, false)
+    assert.equal(result.advancedTo, null)
+    assert.equal(await getPrStatus(azureDevOps, pullRequestId), 'active')
+
+    const instance = await readInstanceAfter(azureDevOps)
+    assert.equal(instance.stage, 'shape')
+  })
+})
+
+test('a waiting-for-author vote is reported as changes-requested — distinct from pending', async () => {
+  await withOpenPullRequest(async ({ azureDevOps, pullRequestId }) => {
+    await castVote(azureDevOps.baseUrl, pullRequestId, -5)
+
+    const result = await checkStageApprovalStatus(SLUG, { azureDevOps })
+    assert.equal(result.review.state, 'changes-requested')
+    assert.equal(result.merged, false)
+    assert.equal(await getPrStatus(azureDevOps, pullRequestId), 'active')
+  })
+})
+
+test('detecting approval merges the Pull Request itself and advances the stage pointer', async () => {
+  await withOpenPullRequest(async ({ azureDevOps, pullRequestId }) => {
+    await castVote(azureDevOps.baseUrl, pullRequestId, 10)
+
+    const result = await checkStageApprovalStatus(SLUG, { azureDevOps })
+    assert.equal(result.review.state, 'approved')
+    assert.equal(result.merged, true)
+    assert.equal(result.prStatus, 'completed')
+    assert.deepEqual(result.advancedTo, { id: 'hld-define', title: 'HLD Definition', gate: 'hld-tac-approved' })
+
+    // The merge happened on Azure DevOps's side…
+    assert.equal(await getPrStatus(azureDevOps, pullRequestId), 'completed')
+    // …and gantry's own stage pointer moved with it (read back from main).
+    const instance = await readInstanceAfter(azureDevOps)
+    assert.equal(instance.stage, 'hld-define')
+  })
+})
+
+test('checking status again after a successful merge is a safe no-op, not a second completion or advance', async () => {
+  await withOpenPullRequest(async ({ azureDevOps, pullRequestId }) => {
+    await castVote(azureDevOps.baseUrl, pullRequestId, 10)
+    const first = await checkStageApprovalStatus(SLUG, { azureDevOps })
+    assert.equal(first.merged, true)
+    assert.equal(first.advancedTo.id, 'hld-define')
+
+    const second = await checkStageApprovalStatus(SLUG, {
+      // A re-click after the advance now resolves the instance's current
+      // stage to the *next* one — a stale screen still asking about the
+      // completed stage does so via its gate, exactly as the API allows.
+      azureDevOps,
+      gate: 'business-case',
+    })
+    assert.equal(second.prStatus, 'completed')
+    assert.equal(second.merged, true)
+    assert.equal(second.advancedTo, null)
+
+    const instance = await readInstanceAfter(azureDevOps)
+    assert.equal(instance.stage, 'hld-define')
+  })
+})
+
+test('approving the final stage completes its Pull Request without attempting an advance', async () => {
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      files: { [`/gantry-workspace/${SLUG}/instance.yaml`]: `definition: design\nslug: ${SLUG}\nstage: handover\n` },
+    },
+    async (adoBaseUrl) => {
+      await withScratchInstances(async (instancesDir) => {
+        registerInstance(
+          SLUG,
+          { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          { instancesDir }
+        )
+        const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl }
+        const handover = definition.stages.find((s) => s.id === 'handover')
+        const branch = await resolveStageBranch(azureDevOps, definition, SLUG, handover.id)
+        const client = createAzureDevOpsClient(azureDevOps)
+        for (const moduleId of ['as-built-notes']) {
+          const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
+          await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
+        }
+
+        const opened = await requestStageApproval(SLUG, { azureDevOps })
+        await castVote(adoBaseUrl, opened.pullRequestId, 10)
+
+        const result = await checkStageApprovalStatus(SLUG, { azureDevOps })
+        assert.equal(result.merged, true)
+        assert.equal(result.advancedTo, null)
+
+        const instance = await readInstanceAfter(azureDevOps)
+        assert.equal(instance.stage, 'handover')
+      })
+    }
+  )
+})
+
+test('a linked stage work item is pushed to its gate-passed state as part of the same check', async () => {
+  await withOpenPullRequest(async ({ azureDevOps, adoBaseUrl, instancesDir, pullRequestId }) => {
+    // Link the instance first (the real route writes the link through the
+    // stage's own branch-scoped instance.yaml copy, so mirror that here).
+    await linkInstanceToWorkItem(
+      SLUG,
+      { organization: ORGANIZATION, project: PROJECT, parentId: 42, workItemType: 'Task', pat: VALID_PAT, baseUrl: azureDevOps.baseUrl },
+      { azureDevOps: { ...azureDevOps, branch: 'gantry-workspace/remote-initiative/shape' } }
+    )
+
+    await castVote(azureDevOps.baseUrl, pullRequestId, 10)
+    const result = await checkStageApprovalStatus(SLUG, { azureDevOps })
+    assert.ok(result.workItemSync)
+    assert.equal(result.workItemSync.ok, true)
+    assert.equal(typeof result.workItemSync.workItemId, 'number')
+    assert.equal(result.workItemSync.state, 'Closed')
+
+    const res = await fetch(`${adoBaseUrl}/${ORGANIZATION}/${PROJECT}/_apis/wit/workitems/${result.workItemSync.workItemId}`, {
+      headers: { Authorization: basicAuthHeader(VALID_PAT) },
+    })
+    const workItem = await res.json()
+    assert.equal(workItem.fields['System.State'], 'Closed')
+  })
+})
+
+// Reads instance.yaml back from main (no branch override) — where the
+// post-merge stage-pointer advance lands (#125).
+async function readInstanceAfter(azureDevOps) {
+  return readInstance(SLUG, { azureDevOps })
+}

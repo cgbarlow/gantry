@@ -827,7 +827,12 @@ function AdvanceStagePanel({ instance }) {
 // the instance's own *current* stage, since that's the only stage a save
 // can ever actually be landing commits on today (a later stage only starts
 // once #125's own "advance the stage" moves the current-stage pointer
-// forward, which doesn't exist yet).
+// forward, which happens when its Check-status action merges this stage's
+// own Pull Request). Once a Pull Request is open, the panel offers #125's
+// "Check status" action in place of "Request approval" — reading the PR's
+// reviewer votes, auto-merging on approval (advancing the stage), and
+// reporting an explicit rejection/changes-requested distinctly from a
+// still-pending review.
 function RequestApprovalPanel({ instance }) {
   const [status, setStatus] = useState('')
   const [confirming, setConfirming] = useState(false)
@@ -877,6 +882,50 @@ function RequestApprovalPanel({ instance }) {
     setStatus('Declined — no Pull Request opened.')
   }
 
+  // "Check status" (#125, ADR-0014): the explicitly-triggered read of the
+  // open Pull Request's reviewer votes. On approval the server merges the
+  // PR itself and advances the stage pointer, so a merged result reloads
+  // the instance (reset to the new current stage, mirroring
+  // AdvanceStagePanel's own post-advance reload) rather than leaving the
+  // screen on the now-completed stage.
+  async function handleCheckStatus() {
+    setStatus('Checking Pull Request status…')
+    const res = await apiFetchForInstance(
+      currentSlug.value,
+      `/api/instance/check-status?slug=${encodeURIComponent(currentSlug.value)}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }
+    )
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setStatus(`Check status failed: ${body.message ?? body.error}`)
+      return
+    }
+    if (!body.merged) {
+      if (body.review?.state === 'rejected') {
+        setStatus(
+          `Rejected — the Owner voted to reject Pull Request #${body.pullRequestId}. Address the feedback, then re-request approval.`
+        )
+      } else if (body.review?.state === 'changes-requested') {
+        setStatus(
+          `Changes requested — the Owner sent Pull Request #${body.pullRequestId} back for more work before approving.`
+        )
+      } else {
+        setStatus(`Still pending — the Owner hasn't reviewed Pull Request #${body.pullRequestId} yet.`)
+      }
+      return
+    }
+    setStatus(
+      body.advancedTo
+        ? `Approved — Pull Request #${body.pullRequestId} merged; stage advanced to "${body.advancedTo.title}".`
+        : `Approved — Pull Request #${body.pullRequestId} merged. This was the final stage; the instance is complete.`
+    )
+    const effectWillReload = viewedStage.value !== null
+    viewedStage.value = null
+    if (!effectWillReload) {
+      instanceData.value = await loadInstance(currentSlug.value, null)
+    }
+  }
+
   return html`
     <section class="request-approval-panel">
       <h2>Request approval</h2>
@@ -888,6 +937,7 @@ function RequestApprovalPanel({ instance }) {
                 ? html`<a href=${justOpened.webUrl} target="_blank" rel="noreferrer">Open in Azure DevOps</a>`
                 : null}
             </p>
+            <button type="button" class="btn" onClick=${handleCheckStatus}>Check status</button>
           `
         : html`<button type="button" class="btn" onClick=${handleCheckAndMaybeConfirm}>Request approval</button>`}
       <div class="save-status">${status}</div>

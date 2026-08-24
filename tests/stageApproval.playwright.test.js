@@ -59,6 +59,22 @@ async function fillShapeStage(azureDevOps, branch) {
   }
 }
 
+// Casts the Owner's reviewer vote directly against the fake Azure DevOps
+// server — the same act as approving/rejecting in Azure DevOps's own UI
+// (ADR-0014 keeps voting out of gantry entirely), so the browser test below
+// exercises Check status's detection against a genuinely external decision.
+async function castVote(adoBaseUrl, pullRequestId, vote) {
+  const res = await fetch(
+    `${adoBaseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/${REPOSITORY}/pullrequests/${pullRequestId}/reviewers/owner-1`,
+    {
+      method: 'PUT',
+      headers: { Authorization: `Basic ${Buffer.from(`:${VALID_PAT}`, 'utf8').toString('base64')}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: 'The Owner', vote }),
+    }
+  )
+  assert.equal(res.status, 200)
+}
+
 function withRemoteInstance(fn) {
   return withFakeAzureDevOpsServer(
     {
@@ -232,6 +248,73 @@ test('confirming opens a Pull Request, and the panel reflects it — including s
           await page.waitForSelector('.request-approval-panel', { timeout: 10_000 })
           await assert.doesNotReject(
             page.locator('.request-approval-panel', { hasText: /Pull Request #\d+ is open/ }).waitFor({ timeout: 10_000 })
+          )
+
+          assert.deepEqual(pageErrors, [])
+        })
+      }
+    )
+  })
+})
+
+test('Check status reports pending, then rejection, then approval — merging and advancing on approval (#125)', async () => {
+  await withRemoteInstance(async ({ adoBaseUrl, instancesDir }) => {
+    const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl }
+    const branch = await resolveStageBranch(azureDevOps, definition, SLUG, SHAPE.id)
+    await fillShapeStage(azureDevOps, branch)
+
+    await withRunningServer(
+      { instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true },
+      async (base) => {
+        await withRunningBrowser(async (browser) => {
+          const page = await browser.newPage()
+          const pageErrors = []
+          page.on('pageerror', (err) => pageErrors.push(err.message))
+          page.on('console', (msg) => {
+            if (msg.type() === 'error') pageErrors.push(msg.text())
+          })
+
+          await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+
+          await page.goto(`${base}/instance/${SLUG}`)
+          const panel = page.locator('.request-approval-panel')
+          await panel.waitFor({ timeout: 10_000 })
+
+          // Open the Pull Request first.
+          await panel.getByRole('button', { name: 'Request approval' }).click()
+          const modal = page.locator('.modal[aria-label="Confirm request approval"]')
+          await modal.waitFor({ state: 'visible', timeout: 10_000 })
+          await modal.getByRole('button', { name: 'Confirm & request approval' }).click()
+          await assert.doesNotReject(panel.locator('text=/Pull Request #\\d+ is open/').waitFor({ timeout: 10_000 }))
+          const prId = Number((await panel.locator('text=/Pull Request #(\\d+)/').first().textContent()).match(/#(\d+)/)[1])
+
+          // "Check status" is now the panel's offered action.
+          const checkButton = panel.getByRole('button', { name: 'Check status' })
+          assert.equal(await checkButton.count(), 1)
+
+          // No decision yet → explicitly pending.
+          await castVote(adoBaseUrl, prId, 0)
+          await checkButton.click()
+          await assert.doesNotReject(panel.locator('text=Still pending — the Owner hasn\'t reviewed').waitFor({ timeout: 10_000 }))
+
+          // An explicit rejection reads as a decision, not as silence.
+          await castVote(adoBaseUrl, prId, -10)
+          await checkButton.click()
+          await assert.doesNotReject(panel.locator('text=Rejected — the Owner voted to reject').waitFor({ timeout: 10_000 }))
+
+          // Approval auto-merges and advances; the screen follows the
+          // instance to its new current stage.
+          await castVote(adoBaseUrl, prId, 10)
+          await checkButton.click()
+          await assert.doesNotReject(page.locator('text=/Approved — Pull Request #\\d+ merged; stage advanced to/').waitFor({ timeout: 10_000 }))
+          await assert.doesNotReject(
+            page.locator('#stage-line', { hasText: 'HLD Definition' }).waitFor({ timeout: 10_000 })
+          )
+          // The merged stage's Pull Request is gone from the panel — the
+          // screen now shows the next stage, which hasn't requested
+          // approval yet, so "Request approval" is offered afresh.
+          await assert.doesNotReject(
+            page.locator('.request-approval-panel').getByRole('button', { name: 'Request approval' }).waitFor({ timeout: 10_000 })
           )
 
           assert.deepEqual(pageErrors, [])
