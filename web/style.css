@@ -615,6 +615,10 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .check-row { margin-top: 10px; }
 .wizard-field-hint { margin: 8px 0 0; color: var(--text-muted); font-size: 12px; }
 
+/* The "+ New Workspace" wizard's (#110/#126) pick-vs-register toggle —
+   reuses `.btn`/`.btn.active` wholesale, just grouped with a small gap. */
+.wizard-mode-toggle { display: flex; gap: 8px; }
+
 .result-card {
   border: var(--border-strong) solid var(--line-strong);
   border-radius: var(--radius);

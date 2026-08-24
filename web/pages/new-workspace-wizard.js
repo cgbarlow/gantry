@@ -1,287 +1,339 @@
-// "+ New Workspace" wizard (Azure DevOps #110, under #106's unified-wizard
-// spec — see docs/adr/0013-unified-workspace-creation-wizard.md on the
-// `gantry-stage-advancement-and-workspace-wizard-adrs` branch). Replaces
-// the old URL-first "+ New instance" wizard (web/pages/setup-wizard.js,
-// removed by this same ticket) entirely: the Workspaces landing page's
-// standalone creation entry point is now a single wizard covering both
-// workspace and instance creation, not two separate concepts.
+// The "+ New Workspace" wizard (#110, under #106/docs/adr/0013-unified-
+// workspace-creation-wizard.md): replaces the old URL-first instance-setup
+// wizard (web/pages/setup-wizard.js, #78/#94) entirely. Rather than pasting
+// a raw Azure DevOps repo URL and having gantry guess whether it already
+// holds instance data, this wizard is explicit about what it's doing at
+// every step:
 //
-// Two steps:
-//   1. "workspace" — pick an already-registered workspace (`GET
-//      /api/workspaces`) or register a brand-new one (`POST
-//      /api/workspaces`), setting its Owner in this same step.
-//   2. "instance" — the new instance's own Name, Directory (defaults to
-//      Name, slugified, overridable), and initial Assignee, then `POST
-//      /api/instances` against the chosen workspace's own
-//      organization/project/repository.
+//   1. Pick an existing Workspace (an already-registered Azure DevOps
+//      organization/project/repository) or register a brand new one —
+//      setting that new Workspace's Owner and ticketing system in the same
+//      step, since nothing else asks for either ahead of an instance
+//      existing in it.
+//   2. Instance Name + Directory (defaulting to a slugified Name,
+//      overridable) + initial Assignee.
+//   3. Only when the chosen Workspace has a ticketing system configured
+//      (today, every Workspace does — see workspaceRegistry.js's own
+//      `ticketingSystem` doc comment — but this step is written to react to
+//      that field rather than assume it, so a future "no ticketing system"
+//      Workspace needs no wizard change of its own): the Azure DevOps
+//      parent-work-item link (#126) — Organization and Project pinned
+//      read-only from the Workspace, Parent work item id and Work item type
+//      as real PAT-backed lookups against `GET
+//      /api/azure-devops/work-items/:id`/`GET
+//      /api/azure-devops/work-item-types` (#121's client capabilities),
+//      never freetext.
 //
-// The Azure DevOps parent-work-item link step — conditional on the chosen
-// workspace's own ticketing system — is a separate, later ticket (#126):
-// this wizard's flow ends the moment the instance is created, which is
-// already a complete, usable flow for a workspace with no ticketing system
-// configured (#110's own acceptance criteria).
+// State is kept as module-scope `@preact/signals` (not component-local
+// `useState`), matching the old wizard's own convention (ADR-0006 names
+// "in-progress wizard answers" as exactly this state model's use case) — an
+// in-progress registration or instance-fields draft survives an internal
+// route change and back, not just component-local state that'd reset on
+// remount.
 import { html } from 'htm/preact'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect } from 'preact/hooks'
 import { signal, effect } from '@preact/signals'
-import { parseRepoUrl } from '../lib/validateRepo.js'
 import { apiFetch } from '../lib/apiFetch.js'
-import { TICKETING_SYSTEMS } from '../lib/ticketingSystem.js'
+import { TICKETING_SYSTEMS, defaultTicketingSystem } from '../lib/ticketingSystem.js'
 
-// ---------- Wizard state ----------
-// `@preact/signals` at module scope, matching web/pages/setup-wizard.js's
-// own established convention: an in-progress wizard survives an internal
-// (client-side) route change and back, not just component-local state that
-// would reset on remount.
+// The work item type used when nothing more specific is looked up or
+// chosen — mirrors lib/workItemLink.js's own `DEFAULT_WORK_ITEM_TYPE`
+// ("Task", the one type every stock Azure DevOps process template ships as
+// a valid child of a parent work item). Kept as a literal here rather than
+// imported: that module is server-only (it shells real Azure DevOps client
+// calls), with no browser-safe entry point of its own.
+const DEFAULT_WORK_ITEM_TYPE = 'Task'
 
-const step = signal('workspace') // 'workspace' | 'instance'
-const workspaceMode = signal('pick') // 'pick' | 'register' — which sub-form step 'workspace' shows
+// ---------- Step 1: pick or register a Workspace ----------
+const workspaceMode = signal('pick') // 'pick' | 'register'
+const workspaces = signal(null) // fetched GET /api/workspaces list, null while loading
+const workspacesLoadError = signal('')
+const pickedWorkspaceId = signal('')
 
-const workspaces = signal([]) // every already-registered workspace (GET /api/workspaces)
-const workspacesStatus = signal('idle') // idle | loading | loaded | error
-const workspacesError = signal('')
-
-const selectedWorkspace = signal(null) // the workspace the new instance will be created in, once chosen
-
-// "Register a new workspace" sub-form fields.
-const newRepoUrl = signal('')
-const newOwner = signal('')
-const newTicketingSystem = signal(TICKETING_SYSTEMS.find((s) => !s.disabled)?.id ?? 'azure-devops')
+const registerForm = signal({ organization: '', project: '', repository: '', owner: '' })
+const registerTicketingSystem = signal(defaultTicketingSystem.value)
 const registerStatus = signal('idle') // idle | registering | failed
 const registerError = signal('')
 
-// Instance-level fields (step 'instance').
-const instanceName = signal('')
-const instanceDirectory = signal('')
-// True once the user edits Directory directly, so it stops auto-following
-// Name — mirrors the common "slug follows title until you touch the slug"
-// pattern.
-const directoryTouched = signal(false)
-// True once the user has typed into Name at all, regardless of its current
-// value — distinct from `instanceName.value !== ''`, which would go back to
-// `false`-equivalent if the user typed something and then cleared it back
-// to empty. Needed so `InstanceStep`'s "Directory can't be empty" message
-// can tell "never touched this form yet" (nothing to explain) apart from
-// "engaged with Name and ended up with an empty Directory anyway" (a real
-// state worth explaining), since both leave `instanceName`/
-// `instanceDirectory` looking identically blank otherwise.
-const nameTouched = signal(false)
-const assignee = signal('')
+// The Workspace this wizard is now creating an instance in — set once step
+// 1 completes, either from the picked entry or the newly registered one.
+const selectedWorkspace = signal(null)
 
-const availableDefinitions = signal([])
+// ---------- Step 2: instance fields ----------
+const step = signal('workspace') // 'workspace' | 'instance' | 'link' | 'done'
+const definitions = signal([])
 const selectedDefinitionId = signal('')
+const nameField = signal('')
+const directoryField = signal('')
+// Once the architect edits Directory directly, it stops auto-following
+// Name — the same "auto-populated but overridable" contract #106's spec
+// describes for the stage work-item title (#111), applied here to Name ->
+// Directory instead.
+const directoryTouched = signal(false)
+const assigneeField = signal('')
 
-const createStatus = signal('idle') // idle | creating | done | failed
+// ---------- Step 3: parent-work-item link (#126) ----------
+const workItemTypes = signal([])
+const workItemTypesLoadError = signal('')
+const parentIdField = signal('')
+const workItemTypeField = signal(DEFAULT_WORK_ITEM_TYPE)
+const lookupStatus = signal('idle') // idle | looking-up | found | not-found | error
+const lookupError = signal('')
+const lookupResult = signal(null) // { id, title, workItemType, state }
+
+// ---------- Final create/link ----------
+const createStatus = signal('idle') // idle | creating | failed
 const createError = signal('')
+const linkStatus = signal('idle') // idle | linking | failed
+const linkError = signal('')
 const createdSlug = signal('')
 
-// Bumped by any action that abandons whatever `registerNewWorkspace()`/
-// `createNewInstance()` call is currently in flight — picking a different
-// workspace, going back a step, switching the pick/register sub-tab, or a
-// full `resetWizard()`. Each of those async functions captures this at the
-// start of its own request and compares it once that request resolves, so
-// a call the user has since abandoned can't apply its (stale) success or
-// failure onto whatever the user has moved on to — the same
-// stale-async-response guard web/pages/setup-wizard.js's own removed
-// `sessionToken` used, for the same reason.
-const sessionToken = signal(0)
-
-// Defaults the definition selection once definitions arrive — guards the
-// same race web/pages/setup-wizard.js's own equivalent effect documents:
-// the definitions fetch and this page's own mount are two independent
-// in-flight requests with no ordering guarantee between them.
-effect(() => {
-  if (selectedDefinitionId.value === '' && availableDefinitions.value.length > 0) {
-    selectedDefinitionId.value = availableDefinitions.value[0].id
-  }
-})
-
-function defaultTicketingSystemId() {
-  return TICKETING_SYSTEMS.find((s) => !s.disabled)?.id ?? 'azure-devops'
-}
-
-function resetWizard() {
-  sessionToken.value++
-  step.value = 'workspace'
-  workspaceMode.value = 'pick'
-  selectedWorkspace.value = null
-  newRepoUrl.value = ''
-  newOwner.value = ''
-  newTicketingSystem.value = defaultTicketingSystemId()
-  registerStatus.value = 'idle'
-  registerError.value = ''
-  instanceName.value = ''
-  instanceDirectory.value = ''
-  directoryTouched.value = false
-  nameTouched.value = false
-  assignee.value = ''
-  selectedDefinitionId.value = availableDefinitions.value[0]?.id ?? ''
-  createStatus.value = 'idle'
-  createError.value = ''
-  createdSlug.value = ''
-}
-
-// A path-safe default for Directory, derived from Name — mirrors
-// lib/slug.js's own `isValidSlug` rule (also enforced server-side; this is
-// just a friendlier starting point than forcing the user to invent a slug
-// by hand).
-function slugify(value) {
-  return value
+function slugify(name) {
+  return (name ?? '')
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
 }
 
-function isValidDirectory(value) {
-  return value !== '' && value !== '.' && value !== '..' && !/[\\/]/.test(value)
-}
+// Keeps Directory auto-populated from Name until the architect edits it
+// directly (directoryTouched) — the same "reveal/default, but overridable"
+// pattern the rest of this wizard's fields follow.
+effect(() => {
+  if (!directoryTouched.value) {
+    directoryField.value = slugify(nameField.value)
+  }
+})
 
-function onNameInput(value) {
-  nameTouched.value = true
-  instanceName.value = value
-  if (!directoryTouched.value) instanceDirectory.value = slugify(value)
-}
-
-function onDirectoryInput(value) {
-  instanceDirectory.value = value
-  directoryTouched.value = true
+function resetWizard() {
+  workspaceMode.value = 'pick'
+  workspaces.value = null
+  workspacesLoadError.value = ''
+  pickedWorkspaceId.value = ''
+  registerForm.value = { organization: '', project: '', repository: '', owner: '' }
+  registerTicketingSystem.value = defaultTicketingSystem.value
+  registerStatus.value = 'idle'
+  registerError.value = ''
+  selectedWorkspace.value = null
+  step.value = 'workspace'
+  selectedDefinitionId.value = definitions.value[0]?.id ?? ''
+  nameField.value = ''
+  directoryField.value = ''
+  directoryTouched.value = false
+  assigneeField.value = ''
+  workItemTypes.value = []
+  workItemTypesLoadError.value = ''
+  parentIdField.value = ''
+  workItemTypeField.value = DEFAULT_WORK_ITEM_TYPE
+  lookupStatus.value = 'idle'
+  lookupError.value = ''
+  lookupResult.value = null
+  createStatus.value = 'idle'
+  createError.value = ''
+  linkStatus.value = 'idle'
+  linkError.value = ''
+  createdSlug.value = ''
 }
 
 async function loadWorkspaces() {
-  workspacesStatus.value = 'loading'
+  workspacesLoadError.value = ''
   try {
     const res = await apiFetch('/api/workspaces')
-    const body = await res.json().catch(() => [])
     if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
       throw new Error(body.message ?? body.error ?? `Failed to load workspaces (${res.status})`)
     }
-    workspaces.value = body
-    workspacesStatus.value = 'loaded'
+    workspaces.value = await res.json()
   } catch (err) {
-    workspacesError.value = err.message
-    workspacesStatus.value = 'error'
+    workspacesLoadError.value = err.message
+    workspaces.value = []
   }
 }
 
-function pickWorkspace(workspace) {
-  // Invalidates any in-flight `registerNewWorkspace()` call — the user is
-  // committing to a specific, already-registered workspace now, so a
-  // late-arriving registration response (from a "Register new workspace"
-  // attempt they've since abandoned) must not silently replace this pick.
-  sessionToken.value++
-  selectedWorkspace.value = workspace
+function pickWorkspace() {
+  const found = (workspaces.value ?? []).find((w) => w.id === pickedWorkspaceId.value)
+  if (!found) return
+  selectedWorkspace.value = found
   step.value = 'instance'
 }
 
-// Switches which sub-form step 'workspace' shows. Bumps the session token
-// exactly like `pickWorkspace` — switching away from "Register new
-// workspace" mid-registration abandons that attempt just as surely as
-// picking an existing workspace does.
-function setWorkspaceMode(mode) {
-  if (workspaceMode.value !== mode) sessionToken.value++
-  workspaceMode.value = mode
-}
-
-async function registerNewWorkspace() {
-  const location = parseRepoUrl(newRepoUrl.value)
-  if (!location) {
-    registerStatus.value = 'failed'
-    registerError.value =
-      "Couldn't parse this as an Azure DevOps repo URL — expected " +
-      'https://dev.azure.com/{organization}/{project}/_git/{repository} ' +
-      '(an on-premises Azure DevOps Server URL is not yet supported).'
-    return
-  }
-  const token = sessionToken.value
+async function registerWorkspace() {
   registerStatus.value = 'registering'
   registerError.value = ''
+  const { organization, project, repository, owner } = registerForm.value
   try {
+    // A brand-new Workspace registration has no workspaceId yet — this
+    // always uses the global default PAT, exactly like
+    // web/lib/validateRepo.js's own repo-check (there's nothing more
+    // specific to resolve a PAT override against until the Workspace
+    // itself exists).
     const res = await apiFetch('/api/workspaces', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...location, owner: newOwner.value, ticketingSystem: newTicketingSystem.value }),
+      body: JSON.stringify({
+        organization: organization.trim(),
+        project: project.trim(),
+        repository: repository.trim(),
+        owner: owner.trim(),
+        ticketingSystem: registerTicketingSystem.value,
+      }),
     })
     const body = await res.json().catch(() => ({}))
-    // The user may have abandoned this registration (picked a different
-    // workspace, switched sub-tabs, or gone back) while the request was in
-    // flight — discard a stale response rather than superimposing it on
-    // whatever the user has since moved on to.
-    if (sessionToken.value !== token) return
     if (!res.ok) {
       registerStatus.value = 'failed'
       registerError.value = body.message ?? body.error ?? `Failed to register workspace (${res.status})`
       return
     }
-    workspaces.value = [...workspaces.value, body]
-    selectedWorkspace.value = body
     registerStatus.value = 'idle'
+    selectedWorkspace.value = body
     step.value = 'instance'
   } catch (err) {
-    if (sessionToken.value !== token) return
     registerStatus.value = 'failed'
     registerError.value = err.message
   }
 }
 
-function backToWorkspaceStep() {
-  // Invalidates any in-flight `createNewInstance()` call — see that
-  // function's own stale-response guard.
-  sessionToken.value++
-  step.value = 'workspace'
-  selectedWorkspace.value = null
-  createStatus.value = 'idle'
-  createError.value = ''
-  createdSlug.value = ''
+function continueFromInstanceStep() {
+  if (!nameField.value.trim() || !directoryField.value.trim() || !selectedDefinitionId.value) return
+  if (selectedWorkspace.value?.ticketingSystem) {
+    step.value = 'link'
+    return
+  }
+  createInstanceAndMaybeLink()
 }
 
-async function createNewInstance() {
-  const workspace = selectedWorkspace.value
-  if (!workspace) return
-  const token = sessionToken.value
+// Resets the lookup outcome whenever the id field changes after a previous
+// look-up — the same "editing invalidates the prior check" rule
+// web/pages/setup-wizard.js's own resetCheck()-on-edit already establishes
+// for its repo-URL field, applied here so a stale "found" result can never
+// be submitted for an id the architect has since changed.
+function onParentIdInput(value) {
+  parentIdField.value = value
+  if (lookupStatus.value !== 'idle') {
+    lookupStatus.value = 'idle'
+    lookupError.value = ''
+    lookupResult.value = null
+  }
+}
+
+async function loadWorkItemTypes() {
+  const ws = selectedWorkspace.value
+  if (!ws) return
+  workItemTypesLoadError.value = ''
+  try {
+    const qs = new URLSearchParams({ organization: ws.organization, project: ws.project })
+    const res = await apiFetch(`/api/azure-devops/work-item-types?${qs}`, {}, { workspaceId: ws.id })
+    const body = await res.json().catch(() => ([]))
+    if (!res.ok) {
+      throw new Error(body.message ?? body.error ?? `Failed to load work item types (${res.status})`)
+    }
+    workItemTypes.value = body
+    if (body.length && !body.some((t) => t.name === workItemTypeField.value)) {
+      workItemTypeField.value = body.some((t) => t.name === DEFAULT_WORK_ITEM_TYPE) ? DEFAULT_WORK_ITEM_TYPE : body[0].name
+    }
+  } catch (err) {
+    workItemTypesLoadError.value = err.message
+  }
+}
+
+async function lookUpParentWorkItem() {
+  const ws = selectedWorkspace.value
+  const id = parentIdField.value.trim()
+  if (!ws || !id) return
+  lookupStatus.value = 'looking-up'
+  lookupError.value = ''
+  try {
+    const qs = new URLSearchParams({ organization: ws.organization, project: ws.project })
+    const res = await apiFetch(`/api/azure-devops/work-items/${encodeURIComponent(id)}?${qs}`, {}, { workspaceId: ws.id })
+    if (res.status === 404) {
+      lookupStatus.value = 'not-found'
+      return
+    }
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new Error(body.message ?? body.error ?? `Look-up failed (${res.status})`)
+    }
+    lookupResult.value = body
+    lookupStatus.value = 'found'
+    // A found work item's own type is a helpful default — still fully
+    // overridable via the Work item type select below — but only when
+    // it's one of this project's own known types (a custom/renamed type
+    // this project's own `GET .../workitemtypes` doesn't report would
+    // otherwise silently select nothing in that dropdown).
+    if (workItemTypes.value.some((t) => t.name === body.workItemType)) {
+      workItemTypeField.value = body.workItemType
+    }
+  } catch (err) {
+    lookupStatus.value = 'error'
+    lookupError.value = err.message
+  }
+}
+
+async function createInstanceAndMaybeLink() {
   createStatus.value = 'creating'
   createError.value = ''
+  const ws = selectedWorkspace.value
+  const slug = directoryField.value.trim()
   try {
-    const res = await apiFetch(
-      '/api/instances',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          definition: selectedDefinitionId.value,
-          slug: instanceDirectory.value,
-          assignee: assignee.value,
-          azureDevOps: {
-            organization: workspace.organization,
-            project: workspace.project,
-            repository: workspace.repository,
-            ...(workspace.baseUrl ? { baseUrl: workspace.baseUrl } : {}),
-          },
-        }),
-      },
-      { workspaceId: workspace.id }
-    )
+    const res = await apiFetch('/api/instances', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        definition: selectedDefinitionId.value,
+        slug,
+        assignee: assigneeField.value.trim(),
+        azureDevOps: { organization: ws.organization, project: ws.project, repository: ws.repository },
+      }),
+    }, { workspaceId: ws.id })
     const body = await res.json().catch(() => ({}))
-    // The user may have abandoned this create (gone back to pick a
-    // different workspace) while the POST was in flight — see
-    // registerNewWorkspace's own identical guard above.
-    if (sessionToken.value !== token) return
     if (!res.ok) {
       createStatus.value = 'failed'
       createError.value = body.message ?? body.error ?? `Failed to create instance (${res.status})`
       return
     }
-    createStatus.value = 'done'
-    createdSlug.value = body.slug
+    createdSlug.value = slug
   } catch (err) {
-    if (sessionToken.value !== token) return
     createStatus.value = 'failed'
     createError.value = err.message
+    return
   }
+
+  // The parent-work-item link is mandatory for a ticketing-enabled
+  // Workspace (#126's own acceptance criterion — every instance in such a
+  // Workspace is trackable on the board from day one), so this always
+  // fires immediately after a successful create when step 'link' was
+  // actually reached — never a separate, skippable action.
+  if (step.value === 'link') {
+    linkStatus.value = 'linking'
+    linkError.value = ''
+    try {
+      const res = await apiFetch(`/api/instance/work-items/link?slug=${encodeURIComponent(slug)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          organization: ws.organization,
+          project: ws.project,
+          parentId: Number(parentIdField.value.trim()),
+          workItemType: workItemTypeField.value,
+        }),
+      }, { workspaceId: ws.id })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        linkStatus.value = 'failed'
+        linkError.value = body.message ?? body.error ?? `Failed to link work item (${res.status})`
+        return
+      }
+    } catch (err) {
+      linkStatus.value = 'failed'
+      linkError.value = err.message
+      return
+    }
+  }
+
+  createStatus.value = 'idle'
+  step.value = 'done'
 }
 
-// A full navigation (not preact-iso client-side routing), matching every
-// other "Open editor" link in the app — see web/pages/setup-wizard.js's own
-// comment on why.
 function openInstance(slug) {
   window.location.assign(`/instance/${encodeURIComponent(slug)}`)
 }
@@ -302,129 +354,158 @@ function WizardHeader() {
   `
 }
 
-function WorkspaceModeToggle() {
-  return html`
-    <div class="view-toggle" role="group" aria-label="Pick or register a workspace">
-      <button
-        type="button"
-        class=${'btn small' + (workspaceMode.value === 'pick' ? ' active' : '')}
-        onClick=${() => setWorkspaceMode('pick')}
-      >
-        Pick existing workspace
-      </button>
-      <button
-        type="button"
-        class=${'btn small' + (workspaceMode.value === 'register' ? ' active' : '')}
-        onClick=${() => setWorkspaceMode('register')}
-      >
-        Register new workspace
-      </button>
-    </div>
-  `
-}
+function WorkspaceStep() {
+  useEffect(() => {
+    if (workspaceMode.value === 'pick' && workspaces.value === null) loadWorkspaces()
+  }, [workspaceMode.value])
 
-function PickWorkspacePanel() {
-  if (workspacesStatus.value === 'loading') return html`<p class="loading">Loading workspaces…</p>`
-  if (workspacesStatus.value === 'error') {
-    return html`<p class="load-error">Failed to load workspaces: ${workspacesError.value}</p>`
-  }
-  if (workspaces.value.length === 0) {
-    return html`
-      <p class="wizard-field-hint">No workspaces registered yet — switch to "Register new workspace" to create the first one.</p>
-    `
-  }
-  return html`
-    <div id="workspace-picker">
-      ${workspaces.value.map(
-        (w) => html`
-          <div key=${w.id} class="definition-card" data-workspace-id=${w.id} onClick=${() => pickWorkspace(w)}>
-            <div class="name">${w.organization}/${w.project}/${w.repository}</div>
-            <div class="stages">${w.owner ? `Owner: ${w.owner}` : 'No owner set'} · ${w.ticketingSystem}</div>
-          </div>
-        `
-      )}
-    </div>
-  `
-}
-
-function RegisterWorkspacePanel() {
   return html`
     <div class="wizard-field">
-      <label for="new-workspace-repo-url">Azure DevOps repo URL</label>
-      <input
-        class="wizard-input"
-        id="new-workspace-repo-url"
-        type="text"
-        placeholder="https://dev.azure.com/org/project/_git/repo"
-        value=${newRepoUrl.value}
-        onInput=${(e) => (newRepoUrl.value = e.currentTarget.value)}
-      />
-    </div>
-    <div class="wizard-field">
-      <label for="new-workspace-owner">Owner</label>
-      <input
-        class="wizard-input"
-        id="new-workspace-owner"
-        type="text"
-        placeholder="Who owns this workspace"
-        value=${newOwner.value}
-        onInput=${(e) => (newOwner.value = e.currentTarget.value)}
-      />
-    </div>
-    <div class="wizard-field">
-      <label>Ticketing system</label>
-      <div class="settings-radio-group" role="radiogroup" aria-label="Ticketing system for the new workspace">
-        ${TICKETING_SYSTEMS.map(
-          (system) => html`
-            <label key=${system.id} class=${'settings-radio' + (system.disabled ? ' disabled' : '')}>
-              <input
-                type="radio"
-                name="new-workspace-ticketing-system"
-                value=${system.id}
-                checked=${newTicketingSystem.value === system.id}
-                disabled=${system.disabled}
-                onChange=${() => (newTicketingSystem.value = system.id)}
-              />
-              ${system.label}
-              ${system.disabled ? html`<span class="stamp review">${system.disabledReason}</span>` : null}
-            </label>
-          `
-        )}
+      <div class="wizard-mode-toggle" role="group" aria-label="Workspace source">
+        <button
+          type="button"
+          class=${'btn small' + (workspaceMode.value === 'pick' ? ' active' : '')}
+          onClick=${() => (workspaceMode.value = 'pick')}
+        >
+          Pick existing workspace
+        </button>
+        <button
+          type="button"
+          class=${'btn small' + (workspaceMode.value === 'register' ? ' active' : '')}
+          onClick=${() => (workspaceMode.value = 'register')}
+        >
+          Register new workspace
+        </button>
       </div>
     </div>
-    <div class="wizard-field">
-      <button
-        type="button"
-        class="btn primary"
-        disabled=${registerStatus.value === 'registering' || newRepoUrl.value.trim() === ''}
-        onClick=${registerNewWorkspace}
-      >
-        ${registerStatus.value === 'registering' ? 'Registering…' : 'Register workspace'}
-      </button>
-      ${registerStatus.value === 'failed' ? html`<div class="inline-error">${registerError.value}</div>` : null}
+
+    ${workspaceMode.value === 'pick'
+      ? html`
+          <div class="wizard-field">
+            ${workspacesLoadError.value ? html`<p class="load-error">${workspacesLoadError.value}</p>` : null}
+            ${workspaces.value === null && !workspacesLoadError.value ? html`<p class="loading">Loading…</p>` : null}
+            ${workspaces.value?.length === 0
+              ? html`<p class="wizard-field-hint">No workspaces registered yet — switch to "Register new workspace".</p>`
+              : null}
+            ${workspaces.value?.length
+              ? html`
+                  <div id="workspace-picker">
+                    ${workspaces.value.map(
+                      (w) => html`
+                        <div
+                          key=${w.id}
+                          class=${'definition-card' + (pickedWorkspaceId.value === w.id ? ' selected' : '')}
+                          onClick=${() => (pickedWorkspaceId.value = w.id)}
+                        >
+                          <div class="name">${w.organization}/${w.project}/${w.repository}</div>
+                          <div class="stages">owner: ${w.owner || '—'} · ticketing: ${w.ticketingSystem || 'none'}</div>
+                        </div>
+                      `
+                    )}
+                  </div>
+                  <div class="wizard-field" style="margin-top:16px">
+                    <button type="button" class="btn primary" disabled=${!pickedWorkspaceId.value} onClick=${pickWorkspace}>
+                      Continue
+                    </button>
+                  </div>
+                `
+              : null}
+          </div>
+        `
+      : html`
+          <div class="wizard-field">
+            <label for="ws-organization">Organization</label>
+            <input
+              class="wizard-input"
+              id="ws-organization"
+              type="text"
+              value=${registerForm.value.organization}
+              onInput=${(e) => (registerForm.value = { ...registerForm.value, organization: e.currentTarget.value })}
+            />
+          </div>
+          <div class="wizard-field">
+            <label for="ws-project">Project</label>
+            <input
+              class="wizard-input"
+              id="ws-project"
+              type="text"
+              value=${registerForm.value.project}
+              onInput=${(e) => (registerForm.value = { ...registerForm.value, project: e.currentTarget.value })}
+            />
+          </div>
+          <div class="wizard-field">
+            <label for="ws-repository">Repository</label>
+            <input
+              class="wizard-input"
+              id="ws-repository"
+              type="text"
+              value=${registerForm.value.repository}
+              onInput=${(e) => (registerForm.value = { ...registerForm.value, repository: e.currentTarget.value })}
+            />
+          </div>
+          <div class="wizard-field">
+            <label for="ws-owner">Owner</label>
+            <input
+              class="wizard-input"
+              id="ws-owner"
+              type="text"
+              value=${registerForm.value.owner}
+              onInput=${(e) => (registerForm.value = { ...registerForm.value, owner: e.currentTarget.value })}
+            />
+          </div>
+          <div class="wizard-field">
+            <label>Ticketing system</label>
+            <div class="settings-radio-group" role="radiogroup" aria-label="Ticketing system">
+              ${TICKETING_SYSTEMS.map(
+                (system) => html`
+                  <label key=${system.id} class=${'settings-radio' + (system.disabled ? ' disabled' : '')}>
+                    <input
+                      type="radio"
+                      name="ws-ticketing-system"
+                      value=${system.id}
+                      checked=${registerTicketingSystem.value === system.id}
+                      disabled=${system.disabled}
+                      onChange=${() => (registerTicketingSystem.value = system.id)}
+                    />
+                    ${system.label}
+                    ${system.disabled ? html`<span class="stamp review">${system.disabledReason}</span>` : null}
+                  </label>
+                `
+              )}
+            </div>
+          </div>
+          <div class="wizard-field">
+            <button
+              type="button"
+              class="btn primary"
+              disabled=${registerStatus.value === 'registering' ||
+              !registerForm.value.organization.trim() ||
+              !registerForm.value.project.trim() ||
+              !registerForm.value.repository.trim()}
+              onClick=${registerWorkspace}
+            >
+              ${registerStatus.value === 'registering' ? 'Registering…' : 'Register workspace'}
+            </button>
+            ${registerStatus.value === 'failed' ? html`<div class="inline-error">${registerError.value}</div>` : null}
+          </div>
+        `}
+  `
+}
+
+function InstanceStep() {
+  const ws = selectedWorkspace.value
+  const ticketingEnabled = Boolean(ws?.ticketingSystem)
+
+  return html`
+    <div class="result-card">
+      <h3><span class="stamp agreed">Workspace</span></h3>
+      <div class="result-row"><span class="k">Organization/Project/Repository</span><span class="v">${ws.organization}/${ws.project}/${ws.repository}</span></div>
     </div>
-  `
-}
 
-function WorkspaceStep() {
-  return html`
-    <${WorkspaceModeToggle} />
-    <div class="wizard-field"></div>
-    ${workspaceMode.value === 'pick' ? html`<${PickWorkspacePanel} />` : html`<${RegisterWorkspacePanel} />`}
-  `
-}
-
-function DefinitionField() {
-  // Only worth showing a picker once more than one definition genuinely
-  // exists — with exactly one (the common case today, per README.md) the
-  // effect above already defaults the selection, so there is nothing for
-  // the architect to actually choose.
-  if (availableDefinitions.value.length <= 1) return null
-  return html`
     <div class="wizard-field">
       <label for="definition-picker">Definition</label>
       <div id="definition-picker">
-        ${availableDefinitions.value.map(
+        ${definitions.value.map(
           (d) => html`
             <div
               key=${d.id}
@@ -438,43 +519,6 @@ function DefinitionField() {
         )}
       </div>
     </div>
-  `
-}
-
-function InstanceStep() {
-  const workspace = selectedWorkspace.value
-
-  if (createStatus.value === 'done') {
-    return html`
-      <div class="result-card">
-        <h3><span class="stamp agreed">Instance created</span></h3>
-        <p class="result-note">"${createdSlug.value}" is registered and appears in gantry's instance listing.</p>
-        <button type="button" class="btn primary" onClick=${() => openInstance(createdSlug.value)}>Open instance</button>
-      </div>
-    `
-  }
-
-  const directoryValid = isValidDirectory(instanceDirectory.value)
-  // A blank Directory before the user has engaged with this form at all
-  // (neither Name nor Directory ever touched) is just the pristine
-  // starting state, not an error to flag yet. Deliberately keyed on the
-  // *touched* flags rather than the fields' current values — a value-based
-  // check (`instanceName.value === '' && instanceDirectory.value === ''`)
-  // would also match "typed a Name, then cleared it back to empty",
-  // silently hiding the exact same explanation this is meant to show for
-  // that case.
-  const directoryPristine = !nameTouched.value && !directoryTouched.value
-  const noDefinitionSelected = selectedDefinitionId.value === ''
-
-  return html`
-    <div class="result-card">
-      <h3>Workspace</h3>
-      <div class="result-row">
-        <span class="k">Repo</span><span class="v">${workspace.organization}/${workspace.project}/${workspace.repository}</span>
-      </div>
-      <div class="result-row"><span class="k">Owner</span><span class="v">${workspace.owner || '—'}</span></div>
-      <button type="button" class="btn small ghost" onClick=${backToWorkspaceStep}>← Choose a different workspace</button>
-    </div>
 
     <div class="wizard-field">
       <label for="instance-name">Name</label>
@@ -482,9 +526,8 @@ function InstanceStep() {
         class="wizard-input"
         id="instance-name"
         type="text"
-        placeholder="My Initiative"
-        value=${instanceName.value}
-        onInput=${(e) => onNameInput(e.currentTarget.value)}
+        value=${nameField.value}
+        onInput=${(e) => (nameField.value = e.currentTarget.value)}
       />
     </div>
 
@@ -494,18 +537,13 @@ function InstanceStep() {
         class="wizard-input"
         id="instance-directory"
         type="text"
-        placeholder="my-initiative"
-        value=${instanceDirectory.value}
-        onInput=${(e) => onDirectoryInput(e.currentTarget.value)}
+        value=${directoryField.value}
+        onInput=${(e) => {
+          directoryTouched.value = true
+          directoryField.value = e.currentTarget.value
+        }}
       />
-      <p class="wizard-field-hint">Defaults to Name, slugified — override it to use a different folder name.</p>
-      ${!directoryValid && !directoryPristine
-        ? html`<div class="inline-error">
-            ${instanceDirectory.value === ''
-              ? "Directory can't be empty — type one directly, or give the instance a Name to derive one from."
-              : 'Not a valid directory name — no "/", "\\", or a bare "." / "..".'}
-          </div>`
-        : null}
+      <p class="wizard-field-hint">Defaults to a slugified Name — edit to override.</p>
     </div>
 
     <div class="wizard-field">
@@ -514,56 +552,123 @@ function InstanceStep() {
         class="wizard-input"
         id="instance-assignee"
         type="text"
-        placeholder="Who owns this instance"
-        value=${assignee.value}
-        onInput=${(e) => (assignee.value = e.currentTarget.value)}
+        placeholder="Unassigned"
+        value=${assigneeField.value}
+        onInput=${(e) => (assigneeField.value = e.currentTarget.value)}
       />
     </div>
-
-    <${DefinitionField} />
 
     <div class="wizard-field">
       <button
         type="button"
         class="btn primary"
-        disabled=${createStatus.value === 'creating' || !directoryValid || noDefinitionSelected}
-        onClick=${createNewInstance}
+        disabled=${!nameField.value.trim() || !directoryField.value.trim() || !selectedDefinitionId.value || createStatus.value === 'creating'}
+        onClick=${continueFromInstanceStep}
       >
-        ${createStatus.value === 'creating' ? 'Creating…' : 'Create instance'}
+        ${ticketingEnabled
+          ? 'Next: link a work item'
+          : createStatus.value === 'creating'
+            ? 'Creating…'
+            : 'Create instance'}
       </button>
-      ${noDefinitionSelected ? html`<p class="wizard-field-hint">Loading definitions…</p>` : null}
+      ${!ticketingEnabled && createStatus.value === 'failed' ? html`<div class="inline-error">${createError.value}</div>` : null}
+    </div>
+  `
+}
+
+function LinkStep() {
+  const ws = selectedWorkspace.value
+
+  useEffect(() => {
+    loadWorkItemTypes()
+    // eslint-disable-next-line
+  }, [])
+
+  const canSubmit =
+    lookupStatus.value === 'found' &&
+    Boolean(workItemTypeField.value) &&
+    createStatus.value !== 'creating' &&
+    linkStatus.value !== 'linking'
+
+  return html`
+    <div class="wizard-field">
+      <label for="link-organization">Organization</label>
+      <input class="wizard-input" id="link-organization" type="text" value=${ws.organization} disabled />
+    </div>
+    <div class="wizard-field">
+      <label for="link-project">Project</label>
+      <input class="wizard-input" id="link-project" type="text" value=${ws.project} disabled />
+    </div>
+
+    <div class="wizard-field">
+      <label for="parent-work-item-id">Parent work item id</label>
+      <div class="workspace-field-row">
+        <input
+          class="wizard-input"
+          id="parent-work-item-id"
+          type="text"
+          value=${parentIdField.value}
+          onInput=${(e) => onParentIdInput(e.currentTarget.value)}
+        />
+        <button
+          type="button"
+          class="btn small"
+          disabled=${!parentIdField.value.trim() || lookupStatus.value === 'looking-up'}
+          onClick=${lookUpParentWorkItem}
+        >
+          ${lookupStatus.value === 'looking-up' ? 'Looking up…' : 'Look up'}
+        </button>
+      </div>
+      ${lookupStatus.value === 'found'
+        ? html`<p class="wizard-field-hint">Found: #${lookupResult.value.id} "${lookupResult.value.title}" (${lookupResult.value.workItemType}, ${lookupResult.value.state})</p>`
+        : null}
+      ${lookupStatus.value === 'not-found' ? html`<div class="inline-error">No work item #${parentIdField.value} found in ${ws.organization}/${ws.project}.</div>` : null}
+      ${lookupStatus.value === 'error' ? html`<div class="inline-error">${lookupError.value}</div>` : null}
+    </div>
+
+    <div class="wizard-field">
+      <label for="work-item-type">Work item type</label>
+      ${workItemTypesLoadError.value ? html`<div class="inline-error">${workItemTypesLoadError.value}</div>` : null}
+      <select
+        class="wizard-input"
+        id="work-item-type"
+        value=${workItemTypeField.value}
+        onChange=${(e) => (workItemTypeField.value = e.currentTarget.value)}
+      >
+        ${workItemTypes.value.map((t) => html`<option key=${t.name} value=${t.name}>${t.name}</option>`)}
+      </select>
+    </div>
+
+    <div class="wizard-field">
+      <button type="button" class="btn primary" disabled=${!canSubmit} onClick=${createInstanceAndMaybeLink}>
+        ${createStatus.value === 'creating' ? 'Creating…' : linkStatus.value === 'linking' ? 'Linking…' : 'Create instance & link'}
+      </button>
       ${createStatus.value === 'failed' ? html`<div class="inline-error">${createError.value}</div>` : null}
+      ${linkStatus.value === 'failed' ? html`<div class="inline-error">${linkError.value}</div>` : null}
+    </div>
+  `
+}
+
+function DoneStep() {
+  return html`
+    <div class="result-card">
+      <h3><span class="stamp agreed">Instance created</span></h3>
+      <p class="result-note">"${createdSlug.value}" is registered and appears in gantry's instance listing.</p>
+      <button type="button" class="btn primary" onClick=${() => openInstance(createdSlug.value)}>Open instance</button>
+      <button type="button" class="btn ghost" onClick=${resetWizard}>Create another</button>
     </div>
   `
 }
 
 export function NewWorkspaceWizardPage() {
-  // This page's state lives in module-scope signals (see the header
-  // comment) precisely so an in-progress wizard survives a client-side
-  // route change and back — `preact-iso`'s router intercepts same-origin
-  // anchor clicks rather than doing a full page reload, so nothing else
-  // would otherwise reset it. That's the right behavior while the wizard
-  // is still in progress, but not once it has already run to completion:
-  // without this, re-opening "+ New Workspace" after finishing a previous
-  // creation (without clicking that result's own "Open instance", which
-  // navigates away with a real page load and so re-initializes everything
-  // for free) would re-show the *previous* "Instance created" card instead
-  // of a blank wizard. Checked synchronously on this very first render
-  // (guarded by a ref so it only ever runs once per mount, not on every
-  // re-render) rather than in an effect, so there's no flash of the stale
-  // completed state before it resets.
-  const hasCheckedForStaleCompletion = useRef(false)
-  if (!hasCheckedForStaleCompletion.current) {
-    hasCheckedForStaleCompletion.current = true
-    if (createStatus.value === 'done') resetWizard()
-  }
-
   useEffect(() => {
-    loadWorkspaces()
     fetch('/api/definitions')
       .then((res) => res.json())
-      .then((body) => (availableDefinitions.value = body))
-      .catch(() => (availableDefinitions.value = []))
+      .then((body) => {
+        definitions.value = body
+        if (!selectedDefinitionId.value) selectedDefinitionId.value = body[0]?.id ?? ''
+      })
+      .catch(() => (definitions.value = []))
   }, [])
 
   return html`
@@ -571,11 +676,14 @@ export function NewWorkspaceWizardPage() {
     <main class="wizard-page">
       <h2>New Workspace</h2>
       <p class="lede">
-        Pick a workspace already registered with gantry, or register a new Azure DevOps repo as one — then give the
-        new instance its own Name, Directory, and initial Assignee.
+        Pick an existing workspace or register a new one, then create an instance in it — with a real
+        parent-work-item link when that workspace has a ticketing system configured.
       </p>
 
-      ${step.value === 'workspace' ? html`<${WorkspaceStep} />` : html`<${InstanceStep} />`}
+      ${step.value === 'workspace' ? html`<${WorkspaceStep} />` : null}
+      ${step.value === 'instance' ? html`<${InstanceStep} />` : null}
+      ${step.value === 'link' ? html`<${LinkStep} />` : null}
+      ${step.value === 'done' ? html`<${DoneStep} />` : null}
     </main>
   `
 }
