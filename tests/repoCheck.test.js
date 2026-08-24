@@ -2,6 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { checkAzureDevOpsRepo, migrateLegacyAzureDevOpsInstance } from '../lib/repoCheck.js'
 import { createAzureDevOpsClient, AzureDevOpsNotFoundError } from '../lib/azureDevOpsClient.js'
+import { loadDefinition } from '../lib/definition.js'
+import { migrateModuleHeadingScale } from '../lib/instance.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
 // checkAzureDevOpsRepo/migrateLegacyAzureDevOpsInstance (#100): moving Azure-DevOps-backed instance storage from repo root to a per-slug gantry-workspace/<slug>/ subdirectory, so one repo ("workspace") can host more than one instance, plus the one-time migration routine that brings a pre-#100 repo-root instance into that new layout.
@@ -40,6 +42,9 @@ const CONTEXT_MODULE = [
   '',
 ].join('\n')
 
+// checkAzureDevOpsRepo evaluates stage status through evaluateStage → readModule, and readModule lazily migrates an old-scale file's headings to the new scale (ADR-0016) as part of the same access — so any module content that has passed through a check lands new-scale. Tests asserting byte-equality against CONTEXT_MODULE after a check compare against this migrated form instead.
+const MIGRATED_CONTEXT_MODULE = migrateModuleHeadingScale(CONTEXT_MODULE, loadDefinition('design').modules.get('context'))
+
 test('checkAzureDevOpsRepo reports "empty" for a repo with no instance data anywhere', async () => {
   await withFakeRepo({}, async (baseUrl) => {
     const result = await checkAzureDevOpsRepo(locationFor(baseUrl))
@@ -71,7 +76,7 @@ test('checkAzureDevOpsRepo migrates a legacy repo-root instance to gantry-worksp
       const migratedInstance = await client.getFileContent('gantry-workspace/my-initiative/instance.yaml')
       assert.match(migratedInstance, /slug: my-initiative/)
       const migratedModule = await client.getFileContent('gantry-workspace/my-initiative/modules/context.md')
-      assert.equal(migratedModule, CONTEXT_MODULE)
+      assert.equal(migratedModule, MIGRATED_CONTEXT_MODULE)
 
       // No repo is left with instance data at both root and subdirectory simultaneously (#100's acceptance criteria) — the legacy copies are gone.
       await assert.rejects(() => client.getFileContent('instance.yaml'), AzureDevOpsNotFoundError)
@@ -197,8 +202,8 @@ test('checkAzureDevOpsRepo resumes and completes a previously-interrupted migrat
 
       const client = createAzureDevOpsClient(locationFor(baseUrl))
 
-      // The already-migrated module is untouched/uncorrupted...
-      assert.equal(await client.getFileContent('gantry-workspace/my-initiative/modules/context.md'), CONTEXT_MODULE)
+      // The already-migrated module is untouched/uncorrupted (its content, having been read for the status rollup, is new-scale per ADR-0016's lazy migration)...
+      assert.equal(await client.getFileContent('gantry-workspace/my-initiative/modules/context.md'), MIGRATED_CONTEXT_MODULE)
       // ...and the previously-stranded one is now migrated too, with its real content intact.
       const migratedSolutionDefinition = await client.getFileContent('gantry-workspace/my-initiative/modules/solution-definition.md')
       assert.match(migratedSolutionDefinition, /Real, already-saved content\./)

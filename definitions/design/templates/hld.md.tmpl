@@ -1,42 +1,42 @@
 # <%~ it.instance.slug %>: High Level Design
 
-## Submission
+# Submission
 
 <%~ it.modules['hld-submission']['purpose-statement'] %>
 
-### Decision requested
+## Decision requested
 
 <%~ it.modules['hld-submission']['decision-requested'] %>
 
-### Consultation
+## Consultation
 
 <%~ it.modules['hld-submission']['consultation'] %>
 <% if (it.modules['hld-submission']['next-steps']) { %>
-### Next steps
+## Next steps
 
 <%~ it.modules['hld-submission']['next-steps'] %>
 <% } %>
 <% if (it.modules['hld-submission']['authors-and-contributors'] && it.modules['hld-submission']['authors-and-contributors'].length) { %>
-### Authors and contributors
+## Authors and contributors
 
 <%~ it.modules['hld-submission']['authors-and-contributors'].map(function(item) { return '- ' + item }).join('\n') %>
 <% } %>
 
-## Problem Statement
+# Problem Statement
 
-### Current state
+## Current state
 
 <%~ it.modules['problem-statement']['current-state'] %>
 
-### Desired future state
+## Desired future state
 
 <%~ it.modules['problem-statement']['desired-future-state'] %>
 
-### In scope / out of scope
+## In scope / out of scope
 
 <%~ it.modules['problem-statement'].scope %>
 
-### Success criteria
+## Success criteria
 
 <%~ it.modules['problem-statement']['success-criteria'] %>
 <%
@@ -51,33 +51,33 @@
   ].filter(Boolean)
 %>
 <% if (nfrParts.length) { %>
-### Non-functional requirements
+## Non-functional requirements
 
 <%~ nfrParts.join('\n\n') %>
 <% } %>
 
-## Proposed solution
+# Proposed solution
 
 <%~ it.modules['proposed-solution'].guardrails %>
 
-### Alignment with strategy
+## Alignment with strategy
 
 <%~ it.modules['proposed-solution']['strategy-alignment'] %>
 
-### Dependencies
+## Dependencies
 
 <%~ it.modules.dependencies['dependencies-overview'] %>
 <% if (it.modules['proposed-solution'].implications) { %>
-### Implications
+## Implications
 
 <%~ it.modules['proposed-solution'].implications %>
 <% } %>
 
-### Trade-offs
+## Trade-offs
 
 <%~ it.modules['proposed-solution']['trade-offs'] %>
 
-### Risks and mitigations
+## Risks and mitigations
 
 <%~ it.modules.risks['risk-register'] %>
 <% if (it.modules.risks['open-issues']) { %>
@@ -97,31 +97,31 @@
   ].filter(Boolean)
 %>
 <% if (securityParts.length) { %>
-### Security and privacy
+## Security and privacy
 
 <%~ securityParts.join('\n\n') %>
 <% } %>
 
-### Cost-benefit analysis
+## Cost-benefit analysis
 
 <%~ it.modules['proposed-solution']['cost-benefit'] %>
 
-### Delivery approach and indicative timeline
+## Delivery approach and indicative timeline
 
 <%~ it.modules['proposed-solution']['delivery-approach'] %>
 
-## Alternatives considered
+# Alternatives considered
 
 <%~ it.modules['alternatives-considered'].alternatives %>
 <% if (it.modules['open-questions'].questions) { %>
 
-## Open questions
+# Open questions
 
 <%~ it.modules['open-questions'].questions %>
 <% } %>
 <% if (it.modules['hld-submission'].attachments && it.modules['hld-submission'].attachments.length) { %>
 
-## Attachment/s
+# Attachment/s
 
 <%~ it.modules['hld-submission'].attachments.map(function(item) { return '- ' + item }).join('\n') %>
 <% } %>

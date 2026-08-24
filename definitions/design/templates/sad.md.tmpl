@@ -1,152 +1,152 @@
 # <%~ it.instance.slug %>: Solution Architecture Document
 
-## Architecture
+# Architecture
 <% if (it.modules.architecture['business-context']) { %>
-### Business context
+## Business context
 
 <%~ it.modules.architecture['business-context'] %>
 <% } %>
 
-### Design decisions
+## Design decisions
 
 <%~ it.modules.architecture['design-decisions'] %>
 
-### Solution description
+## Solution description
 
 <%~ it.modules.architecture['solution-description'] %>
 
-### Logical components
+## Logical components
 
 <% it.modules.architecture['logical-components'].forEach(function(item) { %>- <%~ item %>
 <% }) %>
 <% if (it.modules.architecture.standards && it.modules.architecture.standards.length) { %>
-### Applicable standards
+## Applicable standards
 
 <% it.modules.architecture.standards.forEach(function(item) { %>- <%~ item %>
 <% }) %>
 <% } %>
 <% if (it.modules.architecture['architectural-risks']) { %>
-### Architectural risks
+## Architectural risks
 
 <%~ it.modules.architecture['architectural-risks'] %>
 <% } %>
 <% if (it.modules.architecture['constraints-and-assumptions']) { %>
-### Goals, constraints and assumptions
+## Goals, constraints and assumptions
 
 <%~ it.modules.architecture['constraints-and-assumptions'] %>
 <% } %>
 
-## Integration
+# Integration
 
-### Interfaces
+## Interfaces
 
 <%~ it.modules.integration.interfaces %>
 <% if (it.modules.integration['network-and-infrastructure']) { %>
-### Network and infrastructure
+## Network and infrastructure
 
 <%~ it.modules.integration['network-and-infrastructure'] %>
 <% } %>
 <% if (it.modules.integration.environments && it.modules.integration.environments.length) { %>
-### Environments
+## Environments
 
 <% it.modules.integration.environments.forEach(function(item) { %>- <%~ item %>
 <% }) %>
 <% } %>
 
-## Data
+# Data
 
-### Logical data model
+## Logical data model
 
 <%~ it.modules.data['logical-data-model'] %>
 
-### Data classification
+## Data classification
 
 <%~ it.modules.data['data-classification'] %>
 
-### Data retention, archiving and records management
+## Data retention, archiving and records management
 
 <%~ it.modules.data['data-retention-and-archiving'] %>
 <% if (it.modules.data['data-migration']) { %>
-### Data migration
+## Data migration
 
 <%~ it.modules.data['data-migration'] %>
 <% } %>
 <% if (it.modules.data['data-replication']) { %>
-### Data replication
+## Data replication
 
 <%~ it.modules.data['data-replication'] %>
 <% } %>
 
-## Non-functional requirements
+# Non-functional requirements
 
-### Performance
+## Performance
 
 <%~ it.modules.nfrs.performance %>
 
-### Availability and continuity
+## Availability and continuity
 
 <%~ it.modules.nfrs['availability-and-continuity'] %>
 
-### Disaster recovery and backup
+## Disaster recovery and backup
 
 <%~ it.modules.nfrs['disaster-recovery-and-backup'] %>
 
-### Scalability and capacity
+## Scalability and capacity
 
 <%~ it.modules.nfrs['scalability-and-capacity'] %>
 <% if (it.modules.nfrs['other-nfrs']) { %>
-### Other non-functional requirements
+## Other non-functional requirements
 
 <%~ it.modules.nfrs['other-nfrs'] %>
 <% } %>
 
-### Requirements traceability
+## Requirements traceability
 
 <%~ it.modules.nfrs['requirements-traceability'] %>
 
-## Security
+# Security
 
-### Identity and access management
+## Identity and access management
 
 <%~ it.modules.security['identity-and-access'] %>
 
-### Security architecture
+## Security architecture
 
 <%~ it.modules.security['security-architecture'] %>
 
-### Regulations and standards
+## Regulations and standards
 
 <% it.modules.security['regulations-and-standards'].forEach(function(item) { %>- <%~ item %>
 <% }) %>
 
-### Privacy and confidentiality concerns
+## Privacy and confidentiality concerns
 
 <%~ it.modules.security['privacy-and-confidentiality'] %>
 
-## Risks
+# Risks
 
-### Risks and mitigations
+## Risks and mitigations
 
 <%~ it.modules.risks['risk-register'] %>
 <% if (it.modules.risks['open-issues']) { %>
-### Open issues
+## Open issues
 
 <%~ it.modules.risks['open-issues'] %>
 <% } %>
 
-## Dependencies
+# Dependencies
 <% if (it.modules.dependencies['dependencies-overview']) { %>
-### Dependencies overview
+## Dependencies overview
 
 <%~ it.modules.dependencies['dependencies-overview'] %>
 <% } %>
 
-### Dependency list
+## Dependency list
 
 <% it.modules.dependencies['dependency-list'].forEach(function(item) { %>- <%~ item %>
 <% }) %>
 
-## Operational readiness
+# Operational readiness
 
 <%~ it.modules['support-and-operations']['support-handover-readiness'] %>
 

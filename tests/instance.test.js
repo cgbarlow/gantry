@@ -12,6 +12,7 @@ import {
   parseModuleFile,
   listInstances,
   updateInstanceAssignee,
+  migrateModuleHeadingScale,
 } from '../lib/instance.js'
 import { AzureDevOpsAuthenticationError, AzureDevOpsNotFoundError, createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
@@ -44,9 +45,11 @@ test('creates a design instance with blank Shape-stage module files', () => {
     const raw = readFileSync(contextPath, 'utf8')
     assert.match(raw, /^---\n/)
     assert.match(raw, /owner: c\.barlow/)
-    assert.match(raw, /## Business driver/)
-    assert.match(raw, /## Affected domains/)
-    assert.match(raw, /## Explicitly out of scope/)
+    // New document heading scale (ADR-0016): module title at `#`, field headings at `##`.
+    assert.match(raw, /^# Context$/m)
+    assert.match(raw, /^## Business driver$/m)
+    assert.match(raw, /^## Affected domains$/m)
+    assert.match(raw, /^## Explicitly out of scope$/m)
   })
 })
 
@@ -551,9 +554,157 @@ test('readModule against Azure DevOps reports a missing module the same way the 
   })
 })
 
-// Regression test for a review finding: readModule used to never forward `options.strict` to parseModuleFile on either storage backend, so a caller asking for strict parsing (as evaluateStage's `check` mode does) would silently get non-strict semantics regardless. `strict` must now throw on a parser anomaly the same way on both the local and Azure DevOps-backed paths.
+// Regression test for a review finding: readModule used to never forward `options.strict` to parseModuleFile on either storage backend, so a caller asking for strict parsing (as evaluateStage's `check` mode does) would silently get non-strict semantics regardless. `strict` must now throw on a parser anomaly the same way on both the local and Azure DevOps-backed paths. The file here is written in the new heading scale (ADR-0016) — an old-scale file's stray headings are folded into field content by the lazy migration before the parser ever sees them (see the migration tests below), so a post-migration anomaly is one that exists in new-scale bytes.
+// --- Heading-scale lazy migration (#130, ADR-0016) -------------------------
+//
+// The new document heading scale: module titles at `#`, field headings at `##`, author content starting at `###`. Pre-existing files were written with bare `##` field headings and no module title; reading one migrates it in place (ADR-0010's migrate-on-read pattern) so no manual step is ever needed.
+
+const OLD_SCALE_CONTEXT = [
+  '---',
+  'module: context',
+  'status: review',
+  'owner: c.barlow',
+  '---',
+  '',
+  '## Business driver',
+  '',
+  'A new law requires this by June.',
+  '',
+  '## Affected domains',
+  '',
+  '- Payments',
+  '- Client Record',
+  '',
+  '## Explicitly out of scope',
+  '',
+  'Nothing yet.',
+  '',
+].join('\n')
+
+// The same old-scale file plus two author headings the old scale allowed to collide with the structural one — a `##` that isn't any field's title (which the old parser treated as an unknown phantom section and warned about) and a bare `#`.
+const OLD_SCALE_WITH_AUTHOR_HEADINGS = [
+  '---',
+  'module: context',
+  'status: review',
+  'owner: c.barlow',
+  '---',
+  '',
+  '## Business driver',
+  '',
+  'A new law requires this by June.',
+  '',
+  '## An author heading the old scale allowed to collide',
+  '',
+  'Author prose under their own heading.',
+  '',
+  '## Affected domains',
+  '',
+  '- Payments',
+  '- Client Record',
+  '',
+  '## Explicitly out of scope',
+  '',
+  '# A level-one author heading also collides now',
+  '',
+  'Nothing yet.',
+  '',
+].join('\n')
+
+test('reading an old-scale module file bumps it to the new heading scale and writes the result back', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    const definition = loadDefinition('design')
+    const contextPath = join(instancesDir, 'my-initiative', 'modules', 'context.md')
+    writeFileSync(contextPath, OLD_SCALE_CONTEXT)
+
+    readModule(definition, 'my-initiative', 'context', { instancesDir })
+
+    const raw = readFileSync(contextPath, 'utf8')
+    assert.match(raw, /^# Context$/m)
+    assert.match(raw, /^## Business driver$/m)
+    assert.match(raw, /^## Affected domains$/m)
+    assert.match(raw, /^## Explicitly out of scope$/m)
+  })
+})
+
+test('migration preserves every field\'s parsed content through the round-trip', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    const definition = loadDefinition('design')
+    const moduleSpec = definition.modules.get('context')
+    writeFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), OLD_SCALE_CONTEXT)
+
+    const before = parseModuleFile(OLD_SCALE_CONTEXT, moduleSpec).fields
+    const after = readModule(definition, 'my-initiative', 'context', { instancesDir }).fields
+    assert.deepEqual(after, before)
+
+    // And a fresh read/write cycle on the migrated file is still the exact inverse.
+    const reread = readModule(definition, 'my-initiative', 'context', { instancesDir }).fields
+    assert.deepEqual(reread, before)
+  })
+})
+
+test('migration folds author sub-headings into field content at ### instead of leaving them as phantom structure', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    const definition = loadDefinition('design')
+    const contextPath = join(instancesDir, 'my-initiative', 'modules', 'context.md')
+    writeFileSync(contextPath, OLD_SCALE_WITH_AUTHOR_HEADINGS)
+
+    readModule(definition, 'my-initiative', 'context', { instancesDir })
+
+    const raw = readFileSync(contextPath, 'utf8')
+    // The stray `##` that used to be an unknown-section warning is now author content inside Business driver.
+    assert.match(raw, /A new law requires this by June\.\n\n### An author heading the old scale allowed to collide\n/)
+    assert.doesNotMatch(raw, /^## An author heading/m)
+    // Same for a stray level-one author heading inside Explicitly out of scope.
+    assert.match(raw, /### A level-one author heading also collides now\n/)
+  })
+})
+
+test('a new-scale file reads back byte-identical — migration never rewrites what is already migrated', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    const definition = loadDefinition('design')
+    const moduleSpec = definition.modules.get('context')
+    const contextPath = join(instancesDir, 'my-initiative', 'modules', 'context.md')
+
+    const newText = readFileSync(contextPath, 'utf8')
+    assert.equal(migrateModuleHeadingScale(newText, moduleSpec), newText)
+
+    const mtimeBefore = readFileSync(contextPath, 'utf8')
+    readModule(definition, 'my-initiative', 'context', { instancesDir })
+    assert.equal(readFileSync(contextPath, 'utf8'), mtimeBefore)
+  })
+})
+
+test('readModule against Azure DevOps performs the same lazy migration, pushing the migrated file as a commit', async () => {
+  await withFakeRepo(
+    {
+      '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
+      '/gantry-workspace/my-initiative/modules/context.md': OLD_SCALE_WITH_AUTHOR_HEADINGS,
+    },
+    async (baseUrl) => {
+      const azureDevOps = azureDevOpsOptions(baseUrl)
+      const definition = loadDefinition('design')
+
+      const data = await readModule(definition, 'my-initiative', 'context', { azureDevOps })
+      // The author sub-heading folded into Business driver comes along as content, not as a phantom section.
+      assert.match(data.fields.driver, /^A new law requires this by June\.\n\n### An author heading/)
+      assert.deepEqual(data.fields['affected-domains'], ['Payments', 'Client Record'])
+
+      const client = createAzureDevOpsClient(azureDevOps)
+      const stored = await client.getFileContent('gantry-workspace/my-initiative/modules/context.md')
+      assert.match(stored, /^# Context$/m)
+      assert.match(stored, /^## Business driver$/m)
+      assert.match(stored, /### An author heading the old scale allowed to collide\n/)
+    }
+  )
+})
+
 test('readModule forwards options.strict to parseModuleFile on both the local and Azure DevOps-backed paths', async () => {
-  const badModuleText = '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Not A Real Field\n\nWhatever.\n'
+  const badModuleText =
+    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n# Context\n\n## Not A Real Field\n\nWhatever.\n'
   const definition = loadDefinition('design')
 
   withScratchInstances((instancesDir) => {

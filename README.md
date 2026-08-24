@@ -358,6 +358,8 @@ status: draft
 owner: c.barlow
 ---
 
+# Context
+
 ## Business driver
 
 ...
@@ -373,6 +375,8 @@ owner: c.barlow
 ```
 
 Module files are markdown so they're readable, diffable and editable anywhere. Frontmatter carries the machine-legible state.
+
+Headings follow one document scale (ADR-0016): the module's title sits at `#`, each field heading at `##`, and author content starts at `###` — so an author's own sub-heading can never collide with a field boundary. Files written before this scale existed are migrated in place on first read; no manual step is needed.
 
 ## The design definition
 

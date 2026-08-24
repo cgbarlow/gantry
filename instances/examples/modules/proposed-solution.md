@@ -3,6 +3,7 @@ module: proposed-solution
 status: draft
 owner: c.barlow
 ---
+# Proposed Solution
 
 ## Alignment with strategy
 

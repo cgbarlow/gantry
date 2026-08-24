@@ -3,6 +3,7 @@ module: architecture
 status: agreed
 owner: c.barlow
 ---
+# Architecture
 
 ## Business context
 

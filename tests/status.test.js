@@ -126,7 +126,7 @@ test('getStatus stays a plain synchronous return with no options.azureDevOps giv
   })
 })
 
-// Regression test for a review finding: evaluateStage's Azure-DevOps-backed path used to silently ignore `options.strict`, so a parser anomaly (a heading matching no field) would be swallowed rather than throwing — the same anomaly throws on the local path when `strict: true` (`check`'s own contract). `readModule` (lib/instance.js) now forwards `options.strict` to `parseModuleFile` on both storage backends, so this must throw here exactly as the equivalent local-path call does.
+// Regression test for a review finding: evaluateStage's Azure-DevOps-backed path used to silently ignore `options.strict`, so a parser anomaly (a heading matching no field) would be swallowed rather than throwing — the same anomaly throws on the local path when `strict: true` (`check`'s own contract). `readModule` (lib/instance.js) now forwards `options.strict` to `parseModuleFile` on both storage backends, so this must throw here exactly as the equivalent local-path call does. The module file is written in the new heading scale (ADR-0016): an old-scale file's stray headings are folded into field content by readModule's lazy migration before the parser sees them, so a genuine post-migration anomaly is one that exists in new-scale bytes.
 test('evaluateStage in strict mode over Azure DevOps throws on a parser anomaly, instead of silently ignoring strict', async () => {
   await withFakeAzureDevOpsServer(
     {
@@ -137,7 +137,7 @@ test('evaluateStage in strict mode over Azure DevOps throws on a parser anomaly,
       files: {
         '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
         '/gantry-workspace/my-initiative/modules/context.md':
-          '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Not A Real Field\n\nWhatever.\n',
+          '---\nmodule: context\nstatus: draft\nowner:\n---\n\n# Context\n\n## Not A Real Field\n\nWhatever.\n',
       },
     },
     async (baseUrl) => {

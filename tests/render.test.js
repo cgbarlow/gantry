@@ -44,9 +44,13 @@ test('renders a real docx styled from the HLD reference doc', () => {
     encoding: 'utf8',
   })
   const headingStyles = [...documentXml.matchAll(/w:pStyle w:val="(Heading\d)"/g)].map((m) => m[1])
+  // New document heading scale (ADR-0016): the artefact title and each module title sit at Heading1, every field heading at Heading2 — the templates emit nothing deeper, since author content starts at Heading3 and the examples' own prose uses no sub-headings.
   assert.ok(headingStyles.includes('Heading1'))
   assert.ok(headingStyles.includes('Heading2'))
-  assert.ok(headingStyles.includes('Heading3'))
+  assert.deepEqual(
+    [...new Set(headingStyles)],
+    ['Heading1', 'Heading2']
+  )
   assert.ok((documentXml.match(/<w:numPr>/g) ?? []).length > 0, 'expected real list numbering, not flattened text')
 
   const referenceStyles = execFileSync(
