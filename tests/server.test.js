@@ -297,9 +297,9 @@ test('GET / serves index.html with the import map resolved (no leftover placehol
   })
 })
 
-test('GET /setup (a client-side route with no matching static file) falls back to index.html, not a 404', async () => {
+test('GET /new-workspace (a client-side route with no matching static file) falls back to index.html, not a 404', async () => {
   await withRunningServer({ slug: 'examples' }, async (base) => {
-    const res = await fetch(`${base}/setup`)
+    const res = await fetch(`${base}/new-workspace`)
     assert.equal(res.status, 200)
     const html = await res.text()
     assert.doesNotMatch(html, /__IMPORT_MAP__/)

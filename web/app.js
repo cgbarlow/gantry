@@ -1,4 +1,4 @@
-// gantry's production UI entry point — Preact, delivered via HTM tagged templates with no build step, per docs/adr/0006-preact-frontend-framework.md. `preact-iso` provides the routing shell — the instance dashboard (#77) at `/`, the module editor at `/instance/:slug`, the instance-setup wizard at `/setup` (see web/pages/setup-wizard.js) — and `@preact/signals` holds the instance-scoped state (the viewed slug and stage, the fetched instance data) that's shared across the module editor screen's header, nav, and module list, exactly as today's DOM version threaded a `stageId` through a single re-render function.
+// gantry's production UI entry point — Preact, delivered via HTM tagged templates with no build step, per docs/adr/0006-preact-frontend-framework.md. `preact-iso` provides the routing shell — the instance dashboard (#77) at `/`, the module editor at `/instance/:slug`, the "+ New Workspace" wizard at `/new-workspace` (#110, see web/pages/new-workspace-wizard.js — replaces the old URL-first "+ New instance" wizard entirely) — and `@preact/signals` holds the instance-scoped state (the viewed slug and stage, the fetched instance data) that's shared across the module editor screen's header, nav, and module list, exactly as today's DOM version threaded a `stageId` through a single re-render function.
 import { html, render } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { signal, effect, batch } from '@preact/signals'
@@ -10,7 +10,7 @@ import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import { promptOpen, resolvePromptWith } from './lib/credential.js'
 import { apiFetch, apiFetchForInstance } from './lib/apiFetch.js'
-import { SetupWizardPage } from './pages/setup-wizard.js'
+import { NewWorkspaceWizardPage } from './pages/new-workspace-wizard.js'
 import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage } from './pages/settings.js'
 // Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79) markdown/split/rendered toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
@@ -90,7 +90,7 @@ const viewedStage = signal(null)
 const instanceData = signal(null)
 const loadError = signal(null)
 
-// Fires only while a slug is actually pinned — i.e. while ModuleEditorPage is mounted (see its own useEffect below) — not on every page load regardless of route, so landing on a sibling route with no instance pinned (e.g. /setup, the instance-setup wizard, #78, or the dashboard) never fires this fetch or surfaces a spurious "no instance slug given" failure.
+// Fires only while a slug is actually pinned — i.e. while ModuleEditorPage is mounted (see its own useEffect below) — not on every page load regardless of route, so landing on a sibling route with no instance pinned (e.g. /new-workspace, the "+ New Workspace" wizard, #110, or the dashboard) never fires this fetch or surfaces a spurious "no instance slug given" failure.
 effect(() => {
   const slug = currentSlug.value
   if (!slug) return
@@ -1110,7 +1110,7 @@ function AppHeader({ instance }) {
         <a class="btn small ghost" href="/">← Workspaces</a>
         <h1>${instance.slug} — ${instance.definition}</h1>
         <${InstanceSwitcher} slug=${instance.slug} />
-        <a class="btn small ghost" href="/setup">+ New instance</a>
+        <a class="btn small ghost" href="/new-workspace">+ New Workspace</a>
         <${SettingsMenu} instance=${instance} />
       </div>
       <p id="stage-line">${instance.stage.title} (gate: ${instance.stage.gate})</p>
@@ -1241,7 +1241,7 @@ function EmptyState() {
   return html`
     <div class="dashboard-empty">
       <p>No instances registered yet.</p>
-      <a class="btn primary" href="/setup">+ New instance</a>
+      <a class="btn primary" href="/new-workspace">+ New Workspace</a>
     </div>
   `
 }
@@ -1599,7 +1599,7 @@ function DashboardPage() {
         <h1>Workspaces</h1>
         <div class="dashboard-controls">
           ${instances?.length ? html`<${ViewToggle} />` : null}
-          <a class="btn small ghost" href="/setup">+ New instance</a>
+          <a class="btn small ghost" href="/new-workspace">+ New Workspace</a>
           <a class="btn small ghost" href=${`/settings?from=${encodeURIComponent('/')}`}>Settings</a>
         </div>
       </div>
@@ -1672,13 +1672,13 @@ function PatPromptModal() {
 }
 
 // ---------- App shell: preact-iso routing ----------
-// Eight routes: the dashboard (#77, default/landing), the module editor per instance, the instance-setup wizard (#78), the asset library (#80), and three tab-free Settings screens (#107, superseding #101/#104's single tabbed `/settings`) — Global Settings, Workspace Settings (scoped to one instance's own workspace), and Instance Settings (assignee, read-only instance info, read-only work-item link details). `instanceData`/`loadError` above are populated regardless of which route is active (the `effect()` isn't scoped to a component), so the library screen never has to re-fetch instance data just to know which instance it's browsing.
+// Eight routes: the dashboard (#77, default/landing), the module editor per instance, the "+ New Workspace" wizard (#110, replacing the old #78 instance-setup wizard), the asset library (#80), and three tab-free Settings screens (#107, superseding #101/#104's single tabbed `/settings`) — Global Settings, Workspace Settings (scoped to one instance's own workspace), and Instance Settings (assignee, read-only instance info, read-only work-item link details). `instanceData`/`loadError` above are populated regardless of which route is active (the `effect()` isn't scoped to a component), so the library screen never has to re-fetch instance data just to know which instance it's browsing.
 function App() {
   return html`
     <${LocationProvider}>
       <${Router}>
         <${Route} path="/instance/:slug" component=${ModuleEditorPage} />
-        <${Route} path="/setup" component=${SetupWizardPage} />
+        <${Route} path="/new-workspace" component=${NewWorkspaceWizardPage} />
         <${Route} path="/assets" component=${AssetLibraryPage} />
         <${Route} path="/settings" component=${GlobalSettingsPage} />
         <${Route} path="/settings/workspace" component=${WorkspaceSettingsPage} />

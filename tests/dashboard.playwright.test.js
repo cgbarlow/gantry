@@ -215,7 +215,7 @@ test('dashboard: swimlane chip overflow menu can open the module editor for that
   }
 })
 
-test('dashboard: empty state renders a "new instance" call to action when no instances are registered', async () => {
+test('dashboard: empty state renders a "new workspace" call to action when no instances are registered', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     await withRunningServer(
@@ -225,9 +225,9 @@ test('dashboard: empty state renders a "new instance" call to action when no ins
         await page.waitForSelector('.dashboard-empty', { timeout: 10_000 })
         assert.equal(await page.locator('.view-toggle').count(), 0, 'no view toggle when there is nothing to view')
 
-        await page.locator('.dashboard-empty').getByRole('link', { name: '+ New instance' }).click()
-        await page.waitForSelector('h2:has-text("New instance")', { timeout: 10_000 })
-        assert.equal(page.url(), `${base}/setup`)
+        await page.locator('.dashboard-empty').getByRole('link', { name: '+ New Workspace' }).click()
+        await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
+        assert.equal(page.url(), `${base}/new-workspace`)
       })
     )
   } finally {
@@ -254,8 +254,8 @@ test('dashboard: the topbar no longer has its own theme toggle (moved to Setting
   }
 })
 
-// The dashboard topbar's own "+ New instance" link is what makes creating a new instance reachable without an instance already open — before this, it only existed in the module editor's header (AppHeader) and the empty state's one-off call to action (the test above), so a dashboard already listing instances had no way to start another one.
-test('dashboard: topbar "new instance" link works even when instances are already registered', async () => {
+// The dashboard topbar's own "+ New Workspace" link is what makes creating a new instance reachable without an instance already open — before this, it only existed in the module editor's header (AppHeader) and the empty state's one-off call to action (the test above), so a dashboard already listing instances had no way to start another one.
+test('dashboard: topbar "new workspace" link works even when instances are already registered', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     createInstance('design', 'alpha-initiative', { instancesDir })
@@ -266,9 +266,9 @@ test('dashboard: topbar "new instance" link works even when instances are alread
         await page.goto(base)
         await page.waitForSelector('.master-detail', { timeout: 10_000 })
 
-        await page.locator('.dashboard-topbar').getByRole('link', { name: '+ New instance' }).click()
-        await page.waitForSelector('h2:has-text("New instance")', { timeout: 10_000 })
-        assert.equal(page.url(), `${base}/setup`)
+        await page.locator('.dashboard-topbar').getByRole('link', { name: '+ New Workspace' }).click()
+        await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
+        assert.equal(page.url(), `${base}/new-workspace`)
       })
     )
   } finally {
