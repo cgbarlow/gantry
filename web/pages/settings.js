@@ -1,15 +1,22 @@
-// Settings screen (#101/#104): a new top-level `/settings` route with a
-// tabbed shell. Global Defaults holds the Azure DevOps PAT management moved
-// off the per-instance editor header (see web/app.js's AppHeader — its
-// "Replace Azure DevOps PAT"/"Clear Azure DevOps PAT" buttons are removed
-// entirely, not just hidden) and a global ticketing-system default
-// selector. Workspace overrides (#104) lists every registered workspace
-// with its owner, repo URL, and a PAT/ticketing-system override away from
-// those global defaults — `TABS` is a real array (not a single hard-coded
-// panel) precisely so a second tab could be added without restructuring
-// the shell, which is exactly what #104 does.
+// Settings screens (#107): three separate, tab-free top-level routes —
+// `/settings` (Global Settings), `/settings/workspace` (Workspace Settings,
+// scoped to one instance's own workspace) and `/settings/instance`
+// (Instance Settings, new) — replacing #101/#104's single tabbed `/settings`
+// shell (Global Defaults tab + a Workspace overrides tab listing every
+// registered workspace). That tabbed shell is gone entirely, not merely
+// hidden: no Settings screen has tabs any more, and there is no longer any
+// screen that lists every workspace at once — Workspace Settings shows only
+// the one workspace behind whichever instance it was opened for.
+//
+// Every screen here takes an explicit `from` query param (the path Settings
+// was actually opened from) and its back control returns there — never via
+// browser history — falling back to Home (`/`) when `from` is absent (a
+// direct/bookmarked URL). `preact-iso` hands a matched route's query string
+// straight through as a `query` prop (see its own `exec`/`Router`), so every
+// page component below reads `query.from`/`query.slug` directly rather than
+// re-parsing `location.search` itself.
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { theme, cycleTheme } from '../lib/theme.js'
 import {
   pat,
@@ -20,58 +27,46 @@ import {
   clearWorkspacePatOverride,
 } from '../lib/credential.js'
 import { TICKETING_SYSTEMS, defaultTicketingSystem, setDefaultTicketingSystem } from '../lib/ticketingSystem.js'
-import { apiFetch } from '../lib/apiFetch.js'
+import { apiFetch, apiFetchForInstance } from '../lib/apiFetch.js'
 
-const TABS = [
-  { id: 'global-defaults', label: 'Global Defaults' },
-  { id: 'workspaces', label: 'Workspace overrides' },
-]
-
-function SettingsHeader() {
+// ---------- Shared header ----------
+// One header shape for all three Settings screens: a title (distinct per
+// screen, since there's no shared tab strip to convey which screen this
+// is any more) and a back control that honors `from` — the instance
+// screen's own `/instance/<slug>` when opened from there, or Home when
+// opened from the dashboard (or omitted entirely, e.g. a bookmarked URL).
+function SettingsHeader({ title, backHref }) {
   return html`
     <header class="settings-header">
       <div class="brand">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M3 20h18M6 20V8l6-4 6 4v12M6 8h12" />
         </svg>
-        <h1>Settings</h1>
+        <h1>${title}</h1>
         <button type="button" class="btn small ghost theme-toggle" onClick=${cycleTheme} title="Cycle theme">
           Theme: ${theme.value}
         </button>
       </div>
-      <a class="btn small ghost" href="/">← Instances</a>
+      <a class="btn small ghost" href=${backHref}>← Back</a>
     </header>
   `
 }
 
-function SettingsTabs({ activeTab, onSelect }) {
-  return html`
-    <div class="settings-tabs" role="tablist" aria-label="Settings">
-      ${TABS.map(
-        (tab) => html`
-          <button
-            type="button"
-            key=${tab.id}
-            role="tab"
-            aria-selected=${activeTab === tab.id}
-            class=${activeTab === tab.id ? 'active' : ''}
-            onClick=${() => onSelect(tab.id)}
-          >
-            ${tab.label}
-          </button>
-        `
-      )}
-    </div>
-  `
+// The path a Settings screen was opened from, `?from=`-encoded by whoever
+// linked here (the dashboard, or the instance screen's Settings dropdown —
+// see web/app.js's SettingsMenu) — falling back to Home when absent, per
+// this ticket's own "falls back to Home when there's no such origin"
+// acceptance criterion. Never read from browser history.
+function backHrefFrom(query) {
+  return query?.from || '/'
 }
 
-// The default PAT this section manages is the exact same one
-// web/lib/credential.js already held (and web/app.js's per-instance editor
-// header used to expose) — moved here wholesale, not reimplemented. A
-// third state this section adds beyond "replace"/"clear" (which assumed a
-// PAT already existed): a first-time "Set" action, since this is now the
-// *only* place a PAT can be entered ahead of any 401 ever prompting for
-// one.
+// ---------- Global Settings (`/settings`) ----------
+// The exact same PAT-management and default-ticketing-system content
+// #101's old Global Defaults tab held — moved here wholesale, now the
+// entire screen rather than one tab among others. Reached directly (no
+// intermediate step) from Home, and via the instance screen's Settings
+// dropdown.
 function GlobalPatSection() {
   return html`
     <section class="settings-section">
@@ -101,8 +96,8 @@ function TicketingSystemSection() {
     <section class="settings-section">
       <h2>Default ticketing system</h2>
       <p class="guidance">
-        Which ticketing system new workspaces default to, until a workspace-level override (the "Workspace
-        overrides" tab) says otherwise.
+        Which ticketing system new workspaces default to, until a workspace's own override (its Workspace Settings
+        screen) says otherwise.
       </p>
       <div class="settings-radio-group" role="radiogroup" aria-label="Default ticketing system">
         ${TICKETING_SYSTEMS.map(
@@ -126,22 +121,41 @@ function TicketingSystemSection() {
   `
 }
 
-function GlobalDefaultsTab() {
+export function GlobalSettingsPage({ query }) {
   return html`
-    <${GlobalPatSection} />
-    <${TicketingSystemSection} />
+    <${SettingsHeader} title="Settings" backHref=${backHrefFrom(query)} />
+    <main class="settings-page">
+      <${GlobalPatSection} />
+      <${TicketingSystemSection} />
+    </main>
   `
 }
 
-// ---------- Workspace overrides tab (#104) ----------
+// ---------- Workspace Settings (`/settings/workspace?slug=<instance-slug>`) ----------
+// Scoped to one instance's own workspace only — never a picker or listing
+// across every registered workspace (that whole-registry view is gone,
+// along with the tabbed shell it used to live in). `slug` names the
+// instance whose workspace this is; the workspace itself (found via `GET
+// /api/instance/workspace`, then looked up by id in `GET /api/workspaces` —
+// both pre-existing, uncredentialed registry reads, see their own route
+// comments in lib/server.js) is what's actually shown/edited.
 
-async function loadWorkspaces() {
-  const res = await apiFetch('/api/workspaces')
+async function fetchInstanceWorkspaceId(slug) {
+  const res = await apiFetch(`/api/instance/workspace?slug=${encodeURIComponent(slug)}`)
+  const body = await res.json().catch(() => ({}))
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
+    throw new Error(body.message ?? body.error ?? `Failed to resolve this instance's workspace (${res.status})`)
+  }
+  return body.workspaceId ?? null
+}
+
+async function fetchWorkspaceById(workspaceId) {
+  const res = await apiFetch('/api/workspaces')
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) {
     throw new Error(body.message ?? body.error ?? `Failed to load workspaces (${res.status})`)
   }
-  return res.json()
+  return body.find((w) => w.id === workspaceId) ?? null
 }
 
 async function patchWorkspace(id, updates) {
@@ -166,51 +180,24 @@ function workspaceRepoUrl(workspace) {
   return `${base}/${encodeURIComponent(workspace.organization)}/${encodeURIComponent(workspace.project)}/_git/${encodeURIComponent(workspace.repository)}`
 }
 
-// One workspace's row: owner (viewed/edited here), repo URL, a PAT-override
-// control (client-only — web/lib/credential.js — never touches the
-// server), and a ticketing-system-override control (server-persisted —
-// `PATCH /api/workspaces/:id` — since the workspace registry already
-// stores this per-workspace, per #96). `onUpdated` reports a fresh
-// workspace record back up to `WorkspacesTab` after any server-side PATCH
-// succeeds, so the list reflects it without a full re-fetch.
-function WorkspaceRow({ workspace, onUpdated }) {
+// One workspace's editable fields: owner (server-persisted), a PAT
+// override (client-only, never touches the server), and a
+// ticketing-system override (server-persisted) — the same three fields
+// #104's old Workspace overrides tab exposed per row, now rendered for
+// exactly one workspace (the instance's own) rather than one row per
+// registered workspace.
+function WorkspaceEditor({ workspace, onUpdated }) {
   const [ownerDraft, setOwnerDraft] = useState(workspace.owner ?? '')
   const [ownerStatus, setOwnerStatus] = useState('')
   const [patDraft, setPatDraft] = useState('')
   const [patStatus, setPatStatus] = useState('')
   const [ticketingStatus, setTicketingStatus] = useState('')
 
-  // Keeps the owner draft in sync if this workspace's record is refreshed
-  // from elsewhere (e.g. a ticketing-system change on the same row calling
-  // `onUpdated` with the server's own merged record) — without this, a
-  // stale draft could silently overwrite a concurrent change on save.
   useEffect(() => {
     setOwnerDraft(workspace.owner ?? '')
   }, [workspace.owner])
 
   const hasPatOverride = hasWorkspacePatOverride(workspace.id)
-  // Known, low-risk gap (#104 review; re-assessed, not fixed here): this is
-  // a *heuristic* ("does this workspace's stored value currently differ
-  // from the global default"), not a stored "was this ever explicitly
-  // overridden" flag — the workspace registry (#96, unchanged by this
-  // ticket) always persists one concrete `ticketingSystem` value, with no
-  // distinct "unset, tracks the global default" state. In principle that
-  // means this label could drift out from under an untouched workspace if
-  // the global default ever changed to a different value later.
-  //
-  // In practice, today, it can't: `jira` is rejected by validation
-  // everywhere a ticketing system can be chosen (globally, per-workspace,
-  // and at workspace creation — see workspaceRegistry.js's
-  // `assertValidTicketingSystem` and this file's own `TICKETING_SYSTEMS`
-  // enum), so `defaultTicketingSystem.value` and every workspace's
-  // `ticketingSystem` can only ever be `'azure-devops'` — there is no
-  // reachable state where the two sides of this comparison differ. This
-  // only becomes a real, visible misreporting risk once genuine Jira
-  // support ships (explicitly out of scope for this ticket, per spec #95's
-  // own "Out of Scope" list) and a real fix (an explicit override flag on
-  // the workspace record, intersecting the already-closed #96 ticket's
-  // schema) is worth building then, against real second-system
-  // requirements, rather than speculatively now.
   const hasTicketingOverride = workspace.ticketingSystem !== defaultTicketingSystem.value
 
   async function handleSaveOwner() {
@@ -327,60 +314,256 @@ function WorkspaceRow({ workspace, onUpdated }) {
   `
 }
 
-function WorkspacesTab() {
-  const [workspaces, setWorkspaces] = useState(null)
-  const [error, setError] = useState(null)
+export function WorkspaceSettingsPage({ query }) {
+  const slug = query?.slug
+  const [state, setState] = useState('loading') // 'loading' | 'no-slug' | 'no-workspace' | 'ready' | 'error'
+  const [error, setError] = useState('')
+  const [workspace, setWorkspace] = useState(null)
 
   useEffect(() => {
+    if (!slug) {
+      setState('no-slug')
+      return
+    }
     let cancelled = false
-    loadWorkspaces()
-      .then((list) => {
-        if (!cancelled) setWorkspaces(list)
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err.message)
-      })
+    setState('loading')
+    ;(async () => {
+      try {
+        const workspaceId = await fetchInstanceWorkspaceId(slug)
+        if (!workspaceId) {
+          if (!cancelled) setState('no-workspace')
+          return
+        }
+        const ws = await fetchWorkspaceById(workspaceId)
+        if (cancelled) return
+        if (!ws) {
+          setState('no-workspace')
+          return
+        }
+        setWorkspace(ws)
+        setState('ready')
+      } catch (err) {
+        if (!cancelled) {
+          setError(err.message)
+          setState('error')
+        }
+      }
+    })()
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [slug])
 
-  function handleUpdated(updated) {
-    setWorkspaces((current) => (current ?? []).map((w) => (w.id === updated.id ? updated : w)))
+  return html`
+    <${SettingsHeader} title="Workspace Settings" backHref=${backHrefFrom(query)} />
+    <main class="settings-page">
+      <section class="settings-section">
+        <h2>Workspace</h2>
+        <p class="guidance">
+          This instance's own workspace (an Azure DevOps repo) — its owner, repo URL, and any PAT or
+          ticketing-system override away from the Global Settings screen's values. Not a picker across every
+          registered workspace: just the one this instance belongs to.
+        </p>
+        ${state === 'no-slug' ? html`<p class="load-error">No instance was specified for these Workspace Settings.</p>` : null}
+        ${state === 'loading' ? html`<p class="loading">Loading…</p>` : null}
+        ${state === 'error' ? html`<p class="load-error">Failed to load: ${error}</p>` : null}
+        ${state === 'no-workspace'
+          ? html`<p class="workspace-empty">This instance has no Azure DevOps workspace — its data is stored locally.</p>`
+          : null}
+        ${state === 'ready'
+          ? html`
+              <div class="workspace-list">
+                <${WorkspaceEditor} workspace=${workspace} onUpdated=${setWorkspace} />
+              </div>
+            `
+          : null}
+      </section>
+    </main>
+  `
+}
+
+// ---------- Instance Settings (`/settings/instance?slug=<instance-slug>`) ----------
+// New (#107): hosts the instance's Assignee (editable), read-only instance
+// info, and the instance's own Azure DevOps work-item link details
+// (read-only — re-linking isn't supported here; that's still done from the
+// module editor's own work-item panel, see web/app.js's WorkItemPanel).
+
+async function fetchInstanceDetail(slug) {
+  const res = await apiFetchForInstance(slug, `/api/instance?slug=${encodeURIComponent(slug)}`)
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(body.message ?? body.error ?? `Failed to load instance (${res.status})`)
+  }
+  return body
+}
+
+async function saveAssignee(slug, assignee) {
+  const res = await apiFetchForInstance(slug, `/api/instance/assignee?slug=${encodeURIComponent(slug)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assignee }),
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(body.message ?? body.error ?? `Failed to save assignee (${res.status})`)
+  }
+  return body
+}
+
+// The instance's own stored Assignee — editable here, distinct from a
+// module's own frontmatter `owner` (the Design Authority sign-off
+// convention, untouched by this screen). Mirrors the dashboard's own
+// assignee editor (web/app.js's MasterDetailView), just as a single
+// labelled field rather than one per instance card.
+function AssigneeSection({ slug, assignee }) {
+  const [draft, setDraft] = useState(assignee ?? '')
+  const [status, setStatus] = useState('')
+  // Guards against a duplicate save firing for the same edit: clicking the
+  // "Save" button below moves focus away from the input first, so the
+  // input's own `onBlur` calls `handleSave` a moment before the button's
+  // `onClick` does too — both synchronously, before either's `await`
+  // resolves. Without this ref, that pair fires two identical `PUT
+  // /api/instance/assignee` requests per click (for an Azure-DevOps-backed
+  // instance, two separate commits pushed for the same content). Set
+  // synchronously before the first `await`, so the second, redundant call
+  // sees it and returns immediately rather than racing the first.
+  const savingRef = useRef(false)
+
+  useEffect(() => {
+    setDraft(assignee ?? '')
+  }, [assignee])
+
+  async function handleSave() {
+    if (draft === (assignee ?? '')) return
+    if (savingRef.current) return
+    savingRef.current = true
+    setStatus('Saving…')
+    try {
+      await saveAssignee(slug, draft)
+      setStatus('Saved.')
+    } catch (err) {
+      setStatus(err.message)
+    } finally {
+      savingRef.current = false
+    }
   }
 
   return html`
     <section class="settings-section">
-      <h2>Workspaces</h2>
-      <p class="guidance">
-        Every registered workspace (an Azure DevOps repo) — its owner, repo URL, and any PAT or ticketing-system
-        override away from the Global Defaults tab's values.
-      </p>
-      ${error ? html`<p class="load-error">Failed to load workspaces: ${error}</p>` : null}
-      ${!error && workspaces === null ? html`<p class="loading">Loading…</p>` : null}
-      ${!error && workspaces !== null && workspaces.length === 0
-        ? html`<p class="workspace-empty">No workspaces registered yet.</p>`
-        : null}
-      ${!error && workspaces !== null && workspaces.length > 0
-        ? html`
-            <div class="workspace-list">
-              ${workspaces.map((w) => html`<${WorkspaceRow} key=${w.id} workspace=${w} onUpdated=${handleUpdated} />`)}
-            </div>
-          `
-        : null}
+      <h2>Assignee</h2>
+      <p class="guidance">The single named person responsible for this instance.</p>
+      <div class="workspace-field-row">
+        <input
+          type="text"
+          class="wizard-input"
+          value=${draft}
+          placeholder="Unassigned"
+          onInput=${(e) => setDraft(e.currentTarget.value)}
+          onBlur=${handleSave}
+          onKeyDown=${(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur()
+          }}
+        />
+        <button type="button" class="btn small" onClick=${handleSave}>Save</button>
+      </div>
+      <div class="workspace-field-status">${status}</div>
     </section>
   `
 }
 
-export function SettingsPage() {
-  const [activeTab, setActiveTab] = useState(TABS[0].id)
+// Read-only — slug, definition, and the instance's own current stage. Not
+// a form: nothing here is editable from this screen.
+function InstanceInfoSection({ instance }) {
+  return html`
+    <section class="settings-section">
+      <h2>Instance info</h2>
+      <div class="result-card">
+        <div class="result-row"><span class="k">Slug</span><span class="v">${instance.slug}</span></div>
+        <div class="result-row"><span class="k">Definition</span><span class="v">${instance.definition}</span></div>
+        <div class="result-row">
+          <span class="k">Current stage</span>
+          <span class="v">${instance.stage.title} (gate: ${instance.stage.gate})</span>
+        </div>
+      </div>
+    </section>
+  `
+}
+
+// Read-only — re-linking isn't supported here (or anywhere but the module
+// editor's own work-item panel, which this screen deliberately doesn't
+// duplicate). Shows the parent work item and, per stage, this instance's
+// own child work item id.
+function WorkItemLinkSection({ instance }) {
+  const workItem = instance.workItem
 
   return html`
-    <${SettingsHeader} />
+    <section class="settings-section">
+      <h2>Azure DevOps work item</h2>
+      ${!workItem
+        ? html`<p class="guidance">This instance isn't linked to an Azure DevOps work item.</p>`
+        : html`
+            <div class="result-card">
+              <div class="result-row"><span class="k">Organization</span><span class="v">${workItem.organization}</span></div>
+              <div class="result-row"><span class="k">Project</span><span class="v">${workItem.project}</span></div>
+              <div class="result-row"><span class="k">Work item type</span><span class="v">${workItem.workItemType}</span></div>
+              <div class="result-row"><span class="k">Parent work item</span><span class="v">#${workItem.parentId}</span></div>
+              ${instance.stages.map(
+                (stage) => html`
+                  <div class="result-row" key=${stage.id}>
+                    <span class="k">${stage.title}</span>
+                    <span class="v">${workItem.stages?.[stage.id] ? `#${workItem.stages[stage.id]}` : '—'}</span>
+                  </div>
+                `
+              )}
+            </div>
+            <p class="guidance">Re-linking isn't supported here — this is a read-only view of the existing link.</p>
+          `}
+    </section>
+  `
+}
+
+export function InstanceSettingsPage({ query }) {
+  const slug = query?.slug
+  const [state, setState] = useState('loading') // 'loading' | 'no-slug' | 'ready' | 'error'
+  const [error, setError] = useState('')
+  const [instance, setInstance] = useState(null)
+
+  useEffect(() => {
+    if (!slug) {
+      setState('no-slug')
+      return
+    }
+    let cancelled = false
+    setState('loading')
+    fetchInstanceDetail(slug)
+      .then((data) => {
+        if (cancelled) return
+        setInstance(data)
+        setState('ready')
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setError(err.message)
+        setState('error')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [slug])
+
+  return html`
+    <${SettingsHeader} title="Instance Settings" backHref=${backHrefFrom(query)} />
     <main class="settings-page">
-      <${SettingsTabs} activeTab=${activeTab} onSelect=${setActiveTab} />
-      ${activeTab === 'global-defaults' ? html`<${GlobalDefaultsTab} />` : null}
-      ${activeTab === 'workspaces' ? html`<${WorkspacesTab} />` : null}
+      ${state === 'no-slug' ? html`<p class="load-error">No instance was specified for these Instance Settings.</p>` : null}
+      ${state === 'loading' ? html`<p class="loading">Loading…</p>` : null}
+      ${state === 'error' ? html`<p class="load-error">Failed to load: ${error}</p>` : null}
+      ${state === 'ready'
+        ? html`
+            <${AssigneeSection} slug=${slug} assignee=${instance.assignee} />
+            <${InstanceInfoSection} instance=${instance} />
+            <${WorkItemLinkSection} instance=${instance} />
+          `
+        : null}
     </main>
   `
 }

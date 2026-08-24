@@ -45,8 +45,8 @@ Git is the audit trail. Who changed what, when, and why is a `git log`, not a ve
 | **Stage** | A phase of the process. Stages are ordered, and each has an exit gate. |
 | **Gate** | The decision point a stage feeds. Gates declare which artefacts and which modules must be complete to pass. |
 | **Module** | The atomic unit of content — a single, self-contained piece of the process (context, options, non-functional requirements, security posture). Modules are the source of truth. |
-| **Instance** | One run of a definition against one initiative — a folder of module files, local or living inside a workspace. Its own stored `assignee` (a single named person, editable from the dashboard or `gantry new --assignee`) is a distinct instance-level field, stable across stage transitions — separate from each module's own frontmatter `owner`, which is still just the first non-empty value found among its current stage's modules (see "Instance module files" below), unrelated and unchanged. |
-| **Workspace** | An Azure DevOps organization/project/repository that backs one or more instances' data (see "Backing an instance with Azure DevOps" below). Auto-created the first time an instance is registered against that repo, and reused by every later instance registered against the same one. Holds its own free-text owner label (a workspace-level field, distinct from the per-module `owner` above) and a ticketing-system selection — edited from the Settings screen's "Workspace overrides" tab. |
+| **Instance** | One run of a definition against one initiative — a folder of module files, local or living inside a workspace. Its own stored `assignee` (a single named person, editable from the dashboard, its own Instance Settings screen, or `gantry new --assignee`) is a distinct instance-level field, stable across stage transitions — separate from each module's own frontmatter `owner`, which is still just the first non-empty value found among its current stage's modules (see "Instance module files" below), unrelated and unchanged. |
+| **Workspace** | An Azure DevOps organization/project/repository that backs one or more instances' data (see "Backing an instance with Azure DevOps" below). Auto-created the first time an instance is registered against that repo, and reused by every later instance registered against the same one. Holds its own free-text owner label (a workspace-level field, distinct from the per-module `owner` above) and a ticketing-system selection — edited from an instance's own Workspace Settings screen. |
 | **Artefact** | A rendered output. A document, a page, a summary. Generated, never hand-edited. Every artefact, `.md` and `.docx`, ends with a footer naming a short commit hash and date it was rendered from — the current local `HEAD` for a local instance, or (for an Azure DevOps-backed one) the commit its content was pushed as, one commit behind the file's own latest history entry, since a commit can't name its own hash — so a document can always be traced back to close to the exact version that produced it. |
 
 The key rule: **artefacts are derived, modules are authored.** If you find yourself editing a rendered artefact, something is wrong with the module spec.
@@ -169,7 +169,7 @@ gantry/
     ├── index.html                # app shell
     ├── app.js                     # dashboard + module editor
     ├── pages/setup-wizard.js     # "+ New instance" — local or Azure DevOps
-    ├── pages/settings.js         # /settings — Global Defaults + Workspace overrides tabs
+    ├── pages/settings.js         # /settings, /settings/workspace, /settings/instance — tab-free
     ├── lib/credential.js         # client-side PAT storage/prompt, incl. per-workspace overrides
     ├── lib/ticketingSystem.js    # client-side default-ticketing-system setting
     ├── lib/apiFetch.js           # fetch wrapper: attaches the right PAT, retries once on 401
@@ -203,10 +203,16 @@ From the dashboard, **"+ New instance"** opens the setup wizard:
 
 The first request against an Azure DevOps-backed instance prompts for a **Personal Access Token** with **Code (Read & write)** and **Work Items (Read & write)** scope. It's stored in the browser (`localStorage`), sent only to your own gantry server, and forwarded from there to Azure DevOps as an HTTP Basic credential — gantry's own server never persists it.
 
-The **Settings screen** (`/settings`, linked from the dashboard and the module editor) manages this PAT and everything else workspace-related, in two tabs:
+Settings is three separate, tab-free screens, reached differently depending on where you are:
 
-- **Global Defaults** — set, replace or clear the Azure DevOps PAT ahead of ever being prompted for one, and pick the default **ticketing system** new workspaces use. Azure DevOps is the only ticketing system gantry actually talks to today; a second option is listed but disabled ("coming soon") so the schema and UI don't need a migration once a second one ships.
-- **Workspace overrides** — every registered workspace, listed with its Azure DevOps repo URL and three editable fields: a free-text **owner** label, a **PAT override** for that workspace alone (falls back to the Global Defaults PAT when unset, and — like the global PAT — never leaves the browser), and a per-workspace **ticketing-system** override.
+- From the dashboard (Home), **Settings** goes straight to **Global Settings** (`/settings`) — no intermediate step.
+- From an open instance, **Settings** opens a dropdown offering **Global Settings**, **Workspace Settings**, and **Instance Settings**.
+
+Each screen's own back control returns to wherever it was actually opened from (Home, or that same instance screen) — not browser history — falling back to Home for a direct/bookmarked Settings URL.
+
+- **Global Settings** (`/settings`) — set, replace or clear the Azure DevOps PAT ahead of ever being prompted for one, and pick the default **ticketing system** new workspaces use. Azure DevOps is the only ticketing system gantry actually talks to today; a second option is listed but disabled ("coming soon") so the schema and UI don't need a migration once a second one ships.
+- **Workspace Settings** (`/settings/workspace`, from an instance's own Settings dropdown) — the workspace *behind that one instance* (never a picker across every registered workspace): its Azure DevOps repo URL and three editable fields — a free-text **owner** label, a **PAT override** for that workspace alone (falls back to the Global Settings PAT when unset, and — like the global PAT — never leaves the browser), and a per-workspace **ticketing-system** override. A local instance has no workspace, so this screen reports that instead.
+- **Instance Settings** (`/settings/instance`, from an instance's own Settings dropdown) — that instance's own stored **Assignee** (editable), read-only instance info (slug, definition, current stage), and a read-only view of its Azure DevOps work-item link (organization/project/parent work item/type, and each stage's own child work item id). Re-linking isn't supported here — that's still the module editor's own work-item panel (see "Linking an instance to an Azure DevOps work item" below).
 
 Once registered, a local and an Azure DevOps-backed instance are indistinguishable from the dashboard's point of view — same listing, same module editor, same render command. Where each one's data actually lives is tracked server-side across two registry files (`instances/instance-registry.json`: slug -> workspace; `instances/workspace-registry.json`: workspace -> organization/project/repository/owner/ticketing-system — both gitignored, application state, not source), not in any client-visible config.
 

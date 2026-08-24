@@ -648,40 +648,22 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .mismatch-flag { margin-top: 10px; font-size: 12px; color: var(--stamp-error-bg); }
 
 /*
- * ---------- Settings screen (#101) ----------
- * A new top-level tabbed screen (`/settings`) — currently just the Global
- * Defaults tab (PAT management moved off the module editor's own header,
- * plus the global ticketing-system default). `.settings-header`/
- * `.settings-page` have their own classes rather than reusing
- * `.wizard-header`/`.wizard-page` directly in markup — a review pass on
- * #101 flagged that as a fragile, undocumented coupling (this screen isn't
- * itself a wizard step, and `.wizard-page h2`/`.lede` etc. would otherwise
- * apply here too, only overridden by luck of selector specificity). Their
- * shared base proportions are still declared once, grouped with the
- * wizard's own rules above (see that section's own comment), since it's
- * the same generic page shell, not wizard-specific styling — everything
- * below here is genuinely settings-only.
+ * ---------- Settings screens (#107) ----------
+ * Three top-level, tab-free screens — `/settings` (Global Settings),
+ * `/settings/workspace` (Workspace Settings, scoped to one instance's own
+ * workspace) and `/settings/instance` (Instance Settings) — superseding
+ * #101/#104's single tabbed `/settings` shell (no `.settings-tabs` any
+ * more; each screen is reached directly, not via a tab strip).
+ * `.settings-header`/`.settings-page` have their own classes rather than
+ * reusing `.wizard-header`/`.wizard-page` directly in markup — a review
+ * pass on #101 flagged that as a fragile, undocumented coupling (these
+ * screens aren't wizard steps, and `.wizard-page h2`/`.lede` etc. would
+ * otherwise apply here too, only overridden by luck of selector
+ * specificity). Their shared base proportions are still declared once,
+ * grouped with the wizard's own rules above (see that section's own
+ * comment), since it's the same generic page shell, not wizard-specific
+ * styling — everything below here is genuinely settings-only.
  */
-.settings-tabs {
-  display: flex;
-  gap: 0;
-  border-bottom: var(--border-strong) solid var(--line-strong);
-  margin-bottom: 28px;
-}
-.settings-tabs button {
-  background: none;
-  border: none;
-  padding: 10px 4px;
-  margin-right: 28px;
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.settings-tabs button.active { color: var(--text); border-bottom: 2px solid var(--text); margin-bottom: -2px; }
-.settings-tabs button:disabled { opacity: 0.4; cursor: not-allowed; }
-
 .settings-page .settings-section { margin-bottom: 36px; }
 .settings-page .settings-section h2 { font-family: var(--font-display); font-weight: 600; font-size: 16px; margin: 0 0 6px; }
 .settings-page .settings-section .guidance { margin: 0 0 14px; max-width: 60ch; }
@@ -695,11 +677,15 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .settings-radio .stamp { margin-left: 2px; }
 
 /*
- * ---------- Workspace overrides tab (#104) ----------
- * One `.workspace-row` per registered workspace: repo URL, then three
- * `.workspace-field` blocks (owner, PAT override, ticketing-system
- * override) — reuses `.wizard-input`/`.settings-radio-group`/`.stamp`
- * wholesale rather than inventing parallel input/radio/badge styling.
+ * ---------- Workspace Settings (#104, scoped to one workspace by #107) ----------
+ * One `.workspace-row`: repo URL, then three `.workspace-field` blocks
+ * (owner, PAT override, ticketing-system override) — reuses
+ * `.wizard-input`/`.settings-radio-group`/`.stamp` wholesale rather than
+ * inventing parallel input/radio/badge styling. `.workspace-list` held one
+ * row per registered workspace under #104's old "list every workspace"
+ * tab; #107 narrows that same markup/CSS to exactly one row — the
+ * instance's own workspace — so `.workspace-list` here always wraps a
+ * single `.workspace-row`.
  */
 .workspace-list { display: flex; flex-direction: column; gap: 20px; }
 .workspace-empty { color: var(--text-muted); }
@@ -717,3 +703,40 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .workspace-field-row .wizard-input { flex: 1; }
 .workspace-pat-status, .workspace-ticketing-state { margin-bottom: 8px; }
 .workspace-field-status { margin-top: 6px; font-size: 12px; color: var(--text-muted); min-height: 1em; }
+
+/*
+ * ---------- Settings dropdown (#107) ----------
+ * The module editor header's "Settings" control, once an instance is
+ * open: no longer a plain link straight to Global Settings, but a small
+ * dropdown offering Global/Workspace/Instance Settings — same open/close-
+ * on-outside-click shape as `.chip .menu` (stage swimlanes), just anchored
+ * under a header button instead of a dashboard chip.
+ */
+.settings-menu { position: relative; display: inline-flex; }
+.settings-menu .menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 6px;
+  z-index: 5;
+  background: var(--bg-raised);
+  border: var(--border-strong) solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+  min-width: 160px;
+}
+.settings-menu.menu-open .menu { display: block; }
+.settings-menu .menu a {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-family: var(--font-body);
+  color: var(--text);
+  text-decoration: none;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
+.settings-menu .menu a:hover { background: var(--bg); }

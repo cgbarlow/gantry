@@ -20,7 +20,7 @@ import { theme, cycleTheme } from './lib/theme.js'
 import { promptOpen, resolvePromptWith } from './lib/credential.js'
 import { apiFetch, apiFetchForInstance } from './lib/apiFetch.js'
 import { SetupWizardPage } from './pages/setup-wizard.js'
-import { SettingsPage } from './pages/settings.js'
+import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage } from './pages/settings.js'
 // Two distinct "view mode" concepts collide on the same export names — the
 // dashboard's (#77) master-detail/swimlanes toggle and the module editor's
 // (#79) markdown/split/rendered toggle are unrelated signals that happen to
@@ -885,6 +885,59 @@ function ViewModeToolbar({ instance, onClearAllFields }) {
   `
 }
 
+// ---------- Settings dropdown (#107) ----------
+// From an instance screen, "Settings" is no longer a single link straight
+// to the (now tab-free) Global Settings screen — it opens a small dropdown
+// offering Global Settings, Workspace Settings (scoped to this instance's
+// own workspace — never a picker across every registered workspace), and
+// Instance Settings (assignee, read-only instance info, read-only
+// work-item link details). Every link carries an explicit `from` back to
+// this exact instance screen (`/instance/<slug>`) — not browser history —
+// so each Settings screen's own back control returns here. Mirrors
+// SwimlaneChip's own open/close-on-outside-click menu pattern (one open at
+// a time, closed by any click outside it).
+function SettingsMenu({ instance }) {
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    function onDocumentClick() {
+      setOpen(false)
+    }
+    window.addEventListener('click', onDocumentClick)
+    return () => window.removeEventListener('click', onDocumentClick)
+  }, [open])
+
+  const from = encodeURIComponent(`/instance/${instance.slug}`)
+  const slug = encodeURIComponent(instance.slug)
+
+  return html`
+    <div class=${'settings-menu' + (open ? ' menu-open' : '')}>
+      <button
+        type="button"
+        class="btn small ghost"
+        aria-haspopup="true"
+        aria-expanded=${open}
+        onClick=${(e) => {
+          e.stopPropagation()
+          setOpen((o) => !o)
+        }}
+      >
+        Settings
+      </button>
+      ${open
+        ? html`
+            <div class="menu" role="menu" onClick=${(e) => e.stopPropagation()}>
+              <a role="menuitem" href=${`/settings?from=${from}`}>Global Settings</a>
+              <a role="menuitem" href=${`/settings/workspace?slug=${slug}&from=${from}`}>Workspace Settings</a>
+              <a role="menuitem" href=${`/settings/instance?slug=${slug}&from=${from}`}>Instance Settings</a>
+            </div>
+          `
+        : null}
+    </div>
+  `
+}
+
 // ---------- Header: title, stage line, free-browse stage nav, theme ----------
 function AppHeader({ instance }) {
   return html`
@@ -896,7 +949,7 @@ function AppHeader({ instance }) {
         <a class="btn small ghost" href="/">← Workspaces</a>
         <h1>${instance.slug} — ${instance.definition}</h1>
         <a class="btn small ghost" href="/setup">+ New instance</a>
-        <a class="btn small ghost" href="/settings">Settings</a>
+        <${SettingsMenu} instance=${instance} />
         <button type="button" class="btn small ghost theme-toggle" onClick=${cycleTheme} title="Cycle theme">
           Theme: ${theme.value}
         </button>
@@ -1441,7 +1494,7 @@ function DashboardPage() {
         <div class="dashboard-controls">
           ${instances?.length ? html`<${ViewToggle} />` : null}
           <a class="btn small ghost" href="/setup">+ New instance</a>
-          <a class="btn small ghost" href="/settings">Settings</a>
+          <a class="btn small ghost" href=${`/settings?from=${encodeURIComponent('/')}`}>Settings</a>
           <button type="button" class="btn small ghost theme-toggle" onClick=${cycleTheme} title="Cycle theme">
             Theme: ${theme.value}
           </button>
@@ -1521,13 +1574,15 @@ function PatPromptModal() {
 }
 
 // ---------- App shell: preact-iso routing ----------
-// Six routes: the dashboard (#77, default/landing), the module editor per
+// Eight routes: the dashboard (#77, default/landing), the module editor per
 // instance, the instance-setup wizard (#78), the asset library (#80), and
-// the tabbed settings screen (#101, currently just its Global Defaults
-// tab). `instanceData`/`loadError` above are populated regardless of which
-// route is active (the `effect()` isn't scoped to a component), so the
-// library screen never has to re-fetch instance data just to know which
-// instance it's browsing.
+// three tab-free Settings screens (#107, superseding #101/#104's single
+// tabbed `/settings`) — Global Settings, Workspace Settings (scoped to one
+// instance's own workspace), and Instance Settings (assignee, read-only
+// instance info, read-only work-item link details). `instanceData`/
+// `loadError` above are populated regardless of which route is active (the
+// `effect()` isn't scoped to a component), so the library screen never has
+// to re-fetch instance data just to know which instance it's browsing.
 function App() {
   return html`
     <${LocationProvider}>
@@ -1535,7 +1590,9 @@ function App() {
         <${Route} path="/instance/:slug" component=${ModuleEditorPage} />
         <${Route} path="/setup" component=${SetupWizardPage} />
         <${Route} path="/assets" component=${AssetLibraryPage} />
-        <${Route} path="/settings" component=${SettingsPage} />
+        <${Route} path="/settings" component=${GlobalSettingsPage} />
+        <${Route} path="/settings/workspace" component=${WorkspaceSettingsPage} />
+        <${Route} path="/settings/instance" component=${InstanceSettingsPage} />
         <${Route} default component=${DashboardPage} />
       <//>
     <//>

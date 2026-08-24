@@ -1,23 +1,23 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { createServer } from '../lib/server.js'
+import { createInstance, readInstance, recordInstanceWorkItemLink } from '../lib/instance.js'
+import { registerInstance } from '../lib/instanceRegistry.js'
 import { registerWorkspace } from '../lib/workspaceRegistry.js'
 
-// Browser smoke test for the new top-level Settings screen (#101): a
-// tabbed shell at `/settings` whose only tab today is Global Defaults —
-// global Azure DevOps PAT management (moved off the per-instance editor
-// header entirely; see tests/patPrompt.playwright.test.js for the
-// corresponding "no PAT buttons in the editor header" coverage and the
-// replace/clear flows exercised from this new screen) and a global
-// ticketing-system default selector (`azure-devops` working, `jira`
-// visibly disabled as "coming soon"). Mirrors
+// Browser smoke tests for the reworked Settings screens (#107): three
+// separate, tab-free top-level routes — `/settings` (Global Settings),
+// `/settings/workspace` (Workspace Settings, scoped to one instance's own
+// workspace) and `/settings/instance` (Instance Settings) — replacing
+// #101/#104's single tabbed `/settings` shell entirely. Mirrors
 // tests/dashboard.playwright.test.js's pattern: a real server, a real
 // Chromium page, asserting no console/page errors alongside the ticket's
 // acceptance criteria.
+
 function withRunningServer(options, fn) {
   return new Promise((resolve, reject) => {
     const server = createServer(options)
@@ -53,123 +53,170 @@ function withPage(fn) {
   }
 }
 
-test('settings: /settings shows a tabbed screen with a working Global Defaults tab', async () => {
+function withScratchServer(fn) {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  return withRunningServer({ instancesDir }, (base) => fn(base, instancesDir)).finally(() =>
+    rmSync(instancesDir, { recursive: true, force: true })
+  )
+}
+
+// A local `examples`-backed server (no PAT ever required) — used for every
+// test that needs a real instance screen to open Settings from.
+function withExamplesServer(fn) {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    await withRunningServer(
-      { instancesDir },
-      withPage(async (page, base) => {
-        await page.goto(`${base}/settings`)
-        await page.waitForSelector('.settings-tabs', { timeout: 10_000 })
-
-        assert.equal(await page.locator('.settings-header h1').textContent(), 'Settings')
-        const tab = page.locator('.settings-tabs button', { hasText: 'Global Defaults' })
-        assert.equal(await tab.count(), 1)
-        assert.equal(await tab.getAttribute('aria-selected'), 'true')
-        assert.ok(await page.locator('.settings-section', { hasText: 'Azure DevOps Personal Access Token' }).isVisible())
-        assert.ok(await page.locator('.settings-section', { hasText: 'Default ticketing system' }).isVisible())
-      })
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+    return withRunningServer({ slug: 'examples', instancesDir }, (base) => fn(base, instancesDir)).finally(() =>
+      rmSync(instancesDir, { recursive: true, force: true })
     )
-  } finally {
+  } catch (err) {
     rmSync(instancesDir, { recursive: true, force: true })
+    throw err
   }
+}
+
+// ---------- No tabs anywhere ----------
+
+test('settings: none of the three Settings screens render a tab strip', async () => {
+  await withScratchServer(async (base) => {
+    await withPage(async (page) => {
+      for (const path of ['/settings', '/settings/workspace', '/settings/instance']) {
+        await page.goto(`${base}${path}`)
+        await page.waitForSelector('.settings-header', { timeout: 10_000 })
+        assert.equal(await page.locator('.settings-tabs').count(), 0, `${path} must not render a tab strip`)
+      }
+    })(base)
+  })
 })
 
-test('settings: the default PAT can be set, replaced, and cleared from the Global Defaults tab', async () => {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  try {
-    await withRunningServer(
-      { instancesDir },
-      withPage(async (page, base) => {
-        await page.goto(`${base}/settings`)
-        await page.waitForSelector('.settings-section', { timeout: 10_000 })
+// ---------- Global Settings, reached directly from Home ----------
 
-        // No PAT stored yet: a "Set" action, not "Replace"/"Clear".
-        assert.match(await page.locator('.settings-pat-status').textContent(), /NOT SET/)
-        assert.equal(await page.getByRole('button', { name: 'Set Azure DevOps PAT' }).count(), 1)
-        assert.equal(await page.getByRole('button', { name: 'Replace Azure DevOps PAT' }).count(), 0)
-        assert.equal(await page.getByRole('button', { name: 'Clear Azure DevOps PAT' }).count(), 0)
+test('settings: "Settings" from the dashboard goes straight to Global Settings, no intermediate step', async () => {
+  await withScratchServer(async (base) => {
+    await withPage(async (page) => {
+      await page.goto(base)
+      await page.waitForSelector('.dashboard-empty', { timeout: 10_000 })
+      await page.getByRole('link', { name: 'Settings' }).click()
+      await page.waitForSelector('.settings-header', { timeout: 10_000 })
+      assert.equal(new URL(page.url()).pathname, '/settings')
+      assert.equal(await page.locator('.settings-header h1').textContent(), 'Settings')
+      assert.ok(await page.locator('.settings-section', { hasText: 'Azure DevOps Personal Access Token' }).isVisible())
+      assert.ok(await page.locator('.settings-section', { hasText: 'Default ticketing system' }).isVisible())
+    })(base)
+  })
+})
 
-        await page.getByRole('button', { name: 'Set Azure DevOps PAT' }).click()
-        const modal = page.locator('.modal[aria-label="Azure DevOps sign-in required"]')
-        await modal.waitFor({ state: 'visible', timeout: 5_000 })
-        await modal.locator('input[type=password]').fill('a-fresh-pat')
-        await modal.getByRole('button', { name: 'Continue' }).click()
-        await modal.waitFor({ state: 'hidden', timeout: 5_000 })
+test('settings: Global Settings\' back control returns Home when opened with no explicit origin', async () => {
+  await withScratchServer(async (base) => {
+    await withPage(async (page) => {
+      await page.goto(`${base}/settings`)
+      await page.waitForSelector('.settings-header', { timeout: 10_000 })
+      await page.getByRole('link', { name: '← Back' }).click()
+      await page.waitForSelector('.dashboard-empty', { timeout: 10_000 })
+      assert.equal(new URL(page.url()).pathname, '/')
+    })(base)
+  })
+})
 
-        assert.match(await page.locator('.settings-pat-status').textContent(), /SET/)
-        assert.equal(await page.evaluate(() => localStorage.getItem('gantry:ado-pat')), 'a-fresh-pat')
-        assert.equal(await page.getByRole('button', { name: 'Set Azure DevOps PAT' }).count(), 0)
-        assert.equal(await page.getByRole('button', { name: 'Replace Azure DevOps PAT' }).count(), 1)
+test('settings: the default PAT can be set, replaced, and cleared from Global Settings', async () => {
+  await withScratchServer(async (base) => {
+    await withPage(async (page) => {
+      await page.goto(`${base}/settings`)
+      await page.waitForSelector('.settings-section', { timeout: 10_000 })
 
-        await page.getByRole('button', { name: 'Clear Azure DevOps PAT' }).click()
-        assert.equal(await page.evaluate(() => localStorage.getItem('gantry:ado-pat')), null)
-        assert.match(await page.locator('.settings-pat-status').textContent(), /NOT SET/)
-      })
-    )
-  } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
-  }
+      assert.match(await page.locator('.settings-pat-status').textContent(), /NOT SET/)
+      assert.equal(await page.getByRole('button', { name: 'Set Azure DevOps PAT' }).count(), 1)
+      assert.equal(await page.getByRole('button', { name: 'Replace Azure DevOps PAT' }).count(), 0)
+      assert.equal(await page.getByRole('button', { name: 'Clear Azure DevOps PAT' }).count(), 0)
+
+      await page.getByRole('button', { name: 'Set Azure DevOps PAT' }).click()
+      const modal = page.locator('.modal[aria-label="Azure DevOps sign-in required"]')
+      await modal.waitFor({ state: 'visible', timeout: 5_000 })
+      await modal.locator('input[type=password]').fill('a-fresh-pat')
+      await modal.getByRole('button', { name: 'Continue' }).click()
+      await modal.waitFor({ state: 'hidden', timeout: 5_000 })
+
+      assert.match(await page.locator('.settings-pat-status').textContent(), /SET/)
+      assert.equal(await page.evaluate(() => localStorage.getItem('gantry:ado-pat')), 'a-fresh-pat')
+      assert.equal(await page.getByRole('button', { name: 'Set Azure DevOps PAT' }).count(), 0)
+      assert.equal(await page.getByRole('button', { name: 'Replace Azure DevOps PAT' }).count(), 1)
+
+      await page.getByRole('button', { name: 'Clear Azure DevOps PAT' }).click()
+      assert.equal(await page.evaluate(() => localStorage.getItem('gantry:ado-pat')), null)
+      assert.match(await page.locator('.settings-pat-status').textContent(), /NOT SET/)
+    })(base)
+  })
 })
 
 test('settings: a global ticketing-system default can be set to azure-devops; jira is disabled with a "coming soon" indication', async () => {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  try {
-    await withRunningServer(
-      { instancesDir },
-      withPage(async (page, base) => {
-        await page.goto(`${base}/settings`)
-        await page.waitForSelector('.settings-radio-group', { timeout: 10_000 })
+  await withScratchServer(async (base) => {
+    await withPage(async (page) => {
+      await page.goto(`${base}/settings`)
+      await page.waitForSelector('.settings-radio-group', { timeout: 10_000 })
 
-        const adoRadio = page.locator('.settings-radio', { hasText: 'Azure DevOps' }).locator('input[type=radio]')
-        const jiraRow = page.locator('.settings-radio', { hasText: 'Jira' })
-        const jiraRadio = jiraRow.locator('input[type=radio]')
+      const adoRadio = page.locator('.settings-radio', { hasText: 'Azure DevOps' }).locator('input[type=radio]')
+      const jiraRow = page.locator('.settings-radio', { hasText: 'Jira' })
+      const jiraRadio = jiraRow.locator('input[type=radio]')
 
-        // azure-devops is the default and is selectable/working.
-        assert.ok(await adoRadio.isChecked())
-        assert.equal(await adoRadio.isDisabled(), false)
+      assert.ok(await adoRadio.isChecked())
+      assert.equal(await adoRadio.isDisabled(), false)
 
-        // jira is visibly present, disabled, and flagged "coming soon".
-        assert.equal(await jiraRadio.isDisabled(), true)
-        assert.match(await jiraRow.textContent(), /Coming soon/)
+      assert.equal(await jiraRadio.isDisabled(), true)
+      assert.match(await jiraRow.textContent(), /Coming soon/)
 
-        // Clicking the disabled jira control changes nothing.
-        await jiraRadio.click({ force: true }).catch(() => {})
-        assert.ok(await adoRadio.isChecked())
-        assert.equal(await jiraRadio.isChecked(), false)
-        assert.equal(await page.evaluate(() => localStorage.getItem('gantry:default-ticketing-system')), 'azure-devops')
-      })
-    )
-  } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
-  }
+      await jiraRadio.click({ force: true }).catch(() => {})
+      assert.ok(await adoRadio.isChecked())
+      assert.equal(await jiraRadio.isChecked(), false)
+      assert.equal(await page.evaluate(() => localStorage.getItem('gantry:default-ticketing-system')), 'azure-devops')
+    })(base)
+  })
 })
 
-test('settings: the "Settings" link is reachable from the dashboard', async () => {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  try {
-    await withRunningServer(
-      { instancesDir },
-      withPage(async (page, base) => {
-        await page.goto(base)
-        await page.waitForSelector('.dashboard-empty', { timeout: 10_000 })
-        await page.getByRole('link', { name: 'Settings' }).click()
-        await page.waitForSelector('.settings-tabs', { timeout: 10_000 })
-        assert.equal(new URL(page.url()).pathname, '/settings')
-      })
-    )
-  } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
-  }
+// ---------- From an instance screen: the Settings dropdown ----------
+
+test('settings: from an instance screen, "Settings" opens a dropdown offering Global/Workspace/Instance Settings, each carrying this instance as explicit back-origin', async () => {
+  await withExamplesServer(async (base) => {
+    await withPage(async (page) => {
+      await page.goto(`${base}/instance/examples`)
+      await page.waitForSelector('.module', { timeout: 10_000 })
+
+      // Not a plain link straight to /settings any more — a dropdown.
+      const settingsButton = page.getByRole('button', { name: 'Settings' })
+      assert.equal(await settingsButton.count(), 1)
+      assert.equal(await page.locator('a', { hasText: 'Settings' }).count(), 0)
+
+      await settingsButton.click()
+      const menu = page.locator('.settings-menu .menu')
+      await menu.waitFor({ state: 'visible', timeout: 5_000 })
+      assert.equal(await menu.locator('a', { hasText: 'Global Settings' }).count(), 1)
+      assert.equal(await menu.locator('a', { hasText: 'Workspace Settings' }).count(), 1)
+      assert.equal(await menu.locator('a', { hasText: 'Instance Settings' }).count(), 1)
+
+      // Global Settings: opened from this instance, so its back control
+      // returns to this exact instance screen, not Home.
+      await menu.locator('a', { hasText: 'Global Settings' }).click()
+      await page.waitForSelector('.settings-header', { timeout: 10_000 })
+      assert.equal(new URL(page.url()).pathname, '/settings')
+      assert.equal(await page.locator('.settings-tabs').count(), 0)
+      await page.getByRole('link', { name: '← Back' }).click()
+      await page.waitForSelector('.module', { timeout: 10_000 })
+      assert.equal(new URL(page.url()).pathname, '/instance/examples')
+
+      // Instance Settings: same explicit-origin back behavior.
+      await page.getByRole('button', { name: 'Settings' }).click()
+      await page.locator('.settings-menu .menu a', { hasText: 'Instance Settings' }).click()
+      await page.waitForSelector('.settings-header', { timeout: 10_000 })
+      assert.equal(new URL(page.url()).pathname, '/settings/instance')
+      assert.equal(new URL(page.url()).searchParams.get('slug'), 'examples')
+      await page.getByRole('link', { name: '← Back' }).click()
+      await page.waitForSelector('.module', { timeout: 10_000 })
+      assert.equal(new URL(page.url()).pathname, '/instance/examples')
+    })(base)
+  })
 })
 
-// ---------- Workspace overrides tab (#104) ----------
-// Workspaces are seeded directly via `registerWorkspace` (a plain library
-// call against the same scratch `instancesDir` the test server serves) —
-// no fake Azure DevOps server needed, since this tab's own acceptance
-// criteria are about the tab's UI/local-storage/PATCH behavior, not about
-// proving real Azure DevOps access (that's already covered by
-// tests/serverWorkspaces.test.js's `POST /api/workspaces` coverage).
+// ---------- Workspace Settings: scoped to one instance's own workspace ----------
 
 function seedWorkspace(instancesDir, overrides = {}) {
   return registerWorkspace(
@@ -178,194 +225,153 @@ function seedWorkspace(instancesDir, overrides = {}) {
   )
 }
 
-test('settings: the Workspace overrides tab lists every registered workspace with its owner, repo URL, PAT-override state, and ticketing-system-override state', async () => {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  try {
-    seedWorkspace(instancesDir)
+test('settings: Workspace Settings shows only the one instance-owning workspace — never a picker across every registered workspace', async () => {
+  await withScratchServer(async (base, instancesDir) => {
+    // Two workspaces registered — only one of them backs the instance this
+    // screen is opened for.
+    seedWorkspace(instancesDir, { repository: 'other-repo' })
+    const ownWorkspace = seedWorkspace(instancesDir, { repository: 'own-repo' })
+    registerInstance('remote-initiative', { kind: 'azureDevOps', workspaceId: ownWorkspace.id }, { instancesDir })
 
-    await withRunningServer(
-      { instancesDir },
-      withPage(async (page, base) => {
-        await page.goto(`${base}/settings`)
-        await page.waitForSelector('.settings-tabs', { timeout: 10_000 })
+    await withPage(async (page) => {
+      await page.goto(`${base}/settings/workspace?slug=remote-initiative`)
+      await page.waitForSelector('.workspace-row', { timeout: 10_000 })
 
-        const tab = page.locator('.settings-tabs button', { hasText: 'Workspace overrides' })
-        assert.equal(await tab.count(), 1)
-        await tab.click()
-        assert.equal(await tab.getAttribute('aria-selected'), 'true')
-
-        const row = page.locator('.workspace-row')
-        await row.waitFor({ state: 'visible', timeout: 10_000 })
-        assert.equal(await row.count(), 1)
-        assert.match(await row.locator('.workspace-repo-url').textContent(), /fake-org\/fake-project\/fake-repo/)
-        assert.equal(await row.locator('.workspace-owner input[type=text]').inputValue(), 'c.barlow')
-        assert.match(await row.locator('.workspace-pat-status').textContent(), /USING GLOBAL DEFAULT/)
-        assert.match(await row.locator('.workspace-ticketing-state').textContent(), /USING GLOBAL DEFAULT/)
-      })
-    )
-  } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
-  }
+      const rows = page.locator('.workspace-row')
+      assert.equal(await rows.count(), 1)
+      assert.match(await rows.locator('.workspace-repo-url').textContent(), /own-repo/)
+      assert.doesNotMatch(await page.locator('.settings-page').textContent(), /other-repo/)
+    })(base)
+  })
 })
 
-test('settings: setting a workspace PAT override marks it SET, and clearing it falls back to the global default', async () => {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  try {
-    const workspace = seedWorkspace(instancesDir)
+test('settings: Workspace Settings reports "no workspace" for a local instance, rather than a picker', async () => {
+  await withScratchServer(async (base, instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
 
-    await withRunningServer(
-      { instancesDir },
-      withPage(async (page, base) => {
-        await page.goto(`${base}/settings`)
-        await page.getByRole('tab', { name: 'Workspace overrides' }).click()
-        const row = page.locator('.workspace-row')
-        await row.waitFor({ state: 'visible', timeout: 10_000 })
-
-        assert.match(await row.locator('.workspace-pat-status').textContent(), /USING GLOBAL DEFAULT/)
-
-        await row.locator('.workspace-pat input[type=password]').fill('workspace-override-pat')
-        await row.getByRole('button', { name: 'Set override' }).click()
-        assert.match(await row.locator('.workspace-pat-status').textContent(), /OVERRIDE SET/)
-
-        // Persisted client-side, workspace-keyed — never the bare
-        // `gantry:ado-pat` global-default slot.
-        const overrides = await page.evaluate(() => localStorage.getItem('gantry:ado-pat-overrides'))
-        assert.match(overrides, new RegExp(workspace.id))
-        assert.equal(await page.evaluate(() => localStorage.getItem('gantry:ado-pat')), null)
-
-        await row.getByRole('button', { name: 'Clear override' }).click()
-        assert.match(await row.locator('.workspace-pat-status').textContent(), /USING GLOBAL DEFAULT/)
-        const overridesAfterClear = await page.evaluate(() => localStorage.getItem('gantry:ado-pat-overrides'))
-        assert.equal(overridesAfterClear, null)
-      })
-    )
-  } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
-  }
+    await withPage(async (page) => {
+      await page.goto(`${base}/settings/workspace?slug=my-initiative`)
+      await page.waitForSelector('.settings-section', { timeout: 10_000 })
+      assert.equal(await page.locator('.workspace-row').count(), 0)
+      assert.match(await page.locator('.workspace-empty').textContent(), /no Azure DevOps workspace/)
+    })(base)
+  })
 })
 
-test('settings: a workspace PAT override does not affect the global default, and vice versa', async () => {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  try {
-    seedWorkspace(instancesDir)
+test('settings: Workspace Settings\' owner, PAT-override, and ticketing-system-override controls still work, scoped to this one workspace', async () => {
+  await withScratchServer(async (base, instancesDir) => {
+    const workspace = seedWorkspace(instancesDir, { owner: 'original-owner' })
+    registerInstance('remote-initiative', { kind: 'azureDevOps', workspaceId: workspace.id }, { instancesDir })
 
-    await withRunningServer(
-      { instancesDir },
-      withPage(async (page, base) => {
-        await page.goto(`${base}/settings`)
-        await page.waitForSelector('.settings-section', { timeout: 10_000 })
+    await withPage(async (page) => {
+      await page.goto(`${base}/settings/workspace?slug=remote-initiative`)
+      const row = page.locator('.workspace-row')
+      await row.waitFor({ state: 'visible', timeout: 10_000 })
 
-        // Set the global default from the Global Defaults tab first.
-        await page.getByRole('button', { name: 'Set Azure DevOps PAT' }).click()
-        const modal = page.locator('.modal[aria-label="Azure DevOps sign-in required"]')
-        await modal.waitFor({ state: 'visible', timeout: 5_000 })
-        await modal.locator('input[type=password]').fill('global-default-pat')
-        await modal.getByRole('button', { name: 'Continue' }).click()
-        await modal.waitFor({ state: 'hidden', timeout: 5_000 })
+      assert.equal(await row.locator('.workspace-owner input[type=text]').inputValue(), 'original-owner')
+      assert.match(await row.locator('.workspace-pat-status').textContent(), /USING GLOBAL DEFAULT/)
+      assert.match(await row.locator('.workspace-ticketing-state').textContent(), /USING GLOBAL DEFAULT/)
 
-        await page.getByRole('tab', { name: 'Workspace overrides' }).click()
-        const row = page.locator('.workspace-row')
-        await row.waitFor({ state: 'visible', timeout: 10_000 })
-        await row.locator('.workspace-pat input[type=password]').fill('workspace-override-pat')
-        await row.getByRole('button', { name: 'Set override' }).click()
-        assert.match(await row.locator('.workspace-pat-status').textContent(), /OVERRIDE SET/)
+      await row.locator('.workspace-owner input[type=text]').fill('new-owner')
+      await row.getByRole('button', { name: 'Save owner' }).click()
+      await page.waitForSelector('text=Saved.', { timeout: 5_000 })
 
-        // The global default is untouched by the override having been set.
-        assert.equal(await page.evaluate(() => localStorage.getItem('gantry:ado-pat')), 'global-default-pat')
+      await row.locator('.workspace-pat input[type=password]').fill('workspace-override-pat')
+      await row.getByRole('button', { name: 'Set override' }).click()
+      assert.match(await row.locator('.workspace-pat-status').textContent(), /OVERRIDE SET/)
+      const overrides = await page.evaluate(() => localStorage.getItem('gantry:ado-pat-overrides'))
+      assert.match(overrides, new RegExp(workspace.id))
 
-        await page.getByRole('tab', { name: 'Global Defaults' }).click()
-        assert.match(await page.locator('.settings-pat-status').textContent(), /SET/)
-        await page.getByRole('button', { name: 'Clear Azure DevOps PAT' }).click()
-        assert.equal(await page.evaluate(() => localStorage.getItem('gantry:ado-pat')), null)
-
-        // Clearing the global default leaves the workspace override intact.
-        await page.getByRole('tab', { name: 'Workspace overrides' }).click()
-        assert.match(await row.locator('.workspace-pat-status').textContent(), /OVERRIDE SET/)
-      })
-    )
-  } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
-  }
+      await page.reload()
+      const reloadedRow = page.locator('.workspace-row')
+      await reloadedRow.waitFor({ state: 'visible', timeout: 10_000 })
+      assert.equal(await reloadedRow.locator('.workspace-owner input[type=text]').inputValue(), 'new-owner')
+    })(base)
+  })
 })
 
-test('settings: setting a workspace ticketing-system override persists via PATCH and is scoped to that workspace alone; jira stays unselectable', async () => {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  try {
-    const workspaceA = seedWorkspace(instancesDir, { repository: 'fake-repo-a' })
-    seedWorkspace(instancesDir, { repository: 'fake-repo-b' })
+// ---------- Instance Settings (new, #107) ----------
 
-    await withRunningServer(
-      { instancesDir },
-      withPage(async (page, base) => {
-        await page.goto(`${base}/settings`)
-        await page.getByRole('tab', { name: 'Workspace overrides' }).click()
-        await page.waitForSelector('.workspace-row', { timeout: 10_000 })
-
-        const rows = page.locator('.workspace-row')
-        assert.equal(await rows.count(), 2)
-        const rowA = page.locator('.workspace-row', { hasText: 'fake-repo-a' })
-
-        // jira is present, disabled, and "coming soon" — same as the
-        // Global Defaults tab's own selector.
-        const jiraRadio = rowA.locator('.settings-radio', { hasText: 'Jira' }).locator('input[type=radio]')
-        assert.equal(await jiraRadio.isDisabled(), true)
-        await jiraRadio.click({ force: true }).catch(() => {})
-        assert.equal(await jiraRadio.isChecked(), false)
-
-        const adoRadio = rowA.locator('.settings-radio', { hasText: 'Azure DevOps' }).locator('input[type=radio]')
-        assert.ok(await adoRadio.isChecked())
-
-        // Re-selecting the already-active value still round-trips through
-        // the PATCH endpoint without erroring.
-        await adoRadio.click()
-        await page.waitForTimeout(200)
-        assert.match(await rowA.locator('.workspace-field-status').last().textContent(), /^$/)
-
-        // The persisted record really did go through the server (not just
-        // client-side UI state) — reloading the page still shows it.
-        await page.reload()
-        await page.getByRole('tab', { name: 'Workspace overrides' }).click()
-        await page.waitForSelector('.workspace-row', { timeout: 10_000 })
-        const reloadedRowA = page.locator('.workspace-row', { hasText: 'fake-repo-a' })
-        assert.ok(await reloadedRowA.locator('.settings-radio', { hasText: 'Azure DevOps' }).locator('input[type=radio]').isChecked())
-        assert.equal(reloadedRowA !== null, true)
-        assert.equal(typeof workspaceA.id, 'string')
-      })
+test('settings: Instance Settings hosts an editable Assignee, read-only instance info, and read-only work-item link details', async () => {
+  await withScratchServer(async (base, instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir, assignee: 'c.barlow' })
+    recordInstanceWorkItemLink(
+      'my-initiative',
+      { organization: 'wi-org', project: 'wi-project', workItemType: 'Task', parentId: 42, stages: { shape: 101 } },
+      { instancesDir }
     )
-  } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
-  }
+
+    await withPage(async (page) => {
+      await page.goto(`${base}/settings/instance?slug=my-initiative`)
+      await page.waitForSelector('.settings-section', { timeout: 10_000 })
+
+      // Read-only instance info.
+      assert.match(await page.locator('.settings-page').textContent(), /my-initiative/)
+      assert.match(await page.locator('.settings-page').textContent(), /design/)
+
+      // Editable assignee, pre-filled from the instance's own stored value.
+      const assigneeInput = page.locator('section.settings-section', { hasText: 'Assignee' }).locator('input[type=text]')
+      assert.equal(await assigneeInput.inputValue(), 'c.barlow')
+      await assigneeInput.fill('new-assignee')
+      await assigneeInput.blur()
+      await page.waitForSelector('text=Saved.', { timeout: 5_000 })
+      assert.equal(readInstance('my-initiative', { instancesDir }).assignee, 'new-assignee')
+
+      // Read-only work-item link details — no re-linking form anywhere on
+      // this screen.
+      assert.match(await page.locator('.settings-page').textContent(), /wi-org/)
+      assert.match(await page.locator('.settings-page').textContent(), /wi-project/)
+      assert.match(await page.locator('.settings-page').textContent(), /#42/)
+      assert.match(await page.locator('.settings-page').textContent(), /#101/)
+      assert.equal(await page.getByRole('button', { name: 'Link instance' }).count(), 0)
+      assert.equal(await page.locator('input[placeholder="Organization"]').count(), 0)
+    })(base)
+  })
 })
 
-test('settings: a workspace\'s owner can be viewed and edited from the Workspace overrides tab', async () => {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  try {
-    seedWorkspace(instancesDir, { owner: 'original-owner' })
+// Regression test for a review-pass finding: clicking the Assignee
+// section's "Save" button moves focus away from the input first, so the
+// input's own `onBlur` and the button's `onClick` used to both call
+// `handleSave` for the same edit — two identical `PUT
+// /api/instance/assignee` requests per click (two separate commits for an
+// Azure-DevOps-backed instance) instead of one. Exercises the exact
+// "type, then click Save" path (never blurring elsewhere first) that the
+// earlier blur-only test above didn't cover.
+test('settings: clicking the Assignee section\'s Save button issues exactly one save request, not two', async () => {
+  await withScratchServer(async (base, instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir, assignee: 'c.barlow' })
 
-    await withRunningServer(
-      { instancesDir },
-      withPage(async (page, base) => {
-        await page.goto(`${base}/settings`)
-        await page.getByRole('tab', { name: 'Workspace overrides' }).click()
-        const row = page.locator('.workspace-row')
-        await row.waitFor({ state: 'visible', timeout: 10_000 })
-
-        const ownerInput = row.locator('.workspace-owner input[type=text]')
-        assert.equal(await ownerInput.inputValue(), 'original-owner')
-
-        await ownerInput.fill('new-owner')
-        await row.getByRole('button', { name: 'Save owner' }).click()
-        await page.waitForSelector('text=Saved.', { timeout: 5_000 })
-
-        // Persisted server-side — a reload still shows the new owner.
-        await page.reload()
-        await page.getByRole('tab', { name: 'Workspace overrides' }).click()
-        const reloadedRow = page.locator('.workspace-row')
-        await reloadedRow.waitFor({ state: 'visible', timeout: 10_000 })
-        assert.equal(await reloadedRow.locator('.workspace-owner input[type=text]').inputValue(), 'new-owner')
+    await withPage(async (page) => {
+      let saveRequestCount = 0
+      await page.route('**/api/instance/assignee*', async (route) => {
+        if (route.request().method() === 'PUT') saveRequestCount++
+        await route.continue()
       })
-    )
-  } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
-  }
+
+      await page.goto(`${base}/settings/instance?slug=my-initiative`)
+      await page.waitForSelector('.settings-section', { timeout: 10_000 })
+
+      const assigneeInput = page.locator('section.settings-section', { hasText: 'Assignee' }).locator('input[type=text]')
+      const saveButton = page.locator('section.settings-section', { hasText: 'Assignee' }).getByRole('button', { name: 'Save' })
+
+      await assigneeInput.fill('clicked-assignee')
+      await saveButton.click()
+      await page.waitForSelector('text=Saved.', { timeout: 5_000 })
+
+      assert.equal(readInstance('my-initiative', { instancesDir }).assignee, 'clicked-assignee')
+      assert.equal(saveRequestCount, 1)
+    })(base)
+  })
+})
+
+test('settings: Instance Settings reports "not linked" when the instance has no work-item link', async () => {
+  await withScratchServer(async (base, instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+
+    await withPage(async (page) => {
+      await page.goto(`${base}/settings/instance?slug=my-initiative`)
+      await page.waitForSelector('.settings-section', { timeout: 10_000 })
+      assert.match(await page.locator('.settings-page').textContent(), /isn't linked to an Azure DevOps work item/)
+    })(base)
+  })
 })
