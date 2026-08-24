@@ -143,6 +143,33 @@ test('getWorkItem narrows the response to the requested fields when given a `fie
   })
 })
 
+test('getWorkItem omits `relations` by default, matching the real Azure DevOps API\'s default $expand=None behavior', async () => {
+  await withFakeAzureDevOpsServer({}, async (baseUrl) => {
+    const c = client(baseUrl)
+    const parent = await c.createWorkItem('Feature', { 'System.Title': 'Parent initiative' })
+    const child = await c.createChildWorkItem(parent.id, 'Task', { 'System.Title': 'Draft stage' })
+    assert.ok(child.relations.length > 0) // sanity: the work item genuinely has a relation to omit
+
+    const fetched = await c.getWorkItem(child.id)
+    assert.equal('relations' in fetched, false)
+  })
+})
+
+test('getWorkItem includes `relations` when explicitly requested via `expand: \'relations\'` (or `\'all\'`)', async () => {
+  await withFakeAzureDevOpsServer({}, async (baseUrl) => {
+    const c = client(baseUrl)
+    const parent = await c.createWorkItem('Feature', { 'System.Title': 'Parent initiative' })
+    const child = await c.createChildWorkItem(parent.id, 'Task', { 'System.Title': 'Draft stage' })
+
+    const withRelations = await c.getWorkItem(child.id, { expand: 'relations' })
+    assert.equal(withRelations.relations.length, 1)
+    assert.equal(withRelations.relations[0].rel, 'System.LinkTypes.Hierarchy-Reverse')
+
+    const withAll = await c.getWorkItem(child.id, { expand: 'all' })
+    assert.equal(withAll.relations.length, 1)
+  })
+})
+
 test('getWorkItem throws AzureDevOpsNotFoundError for a work item id that does not exist', async () => {
   await withFakeAzureDevOpsServer({}, async (baseUrl) => {
     await assert.rejects(() => client(baseUrl).getWorkItem(999999), AzureDevOpsNotFoundError)

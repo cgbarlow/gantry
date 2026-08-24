@@ -505,6 +505,18 @@ export function createFakeAzureDevOpsServer({
     // .../workitems/$Type) and update (PATCH .../workitems/{id}) routes
     // above. `fields` (if supplied) narrows the response the same way the
     // real API does, rather than this fake always returning every field.
+    //
+    // Unlike this fake's create/update responses (`workItemResponseBody`,
+    // used unconditionally above — matching the real Create/Update
+    // endpoints, whose own documented examples include `relations` with
+    // no `$expand` needed), the real single-item Get endpoint's default
+    // `$expand` is `None`, and its own documented sample response omits
+    // `relations` entirely when no `$expand` is given. This route mirrors
+    // that distinction — `relations` is only included here when
+    // `$expand=relations` or `$expand=all` (case-insensitive) is actually
+    // requested — rather than reusing `workItemResponseBody` unmodified,
+    // which would silently paper over a real difference in the two
+    // endpoints' default shapes.
     if (req.method === 'GET' && pathname.startsWith(`${witBasePath}/workitems/`)) {
       const idSegment = pathname.slice(`${witBasePath}/workitems/`.length)
       if (/^\d+$/.test(idSegment)) {
@@ -513,14 +525,20 @@ export function createFakeAzureDevOpsServer({
         if (!workItem) {
           return json(404, { message: `TF401232: Work item ${id} does not exist (fake server).` })
         }
+        const expand = (url.searchParams.get('$expand') ?? '').toLowerCase()
+        const includeRelations = expand === 'relations' || expand === 'all'
+        const body = includeRelations
+          ? workItemResponseBody(workItem)
+          : { id: workItem.id, rev: workItem.rev, fields: workItem.fields, url: `${orgWorkItemsPath}/${workItem.id}` }
+
         const fieldsParam = url.searchParams.get('fields')
-        if (!fieldsParam) return json(200, workItemResponseBody(workItem))
+        if (!fieldsParam) return json(200, body)
 
         const requestedFields = fieldsParam.split(',').map((f) => f.trim())
         const narrowedFields = Object.fromEntries(
           requestedFields.filter((f) => f in workItem.fields).map((f) => [f, workItem.fields[f]])
         )
-        return json(200, { ...workItemResponseBody(workItem), fields: narrowedFields })
+        return json(200, { ...body, fields: narrowedFields })
       }
     }
 
