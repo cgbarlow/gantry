@@ -11,15 +11,20 @@ import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
 // Browser smoke test for #111's synced-fields panel (web/app.js's
 // SyncedFieldsPanel): the unlinked "Link to a work item" prompt taking the
-// panel's place, and — once an instance is linked through the work-item
-// panel below it — the five distinct fields appearing, with a title
-// override genuinely persisted server-side. Driven through a real rendered
-// page against a real running gantry server, mirroring
+// panel's place, and — once the instance is linked (via the same server
+// route the "+ New Workspace" wizard calls at creation; #127 removed this
+// screen's own freetext link form) — the five distinct fields appearing,
+// with a title override genuinely persisted server-side. Driven through a
+// real rendered page against a real running gantry server, mirroring
 // tests/workItemLink.playwright.test.js's own conventions.
 
 const WI_ORGANIZATION = 'wi-org'
 const WI_PROJECT = 'wi-project'
 const VALID_PAT = 'valid-test-pat'
+
+function basicAuthHeader(pat) {
+  return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
+}
 
 function withRunningServer(options, fn) {
   return new Promise((resolve, reject) => {
@@ -35,17 +40,6 @@ function withRunningServer(options, fn) {
         server.close()
       }
     })
-  })
-}
-
-// The Work Item panel's link form has no `baseUrl` field (see
-// tests/workItemLink.playwright.test.js's own note) — intercept the outgoing
-// link request client-side and inject the fake server's baseUrl.
-function installWorkItemsLinkRoute(page, wiBaseUrl) {
-  return page.route('**/api/instance/work-items/link*', async (route) => {
-    const body = JSON.parse(route.request().postData() ?? '{}')
-    body.baseUrl = wiBaseUrl
-    await route.continue({ postData: JSON.stringify(body) })
   })
 }
 
@@ -71,7 +65,6 @@ test('the synced-fields panel shows the link prompt when unlinked, then the dist
               pat: VALID_PAT,
               baseUrl: wiBaseUrl,
             })
-            const parentId = (await wiClient.createWorkItem('Feature', { 'System.Title': 'Parent initiative' })).id
 
             const browser = await chromium.launch()
             try {
@@ -82,24 +75,38 @@ test('the synced-fields panel shows the link prompt when unlinked, then the dist
                 if (msg.type() === 'error') pageErrors.push(msg.text())
               })
 
-              // The panel itself needs no PAT while unlinked, but linking through the work-item panel does — seed one as if already entered in a prior session.
+              // The panel itself needs no PAT while unlinked, but the linked synced-fields reads (work item state, PR state) do — seed one as if already entered in a prior session.
               await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
-              await installWorkItemsLinkRoute(page, wiBaseUrl)
 
               await page.goto(`${gantryBase}/instance/my-initiative`)
               const panel = page.locator('.synced-fields-panel')
               await panel.waitFor({ timeout: 10_000 })
 
-              // Unlinked: the prompt takes the fields' place.
+              // Unlinked: the prompt takes the fields' place — and #127 removed
+              // this screen's own link form along with its whole work-item panel.
               await assert.doesNotReject(panel.locator('text=Link to a work item').waitFor({ timeout: 5_000 }))
               assert.equal(await panel.locator('#synced-title').count(), 0)
+              assert.equal(await page.locator('.work-item-panel').count(), 0)
 
-              // Link through the work item panel below.
-              const wiPanel = page.locator('.work-item-panel')
-              await wiPanel.locator('input[placeholder="Organization"]').fill(WI_ORGANIZATION)
-              await wiPanel.locator('input[placeholder="Project"]').fill(WI_PROJECT)
-              await wiPanel.locator('input[placeholder="Parent work item id"]').fill(String(parentId))
-              await wiPanel.getByRole('button', { name: 'Link instance' }).click()
+              // Link through the same server route the "+ New Workspace" wizard
+              // calls at creation time (the UI surface #127 removed was only
+              // ever one of this route's callers), then reload so the panel
+              // refetches against its now-linked instance.
+              const parentId = (
+                await wiClient.createWorkItem('Feature', { 'System.Title': 'Parent initiative' })
+              ).id
+              const linkRes = await fetch(`${gantryBase}/api/instance/work-items/link?slug=my-initiative`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+                body: JSON.stringify({
+                  organization: WI_ORGANIZATION,
+                  project: WI_PROJECT,
+                  parentId,
+                  baseUrl: wiBaseUrl,
+                }),
+              })
+              assert.equal(linkRes.status, 200)
+              await page.reload()
 
               // The synced-fields panel flips to its linked view: five distinct fields, not collapsed together.
               await assert.doesNotReject(page.locator('.synced-fields-panel #synced-title').waitFor({ timeout: 10_000 }))
