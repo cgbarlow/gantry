@@ -1,0 +1,242 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { chromium } from 'playwright'
+import { createServer } from '../lib/server.js'
+import { createInstance } from '../lib/instance.js'
+import { registerInstance } from '../lib/instanceRegistry.js'
+import { loadDefinition } from '../lib/definition.js'
+import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
+import { resolveStageBranch } from '../lib/stageBranch.js'
+import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+
+// Browser smoke test for #124's Request-approval panel (web/app.js's
+// RequestApprovalPanel): the Workspace-backed counterpart to
+// tests/stageAdvancement.playwright.test.js's own Stage-advancement-panel
+// coverage — opens a real Pull Request from the stage's own branch once its
+// gate has passed, driven through a real rendered page against a real
+// running gantry server and a real (fake, in-process) Azure DevOps server.
+// Nothing mocked at the browser or HTTP layer.
+
+const ORGANIZATION = 'fake-org'
+const PROJECT = 'fake-project'
+const REPOSITORY = 'fake-repo'
+const VALID_PAT = 'valid-test-pat'
+const SLUG = 'remote-initiative'
+
+const definition = loadDefinition('design')
+const [SHAPE] = definition.stages
+
+function withRunningServer(options, fn) {
+  return new Promise((resolve, reject) => {
+    const server = createServer(options)
+    server.listen(0, async () => {
+      const { port } = server.address()
+      try {
+        await fn(`http://localhost:${port}`)
+        resolve()
+      } catch (err) {
+        reject(err)
+      } finally {
+        server.close()
+      }
+    })
+  })
+}
+
+function withScratchInstances(fn) {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  return (async () => fn(instancesDir))().finally(() => rmSync(instancesDir, { recursive: true, force: true }))
+}
+
+async function fillShapeStage(azureDevOps, branch) {
+  const client = createAzureDevOpsClient(azureDevOps)
+  for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
+    const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
+    await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
+  }
+}
+
+function withRemoteInstance(fn) {
+  return withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      files: { [`/gantry-workspace/${SLUG}/instance.yaml`]: `definition: design\nslug: ${SLUG}\nstage: shape\n` },
+    },
+    async (adoBaseUrl) => {
+      await withScratchInstances(async (instancesDir) => {
+        registerInstance(
+          SLUG,
+          { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          { instancesDir }
+        )
+        await fn({ adoBaseUrl, instancesDir })
+      })
+    }
+  )
+}
+
+function withRunningBrowser(fn) {
+  return (async () => {
+    const browser = await chromium.launch()
+    try {
+      await fn(browser)
+    } finally {
+      await browser.close()
+    }
+  })()
+}
+
+test('the Request approval panel is never shown for a local instance', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+
+    await withRunningServer({ slug: 'my-initiative', instancesDir }, async (base) => {
+      await withRunningBrowser(async (browser) => {
+        const page = await browser.newPage()
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        await page.goto(`${base}/instance/my-initiative`)
+        await page.waitForSelector('#modules', { timeout: 10_000 })
+
+        assert.equal(await page.locator('.request-approval-panel').count(), 0)
+        // The Stage advancement panel (an unrelated, local-instance-only
+        // panel) is still there — confirming the page genuinely loaded
+        // this instance's real stage screen, rather than the request-
+        // approval panel simply being missing because nothing rendered.
+        await assert.doesNotReject(page.locator('.advance-stage-panel').waitFor({ timeout: 5_000 }))
+
+        assert.deepEqual(pageErrors, [])
+      })
+    })
+  })
+})
+
+test('the Request approval panel blocks on a failing gate for a Workspace-backed instance, without opening a Pull Request', async () => {
+  await withRemoteInstance(async ({ adoBaseUrl, instancesDir }) => {
+    const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl }
+    // Work has begun on the branch, but no module content was ever saved to it — the gate can't pass.
+    await resolveStageBranch(azureDevOps, definition, SLUG, SHAPE.id)
+
+    await withRunningServer(
+      { instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true },
+      async (base) => {
+        await withRunningBrowser(async (browser) => {
+          const page = await browser.newPage()
+          const pageErrors = []
+          page.on('pageerror', (err) => pageErrors.push(err.message))
+          page.on('console', (msg) => {
+            if (msg.type() === 'error') pageErrors.push(msg.text())
+          })
+
+          await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+
+          await page.goto(`${base}/instance/${SLUG}`)
+          await page.waitForSelector('.request-approval-panel', { timeout: 10_000 })
+          const panel = page.locator('.request-approval-panel')
+
+          await panel.getByRole('button', { name: 'Request approval' }).click()
+          await assert.doesNotReject(panel.locator('text=FAIL').waitFor({ timeout: 10_000 }))
+          assert.equal(await page.locator('.modal[aria-label="Confirm request approval"]').count(), 0)
+
+          assert.deepEqual(pageErrors, [])
+        })
+      }
+    )
+  })
+})
+
+test('declining the confirmation opens no Pull Request', async () => {
+  await withRemoteInstance(async ({ adoBaseUrl, instancesDir }) => {
+    const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl }
+    const branch = await resolveStageBranch(azureDevOps, definition, SLUG, SHAPE.id)
+    await fillShapeStage(azureDevOps, branch)
+
+    await withRunningServer(
+      { instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true },
+      async (base) => {
+        await withRunningBrowser(async (browser) => {
+          const page = await browser.newPage()
+          const pageErrors = []
+          page.on('pageerror', (err) => pageErrors.push(err.message))
+          page.on('console', (msg) => {
+            if (msg.type() === 'error') pageErrors.push(msg.text())
+          })
+
+          await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+
+          await page.goto(`${base}/instance/${SLUG}`)
+          await page.waitForSelector('.request-approval-panel', { timeout: 10_000 })
+          const panel = page.locator('.request-approval-panel')
+
+          await panel.getByRole('button', { name: 'Request approval' }).click()
+          const modal = page.locator('.modal[aria-label="Confirm request approval"]')
+          await modal.waitFor({ state: 'visible', timeout: 10_000 })
+          await modal.getByRole('button', { name: 'Decline' }).click()
+          await assert.doesNotReject(panel.locator('text=Declined — no Pull Request opened.').waitFor({ timeout: 5_000 }))
+          await assert.doesNotReject(modal.waitFor({ state: 'hidden', timeout: 5_000 }))
+
+          assert.deepEqual(pageErrors, [])
+        })
+      }
+    )
+  })
+})
+
+test('confirming opens a Pull Request, and the panel reflects it — including surviving a page reload', async () => {
+  await withRemoteInstance(async ({ adoBaseUrl, instancesDir }) => {
+    const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl }
+    const branch = await resolveStageBranch(azureDevOps, definition, SLUG, SHAPE.id)
+    await fillShapeStage(azureDevOps, branch)
+
+    await withRunningServer(
+      { instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true },
+      async (base) => {
+        await withRunningBrowser(async (browser) => {
+          const page = await browser.newPage()
+          const pageErrors = []
+          page.on('pageerror', (err) => pageErrors.push(err.message))
+          page.on('console', (msg) => {
+            if (msg.type() === 'error') pageErrors.push(msg.text())
+          })
+
+          await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+
+          await page.goto(`${base}/instance/${SLUG}`)
+          await page.waitForSelector('.request-approval-panel', { timeout: 10_000 })
+          const panel = page.locator('.request-approval-panel')
+
+          await panel.getByRole('button', { name: 'Request approval' }).click()
+          const modal = page.locator('.modal[aria-label="Confirm request approval"]')
+          await modal.waitFor({ state: 'visible', timeout: 10_000 })
+          await modal.getByRole('button', { name: 'Confirm & request approval' }).click()
+
+          await assert.doesNotReject(panel.locator('text=/Pull Request #\\d+ is open/').waitFor({ timeout: 10_000 }))
+          // The button itself is replaced once a Pull Request is open — no
+          // way to accidentally request a second one from this panel.
+          assert.equal(await panel.getByRole('button', { name: 'Request approval' }).count(), 0)
+
+          // Surviving a full reload proves this is read back off the
+          // instance's own persisted `pullRequests` field (#124), not just
+          // transient in-page state from the action's own response.
+          await page.reload()
+          await page.waitForSelector('.request-approval-panel', { timeout: 10_000 })
+          await assert.doesNotReject(
+            page.locator('.request-approval-panel', { hasText: /Pull Request #\d+ is open/ }).waitFor({ timeout: 10_000 })
+          )
+
+          assert.deepEqual(pageErrors, [])
+        })
+      }
+    )
+  })
+})
