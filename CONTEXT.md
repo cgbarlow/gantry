@@ -4,6 +4,16 @@ A repo-driven pipeline for staged, gated processes: content is captured once as 
 
 ## Language
 
+### The engine
+
+**Stage advancement**: How an instance moves to its next stage — always explicit, never implicit, and split purely by whether the instance is local or Workspace-backed (`docs/adr/0014-pull-request-stage-approval.md`, superseding ADR-0012's ticketing-mode mechanism). A local instance advances self-serve via "Advance to next stage"; a Workspace-backed instance advances only when its stage's Pull Request merges. In both modes the action is blocked until the current stage's gate has genuinely passed. _Avoid_: treating a passed gate as if it advances anything by itself — a gate passing merely *permits* the explicit action; also avoid per-instance opt-outs from the PR requirement (there are none)
+
+**Stage branch**: A Workspace-backed stage's own Azure DevOps branch, `gantry-workspace/<slug>/<stageId>` — created the moment a stage's first save lands, targeted by every read/write while the stage is open, and stacked on the immediately preceding stage's branch while that one's PR is still unmerged. `main` only ever reflects fully-approved, merged stages. _Avoid_: forking each stage's branch fresh from `main`, or creating the branch only at approval time
+
+**Request approval** / **Check status**: The Assignee-side pair gating a Workspace-backed stage. Request approval opens that stage's Pull Request into `main` — the actual approval gate — once its gate has passed; Check status explicitly reads the PR's reviewer votes, distinguishing a rejection or changes-requested vote from a merely-still-pending review, and on detecting approval gantry completes (merges) the PR itself, advances the stage pointer, and pushes any linked work item's state. The Owner approves directly in Azure DevOps. _Avoid_: polling or webhook-based approval detection (explicitly rejected — detection stays manual), adding an approve button inside gantry, or reading the linked work item as gating advancement (it is a tracking surface only; the PR gates)
+
+**"+ New Workspace" wizard**: The landing page's sole creation entry point (`/new-workspace`, `docs/adr/0013-unified-workspace-creation-wizard.md`): pick an existing workspace or register a new one (setting its Owner then, too), then instance Name + Directory (defaulting to the slugified Name) + initial Assignee, then — only for a ticketing-enabled workspace — the parent-work-item link, with Organization/Project pinned read-only from the workspace and id/type as PAT-backed lookups. _Avoid_: calling it the "setup wizard" or "+ New instance" (both removed), or pasting a raw repo URL as the starting point
+
 ### The `design` definition
 
 **Business Case Approved**: The gate closing the Shape stage. Approves the SOAP (Solution on a Page). _Avoid_: "business case gate" (use the full canonical name in artefacts and docs)
