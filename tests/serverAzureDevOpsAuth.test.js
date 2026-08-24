@@ -7,6 +7,7 @@ import { createServer as createHttpServer } from 'node:http'
 import { createServer } from '../lib/server.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
+import { stageBranchName } from '../lib/stageBranch.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
 // Server-level credential gating (#86), now driven by per-request resolution against the instance registry (#89/#92) rather than a fixed `createServer({ azureDevOps })` location: a slug the registry says is Azure-DevOps-backed marks that one request's single-instance routes (GET /api/instance, PUT /api/instance/modules/:id, POST /api/instance/render/:artefact) as such. These tests exercise that gating with real HTTP requests against a running gantry server (mirroring tests/server.test.js's existing `withRunningServer` pattern), backed by the same fake in-process Azure DevOps server tests/instance.test.js and tests/azureDevOpsClient.test.js use — never the real dev.azure.com.
@@ -148,6 +149,11 @@ test('GET /api/instance surfaces a genuine Azure DevOps read failure (a 500, not
     const [, encoded] = (req.headers['authorization'] ?? '').split(' ')
     const decoded = encoded ? Buffer.from(encoded, 'base64').toString('utf8') : ''
     if (decoded !== `:${VALID_PAT}`) return json(401, { message: 'fake: invalid or missing PAT' })
+
+    // GET /api/instance's own bootstrap read (#122's read-only findStageBranch) asks whether this stage already has its own branch before reading anything else — reporting none here (the same "nothing but main exists" shape the shared fakeAzureDevOpsServer.js gives an unseeded stage branch) keeps this ad hoc fake's module-read-failure simulation below the one and only thing this regression test actually exercises.
+    if (req.method === 'GET' && url.pathname === `${basePath}/refs`) {
+      return json(200, { count: 0, value: [] })
+    }
 
     if (req.method === 'GET' && url.pathname === `${basePath}/items`) {
       const path = url.searchParams.get('path')
@@ -303,9 +309,10 @@ test('PUT /api/instance/assignee against an Azure-DevOps-backed instance with a 
     const body = await res.json()
     assert.deepEqual(body, { slug: 'my-initiative', assignee: 'j.smith' })
 
-    // Reading it back proves the write actually landed in the fake Azure DevOps repo's instance.yaml, not just in the response, and that the instance's other fields (stage) survived the update untouched.
+    // Reading it back proves the write actually landed in the fake Azure DevOps repo's instance.yaml, not just in the response, and that the instance's other fields (stage) survived the update untouched. The write is a genuine write (#122) — it lands on the "shape" stage's own branch (created the moment this request touched it), not 'main', which only ever reflects a stage once its own Pull Request has actually merged.
     const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
-    const instanceYaml = await client.getFileContent('gantry-workspace/my-initiative/instance.yaml')
+    const stageBranch = stageBranchName('my-initiative', 'shape')
+    const instanceYaml = await client.getFileContent('gantry-workspace/my-initiative/instance.yaml', { branch: stageBranch })
     assert.match(instanceYaml, /assignee: j\.smith/)
     assert.match(instanceYaml, /stage: shape/)
 
@@ -357,7 +364,9 @@ test('POST /api/instance/render/:artefact against an Azure-DevOps-backed instanc
       pat: VALID_PAT,
       baseUrl: adoBaseUrl,
     })
-    const pushedContent = await client.getFileContent('gantry-workspace/my-initiative/out/soap.docx')
+    // The render pipeline is a genuine write (#122) — it pushes onto the "shape" stage's own branch, not 'main'.
+    const stageBranch = stageBranchName('my-initiative', 'shape')
+    const pushedContent = await client.getFileContent('gantry-workspace/my-initiative/out/soap.docx', { branch: stageBranch })
     const pushedBytes = Buffer.from(pushedContent, 'base64')
     // A real .docx is a zip archive — starts with the "PK" magic bytes.
     assert.equal(pushedBytes.subarray(0, 2).toString(), 'PK')
