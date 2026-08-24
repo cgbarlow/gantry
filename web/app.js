@@ -10,6 +10,7 @@ import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import { promptOpen, resolvePromptWith } from './lib/credential.js'
 import { apiFetch, apiFetchForInstance } from './lib/apiFetch.js'
+import { Dropdown } from './lib/dropdown.js'
 import { NewWorkspaceWizardPage } from './pages/new-workspace-wizard.js'
 import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage } from './pages/settings.js'
 // Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79) markdown/split/rendered toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
@@ -1043,48 +1044,27 @@ function ViewModeToolbar({ instance, onClearAllFields }) {
 // Instance Settings (assignee, read-only instance info, read-only
 // work-item link details). Every link carries an explicit `from` back to
 // this exact instance screen (`/instance/<slug>`) — not browser history —
-// so each Settings screen's own back control returns here. Mirrors
-// SwimlaneChip's own open/close-on-outside-click menu pattern (one open at
-// a time, closed by any click outside it).
+// so each Settings screen's own back control returns here. Its open/close
+// behaviour is the shared Dropdown's (web/lib/dropdown.js) — one open at a
+// time per dropdown, closed by any click outside it or by Escape.
 function SettingsMenu({ instance }) {
   const [open, setOpen] = useState(false)
-
-  useEffect(() => {
-    if (!open) return
-    function onDocumentClick() {
-      setOpen(false)
-    }
-    window.addEventListener('click', onDocumentClick)
-    return () => window.removeEventListener('click', onDocumentClick)
-  }, [open])
 
   const from = encodeURIComponent(`/instance/${instance.slug}`)
   const slug = encodeURIComponent(instance.slug)
 
   return html`
-    <div class=${'settings-menu' + (open ? ' menu-open' : '')}>
-      <button
-        type="button"
-        class="btn small ghost"
-        aria-haspopup="true"
-        aria-expanded=${open}
-        onClick=${(e) => {
-          e.stopPropagation()
-          setOpen((o) => !o)
-        }}
-      >
-        Settings
-      </button>
-      ${open
-        ? html`
-            <div class="menu" role="menu" onClick=${(e) => e.stopPropagation()}>
-              <a role="menuitem" href=${`/settings?from=${from}`}>Global Settings</a>
-              <a role="menuitem" href=${`/settings/workspace?slug=${slug}&from=${from}`}>Workspace Settings</a>
-              <a role="menuitem" href=${`/settings/instance?slug=${slug}&from=${from}`}>Instance Settings</a>
-            </div>
-          `
-        : null}
-    </div>
+    <${Dropdown}
+      className="settings-menu"
+      triggerLabel="Settings"
+      menuRole="menu"
+      open=${open}
+      onOpenChange=${setOpen}
+    >
+      <a role="menuitem" href=${`/settings?from=${from}`}>Global Settings</a>
+      <a role="menuitem" href=${`/settings/workspace?slug=${slug}&from=${from}`}>Workspace Settings</a>
+      <a role="menuitem" href=${`/settings/instance?slug=${slug}&from=${from}`}>Instance Settings</a>
+    <//>
   `
 }
 
@@ -1140,33 +1120,14 @@ function InstanceSwitcher({ slug }) {
       .catch((err) => setError(err.message))
   }, [open, instances, error, slug])
 
-  // Closes on Escape (matches every other dismissible panel in this file —
-  // AssetInsertModal, PatPromptModal) and on any click outside the
-  // switcher itself. There's no natural ancestor element to hang a
-  // click-outside-to-close on the way SwimlaneChip's own menu does (a
-  // whole swimlane-group wrapper) — the header isn't otherwise a click
-  // target — so this listens on the window directly instead, same as the
-  // Escape handling right alongside it.
-  useEffect(() => {
-    if (!open) return
-    function onKeyDown(e) {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    function onWindowClick() {
-      setOpen(false)
-    }
-    window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('click', onWindowClick)
-    return () => {
-      window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('click', onWindowClick)
-    }
-  }, [open])
-
-  function toggle(e) {
-    e.stopPropagation()
-    setCrossWorkspace(false)
-    setOpen((prev) => !prev)
+  // Its dismissal is the shared Dropdown's (web/lib/dropdown.js) — Escape or
+  // any click outside the switcher closes it, same as the hand-rolled
+  // window-listener version this replaced (there's no natural ancestor to
+  // hang a click-outside-to-close on — the header isn't otherwise a click
+  // target — so the Dropdown listens on the window directly).
+  function handleOpenChange(next) {
+    if (next) setCrossWorkspace(false)
+    setOpen(next)
   }
 
   const groups = instances ? groupInstancesByWorkspace(instances) : []
@@ -1184,65 +1145,55 @@ function InstanceSwitcher({ slug }) {
   }
 
   return html`
-    <div class="instance-switcher" onClick=${(e) => e.stopPropagation()}>
-      <button
-        type="button"
-        class="btn small ghost"
-        aria-haspopup="true"
-        aria-expanded=${open}
-        onClick=${toggle}
-      >
-        Switch instance ▾
-      </button>
-      ${open
+    <${Dropdown}
+      className="instance-switcher"
+      triggerLabel="Switch instance ▾"
+      open=${open}
+      onOpenChange=${handleOpenChange}
+    >
+      ${error ? html`<p class="load-error">${error}</p>` : null}
+      ${!error && instances === null ? html`<p class="loading">Loading…</p>` : null}
+      ${instances !== null && !crossWorkspace
         ? html`
-            <div class="menu">
-              ${error ? html`<p class="load-error">${error}</p>` : null}
-              ${!error && instances === null ? html`<p class="loading">Loading…</p>` : null}
-              ${instances !== null && !crossWorkspace
+            <div class="switcher-section">
+              <div class="switcher-heading">${isWorkspaceGroup(currentGroup) ? currentGroup.title : 'Local instance'}</div>
+              ${siblings.length > 0
+                ? siblings.map(renderInstanceLink)
+                : isWorkspaceGroup(currentGroup)
+                  ? html`<p class="switcher-empty">No other instances in this workspace.</p>`
+                  : html`<p class="switcher-empty">No other instances — not part of a workspace.</p>`}
+              ${otherGroups.length > 0
                 ? html`
-                    <div class="switcher-section">
-                      <div class="switcher-heading">${isWorkspaceGroup(currentGroup) ? currentGroup.title : 'Local instance'}</div>
-                      ${siblings.length > 0
-                        ? siblings.map(renderInstanceLink)
-                        : isWorkspaceGroup(currentGroup)
-                          ? html`<p class="switcher-empty">No other instances in this workspace.</p>`
-                          : html`<p class="switcher-empty">No other instances — not part of a workspace.</p>`}
-                      ${otherGroups.length > 0
-                        ? html`
-                            <button
-                              type="button"
-                              class="switcher-escape"
-                              onClick=${() => setCrossWorkspace(true)}
-                            >
-                              Browse other instances →
-                            </button>
-                          `
-                        : null}
-                    </div>
-                  `
-                : null}
-              ${instances !== null && crossWorkspace
-                ? html`
-                    <div class="switcher-section">
-                      <button type="button" class="switcher-back" onClick=${() => setCrossWorkspace(false)}>
-                        ← Back
-                      </button>
-                      ${otherGroups.map(
-                        (group) => html`
-                          <div class="switcher-group" key=${group.key}>
-                            <div class="switcher-heading">${group.title}</div>
-                            ${group.instances.map(renderInstanceLink)}
-                          </div>
-                        `
-                      )}
-                    </div>
+                    <button
+                      type="button"
+                      class="switcher-escape"
+                      onClick=${() => setCrossWorkspace(true)}
+                    >
+                      Browse other instances →
+                    </button>
                   `
                 : null}
             </div>
           `
         : null}
-    </div>
+      ${instances !== null && crossWorkspace
+        ? html`
+            <div class="switcher-section">
+              <button type="button" class="switcher-back" onClick=${() => setCrossWorkspace(false)}>
+                ← Back
+              </button>
+              ${otherGroups.map(
+                (group) => html`
+                  <div class="switcher-group" key=${group.key}>
+                    <div class="switcher-heading">${group.title}</div>
+                    ${group.instances.map(renderInstanceLink)}
+                  </div>
+                `
+              )}
+            </div>
+          `
+        : null}
+    <//>
   `
 }
 
@@ -1611,39 +1562,37 @@ function MasterDetailView({ instances, onInstancesChange }) {
 }
 
 // ---------- Stage-swimlane view ----------
-// One overflow menu open at a time, closed by clicking anywhere else in the lanes (the wrapping onClick resets it; the menu button itself stops propagation so opening/toggling it doesn't immediately re-close it).
-function SwimlaneChip({ instance, menuOpen, onToggleMenu, onAction }) {
+// One overflow menu open at a time, closed by clicking anywhere else in the
+// lanes (SwimlaneGroup owns that single `openSlug`; the chip's own menu is
+// the shared Dropdown, web/lib/dropdown.js, whose outside-click/Escape close
+// covers the rest). The chip forwards the Dropdown's *requested* next state
+// (`onOpenMenu(slug-or-null)`, an explicit set — not a toggle): a blind
+// toggle would race the group's own close-on-click wrapper, re-opening a
+// menu an outside click just closed.
+function SwimlaneChip({ instance, menuOpen, onOpenMenu, onAction }) {
   return html`
-    <div class=${'chip' + (menuOpen ? ' menu-open' : '')}>
-      <div class="name">${instance.slug}</div>
-      <div class="def">${instance.definition}</div>
-      <div class="chip-foot">
-        <span class="assignee">${instance.assignee || 'unassigned'}</span>
-        <${StatusStamp} status=${instance.status} />
-        <button
-          type="button"
-          class="btn small ghost menu-btn"
-          aria-haspopup="true"
-          aria-expanded=${menuOpen}
-          aria-label="Actions for ${instance.slug}"
-          onClick=${(e) => {
-            e.stopPropagation()
-            onToggleMenu(instance.slug)
-          }}
-        >
-          ⋯
-        </button>
-      </div>
-      ${menuOpen
-        ? html`
-            <div class="menu" onClick=${(e) => e.stopPropagation()}>
-              <a href="/instance/${instance.slug}">Open</a>
-              <button type="button" onClick=${() => onAction(instance.slug, 'check')}>Check</button>
-              <button type="button" onClick=${() => onAction(instance.slug, 'render')}>Render</button>
-            </div>
-          `
-        : null}
-    </div>
+    <${Dropdown}
+      className="chip"
+      triggerClass="btn small ghost menu-btn"
+      triggerLabel="⋯"
+      triggerAriaLabel=${`Actions for ${instance.slug}`}
+      open=${menuOpen}
+      onOpenChange=${(next) => onOpenMenu(next ? instance.slug : null)}
+      body=${({ trigger, menu }) => html`
+        <div class="name">${instance.slug}</div>
+        <div class="def">${instance.definition}</div>
+        <div class="chip-foot">
+          <span class="assignee">${instance.assignee || 'unassigned'}</span>
+          <${StatusStamp} status=${instance.status} />
+          ${trigger}
+        </div>
+        ${menu}
+      `}
+    >
+      <a href="/instance/${instance.slug}">Open</a>
+      <button type="button" onClick=${() => onAction(instance.slug, 'check')}>Check</button>
+      <button type="button" onClick=${() => onAction(instance.slug, 'render')}>Render</button>
+    <//>
   `
 }
 
@@ -1677,7 +1626,7 @@ function SwimlaneGroup({ definitionId, stages, instances, showTitle }) {
                         key=${inst.slug}
                         instance=${inst}
                         menuOpen=${openSlug === inst.slug}
-                        onToggleMenu=${(slug) => setOpenSlug((prev) => (prev === slug ? null : slug))}
+                        onOpenMenu=${setOpenSlug}
                         onAction=${handleAction}
                       />
                     `

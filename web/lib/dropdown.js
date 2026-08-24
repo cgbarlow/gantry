@@ -1,0 +1,94 @@
+// The one reusable dropdown (#131): a trigger button plus an absolutely-
+// positioned `.menu`, closed by any click outside it or by Escape. Extracted
+// from the open/close-on-outside-click pattern that was hand-rolled three
+// times over (web/app.js's SettingsMenu, InstanceSwitcher, and SwimlaneChip),
+// so every popup menu in this app shares exactly one implementation of
+// opening, closing, and dismissal.
+//
+// Openness is owned by the caller (`open` in, `onOpenChange` out) rather than
+// held internally — SwimlaneChip's overflow menu is deliberately controlled
+// one level up (SwimlaneGroup keeps "one chip menu open at a time" per
+// dashboard), and InstanceSwitcher resets its cross-workspace view on every
+// fresh open. Both shapes fit the same controlled seam; an uncontrolled
+// variant would have forced a second component or prop-drilled escapes.
+//
+// Dismissal mirrors the exact behaviour each hand-rolled version had (plus
+// Escape, which InstanceSwitcher already had and the others gain for free):
+// while open, a `click` anywhere on the window closes it — the trigger button
+// and the menu itself stop event propagation so their own clicks never reach
+// that listener — as does pressing Escape. Listeners attach only while open,
+// so a closed dropdown costs nothing.
+//
+// Most dropdowns are purely trigger + menu (SettingsMenu, InstanceSwitcher):
+// pass `body` as always-visible content rendered before the trigger, and the
+// trigger + menu render in that default order. SwimlaneChip needs its own
+// DOM shape though — the ⋯ trigger must sit *inside* `.chip-foot` (a flex
+// row it shares with the assignee stamp) for the chip's layout to hold — so
+// `body` may instead be a function receiving `{ trigger, menu }` vnodes to
+// place wherever the surrounding markup needs them.
+import { useEffect } from 'preact/hooks'
+import { html } from 'htm/preact'
+
+export function Dropdown({
+  className,
+  body,
+  triggerLabel,
+  triggerClass = 'btn small ghost',
+  triggerAriaLabel,
+  // Only SettingsMenu's hand-rolled original carried `role="menu"` on its
+  // popup; kept opt-in so menus without full arrow-key navigation (e.g. the
+  // instance switcher) aren't handed an ARIA contract they can't honour.
+  menuRole,
+  open,
+  onOpenChange,
+  children,
+}) {
+  useEffect(() => {
+    if (!open) return
+    function onWindowClick() {
+      onOpenChange(false)
+    }
+    function onKeyDown(e) {
+      if (e.key === 'Escape') onOpenChange(false)
+    }
+    window.addEventListener('click', onWindowClick)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('click', onWindowClick)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+    // Keyed on `onOpenChange` too: a caller whose closure captures per-render
+    // props (SwimlaneChip pins `instance.slug`) must never dismiss through a
+    // stale one if those props change while the menu stays open.
+  }, [open, onOpenChange])
+
+  const trigger = html`
+    <button
+      type="button"
+      class=${triggerClass}
+      aria-haspopup="true"
+      aria-expanded=${open}
+      aria-label=${triggerAriaLabel}
+      onClick=${(e) => {
+        e.stopPropagation()
+        onOpenChange(!open)
+      }}
+    >
+      ${triggerLabel}
+    </button>
+  `
+  const menu =
+    open
+      ? html`
+          <div class="menu" role=${menuRole} onClick=${(e) => e.stopPropagation()}>
+            ${children}
+          </div>
+        `
+      : null
+
+  return html`
+    <div class=${(className ?? '') + (open ? ' menu-open' : '')}>
+      ${typeof body === 'function' ? body({ trigger, menu }) : html`${body}${trigger}${menu}`}
+    </div>
+  `
+}
