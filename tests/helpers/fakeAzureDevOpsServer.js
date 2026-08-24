@@ -178,9 +178,20 @@ export function createFakeAzureDevOpsServer({
         if (children.size === 0) {
           return json(404, { message: `TF401174: Item ${scopePath} not found (fake server).` })
         }
-        const value = [...children.entries()]
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([name, isFolder]) => ({ path: `${normalizedScope}/${name}`, isFolder }))
+        // A real `recursionLevel=OneLevel` response includes the queried
+        // folder itself (its own scopePath, isFolder: true) as one of the
+        // `value` entries alongside its immediate children — reproduced
+        // here (rather than only ever returning children) so tests
+        // against this fake actually exercise lib/azureDevOpsClient.js's
+        // `listFolder` filtering that self-entry back out (#116), instead
+        // of passing vacuously against a fake that never produced the bug
+        // in the first place.
+        const value = [
+          { path: normalizedScope || '/', isFolder: true },
+          ...[...children.entries()]
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([name, isFolder]) => ({ path: `${normalizedScope}/${name}`, isFolder })),
+        ]
         return json(200, { count: value.length, value })
       }
 

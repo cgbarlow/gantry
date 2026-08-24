@@ -231,6 +231,24 @@ test('listFolder returns an empty array (not an error) for a folder that does no
   })
 })
 
+// Regression test for #116: the real Azure DevOps Items API includes the
+// queried folder itself (`scopePath`, isFolder: true) as one of the
+// `value` entries alongside its immediate children — previously
+// unfiltered, this made every single-instance gantry-workspace/<slug>/
+// workspace look like it held more than one instance, since
+// `gantry-workspace` itself came back as an extra "folder" alongside the
+// one genuine `<slug>` subfolder.
+test('listFolder does not include the queried folder itself among its results, only its immediate children', async () => {
+  await withFakeAzureDevOpsServer(
+    { '/gantry-workspace/my-initiative/instance.yaml': 'slug: my-initiative\n' },
+    async (baseUrl) => {
+      const entries = await client(baseUrl).listFolder('/gantry-workspace')
+      const byPath = Object.fromEntries(entries.map((e) => [e.path, e.isFolder]))
+      assert.deepEqual(byPath, { '/gantry-workspace/my-initiative': true })
+    }
+  )
+})
+
 test('deleteFile removes an existing file', async () => {
   await withFakeAzureDevOpsServer({ '/instance.yaml': 'slug: demo\n' }, async (baseUrl) => {
     const c = client(baseUrl)
