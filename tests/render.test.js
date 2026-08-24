@@ -8,7 +8,7 @@ import { renderArtefact, renderStageArtefacts } from '../lib/render.js'
 import { createAsset } from '../lib/assets.js'
 import { loadDefinition } from '../lib/definition.js'
 import { readModule, writeModule } from '../lib/instance.js'
-import { createAzureDevOpsClient, AzureDevOpsNotFoundError } from '../lib/azureDevOpsClient.js'
+import { createAzureDevOpsClient, AzureDevOpsNotFoundError, AzureDevOpsAuthenticationError } from '../lib/azureDevOpsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
 // A minimal real 1x1 red PNG, base64-encoded — small enough to inline, real enough to round-trip through the same file-write/render path a genuine upload takes. Matches the fixture tests/assets.test.js uses.
@@ -480,6 +480,38 @@ test('renderStageArtefacts only considers artefacts belonging to the given stage
       assert.deepEqual(
         results.map((r) => r.artefactId),
         ['soap']
+      )
+    }
+  )
+})
+
+// A rejected PAT is not "a genuine render problem to report per-artefact" — it must propagate exactly like it does from every other Azure-DevOps-backed aggregation in this codebase (e.g. lib/status.js's evaluateStageFromAzureDevOps), so the server's credential-gating layer can still turn it into the structured "authentication required" response instead of it being silently folded into a 200 alongside an unrelated per-artefact error string.
+test('renderStageArtefacts propagates AzureDevOpsAuthenticationError rather than swallowing it as a per-artefact error', async () => {
+  const branch = 'gantry-workspace/examples/shape'
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      files: {},
+      branchFiles: { [branch]: seedExamplesAzureDevOpsFiles() },
+    },
+    async (baseUrl) => {
+      const azureDevOps = {
+        organization: ORGANIZATION,
+        project: PROJECT,
+        repository: REPOSITORY,
+        pat: 'a-pat-the-server-does-not-recognize',
+        baseUrl,
+        branch,
+      }
+      const definition = loadDefinition('design')
+      const stage = definition.stages.find((s) => s.id === 'shape')
+
+      await assert.rejects(
+        () => renderStageArtefacts('examples', definition, stage, { azureDevOps }),
+        AzureDevOpsAuthenticationError
       )
     }
   )
