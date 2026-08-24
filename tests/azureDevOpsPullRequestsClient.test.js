@@ -7,6 +7,7 @@ import {
   AzureDevOpsRequestError,
   DEFAULT_BASE_URL,
 } from '../lib/azureDevOpsPullRequestsClient.js'
+import { basicAuthHeader } from '../lib/azureDevOpsClient.js'
 import { withFakeAzureDevOpsServer as withFakeServer } from './helpers/fakeAzureDevOpsServer.js'
 
 const ORGANIZATION = 'fake-org'
@@ -33,19 +34,18 @@ function client(baseUrl, overrides = {}) {
   })
 }
 
+const pullRequestUrl = (baseUrl, pullRequestId = '') =>
+  `${baseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/${REPOSITORY}/pullrequests/${pullRequestId}`
+
 // Simulates the Owner casting a vote directly in Azure DevOps (never
 // something lib/azureDevOpsPullRequestsClient.js itself does, per
 // ADR-0014) — a raw fetch PUT against the fake server's reviewers
 // endpoint, the same shape a real "Check status" caller (#125) would rely
 // on having actually happened before it reads the pull request back.
 async function castVote(baseUrl, pullRequestId, reviewerId, vote) {
-  const url = `${baseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/${REPOSITORY}/pullrequests/${pullRequestId}/reviewers/${reviewerId}?api-version=7.1`
-  const res = await fetch(url, {
+  const res = await fetch(`${pullRequestUrl(baseUrl, pullRequestId)}/reviewers/${reviewerId}?api-version=7.1`, {
     method: 'PUT',
-    headers: {
-      Authorization: `Basic ${Buffer.from(`:${VALID_PAT}`, 'utf8').toString('base64')}`,
-      'Content-Type': 'application/json',
-    },
+    headers: { Authorization: basicAuthHeader(VALID_PAT), 'Content-Type': 'application/json' },
     body: JSON.stringify({ vote }),
   })
   assert.equal(res.status, 200)
@@ -154,6 +154,14 @@ test('completePullRequest merges an approved pull request, threading through the
     assert.equal(completed.completionOptions.mergeStrategy, 'squash')
     assert.equal(completed.completionOptions.deleteSourceBranch, true)
     assert.ok(completed.closedDate)
+    // Proves completePullRequest actually echoes back the pull request's
+    // *current* lastMergeSourceCommit (Azure DevOps's own optimistic-
+    // concurrency check for completion, mirroring writeFile's oldObjectId
+    // for pushes) rather than omitting it or sending some other value —
+    // the fake server now rejects a mismatched one with 409 (see the
+    // dedicated test below), so completion only succeeds at all because
+    // the client threaded through the right commit id.
+    assert.equal(completed.lastMergeSourceCommit.commitId, created.lastMergeSourceCommit.commitId)
 
     const refetched = await c.getPullRequest(created.pullRequestId)
     assert.equal(refetched.status, 'completed')
@@ -163,6 +171,34 @@ test('completePullRequest merges an approved pull request, threading through the
 test('completePullRequest throws AzureDevOpsNotFoundError for a pull request id that does not exist', async () => {
   await withFakeAzureDevOpsServer(async (baseUrl) => {
     await assert.rejects(() => client(baseUrl).completePullRequest(999999, { mergeStrategy: 'squash' }), AzureDevOpsNotFoundError)
+  })
+})
+
+test('the fake server rejects completing a pull request with a stale lastMergeSourceCommit, proving the concurrency check completePullRequest relies on is real', async () => {
+  await withFakeAzureDevOpsServer(async (baseUrl) => {
+    const c = client(baseUrl)
+    const created = await c.createPullRequest({ sourceBranch: 'hld-stage', targetBranch: 'main', title: 'HLD' })
+
+    // A raw fetch, not through the client — lib/azureDevOpsPullRequestsClient.js's
+    // completePullRequest always fetches the current lastMergeSourceCommit
+    // itself, so it can never be tricked into sending a stale one through
+    // its own public API; this exercises the fake server's enforcement of
+    // that contract directly, the same way a real Azure DevOps org would
+    // reject a completion whose source branch moved since it was last read.
+    const res = await fetch(`${pullRequestUrl(baseUrl, created.pullRequestId)}?api-version=7.1`, {
+      method: 'PATCH',
+      headers: { Authorization: basicAuthHeader(VALID_PAT), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status: 'completed',
+        lastMergeSourceCommit: { commitId: 'stale-commit-id-that-does-not-match' },
+        completionOptions: {},
+      }),
+    })
+    assert.equal(res.status, 409)
+
+    // A rejected completion must leave the pull request untouched.
+    const stillActive = await c.getPullRequest(created.pullRequestId)
+    assert.equal(stillActive.status, 'active')
   })
 })
 

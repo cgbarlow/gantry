@@ -424,6 +424,21 @@ export function createFakeAzureDevOpsServer({
         let raw = ''
         for await (const chunk of req) raw += chunk
         const patch = JSON.parse(raw)
+        // Mirrors the same optimistic-concurrency check the Git push route
+        // above already enforces via oldObjectId: completing a pull
+        // request must echo back its *current* lastMergeSourceCommit, so a
+        // caller that fetched a stale one (or forgot to fetch it at all)
+        // is rejected here rather than silently "succeeding" against
+        // whichever value it happened to send — the same failure mode a
+        // real Azure DevOps org would reject with a 409.
+        if (patch.status === 'completed') {
+          const suppliedCommitId = patch.lastMergeSourceCommit?.commitId
+          if (suppliedCommitId !== pr.lastMergeSourceCommit?.commitId) {
+            return json(409, {
+              message: `TF401027: The pull request has been updated since last read (fake server, lastMergeSourceCommit mismatch).`,
+            })
+          }
+        }
         if (patch.status !== undefined) pr.status = patch.status
         if (patch.completionOptions !== undefined) pr.completionOptions = patch.completionOptions
         if (patch.title !== undefined) pr.title = patch.title
