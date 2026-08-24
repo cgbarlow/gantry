@@ -1,17 +1,7 @@
 /*
- * Gate Ledger design language — light/dark/high-contrast themes, WCAG-checked
- * contrast. Tokens and component styles ported from
- * web/prototypes/design-language.prototype.html (#69) and
- * web/prototypes/module-editor.prototype.html (#72), the two prototypes this
- * screen's restyle is based on. See those files' own header comments for the
- * hand-computed WCAG 2.1 contrast ratios behind each colour pair.
+ * Gate Ledger design language — light/dark/high-contrast themes, WCAG-checked contrast. Tokens and component styles ported from web/prototypes/design-language.prototype.html (#69) and web/prototypes/module-editor.prototype.html (#72), the two prototypes this screen's restyle is based on. See those files' own header comments for the hand-computed WCAG 2.1 contrast ratios behind each colour pair.
  *
- * Fonts: the prototypes loaded Space Grotesk / IBM Plex from Google Fonts for
- * preview purposes only — gantry has no CDN-at-runtime dependency (every
- * other browser dep is served from node_modules via the import map), so this
- * stylesheet lists them as the *preferred* family with a system-font fallback
- * chain, rather than fetching them. Self-hosting those two families under
- * node_modules is follow-on work, not part of this ticket.
+ * Fonts: the prototypes loaded Space Grotesk / IBM Plex from Google Fonts for preview purposes only — gantry has no CDN-at-runtime dependency (every other browser dep is served from node_modules via the import map), so this stylesheet lists them as the *preferred* family with a system-font fallback chain, rather than fetching them. Self-hosting those two families under node_modules is follow-on work, not part of this ticket.
  */
 
 :root {
@@ -188,9 +178,7 @@ header {
 #stage-nav button.stage-current { border-color: var(--line-strong); }
 
 /*
- * View-mode toolbar (#79) — a toolbar segmented control (Markdown / Split /
- * Rendered) for the whole module-editor screen, ported from Variant A of
- * web/prototypes/module-editor.prototype.html (#72).
+ * View-mode toolbar (#79) — a toolbar segmented control (Markdown / Split / Rendered) for the whole module-editor screen, ported from Variant A of web/prototypes/module-editor.prototype.html (#72).
  */
 .toolbar {
   display: flex;
@@ -227,11 +215,7 @@ main#modules, .load-error, .loading {
 }
 
 /*
- * `.btn` styles any `<button class="btn">` or `<a class="btn">` alike —
- * the instance dashboard (#77) uses real `<a>` navigation (e.g. "Open
- * editor", "+ New instance") so preact-iso's anchor-click interception
- * handles it as client-side routing, not a `<button onClick>` that would
- * need its own manual `route()` call to the same effect.
+ * `.btn` styles any `<button class="btn">` or `<a class="btn">` alike — the instance dashboard (#77) uses real `<a>` navigation (e.g. "Open editor", "+ New instance") so preact-iso's anchor-click interception handles it as client-side routing, not a `<button onClick>` that would need its own manual `route()` call to the same effect.
  */
 .btn {
   display: inline-block;
@@ -254,9 +238,7 @@ main#modules, .load-error, .loading {
 button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /*
- * Status pill — used by the module editor's own module status (not
- * currently surfaced in this screen's markup) and by the instance
- * dashboard's (#77) stage/gate/status/owner detail pane and swimlane chips.
+ * Status pill — used by the module editor's own module status (not currently surfaced in this screen's markup) and by the instance dashboard's (#77) stage/gate/status/owner detail pane and swimlane chips.
  */
 .stamp {
   display: inline-block;
@@ -341,12 +323,7 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .load-error, .loading { padding-top: 48px; color: var(--text-muted); }
 
 /*
- * Instance dashboard (#77) — the landing screen at `/`. Layout treatments
- * adapted from web/prototypes/instance-dashboard.prototype.html's variants
- * B (master-detail, the default) and C (stage swimlanes); variant A
- * (ledger register) wasn't chosen and isn't implemented. Same tokens and
- * `.btn`/`.stamp` components as the rest of this stylesheet — nothing
- * dashboard-specific is re-invented here beyond layout.
+ * Instance dashboard (#77) — the landing screen at `/`. Layout treatments adapted from web/prototypes/instance-dashboard.prototype.html's variants B (master-detail, the default) and C (stage swimlanes); variant A (ledger register) wasn't chosen and isn't implemented. Same tokens and `.btn`/`.stamp` components as the rest of this stylesheet — nothing dashboard-specific is re-invented here beyond layout.
  */
 main.dashboard {
   max-width: 1120px;
@@ -404,11 +381,7 @@ main.dashboard {
 .master-detail .placeholder { color: var(--text-muted); text-align: center; padding: 80px 20px; }
 
 /*
- * One card per instance under the selected workspace (#102) — replaces
- * the single-instance `.detail-ledger` the old flat dashboard showed:
- * a workspace can hold several instances at once, so the detail pane
- * lists one of these per instance rather than one ledger for "the"
- * selected instance.
+ * One card per instance under the selected workspace (#102) — replaces the single-instance `.detail-ledger` the old flat dashboard showed: a workspace can hold several instances at once, so the detail pane lists one of these per instance rather than one ledger for "the" selected instance.
  */
 .workspace-instances { display: flex; flex-direction: column; gap: 16px; }
 .instance-card {
@@ -468,11 +441,7 @@ main.dashboard {
 .chip .menu button:hover, .chip .menu a:hover { background: var(--bg); }
 
 /*
- * Asset insertion (#80) — ported from Variant A of
- * web/prototypes/asset-insertion.prototype.html (locked in by #73): an
- * unobtrusive "+ Insert asset" affordance after every module, a two-tab
- * modal (Upload new / Choose existing), and a separate thumbnail-grid
- * library screen.
+ * Asset insertion (#80) — ported from Variant A of web/prototypes/asset-insertion.prototype.html (locked in by #73): an unobtrusive "+ Insert asset" affordance after every module, a two-tab modal (Upload new / Choose existing), and a separate thumbnail-grid library screen.
  */
 .insert-affordance { margin-top: 14px; }
 .insert-affordance > button {
@@ -612,22 +581,9 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 
 /*
  * ---------- Instance setup wizard (#78) ----------
- * Ported from web/prototypes/instance-setup-wizard.prototype.html's variant
- * C ("progressive single page") — the tokens/classes above (fonts, .btn,
- * .stamp, hairlines) are reused as-is; these are the wizard-specific
- * additions, scoped with a `wizard-` prefix or nested under .wizard-page so
- * they can't collide with the module editor's own `.field`/`.result` naming.
+ * Ported from web/prototypes/instance-setup-wizard.prototype.html's variant C ("progressive single page") — the tokens/classes above (fonts, .btn, .stamp, hairlines) are reused as-is; these are the wizard-specific additions, scoped with a `wizard-` prefix or nested under .wizard-page so they can't collide with the module editor's own `.field`/`.result` naming.
  *
- * `.wizard-header`/`.wizard-page`'s base proportions (max-width/margin/
- * padding) are grouped with `.settings-header`/`.settings-page` below —
- * both are the same simple centered-single-column screen shell, just with
- * genuinely different content per screen (no `h2`/`.lede`-style rules are
- * shared, only this literal box model), so writing the same four
- * declarations out twice under two unrelated-looking class names would be
- * pure duplication with no corresponding difference in intent. Each screen
- * still only ever carries its own class in markup — this is a shared rule,
- * not one screen's class applied to the other's markup (the coupling a
- * #101 review pass flagged and this replaces).
+ * `.wizard-header`/`.wizard-page`'s base proportions (max-width/margin/padding) are grouped with `.settings-header`/`.settings-page` below — both are the same simple centered-single-column screen shell, just with genuinely different content per screen (no `h2`/`.lede`-style rules are shared, only this literal box model), so writing the same four declarations out twice under two unrelated-looking class names would be pure duplication with no corresponding difference in intent. Each screen still only ever carries its own class in markup — this is a shared rule, not one screen's class applied to the other's markup (the coupling a #101 review pass flagged and this replaces).
  */
 .wizard-header, .settings-header {
   max-width: 860px;
@@ -705,20 +661,7 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 
 /*
  * ---------- Settings screens (#107) ----------
- * Three top-level, tab-free screens — `/settings` (Global Settings),
- * `/settings/workspace` (Workspace Settings, scoped to one instance's own
- * workspace) and `/settings/instance` (Instance Settings) — superseding
- * #101/#104's single tabbed `/settings` shell (no `.settings-tabs` any
- * more; each screen is reached directly, not via a tab strip).
- * `.settings-header`/`.settings-page` have their own classes rather than
- * reusing `.wizard-header`/`.wizard-page` directly in markup — a review
- * pass on #101 flagged that as a fragile, undocumented coupling (these
- * screens aren't wizard steps, and `.wizard-page h2`/`.lede` etc. would
- * otherwise apply here too, only overridden by luck of selector
- * specificity). Their shared base proportions are still declared once,
- * grouped with the wizard's own rules above (see that section's own
- * comment), since it's the same generic page shell, not wizard-specific
- * styling — everything below here is genuinely settings-only.
+ * Three top-level, tab-free screens — `/settings` (Global Settings), `/settings/workspace` (Workspace Settings, scoped to one instance's own workspace) and `/settings/instance` (Instance Settings) — superseding #101/#104's single tabbed `/settings` shell (no `.settings-tabs` any more; each screen is reached directly, not via a tab strip). `.settings-header`/`.settings-page` have their own classes rather than reusing `.wizard-header`/`.wizard-page` directly in markup — a review pass on #101 flagged that as a fragile, undocumented coupling (these screens aren't wizard steps, and `.wizard-page h2`/`.lede` etc. would otherwise apply here too, only overridden by luck of selector specificity). Their shared base proportions are still declared once, grouped with the wizard's own rules above (see that section's own comment), since it's the same generic page shell, not wizard-specific styling — everything below here is genuinely settings-only.
  */
 .settings-page .settings-section { margin-bottom: 36px; }
 .settings-page .settings-section h2 { font-family: var(--font-display); font-weight: 600; font-size: 16px; margin: 0 0 6px; }
@@ -734,14 +677,7 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 
 /*
  * ---------- Workspace Settings (#104, scoped to one workspace by #107) ----------
- * One `.workspace-row`: repo URL, then three `.workspace-field` blocks
- * (owner, PAT override, ticketing-system override) — reuses
- * `.wizard-input`/`.settings-radio-group`/`.stamp` wholesale rather than
- * inventing parallel input/radio/badge styling. `.workspace-list` held one
- * row per registered workspace under #104's old "list every workspace"
- * tab; #107 narrows that same markup/CSS to exactly one row — the
- * instance's own workspace — so `.workspace-list` here always wraps a
- * single `.workspace-row`.
+ * One `.workspace-row`: repo URL, then three `.workspace-field` blocks (owner, PAT override, ticketing-system override) — reuses `.wizard-input`/`.settings-radio-group`/`.stamp` wholesale rather than inventing parallel input/radio/badge styling. `.workspace-list` held one row per registered workspace under #104's old "list every workspace" tab; #107 narrows that same markup/CSS to exactly one row — the instance's own workspace — so `.workspace-list` here always wraps a single `.workspace-row`.
  */
 .workspace-list { display: flex; flex-direction: column; gap: 20px; }
 .workspace-empty { color: var(--text-muted); }

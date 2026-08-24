@@ -4,30 +4,20 @@ description: >
   Design content for an initiative, from shaping through HLD approval,
   build-ready detailed design, and operational handover.
 
-# Stage/gate topology note:
-# The real-world Contoso process resolves to four gates (see
-# docs/research/stages-gates-module-specs.md, Section 3), not the three in
-# Gantry's own illustrative README example. HLD approval at TAC is a distinct
-# gate with no analogue in the README's worked example, so `define` has been
-# split into `hld-define` and `detailed-design`. See docs/adr/0001 for why.
+# Stage/gate topology note: The real-world Contoso process resolves to four gates (see docs/research/stages-gates-module-specs.md, Section 3), not the three in Gantry's own illustrative README example. HLD approval at TAC is a distinct gate with no analogue in the README's worked example, so `define` has been split into `hld-define` and `detailed-design`. See docs/adr/0001 for why.
 
 stages:
   - id: shape
     title: Shape
     gate: business-case
     modules: [context, solution-definition, team-and-estimates]
-    # The instance the web form's "Populate example text" button reads
-    # from for this stage's fields — one shared instance covering every
-    # stage, so `gantry serve examples` shows every gate screen populated.
+    # The instance the web form's "Populate example text" button reads from for this stage's fields — one shared instance covering every stage, so `gantry serve examples` shows every gate screen populated.
     example: examples
 
   - id: hld-define
     title: HLD Definition
     gate: hld-tac-approved
-    # nfrs, risks, security and dependencies are introduced here in
-    # early/light form and carried forward — not re-declared — at
-    # detailed-design, where the same module ids are required in fuller
-    # form. See each module's guidance.
+    # nfrs, risks, security and dependencies are introduced here in early/light form and carried forward — not re-declared — at detailed-design, where the same module ids are required in fuller form. See each module's guidance.
     modules:
       [hld-submission, problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies]
     example: examples
@@ -66,10 +56,7 @@ artefacts:
 
   - id: ssad
     title: Solution Support Architecture Document
-    # Deliberately the same `requires` list as `sad` — SAD and SSAD are two
-    # renderings of one module set, not two independently-authored documents.
-    # See docs/research/stages-gates-module-specs.md Section 4.4 and
-    # docs/adr/0001.
+    # Deliberately the same `requires` list as `sad` — SAD and SSAD are two renderings of one module set, not two independently-authored documents. See docs/research/stages-gates-module-specs.md Section 4.4 and docs/adr/0001.
     template: templates/ssad.md.tmpl
     gate: build-ready-checklist
     requires: [architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations]

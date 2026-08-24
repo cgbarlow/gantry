@@ -1,14 +1,4 @@
-# Field set confirmed 2026-08-20 (ticket #53), superseding the earlier
-# minimal placeholder. Evidence: the Post-SOAP Artefact Coverage Assessment
-# spreadsheet's "Detailed Design / As-built" column and its threaded
-# comments ("good enough for the technical person who is not familiar with
-# the system to successfully rebuild it from scratch"; "handover of the
-# document does not include the handover of responsibility"), plus a
-# direct statement on ownership and required depth: as-builts are the
-# responsibility of senior developers/tech leads or contingent Architecture
-# support, and must cover detailed business process flows, field-level
-# logic, detailed API specifications, UI wireframes, validation rules,
-# code-level sequence diagrams, and detailed acceptance criteria.
+# Field set confirmed 2026-08-20 (ticket #53), superseding the earlier minimal placeholder. Evidence: the Post-SOAP Artefact Coverage Assessment spreadsheet's "Detailed Design / As-built" column and its threaded comments ("good enough for the technical person who is not familiar with the system to successfully rebuild it from scratch"; "handover of the document does not include the handover of responsibility"), plus a direct statement on ownership and required depth: as-builts are the responsibility of senior developers/tech leads or contingent Architecture support, and must cover detailed business process flows, field-level logic, detailed API specifications, UI wireframes, validation rules, code-level sequence diagrams, and detailed acceptance criteria.
 
 id: as-built-notes
 title: As-Built Notes
