@@ -84,6 +84,32 @@ test('settings: none of the three Settings screens render a tab strip', async ()
 
 // ---------- Global Settings, reached directly from Home ----------
 
+// #113 — the theme toggle used to be duplicated across the Workspaces
+// landing header, the Module Editor header, the setup wizard header, and
+// this Settings header; it's now removed from the other three (see
+// tests/dashboard.playwright.test.js, tests/module-editor.playwright.test.js,
+// and tests/setup-wizard.playwright.test.js), leaving exactly this one
+// control app-wide.
+test('settings: the theme toggle is the one remaining copy, and still cycles the theme', async () => {
+  await withScratchServer(async (base) => {
+    await withPage(async (page) => {
+      await page.goto(`${base}/settings`)
+      await page.waitForSelector('.settings-header', { timeout: 10_000 })
+
+      const toggle = page.locator('.settings-header .theme-toggle')
+      assert.equal(await toggle.count(), 1)
+      assert.equal(await page.locator('.theme-toggle').count(), 1)
+
+      assert.equal(await page.getAttribute('html', 'data-theme'), 'light')
+      assert.match(await toggle.textContent(), /Theme: light/)
+
+      await toggle.click()
+      assert.equal(await page.getAttribute('html', 'data-theme'), 'dark')
+      assert.match(await toggle.textContent(), /Theme: dark/)
+    })(base)
+  })
+})
+
 test('settings: "Settings" from the dashboard goes straight to Global Settings, no intermediate step', async () => {
   await withScratchServer(async (base) => {
     await withPage(async (page) => {

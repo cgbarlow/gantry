@@ -235,6 +235,25 @@ test('dashboard: empty state renders a "new instance" call to action when no ins
   }
 })
 
+// #113 — the theme toggle used to be duplicated in the dashboard topbar, the module editor header, the setup wizard header, and Settings' header; it now lives solely in Settings (see tests/settings.playwright.test.js for its one remaining instance).
+test('dashboard: the topbar no longer has its own theme toggle (moved to Settings, #113)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'alpha-initiative', { instancesDir })
+
+    await withRunningServer(
+      { instancesDir },
+      withPage(async (page, base) => {
+        await page.goto(base)
+        await page.waitForSelector('.dashboard-topbar', { timeout: 10_000 })
+        assert.equal(await page.locator('.dashboard-topbar .theme-toggle').count(), 0)
+      })
+    )
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
 // The dashboard topbar's own "+ New instance" link is what makes creating a new instance reachable without an instance already open — before this, it only existed in the module editor's header (AppHeader) and the empty state's one-off call to action (the test above), so a dashboard already listing instances had no way to start another one.
 test('dashboard: topbar "new instance" link works even when instances are already registered', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))

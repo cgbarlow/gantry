@@ -4,7 +4,6 @@ import { useEffect } from 'preact/hooks'
 import { signal, effect } from '@preact/signals'
 import { validateRepo } from '../lib/validateRepo.js'
 import { apiFetch } from '../lib/apiFetch.js'
-import { theme, cycleTheme } from '../lib/theme.js'
 
 // Wizard state as `@preact/signals` — per docs/adr/0006-preact-frontend-framework.md, which names "in-progress wizard answers" as exactly this state model's use case — kept at module scope so a check/definition-pick in progress survives an internal route change and back, not just component-local state that'd reset on remount.
 const repoUrl = signal('')
@@ -145,6 +144,9 @@ function stampClass(status) {
   return status === 'complete' ? 'agreed' : 'draft'
 }
 
+// The theme toggle used to live here too (a copy of the same duplication
+// #113 addresses in the dashboard/module-editor headers) — now lives
+// solely in Settings (web/pages/settings.js's SettingsHeader).
 function WizardHeader() {
   return html`
     <header class="wizard-header">
@@ -153,9 +155,6 @@ function WizardHeader() {
           <path d="M3 20h18M6 20V8l6-4 6 4v12M6 8h12" />
         </svg>
         <h1>gantry</h1>
-        <button type="button" class="btn small ghost theme-toggle" onClick=${cycleTheme} title="Cycle theme">
-          Theme: ${theme.value}
-        </button>
       </div>
       <a class="btn small ghost" href="/">← Instances</a>
     </header>

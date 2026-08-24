@@ -8,7 +8,6 @@ import { EditorState, Compartment } from '@codemirror/state'
 import { markdown } from '@codemirror/lang-markdown'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
-import { theme, cycleTheme } from './lib/theme.js'
 import { promptOpen, resolvePromptWith } from './lib/credential.js'
 import { apiFetch, apiFetchForInstance } from './lib/apiFetch.js'
 import { SetupWizardPage } from './pages/setup-wizard.js'
@@ -1096,7 +1095,11 @@ function InstanceSwitcher({ slug }) {
   `
 }
 
-// ---------- Header: title, stage line, free-browse stage nav, theme ----------
+// ---------- Header: title, stage line, free-browse stage nav ----------
+// The theme toggle used to live here too, duplicated across this header,
+// the Workspaces landing header, the setup wizard header, and Settings'
+// header (#113) — now lives solely in Settings (web/pages/settings.js's
+// SettingsHeader).
 function AppHeader({ instance }) {
   return html`
     <header>
@@ -1109,9 +1112,6 @@ function AppHeader({ instance }) {
         <${InstanceSwitcher} slug=${instance.slug} />
         <a class="btn small ghost" href="/setup">+ New instance</a>
         <${SettingsMenu} instance=${instance} />
-        <button type="button" class="btn small ghost theme-toggle" onClick=${cycleTheme} title="Cycle theme">
-          Theme: ${theme.value}
-        </button>
       </div>
       <p id="stage-line">${instance.stage.title} (gate: ${instance.stage.gate})</p>
       <nav id="stage-nav">
@@ -1601,9 +1601,6 @@ function DashboardPage() {
           ${instances?.length ? html`<${ViewToggle} />` : null}
           <a class="btn small ghost" href="/setup">+ New instance</a>
           <a class="btn small ghost" href=${`/settings?from=${encodeURIComponent('/')}`}>Settings</a>
-          <button type="button" class="btn small ghost theme-toggle" onClick=${cycleTheme} title="Cycle theme">
-            Theme: ${theme.value}
-          </button>
         </div>
       </div>
       ${error

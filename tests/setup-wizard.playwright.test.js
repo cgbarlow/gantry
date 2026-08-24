@@ -135,6 +135,32 @@ async function signInWithPat(page, pat) {
   await modal.waitFor({ state: 'hidden', timeout: 5_000 })
 }
 
+// #113 — the theme toggle used to be duplicated across the Workspaces
+// landing header, the Module Editor header, this wizard header, and
+// Settings' header; it now lives solely in Settings (see
+// tests/dashboard.playwright.test.js, tests/module-editor.playwright.test.js,
+// and tests/settings.playwright.test.js for its removal from/retention in
+// the other three). No fake Azure DevOps server is needed here — the
+// wizard's header renders before any repo check happens.
+test('setup wizard: the header no longer has its own theme toggle (moved to Settings, #113)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withRunningServer({ instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        await page.goto(`${base}/setup`)
+        await page.waitForSelector('.wizard-header', { timeout: 10_000 })
+        assert.equal(await page.locator('.wizard-header .theme-toggle').count(), 0)
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
 test('the setup wizard walks through empty, existing, and error validate(repoUrl) outcomes against real (fake-server-backed) Azure DevOps repos', async () => {
   await withWizardTestServers(STANDARD_REPO_CONFIGS, async ({ gantryBase, baseUrlsByRepo }) => {
     const browser = await chromium.launch()

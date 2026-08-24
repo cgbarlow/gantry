@@ -76,6 +76,29 @@ test('the ported module editor page loads with no errors and a markdown field sa
   }
 })
 
+// #113 — the theme toggle used to be duplicated across this header, the dashboard topbar, the setup wizard header, and Settings' header; it now lives solely in Settings (see tests/settings.playwright.test.js).
+test('module editor: the header no longer has its own theme toggle (moved to Settings, #113)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+        assert.equal(await page.locator('header .theme-toggle').count(), 0)
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
 // Coverage for #79 — the Markdown/Split/Rendered toolbar toggle, its keyboard hotkey, the state's global/session-only scope, and Rendered's enforced read-only behaviour.
 test('the 3-way view-mode toggle switches modes, cycles via hotkey, stays global across stage switches, and enforces read-only in Rendered', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
