@@ -1,16 +1,22 @@
 // gantry's production UI entry point — Preact, delivered via HTM tagged templates with no build step, per docs/adr/0006-preact-frontend-framework.md. `preact-iso` provides the routing shell — the instance dashboard (#77) at `/`, the module editor at `/instance/:slug`, the "+ New Workspace" wizard at `/new-workspace` (see web/pages/new-workspace-wizard.js, #110/#126, which replaced the old URL-first instance-setup wizard entirely) — and `@preact/signals` holds the instance-scoped state (the viewed slug and stage, the fetched instance data) that's shared across the module editor screen's header, nav, and module list, exactly as today's DOM version threaded a `stageId` through a single re-render function.
 import { html, render } from 'htm/preact'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import { signal, effect, batch } from '@preact/signals'
 import { LocationProvider, Router, Route } from 'preact-iso'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState, Compartment } from '@codemirror/state'
+// `keymap` lives in @codemirror/view (the same module 'codemirror' re-exports
+// EditorView from); imported directly so the toolbar's shortcut layer sits in
+// one obvious place next to the command transforms it drives.
+import { keymap } from '@codemirror/view'
+import { syntaxTree } from '@codemirror/language'
 import { markdown } from '@codemirror/lang-markdown'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import { promptOpen, resolvePromptWith } from './lib/credential.js'
 import { apiFetch, apiFetchForInstance } from './lib/apiFetch.js'
 import { Dropdown } from './lib/dropdown.js'
+import { apply as applyMarkdownCommand, HEADING_LEVELS } from './lib/markdownCommands.js'
 import { NewWorkspaceWizardPage } from './pages/new-workspace-wizard.js'
 import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage } from './pages/settings.js'
 // Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79) markdown/split/rendered toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
@@ -112,6 +118,190 @@ function editableExtension(mode) {
   return [EditorState.readOnly.of(!editable), EditorView.editable.of(editable)]
 }
 
+// ---------- Formatting toolbar (#133) ----------
+//
+// One slim toolbar per markdown field, mounted only while that field has
+// focus and never in Rendered mode. Every button (and every shortcut) funnels
+// through `runMarkdownCommand`, which reads doc/selection/lezer-tree off the
+// live EditorView, hands them to web/lib/markdownCommands.js's deterministic
+// transforms (docs/adr/0017), and dispatches the returned (text, selection)
+// back as a single CodeMirror transaction — so buttons and shortcuts are the
+// same code path by construction, and each command is exactly one undo step.
+const markdownToolbarKeymap = keymap.of([
+  { key: 'Mod-b', run: (view) => runMarkdownCommand(view, 'bold') },
+  { key: 'Mod-i', run: (view) => runMarkdownCommand(view, 'italic') },
+  { key: 'Mod-Shift-x', run: (view) => runMarkdownCommand(view, 'strikethrough') },
+  { key: 'Mod-e', run: (view) => runMarkdownCommand(view, 'inlineCode') },
+  { key: 'Mod-k', run: (view) => runMarkdownCommand(view, 'link') },
+  { key: 'Mod-Shift-8', run: (view) => runMarkdownCommand(view, 'bulletList') },
+  { key: 'Mod-Shift-7', run: (view) => runMarkdownCommand(view, 'numberedList') },
+  { key: 'Mod-Shift-9', run: (view) => runMarkdownCommand(view, 'taskList') },
+])
+
+function runMarkdownCommand(view, name) {
+  // Belt-and-braces against Rendered mode: the keymap can't fire there (no
+  // contenteditable), but a toolbar click racing a mode switch still could.
+  if (!view.state.facet(EditorView.editable)) return false
+  const range = view.state.selection.main
+  const result = applyMarkdownCommand(name, {
+    tree: syntaxTree(view.state),
+    text: view.state.doc.toString(),
+    from: range.from,
+    to: range.to,
+  })
+  view.dispatch({
+    changes: { from: 0, to: view.state.doc.length, insert: result.text },
+    selection: { anchor: result.from, head: result.to },
+    scrollIntoView: true,
+  })
+  return true
+}
+
+// Stroke icons inherit `currentColor`, so one path set works across light,
+// dark and high-contrast themes without per-theme assets. The B/I/S letters
+// stay plain text on purpose — they're the design language's signature
+// self-demonstrating buttons, styled by CSS to show their own effect.
+const ToolbarIcon = ({ children }) => html`
+  <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    ${children}
+  </svg>
+`
+const ICONS = {
+  link: html`
+    <${ToolbarIcon}>
+      <path d="M6.9 8.6a3 3 0 0 0 4.5.3l1.9-1.9a3 3 0 0 0-4.2-4.2L7.9 4" />
+      <path d="M9.1 7.4a3 3 0 0 0-4.5-.3l-1.9 1.9a3 3 0 0 0 4.2 4.2l1.2-1.2" />
+    <//>
+  `,
+  bulletList: html`
+    <${ToolbarIcon}>
+      <circle cx="2.9" cy="3.8" r="0.5" fill="currentColor" stroke="none" />
+      <circle cx="2.9" cy="8" r="0.5" fill="currentColor" stroke="none" />
+      <circle cx="2.9" cy="12.2" r="0.5" fill="currentColor" stroke="none" />
+      <path d="M6.3 3.8h7.2M6.3 8h7.2M6.3 12.2h7.2" />
+    <//>
+  `,
+  numberedList: html`
+    <${ToolbarIcon}>
+      <text x="1.1" y="5.8" font-size="5.4" fill="currentColor" stroke="none" font-family="inherit">1</text>
+      <text x="1.1" y="10.6" font-size="5.4" fill="currentColor" stroke="none" font-family="inherit">2</text>
+      <text x="1.1" y="15.2" font-size="5.4" fill="currentColor" stroke="none" font-family="inherit">3</text>
+      <path d="M6.3 3.8h7.2M6.3 8h7.2M6.3 12.2h7.2" />
+    <//>
+  `,
+  taskList: html`
+    <${ToolbarIcon}>
+      <rect x="1.6" y="2.2" width="3.1" height="3.1" rx="0.6" />
+      <rect x="1.6" y="6.4" width="3.1" height="3.1" rx="0.6" />
+      <path d="M2.4 12.7l1 1 1.6-1.8" />
+      <path d="M6.3 3.8h7.2M6.3 8h7.2M6.3 12.2h7.2" />
+    <//>
+  `,
+  horizontalRule: html`
+    <${ToolbarIcon}>
+      <path d="M2 8h12" />
+    <//>
+  `,
+  codeBlock: html`
+    <${ToolbarIcon}>
+      <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1" />
+      <path d="M5.8 6.3L4.1 8l1.7 1.7M10.2 6.3L11.9 8l-1.7 1.7" />
+    <//>
+  `,
+}
+
+function MarkdownToolbar({ run, refocus, headingsOpen, setHeadingsOpen }) {
+  const keepEditorFocus = (e) => e.preventDefault()
+  // Buttons are shortcut-only by design (tabindex="-1" below): keyboard users
+  // reach every command via its Ctrl/Cmd chord, so Tab skips straight past
+  // these eleven buttons instead of parking on each one between the field and
+  // the page.
+  const button = (name, label, shortcut, content) =>
+    html`
+      <button
+        type="button"
+        class="md-btn"
+        data-command=${name}
+        aria-label=${label}
+        title=${shortcut ? `${label} (${shortcut})` : label}
+        onMouseDown=${keepEditorFocus}
+        onClick=${() => run(name)}
+        tabindex="-1"
+      >
+        ${content}
+      </button>
+    `
+
+  // role="group", not "toolbar": the ARIA toolbar pattern promises arrow-key
+  // traversal between controls, which these shortcut-only buttons deliberately
+  // don't implement — a labelled group makes no such contract.
+  return html`
+    <div class="md-toolbar" role="group" aria-label="Formatting">
+      ${button('bold', 'Bold', 'Ctrl/Cmd+B', html`<span class="md-letter md-letter-bold">B</span>`)}
+      ${button('italic', 'Italic', 'Ctrl/Cmd+I', html`<span class="md-letter md-letter-italic">I</span>`)}
+      ${button(
+        'strikethrough',
+        'Strikethrough',
+        'Ctrl/Cmd+Shift+X',
+        html`<span class="md-letter md-letter-strike">S</span>`
+      )}
+      <span class="md-sep" />
+      ${button(
+        'inlineCode',
+        'Inline code',
+        'Ctrl/Cmd+E',
+        html`<span class="md-glyph">&lt;/&gt;</span>`
+      )}
+      ${button('link', 'Link', 'Ctrl/Cmd+K', ICONS.link)}
+      <span class="md-sep" />
+      ${button('bulletList', 'Bullet list', 'Ctrl/Cmd+Shift+8', ICONS.bulletList)}
+      ${button('numberedList', 'Numbered list', 'Ctrl/Cmd+Shift+7', ICONS.numberedList)}
+      ${button('taskList', 'Task list', 'Ctrl/Cmd+Shift+9', ICONS.taskList)}
+      <span class="md-sep" />
+      ${button(
+        'blockquote',
+        'Blockquote',
+        null,
+        html`<span class="md-glyph md-quote-glyph">&ldquo;</span>`
+      )}
+      ${button('horizontalRule', 'Horizontal rule', null, ICONS.horizontalRule)}
+      ${button('codeBlock', 'Code block', null, ICONS.codeBlock)}
+      <div class="md-headings">
+        <${Dropdown}
+          triggerLabel=${html`<span class="md-glyph">Headings ▾</span>`}
+          triggerClass="md-btn"
+          triggerAriaLabel="Headings"
+          open=${headingsOpen}
+          onOpenChange=${(open) => {
+            setHeadingsOpen(open)
+            // Only a keyboard-driven close (Escape with the trigger or menu
+            // holding focus) hands focus back to the editor. An outside click
+            // close means the user aimed somewhere else on purpose — refocusing
+            // there would yank them back mid-action.
+            if (!open && document.activeElement?.closest?.('.md-headings')) refocus()
+          }}
+        >
+          ${HEADING_LEVELS.map(
+            (level) => html`
+              <button
+                type="button"
+                class="md-menu-item"
+                onMouseDown=${keepEditorFocus}
+                onClick=${() => {
+                  setHeadingsOpen(false)
+                  run(`heading${level}`)
+                }}
+              >
+                Heading ${level}
+              </button>
+            `
+          )}
+        <//>
+      </div>
+    </div>
+  `
+}
+
 // ---------- Markdown field ----------
 // EditorView.updateListener -> markdown-it -> DOMPurify -> sibling preview pane, per docs/adr/0004-markdown-editor-codemirror.md. The CodeMirror instance is the source of truth for the field's value, so getValue/setValue read and write it directly rather than duplicating it into component state.
 //
@@ -148,12 +338,21 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection }) 
   const previewRef = useRef(null)
   // The editor-control methods registered up to ModuleCard (getValue/setValue/insertAtCursor) are captured here too, so this field's own Insert ▾ items act on its own cursor without round-tripping through the module.
   const controlRef = useRef(null)
+  // The toolbar lives inside this wrapper, so focus never actually leaves the
+  // field when a button is pressed — see the focusin/focusout pair below.
+  const wrapperRef = useRef(null)
+  const viewRef = useRef(null)
+  const [focused, setFocused] = useState(false)
+  const [headingsOpen, setHeadingsOpen] = useState(false)
 
   useEffect(() => {
     const editableCompartment = new Compartment()
     const state = EditorState.create({
       doc: field.value ?? '',
       extensions: [
+        // The shortcut layer goes before basicSetup so Mod-b/Mod-i and friends
+        // win over anything the default keymaps would claim first.
+        markdownToolbarKeymap,
         basicSetup,
         markdown(),
         editableCompartment.of(editableExtension(viewMode.value)),
@@ -163,6 +362,7 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection }) 
       ],
     })
     const view = new EditorView({ state, parent: hostRef.current })
+    viewRef.current = view
     renderPreview(previewRef.current, field.value ?? '')
 
     // Track the global view-mode signal for as long as this editor is mounted, so switching into/out of Rendered toggles read-only live — the ticket requires it enforced immediately, not just on next mount.
@@ -183,6 +383,30 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection }) 
     }
     controlRef.current = { insertAtCursor }
 
+    let hideToolbarTimer = null
+    function handleFocusIn() {
+      clearTimeout(hideToolbarTimer)
+      setFocused(true)
+    }
+    // Toolbar visibility follows real focus, but moving focus *within* the
+    // field (to a toolbar button or the headings menu) must not flash the
+    // bar away — hence checking where focus is headed rather than hiding
+    // unconditionally. Rendered mode hides the bar regardless via the render.
+    //
+    // The hide itself must also wait out the mouse sequence that caused the
+    // blur: focus moves during *mousedown*, and unmounting the bar right then
+    // shifts layout before *mouseup* lands, so the click that blurred us never
+    // dispatches at all (observed as a silently swallowed "Save Context"
+    // press). Deferring the unmount a tick lets that first click complete —
+    // the same grace period every dismiss-on-outside-click popover needs.
+    function handleFocusOut(e) {
+      if (wrapperRef.current?.contains(e.relatedTarget)) return
+      clearTimeout(hideToolbarTimer)
+      hideToolbarTimer = setTimeout(() => setFocused(false), 150)
+    }
+    view.dom.addEventListener('focusin', handleFocusIn)
+    view.dom.addEventListener('focusout', handleFocusOut)
+
     onRegister({
       getValue: () => view.state.doc.toString(),
       setValue: (text) => {
@@ -193,6 +417,10 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection }) 
     })
 
     return () => {
+      view.dom.removeEventListener('focusin', handleFocusIn)
+      view.dom.removeEventListener('focusout', handleFocusOut)
+      clearTimeout(hideToolbarTimer)
+      viewRef.current = null
       stopViewModeSync()
       view.destroy()
     }
@@ -200,12 +428,30 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection }) 
     // eslint-disable-next-line
   }, [])
 
+  const runCommand = useCallback((name) => runMarkdownCommand(viewRef.current, name), [])
+  const refocusEditor = useCallback(() => viewRef.current?.focus(), [])
+  // Visible while the field holds focus, and stays up while the headings
+  // menu is open (the menu click moves focus to the trigger button).
+  const showToolbar = focused || headingsOpen
+
   return html`
-    <div class="field field-markdown">
+    <div class="field field-markdown" ref=${wrapperRef}>
       <label>${field.title}${field.required ? ' *' : ''}</label>
       ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
       <div class="split">
-        <div class="editor-host" ref=${hostRef}></div>
+        <div class="editor-pane">
+          ${viewMode.value !== 'rendered' && showToolbar
+            ? html`
+                <${MarkdownToolbar}
+                  run=${runCommand}
+                  refocus=${refocusEditor}
+                  headingsOpen=${headingsOpen}
+                  setHeadingsOpen=${setHeadingsOpen}
+                />
+              `
+            : null}
+          <div class="editor-host" ref=${hostRef}></div>
+        </div>
         <div class="preview" ref=${previewRef}></div>
       </div>
       ${viewMode.value !== 'rendered'
