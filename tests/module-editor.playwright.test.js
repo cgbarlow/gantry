@@ -501,3 +501,354 @@ test('Insert ▾ → Section adds a titled custom field below the requesting fie
     rmSync(instancesDir, { recursive: true, force: true })
   }
 })
+
+// Coverage for #133 — the per-field formatting toolbar: it mounts only while
+// its own markdown field holds focus, moves with focus between fields,
+// vanishes on blur, and never appears in Rendered mode.
+test('formatting toolbar follows field focus, hides on blur, and never shows in Rendered (#133)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const field = page.locator('.field-markdown').first()
+        const content = field.locator('.cm-content')
+
+        // No field focused yet -> no toolbar anywhere.
+        assert.equal(await page.locator('.md-toolbar').count(), 0)
+
+        // Focusing the field mounts its toolbar, carrying the full button set.
+        await content.click()
+        const toolbar = field.locator('.md-toolbar')
+        await toolbar.waitFor({ state: 'visible', timeout: 5_000 })
+        for (const name of [
+          'Bold',
+          'Italic',
+          'Strikethrough',
+          'Inline code',
+          'Link',
+          'Bullet list',
+          'Numbered list',
+          'Task list',
+          'Blockquote',
+          'Horizontal rule',
+          'Code block',
+          'Headings',
+        ]) {
+          assert.equal(await toolbar.getByRole('button', { name, exact: true }).count(), 1, `${name} button`)
+        }
+
+        // Blur (click the page header) takes the toolbar with it.
+        await page.locator('header h1').click()
+        await toolbar.waitFor({ state: 'detached', timeout: 5_000 })
+
+        // Refocus brings it back; Rendered mode keeps it away even though the
+        // hidden editor still exists in the DOM.
+        await content.click()
+        await toolbar.waitFor({ state: 'visible', timeout: 5_000 })
+        await page.locator('.segmented').getByRole('button', { name: 'Rendered' }).click()
+        await toolbar.waitFor({ state: 'detached', timeout: 5_000 })
+        await field.locator('.cm-content').click({ force: true }).catch(() => {})
+        await page.keyboard.type('no toolbar here')
+        assert.equal(await page.locator('.md-toolbar').count(), 0)
+
+        await page.locator('.segmented').getByRole('button', { name: 'Split' }).click()
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// Coverage for #133 — smart toggling parity between buttons and shortcuts:
+// the Bold button bolds selected prose, Ctrl/Cmd+B strips it back off (same
+// engine, opposite direction), and an empty cursor lays down a marker pair
+// whose middle swallows the next typed characters.
+test('bold round-trips via button then shortcut, and empty-cursor markers wrap typed text (#133)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const field = page.locator('.field-markdown').first()
+        const content = field.locator('.cm-content')
+        await content.click()
+
+        // Select just the word "beta" and bold it with the toolbar button.
+        await page.keyboard.press('ControlOrMeta+a')
+        await page.keyboard.type('alpha beta')
+        for (let i = 0; i < 4; i++) await page.keyboard.press('Shift+ArrowLeft')
+        await field.locator('.md-toolbar').getByRole('button', { name: 'Bold', exact: true }).click()
+        assert.equal(await content.textContent(), 'alpha **beta**')
+
+        // The selection now covers the marked region; the shortcut toggles it
+        // back off — proving buttons and shortcuts share one code path.
+        await page.keyboard.press('ControlOrMeta+b')
+        assert.equal(await content.textContent(), 'alpha beta')
+
+        // Empty document, cursor at position 0: bold lays down a doubled pair
+        // with the caret between the halves, and typing lands inside it.
+        await page.keyboard.press('ControlOrMeta+a')
+        await page.keyboard.press('Delete')
+        await page.keyboard.press('ControlOrMeta+b')
+        assert.equal(await content.textContent(), '****')
+        await page.keyboard.type('core')
+        assert.equal(await content.textContent(), '**core**')
+
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// Coverage for #133 — the Headings dropdown offers H3–H6 only (author content
+// starts at ### per ADR-0016), sets a level, re-levels directly, and strips
+// when the current level is re-invoked.
+test('headings dropdown applies H3-H6, re-levels, and strips on re-invoke (#133)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const field = page.locator('.field-markdown').first()
+        const content = field.locator('.cm-content')
+        await content.click()
+        await page.keyboard.press('ControlOrMeta+a')
+        await page.keyboard.type('Plan the work.')
+
+        const headingsTrigger = field.locator('.md-toolbar').getByRole('button', { name: 'Headings', exact: true })
+        const menuItem = (label) => field.locator('.md-headings .menu button', { hasText: label })
+
+        // Exactly H3-H6 in the menu — H1/H2 belong to the structural scale.
+        await headingsTrigger.click()
+        await menuItem('Heading 3').waitFor({ state: 'visible', timeout: 2_000 })
+        assert.deepEqual(
+          await field.locator('.md-headings .menu button').allTextContents(),
+          ['Heading 3', 'Heading 4', 'Heading 5', 'Heading 6']
+        )
+
+        await menuItem('Heading 3').click()
+        assert.equal(await content.textContent(), '### Plan the work.')
+        assert.equal(await field.locator('.md-headings .menu').count(), 0, 'menu closes after choosing a level')
+
+        // Re-opening re-levels straight from H3 to H6 without stripping first.
+        await headingsTrigger.click()
+        await menuItem('Heading 6').click()
+        assert.equal(await content.textContent(), '###### Plan the work.')
+
+        // Re-invoking the current level removes the marker entirely.
+        await headingsTrigger.click()
+        await menuItem('Heading 6').click()
+        assert.equal(await content.textContent(), 'Plan the work.')
+
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// Coverage for #133 — the remaining block buttons end-to-end: task list,
+// blockquote stacking over it, horizontal-rule blank-line hygiene at the end
+// of the document. Verified against the saved module file on disk, since
+// CodeMirror's multi-line textContent drops newlines.
+test('task list, blockquote, and horizontal rule write real markdown to disk (#133)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const field = page.locator('.field-markdown').first()
+        const toolbar = field.locator('.md-toolbar')
+        await field.locator('.cm-content').click()
+
+        await page.keyboard.press('ControlOrMeta+a')
+        await page.keyboard.type('first\nsecond')
+        await page.keyboard.press('ControlOrMeta+a')
+
+        await toolbar.getByRole('button', { name: 'Task list', exact: true }).click()
+        await toolbar.getByRole('button', { name: 'Blockquote', exact: true }).click()
+        await page.keyboard.press('ControlOrMeta+End')
+        await toolbar.getByRole('button', { name: 'Horizontal rule', exact: true }).click()
+
+        await page.locator('.module').first().getByRole('button', { name: 'Save Context' }).click()
+        await page.waitForSelector('text=Saved', { timeout: 5_000 })
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+
+    const definition = loadDefinition('design')
+    const data = readModule(definition, 'examples', 'context', { instancesDir })
+    assert.equal(data.fields.driver, '> - [ ] first\n> - [ ] second\n\n---')
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// Coverage for #133 — inline code, link, and code block produce previews the
+// renderer understands (the user-visible point of the raw markers).
+test("inline code, link, and code block buttons render real preview output (#133)", async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const field = page.locator('.field-markdown').first()
+        const toolbar = field.locator('.md-toolbar')
+        const preview = field.locator('.preview')
+        await field.locator('.cm-content').click()
+
+        // Inline code wraps the selection; the preview shows it as <code>.
+        await page.keyboard.press('ControlOrMeta+a')
+        await page.keyboard.type('run gantry now')
+        for (let i = 0; i < 11; i++) await page.keyboard.press('Shift+ArrowLeft')
+        await toolbar.getByRole('button', { name: 'Inline code', exact: true }).click()
+        await assert.doesNotReject(preview.locator('code', { hasText: 'gantry now' }).waitFor({ timeout: 5_000 }))
+
+        // Link turns prose into [text](url) with the URL slot pre-selected,
+        // so typing the address completes the link.
+        await page.keyboard.press('ControlOrMeta+a')
+        await page.keyboard.type('see the docs')
+        await page.keyboard.press('ControlOrMeta+a')
+        await toolbar.getByRole('button', { name: 'Link', exact: true }).click()
+        await page.keyboard.type('https://example.dev/guide')
+        await assert.doesNotReject(
+          preview.locator('a[href="https://example.dev/guide"]').waitFor({ timeout: 5_000 })
+        )
+
+        // Code block fences every line of the selection; preview shows <pre>.
+        await page.keyboard.press('ControlOrMeta+a')
+        await page.keyboard.type('npm install\nnpm test')
+        await page.keyboard.press('ControlOrMeta+a')
+        await toolbar.getByRole('button', { name: 'Code block', exact: true }).click()
+        await assert.doesNotReject(
+          preview.locator('pre', { hasText: 'npm install' }).waitFor({ timeout: 5_000 })
+        )
+
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// Coverage for #133 — the B/I/S letters demonstrate their own effect in every
+// theme (computed styles, not just class presence), per the ticket's
+// self-demonstrating requirement across light/dark/high-contrast.
+test('B/I/S toolbar letters are visually self-demonstrating across all three themes (#133)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const field = page.locator('.field-markdown').first()
+        await field.locator('.cm-content').click()
+        const toolbar = field.locator('.md-toolbar')
+        await toolbar.waitFor({ state: 'visible', timeout: 5_000 })
+
+        for (const theme of ['light', 'dark', 'hc']) {
+          await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme)
+          const bold = await toolbar.locator('.md-letter-bold').evaluate((el) => getComputedStyle(el).fontWeight)
+          const italic = await toolbar.locator('.md-letter-italic').evaluate((el) => getComputedStyle(el).fontStyle)
+          const strike = await toolbar
+            .locator('.md-letter-strike')
+            .evaluate((el) => getComputedStyle(el).textDecorationLine)
+          assert.ok(Number(bold) >= 700, `${theme}: B must render bold, got font-weight ${bold}`)
+          assert.equal(italic, 'italic', `${theme}: I must render italic`)
+          assert.ok(strike.includes('line-through'), `${theme}: S must render struck through`)
+        }
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})

@@ -408,6 +408,8 @@ Module files are markdown so they're readable, diffable and editable anywhere. F
 
 Headings follow one document scale (ADR-0016): the module's title sits at `#`, each field heading at `##`, and author content starts at `###` — so an author's own sub-heading can never collide with a field boundary. Files written before this scale existed are migrated in place on first read; no manual step is needed.
 
+In the web form, each markdown field grows a slim formatting toolbar while it has focus (bold, italic, strikethrough, inline code, link, lists, quote, rule, code block, and a Headings menu starting at Heading 3 to match that scale), driven by deterministic text transforms over CodeMirror's syntax tree so buttons and `Ctrl/Cmd` shortcuts are one code path (ADR-0017).
+
 ## The design definition
 
 Design is the first definition, and the reason Gantry exists. It replaces a document set in which the Solution on a Page, High Level Design, Solution Architecture Document, Solution Support Architecture Document and detailed design each restated overlapping content in a different template, at a different gate, owned by a different group.

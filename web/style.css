@@ -204,8 +204,9 @@ header {
 
 /* View-mode visibility, driven by data-view-mode on main#modules (#79). */
 main[data-view-mode='markdown'] .field-markdown .preview { display: none; }
-main[data-view-mode='markdown'] .field-markdown .editor-host { flex: 1 1 100%; }
-main[data-view-mode='rendered'] .field-markdown .editor-host { display: none; }
+main[data-view-mode='markdown'] .field-markdown .editor-host { flex: 1 1 auto; }
+main[data-view-mode='markdown'] .field-markdown .editor-pane { flex: 1 1 100%; }
+main[data-view-mode='rendered'] .field-markdown .editor-pane { display: none; }
 main[data-view-mode='rendered'] .field-markdown .preview { flex: 1 1 100%; }
 
 main#modules, .load-error, .loading {
@@ -287,6 +288,9 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .guidance { color: var(--text-muted); font-size: 12px; margin: 0 0 8px; }
 
 .field-markdown .split { display: flex; gap: 16px; align-items: stretch; }
+/* The toolbar mounts inside this pane above the editor host, so the pair
+ * reads as one attached control (#133): toolbar flush on top, editor below. */
+.field-markdown .editor-pane { display: flex; flex-direction: column; min-width: 0; }
 .field-markdown .editor-host,
 .field-markdown .preview {
   flex: 1;
@@ -316,6 +320,89 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
   padding: 1px 4px;
   border-radius: var(--radius);
 }
+
+/*
+ * Formatting toolbar (#133) — one slim strip per focused markdown field.
+ * The B/I/S letters are deliberately unadorned spans that CSS styles to
+ * demonstrate their own effect (bold weight, italic slant, line-through) in
+ * every theme, per the ticket's "self-demonstrating" requirement; the other
+ * buttons use small currentColor stroke icons so light/dark/high-contrast
+ * all come free.
+ */
+.md-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px 5px;
+  margin-bottom: -1px;
+  background: var(--bg-raised);
+  border: var(--border-strong) solid var(--line-strong);
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.md-toolbar + .editor-host {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.md-btn {
+  appearance: none;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  min-width: 26px;
+  height: 24px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.md-btn:hover { color: var(--text); background: var(--bg); }
+.md-btn svg { display: block; }
+.md-letter { font-size: 13px; line-height: 1; font-family: var(--font-body); }
+.md-letter-bold { font-weight: 700; }
+.md-letter-italic { font-style: italic; }
+.md-letter-strike { text-decoration: line-through; }
+.md-glyph { letter-spacing: -1px; }
+.md-quote-glyph {
+  font-family: var(--font-display);
+  font-size: 15px;
+  line-height: 1;
+  transform: translateY(-2px);
+}
+.md-sep { width: 1px; height: 16px; background: var(--line); margin: 0 4px; }
+.md-headings { margin-left: auto; position: relative; }
+.md-headings .menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 27px;
+  z-index: 6;
+  background: var(--bg-raised);
+  border: var(--border-strong) solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+  min-width: 130px;
+}
+.md-headings .menu-open .menu { display: block; }
+.md-headings .menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-family: var(--font-body);
+  color: var(--text);
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.md-headings .menu button:hover { background: var(--bg); }
 
 .field-list .list-row { display: flex; gap: 8px; margin-bottom: 6px; }
 .field-list input {
