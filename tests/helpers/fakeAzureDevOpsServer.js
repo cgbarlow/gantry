@@ -17,6 +17,12 @@ function objectIdFor(n) {
   return n.toString(16).padStart(7, '0') + '0'.repeat(33)
 }
 
+// Mirrors lib/azureDevOpsClient.js's own ZERO_OBJECT_ID — the all-zero id
+// Azure DevOps uses in a ref update's oldObjectId/newObjectId to mean
+// "this ref doesn't exist" (creating a new branch) or "delete this ref",
+// respectively.
+const ZERO_OBJECT_ID = '0'.repeat(40)
+
 // Generic fallback states for any work item type not given an explicit
 // entry in `workItemTypeStates` — plausible-looking but not meant to match
 // any one real process template exactly (tests that care about a specific
@@ -278,6 +284,73 @@ export function createFakeAzureDevOpsServer({
       // `refs/heads/<branch>` match, the same way it would against a real
       // server's (possibly broader) filtered result set.
       const value = [...branches.entries()].map(([name, b]) => ({ name: `refs/heads/${name}`, objectId: b.objectId }))
+      return json(200, { count: value.length, value })
+    }
+
+    // Create/update/delete a ref — lib/azureDevOpsClient.js's createBranch
+    // calls this to create a new branch pointing at another branch's
+    // current tip, distinct from POST .../pushes (which also moves a
+    // ref, but only as a side effect of committing file changes). Mirrors
+    // the real Update Refs API: HTTP 200 even for a rejected individual
+    // update — success/failure is reported per-entry in the response body
+    // (`success`/`updateStatus`/`customMessage`), not via HTTP status.
+    if (req.method === 'POST' && pathname === `${basePath}/refs`) {
+      let raw = ''
+      for await (const chunk of req) raw += chunk
+      const updates = JSON.parse(raw)
+
+      const value = updates.map((update) => {
+        const branchName = update.name.replace(/^refs\/heads\//, '')
+        const existingBranch = branches.get(branchName)
+        const existingObjectId = existingBranch ? existingBranch.objectId : ZERO_OBJECT_ID
+
+        if (update.oldObjectId !== existingObjectId) {
+          // Mirrors the real Update Refs API's two distinct rejection
+          // reasons: the ref already exists with a different tip than the
+          // caller thought (only reachable path today, since
+          // lib/azureDevOpsClient.js's createBranch always presents the
+          // all-zero oldObjectId when creating), vs. a caller presenting a
+          // non-zero oldObjectId for a ref that doesn't exist at all — no
+          // current caller does the latter, but the message stays accurate
+          // if one ever does.
+          const alreadyExists = existingObjectId !== ZERO_OBJECT_ID
+          return {
+            name: update.name,
+            oldObjectId: update.oldObjectId,
+            newObjectId: update.newObjectId,
+            success: false,
+            updateStatus: alreadyExists ? 'refNameConflict' : 'staleOldObjectId',
+            customMessage: alreadyExists
+              ? `Ref ${update.name} already exists (fake server).`
+              : `Ref ${update.name} does not exist yet; cannot update from oldObjectId ${update.oldObjectId} (fake server).`,
+          }
+        }
+
+        if (update.newObjectId === ZERO_OBJECT_ID) {
+          // Deleting a ref — not exercised by any current caller, but a
+          // real possibility per the Update Refs API's own contract.
+          branches.delete(branchName)
+        } else {
+          // Creating a new branch. #118 made every branch carry its own
+          // real content (`store`), so a freshly created branch clones
+          // whichever existing branch currently sits at `newObjectId` (the
+          // source branch's tip, as read by createBranch's own
+          // getBranchObjectId call just before this request) — exactly
+          // like real git, the new branch starts out identical to its
+          // source and the two diverge independently from here on.
+          const sourceBranch = [...branches.values()].find((b) => b.objectId === update.newObjectId)
+          const store = sourceBranch ? new Map(sourceBranch.store) : new Map()
+          branches.set(branchName, { store, objectId: update.newObjectId })
+        }
+
+        return {
+          name: update.name,
+          oldObjectId: update.oldObjectId,
+          newObjectId: update.newObjectId,
+          success: true,
+          updateStatus: 'succeeded',
+        }
+      })
       return json(200, { count: value.length, value })
     }
 

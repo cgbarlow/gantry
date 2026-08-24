@@ -393,6 +393,77 @@ test('createFakeAzureDevOpsServer\'s branchFiles option seeds a non-main branch 
   )
 })
 
+// createBranch backs the per-stage branch lifecycle (#119/#122): a stage's
+// branch is created either fresh from `main`, or stacked on an
+// in-progress earlier stage's branch.
+
+test('createBranch creates a new branch pointing at the source branch\'s current tip', async () => {
+  await withFakeAzureDevOpsServer({ '/instance.yaml': 'slug: demo\n' }, async (baseUrl) => {
+    const c = client(baseUrl)
+    const first = await c.createBranch('gantry-workspace/demo/shape')
+    // Main hasn't moved between the two calls, so a second branch created
+    // from it independently must land on the exact same commit as the
+    // first — the actual proof createBranch reads "from"'s live tip
+    // rather than returning some placeholder/derived value.
+    const second = await c.createBranch('gantry-workspace/demo/other', { from: 'main' })
+
+    assert.equal(first.name, 'gantry-workspace/demo/shape')
+    assert.equal(first.from, 'main')
+    assert.equal(typeof first.objectId, 'string')
+    assert.equal(first.objectId.length, 40)
+    assert.equal(first.objectId, second.objectId)
+  })
+})
+
+test('createBranch defaults to branching from "main" when no source branch is given', async () => {
+  await withFakeAzureDevOpsServer({ '/instance.yaml': 'slug: demo\n' }, async (baseUrl) => {
+    const c = client(baseUrl)
+    const result = await c.createBranch('feature-x')
+    assert.equal(result.from, 'main')
+  })
+})
+
+test('createBranch can stack a new branch on another (non-main) branch, not just on main', async () => {
+  await withFakeAzureDevOpsServer({ '/instance.yaml': 'slug: demo\n' }, async (baseUrl) => {
+    const c = client(baseUrl)
+    const shapeBranch = await c.createBranch('gantry-workspace/demo/shape')
+    const hldBranch = await c.createBranch('gantry-workspace/demo/hld', { from: 'gantry-workspace/demo/shape' })
+
+    assert.equal(hldBranch.from, 'gantry-workspace/demo/shape')
+    // Stacked branch starts out pointing at the same commit as the branch
+    // it was stacked on, since no new commit was made in between.
+    assert.equal(hldBranch.objectId, shapeBranch.objectId)
+  })
+})
+
+test('createBranch throws AzureDevOpsNotFoundError when the source branch does not exist', async () => {
+  await withFakeAzureDevOpsServer({}, async (baseUrl) => {
+    // No files seeded — "main" itself has no commits yet.
+    await assert.rejects(() => client(baseUrl).createBranch('feature-x'), AzureDevOpsNotFoundError)
+  })
+})
+
+test('createBranch throws AzureDevOpsRequestError when the branch name already exists', async () => {
+  await withFakeAzureDevOpsServer({ '/instance.yaml': 'slug: demo\n' }, async (baseUrl) => {
+    const c = client(baseUrl)
+    await c.createBranch('feature-x')
+    await assert.rejects(() => c.createBranch('feature-x'), AzureDevOpsRequestError)
+  })
+})
+
+test('createBranch surfaces a rejected PAT as AzureDevOpsAuthenticationError', async () => {
+  await withFakeAzureDevOpsServer({ '/instance.yaml': 'slug: demo\n' }, async (baseUrl) => {
+    const badClient = client(baseUrl, { pat: 'wrong' })
+    await assert.rejects(() => badClient.createBranch('feature-x'), AzureDevOpsAuthenticationError)
+  })
+})
+
+test('a network failure reaching the Azure DevOps API surfaces as AzureDevOpsRequestError on createBranch too', async () => {
+  const unreachableBaseUrl = 'http://127.0.0.1:1'
+  const c = client(unreachableBaseUrl)
+  await assert.rejects(() => c.createBranch('feature-x'), AzureDevOpsRequestError)
+})
+
 test('createAzureDevOpsClient requires organization, project, repository and pat', () => {
   assert.throws(() => createAzureDevOpsClient({ project: PROJECT, repository: REPOSITORY, pat: VALID_PAT }), /organization/)
   assert.throws(() => createAzureDevOpsClient({ organization: ORGANIZATION, repository: REPOSITORY, pat: VALID_PAT }), /project/)
