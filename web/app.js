@@ -814,6 +814,106 @@ function AdvanceStagePanel({ instance }) {
   `
 }
 
+// ---------- Request approval (Workspace-backed instances only; #124, ADR-0014) ----------
+// The Workspace-backed counterpart to AdvanceStagePanel above: opens this
+// stage's own real approval gate — a Pull Request from its branch into
+// "main" — once the gate has genuinely passed, rather than moving a local
+// instance's own stage pointer directly. Mirrors AdvanceStagePanel's/
+// WorkItemPanel's check-then-confirm shape exactly: "Request approval" runs
+// the same gate check every other gated action in this app runs, and only a
+// genuine PASS opens the confirm dialog — declining it (or a FAIL) opens no
+// Pull Request. Never rendered for a local instance (the opposite condition
+// from AdvanceStagePanel), and — like AdvanceStagePanel — only while viewing
+// the instance's own *current* stage, since that's the only stage a save
+// can ever actually be landing commits on today (a later stage only starts
+// once #125's own "advance the stage" moves the current-stage pointer
+// forward, which doesn't exist yet).
+function RequestApprovalPanel({ instance }) {
+  const [status, setStatus] = useState('')
+  const [confirming, setConfirming] = useState(false)
+  const [justOpened, setJustOpened] = useState(null)
+
+  if (!instance.workspaceBacked || instance.stage.id !== instance.currentStageId) return null
+
+  const stageId = instance.stage.id
+  const openPullRequestId = justOpened?.pullRequestId ?? instance.pullRequests?.[stageId]
+
+  async function handleCheckAndMaybeConfirm() {
+    setStatus('Checking gate…')
+    const res = await apiFetchForInstance(currentSlug.value, `/api/instance/check?slug=${encodeURIComponent(currentSlug.value)}`)
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setStatus(`Check failed: ${body.message ?? body.error}`)
+      return
+    }
+    if (!body.pass) {
+      const outstanding = body.modules.filter((m) => !m.complete).map((m) => m.title)
+      setStatus(`FAIL — outstanding: ${outstanding.join(', ') || 'see modules'}`)
+      return
+    }
+    setStatus('Gate passed.')
+    setConfirming(true)
+  }
+
+  async function handleConfirmRequest() {
+    setConfirming(false)
+    setStatus('Opening Pull Request…')
+    const res = await apiFetchForInstance(
+      currentSlug.value,
+      `/api/instance/request-approval?slug=${encodeURIComponent(currentSlug.value)}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }
+    )
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setStatus(`Request approval failed: ${body.message ?? body.error}`)
+      return
+    }
+    setJustOpened(body)
+    setStatus(`Pull Request #${body.pullRequestId} opened — awaiting the Owner's review.`)
+  }
+
+  function handleDecline() {
+    setConfirming(false)
+    setStatus('Declined — no Pull Request opened.')
+  }
+
+  return html`
+    <section class="request-approval-panel">
+      <h2>Request approval</h2>
+      ${openPullRequestId
+        ? html`
+            <p>
+              Pull Request #${openPullRequestId} is open, requesting approval for stage "${instance.stage.title}".
+              ${justOpened?.webUrl
+                ? html`<a href=${justOpened.webUrl} target="_blank" rel="noreferrer">Open in Azure DevOps</a>`
+                : null}
+            </p>
+          `
+        : html`<button type="button" class="btn" onClick=${handleCheckAndMaybeConfirm}>Request approval</button>`}
+      <div class="save-status">${status}</div>
+      ${confirming
+        ? html`
+            <div class="modal-backdrop" role="presentation">
+              <div class="modal" role="dialog" aria-modal="true" aria-label="Confirm request approval">
+                <h3>Open a Pull Request for review?</h3>
+                <p class="guidance">
+                  The gate for stage "${instance.stage.title}" has passed. Confirm to open a Pull Request from this
+                  stage's own branch into "main", requesting the Owner's approval. Declining opens nothing.
+                </p>
+                <div class="modal-actions">
+                  <button type="button" class="btn ghost" onClick=${handleDecline}>Decline</button>
+                  <button type="button" class="btn primary" onClick=${handleConfirmRequest}>
+                    Confirm & request approval
+                  </button>
+                </div>
+              </div>
+            </div>
+          `
+        : null}
+    </section>
+  `
+}
+
 // ---------- The viewed stage's whole screen: modules + work-item panel ----------
 // Keyed by stage id from the parent (see ModuleEditorPage) so switching stages remounts this wholesale — fresh CodeMirror instances, matching the old full-DOM-rebuild behaviour. "Clear all fields" and "Render" now live in the view-toggle bar (see ViewModeToolbar, ModuleEditorPage) rather than here, so the field registry they depend on is owned by ModuleEditorPage instead — `onFieldRegistered` is threaded straight through.
 function StageScreen({ instance, onFieldRegistered }) {
@@ -830,6 +930,7 @@ function StageScreen({ instance, onFieldRegistered }) {
         `
       )}
       <${AdvanceStagePanel} instance=${instance} />
+      <${RequestApprovalPanel} instance=${instance} />
       <${WorkItemPanel} instance=${instance} />
     </main>
   `
