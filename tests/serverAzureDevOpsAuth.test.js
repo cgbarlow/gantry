@@ -9,17 +9,7 @@ import { registerInstance } from '../lib/instanceRegistry.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
-// Server-level credential gating (#86), now driven by per-request
-// resolution against the instance registry (#89/#92) rather than a fixed
-// `createServer({ azureDevOps })` location: a slug the registry says is
-// Azure-DevOps-backed marks that one request's single-instance routes (GET
-// /api/instance, PUT /api/instance/modules/:id, POST
-// /api/instance/render/:artefact) as such. These tests exercise that
-// gating with real HTTP requests against a running gantry server
-// (mirroring tests/server.test.js's existing `withRunningServer` pattern),
-// backed by the same fake in-process Azure DevOps server
-// tests/instance.test.js and tests/azureDevOpsClient.test.js use — never
-// the real dev.azure.com.
+// Server-level credential gating (#86), now driven by per-request resolution against the instance registry (#89/#92) rather than a fixed `createServer({ azureDevOps })` location: a slug the registry says is Azure-DevOps-backed marks that one request's single-instance routes (GET /api/instance, PUT /api/instance/modules/:id, POST /api/instance/render/:artefact) as such. These tests exercise that gating with real HTTP requests against a running gantry server (mirroring tests/server.test.js's existing `withRunningServer` pattern), backed by the same fake in-process Azure DevOps server tests/instance.test.js and tests/azureDevOpsClient.test.js use — never the real dev.azure.com.
 
 const ORGANIZATION = 'fake-org'
 const PROJECT = 'fake-project'
@@ -47,13 +37,7 @@ function withRunningServer(options, fn) {
   })
 }
 
-// Seeds a fake Azure DevOps repo with a real "my-initiative" design
-// instance at the "shape" stage — the same shape createInstance's own
-// Azure DevOps path (#85) writes — registers that slug in the instance
-// registry (#89) as Azure-DevOps-backed (the only thing that now marks a
-// slug as such, per #92), then runs `fn(baseUrl)` with a gantry server
-// started against a scratch `instancesDir` with no fixed location of its
-// own at all.
+// Seeds a fake Azure DevOps repo with a real "my-initiative" design instance at the "shape" stage — the same shape createInstance's own Azure DevOps path (#85) writes — registers that slug in the instance registry (#89) as Azure-DevOps-backed (the only thing that now marks a slug as such, per #92), then runs `fn(baseUrl)` with a gantry server started against a scratch `instancesDir` with no fixed location of its own at all.
 function withAzureDevOpsBackedServer(files, serverOptions, fn) {
   return withFakeAzureDevOpsServer(
     { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files },
@@ -146,22 +130,13 @@ test('GET /api/instance against an Azure-DevOps-backed instance with a valid PAT
     const domains = context.fields.find((f) => f.id === 'affected-domains')
     assert.deepEqual(domains.value, ['Payments'])
 
-    // A module with no data yet at all in the fake repo (a later stage's
-    // module) still reports its blank draft default, not an error.
+    // A module with no data yet at all in the fake repo (a later stage's module) still reports its blank draft default, not an error.
     const solutionDefinition = body.modules.find((m) => m.id === 'solution-definition')
     assert.equal(solutionDefinition.status, 'draft')
   })
 })
 
-// A genuine Azure DevOps-side failure (not a 404 "no saved data yet" miss,
-// not a 401/403 rejected-PAT) reading one module's file must surface as a
-// real error, not be silently swallowed into "this module is just blank" —
-// regression test for a review finding where the GET /api/instance handler
-// caught *every* readModule failure other than AzureDevOpsAuthenticationError
-// and treated it as "no data yet". Uses a minimal ad hoc fake server (rather
-// than tests/helpers/fakeAzureDevOpsServer.js, which has no way to inject a
-// GET failure) so one specific module's read can be made to fail with a 500
-// while the rest of the repo behaves normally.
+// A genuine Azure DevOps-side failure (not a 404 "no saved data yet" miss, not a 401/403 rejected-PAT) reading one module's file must surface as a real error, not be silently swallowed into "this module is just blank" — regression test for a review finding where the GET /api/instance handler caught *every* readModule failure other than AzureDevOpsAuthenticationError and treated it as "no data yet". Uses a minimal ad hoc fake server (rather than tests/helpers/fakeAzureDevOpsServer.js, which has no way to inject a GET failure) so one specific module's read can be made to fail with a 500 while the rest of the repo behaves normally.
 test('GET /api/instance surfaces a genuine Azure DevOps read failure (a 500, not a 404) as an error, instead of reporting the module as blank', async () => {
   const basePath = `/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/${REPOSITORY}`
   const fakeAdo = createHttpServer((req, res) => {
@@ -209,8 +184,7 @@ test('GET /api/instance surfaces a genuine Azure DevOps read failure (a 500, not
             const res = await fetch(`http://localhost:${port}/api/instance`, {
               headers: { Authorization: basicAuthHeader(VALID_PAT) },
             })
-            // A real failure, not a 200 with the module quietly reported as
-            // an empty draft.
+            // A real failure, not a 200 with the module quietly reported as an empty draft.
             assert.equal(res.status, 500)
             const body = await res.json()
             assert.match(body.error, /HTTP 500/)
@@ -277,8 +251,7 @@ test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance with
     const context = status.modules.find((m) => m.id === 'context')
     assert.equal(context.complete, true)
 
-    // Reading it back (also with a valid PAT) proves the write actually
-    // landed in the fake Azure DevOps repo, not just in the response.
+    // Reading it back (also with a valid PAT) proves the write actually landed in the fake Azure DevOps repo, not just in the response.
     const readRes = await fetch(`${base}/api/instance`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })
     const readBody = await readRes.json()
     const readContext = readBody.modules.find((m) => m.id === 'context')
@@ -330,9 +303,7 @@ test('PUT /api/instance/assignee against an Azure-DevOps-backed instance with a 
     const body = await res.json()
     assert.deepEqual(body, { slug: 'my-initiative', assignee: 'j.smith' })
 
-    // Reading it back proves the write actually landed in the fake Azure
-    // DevOps repo's instance.yaml, not just in the response, and that the
-    // instance's other fields (stage) survived the update untouched.
+    // Reading it back proves the write actually landed in the fake Azure DevOps repo's instance.yaml, not just in the response, and that the instance's other fields (stage) survived the update untouched.
     const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
     const instanceYaml = await client.getFileContent('gantry-workspace/my-initiative/instance.yaml')
     assert.match(instanceYaml, /assignee: j\.smith/)
@@ -341,8 +312,7 @@ test('PUT /api/instance/assignee against an Azure-DevOps-backed instance with a 
     const readRes = await fetch(`${base}/api/instance`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })
     const readBody = await readRes.json()
     const context = readBody.modules.find((m) => m.id === 'context')
-    // The module's own frontmatter owner ("c.barlow", seeded by SEED_FILES)
-    // is a separate, untouched field — not overwritten by the assignee update.
+    // The module's own frontmatter owner ("c.barlow", seeded by SEED_FILES) is a separate, untouched field — not overwritten by the assignee update.
     assert.equal(context.owner, 'c.barlow')
 
     const listingRes = await fetch(`${base}/api/instances`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })
@@ -376,9 +346,7 @@ test('POST /api/instance/render/:artefact against an Azure-DevOps-backed instanc
     assert.equal(res.status, 200)
     const body = await res.json()
     assert.equal(body.artefact, 'soap')
-    // No local docxPath reported — the rendered artefact's real location is
-    // now the Azure DevOps repo it was rendered from, not a scratch path on
-    // whichever machine `gantry serve` happens to run on.
+    // No local docxPath reported — the rendered artefact's real location is now the Azure DevOps repo it was rendered from, not a scratch path on whichever machine `gantry serve` happens to run on.
     assert.equal(body.docxPath, undefined)
     assert.equal(body.azureDevOpsPath, 'gantry-workspace/my-initiative/out/soap.docx')
 

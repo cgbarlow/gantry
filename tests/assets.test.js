@@ -6,9 +6,7 @@ import { join } from 'node:path'
 import { createServer } from '../lib/server.js'
 import { createInstance } from '../lib/instance.js'
 
-// A minimal real 1x1 red PNG, base64-encoded — small enough to inline, real
-// enough to round-trip through the same file-write/serve path a genuine
-// upload takes.
+// A minimal real 1x1 red PNG, base64-encoded — small enough to inline, real enough to round-trip through the same file-write/serve path a genuine upload takes.
 const ONE_PX_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
@@ -204,9 +202,7 @@ test('an asset referenced via the asset:<id> convention from a module\'s markdow
       })
       created = await uploadRes.json()
 
-      // Hand-typing the reference convention directly into a module's
-      // markdown (rather than going through the insert modal) must be
-      // picked up by the usage computation identically.
+      // Hand-typing the reference convention directly into a module's markdown (rather than going through the insert modal) must be picked up by the usage computation identically.
       const putRes = await fetch(`${base}/api/instance/modules/context`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },

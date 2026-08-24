@@ -1,20 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-// The client-side credential store's workspace-keyed generalization (#104):
-// a global default PAT (unchanged behavior from before this ticket) plus
-// per-workspace overrides that take precedence over it. `web/lib/
-// credential.js` is plain ESM with no DOM dependency beyond a guarded
-// `localStorage` access (absent under plain `node --test`, exactly like
-// `web/lib/validateRepo.js`'s own direct-import unit tests) — so its
-// deterministic resolution logic is covered directly here, with the
-// reactive PAT-prompt/Settings-UI integration left to
-// tests/patPrompt.playwright.test.js and tests/settings.playwright.test.js,
-// which need a real browser.
+// The client-side credential store's workspace-keyed generalization (#104): a global default PAT (unchanged behavior from before this ticket) plus per-workspace overrides that take precedence over it. `web/lib/credential.js` is plain ESM with no DOM dependency beyond a guarded `localStorage` access (absent under plain `node --test`, exactly like `web/lib/validateRepo.js`'s own direct-import unit tests) — so its deterministic resolution logic is covered directly here, with the reactive PAT-prompt/Settings-UI integration left to tests/patPrompt.playwright.test.js and tests/settings.playwright.test.js, which need a real browser.
 //
-// `credential.js` holds module-level signal state, so each test imports it
-// fresh (a new module instance, via a cache-busting query string) rather
-// than sharing state across tests in this file.
+// `credential.js` holds module-level signal state, so each test imports it fresh (a new module instance, via a cache-busting query string) rather than sharing state across tests in this file.
 async function freshCredentialModule() {
   return import(`../web/lib/credential.js?t=${Math.random()}`)
 }
@@ -23,8 +12,7 @@ test('patForWorkspace falls back to the global default when no workspace-specifi
   const { setPat, patForWorkspace } = await freshCredentialModule()
   setPat('global-default-pat')
   assert.equal(patForWorkspace('workspace-a'), 'global-default-pat')
-  // A falsy workspaceId (a local instance, or no workspace context at all)
-  // resolves the same way.
+  // A falsy workspaceId (a local instance, or no workspace context at all) resolves the same way.
   assert.equal(patForWorkspace(null), 'global-default-pat')
   assert.equal(patForWorkspace(undefined), 'global-default-pat')
 })
@@ -127,13 +115,7 @@ test('clearPat clears only the global default, leaving workspace overrides untou
 })
 
 // ---------- requestPat/resolvePromptWith: workspace-aware prompt resolution ----------
-// A review pass on #104 flagged the original version of this orchestration
-// as entirely workspace-unaware: whatever the architect submitted always
-// became the global default, even when the 401 that triggered the prompt
-// came from a workspace whose *own* override was the thing actually
-// rejected — silently leaving that stale override in place and dooming the
-// very next retry to fail the same way. These tests exercise the fix
-// directly against the module's real signal state (no browser needed).
+// A review pass on #104 flagged the original version of this orchestration as entirely workspace-unaware: whatever the architect submitted always became the global default, even when the 401 that triggered the prompt came from a workspace whose *own* override was the thing actually rejected — silently leaving that stale override in place and dooming the very next retry to fail the same way. These tests exercise the fix directly against the module's real signal state (no browser needed).
 
 test('requestPat/resolvePromptWith: repairs an existing workspace override, rather than creating/overwriting the global default, when that override is what the prompt was opened for', async () => {
   const { setPat, setWorkspacePatOverride, requestPat, resolvePromptWith, patForWorkspace } = await freshCredentialModule()
@@ -153,16 +135,13 @@ test('requestPat/resolvePromptWith: repairs an existing workspace override, rath
 test('requestPat/resolvePromptWith: sets the global default (not a new override) when the target workspace has no override of its own yet — the common case', async () => {
   const { requestPat, resolvePromptWith, patForWorkspace, hasWorkspacePatOverride } = await freshCredentialModule()
 
-  // No PAT at all yet for workspace-a — the same "first-time setup" case
-  // every pre-#104 test already exercised.
+  // No PAT at all yet for workspace-a — the same "first-time setup" case every pre-#104 test already exercised.
   const granted = requestPat('workspace-a')
   resolvePromptWith('brand-new-pat')
   assert.equal(await granted, true)
 
   assert.equal(patForWorkspace('workspace-a'), 'brand-new-pat')
-  // Became the *global* default, not a workspace-specific override — every
-  // other workspace sees it too, and workspace-a has no override of its
-  // own recorded.
+  // Became the *global* default, not a workspace-specific override — every other workspace sees it too, and workspace-a has no override of its own recorded.
   assert.equal(patForWorkspace('workspace-b'), 'brand-new-pat')
   assert.equal(hasWorkspacePatOverride('workspace-a'), false)
 })
@@ -194,20 +173,14 @@ test('requestPat: concurrent callers share the single in-flight prompt, resolved
 
   // First caller opens the prompt for workspace-a (which has an override).
   const firstGranted = requestPat('workspace-a')
-  // A second, concurrent caller for a *different* workspace (no override of
-  // its own) joins the same already-open prompt rather than opening a
-  // second one — exactly the existing (pre-#104) sharing behavior.
+  // A second, concurrent caller for a *different* workspace (no override of its own) joins the same already-open prompt rather than opening a second one — exactly the existing (pre-#104) sharing behavior.
   const secondGranted = requestPat('workspace-b')
 
   resolvePromptWith('shared-pat')
   assert.equal(await firstGranted, true)
   assert.equal(await secondGranted, true)
 
-  // The submission was applied once, to whichever slot the *first* caller
-  // (the one that actually opened the prompt) determined — workspace-a's
-  // pre-existing override, not workspace-b (which never gets its own
-  // override created just by having called requestPat while a prompt was
-  // already open).
+  // The submission was applied once, to whichever slot the *first* caller (the one that actually opened the prompt) determined — workspace-a's pre-existing override, not workspace-b (which never gets its own override created just by having called requestPat while a prompt was already open).
   assert.equal(patForWorkspace('workspace-a'), 'shared-pat')
   assert.equal(patForWorkspace('workspace-b'), null)
 })

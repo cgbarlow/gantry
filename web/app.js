@@ -1,12 +1,4 @@
-// gantry's production UI entry point — Preact, delivered via HTM tagged
-// templates with no build step, per docs/adr/0006-preact-frontend-framework.md.
-// `preact-iso` provides the routing shell — the instance dashboard (#77) at
-// `/`, the module editor at `/instance/:slug`, the instance-setup wizard at
-// `/setup` (see web/pages/setup-wizard.js) — and `@preact/signals` holds
-// the instance-scoped state (the viewed slug and stage, the fetched
-// instance data) that's shared across the module editor screen's header,
-// nav, and module list, exactly as today's DOM version threaded a `stageId`
-// through a single re-render function.
+// gantry's production UI entry point — Preact, delivered via HTM tagged templates with no build step, per docs/adr/0006-preact-frontend-framework.md. `preact-iso` provides the routing shell — the instance dashboard (#77) at `/`, the module editor at `/instance/:slug`, the instance-setup wizard at `/setup` (see web/pages/setup-wizard.js) — and `@preact/signals` holds the instance-scoped state (the viewed slug and stage, the fetched instance data) that's shared across the module editor screen's header, nav, and module list, exactly as today's DOM version threaded a `stageId` through a single re-render function.
 import { html, render } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { signal, effect, batch } from '@preact/signals'
@@ -21,34 +13,19 @@ import { promptOpen, resolvePromptWith } from './lib/credential.js'
 import { apiFetch, apiFetchForInstance } from './lib/apiFetch.js'
 import { SetupWizardPage } from './pages/setup-wizard.js'
 import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage } from './pages/settings.js'
-// Two distinct "view mode" concepts collide on the same export names — the
-// dashboard's (#77) master-detail/swimlanes toggle and the module editor's
-// (#79) markdown/split/rendered toggle are unrelated signals that happen to
-// share a shape. The dashboard's is aliased here; the module editor's keeps
-// the bare names since it's used throughout the rest of this file.
+// Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79) markdown/split/rendered toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
 import { assetReference, resolveAssetRefs } from './lib/assetRefs.js'
 
 const md = new MarkdownIt()
 
-// The server always serves the real image bytes for an asset id, regardless
-// of which `asset:<id>` reference resolved to it — matches the other
-// single-instance routes' convention (defaulting to the server's startup
-// slug rather than requiring a `?slug=` the client doesn't otherwise track).
-// Known gap exposed by #77's multi-instance routing, not fixed by this
-// merge: this (and fetchAssets/uploadAsset below) still resolve against the
-// server's default startup instance regardless of which slug the module
-// editor is actually viewing — pre-existing from #80's single-instance-era
-// scope, worth its own follow-up ticket rather than silently expanding here.
+// The server always serves the real image bytes for an asset id, regardless of which `asset:<id>` reference resolved to it — matches the other single-instance routes' convention (defaulting to the server's startup slug rather than requiring a `?slug=` the client doesn't otherwise track). Known gap exposed by #77's multi-instance routing, not fixed by this merge: this (and fetchAssets/uploadAsset below) still resolve against the server's default startup instance regardless of which slug the module editor is actually viewing — pre-existing from #80's single-instance-era scope, worth its own follow-up ticket rather than silently expanding here.
 function assetFileUrl(assetId) {
   return `/api/instance/assets/${encodeURIComponent(assetId)}/file`
 }
 
-// `image` tokens whose src resolves to gantry's own asset-file route get an
-// `asset-thumb` class, so the Gate Ledger stylesheet can size/border an
-// inserted asset as a real thumbnail rather than an arbitrary inline image
-// (#80's "renders as an actual thumbnail" acceptance criterion).
+// `image` tokens whose src resolves to gantry's own asset-file route get an `asset-thumb` class, so the Gate Ledger stylesheet can size/border an inserted asset as a real thumbnail rather than an arbitrary inline image (#80's "renders as an actual thumbnail" acceptance criterion).
 const defaultImageRenderer = md.renderer.rules.image
 md.renderer.rules.image = (tokens, idx, options, env, self) => {
   const src = tokens[idx].attrGet('src') ?? ''
@@ -61,9 +38,7 @@ async function loadInstance(slug, stageId) {
   if (slug) params.set('slug', slug)
   if (stageId) params.set('stage', stageId)
   const qs = params.toString()
-  // `apiFetchForInstance` (not plain `apiFetch`) — this request may target
-  // a workspace with its own PAT override (#104), which must be resolved
-  // and attached before the first attempt, not just on a 401 retry.
+  // `apiFetchForInstance` (not plain `apiFetch`) — this request may target a workspace with its own PAT override (#104), which must be resolved and attached before the first attempt, not just on a 401 retry.
   const res = await apiFetchForInstance(slug, qs ? `/api/instance?${qs}` : '/api/instance')
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
@@ -103,33 +78,20 @@ function readFileAsBase64(file) {
   })
 }
 
-// `asset:<id>` references are resolved to the real, fetchable asset-file
-// URL before markdown-it ever sees the text — the *stored* markdown source
-// keeps the portable `asset:<id>` convention (see web/lib/assetRefs.js),
-// only the live preview's rendered HTML points at a real URL.
+// `asset:<id>` references are resolved to the real, fetchable asset-file URL before markdown-it ever sees the text — the *stored* markdown source keeps the portable `asset:<id>` convention (see web/lib/assetRefs.js), only the live preview's rendered HTML points at a real URL.
 function renderPreview(node, text) {
   if (!node) return
   node.innerHTML = DOMPurify.sanitize(md.render(resolveAssetRefs(text ?? '', assetFileUrl)))
 }
 
 // ---------- Instance-scoped state ----------
-// `currentSlug` is the instance the module editor route (`/instance/:slug`)
-// is currently mounted for. `viewedStage` mirrors the free-browse stage
-// switcher: the stage the form is currently displaying, distinct from the
-// instance's own persisted current stage until the user picks a different
-// one. `viewedStage` of `null` means "let the server default to the
-// instance's current stage" (the bootstrap case, on first load of a slug).
+// `currentSlug` is the instance the module editor route (`/instance/:slug`) is currently mounted for. `viewedStage` mirrors the free-browse stage switcher: the stage the form is currently displaying, distinct from the instance's own persisted current stage until the user picks a different one. `viewedStage` of `null` means "let the server default to the instance's current stage" (the bootstrap case, on first load of a slug).
 const currentSlug = signal(null)
 const viewedStage = signal(null)
 const instanceData = signal(null)
 const loadError = signal(null)
 
-// Fires only while a slug is actually pinned — i.e. while ModuleEditorPage
-// is mounted (see its own useEffect below) — not on every page load
-// regardless of route, so landing on a sibling route with no instance
-// pinned (e.g. /setup, the instance-setup wizard, #78, or the dashboard)
-// never fires this fetch or surfaces a spurious "no instance slug given"
-// failure.
+// Fires only while a slug is actually pinned — i.e. while ModuleEditorPage is mounted (see its own useEffect below) — not on every page load regardless of route, so landing on a sibling route with no instance pinned (e.g. /setup, the instance-setup wizard, #78, or the dashboard) never fires this fetch or surfaces a spurious "no instance slug given" failure.
 effect(() => {
   const slug = currentSlug.value
   if (!slug) return
@@ -144,21 +106,14 @@ effect(() => {
     })
 })
 
-// A Rendered-mode editor must be genuinely read-only (#79's acceptance
-// criteria: "no edits possible, none saved"), not just visually hidden by
-// CSS — `EditorState.readOnly` rejects direct-edit transactions and
-// `EditorView.editable` drops `contenteditable`, so neither typing nor
-// paste nor drag-drop can land a change while Rendered is active.
+// A Rendered-mode editor must be genuinely read-only (#79's acceptance criteria: "no edits possible, none saved"), not just visually hidden by CSS — `EditorState.readOnly` rejects direct-edit transactions and `EditorView.editable` drops `contenteditable`, so neither typing nor paste nor drag-drop can land a change while Rendered is active.
 function editableExtension(mode) {
   const editable = mode !== 'rendered'
   return [EditorState.readOnly.of(!editable), EditorView.editable.of(editable)]
 }
 
 // ---------- Markdown field ----------
-// EditorView.updateListener -> markdown-it -> DOMPurify -> sibling preview
-// pane, per docs/adr/0004-markdown-editor-codemirror.md. The CodeMirror
-// instance is the source of truth for the field's value, so getValue/setValue
-// read and write it directly rather than duplicating it into component state.
+// EditorView.updateListener -> markdown-it -> DOMPurify -> sibling preview pane, per docs/adr/0004-markdown-editor-codemirror.md. The CodeMirror instance is the source of truth for the field's value, so getValue/setValue read and write it directly rather than duplicating it into component state.
 function MarkdownField({ field, onRegister, onFocus }) {
   const hostRef = useRef(null)
   const previewRef = useRef(null)
@@ -179,17 +134,12 @@ function MarkdownField({ field, onRegister, onFocus }) {
     const view = new EditorView({ state, parent: hostRef.current })
     renderPreview(previewRef.current, field.value ?? '')
 
-    // Track the global view-mode signal for as long as this editor is
-    // mounted, so switching into/out of Rendered toggles read-only live —
-    // the ticket requires it enforced immediately, not just on next mount.
+    // Track the global view-mode signal for as long as this editor is mounted, so switching into/out of Rendered toggles read-only live — the ticket requires it enforced immediately, not just on next mount.
     const stopViewModeSync = effect(() => {
       view.dispatch({ effects: editableCompartment.reconfigure(editableExtension(viewMode.value)) })
     })
 
-    // Reports focus up to ModuleCard so its single, per-module
-    // "+ Insert asset" affordance (#80) knows which field's cursor to
-    // insert the reference at — the module's fields aren't otherwise
-    // tracked anywhere once mounted.
+    // Reports focus up to ModuleCard so its single, per-module "+ Insert asset" affordance (#80) knows which field's cursor to insert the reference at — the module's fields aren't otherwise tracked anywhere once mounted.
     function handleFocusIn() {
       onFocus?.()
     }
@@ -201,10 +151,7 @@ function MarkdownField({ field, onRegister, onFocus }) {
         view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text ?? '' } })
         renderPreview(previewRef.current, text ?? '')
       },
-      // Inserts an asset reference at the current cursor position (or over
-      // the current selection), on its own line — "clicking one inserts
-      // its reference at the trigger point" (#80). The preview updates via
-      // the same updateListener/docChanged path a normal edit takes.
+      // Inserts an asset reference at the current cursor position (or over the current selection), on its own line — "clicking one inserts its reference at the trigger point" (#80). The preview updates via the same updateListener/docChanged path a normal edit takes.
       insertAtCursor: (snippet) => {
         const { from, to } = view.state.selection.main
         const needsLeadingNewline = from > 0 && view.state.doc.sliceString(from - 1, from) !== '\n'
@@ -222,9 +169,7 @@ function MarkdownField({ field, onRegister, onFocus }) {
       stopViewModeSync()
       view.destroy()
     }
-    // One editor per mount — the enclosing stage screen remounts wholesale
-    // (keyed by stage id) on stage switch, matching the old full-rebuild
-    // behaviour, so this never needs to react to `field` changing in place.
+    // One editor per mount — the enclosing stage screen remounts wholesale (keyed by stage id) on stage switch, matching the old full-rebuild behaviour, so this never needs to react to `field` changing in place.
     // eslint-disable-next-line
   }, [])
 
@@ -294,10 +239,7 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
   const [status, setStatus] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const controlsRef = useRef([])
-  // Which field an inserted asset lands in: whichever markdown field the
-  // author last focused, defaulting to the module's first markdown field
-  // (a module may have none — all-list modules simply get no insert
-  // affordance at all, see hasMarkdownField below).
+  // Which field an inserted asset lands in: whichever markdown field the author last focused, defaulting to the module's first markdown field (a module may have none — all-list modules simply get no insert affordance at all, see hasMarkdownField below).
   const activeFieldIndexRef = useRef(mod.fields.findIndex((f) => f.type !== 'list'))
 
   async function handleSave() {
@@ -306,14 +248,7 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
       fields[field.id] = controlsRef.current[i].getValue()
     })
     setStatus('Saving…')
-    // `slug` is required here (not just `stage`) now that a server can host
-    // any number of instances at once with no fixed default (#88/#92) —
-    // without it, this PUT only ever resolved against whichever slug (if
-    // any) the server happened to be started with, silently 400ing for
-    // every other instance a multi-instance deployment serves. Surfaced by
-    // #94's own "Open instance ... allows editing end-to-end" acceptance
-    // criterion once a freshly adopted/created instance had no such
-    // server-pinned default to fall back on.
+    // `slug` is required here (not just `stage`) now that a server can host any number of instances at once with no fixed default (#88/#92) — without it, this PUT only ever resolved against whichever slug (if any) the server happened to be started with, silently 400ing for every other instance a multi-instance deployment serves. Surfaced by #94's own "Open instance ... allows editing end-to-end" acceptance criterion once a freshly adopted/created instance had no such server-pinned default to fall back on.
     const params = new URLSearchParams({ stage: stageId, slug: currentSlug.value })
     const res = await apiFetchForInstance(currentSlug.value, `/api/instance/modules/${mod.id}?${params}`, {
       method: 'PUT',
@@ -372,12 +307,7 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
 }
 
 // ---------- Insert-asset modal: Upload new / Choose existing ----------
-// Opened by a module's "+ Insert asset" affordance (hidden in Rendered-only
-// view, since that view is read-only — see ModuleCard). Ported from
-// Variant A of web/prototypes/asset-insertion.prototype.html (#73), the
-// variant #74 locked in: a modal with two tabs, the "Upload new" tab
-// blocked by an inline error until both the file and the mandatory
-// source-location field are valid.
+// Opened by a module's "+ Insert asset" affordance (hidden in Rendered-only view, since that view is read-only — see ModuleCard). Ported from Variant A of web/prototypes/asset-insertion.prototype.html (#73), the variant #74 locked in: a modal with two tabs, the "Upload new" tab blocked by an inline error until both the file and the mandatory source-location field are valid.
 function AssetInsertModal({ onInsert, onClose }) {
   const [tab, setTab] = useState('upload')
   const [file, setFile] = useState(null)
@@ -515,9 +445,7 @@ function AssetInsertModal({ onInsert, onClose }) {
 }
 
 // ---------- Asset library screen ----------
-// A new instance-level screen (#80): every asset registered against this
-// instance as a thumbnail-grid card, each flagged USED IN N / UNUSED so
-// orphaned assets are visible without opening every module.
+// A new instance-level screen (#80): every asset registered against this instance as a thumbnail-grid card, each flagged USED IN N / UNUSED so orphaned assets are visible without opening every module.
 function AssetLibraryPage() {
   const [assets, setAssets] = useState(null)
   const [error, setError] = useState('')
@@ -576,17 +504,13 @@ function RenderDialog({ instance, onClose }) {
   async function handleRender(artefact) {
     setRenderingId(artefact.id)
     setStatus('Rendering…')
-    // See ModuleCard's handleSave for why `?slug=` is required here now —
-    // the same gap, for the module editor's own "Render" action.
+    // See ModuleCard's handleSave for why `?slug=` is required here now — the same gap, for the module editor's own "Render" action.
     const slug = currentSlug.value
     const res = await apiFetchForInstance(slug, `/api/instance/render/${artefact.id}?slug=${encodeURIComponent(slug)}`, {
       method: 'POST',
     })
     const body = await res.json()
-    // Azure-DevOps-backed instances report `azureDevOpsPath` (where the
-    // pandoc-rendered .docx was pushed back to, in the same repo the rest
-    // of the instance's data lives in); local instances report `docxPath`
-    // (a path on the machine running `gantry serve`).
+    // Azure-DevOps-backed instances report `azureDevOpsPath` (where the pandoc-rendered .docx was pushed back to, in the same repo the rest of the instance's data lives in); local instances report `docxPath` (a path on the machine running `gantry serve`).
     setStatus(
       res.ok
         ? `Rendered to ${body.azureDevOpsPath ?? body.docxPath}`
@@ -637,19 +561,7 @@ function RenderDialog({ instance, onClose }) {
 }
 
 // ---------- Azure DevOps work-item link + confirmed gate-pass sync (#103) ----------
-// One instance-level panel, shown once per stage screen (below the modules —
-// see StageScreen; Render itself moved to the view-toggle bar, #114) rather
-// than in AppHeader, since "which stage's work item" is stage-scoped even
-// though the *link* itself is instance-level. Unlinked: a small inline form
-// (organization/project/parent work item id/type) posts to POST
-// /api/instance/work-items/link.
-// Linked: shows the parent id and this stage's own child work item id, plus
-// a "Check gate & sync" action that runs the existing check first and only
-// opens the confirm-before-push modal (mirroring PatPromptModal's shape)
-// if the gate genuinely passes — declining it (or the gate failing) never
-// calls POST /api/instance/work-items/sync at all, so the work item's state
-// is left exactly as it was (#103's "declining leaves the work item's state
-// unchanged" acceptance criterion).
+// One instance-level panel, shown once per stage screen (below the modules — see StageScreen; Render itself moved to the view-toggle bar, #114) rather than in AppHeader, since "which stage's work item" is stage-scoped even though the *link* itself is instance-level. Unlinked: a small inline form (organization/project/parent work item id/type) posts to POST /api/instance/work-items/link. Linked: shows the parent id and this stage's own child work item id, plus a "Check gate & sync" action that runs the existing check first and only opens the confirm-before-push modal (mirroring PatPromptModal's shape) if the gate genuinely passes — declining it (or the gate failing) never calls POST /api/instance/work-items/sync at all, so the work item's state is left exactly as it was (#103's "declining leaves the work item's state unchanged" acceptance criterion).
 function WorkItemPanel({ instance }) {
   const [status, setStatus] = useState('')
   const [confirming, setConfirming] = useState(false)
@@ -693,10 +605,7 @@ function WorkItemPanel({ instance }) {
     }
   }
 
-  // "Check gate & sync": runs the same check the dashboard's own Check
-  // action does — only once it genuinely PASSes does this open the confirm
-  // modal; a FAIL (or a check-request failure) reports status and stops
-  // there, exactly as if no linked work item existed at all.
+  // "Check gate & sync": runs the same check the dashboard's own Check action does — only once it genuinely PASSes does this open the confirm modal; a FAIL (or a check-request failure) reports status and stops there, exactly as if no linked work item existed at all.
   async function handleCheckAndMaybeConfirm() {
     setStatus('Checking gate…')
     const res = await apiFetch(`/api/instance/check?slug=${encodeURIComponent(currentSlug.value)}`)
@@ -907,12 +816,7 @@ function AdvanceStagePanel({ instance }) {
 }
 
 // ---------- The viewed stage's whole screen: modules + work-item panel ----------
-// Keyed by stage id from the parent (see ModuleEditorPage) so switching
-// stages remounts this wholesale — fresh CodeMirror instances, matching the
-// old full-DOM-rebuild behaviour. "Clear all fields" and "Render" now live
-// in the view-toggle bar (see ViewModeToolbar, ModuleEditorPage) rather than
-// here, so the field registry they depend on is owned by ModuleEditorPage
-// instead — `onFieldRegistered` is threaded straight through.
+// Keyed by stage id from the parent (see ModuleEditorPage) so switching stages remounts this wholesale — fresh CodeMirror instances, matching the old full-DOM-rebuild behaviour. "Clear all fields" and "Render" now live in the view-toggle bar (see ViewModeToolbar, ModuleEditorPage) rather than here, so the field registry they depend on is owned by ModuleEditorPage instead — `onFieldRegistered` is threaded straight through.
 function StageScreen({ instance, onFieldRegistered }) {
   return html`
     <main id="modules" data-view-mode=${viewMode.value}>
@@ -933,10 +837,7 @@ function StageScreen({ instance, onFieldRegistered }) {
 }
 
 // ---------- View-mode toolbar: Markdown/Split/Rendered segmented control ----------
-// One toolbar for the whole editor screen (see web/lib/viewMode.js) — sits
-// below AppHeader, above the viewed stage's screen, and (like AppHeader) is
-// never remounted by a stage switch, so `viewMode` reads back the same
-// value the author left it in after navigating fields/modules/stages.
+// One toolbar for the whole editor screen (see web/lib/viewMode.js) — sits below AppHeader, above the viewed stage's screen, and (like AppHeader) is never remounted by a stage switch, so `viewMode` reads back the same value the author left it in after navigating fields/modules/stages.
 const VIEW_MODE_LABELS = { markdown: 'Markdown', split: 'Split', rendered: 'Rendered' }
 const VIEW_MODE_HOTKEY = { ctrlKey: true, shiftKey: true, key: 'v' }
 
@@ -950,10 +851,7 @@ function ViewModeToolbar({ instance, onClearAllFields }) {
     function onKeyDown(e) {
       if (e.key.toLowerCase() !== VIEW_MODE_HOTKEY.key) return
       if (e.ctrlKey !== VIEW_MODE_HOTKEY.ctrlKey || e.shiftKey !== VIEW_MODE_HOTKEY.shiftKey) return
-      // Fires even while a CodeMirror editor or other field has focus —
-      // it's a distinctive combo unlikely to collide with normal editing,
-      // and the ticket asks for a hotkey that cycles the whole screen's
-      // view regardless of what the author was just doing.
+      // Fires even while a CodeMirror editor or other field has focus — it's a distinctive combo unlikely to collide with normal editing, and the ticket asks for a hotkey that cycles the whole screen's view regardless of what the author was just doing.
       e.preventDefault()
       cycleViewMode()
     }
@@ -1237,23 +1135,7 @@ function AppHeader({ instance }) {
 }
 
 // ---------- Page: composes header + the viewed stage's screen ----------
-// `slug` arrives as a route param from `/instance/:slug` (preact-iso passes
-// matched params as top-level props). Re-pins the shared instance-scoped
-// signals to this slug on mount and whenever the route's slug changes —
-// e.g. following an "Open editor" link (#102 — this screen used to call
-// that link "Open workspace", renamed to avoid colliding with the
-// Workspace entity, #96) from one instance straight to another without an
-// intervening full page load — clearing the previous
-// instance's stale data first so it's never shown against the new slug.
-// `batch()` matters here: without it, `currentSlug.value = slug` alone
-// fires the instance-loading effect below (it's already subscribed to
-// `currentSlug`) using whatever `viewedStage` was still left over from the
-// instance just navigated away from — a stage that may not even be this
-// new instance's current one — before the very next line resets it. That
-// fires a real, wasted request for the wrong stage, whose response can
-// race the correct one. Batching applies all four writes as one update, so
-// the effect runs exactly once, with the new slug and `viewedStage: null`
-// together.
+// `slug` arrives as a route param from `/instance/:slug` (preact-iso passes matched params as top-level props). Re-pins the shared instance-scoped signals to this slug on mount and whenever the route's slug changes — e.g. following an "Open editor" link (#102 — this screen used to call that link "Open workspace", renamed to avoid colliding with the Workspace entity, #96) from one instance straight to another without an intervening full page load — clearing the previous instance's stale data first so it's never shown against the new slug. `batch()` matters here: without it, `currentSlug.value = slug` alone fires the instance-loading effect below (it's already subscribed to `currentSlug`) using whatever `viewedStage` was still left over from the instance just navigated away from — a stage that may not even be this new instance's current one — before the very next line resets it. That fires a real, wasted request for the wrong stage, whose response can race the correct one. Batching applies all four writes as one update, so the effect runs exactly once, with the new slug and `viewedStage: null` together.
 function ModuleEditorPage({ slug }) {
   useEffect(() => {
     batch(() => {
@@ -1302,17 +1184,7 @@ function ModuleEditorPage({ slug }) {
   `
 }
 
-// ============================================================
-// Workspaces landing page (#77, restructured by #102) — the landing screen
-// at `/`, titled "Workspaces". Two togglable views over the multi-instance
-// registry (`GET /api/instances`, #76): master-detail (default, grouping
-// instances by workspace — see groupInstancesByWorkspace above) and stage
-// swimlanes (still one chip per instance, ungrouped — the ticket's own
-// acceptance criteria describe the *list*, i.e. master-detail's list pane,
-// not this alternate view). The view choice is a persisted signal
-// (web/lib/dashboardView.js), not local state, so it survives remounting
-// this page and reloading the app.
-// ============================================================
+// ============================================================ Workspaces landing page (#77, restructured by #102) — the landing screen at `/`, titled "Workspaces". Two togglable views over the multi-instance registry (`GET /api/instances`, #76): master-detail (default, grouping instances by workspace — see groupInstancesByWorkspace above) and stage swimlanes (still one chip per instance, ungrouped — the ticket's own acceptance criteria describe the *list*, i.e. master-detail's list pane, not this alternate view). The view choice is a persisted signal (web/lib/dashboardView.js), not local state, so it survives remounting this page and reloading the app. ============================================================
 
 // `slug` is optional: the Workspaces landing page (DashboardPage) calls
 // this with none, since it has no single "current" workspace in mind and
@@ -1336,11 +1208,7 @@ async function loadInstances(slug) {
   return res.json()
 }
 
-// Registry `status` is only ever 'complete'/'incomplete' (the current
-// stage's requirements) — a different, coarser vocabulary than a module's
-// own draft/review/agreed frontmatter status. Reuses the same `.stamp`
-// tokens (agreed = done, draft = still in progress) rather than inventing
-// a third visual language, since the Gate Ledger only defines those three.
+// Registry `status` is only ever 'complete'/'incomplete' (the current stage's requirements) — a different, coarser vocabulary than a module's own draft/review/agreed frontmatter status. Reuses the same `.stamp` tokens (agreed = done, draft = still in progress) rather than inventing a third visual language, since the Gate Ledger only defines those three.
 function statusStampClass(status) {
   return status === 'complete' ? 'agreed' : 'draft'
 }
@@ -1378,10 +1246,7 @@ function EmptyState() {
   `
 }
 
-// Runs an instance's Check or Render action against the registry-listing
-// API's slug (not the module editor's shared signals, which only track
-// whichever single instance is currently open) — the dashboard can trigger
-// either action for any listed instance without navigating away from it.
+// Runs an instance's Check or Render action against the registry-listing API's slug (not the module editor's shared signals, which only track whichever single instance is currently open) — the dashboard can trigger either action for any listed instance without navigating away from it.
 async function runCheck(slug) {
   const res = await apiFetchForInstance(slug, `/api/instance/check?slug=${encodeURIComponent(slug)}`)
   const body = await res.json()
@@ -1405,11 +1270,7 @@ async function runRender(slug) {
   return results.join(' · ')
 }
 
-// Persists the instance record's own stored `assignee` (#97) — the instance
-// detail pane's edit affordance for it, distinct from `PUT
-// /api/instance/modules/:id`'s module-level `owner` (the untouched Design
-// Authority sign-off convention). Not routed through ModuleCard's per-module
-// save flow: this is instance-scoped, not module-scoped.
+// Persists the instance record's own stored `assignee` (#97) — the instance detail pane's edit affordance for it, distinct from `PUT /api/instance/modules/:id`'s module-level `owner` (the untouched Design Authority sign-off convention). Not routed through ModuleCard's per-module save flow: this is instance-scoped, not module-scoped.
 async function saveAssignee(slug, assignee) {
   const res = await apiFetch(`/api/instance/assignee?slug=${encodeURIComponent(slug)}`, {
     method: 'PUT',
@@ -1424,15 +1285,7 @@ async function saveAssignee(slug, assignee) {
 }
 
 // ---------- Grouping instances by workspace (#102) ----------
-// The Workspaces landing page's core grouping rule: an Azure-DevOps-backed
-// row carries a `workspace` (lib/registry.js, #102) — every instance
-// sharing that workspace's `id` groups into one row, one entry per
-// workspace, per the ticket's acceptance criteria. A local instance has no
-// `workspace` at all (Workspace is an Azure-DevOps-repo concept only,
-// #96) — it groups on its own, keyed by its own slug, so a repo (or local
-// instance) holding just one instance still renders through the exact
-// same group shape as one holding several — nothing here special-cases a
-// single-instance group.
+// The Workspaces landing page's core grouping rule: an Azure-DevOps-backed row carries a `workspace` (lib/registry.js, #102) — every instance sharing that workspace's `id` groups into one row, one entry per workspace, per the ticket's acceptance criteria. A local instance has no `workspace` at all (Workspace is an Azure-DevOps-repo concept only, #96) — it groups on its own, keyed by its own slug, so a repo (or local instance) holding just one instance still renders through the exact same group shape as one holding several — nothing here special-cases a single-instance group.
 function groupInstancesByWorkspace(instances) {
   const groups = new Map()
   for (const inst of instances) {
@@ -1450,39 +1303,24 @@ function groupInstancesByWorkspace(instances) {
   return [...groups.values()].sort((a, b) => a.title.localeCompare(b.title))
 }
 
-// The list-pane row's secondary line — deliberately the same shape whether
-// the group holds one instance or several (count · distinct definitions),
-// rather than branching into a one-off "single instance" format, so a
-// single-instance workspace is never visually singled out from a
-// multi-instance one (the ticket's own "no special-casing visible to the
-// user" acceptance criterion).
+// The list-pane row's secondary line — deliberately the same shape whether the group holds one instance or several (count · distinct definitions), rather than branching into a one-off "single instance" format, so a single-instance workspace is never visually singled out from a multi-instance one (the ticket's own "no special-casing visible to the user" acceptance criterion).
 function groupSummaryText(group) {
   const definitions = [...new Set(group.instances.map((inst) => inst.definition))]
   const count = group.instances.length
   return `${count} instance${count === 1 ? '' : 's'} · ${definitions.join(', ')}`
 }
 
-// A group's dot in the list pane reflects every one of its instances being
-// complete, not just the first — a multi-instance workspace with even one
-// outstanding instance is "in progress" as a whole.
+// A group's dot in the list pane reflects every one of its instances being complete, not just the first — a multi-instance workspace with even one outstanding instance is "in progress" as a whole.
 function groupStatusClass(group) {
   return group.instances.every((inst) => inst.status === 'complete') ? 'agreed' : 'draft'
 }
 
 // ---------- Master-detail view ----------
-// The Workspaces landing page's default view (#102, superseding #77's
-// flat per-instance listing): the list pane shows one row per workspace
-// (groupInstancesByWorkspace above); selecting one shows every instance it
-// holds in the detail pane, each its own card with definition/assignee/
-// status and the same Check/Render/Open-editor actions the old flat list
-// offered per instance.
+// The Workspaces landing page's default view (#102, superseding #77's flat per-instance listing): the list pane shows one row per workspace (groupInstancesByWorkspace above); selecting one shows every instance it holds in the detail pane, each its own card with definition/assignee/status and the same Check/Render/Open-editor actions the old flat list offered per instance.
 function MasterDetailView({ instances, onInstancesChange }) {
   const [filter, setFilter] = useState('')
   const [selectedKey, setSelectedKey] = useState(null)
-  // Keyed by instance slug (not the single shared string the old flat
-  // list used) — several instances can be in flight for the *same*
-  // selected workspace at once (one Check, one Render, one assignee save),
-  // and each must report its own status independently.
+  // Keyed by instance slug (not the single shared string the old flat list used) — several instances can be in flight for the *same* selected workspace at once (one Check, one Render, one assignee save), and each must report its own status independently.
   const [actionStatus, setActionStatus] = useState({})
   const [assigneeDrafts, setAssigneeDrafts] = useState({})
   const [assigneeStatus, setAssigneeStatus] = useState({})
@@ -1504,11 +1342,7 @@ function MasterDetailView({ instances, onInstancesChange }) {
   const effectiveKey = filtered.some((group) => group.key === selectedKey) ? selectedKey : (filtered[0]?.key ?? null)
   const selectedGroup = groups.find((group) => group.key === effectiveKey) ?? null
 
-  // Resets every instance-scoped edit/action state whenever the selected
-  // workspace changes — never while it's still the same workspace (that
-  // would clobber an in-progress edit or Check/Render status on every
-  // unrelated `instances` refresh), and seeds the assignee drafts from the
-  // newly-selected workspace's own instances.
+  // Resets every instance-scoped edit/action state whenever the selected workspace changes — never while it's still the same workspace (that would clobber an in-progress edit or Check/Render status on every unrelated `instances` refresh), and seeds the assignee drafts from the newly-selected workspace's own instances.
   useEffect(() => {
     setActionStatus({})
     setAssigneeStatus({})
@@ -1626,9 +1460,7 @@ function MasterDetailView({ instances, onInstancesChange }) {
 }
 
 // ---------- Stage-swimlane view ----------
-// One overflow menu open at a time, closed by clicking anywhere else in the
-// lanes (the wrapping onClick resets it; the menu button itself stops
-// propagation so opening/toggling it doesn't immediately re-close it).
+// One overflow menu open at a time, closed by clicking anywhere else in the lanes (the wrapping onClick resets it; the menu button itself stops propagation so opening/toggling it doesn't immediately re-close it).
 function SwimlaneChip({ instance, menuOpen, onToggleMenu, onAction }) {
   return html`
     <div class=${'chip' + (menuOpen ? ' menu-open' : '')}>
@@ -1788,12 +1620,7 @@ function DashboardPage() {
 }
 
 // ---------- Azure DevOps PAT prompt (#87) ----------
-// Rendered globally (see App() below) rather than scoped to any one screen —
-// `apiFetch` (web/lib/apiFetch.js) opens it (via `requestPat()`) the moment
-// *any* request against gantry's own API comes back with the structured
-// "authentication required" response, regardless of which route triggered
-// it. Local instances never produce that response, so this never opens for
-// them — nothing here checks "is this instance local" itself.
+// Rendered globally (see App() below) rather than scoped to any one screen — `apiFetch` (web/lib/apiFetch.js) opens it (via `requestPat()`) the moment *any* request against gantry's own API comes back with the structured "authentication required" response, regardless of which route triggered it. Local instances never produce that response, so this never opens for them — nothing here checks "is this instance local" itself.
 function PatPromptModal() {
   const [value, setValue] = useState('')
   const [error, setError] = useState('')
@@ -1848,15 +1675,7 @@ function PatPromptModal() {
 }
 
 // ---------- App shell: preact-iso routing ----------
-// Eight routes: the dashboard (#77, default/landing), the module editor per
-// instance, the instance-setup wizard (#78), the asset library (#80), and
-// three tab-free Settings screens (#107, superseding #101/#104's single
-// tabbed `/settings`) — Global Settings, Workspace Settings (scoped to one
-// instance's own workspace), and Instance Settings (assignee, read-only
-// instance info, read-only work-item link details). `instanceData`/
-// `loadError` above are populated regardless of which route is active (the
-// `effect()` isn't scoped to a component), so the library screen never has
-// to re-fetch instance data just to know which instance it's browsing.
+// Eight routes: the dashboard (#77, default/landing), the module editor per instance, the instance-setup wizard (#78), the asset library (#80), and three tab-free Settings screens (#107, superseding #101/#104's single tabbed `/settings`) — Global Settings, Workspace Settings (scoped to one instance's own workspace), and Instance Settings (assignee, read-only instance info, read-only work-item link details). `instanceData`/`loadError` above are populated regardless of which route is active (the `effect()` isn't scoped to a component), so the library screen never has to re-fetch instance data just to know which instance it's browsing.
 function App() {
   return html`
     <${LocationProvider}>

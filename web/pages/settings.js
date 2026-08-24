@@ -1,20 +1,6 @@
-// Settings screens (#107): three separate, tab-free top-level routes —
-// `/settings` (Global Settings), `/settings/workspace` (Workspace Settings,
-// scoped to one instance's own workspace) and `/settings/instance`
-// (Instance Settings, new) — replacing #101/#104's single tabbed `/settings`
-// shell (Global Defaults tab + a Workspace overrides tab listing every
-// registered workspace). That tabbed shell is gone entirely, not merely
-// hidden: no Settings screen has tabs any more, and there is no longer any
-// screen that lists every workspace at once — Workspace Settings shows only
-// the one workspace behind whichever instance it was opened for.
+// Settings screens (#107): three separate, tab-free top-level routes — `/settings` (Global Settings), `/settings/workspace` (Workspace Settings, scoped to one instance's own workspace) and `/settings/instance` (Instance Settings, new) — replacing #101/#104's single tabbed `/settings` shell (Global Defaults tab + a Workspace overrides tab listing every registered workspace). That tabbed shell is gone entirely, not merely hidden: no Settings screen has tabs any more, and there is no longer any screen that lists every workspace at once — Workspace Settings shows only the one workspace behind whichever instance it was opened for.
 //
-// Every screen here takes an explicit `from` query param (the path Settings
-// was actually opened from) and its back control returns there — never via
-// browser history — falling back to Home (`/`) when `from` is absent (a
-// direct/bookmarked URL). `preact-iso` hands a matched route's query string
-// straight through as a `query` prop (see its own `exec`/`Router`), so every
-// page component below reads `query.from`/`query.slug` directly rather than
-// re-parsing `location.search` itself.
+// Every screen here takes an explicit `from` query param (the path Settings was actually opened from) and its back control returns there — never via browser history — falling back to Home (`/`) when `from` is absent (a direct/bookmarked URL). `preact-iso` hands a matched route's query string straight through as a `query` prop (see its own `exec`/`Router`), so every page component below reads `query.from`/`query.slug` directly rather than re-parsing `location.search` itself.
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { theme, cycleTheme } from '../lib/theme.js'
@@ -62,11 +48,9 @@ function backHrefFrom(query) {
 }
 
 // ---------- Global Settings (`/settings`) ----------
-// The exact same PAT-management and default-ticketing-system content
-// #101's old Global Defaults tab held — moved here wholesale, now the
-// entire screen rather than one tab among others. Reached directly (no
-// intermediate step) from Home, and via the instance screen's Settings
-// dropdown.
+// The exact same PAT-management and default-ticketing-system content #101's old Global Defaults tab held — moved here wholesale, now the entire screen rather than one tab among others. Reached directly (no intermediate step) from Home, and via the instance screen's Settings dropdown.
+//
+// The default PAT this section manages is the exact same one web/lib/credential.js already held (and web/app.js's per-instance editor header used to expose) — moved here wholesale, not reimplemented. A third state this section adds beyond "replace"/"clear" (which assumed a PAT already existed): a first-time "Set" action, since this is now the *only* place a PAT can be entered ahead of any 401 ever prompting for one.
 function GlobalPatSection() {
   return html`
     <section class="settings-section">
@@ -171,21 +155,13 @@ async function patchWorkspace(id, updates) {
   return body
 }
 
-// The standard `https://dev.azure.com/{organization}/{project}/_git/{repository}`
-// shape — the reverse of web/lib/validateRepo.js's `parseRepoUrl` — with
-// `baseUrl` (an on-premises Azure DevOps Server location) substituted in
-// place of `https://dev.azure.com` when a workspace carries one.
+// The standard `https://dev.azure.com/{organization}/{project}/_git/{repository}` shape — the reverse of web/lib/validateRepo.js's `parseRepoUrl` — with `baseUrl` (an on-premises Azure DevOps Server location) substituted in place of `https://dev.azure.com` when a workspace carries one.
 function workspaceRepoUrl(workspace) {
   const base = workspace.baseUrl ?? 'https://dev.azure.com'
   return `${base}/${encodeURIComponent(workspace.organization)}/${encodeURIComponent(workspace.project)}/_git/${encodeURIComponent(workspace.repository)}`
 }
 
-// One workspace's editable fields: owner (server-persisted), a PAT
-// override (client-only, never touches the server), and a
-// ticketing-system override (server-persisted) — the same three fields
-// #104's old Workspace overrides tab exposed per row, now rendered for
-// exactly one workspace (the instance's own) rather than one row per
-// registered workspace.
+// One workspace's editable fields: owner (server-persisted), a PAT override (client-only, never touches the server), and a ticketing-system override (server-persisted) — the same three fields #104's old Workspace overrides tab exposed per row, now rendered for exactly one workspace (the instance's own) rather than one row per registered workspace.
 function WorkspaceEditor({ workspace, onUpdated }) {
   const [ownerDraft, setOwnerDraft] = useState(workspace.owner ?? '')
   const [ownerStatus, setOwnerStatus] = useState('')
@@ -193,11 +169,15 @@ function WorkspaceEditor({ workspace, onUpdated }) {
   const [patStatus, setPatStatus] = useState('')
   const [ticketingStatus, setTicketingStatus] = useState('')
 
+  // Keeps the owner draft in sync if this workspace's record is refreshed from elsewhere (e.g. a ticketing-system change on the same row calling `onUpdated` with the server's own merged record) — without this, a stale draft could silently overwrite a concurrent change on save.
   useEffect(() => {
     setOwnerDraft(workspace.owner ?? '')
   }, [workspace.owner])
 
   const hasPatOverride = hasWorkspacePatOverride(workspace.id)
+  // Known, low-risk gap (#104 review; re-assessed, not fixed here): this is a *heuristic* ("does this workspace's stored value currently differ from the global default"), not a stored "was this ever explicitly overridden" flag — the workspace registry (#96, unchanged by this ticket) always persists one concrete `ticketingSystem` value, with no distinct "unset, tracks the global default" state. In principle that means this label could drift out from under an untouched workspace if the global default ever changed to a different value later.
+  //
+  // In practice, today, it can't: `jira` is rejected by validation everywhere a ticketing system can be chosen (globally, per-workspace, and at workspace creation — see workspaceRegistry.js's `assertValidTicketingSystem` and this file's own `TICKETING_SYSTEMS` enum), so `defaultTicketingSystem.value` and every workspace's `ticketingSystem` can only ever be `'azure-devops'` — there is no reachable state where the two sides of this comparison differ. This only becomes a real, visible misreporting risk once genuine Jira support ships (explicitly out of scope for this ticket, per spec #95's own "Out of Scope" list) and a real fix (an explicit override flag on the workspace record, intersecting the already-closed #96 ticket's schema) is worth building then, against real second-system requirements, rather than speculatively now.
   const hasTicketingOverride = workspace.ticketingSystem !== defaultTicketingSystem.value
 
   async function handleSaveOwner() {

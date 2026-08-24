@@ -7,10 +7,7 @@ import { createServer } from '../lib/server.js'
 import { registerWorkspace } from '../lib/workspaceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
-// GET/POST /api/workspaces (#96): the HTTP-API-boundary half of the
-// workspace registry's own acceptance criteria — exercised as real HTTP
-// requests against a real running server, mirroring every other server
-// test in this suite.
+// GET/POST /api/workspaces (#96): the HTTP-API-boundary half of the workspace registry's own acceptance criteria — exercised as real HTTP requests against a real running server, mirroring every other server test in this suite.
 
 const ORGANIZATION = 'fake-org'
 const PROJECT = 'fake-project'
@@ -117,11 +114,7 @@ test('POST /api/workspaces with an azureDevOps.baseUrl reports 400 on a server t
 
 // ---------- POST /api/workspaces: requires proving real Azure DevOps access ----------
 //
-// Registering a workspace *establishes* an Azure DevOps location, exactly
-// as POST /api/instances and POST /api/instances/adopt already do — so,
-// like those routes, it must require the caller's own PAT and actually
-// verify it against the real location, not merely accept any caller's
-// say-so for an arbitrary organization/project/repository.
+// Registering a workspace *establishes* an Azure DevOps location, exactly as POST /api/instances and POST /api/instances/adopt already do — so, like those routes, it must require the caller's own PAT and actually verify it against the real location, not merely accept any caller's say-so for an arbitrary organization/project/repository.
 
 test('POST /api/workspaces with no PAT returns the structured "authentication required" response, and persists nothing', async () => {
   await withFakeAzureDevOpsServer(
@@ -163,9 +156,7 @@ test('POST /api/workspaces with a PAT Azure DevOps itself rejects returns the sa
           const body = await res.json()
           assert.equal(body.error, 'authentication_required')
 
-          // A caller who can't prove access to this org/project/repository
-          // must not be able to plant a workspace record (with a
-          // spoofed `owner`, for instance) for it.
+          // A caller who can't prove access to this org/project/repository must not be able to plant a workspace record (with a spoofed `owner`, for instance) for it.
           const listing = await (await fetch(`${base}/api/workspaces`)).json()
           assert.equal(listing.length, 0)
         }
@@ -294,10 +285,7 @@ test('adopting an instance at an Azure DevOps location already backing a registe
               body: JSON.stringify({ azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl } }),
             })
 
-          // Adopting the same location twice (the "come back and re-open
-          // it" case, already covered behaviorally by
-          // tests/serverAzureDevOpsAdopt.test.js) must not fragment one
-          // repo across two workspace ids.
+          // Adopting the same location twice (the "come back and re-open it" case, already covered behaviorally by tests/serverAzureDevOpsAdopt.test.js) must not fragment one repo across two workspace ids.
           assert.equal((await adopt()).status, 200)
           assert.equal((await adopt()).status, 200)
 

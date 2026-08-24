@@ -69,9 +69,7 @@ test('GET /api/instance?stage=<id> includes each field\'s example text from the 
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     createInstance('design', 'my-initiative', { instancesDir })
-    // stage.example resolves within the same instancesDir as the instance
-    // being browsed — mirroring how every instance lives side by side
-    // under the repo's real instances/ root.
+    // stage.example resolves within the same instancesDir as the instance being browsed — mirroring how every instance lives side by side under the repo's real instances/ root.
     cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
 
     await withRunningServer({ slug: 'my-initiative', instancesDir }, async (base) => {
@@ -82,8 +80,7 @@ test('GET /api/instance?stage=<id> includes each field\'s example text from the 
 
       const hldSubmission = body.modules.find((m) => m.id === 'hld-submission')
       const purpose = hldSubmission.fields.find((f) => f.id === 'purpose-statement')
-      // The new instance has no hld-define modules on disk yet — blank
-      // value, but a real example pulled from instances/examples/.
+      // The new instance has no hld-define modules on disk yet — blank value, but a real example pulled from instances/examples/.
       assert.equal(purpose.value, '')
       assert.match(purpose.example, /\S/)
     })
@@ -103,8 +100,7 @@ test('PUT /api/instance/modules/:id writes the same file format the CLI reads, a
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
-    // out/ isn't part of the module-file contract this endpoint touches, but drop it
-    // so the scratch copy mirrors a fresh instance rather than a previously-rendered one.
+    // out/ isn't part of the module-file contract this endpoint touches, but drop it so the scratch copy mirrors a fresh instance rather than a previously-rendered one.
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
@@ -140,9 +136,7 @@ test('PUT /api/instance/modules/:id writes the same file format the CLI reads, a
 test('PUT /api/instance/modules/:id?stage=<id> reports status against the browsed stage, not the instance\'s current one', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    // A freshly-created instance, not the fully-populated examples fixture —
-    // hld-submission genuinely doesn't exist on disk yet, so this proves the
-    // PUT can write a module belonging to a stage other than the current one.
+    // A freshly-created instance, not the fully-populated examples fixture — hld-submission genuinely doesn't exist on disk yet, so this proves the PUT can write a module belonging to a stage other than the current one.
     createInstance('design', 'my-initiative', { instancesDir })
 
     await withRunningServer({ slug: 'my-initiative', instancesDir }, async (base) => {
@@ -230,8 +224,7 @@ test('POST /api/instance/render/:artefact renders a real docx via the web form p
       const body = await res.json()
       assert.equal(body.artefact, 'soap')
       assert.match(body.docxPath, /out[/\\]soap\.docx$/)
-      // Absolute, not relative to wherever `gantry serve` happened to be
-      // launched from — the browser has no way to resolve a relative path.
+      // Absolute, not relative to wherever `gantry serve` happened to be launched from — the browser has no way to resolve a relative path.
       assert.equal(isAbsolute(body.docxPath), true)
       assert.ok(existsSync(body.docxPath))
     })
@@ -355,9 +348,7 @@ test('GET /api/instances lists every registered instance, without the server bei
     createInstance('design', 'zebra-initiative', { instancesDir })
     createInstance('design', 'alpha-initiative', { instancesDir, assignee: 'c.barlow' })
 
-    // No `slug` option at all — the server still starts and serves instance
-    // data via the listing endpoint, proving it no longer requires a single
-    // fixed slug at startup.
+    // No `slug` option at all — the server still starts and serves instance data via the listing endpoint, proving it no longer requires a single fixed slug at startup.
     await withRunningServer({ instancesDir }, async (base) => {
       const res = await fetch(`${base}/api/instances`)
       assert.equal(res.status, 200)
@@ -418,19 +409,12 @@ test('GET /api/instance with no slug given (no default, no query param) reports 
   }
 })
 
-// `slug` arrives from request input now (`?slug=<slug>`), not only a trusted
-// CLI argument at startup — these lock in that a path-traversal slug is
-// rejected before it ever reaches the filesystem, for every route that
-// resolves a slug per-request, rather than escaping `instancesDir`.
+// `slug` arrives from request input now (`?slug=<slug>`), not only a trusted CLI argument at startup — these lock in that a path-traversal slug is rejected before it ever reaches the filesystem, for every route that resolves a slug per-request, rather than escaping `instancesDir`.
 test('GET /api/instance?slug=<traversal> is rejected with 400, never reading outside instancesDir', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   const outsideDir = mkdtempSync(join(tmpdir(), 'gantry-outside-'))
   try {
-    // A real instance sitting just outside instancesDir — `traversalSlug` is
-    // the exact relative path from instancesDir to it (not merely a `../`
-    // prefix), so if the check below were absent, this is genuinely the
-    // directory `join(instancesDir, traversalSlug)` would resolve to and
-    // expose, not an arbitrary escape into an unrelated/nonexistent path.
+    // A real instance sitting just outside instancesDir — `traversalSlug` is the exact relative path from instancesDir to it (not merely a `../` prefix), so if the check below were absent, this is genuinely the directory `join(instancesDir, traversalSlug)` would resolve to and expose, not an arbitrary escape into an unrelated/nonexistent path.
     cpSync('instances/examples', join(outsideDir, 'examples'), { recursive: true })
     rmSync(join(outsideDir, 'examples', 'out'), { recursive: true, force: true })
     const traversalSlug = relative(instancesDir, join(outsideDir, 'examples'))
@@ -453,9 +437,7 @@ test('PUT /api/instance/modules/:id?slug=<traversal> is rejected with 400, never
   const outsideDir = mkdtempSync(join(tmpdir(), 'gantry-outside-'))
   try {
     createInstance('design', 'planted', { instancesDir: outsideDir })
-    // The exact relative path from instancesDir to the planted instance —
-    // if the check below were absent, this is genuinely where the write
-    // would land, not an arbitrary escape into an unrelated/nonexistent path.
+    // The exact relative path from instancesDir to the planted instance — if the check below were absent, this is genuinely where the write would land, not an arbitrary escape into an unrelated/nonexistent path.
     const traversalSlug = relative(instancesDir, join(outsideDir, 'planted'))
     assert.ok(traversalSlug.includes('/'), 'test setup sanity check: traversal slug must span directories')
 
@@ -572,23 +554,12 @@ test('POST /api/instances with an unknown definition reports 400, not 500', asyn
   }
 })
 
-// Regression test for a path-traversal hole found in review: `definition`
-// used to flow straight into `loadDefinition` (`join(definitionsDir,
-// definitionId)`) with no equivalent of `slug`'s isValidSlug guard, so a
-// `definition` value escaping `definitionsDir` (paired with a planted
-// `definition.yaml` whose own `id` field echoed the traversal string back)
-// could read, and fully register an instance against, an arbitrary
-// directory outside definitionsDir. `definition` must now exactly match one
-// of `listDefinitions()`'s real ids, so a traversal payload is rejected as
-// simply "unknown" before it ever reaches the filesystem.
+// Regression test for a path-traversal hole found in review: `definition` used to flow straight into `loadDefinition` (`join(definitionsDir, definitionId)`) with no equivalent of `slug`'s isValidSlug guard, so a `definition` value escaping `definitionsDir` (paired with a planted `definition.yaml` whose own `id` field echoed the traversal string back) could read, and fully register an instance against, an arbitrary directory outside definitionsDir. `definition` must now exactly match one of `listDefinitions()`'s real ids, so a traversal payload is rejected as simply "unknown" before it ever reaches the filesystem.
 test('POST /api/instances rejects a path-traversal "definition" outright, never reaching loadDefinition', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   const outsideDir = mkdtempSync(join(tmpdir(), 'gantry-outside-'))
   try {
-    // A real, well-formed definition planted just outside `definitionsDir`
-    // — if the traversal were still possible, this is genuinely what it
-    // would resolve to and successfully load, not an arbitrary/nonexistent
-    // escape.
+    // A real, well-formed definition planted just outside `definitionsDir` — if the traversal were still possible, this is genuinely what it would resolve to and successfully load, not an arbitrary/nonexistent escape.
     writeFileSync(
       join(outsideDir, 'definition.yaml'),
       'id: planted\ntitle: Planted outside definitionsDir\nstages: []\nartefacts: []\n'
@@ -635,11 +606,7 @@ test('POST /api/instances with an invalid slug reports 400, never reaching creat
 
 // ---------- POST /api/instances with an Azure DevOps location (#93) ----------
 //
-// Unlike tests/serverAzureDevOpsAuth.test.js (a server *started* already
-// pinned to one Azure DevOps location via `options.azureDevOps`), these
-// exercise the per-request location this ticket adds: a plain
-// `withRunningServer({ instancesDir })` server — no `options.azureDevOps`
-// at all — accepting an `azureDevOps` field in the POST body itself.
+// Unlike tests/serverAzureDevOpsAuth.test.js (a server *started* already pinned to one Azure DevOps location via `options.azureDevOps`), these exercise the per-request location this ticket adds: a plain `withRunningServer({ instancesDir })` server — no `options.azureDevOps` at all — accepting an `azureDevOps` field in the POST body itself.
 
 const ORGANIZATION = 'fake-org'
 const PROJECT = 'fake-project'
@@ -719,22 +686,12 @@ test('POST /api/instances with an Azure DevOps location missing required fields 
   }
 })
 
-// Security regression test: without an explicit server-level opt-in, a
-// caller-supplied `baseUrl` must never be honored — see createServer's own
-// doc comment on `allowAzureDevOpsBaseUrlOverride`. Before this guard
-// existed, any HTTP caller could register an Azure-DevOps-backed instance
-// pointing at a server *they* control; since `GET /api/instances` forwards
-// whatever PAT the *current* caller presents to every registered
-// Azure-DevOps-backed entry (to build the unified listing), that let one
-// caller register a location that silently exfiltrated every other
-// caller's real Azure DevOps PAT the next time anyone loaded the
-// dashboard.
+// Security regression test: without an explicit server-level opt-in, a caller-supplied `baseUrl` must never be honored — see createServer's own doc comment on `allowAzureDevOpsBaseUrlOverride`. Before this guard existed, any HTTP caller could register an Azure-DevOps-backed instance pointing at a server *they* control; since `GET /api/instances` forwards whatever PAT the *current* caller presents to every registered Azure-DevOps-backed entry (to build the unified listing), that let one caller register a location that silently exfiltrated every other caller's real Azure DevOps PAT the next time anyone loaded the dashboard.
 test('POST /api/instances with an azureDevOps.baseUrl reports 400 on a server that has not opted into allowAzureDevOpsBaseUrlOverride, and writes nothing', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT }, async (adoBaseUrl) => {
-      // Note: no `allowAzureDevOpsBaseUrlOverride` here — the default,
-      // and what any real deployment would run with.
+      // Note: no `allowAzureDevOpsBaseUrlOverride` here — the default, and what any real deployment would run with.
       await withRunningServer({ instancesDir }, async (base) => {
         const res = await fetch(`${base}/api/instances`, {
           method: 'POST',
@@ -762,11 +719,7 @@ test('POST /api/instances with a valid Azure DevOps location and PAT creates ins
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT }, async (adoBaseUrl) => {
-      // No `options.azureDevOps` at server startup — #93's whole point is
-      // that one running gantry server can register any number of
-      // Azure-DevOps-backed instances at once, chosen per request.
-      // `allowAzureDevOpsBaseUrlOverride` is a test-only opt-in (see
-      // createServer's doc comment) so this can point at the fake server.
+      // No `options.azureDevOps` at server startup — #93's whole point is that one running gantry server can register any number of Azure-DevOps-backed instances at once, chosen per request. `allowAzureDevOpsBaseUrlOverride` is a test-only opt-in (see createServer's doc comment) so this can point at the fake server.
       await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
         const res = await fetch(`${base}/api/instances`, {
           method: 'POST',
@@ -786,18 +739,13 @@ test('POST /api/instances with a valid Azure DevOps location and PAT creates ins
         assert.equal(created.stage, 'shape')
         assert.equal(created.status, 'incomplete')
         assert.equal(created.assignee, 'c.barlow')
-        // An Azure-DevOps-backed row carries its workspace (#96/#102) —
-        // auto-created for this organization/project/repository the
-        // moment the instance was registered against it.
+        // An Azure-DevOps-backed row carries its workspace (#96/#102) — auto-created for this organization/project/repository the moment the instance was registered against it.
         assert.equal(created.workspace.organization, ORGANIZATION)
         assert.equal(created.workspace.project, PROJECT)
         assert.equal(created.workspace.repository, REPOSITORY)
         assert.equal(typeof created.workspace.id, 'string')
 
-        // Verified directly against the fake Azure DevOps repo — exactly
-        // as createInstance's own Azure DevOps path already does when
-        // called directly (#85) — not just gantry's own idea of what it
-        // wrote.
+        // Verified directly against the fake Azure DevOps repo — exactly as createInstance's own Azure DevOps path already does when called directly (#85) — not just gantry's own idea of what it wrote.
         const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
         const instanceYaml = await client.getFileContent('gantry-workspace/remote-initiative/instance.yaml')
         assert.match(instanceYaml, /definition: design/)
@@ -810,9 +758,7 @@ test('POST /api/instances with a valid Azure DevOps location and PAT creates ins
           assert.match(moduleText, /owner: a-module-owner/)
         }
 
-        // Not just written to the fake repo — immediately resolvable and
-        // visible in the same server's own instance listing, with no
-        // instancesDir directory ever created for it locally.
+        // Not just written to the fake repo — immediately resolvable and visible in the same server's own instance listing, with no instancesDir directory ever created for it locally.
         assert.equal(existsSync(join(instancesDir, 'remote-initiative')), false)
 
         const listingRes = await fetch(`${base}/api/instances`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })
@@ -858,13 +804,7 @@ test('POST /api/instances with an Azure DevOps location that already has an inst
   }
 })
 
-// Regression test for a cross-backend slug-collision hole found in review:
-// createInstance's own "already exists" check only ever looks at the *one*
-// backend the current request is writing to, so registering a *new*
-// azureDevOps location under a slug some pre-existing *local* instance
-// already uses used to succeed (201) and silently overwrite that slug's
-// registry entry — orphaning the local instance's data (still on disk, but
-// no longer resolvable/listed).
+// Regression test for a cross-backend slug-collision hole found in review: createInstance's own "already exists" check only ever looks at the *one* backend the current request is writing to, so registering a *new* azureDevOps location under a slug some pre-existing *local* instance already uses used to succeed (201) and silently overwrite that slug's registry entry — orphaning the local instance's data (still on disk, but no longer resolvable/listed).
 test('POST /api/instances with an Azure DevOps location reusing a slug that already exists locally reports 409, and does not overwrite the registry entry', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
@@ -926,12 +866,7 @@ test('GET /api/instances without a PAT still lists local instances, simply omitt
   }
 })
 
-// Regression test for an availability hole found in review: one
-// unreachable/erroring Azure-DevOps-backed registry entry (a network
-// error, an outage, a renamed host) used to make `buildAzureDevOpsRow`
-// rethrow, which crashed the *entire* `GET /api/instances` response (a
-// 500) — hiding every other, including purely local, instance in the same
-// unified listing.
+// Regression test for an availability hole found in review: one unreachable/erroring Azure-DevOps-backed registry entry (a network error, an outage, a renamed host) used to make `buildAzureDevOpsRow` rethrow, which crashed the *entire* `GET /api/instances` response (a 500) — hiding every other, including purely local, instance in the same unified listing.
 test('GET /api/instances still lists local instances even when a registered Azure-DevOps-backed entry is completely unreachable', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
@@ -943,9 +878,7 @@ test('GET /api/instances still lists local instances even when a registered Azur
         organization: ORGANIZATION,
         project: PROJECT,
         repository: REPOSITORY,
-        // Nothing listens here — simulates a network error / outage
-        // talking to this one registered org, distinct from an
-        // authentication rejection.
+        // Nothing listens here — simulates a network error / outage talking to this one registered org, distinct from an authentication rejection.
         baseUrl: 'http://127.0.0.1:1',
       },
       { instancesDir }

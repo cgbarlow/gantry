@@ -52,12 +52,7 @@ test('creates a design instance with blank Shape-stage module files', () => {
 
 // --- Instance-level assignee (#97) ----------------------------------------
 //
-// An explicit, stored field on the instance record itself — replacing the
-// old "derive an owner by scanning the current stage's module frontmatter"
-// behaviour (now lib/registry.js/lib/repoCheck.js). Distinct from
-// `options.owner` above, which still only seeds each first-stage module
-// file's own frontmatter `owner` — the separate, untouched Design Authority
-// sign-off convention.
+// An explicit, stored field on the instance record itself — replacing the old "derive an owner by scanning the current stage's module frontmatter" behaviour (now lib/registry.js/lib/repoCheck.js). Distinct from `options.owner` above, which still only seeds each first-stage module file's own frontmatter `owner` — the separate, untouched Design Authority sign-off convention.
 
 test('createInstance defaults the instance record\'s assignee to empty', () => {
   withScratchInstances((instancesDir) => {
@@ -90,13 +85,7 @@ test('a hand-written instance.yaml that predates #97 (no assignee field at all) 
   })
 })
 
-// Regression test: `assignee`'s '' default must not paper over a genuinely
-// blank/malformed instance.yaml. `yaml.parse('')` returns `null` (not an
-// object), and naively spreading it (`{ assignee: '', ...null }`) would
-// silently turn that `null` into `{ assignee: '' }` — masking a read that
-// should fail immediately (the same way it always has) behind a
-// later, less clear error wherever the caller next uses the "successfully"
-// read instance (e.g. `loadDefinition` rejecting an `undefined` id).
+// Regression test: `assignee`'s '' default must not paper over a genuinely blank/malformed instance.yaml. `yaml.parse('')` returns `null` (not an object), and naively spreading it (`{ assignee: '', ...null }`) would silently turn that `null` into `{ assignee: '' }` — masking a read that should fail immediately (the same way it always has) behind a later, less clear error wherever the caller next uses the "successfully" read instance (e.g. `loadDefinition` rejecting an `undefined` id).
 test('readInstance returns null (not a default-filled object) for a blank instance.yaml, the same as before #97', () => {
   withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
@@ -130,10 +119,7 @@ test('updateInstanceAssignee can clear a previously set assignee back to \'\'', 
 test('assignee stays stable across a stage change — updating stage does not touch or clear it', () => {
   withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir, assignee: 'c.barlow' })
-    // No real "advance a stage" API exists yet (#97's own investigation
-    // found none) — this simulates a stage transition the way one would
-    // actually land today, a direct instance.yaml edit, to prove assignee
-    // isn't wiped out or recomputed as a side effect of it.
+    // No real "advance a stage" API exists yet (#97's own investigation found none) — this simulates a stage transition the way one would actually land today, a direct instance.yaml edit, to prove assignee isn't wiped out or recomputed as a side effect of it.
     writeFileSync(
       join(instancesDir, 'my-initiative', 'instance.yaml'),
       'definition: design\nslug: my-initiative\nstage: hld-define\nassignee: c.barlow\n'
@@ -376,13 +362,7 @@ test('strict mode throws instead of warning on a duplicate heading', () => {
 
 // --- Azure DevOps-backed instances (#85) ---------------------------------
 //
-// These exercise createInstance/readInstance/readModule/writeModule's
-// second storage backend — the Azure DevOps REST API (#84), via the same
-// fake in-process server tests/azureDevOpsClient.test.js uses — instead of
-// the local filesystem, reusing the exact same parseModuleFile/
-// renderModuleFile logic the tests above exercise against disk. Every call
-// here supplies `options.azureDevOps`; every call above doesn't, which is
-// itself part of what proves the two paths are properly independent.
+// These exercise createInstance/readInstance/readModule/writeModule's second storage backend — the Azure DevOps REST API (#84), via the same fake in-process server tests/azureDevOpsClient.test.js uses — instead of the local filesystem, reusing the exact same parseModuleFile/renderModuleFile logic the tests above exercise against disk. Every call here supplies `options.azureDevOps`; every call above doesn't, which is itself part of what proves the two paths are properly independent.
 
 function azureDevOpsOptions(baseUrl, overrides = {}) {
   return {
@@ -418,9 +398,7 @@ test('createInstance writes instance.yaml and blank module files to Azure DevOps
   })
 })
 
-// #100: an Azure-DevOps-backed instance's data lives under a per-slug
-// gantry-workspace/<slug>/ subdirectory, not repo root — this is what one
-// repo ("workspace") hosting more than one instance actually depends on.
+// #100: an Azure-DevOps-backed instance's data lives under a per-slug gantry-workspace/<slug>/ subdirectory, not repo root — this is what one repo ("workspace") hosting more than one instance actually depends on.
 test('createInstance writes an Azure-DevOps-backed instance under gantry-workspace/<slug>/, not repo root', async () => {
   await withFakeRepo({}, async (baseUrl) => {
     const azureDevOps = azureDevOpsOptions(baseUrl)
@@ -437,8 +415,7 @@ test('createInstance writes an Azure-DevOps-backed instance under gantry-workspa
   })
 })
 
-// Acceptance criterion (#100): "A new instance created in a workspace that
-// already has one is written to gantry-workspace/<slug>/, not repo root."
+// Acceptance criterion (#100): "A new instance created in a workspace that already has one is written to gantry-workspace/<slug>/, not repo root."
 test('a second instance can be created in the same Azure DevOps repo as an existing one, each isolated under its own gantry-workspace/<slug>/', async () => {
   await withFakeRepo({}, async (baseUrl) => {
     const azureDevOps = azureDevOpsOptions(baseUrl)
@@ -474,13 +451,7 @@ test('a second instance can be created in the same Azure DevOps repo as an exist
   })
 })
 
-// Defense-in-depth regression test: every real caller of the Azure-DevOps-
-// backed functions below already validates `slug` before reaching them
-// (lib/server.js's isValidSlug for request input, lib/repoCheck.js's own
-// check for a slug discovered from a remote repo) — but these functions
-// must also refuse a path-traversal-shaped slug themselves, rather than
-// silently building a `gantry-workspace/../evil/...` path, in case a
-// future or overlooked caller ever reaches them without validating first.
+// Defense-in-depth regression test: every real caller of the Azure-DevOps-backed functions below already validates `slug` before reaching them (lib/server.js's isValidSlug for request input, lib/repoCheck.js's own check for a slug discovered from a remote repo) — but these functions must also refuse a path-traversal-shaped slug themselves, rather than silently building a `gantry-workspace/../evil/...` path, in case a future or overlooked caller ever reaches them without validating first.
 test('createInstance/readInstance/writeModule/readModule against Azure DevOps reject a path-traversal-shaped slug outright, rather than building a path from it', async () => {
   await withFakeRepo({}, async (baseUrl) => {
     const azureDevOps = azureDevOpsOptions(baseUrl)
@@ -544,12 +515,7 @@ test('createInstance against Azure DevOps refuses to overwrite an instance that 
 })
 
 test('createInstance against Azure DevOps reports exactly what was written and what remains if it fails partway through, instead of a bare network error', async () => {
-  // instance.yaml is the 1st push; each first-stage module ("context",
-  // "solution-definition", "team-and-estimates" for "design") is one push
-  // each after that. failAfterPushes: 2 lets instance.yaml + "context"
-  // through, then fails the very next push ("solution-definition") with a
-  // simulated outage — independent of exactly how many GETs the client
-  // makes per push, so this isn't coupled to that implementation detail.
+  // instance.yaml is the 1st push; each first-stage module ("context", "solution-definition", "team-and-estimates" for "design") is one push each after that. failAfterPushes: 2 lets instance.yaml + "context" through, then fails the very next push ("solution-definition") with a simulated outage — independent of exactly how many GETs the client makes per push, so this isn't coupled to that implementation detail.
   await withFakeAzureDevOpsServer(
     { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {}, failAfterPushes: 2 },
     async (baseUrl) => {
@@ -577,9 +543,7 @@ test('readModule against Azure DevOps reports a missing module the same way the 
     const azureDevOps = azureDevOpsOptions(baseUrl)
     await createInstance('design', 'my-initiative', { azureDevOps })
     const definition = loadDefinition('design')
-    // "hld-submission" belongs to a later stage than "shape" — createInstance
-    // above only wrote the Shape-stage modules, so this one genuinely has no
-    // saved data yet, on Azure DevOps exactly as it wouldn't on disk.
+    // "hld-submission" belongs to a later stage than "shape" — createInstance above only wrote the Shape-stage modules, so this one genuinely has no saved data yet, on Azure DevOps exactly as it wouldn't on disk.
     await assert.rejects(
       () => readModule(definition, 'my-initiative', 'hld-submission', { azureDevOps }),
       /has no saved data for instance "my-initiative"/
@@ -587,12 +551,7 @@ test('readModule against Azure DevOps reports a missing module the same way the 
   })
 })
 
-// Regression test for a review finding: readModule used to never forward
-// `options.strict` to parseModuleFile on either storage backend, so a
-// caller asking for strict parsing (as evaluateStage's `check` mode does)
-// would silently get non-strict semantics regardless. `strict` must now
-// throw on a parser anomaly the same way on both the local and Azure
-// DevOps-backed paths.
+// Regression test for a review finding: readModule used to never forward `options.strict` to parseModuleFile on either storage backend, so a caller asking for strict parsing (as evaluateStage's `check` mode does) would silently get non-strict semantics regardless. `strict` must now throw on a parser anomaly the same way on both the local and Azure DevOps-backed paths.
 test('readModule forwards options.strict to parseModuleFile on both the local and Azure DevOps-backed paths', async () => {
   const badModuleText = '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Not A Real Field\n\nWhatever.\n'
   const definition = loadDefinition('design')

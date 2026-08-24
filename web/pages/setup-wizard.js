@@ -1,11 +1,4 @@
-// Instance-setup wizard (Azure DevOps #78): the "progressive single page"
-// variant (C) from web/prototypes/instance-setup-wizard.prototype.html —
-// fields reveal one at a time as each is satisfied, an existing-instance
-// result renders as a side-by-side "found in repo" vs. "you're about to
-// use" comparison, and a connection error is a dismissible banner that
-// never hides or clears the URL field. See that prototype's header comment
-// for why this variant won out over the single-form and multi-step-wizard
-// alternatives it was compared against.
+// Instance-setup wizard (Azure DevOps #78): the "progressive single page" variant (C) from web/prototypes/instance-setup-wizard.prototype.html — fields reveal one at a time as each is satisfied, an existing-instance result renders as a side-by-side "found in repo" vs. "you're about to use" comparison, and a connection error is a dismissible banner that never hides or clears the URL field. See that prototype's header comment for why this variant won out over the single-form and multi-step-wizard alternatives it was compared against.
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal, effect } from '@preact/signals'
@@ -13,61 +6,27 @@ import { validateRepo } from '../lib/validateRepo.js'
 import { apiFetch } from '../lib/apiFetch.js'
 import { theme, cycleTheme } from '../lib/theme.js'
 
-// Wizard state as `@preact/signals` — per docs/adr/0006-preact-frontend-framework.md,
-// which names "in-progress wizard answers" as exactly this state model's
-// use case — kept at module scope so a check/definition-pick in progress
-// survives an internal route change and back, not just component-local
-// state that'd reset on remount.
+// Wizard state as `@preact/signals` — per docs/adr/0006-preact-frontend-framework.md, which names "in-progress wizard answers" as exactly this state model's use case — kept at module scope so a check/definition-pick in progress survives an internal route change and back, not just component-local state that'd reset on remount.
 const repoUrl = signal('')
 const checkStatus = signal('idle') // idle | checking | empty | existing | error
 const checkErrorMessage = signal('')
 const errorDismissed = signal(false)
 const foundInstance = signal(null) // registry-shaped instance, once checkStatus === 'existing'
-// The Azure DevOps location (`{ organization, project, repository }`)
-// `checkRepo()`'s validateRepo() call parsed the current `repoUrl` into —
-// kept alongside the check result rather than re-parsed at
-// create/adopt-time so `createNewInstance`/`openExistingInstance` send
-// exactly the location the check itself just confirmed, never a second,
-// possibly-differently-parsed value. Reset to `null` by resetCheck()
-// exactly like every other check-scoped signal.
+// The Azure DevOps location (`{ organization, project, repository }`) `checkRepo()`'s validateRepo() call parsed the current `repoUrl` into — kept alongside the check result rather than re-parsed at create/adopt-time so `createNewInstance`/`openExistingInstance` send exactly the location the check itself just confirmed, never a second, possibly-differently-parsed value. Reset to `null` by resetCheck() exactly like every other check-scoped signal.
 const checkedLocation = signal(null)
 const selectedDefinitionId = signal('')
 const createStatus = signal('idle') // idle | creating | done | failed
 const createErrorMessage = signal('')
 const createdSlug = signal('')
-// State for the "existing instance found" outcome's own "Open instance"
-// action: unlike the "empty repo" path (which registers as a side effect
-// of `createNewInstance`'s own POST /api/instances call), opening an
-// already-existing instance first needs its own request — `POST
-// /api/instances/adopt` — to register that (already-existing, previously
-// unknown-to-gantry) location before a navigation to it can resolve
-// anything (#92's per-request registry lookup has nothing to find
-// otherwise).
+// State for the "existing instance found" outcome's own "Open instance" action: unlike the "empty repo" path (which registers as a side effect of `createNewInstance`'s own POST /api/instances call), opening an already-existing instance first needs its own request — `POST /api/instances/adopt` — to register that (already-existing, previously unknown-to-gantry) location before a navigation to it can resolve anything (#92's per-request registry lookup has nothing to find otherwise).
 const opening = signal(false)
 const openErrorMessage = signal('')
-// Fetched once on mount (see SetupWizardPage's effect below); read from here
-// rather than threaded through as a prop so `checkRepo` — a plain function,
-// not a component — can default a fresh check's definition selection
-// without needing a definitions argument passed in from the render tree.
+// Fetched once on mount (see SetupWizardPage's effect below); read from here rather than threaded through as a prop so `checkRepo` — a plain function, not a component — can default a fresh check's definition selection without needing a definitions argument passed in from the render tree.
 const availableDefinitions = signal([])
-// Bumped by resetCheck() every time the current check/create context is
-// abandoned (the URL is edited). `createNewInstance()` captures this at
-// the start of its POST and compares it once that resolves, so a create
-// the user has since abandoned can't apply its (stale) success/failure
-// state on top of whatever check the user has moved on to — the same
-// class of stale-async-response bug checkRepo() itself guards against
-// (there, by comparing the checked URL to the field's current value).
+// Bumped by resetCheck() every time the current check/create context is abandoned (the URL is edited). `createNewInstance()` captures this at the start of its POST and compares it once that resolves, so a create the user has since abandoned can't apply its (stale) success/failure state on top of whatever check the user has moved on to — the same class of stale-async-response bug checkRepo() itself guards against (there, by comparing the checked URL to the field's current value).
 const sessionToken = signal(0)
 
-// `checkRepo()` (an "empty repo" result) and the definitions fetch in
-// SetupWizardPage's own effect are two independent in-flight requests with
-// no ordering guarantee between them — if the check resolves first,
-// `checkRepo()`'s own default (`availableDefinitions.value[0]?.id`) sees an
-// still-empty list and picks `''`, and nothing would otherwise ever revisit
-// that once the definitions do arrive. This closes that gap: once
-// definitions are available, default the selection if an "empty repo"
-// check is showing the picker with nothing chosen yet (the button itself
-// stays disabled meanwhile — see SubmitAction's `noDefinitionSelected`).
+// `checkRepo()` (an "empty repo" result) and the definitions fetch in SetupWizardPage's own effect are two independent in-flight requests with no ordering guarantee between them — if the check resolves first, `checkRepo()`'s own default (`availableDefinitions.value[0]?.id`) sees an still-empty list and picks `''`, and nothing would otherwise ever revisit that once the definitions do arrive. This closes that gap: once definitions are available, default the selection if an "empty repo" check is showing the picker with nothing chosen yet (the button itself stays disabled meanwhile — see SubmitAction's `noDefinitionSelected`).
 effect(() => {
   if (checkStatus.value === 'empty' && selectedDefinitionId.value === '' && availableDefinitions.value.length > 0) {
     selectedDefinitionId.value = availableDefinitions.value[0].id
@@ -90,15 +49,7 @@ function resetCheck() {
 
 function onRepoUrlInput(value) {
   repoUrl.value = value
-  // Editing the URL abandons whatever check is currently displayed — the
-  // definition picker and any result/error card are for the *previous*
-  // URL, not this one, so they must disappear rather than linger stale.
-  // This now also fires while a check is still in flight (`checkStatus.value
-  // === 'checking'`): without it, the "Checking…" state would stay pinned
-  // to a request the user has already moved on from, and checkRepo()'s own
-  // stale-result guard below (comparing the field's value once the request
-  // resolves) is what stops that in-flight request from re-applying a
-  // result for this now-different URL once it does resolve.
+  // Editing the URL abandons whatever check is currently displayed — the definition picker and any result/error card are for the *previous* URL, not this one, so they must disappear rather than linger stale. This now also fires while a check is still in flight (`checkStatus.value === 'checking'`): without it, the "Checking…" state would stay pinned to a request the user has already moved on from, and checkRepo()'s own stale-result guard below (comparing the field's value once the request resolves) is what stops that in-flight request from re-applying a result for this now-different URL once it does resolve.
   if (checkStatus.value !== 'idle') resetCheck()
 }
 
@@ -108,11 +59,7 @@ async function checkRepo() {
   checkStatus.value = 'checking'
   errorDismissed.value = false
   const result = await validateRepo(url)
-  // The URL field can change while this check is in flight (the user edits
-  // it before this resolves — onRepoUrlInput resets checkStatus back to
-  // 'idle' the moment that happens). Discard a stale result rather than
-  // showing a found-instance/definition-picker/error state that no longer
-  // corresponds to what's currently in the field.
+  // The URL field can change while this check is in flight (the user edits it before this resolves — onRepoUrlInput resets checkStatus back to 'idle' the moment that happens). Discard a stale result rather than showing a found-instance/definition-picker/error state that no longer corresponds to what's currently in the field.
   if (repoUrl.value.trim() !== url) return
   if (result.result === 'error') {
     checkStatus.value = 'error'
@@ -144,11 +91,7 @@ async function createNewInstance() {
       body: JSON.stringify({ definition: selectedDefinitionId.value, slug, azureDevOps: location }),
     })
     const body = await res.json()
-    // The user may have abandoned this create (edited the URL, moving on to
-    // a different check) while the POST was in flight — resetCheck() bumps
-    // sessionToken whenever that happens. Discard a stale response rather
-    // than showing a success/failure card for a create the user has since
-    // moved on from, superimposed on whatever repo they're now checking.
+    // The user may have abandoned this create (edited the URL, moving on to a different check) while the POST was in flight — resetCheck() bumps sessionToken whenever that happens. Discard a stale response rather than showing a success/failure card for a create the user has since moved on from, superimposed on whatever repo they're now checking.
     if (sessionToken.value !== token) return
     if (!res.ok) {
       createStatus.value = 'failed'
@@ -164,14 +107,7 @@ async function createNewInstance() {
   }
 }
 
-// The "existing instance found" outcome's own "Open instance" action:
-// registers the already-existing Azure DevOps location the check just
-// confirmed (`POST /api/instances/adopt`, #94) so the module editor's
-// per-request registry lookup (#92) has something to resolve, then
-// navigates exactly as the "empty repo" path's post-create "Open instance"
-// already does. A location previously adopted through this same wizard
-// (the common "come back and open it again" case) adopts idempotently
-// server-side — this never re-prompts or re-fails on a second visit.
+// The "existing instance found" outcome's own "Open instance" action: registers the already-existing Azure DevOps location the check just confirmed (`POST /api/instances/adopt`, #94) so the module editor's per-request registry lookup (#92) has something to resolve, then navigates exactly as the "empty repo" path's post-create "Open instance" already does. A location previously adopted through this same wizard (the common "come back and open it again" case) adopts idempotently server-side — this never re-prompts or re-fails on a second visit.
 async function openExistingInstance() {
   const token = sessionToken.value
   const location = checkedLocation.value
@@ -185,9 +121,7 @@ async function openExistingInstance() {
       body: JSON.stringify({ azureDevOps: location }),
     })
     const body = await res.json().catch(() => ({}))
-    // Mirrors createNewInstance's own stale-response guard: the user may
-    // have abandoned this open (edited the URL, moving on to a different
-    // check) while the POST was in flight.
+    // Mirrors createNewInstance's own stale-response guard: the user may have abandoned this open (edited the URL, moving on to a different check) while the POST was in flight.
     if (sessionToken.value !== token) return
     if (!res.ok) {
       opening.value = false
@@ -202,13 +136,7 @@ async function openExistingInstance() {
   }
 }
 
-// A full navigation (not preact-iso client-side routing) to the module
-// editor's real per-instance route. The module editor is reactive to its
-// route-param `slug` prop now (#77), so a client-side route() would work
-// too — a full navigation is kept anyway for a clean reload of this fresh
-// instance's state, matching the "Open editor" links elsewhere (#102 —
-// this used to say "Open workspace", renamed to avoid colliding with the
-// Workspace entity, #96).
+// A full navigation (not preact-iso client-side routing) to the module editor's real per-instance route. The module editor is reactive to its route-param `slug` prop now (#77), so a client-side route() would work too — a full navigation is kept anyway for a clean reload of this fresh instance's state, matching the "Open editor" links elsewhere (#102 — this used to say "Open workspace", renamed to avoid colliding with the Workspace entity, #96).
 function openInstance(slug) {
   window.location.assign(`/instance/${encodeURIComponent(slug)}`)
 }
@@ -370,12 +298,7 @@ function SubmitAction() {
     `
   }
 
-  // Disabled while no definition is selected yet — reachable right after an
-  // "empty repo" check completes if `GET /api/definitions` (fetched
-  // separately, see SetupWizardPage's effect) hasn't resolved yet, or if it
-  // ever comes back empty. Without this, clicking through in that window
-  // would submit `definition: ''`, rejected server-side but a confusing
-  // dead end rather than a plainly-disabled button.
+  // Disabled while no definition is selected yet — reachable right after an "empty repo" check completes if `GET /api/definitions` (fetched separately, see SetupWizardPage's effect) hasn't resolved yet, or if it ever comes back empty. Without this, clicking through in that window would submit `definition: ''`, rejected server-side but a confusing dead end rather than a plainly-disabled button.
   const noDefinitionSelected = selectedDefinitionId.value === ''
 
   return html`

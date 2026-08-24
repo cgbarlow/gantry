@@ -9,15 +9,7 @@ import { createInstance, readInstance, recordInstanceWorkItemLink } from '../lib
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { registerWorkspace } from '../lib/workspaceRegistry.js'
 
-// Browser smoke tests for the reworked Settings screens (#107): three
-// separate, tab-free top-level routes — `/settings` (Global Settings),
-// `/settings/workspace` (Workspace Settings, scoped to one instance's own
-// workspace) and `/settings/instance` (Instance Settings) — replacing
-// #101/#104's single tabbed `/settings` shell entirely. Mirrors
-// tests/dashboard.playwright.test.js's pattern: a real server, a real
-// Chromium page, asserting no console/page errors alongside the ticket's
-// acceptance criteria.
-
+// Browser smoke tests for the reworked Settings screens (#107): three separate, tab-free top-level routes — `/settings` (Global Settings), `/settings/workspace` (Workspace Settings, scoped to one instance's own workspace) and `/settings/instance` (Instance Settings) — replacing #101/#104's single tabbed `/settings` shell entirely. Mirrors tests/dashboard.playwright.test.js's pattern: a real server, a real Chromium page, asserting no console/page errors alongside the ticket's acceptance criteria.
 function withRunningServer(options, fn) {
   return new Promise((resolve, reject) => {
     const server = createServer(options)
@@ -217,6 +209,7 @@ test('settings: from an instance screen, "Settings" opens a dropdown offering Gl
 })
 
 // ---------- Workspace Settings: scoped to one instance's own workspace ----------
+// Workspaces are seeded directly via `registerWorkspace` (a plain library call against the same scratch `instancesDir` the test server serves) — no fake Azure DevOps server needed, since this screen's own acceptance criteria are about its UI/local-storage/PATCH behavior, not about proving real Azure DevOps access (that's already covered by tests/serverWorkspaces.test.js's `POST /api/workspaces` coverage).
 
 function seedWorkspace(instancesDir, overrides = {}) {
   return registerWorkspace(

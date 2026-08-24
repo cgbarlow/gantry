@@ -9,16 +9,7 @@ import { createInstance } from '../lib/instance.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
-// Browser smoke test for the Workspaces landing page (#77, restructured by
-// #102) — the landing screen at `/`, backed by the multi-instance registry
-// (`GET /api/instances`, #76). Mirrors tests/module-editor.playwright.test.js's
-// pattern: a real server, a real Chromium page, asserting no console/page
-// errors alongside the ticket's acceptance criteria — the "Workspaces"
-// title, master-detail grouping instances by workspace (one row per
-// workspace, a multi-instance workspace's detail column listing every
-// instance it holds), a working toggle to stage swimlanes, the view choice
-// persisting across a reload (via localStorage), and the empty state's
-// "new instance" call to action.
+// Browser smoke test for the Workspaces landing page (#77, restructured by #102) — the landing screen at `/`, backed by the multi-instance registry (`GET /api/instances`, #76). Mirrors tests/module-editor.playwright.test.js's pattern: a real server, a real Chromium page, asserting no console/page errors alongside the ticket's acceptance criteria — the "Workspaces" title, master-detail grouping instances by workspace (one row per workspace, a multi-instance workspace's detail column listing every instance it holds), a working toggle to stage swimlanes, the view choice persisting across a reload (via localStorage), and the empty state's "new instance" call to action.
 function withRunningServer(options, fn) {
   return new Promise((resolve, reject) => {
     const server = createServer(options)
@@ -57,11 +48,7 @@ function withPage(fn) {
 test('dashboard: titled "Workspaces", master-detail is the default view, and its detail column shows each instance\'s definition/status/assignee with Check/Render reachable', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    // Local instances have no workspace (#96 — Workspace is an
-    // Azure-DevOps-repo concept only), so each groups on its own, one row
-    // per instance — the single-instance case the ticket's own "a
-    // workspace with only one instance still displays correctly" criterion
-    // describes.
+    // Local instances have no workspace (#96 — Workspace is an Azure-DevOps-repo concept only), so each groups on its own, one row per instance — the single-instance case the ticket's own "a workspace with only one instance still displays correctly" criterion describes.
     createInstance('design', 'alpha-initiative', { instancesDir, assignee: 'c.barlow' })
     createInstance('design', 'zebra-initiative', { instancesDir })
 
@@ -75,9 +62,7 @@ test('dashboard: titled "Workspaces", master-detail is the default view, and its
         assert.equal(await page.locator('.instance-list .list-item').count(), 2)
         assert.equal(await page.locator('.view-toggle button.active').textContent(), 'Master-detail')
 
-        // First group (sorted by title: alpha-initiative) is selected by
-        // default — its one instance shows up as its own card in the
-        // detail column.
+        // First group (sorted by title: alpha-initiative) is selected by default — its one instance shows up as its own card in the detail column.
         await page.waitForSelector('.instance-card', { timeout: 10_000 })
         assert.equal(await page.locator('.detail-pane h2').textContent(), 'alpha-initiative')
         assert.equal(await page.locator('.instance-card').count(), 1)
@@ -109,12 +94,7 @@ test('dashboard: selecting a workspace with multiple instances shows every one o
     async (adoBaseUrl) => {
       const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
       try {
-        // Two slugs registered directly against the exact same Azure DevOps
-        // location share one auto-created workspace (lib/workspaceRegistry.js,
-        // #96 — verified independently in tests/serverWorkspaces.test.js),
-        // each holding its own data under #100's gantry-workspace/<slug>/
-        // directory layout; registered directly here (rather than through
-        // two real, distinct Azure DevOps repos) for test simplicity.
+        // Two slugs registered directly against the exact same Azure DevOps location share one auto-created workspace (lib/workspaceRegistry.js, #96 — verified independently in tests/serverWorkspaces.test.js), each holding its own data under #100's gantry-workspace/<slug>/directory layout; registered directly here (rather than through two real, distinct Azure DevOps repos) for test simplicity.
         const location = { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl }
         registerInstance('instance-one', location, { instancesDir })
         registerInstance('instance-two', location, { instancesDir })
@@ -122,11 +102,7 @@ test('dashboard: selecting a workspace with multiple instances shows every one o
         await withRunningServer(
           { instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true },
           withPage(async (page, base) => {
-            // A PAT is required to enrich an Azure-DevOps-backed row (see
-            // lib/registry.js's buildAzureDevOpsRow) — seeded into
-            // localStorage before navigating, mirroring
-            // tests/patPrompt.playwright.test.js's own technique, so
-            // GET /api/instances attaches it from the very first request.
+            // A PAT is required to enrich an Azure-DevOps-backed row (see lib/registry.js's buildAzureDevOpsRow) — seeded into localStorage before navigating, mirroring tests/patPrompt.playwright.test.js's own technique, so GET /api/instances attaches it from the very first request.
             await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
             await page.goto(base)
             await page.waitForSelector('.master-detail', { timeout: 10_000 })
@@ -141,9 +117,7 @@ test('dashboard: selecting a workspace with multiple instances shows every one o
             assert.equal(await page.locator('.detail-pane h2').textContent(), REPOSITORY)
             assert.match(await page.locator('.workspace-subtitle').textContent(), new RegExp(`${ORGANIZATION}/${PROJECT}`))
 
-            // Both instances, each its own card, each independently
-            // showing definition/assignee/status and its own Check/Render/
-            // Open-editor actions.
+            // Both instances, each its own card, each independently showing definition/assignee/status and its own Check/Render/Open-editor actions.
             const cards = page.locator('.instance-card')
             assert.equal(await cards.count(), 2)
             const names = await page.locator('.instance-card .name').allTextContents()
@@ -206,8 +180,7 @@ test('dashboard: toggling to stage swimlanes groups instances into lanes by curr
         assert.match(await page.locator('.lane').first().textContent(), /Shape/)
         assert.equal(await page.locator('.chip .name').first().textContent(), 'alpha-initiative')
 
-        // Reload — the view choice (localStorage) survives, so swimlanes
-        // renders again without needing to re-toggle.
+        // Reload — the view choice (localStorage) survives, so swimlanes renders again without needing to re-toggle.
         await page.reload()
         await page.waitForSelector('.swimlanes', { timeout: 10_000 })
         assert.equal(await page.locator('.view-toggle button.active').textContent(), 'Stage swimlanes')
@@ -262,11 +235,7 @@ test('dashboard: empty state renders a "new instance" call to action when no ins
   }
 })
 
-// The dashboard topbar's own "+ New instance" link is what makes creating a
-// new instance reachable without an instance already open — before this, it
-// only existed in the module editor's header (AppHeader) and the empty
-// state's one-off call to action (the test above), so a dashboard already
-// listing instances had no way to start another one.
+// The dashboard topbar's own "+ New instance" link is what makes creating a new instance reachable without an instance already open — before this, it only existed in the module editor's header (AppHeader) and the empty state's one-off call to action (the test above), so a dashboard already listing instances had no way to start another one.
 test('dashboard: topbar "new instance" link works even when instances are already registered', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {

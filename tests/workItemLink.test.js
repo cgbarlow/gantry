@@ -9,12 +9,7 @@ import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsCli
 import { linkInstanceToWorkItem, syncGatePassToWorkItem, pickPassedState, DEFAULT_WORK_ITEM_TYPE } from '../lib/workItemLink.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
-// #95/#103: optional instance-level link to an Azure DevOps work item,
-// per-stage child work-item auto-creation, and confirmed read-write state
-// sync on gate pass. The Work Items side always talks to the in-process
-// fake server (#99's extension of tests/helpers/fakeAzureDevOpsServer.js) —
-// never a mocked client — the same convention every other Azure DevOps
-// client test in this repo follows.
+// #95/#103: optional instance-level link to an Azure DevOps work item, per-stage child work-item auto-creation, and confirmed read-write state sync on gate pass. The Work Items side always talks to the in-process fake server (#99's extension of tests/helpers/fakeAzureDevOpsServer.js) — never a mocked client — the same convention every other Azure DevOps client test in this repo follows.
 
 const WI_ORGANIZATION = 'wi-org'
 const WI_PROJECT = 'wi-project'
@@ -29,8 +24,7 @@ async function withScratchInstances(fn) {
   }
 }
 
-// Only the Work Items endpoints matter for these tests — no `repository`,
-// mirroring tests/azureDevOpsWorkItemsClient.test.js's own wrapper.
+// Only the Work Items endpoints matter for these tests — no `repository`, mirroring tests/azureDevOpsWorkItemsClient.test.js's own wrapper.
 function withFakeWorkItemsServer(overrides, fn) {
   return withFakeAzureDevOpsServer(
     { organization: WI_ORGANIZATION, project: WI_PROJECT, validPat: VALID_PAT, ...overrides },
@@ -44,10 +38,7 @@ async function createParentWorkItem(baseUrl) {
   return parent.id
 }
 
-// Fills in the Shape stage's three modules with the same content the
-// `examples` fixture already carries, so `checkGate`'s "business-case" gate
-// genuinely passes — reused by every gate-pass-sync test below rather than
-// hand-writing each field.
+// Fills in the Shape stage's three modules with the same content the `examples` fixture already carries, so `checkGate`'s "business-case" gate genuinely passes — reused by every gate-pass-sync test below rather than hand-writing each field.
 function fillShapeStage(instancesDir, slug) {
   for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
     cpSync(join('instances', 'examples', 'modules', `${moduleId}.md`), join(instancesDir, slug, 'modules', `${moduleId}.md`))
@@ -98,8 +89,7 @@ test('linkInstanceToWorkItem\'s child work items are genuinely linked to the par
       )
 
       const client = createAzureDevOpsWorkItemsClient({ organization: WI_ORGANIZATION, project: WI_PROJECT, pat: VALID_PAT, baseUrl })
-      // Any further update against the shape child confirms it's a real,
-      // independently addressable work item — not a fabricated id.
+      // Any further update against the shape child confirms it's a real, independently addressable work item — not a fabricated id.
       const updated = await client.updateWorkItem(workItem.stages.shape, { 'System.State': 'Active' })
       assert.equal(updated.fields['System.State'], 'Active')
     })
@@ -272,10 +262,7 @@ test('syncGatePassToWorkItem pushes a state drawn from the work item type\'s own
 
       const client = createAzureDevOpsWorkItemsClient({ organization: WI_ORGANIZATION, project: WI_PROJECT, pat: VALID_PAT, baseUrl })
       const before = await client.getWorkItemTypeStates(DEFAULT_WORK_ITEM_TYPE)
-      // Never fetched a work item directly here — this only proves the
-      // shape child's state starts out at its just-created default, since
-      // "declining" (this test never calls syncGatePassToWorkItem at all
-      // for a first assertion) must never have touched it.
+      // Never fetched a work item directly here — this only proves the shape child's state starts out at its just-created default, since "declining" (this test never calls syncGatePassToWorkItem at all for a first assertion) must never have touched it.
       assert.notEqual(pickPassedState(before), 'New')
 
       const result = await syncGatePassToWorkItem('my-initiative', {}, { instancesDir, pat: VALID_PAT })
@@ -308,9 +295,7 @@ test('syncGatePassToWorkItem works against an Azure-DevOps-backed instance\'s da
           baseUrl: gitBaseUrl,
         }
 
-        // Seed the three Shape-stage modules straight into the fake git
-        // repo, reusing the same examples-fixture content fillShapeStage
-        // copies for the local path.
+        // Seed the three Shape-stage modules straight into the fake git repo, reusing the same examples-fixture content fillShapeStage copies for the local path.
         const gitClient = createAzureDevOpsClient(azureDevOps)
         for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
           const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')

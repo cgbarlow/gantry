@@ -1,61 +1,17 @@
 # The instance record gets its own stored `assignee` field, replacing a derived-from-modules "owner" rollup
 
-Before #97, no instance record had a real "owner" field at all. `lib/registry.js`'s `listRegistry`
-(the dashboard's `GET /api/instances`) and `lib/repoCheck.js`'s `checkAzureDevOpsRepo` (the setup
-wizard's "check repo" step) each independently derived one by scanning the current stage's modules,
-in stage-definition order, and returning the first non-empty frontmatter `owner` they found — '' if
-none had one set. That rollup lived only in two near-duplicate `stageOwner` functions (plus a third
-copy in `lib/repoCheck.js`); nothing on `instance.yaml` itself said who was responsible for an
-instance, and the value shown could silently change (or go blank) whenever a stage transition put a
-different module's frontmatter first in scan order, or whenever a downstream reviewer set their own
-module's `owner` to something else entirely.
+Before #97, no instance record had a real "owner" field at all. `lib/registry.js`'s `listRegistry` (the dashboard's `GET /api/instances`) and `lib/repoCheck.js`'s `checkAzureDevOpsRepo` (the setup wizard's "check repo" step) each independently derived one by scanning the current stage's modules, in stage-definition order, and returning the first non-empty frontmatter `owner` they found — '' if none had one set. That rollup lived only in two near-duplicate `stageOwner` functions (plus a third copy in `lib/repoCheck.js`); nothing on `instance.yaml` itself said who was responsible for an instance, and the value shown could silently change (or go blank) whenever a stage transition put a different module's frontmatter first in scan order, or whenever a downstream reviewer set their own module's `owner` to something else entirely.
 
-`instance.yaml` now carries an explicit `assignee` field: a single named person, defaulting to `''`,
-set at instance creation (`createInstance`'s new `options.assignee`, distinct from the pre-existing
-`options.owner`) and updatable afterward via `updateInstanceAssignee` — a small, dedicated
-read-merge-write helper mirroring `writeModule`'s "read current, only overwrite the one field" shape,
-available on both storage backends (local filesystem and, per ADR-0005, an Azure-DevOps-backed
-instance's own `instance.yaml`). `lib/registry.js` and `lib/repoCheck.js` no longer scan any module at
-all for this — they just read `instance.assignee ?? ''` straight off the instance record, and their
-result key is renamed from `owner` to `assignee` throughout the API (`GET /api/instances`, `GET
-/api/azure-devops/repo-check`, `POST /api/instances`'s response) and the dashboard UI, to avoid two
-unrelated concepts sharing one JSON key. `PUT /api/instance/assignee` is the new single-instance route
-the dashboard's detail pane uses to edit it in place.
+`instance.yaml` now carries an explicit `assignee` field: a single named person, defaulting to `''`, set at instance creation (`createInstance`'s new `options.assignee`, distinct from the pre-existing `options.owner`) and updatable afterward via `updateInstanceAssignee` — a small, dedicated read-merge-write helper mirroring `writeModule`'s "read current, only overwrite the one field" shape, available on both storage backends (local filesystem and, per ADR-0005, an Azure-DevOps-backed instance's own `instance.yaml`). `lib/registry.js` and `lib/repoCheck.js` no longer scan any module at all for this — they just read `instance.assignee ?? ''` straight off the instance record, and their result key is renamed from `owner` to `assignee` throughout the API (`GET /api/instances`, `GET /api/azure-devops/repo-check`, `POST /api/instances`'s response) and the dashboard UI, to avoid two unrelated concepts sharing one JSON key. `PUT /api/instance/assignee` is the new single-instance route the dashboard's detail pane uses to edit it in place.
 
-Module frontmatter's own `status`/`owner` convention (the Design Authority sign-off tracking ADR-0001
-and CONTEXT.md describe) is completely untouched: `parseModuleFile`/`renderModuleFile`/
-`renderModuleInstanceFile`, `PUT /api/instance/modules/:id`, `ModuleCard`'s save flow, and
-`createInstance`'s pre-existing `options.owner` (still seeding each first-stage module file's own
-frontmatter `owner`, e.g. via `gantry new --owner`) are unchanged line for line. The two fields now
-happen to be spelled differently (`assignee` vs. `owner`) specifically so a reader never has to ask
-"which owner do you mean" — a caller supplying both to `POST /api/instances` sees each land in its
-own place, independently.
+Module frontmatter's own `status`/`owner` convention (the Design Authority sign-off tracking ADR-0001 and CONTEXT.md describe) is completely untouched: `parseModuleFile`/`renderModuleFile`/`renderModuleInstanceFile`, `PUT /api/instance/modules/:id`, `ModuleCard`'s save flow, and `createInstance`'s pre-existing `options.owner` (still seeding each first-stage module file's own frontmatter `owner`, e.g. via `gantry new --owner`) are unchanged line for line. The two fields now happen to be spelled differently (`assignee` vs. `owner`) specifically so a reader never has to ask "which owner do you mean" — a caller supplying both to `POST /api/instances` sees each land in its own place, independently.
 
-Because `assignee` is a plain field on the instance record rather than something recomputed from
-whichever modules happen to exist for the current stage, it is automatically stable across stage
-transitions — there is currently no code path that even changes an instance's `stage` at all (an
-explicit finding of this ticket's own investigation: `instance.stage` is written once, at creation,
-and never reassigned anywhere in `lib/` or `bin/`), so this ADR does not need to invent one to satisfy
-"doesn't change or go blank just because the instance moved stages" — it simply can't, since nothing
-currently moves it.
+Because `assignee` is a plain field on the instance record rather than something recomputed from whichever modules happen to exist for the current stage, it is automatically stable across stage transitions — there is currently no code path that even changes an instance's `stage` at all (an explicit finding of this ticket's own investigation: `instance.stage` is written once, at creation, and never reassigned anywhere in `lib/` or `bin/`), so this ADR does not need to invent one to satisfy "doesn't change or go blank just because the instance moved stages" — it simply can't, since nothing currently moves it.
 
 Alternatives considered and rejected:
 
-- **Keep deriving `owner` from module frontmatter, just fix the "first non-empty across stage
-  modules" rule to be less surprising.** Rejected: no derivation rule can make an instance-level
-  concept ("who owns this initiative") behave predictably when its only source of truth is scattered
-  across whichever modules a reviewer happened to fill in and how frontmatter's own per-module
-  `status`/`owner` convention (a different, module-scoped concept — Design Authority sign-off) is
-  used. The ticket's own acceptance criteria ("stable across stage transitions", "API returns the
-  stored assignee rather than a derived rollup") describe a stored field, not a smarter derivation.
-- **Keep the JSON field named `owner` at the instance level too, just change what populates it.**
-  Rejected: every module-level route/response already uses `owner` for its own, unrelated concept
-  (`buildModuleEntry`'s `data.owner`, `PUT /api/instance/modules/:id`'s request body) — reusing the
-  same key for the instance-level field would make every response that includes both an instance row
-  and its modules (there are none today, but nothing rules one out later) ambiguous about which
-  `owner` is which.
-- **Recompute/clear `assignee` on a (currently nonexistent) stage transition.** Rejected as solving a
-  problem that doesn't exist yet: there is no stage-transition code path at all today. Adding one
-  (and deciding what it should do to `assignee`) is out of this ticket's scope.
+- **Keep deriving `owner` from module frontmatter, just fix the "first non-empty across stage modules" rule to be less surprising.** Rejected: no derivation rule can make an instance-level concept ("who owns this initiative") behave predictably when its only source of truth is scattered across whichever modules a reviewer happened to fill in and how frontmatter's own per-module `status`/`owner` convention (a different, module-scoped concept — Design Authority sign-off) is used. The ticket's own acceptance criteria ("stable across stage transitions", "API returns the stored assignee rather than a derived rollup") describe a stored field, not a smarter derivation.
+- **Keep the JSON field named `owner` at the instance level too, just change what populates it.** Rejected: every module-level route/response already uses `owner` for its own, unrelated concept (`buildModuleEntry`'s `data.owner`, `PUT /api/instance/modules/:id`'s request body) — reusing the same key for the instance-level field would make every response that includes both an instance row and its modules (there are none today, but nothing rules one out later) ambiguous about which `owner` is which.
+- **Recompute/clear `assignee` on a (currently nonexistent) stage transition.** Rejected as solving a problem that doesn't exist yet: there is no stage-transition code path at all today. Adding one (and deciding what it should do to `assignee`) is out of this ticket's scope.
 
 Status: accepted.

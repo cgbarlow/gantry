@@ -6,8 +6,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parse as parseYAML } from 'yaml'
 
-// Catches the class of gap ticket #44 found: a lib/ function existing and
-// tested is not the same as its CLI command being wired up.
+// Catches the class of gap ticket #44 found: a lib/ function existing and tested is not the same as its CLI command being wired up.
 test('gantry new creates an instance with blank Shape-stage module files', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'gantry-cli-'))
   try {
@@ -28,9 +27,7 @@ test('gantry new creates an instance with blank Shape-stage module files', () =>
   }
 })
 
-// `--assignee` (#97) sets the instance record's own stored assignee —
-// distinct from `--owner` above, which only seeds each first-stage module
-// file's own frontmatter `owner`.
+// `--assignee` (#97) sets the instance record's own stored assignee — distinct from `--owner` above, which only seeds each first-stage module file's own frontmatter `owner`.
 test('gantry new --assignee records the instance record\'s own assignee, independently of --owner\'s module-frontmatter seeding', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'gantry-cli-'))
   try {

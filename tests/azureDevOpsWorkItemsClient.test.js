@@ -13,10 +13,7 @@ const ORGANIZATION = 'fake-org'
 const PROJECT = 'fake-project'
 const VALID_PAT = 'valid-test-pat'
 
-// Mirrors tests/azureDevOpsClient.test.js's own wrapper: pins this file's
-// fixed organization/project/PAT constants so call sites below only need
-// to supply whatever varies (usually just `workItemTypeStates`). No
-// `repository` is passed — Work Items endpoints aren't repository-scoped.
+// Mirrors tests/azureDevOpsClient.test.js's own wrapper: pins this file's fixed organization/project/PAT constants so call sites below only need to supply whatever varies (usually just `workItemTypeStates`). No `repository` is passed — Work Items endpoints aren't repository-scoped.
 function withFakeAzureDevOpsServer({ workItemTypeStates, workItemTypes } = {}, fn) {
   return withFakeServer(
     { organization: ORGANIZATION, project: PROJECT, validPat: VALID_PAT, workItemTypeStates, workItemTypes },
@@ -242,10 +239,7 @@ test('a rejected PAT surfaces as AzureDevOpsAuthenticationError on getWorkItemTy
 })
 
 test('a network failure reaching the Azure DevOps API surfaces as AzureDevOpsRequestError, not the auth or not-found errors', async () => {
-  // Nothing listens on this port — a real connection failure, not a mock
-  // of fetch — exercising the client's network-error branch, distinct
-  // from the HTTP-level auth/not-found branches covered above. Mirrors
-  // the equivalent test in tests/azureDevOpsClient.test.js.
+  // Nothing listens on this port — a real connection failure, not a mock of fetch — exercising the client's network-error branch, distinct from the HTTP-level auth/not-found branches covered above. Mirrors the equivalent test in tests/azureDevOpsClient.test.js.
   const unreachableBaseUrl = 'http://127.0.0.1:1'
   const c = client(unreachableBaseUrl)
   await assert.rejects(() => c.createWorkItem('Task', { 'System.Title': 'X' }), AzureDevOpsRequestError)

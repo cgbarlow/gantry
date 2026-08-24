@@ -1,32 +1,14 @@
 import { createServer } from 'node:http'
 
-// n's hex digits, zero-padded to a *fixed* width (7) and placed at the
-// *front* of the 40-character id, followed by a fixed run of zeroes — not
-// simply end-padded ("n.toString(16).padEnd(40, '0')"), which is not
-// actually collision-free: end-padding drops any distinction between how
-// many significant hex digits n has, so e.g. objectIdFor(1) ("1" + 39
-// zeroes) and objectIdFor(16) ("10" + 38 zeroes) produce the exact same
-// 40-character string. Fixing the width of the leading hex digits before
-// the zero-fill avoids that collision for any n below 16^7 — far more
-// pushes than any test here performs — while still keeping distinct commit
-// numbers distinguishable in their first few characters (e.g.
-// objectIdFor(1) -> "0000001...", objectIdFor(16) -> "0000010..."), which
-// tests asserting on a render footer's short (first-N-character) commit
-// hash (#98) need.
+// n's hex digits, zero-padded to a *fixed* width (7) and placed at the *front* of the 40-character id, followed by a fixed run of zeroes — not simply end-padded ("n.toString(16).padEnd(40, '0')"), which is not actually collision-free: end-padding drops any distinction between how many significant hex digits n has, so e.g. objectIdFor(1) ("1" + 39 zeroes) and objectIdFor(16) ("10" + 38 zeroes) produce the exact same 40-character string. Fixing the width of the leading hex digits before the zero-fill avoids that collision for any n below 16^7 — far more pushes than any test here performs — while still keeping distinct commit numbers distinguishable in their first few characters (e.g. objectIdFor(1) -> "0000001...", objectIdFor(16) -> "0000010..."), which tests asserting on a render footer's short (first-N-character) commit hash (#98) need.
 function objectIdFor(n) {
   return n.toString(16).padStart(7, '0') + '0'.repeat(33)
 }
 
-// Mirrors lib/azureDevOpsClient.js's own ZERO_OBJECT_ID — the all-zero id
-// Azure DevOps uses in a ref update's oldObjectId/newObjectId to mean
-// "this ref doesn't exist" (creating a new branch) or "delete this ref",
-// respectively.
+// Mirrors lib/azureDevOpsClient.js's own ZERO_OBJECT_ID — the all-zero id Azure DevOps uses in a ref update's oldObjectId/newObjectId to mean "this ref doesn't exist" (creating a new branch) or "delete this ref", respectively.
 const ZERO_OBJECT_ID = '0'.repeat(40)
 
-// Generic fallback states for any work item type not given an explicit
-// entry in `workItemTypeStates` — plausible-looking but not meant to match
-// any one real process template exactly (tests that care about a specific
-// type's states pass `workItemTypeStates` explicitly).
+// Generic fallback states for any work item type not given an explicit entry in `workItemTypeStates` — plausible-looking but not meant to match any one real process template exactly (tests that care about a specific type's states pass `workItemTypeStates` explicitly).
 const DEFAULT_WORK_ITEM_TYPE_STATES = [
   { name: 'New', category: 'Proposed', color: 'b2b2b2' },
   { name: 'Active', category: 'InProgress', color: '007acc' },
@@ -47,63 +29,17 @@ const DEFAULT_WORK_ITEM_TYPES = [
 ]
 
 /**
- * A minimal in-process fake of the Azure DevOps Git Items/Refs/Pushes REST
- * API, standing in for a real `dev.azure.com` org/project/repo in tests
- * (#84) — a real HTTP server on an ephemeral port that lib/azureDevOpsClient.js
- * talks to over real `fetch` calls, never a mock of `fetch` itself. Extended
- * by #99 to also fake the Work Items create/update/get-type-states
- * endpoints lib/azureDevOpsWorkItemsClient.js talks to, the same way, and by
- * #118 to actually track each branch's content independently (previously
- * every read/write landed in one flat store regardless of what branch the
- * client asked for — fine while no caller ever passed anything but the
- * client's own `'main'` default, but unable to prove a non-`'main'` branch
- * is genuinely isolated).
+ * A minimal in-process fake of the Azure DevOps Git Items/Refs/Pushes REST API, standing in for a real `dev.azure.com` org/project/repo in tests (#84) — a real HTTP server on an ephemeral port that lib/azureDevOpsClient.js talks to over real `fetch` calls, never a mock of `fetch` itself. Extended by #99 to also fake the Work Items create/update/get-type-states endpoints lib/azureDevOpsWorkItemsClient.js talks to, the same way, and by #118 to actually track each branch's content independently (previously every read/write landed in one flat store regardless of what branch the client asked for — fine while no caller ever passed anything but the client's own `'main'` default, but unable to prove a non-`'main'` branch is genuinely isolated).
  *
- * `files` seeds `main`'s initial content, keyed by repo-relative path
- * (leading "/" optional). `branchFiles`, if given, seeds one or more
- * *other* branches the same way (`{ [branchName]: { [path]: content } }`) —
- * for a test that needs a second branch to already exist (e.g. to prove a
- * write to it doesn't leak into `main`) without first driving a real push
- * to create it. `validPat` is the PAT (or, if an array, any one of several
- * PATs — e.g. to exercise replacing one valid PAT with another) accepted as
- * the password half of HTTP Basic auth (empty username) — anything else, or
- * no Authorization header at all, gets a 401, mirroring how a rejected PAT
- * surfaces from the real API.
+ * `files` seeds `main`'s initial content, keyed by repo-relative path (leading "/" optional). `branchFiles`, if given, seeds one or more *other* branches the same way (`{ [branchName]: { [path]: content } }`) — for a test that needs a second branch to already exist (e.g. to prove a write to it doesn't leak into `main`) without first driving a real push to create it. `validPat` is the PAT (or, if an array, any one of several PATs — e.g. to exercise replacing one valid PAT with another) accepted as the password half of HTTP Basic auth (empty username) — anything else, or no Authorization header at all, gets a 401, mirroring how a rejected PAT surfaces from the real API.
  *
- * `failAfterPushes`, if given, makes every push (POST .../pushes) once
- * `failAfterPushes` pushes have already committed successfully *during this
- * server's lifetime, across every branch* fail with a 500 — simulating a
- * mid-flow outage (a network blip, an expired PAT) for tests that need to
- * exercise a caller's partial-failure handling (e.g. a multi-file create
- * like createInstance's Azure DevOps path) without that test depending on
- * how many GETs the client happens to make per push. Counted separately
- * from any branch's own commit count (each of which seeds at 1 when that
- * branch is given non-empty `files`/`branchFiles` content) so
- * `failAfterPushes` always means "N real pushes made against this server",
- * regardless of how many branches were seeded with an initial commit.
- * Reads (`items`/`refs`) are never affected by this — only the write path.
+ * `failAfterPushes`, if given, makes every push (POST .../pushes) once `failAfterPushes` pushes have already committed successfully *during this server's lifetime, across every branch* fail with a 500 — simulating a mid-flow outage (a network blip, an expired PAT) for tests that need to exercise a caller's partial-failure handling (e.g. a multi-file create like createInstance's Azure DevOps path) without that test depending on how many GETs the client happens to make per push. Counted separately from any branch's own commit count (each of which seeds at 1 when that branch is given non-empty `files`/`branchFiles` content) so `failAfterPushes` always means "N real pushes made against this server", regardless of how many branches were seeded with an initial commit. Reads (`items`/`refs`) are never affected by this — only the write path.
  *
- * `workItemTypeStates`, if given, maps a work item type name (e.g. "Task")
- * to the array of valid states GET .../workitemtypes/{type}/states should
- * report for it — either full `{ name, category, color }` entries (Azure
- * DevOps's own shape) or plain state-name strings (auto-filled with
- * placeholder category/color). Falls back to a generic 4-state list for any
- * type not given an explicit entry.
+ * `workItemTypeStates`, if given, maps a work item type name (e.g. "Task") to the array of valid states GET .../workitemtypes/{type}/states should report for it — either full `{ name, category, color }` entries (Azure DevOps's own shape) or plain state-name strings (auto-filled with placeholder category/color). Falls back to a generic 4-state list for any type not given an explicit entry.
  *
- * Extended by #120 to also fake the Pull Requests create/get/complete
- * endpoints lib/azureDevOpsPullRequestsClient.js talks to, plus the "cast a
- * vote" endpoint (PUT .../pullrequests/{id}/reviewers/{reviewerId}) — not
- * something that client itself exposes (voting is the Owner's own action,
- * performed in Azure DevOps's real UI, per ADR-0014), but faked here so
- * tests can simulate "the Owner approved/rejected this" via a plain
- * `fetch` call against this same fake server, the same way a real test
- * would exercise "Check status" detecting that vote.
+ * Extended by #120 to also fake the Pull Requests create/get/complete endpoints lib/azureDevOpsPullRequestsClient.js talks to, plus the "cast a vote" endpoint (PUT .../pullrequests/{id}/reviewers/{reviewerId}) — not something that client itself exposes (voting is the Owner's own action, performed in Azure DevOps's real UI, per ADR-0014), but faked here so tests can simulate "the Owner approved/rejected this" via a plain `fetch` call against this same fake server, the same way a real test would exercise "Check status" detecting that vote.
  *
- * `workItemTypes`, if given, is the array GET .../workitemtypes (the whole
- * project's list of work item types, #121) should report — either full
- * Azure-DevOps-shaped entries or plain type-name strings (auto-filled with
- * placeholder description/color/icon). Falls back to a generic 4-type list
- * (Epic/Feature/Task/Bug) when omitted.
+ * `workItemTypes`, if given, is the array GET .../workitemtypes (the whole project's list of work item types, #121) should report — either full Azure-DevOps-shaped entries or plain type-name strings (auto-filled with placeholder description/color/icon). Falls back to a generic 4-type list (Epic/Feature/Task/Bug) when omitted.
  */
 export function createFakeAzureDevOpsServer({
   organization,
@@ -146,23 +82,15 @@ export function createFakeAzureDevOpsServer({
   const witBasePath = `/${organization}/${project}/_apis/wit`
   const orgWorkItemsPath = `/${organization}/_apis/wit/workItems`
 
-  // In-memory Work Items store, separate from the Git `store` above —
-  // keyed by numeric id, seeded empty (no `files`-style seeding option;
-  // tests create whatever work items they need via the client itself).
+  // In-memory Work Items store, separate from the Git `store` above — keyed by numeric id, seeded empty (no `files`-style seeding option; tests create whatever work items they need via the client itself).
   const workItems = new Map()
   let nextWorkItemId = 1
 
-  // In-memory Pull Requests store, separate from both the Git `store` and
-  // the Work Items store above — keyed by numeric id, seeded empty (tests
-  // create whatever pull requests they need via the client itself).
+  // In-memory Pull Requests store, separate from both the Git `store` and the Work Items store above — keyed by numeric id, seeded empty (tests create whatever pull requests they need via the client itself).
   const pullRequests = new Map()
   let nextPullRequestId = 1
 
-  // Applies an Azure DevOps JSON Patch document (as sent by
-  // lib/azureDevOpsWorkItemsClient.js's fieldsToPatch) to a fake work
-  // item's fields/relations — only the "add a field" and "append a
-  // relation" shapes that client actually produces, not general JSON
-  // Patch (this fake only needs to satisfy its one real caller).
+  // Applies an Azure DevOps JSON Patch document (as sent by lib/azureDevOpsWorkItemsClient.js's fieldsToPatch) to a fake work item's fields/relations — only the "add a field" and "append a relation" shapes that client actually produces, not general JSON Patch (this fake only needs to satisfy its one real caller).
   function applyWorkItemPatch(workItem, patch) {
     for (const op of patch) {
       if (op.path === '/relations/-' && op.op === 'add') {
@@ -207,11 +135,7 @@ export function createFakeAzureDevOpsServer({
 
   return createServer(async (req, res) => {
     const url = new URL(req.url, 'http://fake-azure-devops.invalid')
-    // Decode percent-encoded path segments before route-matching, the way
-    // a real HTTP server/router does — lets this fake exercise the
-    // client's URL-encoding of organisation/project/repository names
-    // (which may contain spaces or other reserved characters) rather than
-    // only matching when those names happen to need no encoding.
+    // Decode percent-encoded path segments before route-matching, the way a real HTTP server/router does — lets this fake exercise the client's URL-encoding of organisation/project/repository names (which may contain spaces or other reserved characters) rather than only matching when those names happen to need no encoding.
     const pathname = decodeURIComponent(url.pathname)
     const json = (status, body) => {
       res.writeHead(status, { 'Content-Type': 'application/json' })
@@ -238,16 +162,7 @@ export function createFakeAzureDevOpsServer({
       const store = branch?.store ?? new Map()
 
       const scopePath = url.searchParams.get('scopePath')
-      // A `scopePath` (+`recursionLevel`, always `OneLevel` for this fake's
-      // one real caller, lib/azureDevOpsClient.js's `listFolder`) requests
-      // a folder listing instead of a single file's content — the fake
-      // repo's flat `store` has no real notion of folders, so a folder's
-      // existence/children are derived from whatever file paths happen to
-      // start with `${scopePath}/`: the first remaining path segment is an
-      // immediate child, a folder itself if more segments follow it, a
-      // file otherwise. 404s (matching a real not-found path) if nothing
-      // in the store starts with that prefix, mirroring how a single-file
-      // `path` lookup 404s below.
+      // A `scopePath` (+`recursionLevel`, always `OneLevel` for this fake's one real caller, lib/azureDevOpsClient.js's `listFolder`) requests a folder listing instead of a single file's content — the fake repo's flat `store` has no real notion of folders, so a folder's existence/children are derived from whatever file paths happen to start with `${scopePath}/`: the first remaining path segment is an immediate child, a folder itself if more segments follow it, a file otherwise. 404s (matching a real not-found path) if nothing in the store starts with that prefix, mirroring how a single-file `path` lookup 404s below.
       if (scopePath !== null) {
         const normalizedScope = scopePath === '/' ? '' : scopePath.replace(/\/+$/, '')
         const prefix = `${normalizedScope}/`
@@ -395,12 +310,7 @@ export function createFakeAzureDevOpsServer({
       pushesMade += 1
       const newObjectId = objectIdFor(globalCommitCount)
       branches.set(branchName, { store, objectId: newObjectId })
-      // A real push response's `commits[]` entries carry full commit
-      // metadata (author/committer name+date, not just the commitId) —
-      // this is what lib/render.js's Azure-DevOps-backed render path (#98)
-      // reads its footer's commit hash/date from, rather than a separate
-      // call, so the fake mirrors that shape rather than the bare
-      // `{ commitId }` a caller uninterested in it might expect.
+      // A real push response's `commits[]` entries carry full commit metadata (author/committer name+date, not just the commitId) — this is what lib/render.js's Azure-DevOps-backed render path (#98) reads its footer's commit hash/date from, rather than a separate call, so the fake mirrors that shape rather than the bare `{ commitId }` a caller uninterested in it might expect.
       const now = new Date().toISOString()
       return json(201, {
         pushId: globalCommitCount,
@@ -625,11 +535,7 @@ export function createFakeAzureDevOpsServer({
 }
 
 /**
- * Starts a `createFakeAzureDevOpsServer` on an ephemeral port for the
- * duration of `fn(baseUrl)`, then closes it — mirrors
- * `tests/server.test.js`'s `withRunningServer` helper's shape (per #82's
- * testing decisions). Shared by `tests/azureDevOpsClient.test.js` and
- * `tests/instance.test.js` so this lifecycle isn't duplicated across both.
+ * Starts a `createFakeAzureDevOpsServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/server.test.js`'s `withRunningServer` helper's shape (per #82's testing decisions). Shared by `tests/azureDevOpsClient.test.js` and `tests/instance.test.js` so this lifecycle isn't duplicated across both.
  */
 export function withFakeAzureDevOpsServer(
   { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes },

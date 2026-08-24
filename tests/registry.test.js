@@ -52,9 +52,7 @@ test('listRegistry reports "complete" once every required field for the current 
   })
 })
 
-// The instance-level assignee (#97) is a plain field on the instance
-// record, not derived by scanning any module's frontmatter `owner` — even
-// though every module below has one set, it must not leak into this row.
+// The instance-level assignee (#97) is a plain field on the instance record, not derived by scanning any module's frontmatter `owner` — even though every module below has one set, it must not leak into this row.
 test('listRegistry falls back to \'\' for assignee when the instance record has none set, regardless of module frontmatter owner', () => {
   withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
@@ -85,9 +83,7 @@ test('listRegistry skips a stale registry entry (instance deleted from disk afte
     // Backfills both slugs into the registry file.
     listRegistry({ instancesDir })
 
-    // Simulates an instance directory removed after the registry already
-    // knows about it (manual cleanup, a rename, a future delete feature) —
-    // the registry itself has no way to notice this on its own.
+    // Simulates an instance directory removed after the registry already knows about it (manual cleanup, a rename, a future delete feature) — the registry itself has no way to notice this on its own.
     rmSync(join(instancesDir, 'alpha-initiative'), { recursive: true, force: true })
 
     const registry = listRegistry({ instancesDir })
@@ -101,11 +97,7 @@ test('listRegistry skips a stale registry entry (instance deleted from disk afte
 test('listRegistry still throws on a genuine read failure, rather than silently skipping it the way a stale/missing entry is', () => {
   withScratchInstances((instancesDir) => {
     createInstance('design', 'broken-initiative', { instancesDir })
-    // Unlike a *missing* instance.yaml (readInstance's "No instance ..."
-    // error, which listRegistry deliberately skips), a present-but-
-    // unparseable instance.yaml is a real problem that must still surface
-    // — it isn't the "instance was deleted after being registered" case
-    // the stale-entry skip above exists for.
+    // Unlike a *missing* instance.yaml (readInstance's "No instance ..." error, which listRegistry deliberately skips), a present-but-unparseable instance.yaml is a real problem that must still surface — it isn't the "instance was deleted after being registered" case the stale-entry skip above exists for.
     writeFileSync(join(instancesDir, 'broken-initiative', 'instance.yaml'), ': not: valid: yaml: [')
 
     assert.throws(() => listRegistry({ instancesDir }), /Nested mappings/)

@@ -78,9 +78,7 @@ test('registerInstance rejects an Azure DevOps location missing required fields'
 
 test('an instance.yaml already on disk with no registry entry is auto-backfilled as local, with no manual step', () => {
   withScratchInstances((instancesDir) => {
-    // Simulates a pre-existing instance created before the registry ever
-    // existed (or by a caller that bypassed registerInstance entirely,
-    // e.g. createInstance's local path, which never calls it).
+    // Simulates a pre-existing instance created before the registry ever existed (or by a caller that bypassed registerInstance entirely, e.g. createInstance's local path, which never calls it).
     createInstance('design', 'pre-existing', { instancesDir })
 
     assert.deepEqual(resolveInstanceLocation('pre-existing', { instancesDir }), { kind: 'local' })
@@ -121,8 +119,7 @@ test('the registry survives across multiple reads/writes (a fresh call sees a pr
     registerInstance('first', { kind: 'local' }, { instancesDir })
     registerInstance('second', { kind: 'local' }, { instancesDir })
 
-    // Each of these calls re-reads the registry file from scratch — no
-    // shared in-memory state — so this only passes if persistence is real.
+    // Each of these calls re-reads the registry file from scratch — no shared in-memory state — so this only passes if persistence is real.
     assert.deepEqual(resolveInstanceLocation('first', { instancesDir }), { kind: 'local' })
     assert.deepEqual(resolveInstanceLocation('second', { instancesDir }), { kind: 'local' })
     assert.equal(listRegisteredInstances({ instancesDir }).length, 2)
@@ -131,11 +128,7 @@ test('the registry survives across multiple reads/writes (a fresh call sees a pr
 
 test('instance.yaml\'s own (descriptive) azureDevOps field is never consulted — the registry alone decides kind', () => {
   withScratchInstances((instancesDir) => {
-    // A local instance.yaml can't itself carry an azureDevOps field the way
-    // createInstance's Azure DevOps path writes one — but even if a local
-    // instance.yaml were hand-edited to include one, resolving a slug's
-    // location must come from the registry file alone, never from
-    // reading/parsing instance.yaml's own content.
+    // A local instance.yaml can't itself carry an azureDevOps field the way createInstance's Azure DevOps path writes one — but even if a local instance.yaml were hand-edited to include one, resolving a slug's location must come from the registry file alone, never from reading/parsing instance.yaml's own content.
     createInstance('design', 'local-only', { instancesDir })
     assert.deepEqual(resolveInstanceLocation('local-only', { instancesDir }), { kind: 'local' })
   })
@@ -163,10 +156,7 @@ test('registerInstance persists an azureDevOps location as a workspace reference
     const location = { kind: 'azureDevOps', organization: 'fake-org', project: 'fake-project', repository: 'fake-repo' }
     registerInstance('remote-initiative', location, { instancesDir })
 
-    // resolveInstanceLocation still hands back the familiar shape (see the
-    // round-trip test above) — this asserts on the *raw file on disk*,
-    // which is the actual acceptance criterion: no organization/project/
-    // repository duplicated per instance, only a workspace id.
+    // resolveInstanceLocation still hands back the familiar shape (see the round-trip test above) — this asserts on the *raw file on disk*, which is the actual acceptance criterion: no organization/project/repository duplicated per instance, only a workspace id.
     const registryPath = join(instancesDir, 'instance-registry.json')
     const persisted = JSON.parse(readFileSync(registryPath, 'utf8'))
     assert.equal(persisted['remote-initiative'].kind, 'azureDevOps')
@@ -175,8 +165,7 @@ test('registerInstance persists an azureDevOps location as a workspace reference
     assert.equal(persisted['remote-initiative'].project, undefined)
     assert.equal(persisted['remote-initiative'].repository, undefined)
 
-    // The workspace it references really was created, with the right
-    // organization/project/repository.
+    // The workspace it references really was created, with the right organization/project/repository.
     const workspace = resolveWorkspace(persisted['remote-initiative'].workspaceId, { instancesDir })
     assert.equal(workspace.organization, 'fake-org')
     assert.equal(workspace.project, 'fake-project')
@@ -234,9 +223,7 @@ test('two instances registered against the same organization/project/repository 
 test('a registry file written before workspaces existed (organization/project/repository duplicated per entry) is auto-migrated on read, with no manual step', () => {
   withScratchInstances((instancesDir) => {
     const registryPath = join(instancesDir, 'instance-registry.json')
-    // Simulates a registry file persisted by a pre-#96 version of gantry —
-    // the exact shape `registerInstance`/`listRegisteredInstances` used to
-    // read and write before this ticket.
+    // Simulates a registry file persisted by a pre-#96 version of gantry — the exact shape `registerInstance`/`listRegisteredInstances` used to read and write before this ticket.
     writeFileSync(
       registryPath,
       JSON.stringify({
@@ -245,8 +232,7 @@ test('a registry file written before workspaces existed (organization/project/re
     )
 
     const location = resolveInstanceLocation('legacy-initiative', { instancesDir })
-    // Still resolves exactly as before — callers relying on the old shape
-    // are unaffected by the migration underneath them.
+    // Still resolves exactly as before — callers relying on the old shape are unaffected by the migration underneath them.
     assert.deepEqual(location, {
       kind: 'azureDevOps',
       organization: 'legacy-org',
@@ -259,8 +245,7 @@ test('a registry file written before workspaces existed (organization/project/re
     assert.equal(workspaces.length, 1)
     assert.equal(workspaces[0].organization, 'legacy-org')
 
-    // …and the registry file on disk was rewritten to reference it, rather
-    // than staying in the legacy duplicated-fields shape forever.
+    // …and the registry file on disk was rewritten to reference it, rather than staying in the legacy duplicated-fields shape forever.
     const migrated = JSON.parse(readFileSync(registryPath, 'utf8'))
     assert.equal(migrated['legacy-initiative'].workspaceId, workspaces[0].id)
     assert.equal(migrated['legacy-initiative'].organization, undefined)

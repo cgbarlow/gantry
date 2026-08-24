@@ -7,13 +7,7 @@ import { createServer } from '../lib/server.js'
 import { createInstance } from '../lib/instance.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
-// POST /api/instances/adopt (#94, under #88): registers an Azure-DevOps-
-// backed location the setup wizard's own repo-check (#90) already found
-// instance data at, so the module editor's per-request registry lookup
-// (#92) can resolve it afterward — without writing anything, unlike POST
-// /api/instances' create-and-register path (#93). Backed by the same
-// in-process fake Azure DevOps server used throughout #84-#94 — never a
-// real dev.azure.com.
+// POST /api/instances/adopt (#94, under #88): registers an Azure-DevOps-backed location the setup wizard's own repo-check (#90) already found instance data at, so the module editor's per-request registry lookup (#92) can resolve it afterward — without writing anything, unlike POST /api/instances' create-and-register path (#93). Backed by the same in-process fake Azure DevOps server used throughout #84-#94 — never a real dev.azure.com.
 
 const ORGANIZATION = 'fake-org'
 const PROJECT = 'fake-project'
@@ -154,11 +148,7 @@ test('POST /api/instances/adopt against a repo with no instance.yaml yet reports
   })
 })
 
-// #100: adopting a location that already holds more than one instance
-// under gantry-workspace/<slug>/ is a distinct, honest 400 (this route has
-// no slug input to say which one to adopt) — never silently treated as
-// "nothing to adopt" (that would be misleading: data genuinely is there),
-// and never guessed at.
+// #100: adopting a location that already holds more than one instance under gantry-workspace/<slug>/ is a distinct, honest 400 (this route has no slug input to say which one to adopt) — never silently treated as "nothing to adopt" (that would be misleading: data genuinely is there), and never guessed at.
 test('POST /api/instances/adopt against a repo already holding more than one instance reports 400 naming them, and registers nothing', async () => {
   const filesWithTwoInstances = {
     '/gantry-workspace/alpha-initiative/instance.yaml': 'definition: design\nslug: alpha-initiative\nstage: shape\n',
@@ -201,8 +191,7 @@ test('POST /api/instances/adopt against a repo with an existing instance registe
     assert.equal(body.workspace.organization, ORGANIZATION)
     assert.equal(body.workspace.repository, REPOSITORY)
 
-    // Genuinely registered — resolvable by the single-instance routes
-    // (#92), not merely reported back in this one response.
+    // Genuinely registered — resolvable by the single-instance routes (#92), not merely reported back in this one response.
     const instanceRes = await fetch(`${gantryBase}/api/instance?slug=my-initiative`, {
       headers: { Authorization: basicAuthHeader(VALID_PAT) },
     })
@@ -214,8 +203,7 @@ test('POST /api/instances/adopt against a repo with an existing instance registe
     const listing = await (await fetch(`${gantryBase}/api/instances`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })).json()
     assert.ok(listing.some((i) => i.slug === 'my-initiative'))
 
-    // No local directory was created — this only registered a location,
-    // never wrote instance data anywhere.
+    // No local directory was created — this only registered a location, never wrote instance data anywhere.
     assert.equal(existsSync(join(instancesDir, 'my-initiative')), false)
   })
 })
@@ -232,8 +220,7 @@ test('POST /api/instances/adopt is idempotent for a slug already adopted to this
     const first = await makeRequest()
     assert.equal(first.status, 200)
 
-    // A second adopt of the exact same location (the "come back and open it
-    // again" case) must succeed identically, not report a conflict.
+    // A second adopt of the exact same location (the "come back and open it again" case) must succeed identically, not report a conflict.
     const second = await makeRequest()
     assert.equal(second.status, 200)
     const secondBody = await second.json()
@@ -243,8 +230,7 @@ test('POST /api/instances/adopt is idempotent for a slug already adopted to this
 
 test('POST /api/instances/adopt reports 409 when the found slug is already registered to a different location, and does not repoint the registry', async () => {
   await withFakeAzureDevOpsAndGantryServer(SEED_FILES, {}, async (gantryBase, adoBaseUrl, instancesDir) => {
-    // "my-initiative" already exists as a genuine *local* instance under
-    // this same slug before the adopt is ever attempted.
+    // "my-initiative" already exists as a genuine *local* instance under this same slug before the adopt is ever attempted.
     createInstance('design', 'my-initiative', { instancesDir, assignee: 'local-assignee' })
 
     const res = await fetch(`${gantryBase}/api/instances/adopt`, {
@@ -279,17 +265,7 @@ test('POST /api/instances/adopt reports 400 when the found instance.yaml has no 
   })
 })
 
-// Regression test found in review: the found instance's slug comes from
-// the *target repo's own* instance.yaml — unsanitized third-party content,
-// unlike every other registration path's slug (always client-supplied and
-// already validated, e.g. POST /api/instances' create path). A malformed
-// value (containing a path separator, or exactly "." / "..") must be
-// rejected here too, the same way isValidSlug already guards every
-// client-supplied slug elsewhere — otherwise it would register
-// successfully but become a permanent, unremovable (no unregister route
-// exists) entry in the shared dashboard listing that can never actually be
-// opened, since every single-instance route's own resolveSlugParam rejects
-// such a slug the moment anyone tries to load it.
+// Regression test found in review: the found instance's slug comes from the *target repo's own* instance.yaml — unsanitized third-party content, unlike every other registration path's slug (always client-supplied and already validated, e.g. POST /api/instances' create path). A malformed value (containing a path separator, or exactly "." / "..") must be rejected here too, the same way isValidSlug already guards every client-supplied slug elsewhere — otherwise it would register successfully but become a permanent, unremovable (no unregister route exists) entry in the shared dashboard listing that can never actually be opened, since every single-instance route's own resolveSlugParam rejects such a slug the moment anyone tries to load it.
 test('POST /api/instances/adopt reports 400 when the found instance.yaml has a malformed (path-like) slug, and does not register it', async () => {
   const filesWithBadSlug = { ...SEED_FILES, '/instance.yaml': 'definition: design\nslug: ../evil\nstage: shape\n' }
   await withFakeAzureDevOpsAndGantryServer(filesWithBadSlug, {}, async (gantryBase, adoBaseUrl) => {
@@ -302,8 +278,7 @@ test('POST /api/instances/adopt reports 400 when the found instance.yaml has a m
     const body = await res.json()
     assert.match(body.error, /invalid slug/)
 
-    // Nothing was registered — the malformed entry never reaches the
-    // shared listing at all.
+    // Nothing was registered — the malformed entry never reaches the shared listing at all.
     const listing = await (await fetch(`${gantryBase}/api/instances`)).json()
     assert.equal(listing.length, 0)
   })

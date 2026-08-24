@@ -125,8 +125,7 @@ test('listWorkspaces lists every workspace, sorted by id', () => {
 test('the workspace registry survives across separate calls (a fresh call sees a previous call\'s registration)', () => {
   withScratchInstances((instancesDir) => {
     const created = registerWorkspace(LOCATION, { instancesDir })
-    // Each of these calls re-reads the registry file from scratch — no
-    // shared in-memory state — so this only passes if persistence is real.
+    // Each of these calls re-reads the registry file from scratch — no shared in-memory state — so this only passes if persistence is real.
     assert.deepEqual(resolveWorkspace(created.id, { instancesDir }), created)
     assert.equal(listWorkspaces({ instancesDir }).length, 1)
   })

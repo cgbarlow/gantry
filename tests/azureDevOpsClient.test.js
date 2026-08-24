@@ -14,12 +14,7 @@ const PROJECT = 'fake-project'
 const REPOSITORY = 'fake-repo'
 const VALID_PAT = 'valid-test-pat'
 
-// Mirrors tests/server.test.js's withRunningServer helper's shape (per
-// #82's testing decisions), but for the fake Azure DevOps server instead
-// of gantry's own — a real HTTP server on an ephemeral port, hit with real
-// `fetch` calls, never a mock of `fetch` internals. Pins this file's fixed
-// organization/project/repository/PAT constants so call sites below only
-// need to supply `files`.
+// Mirrors tests/server.test.js's withRunningServer helper's shape (per #82's testing decisions), but for the fake Azure DevOps server instead of gantry's own — a real HTTP server on an ephemeral port, hit with real `fetch` calls, never a mock of `fetch` internals. Pins this file's fixed organization/project/repository/PAT constants so call sites below only need to supply `files`.
 function withFakeAzureDevOpsServer(files, fn) {
   return withFakeServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files }, fn)
 }
@@ -82,14 +77,7 @@ test('writeFile survives a second write to the same path (branch ref moves forwa
   })
 })
 
-// Regression test for a fake-server bug found in review: an earlier version
-// of objectIdFor (tests/helpers/fakeAzureDevOpsServer.js) end-padded a hex
-// encoding of the commit count with zeroes, which is not actually
-// collision-free — e.g. commit 1 ("1" + 39 zeroes) and commit 16 ("10" + 38
-// zeroes) produced the exact same 40-character id. That would silently
-// break the optimistic-concurrency (oldObjectId) check any real Azure
-// DevOps repo relies on, and any test asserting on a commit id's
-// uniqueness, once a fake-server session crossed 16 pushes.
+// Regression test for a fake-server bug found in review: an earlier version of objectIdFor (tests/helpers/fakeAzureDevOpsServer.js) end-padded a hex encoding of the commit count with zeroes, which is not actually collision-free — e.g. commit 1 ("1" + 39 zeroes) and commit 16 ("10" + 38 zeroes) produced the exact same 40-character id. That would silently break the optimistic-concurrency (oldObjectId) check any real Azure DevOps repo relies on, and any test asserting on a commit id's uniqueness, once a fake-server session crossed 16 pushes.
 test('writeFile assigns a distinct newObjectId to every one of many pushes against the same fake server, never repeating one', async () => {
   await withFakeAzureDevOpsServer({}, async (baseUrl) => {
     const c = client(baseUrl)
@@ -124,8 +112,7 @@ test('base URL defaults to the real Azure DevOps API but is configurable/overrid
   await withFakeAzureDevOpsServer({ '/instance.yaml': 'slug: demo\n' }, async (baseUrl) => {
     const c = client(baseUrl)
     assert.equal(c.baseUrl, baseUrl)
-    // Proves the override actually took effect: a real call succeeds
-    // against the fake server on this non-default base URL.
+    // Proves the override actually took effect: a real call succeeds against the fake server on this non-default base URL.
     assert.equal(await c.getFileContent('/instance.yaml'), 'slug: demo\n')
   })
 })
@@ -145,8 +132,7 @@ test('a rejected PAT is reported distinctly from a not-found path, on the same c
     const badClient = client(baseUrl, { pat: 'wrong' })
     await assert.rejects(() => badClient.getFileContent('/instance.yaml'), AzureDevOpsAuthenticationError)
 
-    // The two failure modes are genuinely distinct classes, not the same
-    // error with a different message.
+    // The two failure modes are genuinely distinct classes, not the same error with a different message.
     assert.notEqual(AzureDevOpsAuthenticationError, AzureDevOpsNotFoundError)
   })
 })
@@ -159,19 +145,14 @@ test('a rejected PAT on writeFile also surfaces as AzureDevOpsAuthenticationErro
 })
 
 test('a network failure reaching the Azure DevOps API surfaces as AzureDevOpsRequestError, not the auth or not-found errors', async () => {
-  // Nothing listens on this port — a real connection failure, not a mock
-  // of fetch — exercising the client's network-error branch, distinct
-  // from the HTTP-level auth/not-found branches covered above.
+  // Nothing listens on this port — a real connection failure, not a mock of fetch — exercising the client's network-error branch, distinct from the HTTP-level auth/not-found branches covered above.
   const unreachableBaseUrl = 'http://127.0.0.1:1'
   const c = client(unreachableBaseUrl)
   await assert.rejects(() => c.getFileContent('/instance.yaml'), AzureDevOpsRequestError)
 })
 
 test('organisation and project names containing URL-reserved characters (space, "&", "#", "?") are encoded, not misparsed as a URL fragment/query', async () => {
-  // A project name is free text in Azure DevOps and can contain any of
-  // these — unlike the fixed ORGANIZATION/PROJECT constants used by every
-  // other test here, which are plain slugs that would pass even without
-  // encoding.
+  // A project name is free text in Azure DevOps and can contain any of these — unlike the fixed ORGANIZATION/PROJECT constants used by every other test here, which are plain slugs that would pass even without encoding.
   const organization = 'fake-org'
   const project = 'Q&A #1?'
   const repository = 'fake-repo'
@@ -207,8 +188,7 @@ test('organisation and project names containing URL-reserved characters (space, 
   })
 })
 
-// listFolder/deleteFile back lib/repoCheck.js's legacy-root-to-
-// gantry-workspace/<slug>/ migration (#100).
+// listFolder/deleteFile back lib/repoCheck.js's legacy-root-to-gantry-workspace/<slug>/ migration (#100).
 
 test('listFolder lists the immediate children of a folder, distinguishing files from subfolders', async () => {
   await withFakeAzureDevOpsServer(

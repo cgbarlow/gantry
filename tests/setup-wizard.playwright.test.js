@@ -7,28 +7,9 @@ import { chromium } from 'playwright'
 import { createServer } from '../lib/server.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
-// Browser smoke test for the instance-setup wizard's real (unstubbed)
-// validate(repoUrl)/instance-creation/instance-adoption flow (#94, under
-// #88) — the "progressive single page" variant from
-// web/prototypes/instance-setup-wizard.prototype.html, now driven by the
-// live Azure DevOps repo-check (#90), instance-creation (#93), and
-// instance-adoption (#94) routes instead of #78's original stub (which only
-// ever compared a URL's last path segment against gantry's own
-// already-known instances).
+// Browser smoke test for the instance-setup wizard's real (unstubbed) validate(repoUrl)/instance-creation/instance-adoption flow (#94, under #88) — the "progressive single page" variant from web/prototypes/instance-setup-wizard.prototype.html, now driven by the live Azure DevOps repo-check (#90), instance-creation (#93), and instance-adoption (#94) routes instead of #78's original stub (which only ever compared a URL's last path segment against gantry's own already-known instances).
 //
-// Real, separate in-process fake Azure DevOps servers stand in for real
-// repos the architect might paste a URL to (#84's fake server, never a
-// real dev.azure.com): `EXISTING_REPO` (already has a full instance.yaml +
-// shape-stage modules — the "existing instance found" outcome) and
-// `EMPTY_REPO` (nothing in it yet — the "empty repo" -> create-instance
-// outcome). The wizard's own URL field only ever expresses the standard
-// `https://dev.azure.com/{organization}/{project}/_git/{repository}` shape
-// (per #94's explicit scope — no on-premises baseUrl support), so each fake
-// server's real `baseUrl` is injected into the browser's own outgoing
-// requests via `page.route` — mirroring how
-// tests/serverAzureDevOpsRepoCheck.test.js/tests/server.test.js inject a
-// test-only `baseUrl` at the HTTP layer, just done here for a real browser
-// tab's traffic instead of a direct `fetch` call.
+// Real, separate in-process fake Azure DevOps servers stand in for real repos the architect might paste a URL to (#84's fake server, never a real dev.azure.com): `EXISTING_REPO` (already has a full instance.yaml + shape-stage modules — the "existing instance found" outcome) and `EMPTY_REPO` (nothing in it yet — the "empty repo" -> create-instance outcome). The wizard's own URL field only ever expresses the standard `https://dev.azure.com/{organization}/{project}/_git/{repository}` shape (per #94's explicit scope — no on-premises baseUrl support), so each fake server's real `baseUrl` is injected into the browser's own outgoing requests via `page.route` — mirroring how tests/serverAzureDevOpsRepoCheck.test.js/tests/server.test.js inject a test-only `baseUrl` at the HTTP layer, just done here for a real browser tab's traffic instead of a direct `fetch` call.
 const ORGANIZATION = 'Contoso-Production'
 const PROJECT = 'Default'
 const EXISTING_REPO = 'claims-modernisation'
@@ -63,18 +44,7 @@ function withRunningServer(options, fn) {
   })
 }
 
-// Starts one fake Azure DevOps server per `[repository, files]` pair in
-// `repoConfigs`, then a real gantry server whose `allowedAzureDevOpsBaseUrls`
-// allow-list includes every one of those fake servers' real base URLs (so
-// it's willing to honour a test-supplied `baseUrl` override for any of
-// them) plus `allowAzureDevOpsBaseUrlOverride: true` (so `POST
-// /api/instances`/`POST /api/instances/adopt` accept one too) — real
-// `gantry serve` never sets either option, so a real deployment can never
-// be directed to an arbitrary caller-chosen host this way (see
-// tests/serverAzureDevOpsRepoCheck.test.js's own dedicated coverage of that
-// default-off behaviour). `fn` receives `{ gantryBase, baseUrlsByRepo,
-// instancesDir }`, where `baseUrlsByRepo` maps each configured repository
-// name to its fake server's real base URL.
+// Starts one fake Azure DevOps server per `[repository, files]` pair in `repoConfigs`, then a real gantry server whose `allowedAzureDevOpsBaseUrls` allow-list includes every one of those fake servers' real base URLs (so it's willing to honour a test-supplied `baseUrl` override for any of them) plus `allowAzureDevOpsBaseUrlOverride: true` (so `POST /api/instances`/`POST /api/instances/adopt` accept one too) — real `gantry serve` never sets either option, so a real deployment can never be directed to an arbitrary caller-chosen host this way (see tests/serverAzureDevOpsRepoCheck.test.js's own dedicated coverage of that default-off behaviour). `fn` receives `{ gantryBase, baseUrlsByRepo, instancesDir }`, where `baseUrlsByRepo` maps each configured repository name to its fake server's real base URL.
 function withWizardTestServers(repoConfigs, fn) {
   async function startNext(remaining, baseUrlsByRepo) {
     if (remaining.length === 0) {
@@ -108,24 +78,9 @@ function repoUrlFor(repository) {
   return `https://dev.azure.com/${ORGANIZATION}/${PROJECT}/_git/${repository}`
 }
 
-// Installs the one set of `page.route` handlers every test below needs —
-// a single handler per pattern (not stacked across tests/helpers), since
-// Playwright runs multiple handlers registered against the same pattern in
-// *reverse* registration order and `route.continue()` sends the request
-// straight to the network rather than falling through to an
-// earlier-registered handler, so layering a second, independently-purposed
-// handler on the same pattern would silently defeat the first one.
+// Installs the one set of `page.route` handlers every test below needs — a single handler per pattern (not stacked across tests/helpers), since Playwright runs multiple handlers registered against the same pattern in *reverse* registration order and `route.continue()` sends the request straight to the network rather than falling through to an earlier-registered handler, so layering a second, independently-purposed handler on the same pattern would silently defeat the first one.
 //
-// Always injects the real fake-server `baseUrl` matching whichever
-// repository name the request names (the one piece of test wiring the real
-// wizard UI has no way to express itself — #94's URL field never collects
-// a `baseUrl`). `failFirstCheck`/`failFirstCreate` additionally make the
-// *first* matching repo-check/instance-creation request look exactly like
-// Azure DevOps rejecting (or gantry never receiving) a usable PAT — the
-// same structured `authentication_required` response `lib/server.js`'s
-// `sendAuthenticationRequired` produces — so the PAT-prompt-and-retry-once
-// path can be exercised deterministically, without depending on real PAT
-// validation timing.
+// Always injects the real fake-server `baseUrl` matching whichever repository name the request names (the one piece of test wiring the real wizard UI has no way to express itself — #94's URL field never collects a `baseUrl`). `failFirstCheck`/`failFirstCreate` additionally make the *first* matching repo-check/instance-creation request look exactly like Azure DevOps rejecting (or gantry never receiving) a usable PAT — the same structured `authentication_required` response `lib/server.js`'s `sendAuthenticationRequired` produces — so the PAT-prompt-and-retry-once path can be exercised deterministically, without depending on real PAT validation timing.
 function installRoutes(page, baseUrlsByRepo, { failFirstCheck = false, failFirstCreate = false } = {}) {
   const authRequiredBody = JSON.stringify({
     error: 'authentication_required',
@@ -207,8 +162,7 @@ test('the setup wizard walks through empty, existing, and error validate(repoUrl
       // No definition picker appears for a failed check.
       assert.equal(await page.locator('#definition-picker').count(), 0)
 
-      // A well-formed but non-dev.azure.com base URL is the same explicit,
-      // known-gap error, not a crash or silent no-op.
+      // A well-formed but non-dev.azure.com base URL is the same explicit, known-gap error, not a crash or silent no-op.
       await page.locator('#repo-url').fill('https://ado.internal.example.com/org/project/_git/repo')
       await page.getByRole('button', { name: 'Check repo' }).click()
       await page.waitForSelector('.dismiss-banner', { timeout: 5_000 })
@@ -222,10 +176,7 @@ test('the setup wizard walks through empty, existing, and error validate(repoUrl
       await page.getByRole('button', { name: 'Create instance' }).click()
       await page.waitForSelector('text=Instance created', { timeout: 5_000 })
 
-      // Genuinely written to the fake Azure DevOps repo — not just
-      // rendered in the browser — and registered via the listing API
-      // (#93), which is what makes it show up where the dashboard (#77)
-      // will read from.
+      // Genuinely written to the fake Azure DevOps repo — not just rendered in the browser — and registered via the listing API (#93), which is what makes it show up where the dashboard (#77) will read from.
       const registryAfterCreate = await (
         await fetch(`${gantryBase}/api/instances`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })
       ).json()
@@ -256,10 +207,7 @@ test('the setup wizard walks through empty, existing, and error validate(repoUrl
       await page.waitForSelector('.module', { timeout: 10_000 })
       assert.equal(await page.locator('header h1').textContent(), 'claims-modernisation — design')
 
-      // "Open instance" doesn't just load the module editor — it genuinely
-      // allows editing this (adopted, Azure-DevOps-backed) instance's
-      // modules end-to-end: an edit here round-trips through
-      // PUT /api/instance/modules/:id to the real fake Azure DevOps repo.
+      // "Open instance" doesn't just load the module editor — it genuinely allows editing this (adopted, Azure-DevOps-backed) instance's modules end-to-end: an edit here round-trips through PUT /api/instance/modules/:id to the real fake Azure DevOps repo.
       const editedText = 'Edited via the setup wizard\'s "Open instance" on an adopted, existing instance.'
       await page.locator('.field-markdown .cm-content').first().click()
       await page.keyboard.press('ControlOrMeta+a')
@@ -279,11 +227,7 @@ test('a repo check or instance creation made with no usable PAT triggers the PAT
     const browser = await chromium.launch()
     try {
       const page = await browser.newPage()
-      // The *first* repo-check and *first* instance-creation request each
-      // look exactly like gantry's structured "authentication required"
-      // response — deterministically exercising apiFetch's
-      // prompt-and-retry-once path, without depending on real PAT
-      // validation timing (see installRoutes' own comment).
+      // The *first* repo-check and *first* instance-creation request each look exactly like gantry's structured "authentication required" response — deterministically exercising apiFetch's prompt-and-retry-once path, without depending on real PAT validation timing (see installRoutes' own comment).
       await installRoutes(page, baseUrlsByRepo, { failFirstCheck: true, failFirstCreate: true })
 
       await page.goto(`${gantryBase}/setup`)
@@ -293,8 +237,7 @@ test('a repo check or instance creation made with no usable PAT triggers the PAT
       await page.locator('#repo-url').fill(repoUrlFor(EXISTING_REPO))
       await page.getByRole('button', { name: 'Check repo' }).click()
       await signInWithPat(page, VALID_PAT)
-      // The original check completes once the PAT is supplied — no need to
-      // click "Check repo" a second time.
+      // The original check completes once the PAT is supplied — no need to click "Check repo" a second time.
       await page.waitForSelector('text=Existing instance found', { timeout: 10_000 })
       const stored = await page.evaluate(() => localStorage.getItem('gantry:ado-pat'))
       assert.equal(stored, VALID_PAT)
@@ -305,8 +248,7 @@ test('a repo check or instance creation made with no usable PAT triggers the PAT
       await page.waitForSelector('text=Empty repo', { timeout: 10_000 })
       await page.getByRole('button', { name: 'Create instance' }).click()
       await signInWithPat(page, VALID_PAT)
-      // The original create completes once the PAT is supplied — no need
-      // to click "Create instance" a second time.
+      // The original create completes once the PAT is supplied — no need to click "Create instance" a second time.
       await page.waitForSelector('text=Instance created', { timeout: 10_000 })
     } finally {
       await browser.close()
@@ -314,13 +256,7 @@ test('a repo check or instance creation made with no usable PAT triggers the PAT
   })
 })
 
-// Regression test for a stale-response race found in review: clicking
-// "Create instance" then abandoning it (editing the URL, checking a
-// different repo) before the POST resolved used to still apply that stale
-// create's completion — an "Instance created" card for the *abandoned*
-// repo appearing on top of whatever the user had since moved on to
-// checking. `createNewInstance()` discards a completion superseded by a
-// later edit (see `sessionToken` in web/pages/setup-wizard.js).
+// Regression test for a stale-response race found in review: clicking "Create instance" then abandoning it (editing the URL, checking a different repo) before the POST resolved used to still apply that stale create's completion — an "Instance created" card for the *abandoned* repo appearing on top of whatever the user had since moved on to checking. `createNewInstance()` discards a completion superseded by a later edit (see `sessionToken` in web/pages/setup-wizard.js).
 test('abandoning a "Create instance" in flight does not surface a stale success card for it later', async () => {
   await withWizardTestServers([...STANDARD_REPO_CONFIGS, ['repo-a', {}], ['repo-b', {}]], async ({ gantryBase, baseUrlsByRepo }) => {
     const browser = await chromium.launch()
@@ -344,8 +280,7 @@ test('abandoning a "Create instance" in flight does not surface a stale success 
       await page.goto(`${gantryBase}/setup`)
       await page.waitForSelector('#repo-url', { timeout: 10_000 })
 
-      // Start creating "repo-a", then abandon it before the (slowed) POST
-      // resolves by switching to a different, unrelated "repo-b" check.
+      // Start creating "repo-a", then abandon it before the (slowed) POST resolves by switching to a different, unrelated "repo-b" check.
       await page.locator('#repo-url').fill(repoUrlFor('repo-a'))
       await page.getByRole('button', { name: 'Check repo' }).click()
       await page.waitForSelector('text=Empty repo', { timeout: 5_000 })
@@ -365,9 +300,7 @@ test('abandoning a "Create instance" in flight does not surface a stale success 
         'a stale "Instance created" card for the abandoned repo-a create should not appear'
       )
 
-      // The abandoned create still genuinely completed server-side (an
-      // already-sent HTTP request can't be cancelled) — only the stale
-      // *UI* update for it should be suppressed, not the actual effect.
+      // The abandoned create still genuinely completed server-side (an already-sent HTTP request can't be cancelled) — only the stale *UI* update for it should be suppressed, not the actual effect.
       const registry = await (
         await fetch(`${gantryBase}/api/instances`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })
       ).json()
@@ -378,10 +311,7 @@ test('abandoning a "Create instance" in flight does not surface a stale success 
   })
 })
 
-// Regression test for the same class of race in the "existing instance
-// found" -> "Open instance" path: editing the URL mid-adopt must abandon
-// that stale in-flight adopt, exactly as the "empty repo" -> "Create
-// instance" path already does above.
+// Regression test for the same class of race in the "existing instance found" -> "Open instance" path: editing the URL mid-adopt must abandon that stale in-flight adopt, exactly as the "empty repo" -> "Create instance" path already does above.
 test('editing the URL while "Open instance" is adopting an existing instance abandons that stale in-flight request', async () => {
   await withWizardTestServers(STANDARD_REPO_CONFIGS, async ({ gantryBase, baseUrlsByRepo }) => {
     const browser = await chromium.launch()
@@ -415,8 +345,7 @@ test('editing the URL while "Open instance" is adopting an existing instance aba
       await page.getByRole('button', { name: 'Check repo' }).click()
       await page.waitForSelector('text=Empty repo', { timeout: 5_000 })
 
-      // No navigation away from /setup happened as a side effect of the
-      // abandoned adopt resolving in the background.
+      // No navigation away from /setup happened as a side effect of the abandoned adopt resolving in the background.
       await page.waitForTimeout(1_500)
       assert.match(page.url(), /\/setup$/)
       assert.equal(await page.locator('#repo-url').inputValue(), repoUrlFor(EMPTY_REPO))

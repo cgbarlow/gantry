@@ -74,9 +74,7 @@ test('an unknown stageId throws', () => {
 
 // --- Azure DevOps-backed instances (#86) ---------------------------------
 //
-// getStatus/evaluateStage's second storage backend, exercised the same way
-// tests/instance.test.js exercises lib/instance.js's — a fake in-process
-// Azure DevOps server, never the real dev.azure.com.
+// getStatus/evaluateStage's second storage backend, exercised the same way tests/instance.test.js exercises lib/instance.js's — a fake in-process Azure DevOps server, never the real dev.azure.com.
 
 const ORGANIZATION = 'fake-org'
 const PROJECT = 'fake-project'
@@ -128,13 +126,7 @@ test('getStatus stays a plain synchronous return with no options.azureDevOps giv
   })
 })
 
-// Regression test for a review finding: evaluateStage's Azure-DevOps-backed
-// path used to silently ignore `options.strict`, so a parser anomaly (a
-// heading matching no field) would be swallowed rather than throwing — the
-// same anomaly throws on the local path when `strict: true` (`check`'s own
-// contract). `readModule` (lib/instance.js) now forwards `options.strict`
-// to `parseModuleFile` on both storage backends, so this must throw here
-// exactly as the equivalent local-path call does.
+// Regression test for a review finding: evaluateStage's Azure-DevOps-backed path used to silently ignore `options.strict`, so a parser anomaly (a heading matching no field) would be swallowed rather than throwing — the same anomaly throws on the local path when `strict: true` (`check`'s own contract). `readModule` (lib/instance.js) now forwards `options.strict` to `parseModuleFile` on both storage backends, so this must throw here exactly as the equivalent local-path call does.
 test('evaluateStage in strict mode over Azure DevOps throws on a parser anomaly, instead of silently ignoring strict', async () => {
   await withFakeAzureDevOpsServer(
     {

@@ -88,11 +88,7 @@ test('an unknown --gate throws', () => {
 })
 
 // ---------- Azure-DevOps-backed checkGate (#103) ----------
-// checkGate previously only ever read from the local filesystem — an
-// Azure-DevOps-backed instance's gate could never actually be checked at
-// all (a pre-existing gap #103's own confirmed gate-pass-sync flow depends
-// on not existing). These mirror the local-path tests above, one storage
-// backend removed.
+// checkGate previously only ever read from the local filesystem — an Azure-DevOps-backed instance's gate could never actually be checked at all (a pre-existing gap #103's own confirmed gate-pass-sync flow depends on not existing). These mirror the local-path tests above, one storage backend removed.
 
 test('checkGate against Azure DevOps fails a freshly-created instance the same way the local path does', async () => {
   await withFakeRepo({}, async (baseUrl) => {

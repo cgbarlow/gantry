@@ -8,21 +8,13 @@ import { createServer } from '../lib/server.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
-// Frontend PAT entry & storage (#87): the web form recognizes the
-// "authentication required" response (from #86) on any API call, prompts
-// the architect for an Azure DevOps PAT, stores it, attaches it as the
-// Authorization header on every subsequent request, and offers a way to
-// clear/replace it. Exercised here through a real browser and a real
-// running gantry server backed by the fake in-process Azure DevOps server
-// (never the real dev.azure.com), mirroring
-// tests/module-editor.playwright.test.js's own pattern.
+// Frontend PAT entry & storage (#87): the web form recognizes the "authentication required" response (from #86) on any API call, prompts the architect for an Azure DevOps PAT, stores it, attaches it as the Authorization header on every subsequent request, and offers a way to clear/replace it. Exercised here through a real browser and a real running gantry server backed by the fake in-process Azure DevOps server (never the real dev.azure.com), mirroring tests/module-editor.playwright.test.js's own pattern.
 
 const ORGANIZATION = 'fake-org'
 const PROJECT = 'fake-project'
 const REPOSITORY = 'fake-repo'
 const VALID_PAT = 'valid-test-pat'
-// A second accepted PAT, distinct from VALID_PAT — used by the "Replace PAT"
-// test to prove overwriting with a genuinely different credential works.
+// A second accepted PAT, distinct from VALID_PAT — used by the "Replace PAT" test to prove overwriting with a genuinely different credential works.
 const VALID_PAT_2 = `${VALID_PAT}-2`
 
 const SEED_FILES = {
@@ -66,10 +58,7 @@ function withRunningServer(options, fn) {
   })
 }
 
-// Registers "my-initiative" in the instance registry (#89) as Azure-DevOps-
-// backed — the only thing that now marks a slug as such (#92) — against a
-// scratch instancesDir, rather than pinning the whole server to one fixed
-// location at startup.
+// Registers "my-initiative" in the instance registry (#89) as Azure-DevOps-backed — the only thing that now marks a slug as such (#92) — against a scratch instancesDir, rather than pinning the whole server to one fixed location at startup.
 function withAzureDevOpsBackedServer(fn) {
   return withFakeAzureDevOpsServer(
     { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: [VALID_PAT, VALID_PAT_2], files: SEED_FILES },
@@ -104,8 +93,7 @@ test('opening an Azure-DevOps-backed instance with no stored PAT prompts for one
       assert.match(await modal.textContent(), /Code \(Read & write\)/)
       assert.match(await modal.textContent(), /Work Items \(Read & write\)/)
 
-      // No module content has loaded behind the modal yet — the prompt
-      // gates the view entirely, it doesn't just decorate a failed load.
+      // No module content has loaded behind the modal yet — the prompt gates the view entirely, it doesn't just decorate a failed load.
       assert.equal(await page.locator('.module').count(), 0)
 
       await modal.locator('input[type=password]').fill(VALID_PAT)
@@ -115,8 +103,7 @@ test('opening an Azure-DevOps-backed instance with no stored PAT prompts for one
       assert.equal(await page.locator('header h1').textContent(), 'my-initiative — design')
       await modal.waitFor({ state: 'hidden', timeout: 5_000 })
 
-      // Persisted client-side, so a fresh load of the same instance doesn't
-      // re-prompt.
+      // Persisted client-side, so a fresh load of the same instance doesn't re-prompt.
       const stored = await page.evaluate(() => localStorage.getItem('gantry:ado-pat'))
       assert.equal(stored, VALID_PAT)
 
@@ -135,15 +122,13 @@ test('a stored PAT is attached automatically on every subsequent request — no 
       const pageErrors = []
       page.on('pageerror', (err) => pageErrors.push(err.message))
 
-      // Seed the PAT before any navigation, as if it had been entered in a
-      // prior session.
+      // Seed the PAT before any navigation, as if it had been entered in a prior session.
       await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
 
       await page.goto(`${base}/instance/my-initiative`)
       await page.waitForSelector('.module', { timeout: 10_000 })
 
-      // The prompt never appears at all — the stored PAT was attached from
-      // the very first request.
+      // The prompt never appears at all — the stored PAT was attached from the very first request.
       assert.equal(await page.locator('.modal[aria-label="Azure DevOps sign-in required"]').count(), 0)
 
       const newText = 'Edited via the Azure-DevOps-backed instance, PAT attached automatically.'
@@ -166,13 +151,7 @@ test('clearing the stored PAT (from the Settings screen, #101) re-triggers the p
     try {
       const page = await browser.newPage()
 
-      // PAT management moved off the per-instance editor header entirely
-      // (#101) onto the global Settings screen's "Global Defaults" tab —
-      // exercised there instead of on `/instance/my-initiative`. Seeded via
-      // `page.evaluate` after an initial navigation (not `addInitScript`,
-      // which reruns on *every* subsequent navigation this test makes —
-      // including the one right after clearing — and would silently
-      // re-seed the very value this test clears).
+      // PAT management moved off the per-instance editor header entirely (#101) onto the global Settings screen's "Global Defaults" tab — exercised there instead of on `/instance/my-initiative`. Seeded via `page.evaluate` after an initial navigation (not `addInitScript`, which reruns on *every* subsequent navigation this test makes — including the one right after clearing — and would silently re-seed the very value this test clears).
       await page.goto(`${base}/settings`)
       await page.evaluate((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
       await page.reload()
@@ -180,9 +159,7 @@ test('clearing the stored PAT (from the Settings screen, #101) re-triggers the p
       const storedAfterClear = await page.evaluate(() => localStorage.getItem('gantry:ado-pat'))
       assert.equal(storedAfterClear, null)
 
-      // Clearing the PAT does not, by itself, touch any Azure-DevOps-backed
-      // API — the prompt reappears only once a genuine subsequent action
-      // needs the API again, here: opening the Azure-DevOps-backed instance.
+      // Clearing the PAT does not, by itself, touch any Azure-DevOps-backed API — the prompt reappears only once a genuine subsequent action needs the API again, here: opening the Azure-DevOps-backed instance.
       const modal = page.locator('.modal[aria-label="Azure DevOps sign-in required"]')
       assert.equal(await modal.count(), 0)
 
@@ -205,12 +182,7 @@ test('the Settings screen\'s "Replace Azure DevOps PAT" control (#101) opens the
     try {
       const page = await browser.newPage()
 
-      // Seeded via `page.evaluate` + `reload` after an initial navigation,
-      // not `addInitScript` — see the previous test's own comment on why
-      // `addInitScript` is unsafe once a test navigates more than once
-      // (it would re-seed VALID_PAT right before the later
-      // `/instance/my-initiative` navigation below, silently overwriting
-      // the replacement PAT this test proves gets used instead).
+      // Seeded via `page.evaluate` + `reload` after an initial navigation, not `addInitScript` — see the previous test's own comment on why `addInitScript` is unsafe once a test navigates more than once (it would re-seed VALID_PAT right before the later `/instance/my-initiative` navigation below, silently overwriting the replacement PAT this test proves gets used instead).
       await page.goto(`${base}/settings`)
       await page.evaluate((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
       await page.reload()
@@ -220,10 +192,7 @@ test('the Settings screen\'s "Replace Azure DevOps PAT" control (#101) opens the
       const modal = page.locator('.modal[aria-label="Azure DevOps sign-in required"]')
       await modal.waitFor({ state: 'visible', timeout: 5_000 })
 
-      // A genuinely different, still-valid replacement — the fake server
-      // accepts either PAT (see withAzureDevOpsBackedServer's `validPat`
-      // array) — so this proves both the overwrite itself and that the
-      // replaced value keeps working, not just that the modal closes.
+      // A genuinely different, still-valid replacement — the fake server accepts either PAT (see withAzureDevOpsBackedServer's `validPat` array) — so this proves both the overwrite itself and that the replaced value keeps working, not just that the modal closes.
       const replacementPat = VALID_PAT_2
       await modal.locator('input[type=password]').fill(replacementPat)
       await modal.getByRole('button', { name: 'Continue' }).click()
@@ -232,9 +201,7 @@ test('the Settings screen\'s "Replace Azure DevOps PAT" control (#101) opens the
       const stored = await page.evaluate(() => localStorage.getItem('gantry:ado-pat'))
       assert.equal(stored, replacementPat)
 
-      // The replaced PAT is what's now attached — a subsequent save on the
-      // Azure-DevOps-backed instance still round-trips, proving the new
-      // value is genuinely in effect, not just recorded in storage.
+      // The replaced PAT is what's now attached — a subsequent save on the Azure-DevOps-backed instance still round-trips, proving the new value is genuinely in effect, not just recorded in storage.
       await page.goto(`${base}/instance/my-initiative`)
       await page.waitForSelector('.module', { timeout: 10_000 })
       await page.locator('.field-markdown .cm-content').first().click()

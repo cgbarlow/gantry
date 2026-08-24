@@ -5,22 +5,9 @@ import { createServer as createHttpServer } from 'node:http'
 import { createServer } from '../lib/server.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
-// GET /api/azure-devops/repo-check (#90, under #88): given an Azure DevOps
-// location (organization/project/repository, as query params — never a
-// gantry slug) and the caller's own PAT, reports whether that location
-// already holds instance data. Read-only; never touches instancesDir or
-// lib/registry.js. Backed by the same fake in-process Azure DevOps server
-// tests/serverAzureDevOpsAuth.test.js and tests/instance.test.js use — never
-// the real dev.azure.com.
+// GET /api/azure-devops/repo-check (#90, under #88): given an Azure DevOps location (organization/project/repository, as query params — never a gantry slug) and the caller's own PAT, reports whether that location already holds instance data. Read-only; never touches instancesDir or lib/registry.js. Backed by the same fake in-process Azure DevOps server tests/serverAzureDevOpsAuth.test.js and tests/instance.test.js use — never the real dev.azure.com.
 //
-// `baseUrl` is also accepted as a query param, but only honoured when it
-// exactly matches an entry in the server's own `allowedAzureDevOpsBaseUrls`
-// allow-list — empty by default (what `gantry serve` uses), so a real
-// deployment can't be directed to make an outbound request to an arbitrary
-// caller-chosen host. Every test below that needs to point at the fake
-// Azure DevOps server allow-lists that fake server's own baseUrl
-// explicitly; the "baseUrl override is allow-listed, not a blanket switch"
-// section covers the default-off and scoped-allow-list behaviour itself.
+// `baseUrl` is also accepted as a query param, but only honoured when it exactly matches an entry in the server's own `allowedAzureDevOpsBaseUrls` allow-list — empty by default (what `gantry serve` uses), so a real deployment can't be directed to make an outbound request to an arbitrary caller-chosen host. Every test below that needs to point at the fake Azure DevOps server allow-lists that fake server's own baseUrl explicitly; the "baseUrl override is allow-listed, not a blanket switch" section covers the default-off and scoped-allow-list behaviour itself.
 
 const ORGANIZATION = 'fake-org'
 const PROJECT = 'fake-project'
@@ -48,18 +35,7 @@ function withRunningServer(options, fn) {
   })
 }
 
-// Unlike tests/serverAzureDevOpsAuth.test.js's `withAzureDevOpsBackedServer`,
-// this route takes its Azure DevOps location as per-request query params
-// rather than from server-startup options — so the gantry server here is
-// started with no `options.azureDevOps` at all, only pointed (via the
-// query string each test builds) at the fake Azure DevOps server's baseUrl.
-// `allowedAzureDevOpsBaseUrls: [adoBaseUrl]` is what makes that possible:
-// real `gantry serve` never sets it, so a real deployment can never be
-// directed to an arbitrary caller-chosen host this way (see the dedicated
-// tests below covering that default-empty, exact-match-only behaviour) —
-// it's only ever populated here, with this one fake server's own baseUrl,
-// to let this suite point at the fake in-process server instead of the
-// real dev.azure.com.
+// Unlike tests/serverAzureDevOpsAuth.test.js's `withAzureDevOpsBackedServer`, this route takes its Azure DevOps location as per-request query params rather than from server-startup options — so the gantry server here is started with no `options.azureDevOps` at all, only pointed (via the query string each test builds) at the fake Azure DevOps server's baseUrl. `allowedAzureDevOpsBaseUrls: [adoBaseUrl]` is what makes that possible: real `gantry serve` never sets it, so a real deployment can never be directed to an arbitrary caller-chosen host this way (see the dedicated tests below covering that default-empty, exact-match-only behaviour) — it's only ever populated here, with this one fake server's own baseUrl, to let this suite point at the fake in-process server instead of the real dev.azure.com.
 function withFakeAzureDevOpsAndGantryServer(files, fn) {
   return withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files }, async (adoBaseUrl) => {
     await withRunningServer({ allowedAzureDevOpsBaseUrls: [adoBaseUrl] }, async (gantryBase) => fn(gantryBase, adoBaseUrl))
@@ -139,13 +115,9 @@ test('GET /api/azure-devops/repo-check with a valid PAT against a repo that alre
     assert.equal(body.slug, 'my-initiative')
     assert.equal(body.definition, 'design')
     assert.equal(body.stage, 'shape')
-    // Only "context" of the shape stage's three modules (context,
-    // solution-definition, team-and-estimates) was seeded, so the stage is
-    // not complete yet.
+    // Only "context" of the shape stage's three modules (context, solution-definition, team-and-estimates) was seeded, so the stage is not complete yet.
     assert.equal(body.status, 'incomplete')
-    // The instance record's own stored assignee (#97) — not derived from
-    // "context"'s own module frontmatter owner (also 'c.barlow' above,
-    // coincidentally the same value, but read from a different field).
+    // The instance record's own stored assignee (#97) — not derived from "context"'s own module frontmatter owner (also 'c.barlow' above, coincidentally the same value, but read from a different field).
     assert.equal(body.assignee, 'c.barlow')
   })
 })
@@ -180,10 +152,7 @@ test('GET /api/azure-devops/repo-check with a valid PAT against a repo with no i
   })
 })
 
-// #100: one Azure DevOps repo can now hold more than one instance under
-// gantry-workspace/<slug>/ — this route has no slug input to disambiguate
-// with, so a location holding several is reported distinctly from
-// "empty" rather than silently guessing one.
+// #100: one Azure DevOps repo can now hold more than one instance under gantry-workspace/<slug>/ — this route has no slug input to disambiguate with, so a location holding several is reported distinctly from "empty" rather than silently guessing one.
 test('GET /api/azure-devops/repo-check with a valid PAT against a repo already holding more than one instance reports "multiple", not "empty"', async () => {
   await withFakeAzureDevOpsAndGantryServer(
     {
@@ -220,11 +189,7 @@ test('GET /api/azure-devops/repo-check with a missing required query parameter r
 // ---------- baseUrl override is allow-listed, not a blanket switch ----------
 
 test('GET /api/azure-devops/repo-check rejects a caller-supplied baseUrl with a 400 when the server has no allow-list at all, without making any outbound request', async () => {
-  // No `allowedAzureDevOpsBaseUrls` here — the same default (empty) `gantry
-  // serve` uses. Points `baseUrl` at the fake Azure DevOps server anyway:
-  // if this were honoured, the request would succeed exactly like the
-  // tests above; the assertion below is only meaningful because the fake
-  // server is real and reachable, not because the URL is bogus.
+  // No `allowedAzureDevOpsBaseUrls` here — the same default (empty) `gantry serve` uses. Points `baseUrl` at the fake Azure DevOps server anyway: if this were honoured, the request would succeed exactly like the tests above; the assertion below is only meaningful because the fake server is real and reachable, not because the URL is bogus.
   await withFakeAzureDevOpsServer(
     { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: SEED_FILES },
     async (adoBaseUrl) => {
@@ -241,12 +206,7 @@ test('GET /api/azure-devops/repo-check rejects a caller-supplied baseUrl with a 
 })
 
 test('GET /api/azure-devops/repo-check rejects a caller-supplied baseUrl not on the server\'s allow-list, even though it names a different real, reachable Azure DevOps-shaped server', async () => {
-  // Regression coverage for the allow-list actually being scoped per-host:
-  // a server configured to trust one specific on-premises-style location
-  // (`allowedServer`) must not thereby trust *any* location a caller names —
-  // only that exact one. `otherServer` is a second, equally real fake Azure
-  // DevOps server (not a bogus URL) to prove this isn't merely "unreachable
-  // hosts get rejected".
+  // Regression coverage for the allow-list actually being scoped per-host: a server configured to trust one specific on-premises-style location (`allowedServer`) must not thereby trust *any* location a caller names — only that exact one. `otherServer` is a second, equally real fake Azure DevOps server (not a bogus URL) to prove this isn't merely "unreachable hosts get rejected".
   await withFakeAzureDevOpsServer(
     { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: SEED_FILES },
     async (allowedServerBaseUrl) => {
@@ -260,8 +220,7 @@ test('GET /api/azure-devops/repo-check rejects a caller-supplied baseUrl not on 
             })
             assert.equal(allowedRes.status, 200)
 
-            // ...but a different, equally real server is not, even though
-            // it isn't on this server's allow-list.
+            // ...but a different, equally real server is not, even though it isn't on this server's allow-list.
             const otherRes = await fetch(repoCheckUrl(gantryBase, otherServerBaseUrl), {
               headers: { Authorization: basicAuthHeader(VALID_PAT) },
             })
@@ -276,20 +235,12 @@ test('GET /api/azure-devops/repo-check rejects a caller-supplied baseUrl not on 
 })
 
 test('GET /api/azure-devops/repo-check treats a misconfigured (non-array) allowedAzureDevOpsBaseUrls as an empty allow-list, not a substring-match allow-list', async () => {
-  // `allowedAzureDevOpsBaseUrls` given as a bare string, not wrapped in an
-  // array — a plausible operator slip. Were this passed straight to
-  // `.includes()` unchecked, `String.prototype.includes` would accept any
-  // caller-supplied *substring* of that string as a match (weaker than the
-  // exact-match allow-list this option is documented to be) instead of
-  // rejecting it the same way an absent/empty allow-list would.
+  // `allowedAzureDevOpsBaseUrls` given as a bare string, not wrapped in an array — a plausible operator slip. Were this passed straight to `.includes()` unchecked, `String.prototype.includes` would accept any caller-supplied *substring* of that string as a match (weaker than the exact-match allow-list this option is documented to be) instead of rejecting it the same way an absent/empty allow-list would.
   await withFakeAzureDevOpsServer(
     { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: SEED_FILES },
     async (adoBaseUrl) => {
       await withRunningServer({ allowedAzureDevOpsBaseUrls: adoBaseUrl }, async (gantryBase) => {
-        // A substring of the misconfigured string that a real allow-list
-        // entry would never itself be — proves this isn't just "the full
-        // string still happens to work", but that substring-matching isn't
-        // happening at all.
+        // A substring of the misconfigured string that a real allow-list entry would never itself be — proves this isn't just "the full string still happens to work", but that substring-matching isn't happening at all.
         const substringOfConfiguredUrl = adoBaseUrl.slice(0, -1)
         const url = new URL(`${gantryBase}/api/azure-devops/repo-check`)
         url.searchParams.set('organization', ORGANIZATION)

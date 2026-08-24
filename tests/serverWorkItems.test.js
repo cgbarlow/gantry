@@ -9,11 +9,7 @@ import { registerInstance } from '../lib/instanceRegistry.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
-// HTTP-boundary tests for #95/#103's new routes: POST /api/instance/work-
-// items/link, POST /api/instance/work-items/sync, and the accompanying fix
-// to GET /api/instance/check (previously local-only). Real HTTP requests
-// against a real gantry server and a real (fake, in-process) Azure DevOps
-// server throughout — nothing mocked.
+// HTTP-boundary tests for #95/#103's new routes: POST /api/instance/work-items/link, POST /api/instance/work-items/sync, and the accompanying fix to GET /api/instance/check (previously local-only). Real HTTP requests against a real gantry server and a real (fake, in-process) Azure DevOps server throughout — nothing mocked.
 
 const WI_ORGANIZATION = 'wi-org'
 const WI_PROJECT = 'wi-project'
@@ -54,11 +50,7 @@ function withScratchGantryServer(fn) {
   return withFakeWorkItemsServer(async (wiBaseUrl) => {
     const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
     try {
-      // `allowAzureDevOpsBaseUrlOverride` lets these tests point the real
-      // work-items-link route at the fake Azure DevOps server instead of
-      // the real dev.azure.com, the same opt-in every other Azure-DevOps-
-      // backed HTTP test in this repo already uses (see createServer's own
-      // doc comment) — never enabled on a real deployment.
+      // `allowAzureDevOpsBaseUrlOverride` lets these tests point the real work-items-link route at the fake Azure DevOps server instead of the real dev.azure.com, the same opt-in every other Azure-DevOps-backed HTTP test in this repo already uses (see createServer's own doc comment) — never enabled on a real deployment.
       await withRunningServer(
         { instancesDir, allowedAzureDevOpsBaseUrls: [wiBaseUrl], allowAzureDevOpsBaseUrlOverride: true },
         async (gantryBase) => fn(gantryBase, wiBaseUrl, instancesDir)
@@ -267,8 +259,7 @@ test('POST /api/instance/work-items/sync pushes a real state to the stage\'s wor
     assert.equal(body.workItemId, link.stages.shape)
     assert.equal(body.workItem.fields['System.State'], body.state)
 
-    // A direct client call against the fake server confirms the state
-    // genuinely changed there — not merely echoed back in the response.
+    // A direct client call against the fake server confirms the state genuinely changed there — not merely echoed back in the response.
     const client = createAzureDevOpsWorkItemsClient({ organization: WI_ORGANIZATION, project: WI_PROJECT, pat: VALID_PAT, baseUrl: wiBaseUrl })
     const updated = await client.updateWorkItem(link.stages.shape, {})
     assert.equal(updated.fields['System.State'], body.state)
@@ -302,10 +293,7 @@ test('GET /api/instance/check now actually checks an Azure-DevOps-backed instanc
               { instancesDir }
             )
 
-            // No PAT — the structured "authentication required" response,
-            // proving this route now actually gates on Azure DevOps
-            // credentials for a registry-resolved Azure-DevOps-backed slug,
-            // rather than reading (or missing) a local directory.
+            // No PAT — the structured "authentication required" response, proving this route now actually gates on Azure DevOps credentials for a registry-resolved Azure-DevOps-backed slug, rather than reading (or missing) a local directory.
             const unauthed = await fetch(`${gantryBase}/api/instance/check?slug=my-initiative`)
             assert.equal(unauthed.status, 401)
             const unauthedBody = await unauthed.json()

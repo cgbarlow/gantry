@@ -7,13 +7,7 @@ import { createServer } from '../lib/server.js'
 import { createInstance } from '../lib/instance.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 
-// GET /api/instance/workspace (#104): the small, registry-only lookup the
-// client-side request layer (web/lib/apiFetch.js's `apiFetchForInstance`)
-// asks *before* deciding which PAT to attach to a request that actually
-// touches Azure DevOps for a given slug — see lib/instanceRegistry.js's
-// `resolveInstanceWorkspaceId` for why this is a separate function/route
-// rather than a new field on the existing `resolveInstanceLocation`/`GET
-// /api/instances` shapes.
+// GET /api/instance/workspace (#104): the small, registry-only lookup the client-side request layer (web/lib/apiFetch.js's `apiFetchForInstance`) asks *before* deciding which PAT to attach to a request that actually touches Azure DevOps for a given slug — see lib/instanceRegistry.js's `resolveInstanceWorkspaceId` for why this is a separate function/route rather than a new field on the existing `resolveInstanceLocation`/`GET /api/instances` shapes.
 
 function withRunningServer(options, fn) {
   return new Promise((resolve, reject) => {

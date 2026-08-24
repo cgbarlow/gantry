@@ -1,11 +1,6 @@
 import { signal, effect } from '@preact/signals'
 
-// The instance dashboard's (#77) chosen layout — master-detail (default) or
-// stage swimlanes — persisted the same way theme.js persists theme choice:
-// a `@preact/signals` signal backed by localStorage, guarded against
-// localStorage throwing (blocked storage, sandboxed iframe, etc.) so a
-// throw here can never take down the rest of the app, just stop the choice
-// persisting. See web/lib/theme.js for the identical pattern this mirrors.
+// The instance dashboard's (#77) chosen layout — master-detail (default) or stage swimlanes — persisted the same way theme.js persists theme choice: a `@preact/signals` signal backed by localStorage, guarded against localStorage throwing (blocked storage, sandboxed iframe, etc.) so a throw here can never take down the rest of the app, just stop the choice persisting. See web/lib/theme.js for the identical pattern this mirrors.
 export const VIEW_MODES = ['master-detail', 'swimlanes']
 
 const STORAGE_KEY = 'gantry:dashboard-view'

@@ -1,40 +1,9 @@
 # Adopt Preact as gantry's production UI framework
 
-Gantry's web UI (`web/index.html`, `web/app.js`) was a single static, no-build
-page with no framework — hand-rolled DOM construction and a re-fetch-on-every-change
-pattern. The production UI is growing to four to five distinct, more stateful
-screens (instance dashboard, an Azure DevOps-backed setup wizard, the module
-editor, an asset library — see the wayfinder map "Design gantry's production
-UI"), at which point hand-written DOM bookkeeping starts costing more than a
-framework's reactivity would.
+Gantry's web UI (`web/index.html`, `web/app.js`) was a single static, no-build page with no framework — hand-rolled DOM construction and a re-fetch-on-every-change pattern. The production UI is growing to four to five distinct, more stateful screens (instance dashboard, an Azure DevOps-backed setup wizard, the module editor, an asset library — see the wayfinder map "Design gantry's production UI"), at which point hand-written DOM bookkeeping starts costing more than a framework's reactivity would.
 
-We chose **Preact**, delivered via **HTM tagged templates** with no build
-step — resolving `lib/importmap.js` from `node_modules` exactly as CodeMirror
-6, `markdown-it`, and `dompurify` are today. `@preact/signals` is adopted from
-the outset as the standard cross-screen state primitive (active
-instance/module, in-progress wizard answers, asset-library filters), and
-`preact-iso` as the router across the app's screens. The existing module
-editor (including its CodeMirror 6 wiring fixed by
-`docs/adr/0004-markdown-editor-codemirror.md`) is ported into Preact
-alongside the new screens, rather than left vanilla — so the whole app shares
-one component/state/routing model instead of a split codebase.
+We chose **Preact**, delivered via **HTM tagged templates** with no build step — resolving `lib/importmap.js` from `node_modules` exactly as CodeMirror 6, `markdown-it`, and `dompurify` are today. `@preact/signals` is adopted from the outset as the standard cross-screen state primitive (active instance/module, in-progress wizard answers, asset-library filters), and `preact-iso` as the router across the app's screens. The existing module editor (including its CodeMirror 6 wiring fixed by `docs/adr/0004-markdown-editor-codemirror.md`) is ported into Preact alongside the new screens, rather than left vanilla — so the whole app shares one component/state/routing model instead of a split codebase.
 
-Preact was chosen over Lit — the other candidate that integrates cleanly
-with gantry's no-build pipeline — because Lit ships no official state or
-routing story, which would mean hand-rolling exactly the plumbing a
-framework is being adopted to avoid. Svelte was ruled out entirely: it
-requires a real compiler with no supported CDN/runtime-only path. Vue's
-no-build story is real but needs a hand-added override in
-`lib/importmap.js` to reach a browser-safe file; its ecosystem defaults
-(Pinia, vue-router, Vite scaffolding) also lean heavier than this app's size
-warrants. Staying fully vanilla remained an option but was rejected because
-the wizard's multi-step state and the asset library's filter/search are
-exactly the kind of interactivity the current hand-rolled DOM-rebuild
-pattern handles poorly.
+Preact was chosen over Lit — the other candidate that integrates cleanly with gantry's no-build pipeline — because Lit ships no official state or routing story, which would mean hand-rolling exactly the plumbing a framework is being adopted to avoid. Svelte was ruled out entirely: it requires a real compiler with no supported CDN/runtime-only path. Vue's no-build story is real but needs a hand-added override in `lib/importmap.js` to reach a browser-safe file; its ecosystem defaults (Pinia, vue-router, Vite scaffolding) also lean heavier than this app's size warrants. Staying fully vanilla remained an option but was rejected because the wizard's multi-step state and the asset library's filter/search are exactly the kind of interactivity the current hand-rolled DOM-rebuild pattern handles poorly.
 
-JSX (and the build step it requires) was considered and rejected: it would
-reverse gantry's no-build principle for the first time, trading a real but
-modest ergonomics/TypeScript loss for a new build/deploy failure surface —
-not worth it for a small internal tool. See
-`docs/research/frontend-framework-options.md` for the full comparison this
-decision was based on.
+JSX (and the build step it requires) was considered and rejected: it would reverse gantry's no-build principle for the first time, trading a real but modest ergonomics/TypeScript loss for a new build/deploy failure surface — not worth it for a small internal tool. See `docs/research/frontend-framework-options.md` for the full comparison this decision was based on.

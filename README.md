@@ -445,3 +445,4 @@ Conventions:
 - Module ids are lower-kebab-case and name the *content*, not the section of a document it used to live in.
 - Guidance text in module specs is written for the person filling it in, not for a reviewer.
 - Never add a field that exists only to satisfy a template's layout.
+- Comment/prose text (code comments, `CONTEXT.md`, `docs/adr/`) is written one paragraph per line, not hard-wrapped at a fixed column — see `docs/adr/0015`.

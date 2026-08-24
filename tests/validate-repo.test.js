@@ -2,14 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { parseRepoUrl, repoSlug } from '../web/lib/validateRepo.js'
 
-// The pure, deterministic half of the setup wizard's real validate(repoUrl)
-// contract (#94, under #88) — parsing a repo URL into its Azure DevOps
-// location. The network-dependent half (asking the live repo-check route,
-// `GET /api/azure-devops/repo-check`, #90, whether that location already
-// holds instance data) is covered end-to-end by
-// tests/setup-wizard.playwright.test.js instead, since it needs a running
-// server, a fake Azure DevOps backend, and a real `apiFetch`/PAT-prompt flow
-// behind a real browser.
+// The pure, deterministic half of the setup wizard's real validate(repoUrl) contract (#94, under #88) — parsing a repo URL into its Azure DevOps location. The network-dependent half (asking the live repo-check route, `GET /api/azure-devops/repo-check`, #90, whether that location already holds instance data) is covered end-to-end by tests/setup-wizard.playwright.test.js instead, since it needs a running server, a fake Azure DevOps backend, and a real `apiFetch`/PAT-prompt flow behind a real browser.
 
 test('parseRepoUrl parses the standard https://dev.azure.com/{organization}/{project}/_git/{repository} shape', () => {
   assert.deepEqual(parseRepoUrl('https://dev.azure.com/Contoso-Production/Default/_git/claims-modernisation'), {
@@ -29,8 +22,7 @@ test('parseRepoUrl parses the standard https://dev.azure.com/{organization}/{pro
     project: 'project',
     repository: 'spaced',
   })
-  // Percent-encoded organisation/project names (e.g. "Team & Co") are
-  // decoded — Azure DevOps itself would encode these in a real repo URL.
+  // Percent-encoded organisation/project names (e.g. "Team & Co") are decoded — Azure DevOps itself would encode these in a real repo URL.
   assert.deepEqual(parseRepoUrl('https://dev.azure.com/Team%20%26%20Co/My%20Project/_git/repo'), {
     organization: 'Team & Co',
     project: 'My Project',
@@ -43,12 +35,9 @@ test('parseRepoUrl returns null for anything that is not the standard dev.azure.
   assert.equal(parseRepoUrl('not a url'), null)
   assert.equal(parseRepoUrl(undefined), null)
   assert.equal(parseRepoUrl(null), null)
-  // A non-dev.azure.com base URL (on-premises Azure DevOps Server) is an
-  // explicit, known gap — out of scope, per #88/#94 — not silently
-  // reinterpreted as if it were dev.azure.com.
+  // A non-dev.azure.com base URL (on-premises Azure DevOps Server) is an explicit, known gap — out of scope, per #88/#94 — not silently reinterpreted as if it were dev.azure.com.
   assert.equal(parseRepoUrl('https://ado.internal.example.com/org/project/_git/repo'), null)
-  // A GitHub (or any other non-Azure-DevOps host) URL never parses either,
-  // even though it superficially resembles a repo URL.
+  // A GitHub (or any other non-Azure-DevOps host) URL never parses either, even though it superficially resembles a repo URL.
   assert.equal(parseRepoUrl('https://github.com/org/repo.git'), null)
   // Missing the "_git" segment, or missing a path segment entirely.
   assert.equal(parseRepoUrl('https://dev.azure.com/org/project/repo'), null)

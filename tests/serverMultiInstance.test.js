@@ -7,14 +7,7 @@ import { createServer } from '../lib/server.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
-// #92: `createServer(options)` no longer takes one fixed `options.azureDevOps`
-// location for the whole process — each request resolves its own slug
-// against the instance registry (#89) to decide whether it's local or
-// Azure-DevOps-backed. These tests are the acceptance test for that: one
-// running server, with one local instance and one Azure-DevOps-backed
-// (fake-server-backed) instance both registered ahead of time, exercised
-// through the exact same server instance — mirroring
-// tests/serverAzureDevOpsAuth.test.js's existing style.
+// #92: `createServer(options)` no longer takes one fixed `options.azureDevOps` location for the whole process — each request resolves its own slug against the instance registry (#89) to decide whether it's local or Azure-DevOps-backed. These tests are the acceptance test for that: one running server, with one local instance and one Azure-DevOps-backed (fake-server-backed) instance both registered ahead of time, exercised through the exact same server instance — mirroring tests/serverAzureDevOpsAuth.test.js's existing style.
 
 const ORGANIZATION = 'fake-org'
 const PROJECT = 'fake-project'
@@ -72,36 +65,27 @@ test('one running server, with no fixed Azure DevOps location, correctly serves 
     async (adoBaseUrl) => {
       const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
       try {
-        // A real local instance, on disk, auto-backfilled into the
-        // registry as `{ kind: 'local' }` the first time it's resolved.
+        // A real local instance, on disk, auto-backfilled into the registry as `{ kind: 'local' }` the first time it's resolved.
         cpSync('instances/examples', join(instancesDir, 'local-initiative'), { recursive: true })
         rmSync(join(instancesDir, 'local-initiative', 'out'), { recursive: true, force: true })
 
-        // A remote instance, registered directly (per #92's scope: this
-        // ticket doesn't add a way to register one through the app itself,
-        // only makes the server capable of correctly serving one already
-        // in the registry).
+        // A remote instance, registered directly (per #92's scope: this ticket doesn't add a way to register one through the app itself, only makes the server capable of correctly serving one already in the registry).
         registerInstance(
           'remote-initiative',
           { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
           { instancesDir }
         )
 
-        // No `slug` and no `azureDevOps` option at all — nothing pins this
-        // server to any one instance or location; both are resolved
-        // per-request purely from the registry.
+        // No `slug` and no `azureDevOps` option at all — nothing pins this server to any one instance or location; both are resolved per-request purely from the registry.
         await withRunningServer({ instancesDir }, async (base) => {
-          // The local slug: served with no credential required, unchanged
-          // from today.
+          // The local slug: served with no credential required, unchanged from today.
           const localRes = await fetch(`${base}/api/instance?slug=local-initiative`)
           assert.equal(localRes.status, 200)
           const localBody = await localRes.json()
           assert.equal(localBody.slug, 'local-initiative')
           assert.equal(localBody.definition, 'design')
 
-          // The same running server, same instance, same request shape —
-          // now against the Azure-DevOps-backed slug: gated behind the same
-          // PAT credential flow as before.
+          // The same running server, same instance, same request shape — now against the Azure-DevOps-backed slug: gated behind the same PAT credential flow as before.
           const noPatRes = await fetch(`${base}/api/instance?slug=remote-initiative`)
           assert.equal(noPatRes.status, 401)
           const noPatBody = await noPatRes.json()
@@ -118,8 +102,7 @@ test('one running server, with no fixed Azure DevOps location, correctly serves 
           const driver = context.fields.find((f) => f.id === 'driver')
           assert.equal(driver.value, 'Seeded from the fake Azure DevOps repo.')
 
-          // Both instances now show up in the shared dashboard listing —
-          // the registry is the single source of truth for both.
+          // Both instances now show up in the shared dashboard listing — the registry is the single source of truth for both.
           const listing = await (await fetch(`${base}/api/instances`)).json()
           assert.ok(listing.some((i) => i.slug === 'local-initiative'))
         })
@@ -156,8 +139,7 @@ test('writing a module on the Azure-DevOps-backed instance never touches the loc
           })
           assert.equal(res.status, 200)
 
-          // The local instance's own context module is untouched by a
-          // write against the remote instance sharing the same server.
+          // The local instance's own context module is untouched by a write against the remote instance sharing the same server.
           const localRes = await fetch(`${base}/api/instance?slug=local-initiative`)
           const localBody = await localRes.json()
           const localContext = localBody.modules.find((m) => m.id === 'context')

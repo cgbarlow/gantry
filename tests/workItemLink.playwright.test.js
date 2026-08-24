@@ -9,12 +9,7 @@ import { createInstance, readInstance } from '../lib/instance.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
-// Browser smoke test for #95/#103's Work Item panel (web/app.js's
-// WorkItemPanel): linking an unlinked instance through the real form, and
-// the confirmed gate-pass-then-sync flow (both the confirm and the decline
-// path), driven through a real rendered page against a real running gantry
-// server and the fake in-process Azure DevOps Work Items server — nothing
-// mocked at the browser or HTTP layer.
+// Browser smoke test for #95/#103's Work Item panel (web/app.js's WorkItemPanel): linking an unlinked instance through the real form, and the confirmed gate-pass-then-sync flow (both the confirm and the decline path), driven through a real rendered page against a real running gantry server and the fake in-process Azure DevOps Work Items server — nothing mocked at the browser or HTTP layer.
 
 const WI_ORGANIZATION = 'wi-org'
 const WI_PROJECT = 'wi-project'
@@ -47,14 +42,7 @@ async function createParentWorkItem(baseUrl) {
   return parent.id
 }
 
-// The Work Item panel's link form has no `baseUrl` field (production only
-// ever targets the real dev.azure.com — mirrors the setup wizard's own
-// repo-URL field, per #94's own "no on-premises baseUrl support" note) — the
-// one piece of test wiring the real form has no way to express itself.
-// Mirrors tests/setup-wizard.playwright.test.js's own `installRoutes`:
-// intercept the outgoing request client-side and inject the fake server's
-// `baseUrl` before it reaches the real gantry server, rather than adding a
-// test-only field to production UI.
+// The Work Item panel's link form has no `baseUrl` field (production only ever targets the real dev.azure.com — mirrors the setup wizard's own repo-URL field, per #94's own "no on-premises baseUrl support" note) — the one piece of test wiring the real form has no way to express itself. Mirrors tests/setup-wizard.playwright.test.js's own `installRoutes`: intercept the outgoing request client-side and inject the fake server's `baseUrl` before it reaches the real gantry server, rather than adding a test-only field to production UI.
 function installWorkItemsLinkRoute(page, wiBaseUrl) {
   return page.route('**/api/instance/work-items/link*', async (route) => {
     const body = JSON.parse(route.request().postData() ?? '{}')
@@ -63,11 +51,7 @@ function installWorkItemsLinkRoute(page, wiBaseUrl) {
   })
 }
 
-// A gantry server backed by a scratch local instance ("my-initiative")
-// whose Shape stage is pre-filled with the `examples` fixture's own real
-// content, so the "Check gate & sync" action's check can genuinely PASS —
-// wired to trust the fake Azure DevOps Work Items server's base URL, the
-// same opt-in every other Azure-DevOps-backed test in this repo uses.
+// A gantry server backed by a scratch local instance ("my-initiative") whose Shape stage is pre-filled with the `examples` fixture's own real content, so the "Check gate & sync" action's check can genuinely PASS — wired to trust the fake Azure DevOps Work Items server's base URL, the same opt-in every other Azure-DevOps-backed test in this repo uses.
 function withLinkableInstanceServer(fn) {
   return withFakeWorkItemsServer(async (wiBaseUrl) => {
     const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
@@ -108,12 +92,7 @@ test('the Work Item panel links an unlinked instance through the form, then conf
         if (msg.type() === 'error') pageErrors.push(msg.text())
       })
 
-      // This instance's own data is local (never returns
-      // "authentication_required"), but the new work-items/link and
-      // work-items/sync routes do require a PAT (Work Items scope) — seed
-      // one up front, as if already entered in a prior session, so this
-      // test can drive the panel itself rather than the (separately
-      // covered, tests/patPrompt.playwright.test.js) PAT-prompt flow.
+      // This instance's own data is local (never returns "authentication_required"), but the new work-items/link and work-items/sync routes do require a PAT (Work Items scope) — seed one up front, as if already entered in a prior session, so this test can drive the panel itself rather than the (separately covered, tests/patPrompt.playwright.test.js) PAT-prompt flow.
       await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
       await installWorkItemsLinkRoute(page, wiBaseUrl)
 
@@ -130,8 +109,7 @@ test('the Work Item panel links an unlinked instance through the form, then conf
       await panel.locator('input[placeholder="Parent work item id"]').fill(String(parentId))
       await panel.getByRole('button', { name: 'Link instance' }).click()
 
-      // Linking succeeds — the panel flips to the linked view, reporting
-      // this stage's own child work item id.
+      // Linking succeeds — the panel flips to the linked view, reporting this stage's own child work item id.
       await assert.doesNotReject(panel.locator(`text=Linked to parent work item #${parentId}`).waitFor({ timeout: 10_000 }))
       await assert.doesNotReject(panel.locator("text=This stage's work item: #").waitFor({ timeout: 5_000 }))
 
@@ -139,9 +117,7 @@ test('the Work Item panel links an unlinked instance through the form, then conf
       const instance = readInstance('my-initiative', { instancesDir })
       assert.equal(instance.workItem.parentId, parentId)
 
-      // "Check gate & sync work item" — the Shape stage's modules were
-      // pre-filled, so the check genuinely passes and the confirm modal
-      // opens (never auto-pushing without it).
+      // "Check gate & sync work item" — the Shape stage's modules were pre-filled, so the check genuinely passes and the confirm modal opens (never auto-pushing without it).
       await panel.getByRole('button', { name: 'Check gate & sync work item' }).click()
       await assert.doesNotReject(page.locator('.modal[aria-label="Confirm work item state update"]').waitFor({ timeout: 10_000 }))
 
@@ -149,8 +125,7 @@ test('the Work Item panel links an unlinked instance through the form, then conf
       await modal.getByRole('button', { name: 'Confirm & push' }).click()
       await assert.doesNotReject(panel.locator('text=Pushed state').waitFor({ timeout: 10_000 }))
 
-      // Confirmed against the fake Azure DevOps server itself: the shape
-      // child work item's state genuinely changed there.
+      // Confirmed against the fake Azure DevOps server itself: the shape child work item's state genuinely changed there.
       const client = createAzureDevOpsWorkItemsClient({ organization: WI_ORGANIZATION, project: WI_PROJECT, pat: VALID_PAT, baseUrl: wiBaseUrl })
       const shapeWorkItemId = instance.workItem.stages.shape
       const states = await client.getWorkItemTypeStates('Task')
