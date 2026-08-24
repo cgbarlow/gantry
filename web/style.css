@@ -153,18 +153,25 @@ header {
 .segmented button { border: none; border-right: var(--hairline) solid var(--line-strong); border-radius: 0; margin: 0; }
 .segmented button:last-child { border-right: none; }
 
+/*
+ * Right-hand side of the view-mode toolbar (#114) — "Clear all fields" and
+ * "Render" (which opens the render-artefact-picker dialog), replacing the
+ * old per-stage stage-actions bar and per-artefact Render button set.
+ */
+.toolbar-actions { display: flex; align-items: center; }
+.toolbar-actions .btn { margin: 0 0 0 8px; }
+
 /* View-mode visibility, driven by data-view-mode on main#modules (#79). */
 main[data-view-mode='markdown'] .field-markdown .preview { display: none; }
 main[data-view-mode='markdown'] .field-markdown .editor-host { flex: 1 1 100%; }
 main[data-view-mode='rendered'] .field-markdown .editor-host { display: none; }
 main[data-view-mode='rendered'] .field-markdown .preview { flex: 1 1 100%; }
 
-main#modules, .stage-actions, .load-error, .loading {
+main#modules, .load-error, .loading {
   max-width: 1120px;
   margin: 0 auto;
   padding: 0 32px 140px;
 }
-.stage-actions { padding-top: 20px; padding-bottom: 0; }
 
 /*
  * `.btn` styles any `<button class="btn">` or `<a class="btn">` alike —
@@ -216,8 +223,10 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .module h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 4px; }
 .module .purpose { color: var(--text-muted); font-style: italic; font-size: 13px; margin: 0 0 16px; }
 
-.artefacts { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 32px; }
-.artefacts h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }
+/* Render dialog (#114) — the artefact list inside the modal opened by the
+ * toolbar's "Render" button. */
+.render-artefact-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.render-artefact-list .btn { width: 100%; margin: 0; text-align: left; }
 
 .work-item-panel { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 32px; }
 .work-item-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }

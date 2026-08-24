@@ -176,6 +176,90 @@ test('the 3-way view-mode toggle switches modes, cycles via hotkey, stays global
   }
 })
 
+// Coverage for #114 — "Clear all fields" and the Render dialog, both moved
+// into the view-toggle bar: a single "Render" button (replacing the old
+// one-button-per-artefact layout) opens a dialog listing every artefact the
+// current stage can produce, using the same dialog for a single-artefact
+// stage (Shape -> soap) as for a multi-artefact one (Detailed Design ->
+// sad/ssad) — not a special case per artefact count.
+test('Render and Clear all fields live in the view-toggle bar; Render opens a dialog listing every artefact for the current stage', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const toolbar = page.locator('.toolbar')
+
+        // Both buttons sit in the view-toggle bar, "Clear all fields"
+        // immediately left of "Render" — not per-artefact buttons buried
+        // below the modules, and not a separate "stage actions" bar.
+        const clearButton = toolbar.getByRole('button', { name: 'Clear all fields' })
+        const renderButton = toolbar.getByRole('button', { name: 'Render', exact: true })
+        await assert.doesNotReject(clearButton.waitFor({ state: 'visible', timeout: 5_000 }))
+        await assert.doesNotReject(renderButton.waitFor({ state: 'visible', timeout: 5_000 }))
+        assert.equal(await page.locator('.artefacts').count(), 0, 'the old per-artefact section must be gone')
+        assert.equal(await page.locator('.stage-actions').count(), 0, 'the old separate stage-actions bar must be gone')
+
+        // Shape stage (the default) produces exactly one artefact (soap) —
+        // the dialog lists it via the same button/dialog pattern as a
+        // multi-artefact stage, checked further down.
+        await renderButton.click()
+        const dialog = page.locator('.modal', { hasText: 'Render' })
+        await dialog.waitFor({ state: 'visible', timeout: 5_000 })
+        assert.deepEqual(await dialog.locator('.render-artefact-list button').allTextContents(), ['Solution on a Page'])
+
+        await dialog.getByRole('button', { name: 'Solution on a Page' }).click()
+        await assert.doesNotReject(dialog.locator('text=Rendered to').waitFor({ timeout: 10_000 }))
+        await dialog.getByRole('button', { name: 'Close' }).click()
+        await dialog.waitFor({ state: 'hidden', timeout: 5_000 })
+
+        // Navigate to the Detailed Design stage, which shares one gate
+        // between two artefacts (sad, ssad) — the dialog lists both.
+        await page.locator('#stage-nav button', { hasText: 'Detailed Design' }).click()
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        await page.locator('.toolbar').getByRole('button', { name: 'Render', exact: true }).click()
+        const secondDialog = page.locator('.modal', { hasText: 'Render' })
+        await secondDialog.waitFor({ state: 'visible', timeout: 5_000 })
+        assert.deepEqual(
+          await secondDialog.locator('.render-artefact-list button').allTextContents(),
+          ['Solution Architecture Document', 'Solution Support Architecture Document']
+        )
+        await secondDialog.getByRole('button', { name: 'Close' }).click()
+
+        // "Clear all fields" clears the currently mounted stage's own
+        // fields, wired via the registry now owned above StageScreen.
+        const firstField = page.locator('.field-markdown .cm-content').first()
+        await firstField.click()
+        await page.keyboard.press('ControlOrMeta+a')
+        await page.keyboard.type('some content to clear')
+        assert.match(await firstField.textContent(), /some content to clear/)
+        await page.locator('.toolbar').getByRole('button', { name: 'Clear all fields' }).click()
+        assert.equal(await firstField.textContent(), '')
+
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
 // Coverage for #80 — the "+ Insert asset" affordance, the Upload new /
 // Choose existing modal, inline validation, live-preview thumbnail
 // rendering, the hand-typed markdown convention, and the asset library

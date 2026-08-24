@@ -561,11 +561,20 @@ function AssetLibraryPage() {
   `
 }
 
-// ---------- Render section ----------
-function ArtefactsSection({ instance }) {
+// ---------- Render dialog (#114) ----------
+// A single "Render" button, in the view-toggle bar (see ViewModeToolbar),
+// opens this dialog rather than the old one-button-per-artefact layout —
+// same dialog whether the current stage produces one artefact (e.g. `soap`)
+// or several sharing a gate (e.g. `sad`/`ssad`), per the ticket's "not a
+// special case" acceptance criterion. Follows the same
+// modal-backdrop/modal/modal-actions shape as AssetInsertModal and the
+// work-item sync confirm modal above.
+function RenderDialog({ instance, onClose }) {
   const [status, setStatus] = useState('')
+  const [renderingId, setRenderingId] = useState(null)
 
   async function handleRender(artefact) {
+    setRenderingId(artefact.id)
     setStatus('Rendering…')
     // See ModuleCard's handleSave for why `?slug=` is required here now —
     // the same gap, for the module editor's own "Render" action.
@@ -583,29 +592,57 @@ function ArtefactsSection({ instance }) {
         ? `Rendered to ${body.azureDevOpsPath ?? body.docxPath}`
         : `Render failed: ${body.message ?? body.error}`
     )
+    setRenderingId(null)
   }
 
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   return html`
-    <section class="artefacts">
-      <h2>Render</h2>
-      ${instance.artefacts.map(
-        (artefact) => html`
-          <button type="button" class="btn" key=${artefact.id} onClick=${() => handleRender(artefact)}>
-            Render ${artefact.title}
-          </button>
-        `
-      )}
-      <div class="save-status">${status}</div>
-    </section>
+    <div class="modal-backdrop" role="presentation" onClick=${(e) => e.target === e.currentTarget && onClose()}>
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Render an artefact">
+        <h3>Render</h3>
+        ${instance.artefacts.length
+          ? html`
+              <ul class="render-artefact-list">
+                ${instance.artefacts.map(
+                  (artefact) => html`
+                    <li key=${artefact.id}>
+                      <button
+                        type="button"
+                        class="btn"
+                        disabled=${renderingId === artefact.id}
+                        onClick=${() => handleRender(artefact)}
+                      >
+                        ${renderingId === artefact.id ? 'Rendering…' : artefact.title}
+                      </button>
+                    </li>
+                  `
+                )}
+              </ul>
+            `
+          : html`<p class="guidance">This stage has no artefacts to render yet.</p>`}
+        <div class="save-status">${status}</div>
+        <div class="modal-actions">
+          <button type="button" class="btn ghost" onClick=${onClose}>Close</button>
+        </div>
+      </div>
+    </div>
   `
 }
 
 // ---------- Azure DevOps work-item link + confirmed gate-pass sync (#103) ----------
-// One instance-level panel, shown once per stage screen (below the modules,
-// alongside Render — see StageScreen) rather than in AppHeader, since
-// "which stage's work item" is stage-scoped even though the *link* itself
-// is instance-level. Unlinked: a small inline form (organization/project/
-// parent work item id/type) posts to POST /api/instance/work-items/link.
+// One instance-level panel, shown once per stage screen (below the modules —
+// see StageScreen; Render itself moved to the view-toggle bar, #114) rather
+// than in AppHeader, since "which stage's work item" is stage-scoped even
+// though the *link* itself is instance-level. Unlinked: a small inline form
+// (organization/project/parent work item id/type) posts to POST
+// /api/instance/work-items/link.
 // Linked: shows the parent id and this stage's own child work item id, plus
 // a "Check gate & sync" action that runs the existing check first and only
 // opens the confirm-before-push modal (mirroring PatPromptModal's shape)
@@ -768,25 +805,15 @@ function WorkItemPanel({ instance }) {
   `
 }
 
-// ---------- The viewed stage's whole screen: stage actions, modules, artefacts ----------
+// ---------- The viewed stage's whole screen: modules + work-item panel ----------
 // Keyed by stage id from the parent (see ModuleEditorPage) so switching
-// stages remounts this wholesale — fresh CodeMirror instances and a fresh
-// field registry per stage, matching the old full-DOM-rebuild behaviour.
-function StageScreen({ instance }) {
-  const registryRef = useRef([])
-
-  function registerField(field, control) {
-    registryRef.current.push({ field, control })
-  }
-
-  function clearAllFields() {
-    registryRef.current.forEach(({ field, control }) => control.setValue(field.type === 'list' ? [] : ''))
-  }
-
+// stages remounts this wholesale — fresh CodeMirror instances, matching the
+// old full-DOM-rebuild behaviour. "Clear all fields" and "Render" now live
+// in the view-toggle bar (see ViewModeToolbar, ModuleEditorPage) rather than
+// here, so the field registry they depend on is owned by ModuleEditorPage
+// instead — `onFieldRegistered` is threaded straight through.
+function StageScreen({ instance, onFieldRegistered }) {
   return html`
-    <div class="stage-actions">
-      <button type="button" class="btn" onClick=${clearAllFields}>Clear all fields</button>
-    </div>
     <main id="modules" data-view-mode=${viewMode.value}>
       ${instance.modules.map(
         (mod) => html`
@@ -794,11 +821,10 @@ function StageScreen({ instance }) {
             key=${mod.id}
             mod=${mod}
             stageId=${instance.stage.id}
-            onFieldRegistered=${registerField}
+            onFieldRegistered=${onFieldRegistered}
           />
         `
       )}
-      <${ArtefactsSection} instance=${instance} />
       <${WorkItemPanel} instance=${instance} />
     </main>
   `
@@ -812,7 +838,12 @@ function StageScreen({ instance }) {
 const VIEW_MODE_LABELS = { markdown: 'Markdown', split: 'Split', rendered: 'Rendered' }
 const VIEW_MODE_HOTKEY = { ctrlKey: true, shiftKey: true, key: 'v' }
 
-function ViewModeToolbar() {
+// `instance` and `onClearAllFields` back the "Clear all fields" + "Render"
+// pair moved here from the stage screen (#114) — both now sit on the right
+// of this same bar, "Clear all fields" immediately left of "Render".
+function ViewModeToolbar({ instance, onClearAllFields }) {
+  const [renderOpen, setRenderOpen] = useState(false)
+
   useEffect(() => {
     function onKeyDown(e) {
       if (e.key.toLowerCase() !== VIEW_MODE_HOTKEY.key) return
@@ -845,7 +876,12 @@ function ViewModeToolbar() {
           `
         )}
       </div>
+      <div class="toolbar-actions">
+        <button type="button" class="btn" onClick=${onClearAllFields}>Clear all fields</button>
+        <button type="button" class="btn primary" onClick=${() => setRenderOpen(true)}>Render</button>
+      </div>
     </div>
+    ${renderOpen ? html`<${RenderDialog} instance=${instance} onClose=${() => setRenderOpen(false)} />` : null}
   `
 }
 
@@ -917,13 +953,38 @@ function ModuleEditorPage({ slug }) {
   const instance = instanceData.value
   const error = loadError.value
 
+  // The field registry backing "Clear all fields" (#114 moved this button,
+  // and hence this registry, up from StageScreen into this parent — the
+  // toolbar it now lives in sits above StageScreen and outlives any single
+  // stage's mount, so it's no longer freed-and-refreshed just by
+  // StageScreen's own key-driven remount). Rather than resetting it in a
+  // separate effect keyed on the stage id — which would race the freshly
+  // mounted stage's own ModuleCard/MarkdownField registration effects
+  // (child effects commit before an ancestor's, so a parent-level reset
+  // effect could fire *after* the new stage's fields already registered,
+  // wiping them out) — registerField itself detects a stage change and
+  // resets synchronously before recording the new field, so there's no
+  // window where a genuinely-current registration can be discarded.
+  const registryRef = useRef({ stageId: null, entries: [] })
+
+  function registerField(field, control) {
+    if (registryRef.current.stageId !== instance.stage.id) {
+      registryRef.current = { stageId: instance.stage.id, entries: [] }
+    }
+    registryRef.current.entries.push({ field, control })
+  }
+
+  function clearAllFields() {
+    registryRef.current.entries.forEach(({ field, control }) => control.setValue(field.type === 'list' ? [] : ''))
+  }
+
   if (error) return html`<p class="load-error">Failed to load: ${error}</p>`
   if (!instance || instance.slug !== slug) return html`<p class="loading">Loading…</p>`
 
   return html`
     <${AppHeader} instance=${instance} />
-    <${ViewModeToolbar} />
-    <${StageScreen} key=${instance.stage.id} instance=${instance} />
+    <${ViewModeToolbar} instance=${instance} onClearAllFields=${clearAllFields} />
+    <${StageScreen} key=${instance.stage.id} instance=${instance} onFieldRegistered=${registerField} />
   `
 }
 
