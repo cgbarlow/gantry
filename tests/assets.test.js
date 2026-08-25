@@ -228,6 +228,62 @@ test('an asset referenced via the asset:<id> convention from a module\'s markdow
   }
 })
 
+test('assets routes work with ?slug= on a server started without a default slug (#143)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'no-default-slug', { instancesDir })
+    // Server started with NO default slug — every request must carry ?slug=.
+    await withRunningServer({ instancesDir }, async (base) => {
+      const slug = encodeURIComponent('no-default-slug')
+
+      // Without ?slug= the server must reject the request with a clear error.
+      const noSlugRes = await fetch(`${base}/api/instance/assets`)
+      assert.equal(noSlugRes.status, 400)
+      const noSlugBody = await noSlugRes.json()
+      assert.match(noSlugBody.error, /No instance slug given/)
+
+      // GET /api/instance/assets?slug=... must list (empty) successfully.
+      const listRes = await fetch(`${base}/api/instance/assets?slug=${slug}`)
+      assert.equal(listRes.status, 200)
+      assert.deepEqual(await listRes.json(), [])
+
+      // POST /api/instance/assets?slug=... must upload successfully.
+      const uploadRes = await fetch(`${base}/api/instance/assets?slug=${slug}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: 'flow.png',
+          dataBase64: ONE_PX_PNG_BASE64,
+          name: 'Flow diagram',
+          source: 'https://draw.io/diagrams/flow',
+        }),
+      })
+      assert.equal(uploadRes.status, 201)
+      const created = await uploadRes.json()
+      assert.ok(created.id)
+
+      // GET /api/instance/assets?slug=... must now return the uploaded asset.
+      const listAfter = await fetch(`${base}/api/instance/assets?slug=${slug}`)
+      const list = await listAfter.json()
+      assert.equal(list.length, 1)
+      assert.equal(list[0].id, created.id)
+
+      // GET /api/instance/assets/:id/file?slug=... must serve the file bytes.
+      const fileRes = await fetch(`${base}/api/instance/assets/${created.id}/file?slug=${slug}`)
+      assert.equal(fileRes.status, 200)
+      assert.equal(fileRes.headers.get('content-type'), 'image/png')
+      const bytes = Buffer.from(await fileRes.arrayBuffer())
+      assert.deepEqual(bytes, Buffer.from(ONE_PX_PNG_BASE64, 'base64'))
+
+      // Without ?slug=, the file route must also reject.
+      const noSlugFile = await fetch(`${base}/api/instance/assets/${created.id}/file`)
+      assert.equal(noSlugFile.status, 400)
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
 test('an asset with no markdown referencing it anywhere is reported as unused (empty usedIn)', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {

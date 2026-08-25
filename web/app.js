@@ -26,9 +26,9 @@ import { assetReference, resolveAssetRefs } from './lib/assetRefs.js'
 
 const md = new MarkdownIt()
 
-// The server always serves the real image bytes for an asset id, regardless of which `asset:<id>` reference resolved to it — matches the other single-instance routes' convention (defaulting to the server's startup slug rather than requiring a `?slug=` the client doesn't otherwise track). Known gap exposed by #77's multi-instance routing, not fixed by this merge: this (and fetchAssets/uploadAsset below) still resolve against the server's default startup instance regardless of which slug the module editor is actually viewing — pre-existing from #80's single-instance-era scope, worth its own follow-up ticket rather than silently expanding here.
-function assetFileUrl(assetId) {
-  return `/api/instance/assets/${encodeURIComponent(assetId)}/file`
+function assetFileUrl(assetId, slug) {
+  const base = `/api/instance/assets/${encodeURIComponent(assetId)}/file`
+  return slug ? `${base}?slug=${encodeURIComponent(slug)}` : base
 }
 
 // `image` tokens whose src resolves to gantry's own asset-file route get an `asset-thumb` class, so the Gate Ledger stylesheet can size/border an inserted asset as a real thumbnail rather than an arbitrary inline image (#80's "renders as an actual thumbnail" acceptance criterion).
@@ -53,8 +53,9 @@ async function loadInstance(slug, stageId) {
   return res.json()
 }
 
-async function fetchAssets() {
-  const res = await apiFetch('/api/instance/assets')
+async function fetchAssets(slug) {
+  const qs = slug ? `?slug=${encodeURIComponent(slug)}` : ''
+  const res = await apiFetchForInstance(slug, `/api/instance/assets${qs}`)
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new Error(body.message ?? body.error ?? `Failed to load images (${res.status})`)
@@ -62,8 +63,9 @@ async function fetchAssets() {
   return res.json()
 }
 
-async function uploadAsset({ filename, dataBase64, name, source, uploadedBy }) {
-  const res = await apiFetch('/api/instance/assets', {
+async function uploadAsset({ slug, filename, dataBase64, name, source, uploadedBy }) {
+  const qs = slug ? `?slug=${encodeURIComponent(slug)}` : ''
+  const res = await apiFetchForInstance(slug, `/api/instance/assets${qs}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ filename, dataBase64, name, source, uploadedBy }),
@@ -87,7 +89,8 @@ function readFileAsBase64(file) {
 // `asset:<id>` references are resolved to the real, fetchable asset-file URL before markdown-it ever sees the text — the *stored* markdown source keeps the portable `asset:<id>` convention (see web/lib/assetRefs.js), only the live preview's rendered HTML points at a real URL.
 function renderPreview(node, text) {
   if (!node) return
-  node.innerHTML = DOMPurify.sanitize(md.render(resolveAssetRefs(text ?? '', assetFileUrl)))
+  const slug = currentSlug.value
+  node.innerHTML = DOMPurify.sanitize(md.render(resolveAssetRefs(text ?? '', (id) => assetFileUrl(id, slug))))
 }
 
 // ---------- Identity picker (#145 Part 2) ----------
@@ -1026,7 +1029,7 @@ function AssetInsertModal({ onInsert, onClose }) {
 
   useEffect(() => {
     if (tab !== 'existing' || existing !== null) return
-    fetchAssets()
+    fetchAssets(currentSlug.value)
       .then(setExisting)
       .catch((err) => setExistingError(err.message))
   }, [tab, existing])
@@ -1052,7 +1055,7 @@ function AssetInsertModal({ onInsert, onClose }) {
     setSubmitting(true)
     try {
       const dataBase64 = await readFileAsBase64(file)
-      const asset = await uploadAsset({ filename: file.name, dataBase64, name, source })
+      const asset = await uploadAsset({ slug: currentSlug.value, filename: file.name, dataBase64, name, source })
       onInsert(asset)
     } catch (err) {
       setSourceError(err.message)
@@ -1136,7 +1139,7 @@ function AssetInsertModal({ onInsert, onClose }) {
                         : existing.map(
                             (asset) => html`
                               <button type="button" class="card" key=${asset.id} onClick=${() => onInsert(asset)}>
-                                <img src=${assetFileUrl(asset.id)} alt=${asset.name} />
+                                <img src=${assetFileUrl(asset.id, currentSlug.value)} alt=${asset.name} />
                                 <div class="name">${asset.name}</div>
                               </button>
                             `
@@ -1157,7 +1160,9 @@ function AssetLibraryPage() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    fetchAssets()
+    const slug = currentSlug.value
+    if (!slug) return
+    fetchAssets(slug)
       .then(setAssets)
       .catch((err) => setError(err.message))
   }, [])
@@ -1176,7 +1181,7 @@ function AssetLibraryPage() {
                 : assets.map(
                     (asset) => html`
                       <div class="card" key=${asset.id}>
-                        <img src=${assetFileUrl(asset.id)} alt=${asset.name} />
+                        <img src=${assetFileUrl(asset.id, currentSlug.value)} alt=${asset.name} />
                         <div class="name">${asset.name}</div>
                         <div class="meta">
                           ${asset.uploadedBy ? html`${asset.uploadedBy} · ` : null}
