@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { checkAzureDevOpsRepo, migrateLegacyAzureDevOpsInstance } from '../lib/repoCheck.js'
-import { createAzureDevOpsClient, AzureDevOpsNotFoundError } from '../lib/azureDevOpsClient.js'
+import { createAzureDevOpsClient, AzureDevOpsNotFoundError, AzureDevOpsRepoNotFoundError } from '../lib/azureDevOpsClient.js'
 import { loadDefinition } from '../lib/definition.js'
 import { migrateModuleHeadingScale } from '../lib/instance.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
@@ -302,6 +302,53 @@ test('checkAzureDevOpsRepo reads/migrates/evaluates against the caller-supplied 
       // Checking the default branch instead finds nothing there at all.
       const mainResult = await checkAzureDevOpsRepo(locationFor(baseUrl))
       assert.equal(mainResult.result, 'empty')
+    }
+  )
+})
+
+// ---------- #139: nonexistent repository detection ----------
+
+test('checkAzureDevOpsRepo throws AzureDevOpsRepoNotFoundError for a repository that does not exist', async () => {
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {}, repoExists: false },
+    async (baseUrl) => {
+      await assert.rejects(
+        () => checkAzureDevOpsRepo(locationFor(baseUrl)),
+        (err) => {
+          assert.ok(err instanceof AzureDevOpsRepoNotFoundError)
+          assert.match(err.message, /does not exist/)
+          assert.match(err.message, /create it in Azure DevOps first/)
+          return true
+        }
+      )
+    }
+  )
+})
+
+test('checkAzureDevOpsRepo reports "empty" for an existing but empty repository (not repo-missing)', async () => {
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {} },
+    async (baseUrl) => {
+      const result = await checkAzureDevOpsRepo(locationFor(baseUrl))
+      assert.equal(result.result, 'empty')
+    }
+  )
+})
+
+test('repoExists returns true for an existing repo and false for a nonexistent one', async () => {
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {} },
+    async (baseUrl) => {
+      const client = createAzureDevOpsClient({ ...locationFor(baseUrl), baseUrl })
+      assert.equal(await client.repoExists(), true)
+    }
+  )
+
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {}, repoExists: false },
+    async (baseUrl) => {
+      const client = createAzureDevOpsClient({ ...locationFor(baseUrl), baseUrl })
+      assert.equal(await client.repoExists(), false)
     }
   )
 })
