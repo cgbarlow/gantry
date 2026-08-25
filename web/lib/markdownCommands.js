@@ -343,10 +343,415 @@ export function toggleFencedCode({ tree, text, from, to }) {
   }
 }
 
+// ---------- tables (#134) ----------
+//
+// Microsoft-Loop-style editing over GFM pipe tables, in the same pure-transform
+// seam as everything above. One deliberate divergence from the inline/block
+// commands: @codemirror/lang-markdown's default parser does not recognise pipe
+// tables (its GFM Table extension only marks ranges, not cell structure), so
+// the tree is useless here and these commands read a strict line-based parse
+// instead — see docs/adr/0018. Strictness IS the graceful-degradation story:
+// any line run that isn't an unambiguous, rectangular pipe table parses as
+// null, and every command then returns null (no-op) rather than improvising a
+// repair the author didn't ask for. Unlike the block toggles, null is a normal
+// return here — the dispatcher routes table commands the same way but callers
+// must treat null as "nothing happened".
+
+const ALIGNMENT_ORDER = ['left', 'center', 'right']
+
+const DELIMITER_CELL = /^:?-+:?$/
+
+// Unescaped pipe positions in a line — `\|` never separates cells.
+function scanPipes(lineText) {
+  const pipes = []
+  for (let i = 0; i < lineText.length; i++) {
+    if (lineText[i] === '\\') {
+      i++
+      continue
+    }
+    if (lineText[i] === '|') pipes.push(i)
+  }
+  return pipes
+}
+
+// Split one line into raw cell segments between its unescaped pipes, keeping
+// each segment's absolute [start, end) so rebuilds preserve the author's
+// internal padding byte-for-byte. Leading/trailing pipes produce edge
+// segments that are dropped; interior empties are real empty cells.
+function splitSegments(lineText, lineStart) {
+  const pipes = scanPipes(lineText)
+  if (pipes.length === 0) return null
+  const bounds = []
+  let prev = -1
+  for (const p of [...pipes, lineText.length]) {
+    bounds.push([prev, p])
+    prev = p
+  }
+  const segs = []
+  for (const [a, b] of bounds) {
+    const start = a + 1
+    const end = b
+    if (start >= end && (a === -1 || b === lineText.length)) continue
+    const raw = lineText.slice(start, end)
+    const trimmed = raw.trim()
+    const leadSpaces = raw.length - raw.trimStart().length
+    // Empty cells park the caret mid-padding (Loop-style) rather than flush
+    // against the closing pipe; non-empty ones use their real content range.
+    const caretOffset = trimmed === '' ? Math.ceil(raw.length / 2) : leadSpaces
+    segs.push({
+      raw,
+      start: lineStart + start,
+      end: lineStart + end,
+      text: trimmed,
+      contentStart: lineStart + start + caretOffset,
+      contentEnd: lineStart + start + caretOffset + trimmed.length,
+    })
+  }
+  return segs.length ? segs : null
+}
+
+// Parse the run of pipe-bearing lines around `pos` into a table. Returns null
+// unless the run contains a rectangular pipe table under the cursor: exactly
+// one delimiter row, a header immediately above it, and every row — header,
+// delimiter and body alike — carrying the same cell count. Lines the scan
+// picked up *above* the header are prose that merely carries pipes, not table
+// structure: they're excluded from the parse (and never rewritten), and a
+// caret among them means "not in a table". The returned record also locates
+// the cursor: rowIndex/colIndex (the delimiter row is a real row index but
+// never reported as the cursor's column owner — pipes resolve to the cell on
+// their left, padding to its cell).
+export function findTable(text, pos) {
+  const probe = Math.min(Math.max(pos, 0), text.length)
+  const startOfLine = (p) => text.lastIndexOf('\n', p - 1) + 1
+  const endOfLine = (p) => {
+    const e = text.indexOf('\n', p)
+    return e === -1 ? text.length : e
+  }
+  const hasPipes = (start, end) => scanPipes(text.slice(start, end)).length > 0
+
+  // The candidate region is the maximal run of pipe-bearing lines around the
+  // cursor; the delimiter row then decides where the table itself starts.
+  const cursorStart = startOfLine(probe)
+  if (!hasPipes(cursorStart, endOfLine(cursorStart))) return null
+
+  const lines = []
+  const segsPerLine = []
+  const push = (ls, atFront) => {
+    const end = endOfLine(ls)
+    const segs = splitSegments(text.slice(ls, end), ls)
+    if (!segs) return false
+    // Above-cursor lines arrive scanned bottom-up, so they prepend to keep
+    // lines[]/segsPerLine[] in document order.
+    if (atFront) {
+      lines.unshift({ start: ls, end })
+      segsPerLine.unshift(segs)
+    } else {
+      lines.push({ start: ls, end })
+      segsPerLine.push(segs)
+    }
+    return true
+  }
+
+  if (!push(cursorStart)) return null
+  for (let up = cursorStart; up > 0; ) {
+    const prevStart = startOfLine(up - 1)
+    if (!hasPipes(prevStart, up - 1) || !push(prevStart, true)) break
+    up = prevStart
+  }
+  for (let dn = endOfLine(cursorStart); dn < text.length; ) {
+    const nextStart = dn + 1
+    if (!hasPipes(nextStart, endOfLine(nextStart)) || !push(nextStart)) break
+    dn = endOfLine(nextStart)
+  }
+
+  const isDelim = segsPerLine.map((segs) => segs.every((c) => DELIMITER_CELL.test(c.text)))
+  const delimCandidates = []
+  for (let i = 0; i < lines.length; i++) if (isDelim[i]) delimCandidates.push(i)
+  if (delimCandidates.length !== 1) return null
+  let delimIndex = delimCandidates[0]
+  if (delimIndex === 0) return null
+
+  // A GFM table begins at its header — the line immediately above the
+  // delimiter. Anything above that is prose with pipes in it: exclude it so
+  // commands never rebuild it, and treat a caret there as not-in-a-table.
+  if (delimIndex > 1) {
+    if (probe < lines[delimIndex - 1].start) return null
+    const cut = delimIndex - 1
+    lines.splice(0, cut)
+    segsPerLine.splice(0, cut)
+    delimIndex -= cut
+  }
+
+  const colCount = segsPerLine[delimIndex].length
+  if (colCount < 1) return null
+  for (const segs of segsPerLine) {
+    if (segs.length !== colCount) return null
+  }
+
+  const alignments = segsPerLine[delimIndex].map((c) =>
+    c.text.startsWith(':') && c.text.endsWith(':') ? 'center' : c.text.endsWith(':') ? 'right' : 'left'
+  )
+
+  let rowIndex = lines.findIndex((l) => probe >= l.start && probe <= l.end)
+  if (rowIndex === -1) rowIndex = lines.length - 1
+  const lineStart = lines[rowIndex].start
+  const rel = probe - lineStart
+  const rawLine = text.slice(lines[rowIndex].start, lines[rowIndex].end)
+  const pipesBefore = scanPipes(rawLine.slice(0, rel)).length
+  const hasLeadingPipe = rawLine.trimStart().startsWith('|')
+  const colIndex = Math.min(Math.max(pipesBefore - (hasLeadingPipe ? 1 : 0), 0), colCount - 1)
+
+  return {
+    start: lines[0].start,
+    end: lines[lines.length - 1].end,
+    lines,
+    segs: segsPerLine,
+    colCount,
+    delimIndex,
+    alignments,
+    rowIndex,
+    colIndex,
+  }
+}
+
+// Canonical line rebuild: outer pipes normalised, interior segments (padding
+// included) verbatim.
+const rebuildLine = (segs) => '|' + segs.map((c) => c.raw).join('|') + '|'
+
+const emptySegment = (width) => ' '.repeat(Math.max(width, 1))
+
+// Delimiter segment for an alignment at a given total segment width — the
+// two-space frame mirrors how rebuildLine's cells read; cores shorter than
+// GFM's minimum grow rather than emit `::`.
+function alignmentSegment(align, width) {
+  const coreWidth = Math.max(width - 2, align === 'center' ? 4 : 3)
+  const dashes = '-'.repeat(align === 'center' ? coreWidth - 2 : align === 'right' ? coreWidth - 1 : coreWidth)
+  const core = align === 'center' ? ':' + dashes + ':' : align === 'right' ? dashes + ':' : dashes
+  return ' ' + core + ' '
+}
+
+function clampPos(pos, length) {
+  return Math.min(Math.max(pos, 0), length)
+}
+
+// Land the cursor inside whatever table now surrounds `pos`: collapse onto the
+// owning cell's content start. Tables that stopped parsing under the new text
+// degrade to a plain clamped position.
+function snapToCell(text, pos) {
+  const t = findTable(text, clampPos(pos, text.length))
+  if (!t) return clampPos(pos, text.length)
+  const r = Math.min(t.rowIndex, t.lines.length - 1)
+  const c = Math.min(t.colIndex, t.colCount - 1)
+  return t.segs[r][c].contentStart
+}
+
+export function insertTable({ text, from, to, rows = 3, cols = 3 }) {
+  const rowCount = Math.min(Math.max(Math.round(rows) || 3, 1), 30)
+  const colCount = Math.min(Math.max(Math.round(cols) || 3, 1), 15)
+  const headers = Array.from({ length: colCount }, (_, i) => `Header ${i + 1}`)
+  const widths = headers.map((h) => Math.max(h.length, 3))
+  const line = (cells) => '| ' + cells.map((c, i) => c.padEnd(widths[i])).join(' | ') + ' |'
+  const headerLine = line(headers)
+  const delimLine = line(widths.map((w) => '-'.repeat(w)))
+  const table = [
+    headerLine,
+    delimLine,
+    ...Array.from({ length: rowCount }, () => line(widths.map(() => ''))),
+  ].join('\n')
+
+  // Same blank-line hygiene as insertHorizontalRule: a table glued to prose
+  // stops being a table (or drags the paragraph above into a setext heading).
+  const before = text.slice(0, from)
+  const after = text.slice(to)
+  const lead = from === 0 ? '' : before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n'
+  const trail = to === text.length ? '' : after.startsWith('\n\n') ? '' : after.startsWith('\n') ? '\n' : '\n\n'
+
+  const inserted = lead + table + trail
+  const nextText = before + inserted + after
+  return {
+    text: nextText,
+    // Cursor opens in the first body cell, ready to type over the padding.
+    from: snapToCell(nextText, from + lead.length + headerLine.length + 1 + delimLine.length + 1),
+    to: snapToCell(nextText, from + lead.length + headerLine.length + 1 + delimLine.length + 1),
+  }
+}
+
+export function tableAddRow({ text, from, to, where }) {
+  const t = findTable(text, from)
+  if (!t) return null
+
+  let insertAfter
+  if (where === 'below') {
+    // Above-the-fold rows don't exist: "below" the header or delimiter lands
+    // the new row as the first body row.
+    insertAfter = Math.max(t.rowIndex, t.delimIndex)
+  } else {
+    if (t.rowIndex <= t.delimIndex) return null
+    insertAfter = t.rowIndex - 1
+  }
+
+  // Widths follow the neighbouring row so the column edges stay lined up.
+  const widths = t.segs[insertAfter].map((c) => Math.max(c.text.length, 1))
+  const newRow = '| ' + widths.map((w) => emptySegment(w)).join(' | ') + ' |'
+  const at = t.lines[insertAfter].end
+  const nextText = text.slice(0, at) + '\n' + newRow + text.slice(at)
+  const cellPos = snapToCell(nextText, at + 3)
+  return { text: nextText, from: cellPos, to: cellPos }
+}
+
+export function tableDeleteRow({ text, from, to }) {
+  const t = findTable(text, from)
+  if (!t) return null
+  if (t.rowIndex === t.delimIndex) return null
+
+  let nextText
+  let roughPos
+  if (t.rowIndex === 0) {
+    // Deleting the header promotes the first body row into its slot (the
+    // delimiter must keep a header above it); with no body rows there is
+    // nothing to promote, so the command stands down.
+    if (t.lines.length <= 2) return null
+    const [, delimLine, firstBody] = t.lines
+    nextText =
+      text.slice(0, t.start) +
+      text.slice(firstBody.start, firstBody.end) +
+      '\n' +
+      text.slice(delimLine.start, delimLine.end) +
+      text.slice(firstBody.end)
+    roughPos = t.start
+  } else {
+    const line = t.lines[t.rowIndex]
+    // Eat one adjoining newline so the remaining rows knit back together;
+    // at end-of-document the preceding newline goes instead.
+    const fromIdx = line.end === text.length && line.start > 0 ? line.start - 1 : line.start
+    const toIdx = line.end === text.length ? line.end : Math.min(line.end + 1, text.length)
+    nextText = text.slice(0, fromIdx) + text.slice(toIdx)
+    roughPos = fromIdx
+  }
+  const cellPos = snapToCell(nextText, roughPos)
+  return { text: nextText, from: cellPos, to: cellPos }
+}
+
+export function tableAddColumn({ text, from, to, side }) {
+  const t = findTable(text, from)
+  if (!t) return null
+  const insertAt = side === 'left' ? t.colIndex : t.colIndex + 1
+
+  const rebuilt = []
+  for (let r = 0; r < t.lines.length; r++) {
+    const segs = t.segs[r].slice()
+    // Each row's new cell borrows its neighbour column's own width, keeping
+    // every existing edge aligned; the delimiter's fresh cell runs left.
+    const width = Math.max(segs[Math.min(insertAt, segs.length - 1)].text.length, 1)
+    segs.splice(insertAt, 0, { raw: r === t.delimIndex ? alignmentSegment('left', width + 2) : emptySegment(width) })
+    rebuilt.push(rebuildLine(segs))
+  }
+
+  const nextText = text.slice(0, t.start) + rebuilt.join('\n') + text.slice(t.end)
+  // Cursor rides along in the same row, parked inside the freshly inserted column.
+  return parkedCursor(t.start, nextText, rebuilt, t.rowIndex, insertAt)
+}
+
+// Shared tail of the column commands: walk to the caret's row in the rebuilt
+// text and park inside cell (rowIndex, preferredCol), resolved by re-parsing
+// rather than arithmetic — arithmetic through edited pipe lines is exactly how
+// off-by-ones happen.
+function parkedCursor(tableStart, nextText, rebuiltLines, rowIndex, preferredCol) {
+  let roughPos = tableStart
+  for (let r = 0; r < rowIndex; r++) roughPos += rebuiltLines[r].length + 1
+  const t2 = findTable(nextText, clampPos(roughPos, nextText.length))
+  if (!t2) {
+    const pos = clampPos(roughPos, nextText.length)
+    return { text: nextText, from: pos, to: pos }
+  }
+  const cell = t2.segs[t2.rowIndex][Math.min(preferredCol, t2.colCount - 1)]
+  return { text: nextText, from: cell.contentStart, to: cell.contentEnd }
+}
+
+export function tableDeleteColumn({ text, from, to }) {
+  const t = findTable(text, from)
+  if (!t) return null
+
+  if (t.colCount === 1) {
+    // Out of columns, out of table — the Loop convention. Take one adjoining
+    // newline with it so the neighbours don't fuse.
+    const fromIdx = t.start > 0 && text[t.start - 1] === '\n' && text[t.end] === '\n' ? t.start - 1 : t.start
+    const toIdx = text[t.end] === '\n' ? t.end + 1 : t.end
+    const nextText = text.slice(0, fromIdx) + text.slice(toIdx)
+    const pos = clampPos(fromIdx, nextText.length)
+    return { text: nextText, from: pos, to: pos }
+  }
+
+  const rebuilt = t.segs.map((segs) => rebuildLine(segs.filter((_, c) => c !== t.colIndex)))
+  const nextText = text.slice(0, t.start) + rebuilt.join('\n') + text.slice(t.end)
+  // The caret stays in its own row, clamped to the nearest surviving column.
+  return parkedCursor(t.start, nextText, rebuilt, t.rowIndex, t.colIndex)
+}
+
+export function tableCycleAlignment({ text, from, to }) {
+  const t = findTable(text, from)
+  if (!t) return null
+  const next = ALIGNMENT_ORDER[(ALIGNMENT_ORDER.indexOf(t.alignments[t.colIndex]) + 1) % ALIGNMENT_ORDER.length]
+
+  const segs = t.segs[t.delimIndex].slice()
+  segs[t.colIndex] = { raw: alignmentSegment(next, segs[t.colIndex].raw.length) }
+  const rebuilt = rebuildLine(segs)
+  const line = t.lines[t.delimIndex]
+
+  // Only the delimiter line is rewritten; positions past it ride the delta.
+  const delta = rebuilt.length - (line.end - line.start)
+  const map = (p) => (p <= line.start ? p : p >= line.end ? p + delta : line.start + rebuilt.length)
+  const nextText = text.slice(0, line.start) + rebuilt + text.slice(line.end)
+  const pos = map(from)
+  return { text: nextText, from: pos, to: pos }
+}
+
+// Cell-to-cell walking skips the delimiter row — it's furniture, not a cell.
+// Forward off the last cell appends a row (Loop behaviour); backward off the
+// first reports null so the caller decides whether to consume the keypress.
+function stepCell(t, r, c, dir) {
+  if (dir === 'forward') {
+    if (c < t.colCount - 1) return [r, c + 1]
+    let nr = r + 1
+    if (nr === t.delimIndex) nr++
+    return nr < t.lines.length ? [nr, 0] : null
+  }
+  if (c > 0) return [r, c - 1]
+  let nr = r - 1
+  if (nr === t.delimIndex) nr--
+  return nr >= 0 ? [nr, t.colCount - 1] : null
+}
+
+function cellFor(t, r, c) {
+  return t.segs[r][c]
+}
+
+export function tableNextCell(state) {
+  const t = findTable(state.text, state.from)
+  if (!t) return null
+  const next = stepCell(t, t.rowIndex, t.colIndex, 'forward')
+  if (!next) return tableAddRow({ ...state, where: 'below' })
+  const cell = cellFor(t, next[0], next[1])
+  return { text: state.text, from: cell.contentStart, to: cell.contentEnd }
+}
+
+export function tablePrevCell(state) {
+  const t = findTable(state.text, state.from)
+  if (!t) return null
+  const prev = stepCell(t, t.rowIndex, t.colIndex, 'back')
+  if (!prev) return null
+  const cell = cellFor(t, prev[0], prev[1])
+  return { text: state.text, from: cell.contentStart, to: cell.contentEnd }
+}
+
 // ---------- dispatcher ----------
 
 // One entry point for the toolbar/keymap layer: names mirror button
-// identities; headings arrive as `heading3`..`heading6`.
+// identities; headings arrive as `heading3`..`heading6`. Table commands
+// (#134) return null to mean "no well-formed table here — do nothing"
+// instead of throwing; the keymap glue decides whether that consumes the
+// keypress (Shift-Tab on the first cell) or falls through to plain typing
+// (Enter anywhere but the last cell).
 export function apply(command, state) {
   if (INLINE_KINDS[command]) return toggleInline({ ...state, kind: command })
   switch (command) {
@@ -364,6 +769,26 @@ export function apply(command, state) {
       return insertHorizontalRule(state)
     case 'codeBlock':
       return toggleFencedCode(state)
+    case 'insertTable':
+      return insertTable(state)
+    case 'tableAddRowAbove':
+      return tableAddRow({ ...state, where: 'above' })
+    case 'tableAddRowBelow':
+      return tableAddRow({ ...state, where: 'below' })
+    case 'tableDeleteRow':
+      return tableDeleteRow(state)
+    case 'tableAddColumnLeft':
+      return tableAddColumn({ ...state, side: 'left' })
+    case 'tableAddColumnRight':
+      return tableAddColumn({ ...state, side: 'right' })
+    case 'tableDeleteColumn':
+      return tableDeleteColumn(state)
+    case 'tableCycleAlignment':
+      return tableCycleAlignment(state)
+    case 'tableNextCell':
+      return tableNextCell(state)
+    case 'tablePrevCell':
+      return tablePrevCell(state)
     default: {
       const heading = /^heading([3-6])$/.exec(command)
       if (heading) return toggleHeading({ ...state, level: Number(heading[1]) })

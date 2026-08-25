@@ -9,6 +9,8 @@ import {
   toggleLink,
   insertHorizontalRule,
   toggleFencedCode,
+  findTable,
+  insertTable,
 } from '../web/lib/markdownCommands.js'
 
 // Fake syntax-tree pieces honouring the same contract as @lezer/common's
@@ -222,6 +224,228 @@ test('fenced code strips existing fence lines when the cursor is inside one', ()
     from: 0,
     to: 2,
   })
+})
+
+// ---------- tables (#134) ----------
+//
+// The table commands are exercised through the same apply() dispatcher the
+// toolbar and keymap use, so name routing is covered alongside behaviour.
+
+const TABLE = '| A | B |\n| --- | :--: |\n| one | two |\n| three | four |'
+
+function posOf(text, needle, occurrence = 1) {
+  let idx = -1
+  for (let i = 0; i < occurrence; i++) idx = text.indexOf(needle, idx + 1)
+  return idx
+}
+
+function dispatch(command, text, from, extra = {}) {
+  return apply(command, { tree: null, text, from, to: from, ...extra })
+}
+
+test('findTable parses a rectangular pipe table and locates the cursor', () => {
+  const t = findTable(TABLE, posOf(TABLE, 'three'))
+  assert.ok(t)
+  assert.equal(t.colCount, 2)
+  assert.equal(t.delimIndex, 1)
+  assert.deepEqual(t.alignments, ['left', 'center'])
+  assert.equal(t.rowIndex, 3)
+  assert.equal(t.colIndex, 0)
+  // Cell content ranges exclude padding.
+  const three = t.segs[3][0]
+  assert.equal(three.text, 'three')
+  assert.equal(TABLE.slice(three.contentStart, three.contentEnd), 'three')
+})
+
+test('findTable resolves a cursor sitting on a pipe or in padding to its cell', () => {
+  const pipeBetweenBodyCells = TABLE.indexOf('|', TABLE.indexOf('one'))
+  const t = findTable(TABLE, pipeBetweenBodyCells)
+  assert.equal(t.colIndex, 0, 'cursor on the pipe owns the cell to its LEFT')
+})
+
+test('findTable rejects non-tables: no delimiter, ragged rows, two delimiter rows', () => {
+  assert.equal(findTable('| just prose | with pipes |', 4), null)
+  assert.equal(findTable('| a | b |\n| - |', 3), null)
+  assert.equal(
+    findTable('| a | b |\n| - | - |\n| c | d |\n| e | f |\n| - | - |', 10),
+    null,
+    'ambiguous double-delimiter run'
+  )
+  assert.equal(findTable('no pipes at all', 2), null)
+})
+
+test('findTable honours escaped pipes as content, not separators', () => {
+  const doc = '| a \\| b | c |\n| --- | --- |\n| x | y |'
+  const t = findTable(doc, 0)
+  assert.ok(t)
+  assert.equal(t.colCount, 2)
+  assert.equal(t.segs[0][0].text, 'a \\| b')
+})
+
+test('findTable anchors on the header: pipe-bearing prose above it is not table structure', () => {
+  const doc = 'note a | b\n| H1 | H2 |\n| -- | -- |\n| x | y |'
+  const t = findTable(doc, posOf(doc, 'x'))
+  assert.ok(t, 'valid table below prose still parses')
+  assert.equal(t.colCount, 2)
+  assert.equal(t.delimIndex, 1)
+  assert.equal(t.start, doc.indexOf('| H1'), 'parse starts at the header line')
+  // A caret sitting on the prose line was never "in a table".
+  assert.equal(findTable(doc, 5), null)
+})
+
+test('column commands never rebuild pipe-bearing prose above the table', () => {
+  const doc = 'note a | b\n| H1 | H2 |\n| -- | -- |\n| x | y |'
+  const res = dispatch('tableAddColumnRight', doc, doc.indexOf('| y'))
+  assert.ok(res)
+  assert.ok(res.text.startsWith('note a | b\n'), 'prose line untouched byte-for-byte')
+})
+
+test('findTable still rejects genuinely ragged tables under its own header', () => {
+  assert.equal(findTable('| H1 | H2 |\n| - | - |\n| one | two | three |', 8), null)
+})
+
+test('insertTable builds the requested size with blank-line hygiene and opens in the first body cell', () => {
+  const res = dispatch('insertTable', 'before after', 6, { rows: 2, cols: 3 })
+  assert.match(res.text, /^before\n\n\| Header 1 \| Header 2 \| Header 3 \|\n\| -{8} \| -{8} \| -{8} \|/)
+  assert.match(res.text, /\|\s{10}\|\s{10}\|\s{10}\|\n\n after$/, 'trailing blank line restored mid-document')
+  // Cursor collapsed inside the first body cell — typing lands there.
+  const typed = res.text.slice(0, res.from) + 'X' + res.text.slice(res.to)
+  const t = findTable(typed, res.from)
+  assert.equal(t.rowIndex, 2)
+  assert.equal(t.colIndex, 0)
+  assert.equal(t.segs[2][0].text, 'X')
+  // End of document gets no trailing blank line; mid-document gets both.
+  const atEnd = dispatch('insertTable', 'prose', 5, { rows: 1, cols: 1 })
+  assert.match(atEnd.text, /^prose\n\n\| Header 1 \|\n\| -{8} \|\n\| {10}\|$/)
+})
+
+test('tableAddRowBelow inserts under the cursor row with matching widths; header/delegate case lands first body row', () => {
+  const below = dispatch('tableAddRowBelow', TABLE, posOf(TABLE, 'two'))
+  assert.equal(
+    below.text,
+    '| A | B |\n| --- | :--: |\n| one | two |\n|     |     |\n| three | four |'
+  )
+  // Cursor parked inside the new (empty) row's first cell.
+  const t = findTable(below.text, below.from)
+  assert.equal(t.rowIndex, 3)
+
+  // "Below" while on the header inserts the FIRST BODY ROW, never between
+  // header and delimiter; the new row borrows the delimiter's widths.
+  const fromHeader = dispatch('tableAddRowBelow', TABLE, posOf(TABLE, 'A'))
+  assert.equal(
+    fromHeader.text,
+    '| A | B |\n| --- | :--: |\n|     |      |\n| one | two |\n| three | four |'
+  )
+  const th = findTable(fromHeader.text, fromHeader.from)
+  assert.equal(th.rowIndex, 2)
+  assert.equal(th.segs[2][0].text, '')
+
+  // "Above" on the header stands down rather than corrupting the structure.
+  assert.equal(dispatch('tableAddRowAbove', TABLE, posOf(TABLE, 'A')), null)
+  const above = dispatch('tableAddRowAbove', TABLE, posOf(TABLE, 'four'))
+  assert.equal(
+    above.text,
+    '| A | B |\n| --- | :--: |\n| one | two |\n|     |     |\n| three | four |'
+  )
+})
+
+test('tableDeleteRow removes a body row, promotes on the header, and refuses the delimiter', () => {
+  const del = dispatch('tableDeleteRow', TABLE, posOf(TABLE, 'one'))
+  assert.equal(del.text, '| A | B |\n| --- | :--: |\n| three | four |')
+  assert.equal(dispatch('tableDeleteRow', TABLE, TABLE.indexOf(':--')), null)
+
+  // Deleting the header promotes the first body row into its place.
+  const promoted = dispatch('tableDeleteRow', TABLE, posOf(TABLE, 'A'))
+  assert.equal(promoted.text, '| one | two |\n| --- | :--: |\n| three | four |')
+
+  // Last body row may go, leaving a header-only table.
+  const headerOnly = dispatch('tableDeleteRow', TABLE, posOf(TABLE, 'four'))
+  assert.equal(headerOnly.text, '| A | B |\n| --- | :--: |\n| one | two |')
+})
+
+test('tableAddColumnLeft/Right insert into every row and park the cursor in the new column', () => {
+  const right = dispatch('tableAddColumnRight', TABLE, posOf(TABLE, 'two'))
+  assert.equal(
+    right.text,
+    '| A | B | |\n| --- | :--: | ---- |\n| one | two |   |\n| three | four |    |'
+  )
+  const rt = findTable(right.text, right.from)
+  assert.equal(rt.colCount, 3)
+  assert.equal(rt.colIndex, 2)
+  assert.equal(rt.rowIndex, 2)
+
+  const left = dispatch('tableAddColumnLeft', TABLE, posOf(TABLE, 'two'))
+  assert.equal(
+    left.text,
+    '| A | | B |\n| --- | ---- | :--: |\n| one |   | two |\n| three |    | four |'
+  )
+  const lt = findTable(left.text, left.from)
+  assert.equal(lt.colCount, 3)
+  assert.equal(lt.colIndex, 1)
+  assert.equal(lt.alignments[1], 'left', 'fresh delimiter column runs left')
+})
+
+test('tableDeleteColumn drops the column everywhere; the last column takes the whole table', () => {
+  const del = dispatch('tableDeleteColumn', TABLE, posOf(TABLE, 'three'))
+  assert.equal(del.text, '| B |\n| :--: |\n| two |\n| four |')
+
+  const single = '| Only |\n| ---- |\n| cell |'
+  const gone = dispatch('tableDeleteColumn', single, posOf(single, 'cell'))
+  assert.equal(gone.text.replace(/\n+$/, ''), '')
+})
+
+test('tableCycleAlignment walks the cursor column through centre and right without touching its neighbour', () => {
+  // Column 2 starts centred (`:--:`): one click -> right, two -> left.
+  const toRight = dispatch('tableCycleAlignment', TABLE, posOf(TABLE, 'two'))
+  assert.equal(toRight.text.split('\n')[1], '| --- | ---: |')
+  const toLeft = dispatch('tableCycleAlignment', toRight.text, toRight.from)
+  assert.equal(toLeft.text.split('\n')[1], '| --- | ---- |')
+  // Column 1 starts left-aligned: one click centres it, leaving column 2 alone.
+  const toCenter = dispatch('tableCycleAlignment', TABLE, posOf(TABLE, 'one'))
+  assert.equal(toCenter.text.split('\n')[1], '| :--: | :--: |')
+})
+
+test('tableNextCell walks cell to cell, skips the delimiter, and appends a row after the last cell', () => {
+  let state = { tree: null, text: TABLE, from: posOf(TABLE, 'one'), to: posOf(TABLE, 'one') }
+  state.to = state.from
+
+  // Forward: second cell of this row...
+  let r = apply('tableNextCell', state)
+  assert.equal(r.text.slice(r.from, r.to), 'two')
+  // ...first cell of the NEXT BODY ROW (delimiter skipped)...
+  r = apply('tableNextCell', { ...state, from: r.from, to: r.to })
+  assert.equal(r.text.slice(r.from, r.to), 'three')
+  // ...second cell of it...
+  r = apply('tableNextCell', { ...state, from: r.from, to: r.to })
+  assert.equal(r.text.slice(r.from, r.to), 'four')
+  // ...and off the very last cell a fresh row appears, caret in its first cell.
+  r = apply('tableNextCell', { ...state, from: r.from, to: r.to })
+  assert.notEqual(r.text, TABLE)
+  assert.match(r.text, /\| four \|\n\| +\| +\|$/)
+  const nt = findTable(r.text, r.from)
+  assert.equal(nt.rowIndex, 4)
+  assert.equal(nt.colIndex, 0)
+
+  // Backward retraces; Shift-Tab off the first cell reports null.
+  const back = apply('tablePrevCell', { tree: null, text: r.text, from: r.from, to: r.to })
+  assert.equal(back.text.slice(back.from, back.to), 'four')
+  const stuck = apply('tablePrevCell', { tree: null, text: TABLE, from: posOf(TABLE, 'A'), to: posOf(TABLE, 'A') })
+  assert.equal(stuck, null)
+})
+
+test('malformed tables no-op through the dispatcher instead of rewriting text', () => {
+  const ragged = '| a | b |\n| - |'
+  for (const cmd of [
+    'tableAddRowBelow',
+    'tableDeleteRow',
+    'tableAddColumnRight',
+    'tableDeleteColumn',
+    'tableCycleAlignment',
+    'tableNextCell',
+    'tablePrevCell',
+  ]) {
+    assert.equal(dispatch(cmd, ragged, 3), null, cmd)
+  }
 })
 
 // ---------- dispatcher ----------

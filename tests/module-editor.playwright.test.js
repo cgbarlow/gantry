@@ -374,8 +374,32 @@ test("each markdown field has an Insert ▾ dropdown whose Image flow uploads, i
   }
 })
 
-// Coverage for #132's Table item: a starter GFM pipe table lands at the cursor, renders as a real table immediately, and round-trips to the module file verbatim on save.
-test('Insert ▾ → Table inserts a starter pipe table that renders live and survives save/reload', async () => {
+// Coverage for #134 — Loop-style table editing: the Insert ▾ size grid, the
+// contextual control strip, the Tab/Enter keyboard flow, graceful degradation
+// on malformed input, and themed preview rendering.
+
+// CodeMirror renders one .cm-line per document line with no separators, so
+// textContent alone can't distinguish lines; join them explicitly.
+const docText = (field) =>
+  field.locator('.cm-content').evaluate((el) => [...el.querySelectorAll('.cm-line')].map((l) => l.textContent).join('\n'))
+
+// Editor state settles across microtasks (preact render, CM transactions);
+// poll rather than assume immediacy.
+async function eventually(fn, timeout = 3000) {
+  const start = Date.now()
+  let lastErr
+  while (Date.now() - start < timeout) {
+    try {
+      return await fn()
+    } catch (err) {
+      lastErr = err
+      await new Promise((r) => setTimeout(r, 100))
+    }
+  }
+  throw lastErr
+}
+
+test('Insert ▾ → Table opens a size grid whose pick inserts a live table with the caret parked (#134)', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
@@ -397,16 +421,32 @@ test('Insert ▾ → Table inserts a starter pipe table that renders live and su
         const contextModule = page.locator('.module').first()
         const firstField = contextModule.locator('.field-markdown').nth(0)
 
-        // Replace the seeded content with a lead-in line, then insert the table at the cursor (end of that line).
+        // Replace the seeded content with a lead-in line, then open the grid.
         await firstField.locator('.cm-content').click()
         await page.keyboard.press('ControlOrMeta+a')
         await page.keyboard.type('Key decisions:')
         await firstField.getByRole('button', { name: 'Insert ▾' }).click()
         await contextModule.locator('.insert-dropdown .menu').getByRole('menuitem', { name: 'Table' }).click()
 
-        // The starter table renders as a real GFM table in the sibling preview pane.
+        const grid = contextModule.locator('.table-picker-grid')
+        await grid.waitFor({ state: 'visible', timeout: 5_000 })
+        assert.equal(await grid.locator('.table-picker-cell').count(), 64, 'an 8×8 grid')
+
+        // Hovering a corner lights up exactly its R×C rectangle and the
+        // caption reads out the size.
+        await grid.locator('[data-row="2"][data-col="3"]').hover()
+        await eventually(async () => {
+          assert.equal(await grid.locator('.table-picker-cell.lit').count(), 6)
+          assert.equal(await contextModule.locator('.table-picker-caption').textContent(), '3 × 2')
+        })
+
+        await grid.locator('[data-row="2"][data-col="3"]').click()
         await assert.doesNotReject(firstField.locator('.preview table').waitFor({ timeout: 5_000 }))
-        assert.equal(await firstField.locator('.preview table th').count(), 2)
+        assert.equal(await firstField.locator('.preview table th').count(), 3)
+
+        // The caret landed in the first body cell, so the contextual strip
+        // is up without any further interaction.
+        await assert.doesNotReject(firstField.locator('.table-toolbar').waitFor({ state: 'visible', timeout: 5_000 }))
 
         // Round-trip: save, then read the module file back off disk.
         await contextModule.getByRole('button', { name: 'Save Context' }).click()
@@ -419,8 +459,258 @@ test('Insert ▾ → Table inserts a starter pipe table that renders live and su
 
     const definition = loadDefinition('design')
     const data = readModule(definition, 'examples', 'context', { instancesDir })
-    // The table lands directly after the lead-in line (insert-at-cursor), with the GFM separator row intact.
-    assert.match(data.fields.driver, /^Key decisions:\n\| Column 1 \| Column 2 \|\n\| -{8,} \| -{8,} \|/)
+    // Blank-line hygiene kept the lead-in separated, and the fresh table is
+    // padded to the header's width.
+    assert.match(
+      data.fields.driver,
+      /^Key decisions:\n\n\| Header 1 \| Header 2 \| Header 3 \|\n\| -{8} \| -{8} \| -{8} \|\n\| {10}\| {10}\| {10}\|$/
+    )
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('Tab walks the cells, Enter appends a row from the last one, Shift-Tab retraces (#134)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const firstField = page.locator('.field-markdown').nth(0)
+        await firstField.locator('.cm-content').click()
+        await page.keyboard.press('ControlOrMeta+a')
+
+        // Seed a 2×2 table through the picker.
+        await firstField.getByRole('button', { name: 'Insert ▾' }).click()
+        await firstField.locator('.insert-dropdown .menu').getByRole('menuitem', { name: 'Table' }).click()
+        const grid = firstField.locator('.table-picker-grid')
+        await grid.waitFor({ state: 'visible', timeout: 5_000 })
+        await grid.locator('[data-row="2"][data-col="2"]').click()
+        await assert.doesNotReject(firstField.locator('.preview table').waitFor({ timeout: 5_000 }))
+
+        // Walk the four cells with Tab, dropping a letter in each; the walk
+        // skips the delimiter row by construction.
+        for (const letter of ['a', 'b', 'c']) {
+          await page.keyboard.type(letter)
+          await page.keyboard.press('Tab')
+        }
+        await page.keyboard.type('d')
+        // Off the last cell Enter appends a row instead of splitting a line…
+        await page.keyboard.press('Enter')
+        await page.keyboard.type('e')
+        // …and Shift-Tab retraces into the previous cell, selecting it.
+        await page.keyboard.press('Shift+Tab')
+        await page.keyboard.type('D')
+
+        const text = await eventually(() => docText(firstField))
+        assert.match(
+          text,
+          /\| Header 1 \| Header 2 \|\n\| -{8} \| -{8} \|\n\| {5}a {5}\| {5}b {5}\|\n\| {2}c \| {2}D \|\n\| {2}e \| {3}\|$/
+        )
+        assert.equal(await firstField.locator('.preview td').count(), 6, 'three body rows × two columns')
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('the contextual strip adds/removes rows and columns and cycles alignment (#134)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const firstField = page.locator('.field-markdown').nth(0)
+        await firstField.locator('.cm-content').click()
+        await page.keyboard.press('ControlOrMeta+a')
+
+        await firstField.getByRole('button', { name: 'Insert ▾' }).click()
+        await firstField.locator('.insert-dropdown .menu').getByRole('menuitem', { name: 'Table' }).click()
+        const grid = firstField.locator('.table-picker-grid')
+        await grid.waitFor({ state: 'visible', timeout: 5_000 })
+        await grid.locator('[data-row="2"][data-col="2"]').click()
+        await assert.doesNotReject(firstField.locator('.table-toolbar').waitFor({ state: 'visible', timeout: 5_000 }))
+        const strip = firstField.locator('.table-toolbar')
+
+        // Park some content so row operations have something to act on.
+        await page.keyboard.type('a')
+
+        // Add row below lands an empty row under the caret's row.
+        await strip.getByRole('button', { name: 'Add row below' }).click()
+        await page.keyboard.type('x')
+        await eventually(async () => {
+          assert.match(await docText(firstField), /\n\| {2}x \| {3}\|$/)
+        })
+
+        // Add column right grows every row and parks the caret in the new one
+        // (its padding borrows the neighbour's width — an empty neighbour
+        // means a narrow cell, which is cosmetically uneven but valid GFM).
+        await strip.getByRole('button', { name: 'Add column right' }).click()
+        await page.keyboard.type('y')
+        await eventually(async () => {
+          assert.equal(await firstField.locator('.preview table th').count(), 3)
+          assert.match(await docText(firstField), /\| {2}x \| ?y/)
+        })
+
+        // Alignment cycles on the caret's column: left -> centre.
+        await strip.getByRole('button', { name: 'Cycle column alignment' }).click()
+        await eventually(async () => {
+          assert.equal(await firstField.locator('.preview table th').nth(1).getAttribute('style'), 'text-align:center')
+          assert.match(await docText(firstField), /\| -{8} \| :--+: \|/)
+        })
+
+        // Delete column takes the caret's column back out everywhere.
+        await strip.getByRole('button', { name: 'Delete column' }).click()
+        await eventually(async () => {
+          assert.equal(await firstField.locator('.preview table th').count(), 2)
+        })
+
+        // Delete row removes the caret's row (the one holding x/y).
+        await strip.getByRole('button', { name: 'Delete row' }).click()
+        await eventually(async () => {
+          const text = await docText(firstField)
+          assert.doesNotMatch(text, /x/)
+          assert.match(text, /\| Header 1 \| Header 2 \|\n\| -{8} \| -{8} \|/)
+        })
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('a malformed pseudo-table degrades gracefully: no strip, no corruption (#134)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const firstField = page.locator('.field-markdown').nth(0)
+        await firstField.locator('.cm-content').click()
+        await page.keyboard.press('ControlOrMeta+a')
+        // Ragged: two pipes up top, one below, no valid delimiter run.
+        await page.keyboard.insertText('| a | b |\n| - |')
+
+        // Put the caret inside the pseudo-table's second line.
+        await firstField.locator('.cm-line', { hasText: '| - |' }).click()
+
+        // No strip may appear, and the table commands must leave the text alone.
+        await eventually(async () => {
+          assert.equal(await firstField.locator('.table-toolbar').count(), 0)
+        })
+        const before = await docText(firstField)
+        await page.keyboard.press('Tab')
+        await page.keyboard.press('Shift+Tab')
+        assert.equal(await docText(firstField), before, 'Tab/Shift-Tab fall through outside a well-formed table')
+
+        // Enter still just splits a line.
+        await page.keyboard.press('Enter')
+        await eventually(async () => {
+          assert.equal((await docText(firstField)).split('\n').length, 3)
+        })
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// Per #134's styling requirement: preview tables dress themselves purely from
+// design tokens, so the same rules hold across light/dark/high-contrast.
+test('preview tables are token-styled in all three themes (#134)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const firstField = page.locator('.field-markdown').nth(0)
+        await firstField.locator('.cm-content').click()
+        await page.keyboard.press('ControlOrMeta+a')
+        await firstField.getByRole('button', { name: 'Insert ▾' }).click()
+        await firstField.locator('.insert-dropdown .menu').getByRole('menuitem', { name: 'Table' }).click()
+        const grid = firstField.locator('.table-picker-grid')
+        await grid.waitFor({ state: 'visible', timeout: 5_000 })
+        await grid.locator('[data-row="2"][data-col="2"]').click()
+        const cell = firstField.locator('.preview td').first()
+        await cell.waitFor({ timeout: 5_000 })
+
+        let lightBorder = null
+        for (const theme of ['light', 'dark', 'hc']) {
+          await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme)
+          // hc intentionally thickens --hairline to 2px, so assert against the
+          // token rather than a hardcoded pixel value.
+          const hairline = await page.evaluate(() =>
+            getComputedStyle(document.documentElement).getPropertyValue('--hairline').trim()
+          )
+          const style = await cell.evaluate((el) => {
+            const s = getComputedStyle(el)
+            return { width: s.borderTopWidth, style: s.borderTopStyle, color: s.borderTopColor }
+          })
+          assert.equal(style.style, 'solid', `${theme}: td edges must be ruled`)
+          assert.equal(style.width, hairline, `${theme}: rules follow the --hairline token`)
+          if (theme === 'light') lightBorder = style.color
+          if (theme === 'dark') assert.notEqual(style.color, lightBorder, 'border colour follows the theme tokens')
+        }
+      } finally {
+        await browser.close()
+      }
+    })
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }
