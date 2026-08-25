@@ -503,6 +503,8 @@ function InstanceStep() {
       <div class="result-row"><span class="k">Organization/Project/Repository</span><span class="v">${ws.organization}/${ws.project}/${ws.repository}</span></div>
     </div>
 
+    <h3>New Instance</h3>
+
     <div class="wizard-field">
       <label for="definition-picker">Definition</label>
       <div id="definition-picker">
