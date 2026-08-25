@@ -640,14 +640,17 @@ test('a malformed pseudo-table degrades gracefully: no strip, no corruption (#13
         // Put the caret inside the pseudo-table's second line.
         await firstField.locator('.cm-line', { hasText: '| - |' }).click()
 
-        // No strip may appear, and the table commands must leave the text alone.
+        // No strip may appear — the caret is outside a well-formed table.
         await eventually(async () => {
           assert.equal(await firstField.locator('.table-toolbar').count(), 0)
         })
         const before = await docText(firstField)
+        // Tab indents and Shift-Tab outdents outside a table (#146).
         await page.keyboard.press('Tab')
+        const afterTab = await docText(firstField)
+        assert.notEqual(afterTab, before, 'Tab indents outside a table')
         await page.keyboard.press('Shift+Tab')
-        assert.equal(await docText(firstField), before, 'Tab/Shift-Tab fall through outside a well-formed table')
+        assert.equal(await docText(firstField), before, 'Shift-Tab outdents back to the original')
 
         // Enter still just splits a line.
         await page.keyboard.press('Enter')

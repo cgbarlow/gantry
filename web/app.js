@@ -9,6 +9,7 @@ import { EditorState, Compartment } from '@codemirror/state'
 // EditorView from); imported directly so the toolbar's shortcut layer sits in
 // one obvious place next to the command transforms it drives.
 import { keymap } from '@codemirror/view'
+import { indentWithTab } from '@codemirror/commands'
 import { syntaxTree } from '@codemirror/language'
 import { markdown } from '@codemirror/lang-markdown'
 import MarkdownIt from 'markdown-it'
@@ -286,6 +287,12 @@ const markdownToolbarKeymap = keymap.of([
   { key: 'Tab', run: (view) => runTableKey(view, 'tableNextCell') },
   { key: 'Shift-Tab', run: (view) => runTableKey(view, 'tablePrevCell') },
   { key: 'Enter', run: (view) => runTableEnter(view) },
+  // Tab indents inside a markdown field; Shift-Tab outdents. The table
+  // bindings above consume Tab/Shift-Tab when the caret sits inside a
+  // table — they return false otherwise, at which point these bindings
+  // pick up the keystroke.  Escape (built into CodeMirror) drops into
+  // tab-focus mode so Tab/Shift-Tab then move focus out as before.
+  indentWithTab,
 ])
 
 function runMarkdownCommand(view, name, extra = {}) {
