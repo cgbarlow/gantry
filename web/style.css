@@ -179,6 +179,13 @@ header {
 
 /*
  * View-mode toolbar (#79) — a toolbar segmented control (Markdown / Split / Rendered) for the whole module-editor screen, ported from Variant A of web/prototypes/module-editor.prototype.html (#72).
+ *
+ * Sticky (#135) — the bar pins to the top of the viewport once scrolled past,
+ * so markdown/split/rendered switching stays reachable while scrolling long
+ * modules. Its parent is #app (full page height), so it sticks for the whole
+ * scroll; z-index sits above in-flow content, below the field popovers (9)
+ * — an open Headings/Insert menu must stay visible if its anchor scrolls
+ * beneath the pinned bar — and below modal backdrops (20).
  */
 .toolbar {
   display: flex;
@@ -189,7 +196,16 @@ header {
   padding: 14px 32px;
   background: var(--bg-raised);
   border-bottom: var(--hairline) solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 8;
 }
+/*
+ * Suppressed while a field panel owns the screen (#135): a full-screen field
+ * covers the viewport anyway, and un-sticking keeps the bar out of the
+ * layout entirely for as long as <html> carries data-field-fullscreen.
+ */
+[data-field-fullscreen] .toolbar { position: static; }
 .segmented { display: inline-flex; border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius); overflow: hidden; }
 .segmented button { border: none; border-right: var(--hairline) solid var(--line-strong); border-radius: 0; margin: 0; }
 .segmented button:last-child { border-right: none; }
@@ -381,7 +397,9 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
   position: absolute;
   right: 0;
   top: 27px;
-  z-index: 6;
+  /* Above the sticky view bar (#135): scrolling with the menu open must not
+   * slide it underneath the pinned toolbar. */
+  z-index: 9;
   background: var(--bg-raised);
   border: var(--border-strong) solid var(--line-strong);
   border-radius: var(--radius);
@@ -403,6 +421,30 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
   box-sizing: border-box;
 }
 .md-headings .menu button:hover { background: var(--bg); }
+
+/*
+ * Full-screen field expansion (#135) — the field's own wrapper is the
+ * full-screen element, so the UA's "fills the viewport" default is re-flowed
+ * into the Gate Ledger layout: label and Insert ▾ keep their natural height
+ * while the split row takes everything that's left, meaning markdown mode
+ * gets a full-height editor, split mode gets BOTH panes filling the screen,
+ * and each pane scrolls internally rather than pushing the toolbar away.
+ */
+.field-markdown:fullscreen {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  padding: 20px 32px 28px;
+  overflow: auto;
+}
+.field-markdown:fullscreen .split {
+  flex: 1 1 auto;
+  min-height: 240px;
+}
+.field-markdown:fullscreen > label,
+.field-markdown:fullscreen > .guidance,
+.field-markdown:fullscreen > .insert-dropdown { flex-shrink: 0; }
 
 .field-list .list-row { display: flex; gap: 8px; margin-bottom: 6px; }
 .field-list input {
@@ -564,7 +606,8 @@ main.dashboard {
   left: 0;
   top: 100%;
   margin-top: 6px;
-  z-index: 5;
+  /* Above the sticky view bar, same as the Headings menu (#135). */
+  z-index: 9;
   background: var(--bg-raised);
   border: var(--border-strong) solid var(--line-strong);
   border-radius: var(--radius);

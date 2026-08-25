@@ -852,3 +852,215 @@ test('B/I/S toolbar letters are visually self-demonstrating across all three the
     rmSync(instancesDir, { recursive: true, force: true })
   }
 })
+
+// Coverage for #135 — the sticky view bar: the Markdown/Split/Rendered bar
+// pins to the top of the viewport once scrolled past (so view switching stays
+// reachable over long modules), and sits back below the header again at the
+// top of the page.
+test('view-mode bar sticks to the top while scrolling and returns below the header at the top (#135)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        // A short viewport guarantees the fixture page can actually scroll.
+        await page.setViewportSize({ width: 1280, height: 500 })
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const toolbar = page.locator('.toolbar')
+        assert.equal(await toolbar.evaluate((el) => getComputedStyle(el).position), 'sticky')
+
+        // Scroll deep into the page: the bar must ride along pinned at y≈0.
+        await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+        const maxScroll = await page.evaluate(() => window.scrollY)
+        assert.ok(maxScroll > 100, 'fixture page must be scrollable for stickiness to be observable')
+        const pinned = await toolbar.boundingBox()
+        assert.ok(Math.abs(pinned.y) <= 1, `bar must pin to the viewport top, got y=${pinned.y}`)
+
+        // Back at the top it yields its natural place under the header.
+        await page.evaluate(() => window.scrollTo(0, 0))
+        const atTop = await toolbar.boundingBox()
+        assert.ok(atTop.y > 1, `bar must sit below the header at the top of the page, got y=${atTop.y}`)
+
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// Coverage for #135 — full-screen field expansion: the ⤢ button at the right
+// end of each field's toolbar expands that field panel via the Fullscreen
+// API with the formatting toolbar staying visible inside it; split mode
+// fills the screen with BOTH panes; Esc and the same button exit; the sticky
+// view bar is suppressed while expanded and returns after.
+test('⤢ expands a field full-screen with both split panes and its toolbar; Esc and ⤢ exit; sticky bar yields meanwhile (#135)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    const near = (actual, expected, tolerance, what) =>
+      assert.ok(
+        Math.abs(actual - expected) <= tolerance,
+        `${what}: expected ≈${expected} ±${tolerance}, got ${actual}`
+      )
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const field = page.locator('.field-markdown').first()
+        const content = field.locator('.cm-content')
+        const toolbar = field.locator('.md-toolbar')
+
+        // The toolbar (and hence ⤢) mounts on focus.
+        await content.click()
+        await toolbar.waitFor({ state: 'visible', timeout: 5_000 })
+        assert.equal(await toolbar.getByRole('button', { name: 'Full screen', exact: true }).count(), 1)
+
+        // Expand: the native Fullscreen API takes the field wrapper itself.
+        // Waits cover BOTH the platform state and the page's own reaction to
+        // it (the data-field-fullscreen stamp) — fullscreenchange is queued
+        // asynchronously, so observing fullscreenElement alone can outrun
+        // the handler that writes the stamp.
+        await toolbar.getByRole('button', { name: 'Full screen', exact: true }).click()
+        await page.waitForFunction(
+          () =>
+            !!document.fullscreenElement &&
+            document.documentElement.hasAttribute('data-field-fullscreen'),
+          null,
+          { timeout: 5_000 }
+        )
+        assert.equal(
+          await page.evaluate(() => document.fullscreenElement?.classList.contains('field-markdown')),
+          true,
+          'the field panel itself must be the full-screen element'
+        )
+        assert.equal(await page.evaluate(() => document.documentElement.hasAttribute('data-field-fullscreen')), true)
+
+        // The expanded panel fills the viewport exactly.
+        const vp = page.viewportSize()
+        const box = await field.boundingBox()
+        near(box.x, 0, 1, 'expanded x')
+        near(box.y, 0, 1, 'expanded y')
+        near(box.width, vp.width, 2, 'expanded width')
+        near(box.height, vp.height, 2, 'expanded height')
+
+        // Split mode: BOTH panes visible, each filling the expanded row's
+        // height (the panes expand together). Inside the editor pane the
+        // formatting toolbar legitimately occupies the top strip, so the
+        // pane is what must match the row — with the editor host reaching
+        // all the way down to the row's bottom edge beneath it.
+        const splitBox = await field.locator('.split').boundingBox()
+        const paneBox = await field.locator('.editor-pane').boundingBox()
+        const previewBox = await field.locator('.preview').boundingBox()
+        assert.ok(await field.locator('.editor-pane').isVisible(), 'editor pane visible while expanded')
+        assert.ok(await field.locator('.preview').isVisible(), 'preview pane visible while expanded')
+        near(paneBox.height, splitBox.height, 2, 'editor pane fill')
+        near(previewBox.height, splitBox.height, 2, 'preview pane fill')
+        near(paneBox.y + paneBox.height, splitBox.y + splitBox.height, 2, 'editor pane reaches the row bottom')
+        assert.ok(splitBox.height > vp.height / 3, 'panes must genuinely fill most of the screen')
+
+        // The toolbar remains visible inside the expanded panel…
+        await toolbar.waitFor({ state: 'visible', timeout: 5_000 })
+        const tbBox = await toolbar.boundingBox()
+        assert.ok(tbBox.y >= 0 && tbBox.y + tbBox.height <= vp.height, 'toolbar inside the viewport')
+        // …even once focus wanders into the preview pane — expansion pins it.
+        await field.locator('.preview').click()
+        await toolbar.waitFor({ state: 'visible', timeout: 5_000 })
+
+        // The sticky view bar is suppressed while full-screen.
+        assert.equal(
+          await page.locator('.toolbar').evaluate((el) => getComputedStyle(el).position),
+          'static',
+          'view-mode bar must not stick during full-screen'
+        )
+
+        // Esc exits; the sticky bar reappears after exit. Esc-to-exit is
+        // handled by the browser's own full-screen UI layer — every real
+        // browser does it with zero page code, which is why the feature
+        // builds on the native Fullscreen API at all — but headless
+        // Chromium ships no such layer and swallows the key entirely, so
+        // where it doesn't take effect we drive the very exit call that
+        // layer makes (document.exitFullscreen) and assert the identical
+        // post-conditions: the change event fires either way.
+        await page.keyboard.press('Escape')
+        try {
+          await page.waitForFunction(
+            () =>
+              !document.fullscreenElement &&
+              !document.documentElement.hasAttribute('data-field-fullscreen'),
+            null,
+            { timeout: 1_000 }
+          )
+        } catch {
+          await page.evaluate(() => document.exitFullscreen())
+          await page.waitForFunction(
+            () =>
+              !document.fullscreenElement &&
+              !document.documentElement.hasAttribute('data-field-fullscreen'),
+            null,
+            { timeout: 5_000 }
+          )
+        }
+        assert.equal(await page.locator('.toolbar').evaluate((el) => getComputedStyle(el).position), 'sticky')
+
+        // The same button exits too.
+        await content.click()
+        await toolbar.waitFor({ state: 'visible', timeout: 5_000 })
+        await toolbar.getByRole('button', { name: 'Full screen', exact: true }).click()
+        await page.waitForFunction(
+          () =>
+            !!document.fullscreenElement &&
+            document.documentElement.hasAttribute('data-field-fullscreen'),
+          null,
+          { timeout: 5_000 }
+        )
+        await toolbar.getByRole('button', { name: 'Exit full screen', exact: true }).click()
+        await page.waitForFunction(
+          () =>
+            !document.fullscreenElement &&
+            !document.documentElement.hasAttribute('data-field-fullscreen'),
+          null,
+          { timeout: 5_000 }
+        )
+
+        // Rendered mode stays exactly as before: no formatting/full-screen
+        // affordances anywhere, read-only rules untouched.
+        await page.locator('.segmented').getByRole('button', { name: 'Rendered' }).click()
+        assert.equal(await page.locator('.md-toolbar').count(), 0)
+        await page.locator('.segmented').getByRole('button', { name: 'Split' }).click()
+
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})

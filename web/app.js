@@ -208,15 +208,28 @@ const ICONS = {
       <path d="M5.8 6.3L4.1 8l1.7 1.7M10.2 6.3L11.9 8l-1.7 1.7" />
     <//>
   `,
+  // The full-screen pair (#135) — arrows out to the corners to expand, back
+  // in towards the centre to exit, so the same slot demonstrates its own
+  // current action the way the B/I/S letters do.
+  expand: html`
+    <${ToolbarIcon}>
+      <path d="M10 2h4v4M14 2L9.33 6.67M6 14H2v-4M2 14l4.67-4.67" />
+    <//>
+  `,
+  collapse: html`
+    <${ToolbarIcon}>
+      <path d="M13.33 6.67h-4v-4M9.33 6.67L14 2M2.67 9.33h4v4M6.67 9.33L2 14" />
+    <//>
+  `,
 }
 
-function MarkdownToolbar({ run, refocus, headingsOpen, setHeadingsOpen }) {
+function MarkdownToolbar({ run, refocus, headingsOpen, setHeadingsOpen, expanded, onToggleFullscreen }) {
   const keepEditorFocus = (e) => e.preventDefault()
   // Buttons are shortcut-only by design (tabindex="-1" below): keyboard users
   // reach every command via its Ctrl/Cmd chord, so Tab skips straight past
-  // these eleven buttons instead of parking on each one between the field and
+  // these twelve buttons instead of parking on each one between the field and
   // the page.
-  const button = (name, label, shortcut, content) =>
+  const button = (name, label, shortcut, content, onClick) =>
     html`
       <button
         type="button"
@@ -225,7 +238,7 @@ function MarkdownToolbar({ run, refocus, headingsOpen, setHeadingsOpen }) {
         aria-label=${label}
         title=${shortcut ? `${label} (${shortcut})` : label}
         onMouseDown=${keepEditorFocus}
-        onClick=${() => run(name)}
+        onClick=${onClick ?? (() => run(name))}
         tabindex="-1"
       >
         ${content}
@@ -298,6 +311,14 @@ function MarkdownToolbar({ run, refocus, headingsOpen, setHeadingsOpen }) {
           )}
         <//>
       </div>
+      <span class="md-sep" />
+      ${button(
+        'fullscreen',
+        expanded ? 'Exit full screen' : 'Full screen',
+        'Esc',
+        expanded ? ICONS.collapse : ICONS.expand,
+        onToggleFullscreen
+      )}
     </div>
   `
 }
@@ -344,6 +365,52 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection }) 
   const viewRef = useRef(null)
   const [focused, setFocused] = useState(false)
   const [headingsOpen, setHeadingsOpen] = useState(false)
+  // True while THIS field's wrapper is the document's full-screen element (#135). State follows the native `fullscreenchange` event — not the toggling click alone — so a browser-driven exit (Esc, F11-ish browser chrome, or the element leaving the DOM) un-expands us exactly when the platform does.
+  const [expanded, setExpanded] = useState(false)
+
+  // Full-screen expansion (#135): the wrapper (label + guidance + split panes
+  // + Insert ▾) is what requests full-screen, so everything the field owns
+  // travels into it together and CSS re-flows it to fill the viewport. While
+  // any field is expanded we also stamp `data-field-fullscreen` on <html> —
+  // the view-mode bar reads that to unstick itself for the duration.
+  useEffect(() => {
+    // Captured once: Preact detaches refs synchronously during unmount, but
+    // runs this cleanup in a deferred flush afterwards — by then
+    // wrapperRef.current is null, so the captured node is the only way the
+    // cleanup can still recognise our own wrapper.
+    const el = wrapperRef.current
+    function handleFullscreenChange() {
+      setExpanded(document.fullscreenElement === el)
+      // Keyed to *whether anything* holds full-screen, not to this field's
+      // own match: every mounted field's listener fires for the same
+      // transition, so a bystander field must not erase the stamp the
+      // expanded field just wrote. (Only one element can be full-screen at a
+      // time, so all handlers converge on the same answer.)
+      if (document.fullscreenElement) document.documentElement.setAttribute('data-field-fullscreen', '')
+      else document.documentElement.removeAttribute('data-field-fullscreen')
+    }
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange)
+      // Unmounted while holding full-screen (e.g. a future interaction tears
+      // down the screen mid-expansion): leave full-screen AND clear the stamp
+      // here — our change listener is already gone by the time the exit
+      // fires, so nobody else would remove it.
+      if (el && document.fullscreenElement === el) {
+        document.documentElement.removeAttribute('data-field-fullscreen')
+        document.exitFullscreen().catch(() => {})
+      }
+    }
+  }, [])
+
+  function toggleFullscreen() {
+    if (!wrapperRef.current) return
+    if (document.fullscreenElement === wrapperRef.current) {
+      document.exitFullscreen().catch(() => {})
+    } else {
+      wrapperRef.current.requestFullscreen().catch(() => {})
+    }
+  }
 
   useEffect(() => {
     const editableCompartment = new Compartment()
@@ -431,8 +498,10 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection }) 
   const runCommand = useCallback((name) => runMarkdownCommand(viewRef.current, name), [])
   const refocusEditor = useCallback(() => viewRef.current?.focus(), [])
   // Visible while the field holds focus, and stays up while the headings
-  // menu is open (the menu click moves focus to the trigger button).
-  const showToolbar = focused || headingsOpen
+  // menu is open (the menu click moves focus to the trigger button). While
+  // the field is full-screen the bar is unconditional (#135): the expanded
+  // panel must keep its toolbar even if focus wanders into the preview.
+  const showToolbar = focused || headingsOpen || expanded
 
   return html`
     <div class="field field-markdown" ref=${wrapperRef}>
@@ -447,6 +516,8 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection }) 
                   refocus=${refocusEditor}
                   headingsOpen=${headingsOpen}
                   setHeadingsOpen=${setHeadingsOpen}
+                  expanded=${expanded}
+                  onToggleFullscreen=${toggleFullscreen}
                 />
               `
             : null}
