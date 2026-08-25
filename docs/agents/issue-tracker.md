@@ -4,6 +4,13 @@ Issues and specs for this repo live as Azure DevOps work items in the **Default*
 
 ## Conventions
 
+> **Running under ready-for-agent?** If this session was started by the
+> ready-for-agent harness (worktree path contains `/tmp/ready-for-agent/`),
+> do **not** create, comment on, or transition Azure DevOps work items — the
+> harness owns the ticket lifecycle and will drop your run
+> (`issue_not_found`) if the ticket's state changes mid-flight. Everything
+> below applies only to human-driven interactive sessions.
+
 Use the `azure-devops` MCP tools (`mcp__azure-devops__wit_*`), not a CLI.
 
 - **Create a work item**: `mcp__azure-devops__wit_work_item_write` (action: create). Project `Default`. Pick a type appropriate to the work (`Task`, `Bug`, `User Story`, etc.) and link it as a child of Epic #34 via `mcp__azure-devops__wit_work_item_link_write`.
