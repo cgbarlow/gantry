@@ -299,6 +299,90 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .request-approval-panel { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 32px; }
 .request-approval-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }
 
+/* Flash highlight animation (#145 Part 1) — brief background pulse on the
+   request-approval panel when the view-bar button scrolls to it, giving the
+   user a visual anchor. The flash cycles through three half-opacity pulses
+   of the raised background, then holds transparent — enough to catch the
+   eye without lingering. `prefers-reduced-motion` (above, line 98) kills
+   the animation entirely, leaving the panel simply scrolled-into-view. */
+@keyframes panel-flash {
+  0%   { background: var(--bg-raised); }
+  33%  { background: transparent; }
+  66%  { background: var(--bg-raised); }
+  100% { background: transparent; }
+}
+.request-approval-panel.flash { animation: panel-flash 1.2s ease-out; }
+
+/*
+ * Identity picker (#145 Part 2) — a combobox-style input with a
+ * typeahead dropdown, used in place of every plain text input for
+ * people fields (workspace Owner, per-instance required-reviewer
+ * override, instance Assignee). The input shows the display name
+ * while the underlying value is a uniqueName. Debounced search
+ * against the `GET /api/identities` endpoint; a clear button
+ * (×) lets the user blank the field.
+ */
+.identity-picker { position: relative; flex: 1 1 auto; }
+.identity-picker input {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 8px 11px;
+  border-radius: var(--radius);
+  border: var(--border-strong) solid var(--line-strong);
+  background: var(--bg-raised);
+  color: var(--text);
+  width: 100%;
+}
+.identity-picker input::placeholder { color: var(--text-muted); }
+.identity-picker input.has-error { border-color: var(--stamp-error-bg); }
+.identity-picker .clear-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+.identity-picker .clear-btn:hover { color: var(--text); }
+.identity-picker .identity-dropdown {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  margin-top: 2px;
+  z-index: 9;
+  background: var(--bg-raised);
+  border: var(--border-strong) solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+  max-height: 220px;
+  overflow-y: auto;
+}
+.identity-picker .identity-dropdown.open { display: block; }
+.identity-picker .identity-dropdown .identity-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: var(--font-body);
+  color: var(--text);
+  background: none;
+  border: none;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.identity-picker .identity-dropdown .identity-option:hover { background: var(--bg); }
+.identity-picker .identity-dropdown .identity-option .name { font-weight: 600; }
+.identity-picker .identity-dropdown .identity-option .email { font-size: 11px; color: var(--text-muted); margin-left: 6px; }
+.identity-picker .identity-dropdown .no-results { padding: 8px 12px; font-size: 12px; color: var(--text-muted); }
+
 .field { margin-top: 20px; }
 .field label { font-family: var(--font-display); font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px; }
 .guidance { color: var(--text-muted); font-size: 12px; margin: 0 0 8px; }

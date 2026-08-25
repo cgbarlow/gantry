@@ -541,6 +541,55 @@ export function createFakeAzureDevOpsServer({
       }
     }
 
+    // Identity search endpoint (#145 Part 2) — a minimal fake of
+    // `/_apis/identities` that returns a single hardcoded identity
+    // (`fakeUser`) when the query matches its displayName or uniqueName,
+    // an empty array otherwise. Just enough to prove
+    // lib/azureDevOpsIdentityClient.js resolves identities correctly in
+    // tests without needing to spin up a real Azure DevOps directory.
+    if (req.method === 'GET' && pathname === `/${organization}/${project}/_apis/identities`) {
+      const query = (url.searchParams.get('searchFilter') ?? url.searchParams.get('query') ?? '').toLowerCase()
+      if (!query) return json(200, [])
+      const fakeIdentity = {
+        id: 'fake-identity-id-001',
+        displayName: 'Test User',
+        uniqueName: 'testuser@example.com',
+        emailAddress: 'testuser@example.com',
+      }
+      const matches = fakeIdentity.displayName.toLowerCase().includes(query) || fakeIdentity.uniqueName.toLowerCase().includes(query)
+      return json(200, matches ? [fakeIdentity] : [])
+    }
+
+    // POST reviewers endpoint (#145 Part 2) — adds reviewers to an
+    // existing pull request (mirrors PUT .../reviewers/{id} but takes an
+    // array and POSTs, the shape lib/azureDevOpsPullRequestsClient.js's
+    // `addReviewers` produces).
+    if (pathname.startsWith(`${basePath}/pullrequests/`) && pathname.endsWith('/reviewers') && req.method === 'POST') {
+      const rest = pathname.slice(`${basePath}/pullrequests/`.length)
+      const idSegment = rest.replace(/\/reviewers$/, '')
+      const id = Number(idSegment)
+      const pr = pullRequests.get(id)
+      if (!pr) {
+        return json(404, { message: `TF401180: Pull request ${idSegment} does not exist (fake server).` })
+      }
+      let raw = ''
+      for await (const chunk of req) raw += chunk
+      const body = JSON.parse(raw)
+      const added = []
+      for (const r of (body.reviewers ?? [])) {
+        const existing = pr.reviewers.find((rev) => rev.id === r.id)
+        if (existing) {
+          if (r.required !== undefined) existing.required = r.required
+          added.push(existing)
+        } else {
+          const reviewer = { id: r.id, displayName: r.displayName ?? r.id, vote: 0, required: r.required ?? false }
+          pr.reviewers.push(reviewer)
+          added.push(reviewer)
+        }
+      }
+      return json(200, { count: added.length, value: added })
+    }
+
     return json(404, { message: `No fake route for ${req.method} ${pathname}` })
   })
 }

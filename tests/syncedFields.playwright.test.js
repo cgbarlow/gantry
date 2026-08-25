@@ -115,7 +115,7 @@ test('the synced-fields panel shows the link prompt when unlinked, then the dist
               assert.equal(await panel.locator('input#synced-title').inputValue(), 'my-initiative — Shape')
               assert.match(await panel.locator('.synced-value').nth(1).innerText(), /#\d+ · New/)
               assert.match(await panel.locator('.synced-value').nth(2).innerText(), /No pull request open/)
-              assert.equal(await panel.locator('input#synced-assignee').inputValue(), 'Ada Lovelace')
+              assert.equal(await panel.locator('.identity-picker input').inputValue(), 'Ada Lovelace')
 
               // Override the title — saved on blur/Enter, persisted server-side.
               await panel.locator('input#synced-title').fill('Custom shape title')

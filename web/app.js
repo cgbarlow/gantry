@@ -90,6 +90,147 @@ function renderPreview(node, text) {
   node.innerHTML = DOMPurify.sanitize(md.render(resolveAssetRefs(text ?? '', assetFileUrl)))
 }
 
+// ---------- Identity picker (#145 Part 2) ----------
+// A combobox-style input that searches Azure DevOps identities as the user
+// types, presenting matches in a pick-list. Used in place of every plain
+// text input for people fields (workspace Owner, per-instance required-
+// reviewer override, instance Assignee). The underlying value is a
+// `uniqueName`; the display is the `displayName`. A clear button (×) lets
+// the user blank the field. Debounced to avoid hammering the server on
+// every keystroke.
+function IdentityPicker({ value, onChange, placeholder, slug, className }) {
+  const [query, setQuery] = useState(value ?? '')
+  const [results, setResults] = useState([])
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const debounceRef = useRef(null)
+  const inputRef = useRef(null)
+  const wrapperRef = useRef(null)
+
+  // Sync display value when the external value changes (e.g. on load from server)
+  useEffect(() => {
+    setQuery(value ?? '')
+  }, [value])
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  async function search(q) {
+    if (!q.trim()) {
+      setResults([])
+      setOpen(false)
+      return
+    }
+    setLoading(true)
+    try {
+      const params = new URLSearchParams({ q })
+      if (slug) params.set('slug', slug)
+      const res = await apiFetchForInstance(slug, `/api/identities?${params}`)
+      const data = await res.json().catch(() => [])
+      setResults(Array.isArray(data) ? data : [])
+      setOpen(true)
+    } catch {
+      setResults([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function handleInput(e) {
+    const val = e.currentTarget.value
+    setQuery(val)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => search(val), 250)
+  }
+
+  function handleSelect(identity) {
+    setQuery(identity.displayName)
+    setOpen(false)
+    onChange?.(identity.uniqueName, identity)
+  }
+
+  function handleClear() {
+    setQuery('')
+    setResults([])
+    setOpen(false)
+    onChange?.('', null)
+    inputRef.current?.focus()
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === 'Escape') {
+      setOpen(false)
+    } else if (e.key === 'Enter') {
+      // Commit the currently typed value as-is (without requiring a dropdown
+      // selection) — allows keyboard-only workflows and preserves backwards
+      // compatibility with Playwright tests that type + Enter.
+      e.preventDefault()
+      const trimmed = query.trim()
+      setOpen(false)
+      onChange?.(trimmed, trimmed ? { uniqueName: trimmed, displayName: trimmed } : null)
+    }
+  }
+
+  const hasValue = Boolean(query.trim())
+
+  return html`
+    <div class=${'identity-picker' + (className ? ' ' + className : '')} ref=${wrapperRef}>
+      <input
+        ref=${inputRef}
+        type="text"
+        value=${query}
+        placeholder=${placeholder ?? 'Search by name\u2026'}
+        onInput=${handleInput}
+        onFocus=${() => { if (query.trim() && results.length) setOpen(true) }}
+        onBlur=${() => {
+          // Commit the current typed value on blur (matches the old text input's
+          // save-on-blur behaviour). Playwright's `.fill()` + `.blur()` pattern
+          // relies on this — `.fill()` bypasses Preact's onInput, so the draft
+          // state doesn't update until blur fires.
+          const trimmed = query.trim()
+          if (trimmed !== (value ?? '').trim()) {
+            onChange?.(trimmed, trimmed ? { uniqueName: trimmed, displayName: trimmed } : null)
+          }
+          setOpen(false)
+        }}
+        onKeyDown=${handleKeyDown}
+      />
+      ${hasValue
+        ? html`<button type="button" class="clear-btn" onClick=${handleClear} aria-label="Clear">x</button>`
+        : null}
+      <div class=${'identity-dropdown' + (open ? ' open' : '')}>
+        ${loading ? html`<div class="no-results">Searching…</div>` : null}
+        ${!loading && results.length === 0 && query.trim()
+          ? html`<div class="no-results">No identities found for "${query}".</div>`
+          : null}
+        ${results.map(
+          (identity) => html`
+            <button
+              type="button"
+              class="identity-option"
+              key=${identity.uniqueName}
+              onClick=${() => handleSelect(identity)}
+            >
+              <span class="name">${identity.displayName}</span>
+              ${identity.emailAddress
+                ? html`<span class="email">${identity.emailAddress}</span>`
+                : null}
+            </button>
+          `
+        )}
+      </div>
+    </div>
+  `
+}
+
 // ---------- Instance-scoped state ----------
 // `currentSlug` is the instance the module editor route (`/instance/:slug`) is currently mounted for. `viewedStage` mirrors the free-browse stage switcher: the stage the form is currently displaying, distinct from the instance's own persisted current stage until the user picks a different one. `viewedStage` of `null` means "let the server default to the instance's current stage" (the bootstrap case, on first load of a slug).
 const currentSlug = signal(null)
@@ -1287,15 +1428,16 @@ function SyncedFieldsPanel({ instance }) {
         </div>
         <div class="synced-field">
           <label class="field-label" for="synced-assignee">Assignee${data.assigneeInherited ? '' : ' · overridden'}</label>
-          <input
-            id="synced-assignee"
-            class="text-field"
-            type="text"
-            placeholder=${instance.assignee ? `${instance.assignee} (inherited)` : 'Inherited from the instance'}
+          <${IdentityPicker}
             value=${assigneeDraft ?? data.assignee}
-            onInput=${(e) => setAssigneeDraft(e.currentTarget.value)}
-            onBlur=${commitAssignee}
-            onKeyDown=${(e) => e.key === 'Enter' && e.currentTarget.blur()}
+            onChange=${(uniqueName) => {
+              setAssigneeDraft(uniqueName)
+              // Commit immediately on select (no blur-based commit needed — the picker's selection is already definitive)
+              if (!data || uniqueName === data.assignee) return
+              save({ assignee: uniqueName.trim() ? uniqueName.trim() : '' })
+            }}
+            placeholder=${instance.assignee ? `${instance.assignee} (inherited)` : 'Inherited from the instance'}
+            slug=${currentSlug.value}
           />
         </div>
       </div>
@@ -1668,7 +1810,10 @@ const VIEW_MODE_HOTKEY = { ctrlKey: true, shiftKey: true, key: 'v' }
 // `instance` and `onClearAllFields` back the "Clear all fields" + "Render"
 // pair moved here from the stage screen (#114) — both now sit on the right
 // of this same bar, "Clear all fields" immediately left of "Render".
-function ViewModeToolbar({ instance, onClearAllFields }) {
+// `requestApprovalSlug` signals a "Request Approval" shortcut button —
+// (#145 Part 1) clicking it scrolls to the RequestApprovalPanel and
+// briefly highlights it so the author's eye is drawn down.
+function ViewModeToolbar({ instance, onClearAllFields, requestApprovalSlug }) {
   const [renderOpen, setRenderOpen] = useState(false)
 
   useEffect(() => {
@@ -1682,6 +1827,23 @@ function ViewModeToolbar({ instance, onClearAllFields }) {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
+
+  function scrollToApprovalPanel() {
+    const panel = document.querySelector('.request-approval-panel')
+    if (!panel) return
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    // Flash the panel with a brief background highlight so the user's eye is drawn down
+    panel.classList.remove('flash')
+    // Force a reflow so removing then adding the class triggers a fresh animation
+    void panel.offsetHeight
+    panel.classList.add('flash')
+    // Remove the class after the animation completes so re-clicking re-triggers
+    const onEnd = () => {
+      panel.classList.remove('flash')
+      panel.removeEventListener('animationend', onEnd)
+    }
+    panel.addEventListener('animationend', onEnd)
+  }
 
   return html`
     <div class="toolbar">
@@ -1703,6 +1865,9 @@ function ViewModeToolbar({ instance, onClearAllFields }) {
       <div class="toolbar-actions">
         <button type="button" class="btn" onClick=${onClearAllFields}>Clear all fields</button>
         <button type="button" class="btn primary" onClick=${() => setRenderOpen(true)}>Render</button>
+        ${requestApprovalSlug
+          ? html`<button type="button" class="btn request-approval-btn" onClick=${scrollToApprovalPanel}>Request Approval</button>`
+          : null}
       </div>
     </div>
     ${renderOpen ? html`<${RenderDialog} instance=${instance} onClose=${() => setRenderOpen(false)} />` : null}
@@ -1954,7 +2119,7 @@ function ModuleEditorPage({ slug }) {
 
   return html`
     <${AppHeader} instance=${instance} />
-    <${ViewModeToolbar} instance=${instance} onClearAllFields=${clearAllFields} />
+    <${ViewModeToolbar} instance=${instance} onClearAllFields=${clearAllFields} requestApprovalSlug=${instance.workspaceBacked ? instance.slug : null} />
     <${StageScreen} key=${instance.stage.id} instance=${instance} onFieldRegistered=${registerField} />
   `
 }
@@ -2137,9 +2302,9 @@ function MasterDetailView({ instances, onInstancesChange }) {
     setActionStatus((prev) => ({ ...prev, [slug]: result }))
   }
 
-  async function handleAssigneeSave(slug) {
+  async function handleAssigneeSave(slug, draftOverride) {
     const inst = selectedGroup?.instances.find((i) => i.slug === slug)
-    const draft = assigneeDrafts[slug] ?? ''
+    const draft = draftOverride ?? assigneeDrafts[slug] ?? ''
     if (!inst || draft === (inst.assignee ?? '')) return
     setAssigneeStatus((prev) => ({ ...prev, [slug]: 'Saving…' }))
     try {
@@ -2202,19 +2367,16 @@ function MasterDetailView({ instances, onInstancesChange }) {
                       </div>
                       <div class="instance-card-row">
                         <span class="field-label">Assignee</span>
-                        <input
-                          class="text-field mono assignee-input"
-                          type="text"
-                          placeholder="Unassigned"
+                        <${IdentityPicker}
                           value=${assigneeDrafts[inst.slug] ?? ''}
-                          onInput=${(e) => {
-                            const value = e.currentTarget.value
-                            setAssigneeDrafts((prev) => ({ ...prev, [inst.slug]: value }))
+                          onChange=${(uniqueName) => {
+                            setAssigneeDrafts((prev) => ({ ...prev, [inst.slug]: uniqueName }))
+                            // Commit immediately — pass the value directly so it doesn't read stale state
+                            handleAssigneeSave(inst.slug, uniqueName)
                           }}
-                          onBlur=${() => handleAssigneeSave(inst.slug)}
-                          onKeyDown=${(e) => {
-                            if (e.key === 'Enter') e.currentTarget.blur()
-                          }}
+                          placeholder="Unassigned"
+                          slug=${inst.slug}
+                          className="mono"
                         />
                       </div>
                       <div class="save-status assignee-save-status">${assigneeStatus[inst.slug] ?? ''}</div>

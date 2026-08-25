@@ -15,6 +15,134 @@ import {
 import { TICKETING_SYSTEMS, defaultTicketingSystem, setDefaultTicketingSystem } from '../lib/ticketingSystem.js'
 import { apiFetch, apiFetchForInstance } from '../lib/apiFetch.js'
 
+// ---------- Identity picker (#145 Part 2, settings copy) ----------
+// Identical shape to the IdentityPicker in app.js — a combobox-typeahead
+// for Azure DevOps identities. Duplicated here rather than extracted to a
+// shared module to avoid pulling app.js's signal/credential imports into
+// the settings page; the two copies are intentionally kept identical.
+function IdentityPicker({ value, onChange, placeholder, slug, className }) {
+  const [query, setQuery] = useState(value ?? '')
+  const [results, setResults] = useState([])
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const debounceRef = useRef(null)
+  const inputRef = useRef(null)
+  const wrapperRef = useRef(null)
+
+  useEffect(() => {
+    setQuery(value ?? '')
+  }, [value])
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  async function search(q) {
+    if (!q.trim()) {
+      setResults([])
+      setOpen(false)
+      return
+    }
+    setLoading(true)
+    try {
+      const params = new URLSearchParams({ q })
+      if (slug) params.set('slug', slug)
+      const res = slug ? await apiFetchForInstance(slug, `/api/identities?${params}`) : await apiFetch(`/api/identities?${params}`)
+      const data = await res.json().catch(() => [])
+      setResults(Array.isArray(data) ? data : [])
+      setOpen(true)
+    } catch {
+      setResults([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function handleInput(e) {
+    const val = e.currentTarget.value
+    setQuery(val)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => search(val), 250)
+  }
+
+  function handleSelect(identity) {
+    setQuery(identity.displayName)
+    setOpen(false)
+    onChange?.(identity.uniqueName, identity)
+  }
+
+  function handleClear() {
+    setQuery('')
+    setResults([])
+    setOpen(false)
+    onChange?.('', null)
+    inputRef.current?.focus()
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === 'Escape') setOpen(false)
+    else if (e.key === 'Enter') {
+      e.preventDefault()
+      const trimmed = query.trim()
+      setOpen(false)
+      onChange?.(trimmed, trimmed ? { uniqueName: trimmed, displayName: trimmed } : null)
+    }
+  }
+
+  const hasValue = Boolean(query.trim())
+
+  return html`
+    <div class=${'identity-picker' + (className ? ' ' + className : '')} ref=${wrapperRef}>
+      <input
+        ref=${inputRef}
+        type="text"
+        value=${query}
+        placeholder=${placeholder ?? 'Search by name\u2026'}
+        onInput=${handleInput}
+        onFocus=${() => { if (query.trim() && results.length) setOpen(true) }}
+        onBlur=${() => {
+          const trimmed = query.trim()
+          if (trimmed !== (value ?? '').trim()) {
+            onChange?.(trimmed, trimmed ? { uniqueName: trimmed, displayName: trimmed } : null)
+          }
+          setOpen(false)
+        }}
+        onKeyDown=${handleKeyDown}
+      />
+      ${hasValue
+        ? html`<button type="button" class="clear-btn" onClick=${handleClear} aria-label="Clear">\u00d7</button>`
+        : null}
+      <div class=${'identity-dropdown' + (open ? ' open' : '')}>
+        ${loading ? html`<div class="no-results">Searching\u2026</div>` : null}
+        ${!loading && results.length === 0 && query.trim()
+          ? html`<div class="no-results">No identities found for "${query}".</div>`
+          : null}
+        ${results.map(
+          (identity) => html`
+            <button
+              type="button"
+              class="identity-option"
+              key=${identity.uniqueName}
+              onClick=${() => handleSelect(identity)}
+            >
+              <span class="name">${identity.displayName}</span>
+              ${identity.emailAddress
+                ? html`<span class="email">${identity.emailAddress}</span>`
+                : null}
+            </button>
+          `
+        )}
+      </div>
+    </div>
+  `
+}
+
 // ---------- Shared header ----------
 // One header shape for all three Settings screens: a title (distinct per
 // screen, since there's no shared tab strip to convey which screen this
@@ -161,17 +289,23 @@ function workspaceRepoUrl(workspace) {
   return `${base}/${encodeURIComponent(workspace.organization)}/${encodeURIComponent(workspace.project)}/_git/${encodeURIComponent(workspace.repository)}`
 }
 
-// One workspace's editable fields: owner (server-persisted), a PAT override (client-only, never touches the server), and a ticketing-system override (server-persisted) — the same three fields #104's old Workspace overrides tab exposed per row, now rendered for exactly one workspace (the instance's own) rather than one row per registered workspace.
+// One workspace's editable fields: owner (server-persisted, identity-picker), a PAT override (client-only, never touches the server), and a ticketing-system override (server-persisted) — the same three fields #104's old Workspace overrides tab exposed per row, now rendered for exactly one workspace (the instance's own) rather than one row per registered workspace. The owner field is now an identity picker (#145 Part 2).
 function WorkspaceEditor({ workspace, onUpdated }) {
   const [ownerDraft, setOwnerDraft] = useState(workspace.owner ?? '')
   const [ownerStatus, setOwnerStatus] = useState('')
   const [patDraft, setPatDraft] = useState('')
   const [patStatus, setPatStatus] = useState('')
   const [ticketingStatus, setTicketingStatus] = useState('')
+  // A ref tracking the latest owner value — used by handleSaveOwner to read
+  // the value that was set via IdentityPicker's onChange (which may not have
+  // committed to state yet when the Save button is clicked immediately after
+  // a .fill() + blur).
+  const latestOwnerRef = useRef(workspace.owner ?? '')
 
   // Keeps the owner draft in sync if this workspace's record is refreshed from elsewhere (e.g. a ticketing-system change on the same row calling `onUpdated` with the server's own merged record) — without this, a stale draft could silently overwrite a concurrent change on save.
   useEffect(() => {
     setOwnerDraft(workspace.owner ?? '')
+    latestOwnerRef.current = workspace.owner ?? ''
   }, [workspace.owner])
 
   const hasPatOverride = hasWorkspacePatOverride(workspace.id)
@@ -181,9 +315,10 @@ function WorkspaceEditor({ workspace, onUpdated }) {
   const hasTicketingOverride = workspace.ticketingSystem !== defaultTicketingSystem.value
 
   async function handleSaveOwner() {
-    setOwnerStatus('Saving…')
+    const valueToSave = latestOwnerRef.current
+    setOwnerStatus('Saving\u2026')
     try {
-      const updated = await patchWorkspace(workspace.id, { owner: ownerDraft })
+      const updated = await patchWorkspace(workspace.id, { owner: valueToSave })
       onUpdated(updated)
       setOwnerStatus('Saved.')
     } catch (err) {
@@ -194,16 +329,16 @@ function WorkspaceEditor({ workspace, onUpdated }) {
   function handleSetPatOverride() {
     setWorkspacePatOverride(workspace.id, patDraft)
     setPatDraft('')
-    setPatStatus('Override saved — used for this workspace\u2019s instances from now on.')
+    setPatStatus('Override saved \u2014 used for this workspace\u2019s instances from now on.')
   }
 
   function handleClearPatOverride() {
     clearWorkspacePatOverride(workspace.id)
-    setPatStatus('Override cleared — falling back to the global default.')
+    setPatStatus('Override cleared \u2014 falling back to the global default.')
   }
 
   async function handleTicketingChange(systemId) {
-    setTicketingStatus('Saving…')
+    setTicketingStatus('Saving\u2026')
     try {
       const updated = await patchWorkspace(workspace.id, { ticketingSystem: systemId })
       onUpdated(updated)
@@ -222,12 +357,15 @@ function WorkspaceEditor({ workspace, onUpdated }) {
       <div class="workspace-field workspace-owner">
         <label>Owner</label>
         <div class="workspace-field-row">
-          <input
-            type="text"
-            class="wizard-input"
+          <${IdentityPicker}
             value=${ownerDraft}
+            onChange=${(uniqueName) => {
+              setOwnerDraft(uniqueName)
+              latestOwnerRef.current = uniqueName
+              // Auto-commit on selection
+              handleSaveOwner()
+            }}
             placeholder="Unset"
-            onInput=${(e) => setOwnerDraft(e.currentTarget.value)}
           />
           <button type="button" class="btn small" onClick=${handleSaveOwner}>Save owner</button>
         </div>
@@ -345,7 +483,7 @@ export function WorkspaceSettingsPage({ query }) {
           registered workspace: just the one this instance belongs to.
         </p>
         ${state === 'no-slug' ? html`<p class="load-error">No instance was specified for these Workspace Settings.</p>` : null}
-        ${state === 'loading' ? html`<p class="loading">Loading…</p>` : null}
+        ${state === 'loading' ? html`<p class="loading">Loading\u2026</p>` : null}
         ${state === 'error' ? html`<p class="load-error">Failed to load: ${error}</p>` : null}
         ${state === 'no-workspace'
           ? html`<p class="workspace-empty">This instance has no Azure DevOps workspace — its data is stored locally.</p>`
@@ -363,10 +501,11 @@ export function WorkspaceSettingsPage({ query }) {
 }
 
 // ---------- Instance Settings (`/settings/instance?slug=<instance-slug>`) ----------
-// New (#107): hosts the instance's Assignee (editable), read-only instance
-// info, and the instance's own Azure DevOps work-item link details
-// (read-only — re-linking isn't supported here; that's still done from the
-// module editor's own work-item panel, see web/app.js's WorkItemPanel).
+// New (#107): hosts the instance's Assignee (editable, identity picker), per-instance
+// required-reviewer override (#145 Part 2), read-only instance info, and the instance's
+// own Azure DevOps work-item link details (read-only — re-linking isn't supported here;
+// that's still done from the module editor's own work-item panel, see web/app.js's
+// WorkItemPanel).
 
 async function fetchInstanceDetail(slug) {
   const res = await apiFetchForInstance(slug, `/api/instance?slug=${encodeURIComponent(slug)}`)
@@ -390,6 +529,19 @@ async function saveAssignee(slug, assignee) {
   return body
 }
 
+async function saveRequiredReviewer(slug, requiredReviewer) {
+  const res = await apiFetchForInstance(slug, `/api/instance/required-reviewer?slug=${encodeURIComponent(slug)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requiredReviewer }),
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(body.message ?? body.error ?? `Failed to save required reviewer (${res.status})`)
+  }
+  return body
+}
+
 // The instance's own stored Assignee — editable here, distinct from a
 // module's own frontmatter `owner` (the Design Authority sign-off
 // convention, untouched by this screen). Mirrors the dashboard's own
@@ -398,28 +550,22 @@ async function saveAssignee(slug, assignee) {
 function AssigneeSection({ slug, assignee }) {
   const [draft, setDraft] = useState(assignee ?? '')
   const [status, setStatus] = useState('')
-  // Guards against a duplicate save firing for the same edit: clicking the
-  // "Save" button below moves focus away from the input first, so the
-  // input's own `onBlur` calls `handleSave` a moment before the button's
-  // `onClick` does too — both synchronously, before either's `await`
-  // resolves. Without this ref, that pair fires two identical `PUT
-  // /api/instance/assignee` requests per click (for an Azure-DevOps-backed
-  // instance, two separate commits pushed for the same content). Set
-  // synchronously before the first `await`, so the second, redundant call
-  // sees it and returns immediately rather than racing the first.
   const savingRef = useRef(false)
+  const latestDraftRef = useRef(assignee ?? '')
 
   useEffect(() => {
     setDraft(assignee ?? '')
+    latestDraftRef.current = assignee ?? ''
   }, [assignee])
 
   async function handleSave() {
-    if (draft === (assignee ?? '')) return
+    const valueToSave = latestDraftRef.current
+    if (valueToSave === (assignee ?? '')) return
     if (savingRef.current) return
     savingRef.current = true
-    setStatus('Saving…')
+    setStatus('Saving\u2026')
     try {
-      await saveAssignee(slug, draft)
+      await saveAssignee(slug, valueToSave)
       setStatus('Saved.')
     } catch (err) {
       setStatus(err.message)
@@ -433,16 +579,76 @@ function AssigneeSection({ slug, assignee }) {
       <h2>Assignee</h2>
       <p class="guidance">The single named person responsible for this instance.</p>
       <div class="workspace-field-row">
-        <input
-          type="text"
-          class="wizard-input"
+        <${IdentityPicker}
           value=${draft}
-          placeholder="Unassigned"
-          onInput=${(e) => setDraft(e.currentTarget.value)}
-          onBlur=${handleSave}
-          onKeyDown=${(e) => {
-            if (e.key === 'Enter') e.currentTarget.blur()
+          onChange=${(uniqueName) => {
+            setDraft(uniqueName)
+            latestDraftRef.current = uniqueName
+            // Auto-commit on selection
+            handleSave()
           }}
+          placeholder="Unassigned"
+          slug=${slug}
+        />
+        <button type="button" class="btn small" onClick=${handleSave}>Save</button>
+      </div>
+      <div class="workspace-field-status">${status}</div>
+    </section>
+  `
+}
+
+// (#145 Part 2) Per-instance required-reviewer override — when set, this
+// person must approve the Pull Request opened by "Request Approval". Falls
+// back to the workspace Owner when blank (displayed as guidance). Cleared
+// by emptying the field. The effective reviewer is resolved at PR-open time
+// in lib/stageApproval.js, so a stale or blank value here is caught then
+// with a clear error message, not silently ignored.
+function RequiredReviewerSection({ slug, requiredReviewer }) {
+  const [draft, setDraft] = useState(requiredReviewer ?? '')
+  const [status, setStatus] = useState('')
+  const savingRef = useRef(false)
+  const latestDraftRef = useRef(requiredReviewer ?? '')
+
+  useEffect(() => {
+    setDraft(requiredReviewer ?? '')
+    latestDraftRef.current = requiredReviewer ?? ''
+  }, [requiredReviewer])
+
+  async function handleSave() {
+    const valueToSave = latestDraftRef.current
+    if (valueToSave === (requiredReviewer ?? '')) return
+    if (savingRef.current) return
+    savingRef.current = true
+    setStatus('Saving\u2026')
+    try {
+      await saveRequiredReviewer(slug, valueToSave)
+      setStatus('Saved.')
+    } catch (err) {
+      setStatus(err.message)
+    } finally {
+      savingRef.current = false
+    }
+  }
+
+  return html`
+    <section class="settings-section">
+      <h2>Required reviewer</h2>
+      <p class="guidance">
+        When set, this person must approve the Pull Request opened by "Request Approval". Leave blank to
+        fall back to the workspace Owner. The reviewer is resolved when the Pull Request is opened — if
+        the person has left the organization, approval will be blocked with a clear error message.
+      </p>
+      <div class="workspace-field-row">
+        <${IdentityPicker}
+          value=${draft}
+          onChange=${(uniqueName) => {
+            setDraft(uniqueName)
+            latestDraftRef.current = uniqueName
+            // Auto-commit on selection — empty string clears the override
+            handleSave()
+          }}
+          placeholder=${'Falls back to workspace Owner'}
+          slug=${slug}
         />
         <button type="button" class="btn small" onClick=${handleSave}>Save</button>
       </div>
@@ -491,7 +697,7 @@ function WorkItemLinkSection({ instance }) {
                 (stage) => html`
                   <div class="result-row" key=${stage.id}>
                     <span class="k">${stage.title}</span>
-                    <span class="v">${workItem.stages?.[stage.id] ? `#${workItem.stages[stage.id]}` : '—'}</span>
+                    <span class="v">${workItem.stages?.[stage.id] ? `#${workItem.stages[stage.id]}` : '\u2014'}</span>
                   </div>
                 `
               )}
@@ -535,11 +741,12 @@ export function InstanceSettingsPage({ query }) {
     <${SettingsHeader} title="Instance Settings" backHref=${backHrefFrom(query)} />
     <main class="settings-page">
       ${state === 'no-slug' ? html`<p class="load-error">No instance was specified for these Instance Settings.</p>` : null}
-      ${state === 'loading' ? html`<p class="loading">Loading…</p>` : null}
+      ${state === 'loading' ? html`<p class="loading">Loading\u2026</p>` : null}
       ${state === 'error' ? html`<p class="load-error">Failed to load: ${error}</p>` : null}
       ${state === 'ready'
         ? html`
             <${AssigneeSection} slug=${slug} assignee=${instance.assignee} />
+            <${RequiredReviewerSection} slug=${slug} requiredReviewer=${instance.requiredReviewer} />
             <${InstanceInfoSection} instance=${instance} />
             <${WorkItemLinkSection} instance=${instance} />
           `
