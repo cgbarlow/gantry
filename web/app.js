@@ -358,8 +358,8 @@ function MarkdownToolbar({ run, refocus, headingsOpen, setHeadingsOpen, expanded
 //
 // Every markdown field carries its own generic **Insert ▾** dropdown (#132) — Image (opens the shared image-insert modal), Table (opens a Loop-style hover-grid size picker, #134), Section (a new custom field appended below this one) — replacing the single per-module "+ Insert asset" button that preceded it. Hidden in Rendered view along with every other editing affordance, since that view is read-only.
 
-// The three-item menu behind every field's Insert ▾ (#132). Openness is controlled (the shared Dropdown's contract); each item closes the menu before acting, matching how SwimlaneChip's items dismiss through their parent.
-function InsertDropdown({ onImage, onTable, onSection }) {
+// The four-item menu behind every field's Insert ▾ (#132, #144). Openness is controlled (the shared Dropdown's contract); each item closes the menu before acting, matching how SwimlaneChip's items dismiss through their parent.
+function InsertDropdown({ onImage, onTable, onSection, onList }) {
   const [open, setOpen] = useState(false)
 
   function pick(action) {
@@ -379,6 +379,7 @@ function InsertDropdown({ onImage, onTable, onSection }) {
       <button type="button" role="menuitem" onClick=${() => pick(onImage)}>Image</button>
       <button type="button" role="menuitem" onClick=${() => pick(onTable)}>Table</button>
       <button type="button" role="menuitem" onClick=${() => pick(onSection)}>Section</button>
+      <button type="button" role="menuitem" onClick=${() => pick(onList)}>List</button>
     <//>
   `
 }
@@ -468,7 +469,7 @@ function TableControlStrip({ run }) {
   `
 }
 
-function MarkdownField({ field, onRegister, onRequestImage, onRequestSection }) {
+function MarkdownField({ field, onRegister, onRequestImage, onRequestSection, onRequestList }) {
   const hostRef = useRef(null)
   const previewRef = useRef(null)
   // The editor-control methods registered up to ModuleCard (getValue/setValue/insertAtCursor) are captured here too, so this field's own Insert ▾ items act on its own cursor without round-tripping through the module.
@@ -669,6 +670,7 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection }) 
                 onImage=${() => onRequestImage?.()}
                 onTable=${() => setPickerOpen(true)}
                 onSection=${() => onRequestSection?.()}
+                onList=${() => onRequestList?.()}
               />
               <${TableGridPicker} open=${pickerOpen} onOpenChange=${setPickerOpen} onPick=${pickTable} />
             </div>
@@ -734,6 +736,8 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
   const [imageFieldId, setImageFieldId] = useState(null)
   // Which field the new Section goes below: the one whose Insert ▾ → Section was clicked. Null = dialog closed.
   const [sectionAfterId, setSectionAfterId] = useState(null)
+  // Which field the new List goes below: the one whose Insert ▾ → List was clicked. Null = dialog closed.
+  const [listAfterId, setListAfterId] = useState(null)
   // Editor controls keyed by FIELD ID (not array index): inserting a Section shifts every later field's display index without remounting it (components are keyed by field id), so index-keyed lookups would go stale mid-session. Ids never shift.
   const controlsRef = useRef({})
 
@@ -792,6 +796,28 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
     setSectionAfterId(null)
   }
 
+  // Insert ▾ → List (#144): appends a new custom list field immediately below the requesting field. Client-side only until the next Save — the custom field joins the module's field list (and hence the save payload's layout), and the parser preserves its ## Title section as a list-typed field from then on.
+  function handleInsertList(title) {
+    const afterIndex = mod.fields.findIndex((f) => f.id === listAfterId)
+    const newField = {
+      id: uniqueCustomFieldClientId(),
+      title: title.trim() ? title.trim() : 'Untitled list',
+      type: 'list',
+      required: false,
+      guidance: null,
+      value: [],
+      example: null,
+      custom: true,
+    }
+    const fields = [...mod.fields]
+    fields.splice(afterIndex + 1, 0, newField)
+    instanceData.value = {
+      ...instanceData.value,
+      modules: instanceData.value.modules.map((m) => (m.id === mod.id ? { ...m, fields } : m)),
+    }
+    setListAfterId(null)
+  }
+
   return html`
     <section class="module">
       <h2>${mod.title}</h2>
@@ -801,7 +827,8 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
           controlsRef.current[field.id] = control
           onFieldRegistered(field, control)
         }
-        return field.type === 'list'
+        const isList = field.type === 'list'
+        return isList
           ? html`<${ListField} key=${field.id} field=${field} onRegister=${onRegister} />`
           : html`<${MarkdownField}
               key=${field.id}
@@ -809,6 +836,7 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
               onRegister=${onRegister}
               onRequestImage=${() => setImageFieldId(field.id)}
               onRequestSection=${() => setSectionAfterId(field.id)}
+              onRequestList=${() => setListAfterId(field.id)}
             />`
       })}
       <div class="save-status">${status}</div>
@@ -818,6 +846,9 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
         : null}
       ${sectionAfterId !== null
         ? html`<${SectionDialog} onConfirm=${handleInsertSection} onClose=${() => setSectionAfterId(null)} />`
+        : null}
+      ${listAfterId !== null
+        ? html`<${ListDialog} onConfirm=${handleInsertList} onClose=${() => setListAfterId(null)} />`
         : null}
     </section>
   `
@@ -865,6 +896,49 @@ function SectionDialog({ onConfirm, onClose }) {
         <div class="modal-actions">
           <button type="button" class="btn ghost" onClick=${onClose}>Cancel</button>
           <button type="button" class="btn primary" onClick=${() => onConfirm(title)}>Insert section</button>
+        </div>
+      </div>
+    </div>
+  `
+}
+
+// The Insert ▾ → List prompt (#144): asks for the one-line title (rendered as the block's ## heading; blank becomes "Untitled list") and inserts a new list-typed field below the requesting field on confirm. Same modal shape as SectionDialog; the new field uses the existing ListField component for its rows UI.
+function ListDialog({ onConfirm, onClose }) {
+  const [title, setTitle] = useState('')
+  const inputRef = useRef(null)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  return html`
+    <div class="modal-backdrop" role="presentation" onClick=${(e) => e.target === e.currentTarget && onClose()}>
+      <div class="modal" role="dialog" aria-modal="true" aria-label="New list">
+        <h3>New list</h3>
+        <div class="upload-field">
+          <label class="field-label">Title (optional)</label>
+          <input
+            ref=${inputRef}
+            class="text-field"
+            type="text"
+            placeholder="e.g. Teams and contact persons"
+            value=${title}
+            onInput=${(e) => setTitle(e.currentTarget.value)}
+            onKeyDown=${(e) => e.key === 'Enter' && onConfirm(title)}
+          />
+        </div>
+        <p class="guidance">Adds a structured rows editor below this field. Items are preserved as a bulleted list in the file.</p>
+        <div class="modal-actions">
+          <button type="button" class="btn ghost" onClick=${onClose}>Cancel</button>
+          <button type="button" class="btn primary" onClick=${() => onConfirm(title)}>Insert list</button>
         </div>
       </div>
     </div>

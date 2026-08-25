@@ -295,7 +295,7 @@ test("each markdown field has an Insert ▾ dropdown whose Image flow uploads, i
         await menu.waitFor({ state: 'visible', timeout: 5_000 })
         assert.deepEqual(
           await menu.getByRole('menuitem').allTextContents(),
-          ['Image', 'Table', 'Section']
+          ['Image', 'Table', 'Section', 'List']
         )
         await menu.getByRole('menuitem', { name: 'Image' }).click()
 

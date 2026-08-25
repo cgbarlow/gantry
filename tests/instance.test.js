@@ -444,6 +444,199 @@ test('layout records the interleaved order of defined and custom sections', () =
   ])
 })
 
+// A custom section whose body is entirely bullet items is a list-typed field (#144): the parser classifies it as type: 'list' with a string[] value, and the layout entry carries that type so the writer can replay it as bullets.
+test('parses an all-bullets custom section as a list-typed custom field', () => {
+  const definition = loadDefinition('design')
+  const moduleSpec = definition.modules.get('context')
+  const data = parseModuleFile(
+    [
+      '---',
+      'module: context',
+      'status: draft',
+      'owner:',
+      '---',
+      '',
+      '## Business driver',
+      '',
+      'Some text.',
+      '',
+      '## Stakeholders',
+      '',
+      '- Alice',
+      '- Bob',
+      '- Carol',
+      '',
+    ].join('\n'),
+    moduleSpec
+  )
+  assert.equal(data.fields.driver, 'Some text.')
+  assert.deepEqual(data.customFields, [
+    { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: ['Alice', 'Bob', 'Carol'] },
+  ])
+  assert.deepEqual(data.layout, [
+    { field: 'driver' },
+    { custom: { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: ['Alice', 'Bob', 'Carol'] } },
+  ])
+  assert.deepEqual(data.warnings, [])
+})
+
+// Mixed content (some prose, some bullets) stays a plain markdown custom section — the list classification requires every non-empty line to be a bullet.
+test('a custom section with mixed prose and bullets stays a plain markdown section', () => {
+  const definition = loadDefinition('design')
+  const moduleSpec = definition.modules.get('context')
+  const data = parseModuleFile(
+    [
+      '---',
+      'module: context',
+      'status: draft',
+      'owner:',
+      '---',
+      '',
+      '## Stakeholders',
+      '',
+      'Key people involved:',
+      '',
+      '- Alice',
+      '- Bob',
+      '',
+    ].join('\n'),
+    moduleSpec
+  )
+  assert.deepEqual(data.customFields, [
+    { id: 'custom:stakeholders', title: 'Stakeholders', value: 'Key people involved:\n\n- Alice\n- Bob' },
+  ])
+  // No type property — it's a plain markdown custom section.
+  assert.equal(data.customFields[0].type, undefined)
+})
+
+// An empty custom section is compatible with being an empty list (a list inserted before any items were added), so it preserves type: 'list' through the round-trip — the rows UI reappears on reload rather than being permanently lost.
+test('an empty custom section preserves list type through the round-trip', () => {
+  const definition = loadDefinition('design')
+  const moduleSpec = definition.modules.get('context')
+  const data = parseModuleFile(
+    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Empty section\n\n\n',
+    moduleSpec
+  )
+  assert.deepEqual(data.customFields, [{ id: 'custom:empty-section', title: 'Empty section', type: 'list', value: [] }])
+})
+
+// List-typed custom field round-trip: write with a layout containing a custom list, then read it back — the parser must detect the bullet content as a list field with the same items.
+test('list-typed custom field round-trips through write/read with values intact', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    const definition = loadDefinition('design')
+
+    writeModule(
+      definition,
+      'my-initiative',
+      'context',
+      {
+        status: 'draft',
+        owner: '',
+        fields: {
+          driver: 'Because.',
+          'affected-domains': [],
+          'out-of-scope': '',
+        },
+        layout: [
+          { field: 'driver' },
+          { custom: { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: ['Alice', 'Bob'] } },
+          { field: 'affected-domains' },
+          { field: 'out-of-scope' },
+        ],
+      },
+      { instancesDir }
+    )
+
+    // On disk: the custom block sits between Business driver and Affected domains, written as bullets.
+    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
+    assert.ok(stored.indexOf('## Stakeholders') > stored.indexOf('## Business driver'))
+    assert.ok(stored.indexOf('## Stakeholders') < stored.indexOf('## Affected domains'))
+    assert.ok(stored.includes('- Alice'))
+    assert.ok(stored.includes('- Bob'))
+
+    // Reading it back yields the same interleaved layout with type: 'list'.
+    const data = readModule(definition, 'my-initiative', 'context', { instancesDir })
+    assert.deepEqual(data.customFields, [
+      { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: ['Alice', 'Bob'] },
+    ])
+    assert.deepEqual(data.layout, [
+      { field: 'driver' },
+      { custom: { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: ['Alice', 'Bob'] } },
+      { field: 'affected-domains' },
+      { field: 'out-of-scope' },
+    ])
+  })
+})
+
+// Collision suffixes apply to list-typed custom fields too — two list sections with the same title get -2, -3 suffixes, deterministically.
+test('suffixes colliding list-typed custom-field ids', () => {
+  const definition = loadDefinition('design')
+  const moduleSpec = definition.modules.get('context')
+  const data = parseModuleFile(
+    [
+      '---',
+      'module: context',
+      'status: draft',
+      'owner:',
+      '---',
+      '',
+      '## Stakeholders',
+      '',
+      '- Alice',
+      '',
+      '## Stakeholders',
+      '',
+      '- Bob',
+      '',
+    ].join('\n'),
+    moduleSpec
+  )
+  assert.deepEqual(
+    data.customFields.map((f) => f.id),
+    ['custom:stakeholders', 'custom:stakeholders-2']
+  )
+  assert.deepEqual(data.customFields[0], { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: ['Alice'] })
+  assert.deepEqual(data.customFields[1], { id: 'custom:stakeholders-2', title: 'Stakeholders', type: 'list', value: ['Bob'] })
+  assert.deepEqual(data.warnings, [])
+})
+
+// A list-typed custom section interleaved between defined fields records its position in layout.
+test('layout records the interleaved order of defined and list-typed custom sections', () => {
+  const definition = loadDefinition('design')
+  const moduleSpec = definition.modules.get('context')
+  const data = parseModuleFile(
+    [
+      '---',
+      'module: context',
+      'status: draft',
+      'owner:',
+      '---',
+      '',
+      '## Business driver',
+      '',
+      'Text.',
+      '',
+      '## Stakeholders',
+      '',
+      '- Alice',
+      '- Bob',
+      '',
+      '## Affected domains',
+      '',
+      '- Payments',
+      '',
+    ].join('\n'),
+    moduleSpec
+  )
+  assert.deepEqual(data.layout, [
+    { field: 'driver' },
+    { custom: { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: ['Alice', 'Bob'] } },
+    { field: 'affected-domains' },
+  ])
+})
+
+// Mixed prose and bullets in a custom section stays plain — proving the parser doesn't falsely classify it.
 test('warns (non-strict) on a duplicate heading, identifying which occurrence wins', () => {
   const definition = loadDefinition('design')
   const moduleSpec = definition.modules.get('context')
