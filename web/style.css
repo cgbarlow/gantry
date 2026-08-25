@@ -390,7 +390,7 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .field-markdown .split { display: flex; gap: 16px; align-items: stretch; }
 /* The toolbar mounts inside this pane above the editor host, so the pair
  * reads as one attached control (#133): toolbar flush on top, editor below. */
-.field-markdown .editor-pane { display: flex; flex-direction: column; min-width: 0; }
+.field-markdown .editor-pane { display: flex; flex-direction: column; min-width: 0; flex: 1 1 0; }
 .field-markdown .editor-host,
 .field-markdown .preview {
   flex: 1;
@@ -400,6 +400,7 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .field-markdown .editor-host {
   border: var(--border-strong) solid var(--line-strong);
   background: var(--bg-raised);
+  min-height: 100px;
 }
 .field-markdown .editor-host .cm-editor { height: 100%; }
 .field-markdown .editor-host .cm-content,
