@@ -419,3 +419,47 @@ test('#137: mid-flow revisit of /new-workspace persists step; Back reaches works
     }
   })
 })
+
+// ---- #138: instance-fields section heading ----
+
+test('#138: Instance step renders "New Instance" heading between Workspace card and Definition picker', async () => {
+  await withWizardTestServer(async ({ gantryBase, adoBaseUrl }) => {
+    const browser = await chromium.launch()
+    try {
+      const page = await browser.newPage()
+      await installBaseUrlRoutes(page, adoBaseUrl)
+      await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+
+      await page.goto(`${gantryBase}/new-workspace`)
+      await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
+      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+      await page.locator('#ws-organization').fill(ORGANIZATION)
+      await page.locator('#ws-project').fill(PROJECT)
+      await page.locator('#ws-repository').fill(REPOSITORY)
+      await page.getByRole('button', { name: 'Register workspace' }).click()
+
+      // Wait for Instance step to appear.
+      await page.waitForSelector('#instance-name', { timeout: 10_000 })
+
+      // The "New Instance" heading is present.
+      const heading = page.locator('h3', { hasText: 'New Instance' })
+      assert.equal(await heading.count(), 1, '"New Instance" heading renders exactly once')
+
+      // Heading is positioned between the Workspace summary card and the
+      // Definition picker — the Workspace card's <h3> with the "Workspace"
+      // stamp comes first, then "New Instance", then the Definition label.
+      const workspaceStamp = page.locator('h3 .stamp.agreed', { hasText: 'Workspace' })
+      const definitionLabel = page.locator('label[for="definition-picker"]')
+      const headingBox = await heading.boundingBox()
+      const stampBox = await workspaceStamp.boundingBox()
+      const defBox = await definitionLabel.boundingBox()
+      assert.ok(headingBox, 'heading is visible')
+      assert.ok(stampBox, 'workspace stamp is visible')
+      assert.ok(defBox, 'definition label is visible')
+      assert.ok(stampBox.y < headingBox.y, 'heading appears below the Workspace stamp')
+      assert.ok(headingBox.y < defBox.y, 'heading appears above the Definition picker')
+    } finally {
+      await browser.close()
+    }
+  })
+})
