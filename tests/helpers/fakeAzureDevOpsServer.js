@@ -33,6 +33,9 @@ const DEFAULT_WORK_ITEM_TYPES = [
  *
  * `files` seeds `main`'s initial content, keyed by repo-relative path (leading "/" optional). `branchFiles`, if given, seeds one or more *other* branches the same way (`{ [branchName]: { [path]: content } }`) — for a test that needs a second branch to already exist (e.g. to prove a write to it doesn't leak into `main`) without first driving a real push to create it. `validPat` is the PAT (or, if an array, any one of several PATs — e.g. to exercise replacing one valid PAT with another) accepted as the password half of HTTP Basic auth (empty username) — anything else, or no Authorization header at all, gets a 401, mirroring how a rejected PAT surfaces from the real API.
  *
+ * `repoExists` (default `true`) controls whether the GET .../_apis/git/repositories/{repo} endpoint reports the repository as existing. When `false`, the endpoint returns 404, simulating a nonexistent Azure DevOps repository — used by lib/repoCheck.js tests to exercise the "repository doesn't exist" path. Every other Git endpoint (items, refs, pushes) continues to work normally when `repoExists` is `false`, since the real Azure DevOps API treats the repository metadata check as independent from whether you have direct access to its contents.
+ *
+ *
  * `failAfterPushes`, if given, makes every push (POST .../pushes) once `failAfterPushes` pushes have already committed successfully *during this server's lifetime, across every branch* fail with a 500 — simulating a mid-flow outage (a network blip, an expired PAT) for tests that need to exercise a caller's partial-failure handling (e.g. a multi-file create like createInstance's Azure DevOps path) without that test depending on how many GETs the client happens to make per push. Counted separately from any branch's own commit count (each of which seeds at 1 when that branch is given non-empty `files`/`branchFiles` content) so `failAfterPushes` always means "N real pushes made against this server", regardless of how many branches were seeded with an initial commit. Reads (`items`/`refs`) are never affected by this — only the write path.
  *
  * `workItemTypeStates`, if given, maps a work item type name (e.g. "Task") to the array of valid states GET .../workitemtypes/{type}/states should report for it — either full `{ name, category, color }` entries (Azure DevOps's own shape) or plain state-name strings (auto-filled with placeholder category/color). Falls back to a generic 4-state list for any type not given an explicit entry.
@@ -51,6 +54,7 @@ export function createFakeAzureDevOpsServer({
   failAfterPushes,
   workItemTypeStates = {},
   workItemTypes,
+  repoExists = true,
 } = {}) {
   // One independent { store, objectId } per branch — a branch with no
   // entry here has never had a commit (mirrors the pre-#118 "commitCount
@@ -148,6 +152,17 @@ export function createFakeAzureDevOpsServer({
     const validPats = Array.isArray(validPat) ? validPat : [validPat]
     if (!validPats.includes(providedPat)) {
       return json(401, { message: 'TF400813: The user is not authorized (fake: invalid or missing PAT).' })
+    }
+
+    // GET the repository metadata itself — lib/azureDevOpsClient.js's
+    // repoExists() calls this to distinguish "repository doesn't exist" from
+    // "empty repository".  `repoExists` (the test fixture param, default
+    // true) controls this independently of whether files were seeded.
+    if (req.method === 'GET' && pathname === `${basePath}`) {
+      if (!repoExists) {
+        return json(404, { message: `TF401174: Repository ${repository} not found (fake server).` })
+      }
+      return json(200, { id: repository, name: repository, defaultBranch: 'refs/heads/main' })
     }
 
     if (req.method === 'GET' && pathname === `${basePath}/items`) {
@@ -549,7 +564,7 @@ export function createFakeAzureDevOpsServer({
  * Starts a `createFakeAzureDevOpsServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/server.test.js`'s `withRunningServer` helper's shape (per #82's testing decisions). Shared by `tests/azureDevOpsClient.test.js` and `tests/instance.test.js` so this lifecycle isn't duplicated across both.
  */
 export function withFakeAzureDevOpsServer(
-  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes },
+  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes, repoExists },
   fn
 ) {
   return new Promise((resolve, reject) => {
@@ -563,6 +578,7 @@ export function withFakeAzureDevOpsServer(
       failAfterPushes,
       workItemTypeStates,
       workItemTypes,
+      repoExists,
     })
     server.listen(0, async () => {
       const { port } = server.address()

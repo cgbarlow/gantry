@@ -392,3 +392,54 @@ test('PATCH /api/workspaces/:id rejects a non-string owner (e.g. null) with 400,
     assert.equal(listing.find((w) => w.id === workspace.id).owner, 'c.barlow')
   })
 })
+
+// ---------- #139: nonexistent repository rejection ----------
+
+test('POST /api/workspaces with a nonexistent Azure DevOps repository returns 400 naming the missing repo, and persists nothing', async () => {
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {}, repoExists: false },
+    async (adoBaseUrl) => {
+      await withScratchServer(
+        { allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true },
+        async (base) => {
+          const res = await fetch(`${base}/api/workspaces`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+            body: postWorkspaceBody({ baseUrl: adoBaseUrl }),
+          })
+          assert.equal(res.status, 400)
+          const body = await res.json()
+          assert.match(body.error, /does not exist/)
+          assert.match(body.error, /create it in Azure DevOps first/)
+          assert.match(body.error, new RegExp(REPOSITORY))
+
+          const listing = await (await fetch(`${base}/api/workspaces`)).json()
+          assert.equal(listing.length, 0)
+        }
+      )
+    }
+  )
+})
+
+test('POST /api/workspaces with an empty-but-existing Azure DevOps repository still succeeds (empty semantics preserved)', async () => {
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {} },
+    async (adoBaseUrl) => {
+      await withScratchServer(
+        { allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true },
+        async (base) => {
+          const res = await fetch(`${base}/api/workspaces`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+            body: postWorkspaceBody({ baseUrl: adoBaseUrl }),
+          })
+          assert.equal(res.status, 201)
+
+          const listing = await (await fetch(`${base}/api/workspaces`)).json()
+          assert.equal(listing.length, 1)
+          assert.equal(listing[0].repository, REPOSITORY)
+        }
+      )
+    }
+  )
+})

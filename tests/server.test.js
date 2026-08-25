@@ -895,3 +895,34 @@ test('GET /api/instances still lists local instances even when a registered Azur
     rmSync(instancesDir, { recursive: true, force: true })
   }
 })
+
+// ---------- #139: nonexistent repository rejection at instance creation ----------
+
+test('POST /api/instances with an Azure DevOps location whose repository does not exist returns 400 with a human-readable message, not a raw REST error', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {}, repoExists: false }, async (adoBaseUrl) => {
+      await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+        const res = await fetch(`${base}/api/instances`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+          body: JSON.stringify({
+            definition: 'design',
+            slug: 'remote-initiative',
+            azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          }),
+        })
+        assert.equal(res.status, 400)
+        const body = await res.json()
+        assert.match(body.error, /does not exist/)
+        assert.match(body.error, /create it in Azure DevOps first/)
+        assert.match(body.error, new RegExp(REPOSITORY))
+
+        const listing = await (await fetch(`${base}/api/instances`)).json()
+        assert.equal(listing.length, 0)
+      })
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
