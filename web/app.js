@@ -16,7 +16,7 @@ import DOMPurify from 'dompurify'
 import { promptOpen, resolvePromptWith } from './lib/credential.js'
 import { apiFetch, apiFetchForInstance } from './lib/apiFetch.js'
 import { Dropdown } from './lib/dropdown.js'
-import { apply as applyMarkdownCommand, HEADING_LEVELS } from './lib/markdownCommands.js'
+import { apply as applyMarkdownCommand, HEADING_LEVELS, findTable } from './lib/markdownCommands.js'
 import { NewWorkspaceWizardPage } from './pages/new-workspace-wizard.js'
 import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage } from './pages/settings.js'
 // Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79) markdown/split/rendered toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
@@ -136,9 +136,15 @@ const markdownToolbarKeymap = keymap.of([
   { key: 'Mod-Shift-8', run: (view) => runMarkdownCommand(view, 'bulletList') },
   { key: 'Mod-Shift-7', run: (view) => runMarkdownCommand(view, 'numberedList') },
   { key: 'Mod-Shift-9', run: (view) => runMarkdownCommand(view, 'taskList') },
+  // Inside a table Tab walks the cells and Enter appends a row from the last
+  // one (#134); this layer sits before basicSetup so it wins over the default
+  // indent/newline bindings wherever it chooses to consume the keystroke.
+  { key: 'Tab', run: (view) => runTableKey(view, 'tableNextCell') },
+  { key: 'Shift-Tab', run: (view) => runTableKey(view, 'tablePrevCell') },
+  { key: 'Enter', run: (view) => runTableEnter(view) },
 ])
 
-function runMarkdownCommand(view, name) {
+function runMarkdownCommand(view, name, extra = {}) {
   // Belt-and-braces against Rendered mode: the keymap can't fire there (no
   // contenteditable), but a toolbar click racing a mode switch still could.
   if (!view.state.facet(EditorView.editable)) return false
@@ -148,13 +154,37 @@ function runMarkdownCommand(view, name) {
     text: view.state.doc.toString(),
     from: range.from,
     to: range.to,
+    ...extra,
   })
+  // A null result is the transform's way of saying "not my table" — swallow
+  // the keystroke's claim on it and let whatever's underneath have a go.
+  if (!result) return false
   view.dispatch({
     changes: { from: 0, to: view.state.doc.length, insert: result.text },
     selection: { anchor: result.from, head: result.to },
     scrollIntoView: true,
   })
   return true
+}
+
+// Table keys are contextual (#134): they consume the keystroke only while the
+// cursor sits inside a well-formed table. Everywhere else they report false,
+// so Tab still indents and Enter still splits lines — graceful degradation,
+// not a modal trap.
+function runTableKey(view, command) {
+  if (!view.state.facet(EditorView.editable)) return false
+  const head = view.state.selection.main.head
+  if (!findTable(view.state.doc.toString(), head)) return false
+  return runMarkdownCommand(view, command)
+}
+
+// Enter only hijacks the caret when there is no "next cell" to hand it to:
+// from the last cell of the last row it appends a fresh row instead.
+function runTableEnter(view) {
+  if (!view.state.facet(EditorView.editable)) return false
+  const t = findTable(view.state.doc.toString(), view.state.selection.main.head)
+  if (!t || t.rowIndex !== t.lines.length - 1 || t.colIndex !== t.colCount - 1) return false
+  return runMarkdownCommand(view, 'tableAddRowBelow')
 }
 
 // Stroke icons inherit `currentColor`, so one path set works across light,
@@ -326,8 +356,7 @@ function MarkdownToolbar({ run, refocus, headingsOpen, setHeadingsOpen, expanded
 // ---------- Markdown field ----------
 // EditorView.updateListener -> markdown-it -> DOMPurify -> sibling preview pane, per docs/adr/0004-markdown-editor-codemirror.md. The CodeMirror instance is the source of truth for the field's value, so getValue/setValue read and write it directly rather than duplicating it into component state.
 //
-// Every markdown field carries its own generic **Insert ▾** dropdown (#132) — Image (opens the shared image-insert modal), Table (a starter GFM pipe table at the cursor), Section (a new custom field appended below this one) — replacing the single per-module "+ Insert asset" button that preceded it. Hidden in Rendered view along with every other editing affordance, since that view is read-only.
-const STARTER_TABLE = ['| Column 1 | Column 2 |', '| -------- | -------- |', '|          |          |'].join('\n')
+// Every markdown field carries its own generic **Insert ▾** dropdown (#132) — Image (opens the shared image-insert modal), Table (opens a Loop-style hover-grid size picker, #134), Section (a new custom field appended below this one) — replacing the single per-module "+ Insert asset" button that preceded it. Hidden in Rendered view along with every other editing affordance, since that view is read-only.
 
 // The three-item menu behind every field's Insert ▾ (#132). Openness is controlled (the shared Dropdown's contract); each item closes the menu before acting, matching how SwimlaneChip's items dismiss through their parent.
 function InsertDropdown({ onImage, onTable, onSection }) {
@@ -351,6 +380,91 @@ function InsertDropdown({ onImage, onTable, onSection }) {
       <button type="button" role="menuitem" onClick=${() => pick(onTable)}>Table</button>
       <button type="button" role="menuitem" onClick=${() => pick(onSection)}>Section</button>
     <//>
+  `
+}
+
+// The Loop-style size grid behind Insert ▾ ▸ Table (#134): hovering or
+// focusing a cell lights up the R×C rectangle it corners, the caption reads
+// out the current size, and clicking inserts. Eight is a deliberate ceiling —
+// bigger tables are one Tab-away from growing once they exist. The picker has
+// no trigger of its own: InsertDropdown's Table item owns that moment, so the
+// Dropdown renders only its menu via the body-function seam.
+const TABLE_GRID_SIZE = 8
+
+function TableGridPicker({ open, onOpenChange, onPick }) {
+  const [hover, setHover] = useState(null)
+
+  // A fresh open starts with no preview lit; without this the grid would
+  // resurrect whatever corner the mouse last crossed.
+  useEffect(() => {
+    if (!open) setHover(null)
+  }, [open])
+
+  const cells = []
+  for (let r = 1; r <= TABLE_GRID_SIZE; r++) {
+    for (let c = 1; c <= TABLE_GRID_SIZE; c++) {
+      cells.push(html`
+        <button
+          type="button"
+          class="table-picker-cell${hover && r <= hover.r && c <= hover.c ? ' lit' : ''}"
+          data-row=${r}
+          data-col=${c}
+          aria-label="${c} by ${r} table"
+          onMouseEnter=${() => setHover({ r, c })}
+          onFocus=${() => setHover({ r, c })}
+          onClick=${() => {
+            onOpenChange(false)
+            onPick(r, c)
+          }}
+        />
+      `)
+    }
+  }
+
+  return html`
+    <${Dropdown} className="table-picker" open=${open} onOpenChange=${onOpenChange} body=${({ menu }) => menu}>
+      <div class="table-picker-grid" onMouseLeave=${() => setHover(null)}>${cells}</div>
+      <div class="table-picker-caption" aria-live="polite">
+        ${hover ? `${hover.c} × ${hover.r}` : 'Rows × Columns'}
+      </div>
+    <//>
+  `
+}
+
+// Contextual table controls (#134): a strip above the formatting toolbar,
+// present only while the caret sits inside a well-formed table. Every button
+// funnels through the same run() seam as the toolbar — pure transform in,
+// one transaction back — so each click is exactly one undo step, and on a
+// malformed table every button is a silent no-op by construction.
+function TableControlStrip({ run }) {
+  const keepEditorFocus = (e) => e.preventDefault()
+  const btn = (name, label, glyph) =>
+    html`
+      <button
+        type="button"
+        class="md-btn"
+        data-command=${name}
+        aria-label=${label}
+        title=${label}
+        tabindex="-1"
+        onMouseDown=${keepEditorFocus}
+        onClick=${() => run(name)}
+      >
+        <span class="md-glyph">${glyph}</span>
+      </button>
+    `
+  return html`
+    <div class="md-toolbar table-toolbar" role="group" aria-label="Table">
+      ${btn('tableAddRowAbove', 'Add row above', '+↑')}
+      ${btn('tableAddRowBelow', 'Add row below', '+↓')}
+      ${btn('tableDeleteRow', 'Delete row', '−↓')}
+      <span class="md-sep" />
+      ${btn('tableAddColumnLeft', 'Add column left', '+←')}
+      ${btn('tableAddColumnRight', 'Add column right', '+→')}
+      ${btn('tableDeleteColumn', 'Delete column', '−→')}
+      <span class="md-sep" />
+      ${btn('tableCycleAlignment', 'Cycle column alignment', '⇄')}
+    </div>
   `
 }
 
@@ -411,6 +525,10 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection }) 
       wrapperRef.current.requestFullscreen().catch(() => {})
     }
   }
+  // Table awareness (#134): the control strip and its gating ride on this
+  // flag, refreshed from every selection/doc update below.
+  const [inTable, setInTable] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   useEffect(() => {
     const editableCompartment = new Compartment()
@@ -425,6 +543,11 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection }) 
         editableCompartment.of(editableExtension(viewMode.value)),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) renderPreview(previewRef.current, update.state.doc.toString())
+          // Selection moves count too — Tab-walking cells must flip the strip
+          // on/off as the caret crosses the table's edge.
+          if (update.docChanged || update.selectionSet) {
+            setInTable(!!findTable(update.state.doc.toString(), update.state.selection.main.head))
+          }
         }),
       ],
     })
@@ -495,13 +618,26 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection }) 
     // eslint-disable-next-line
   }, [])
 
-  const runCommand = useCallback((name) => runMarkdownCommand(viewRef.current, name), [])
+  const runCommand = useCallback((name, extra) => runMarkdownCommand(viewRef.current, name, extra), [])
   const refocusEditor = useCallback(() => viewRef.current?.focus(), [])
   // Visible while the field holds focus, and stays up while the headings
   // menu is open (the menu click moves focus to the trigger button). While
   // the field is full-screen the bar is unconditional (#135): the expanded
   // panel must keep its toolbar even if focus wanders into the preview.
   const showToolbar = focused || headingsOpen || expanded
+  const showTableStrip = showToolbar && inTable
+  // The grid picker inserts straight through the command dispatcher, so the
+  // new table arrives with blank-line hygiene and a parked caret for free.
+  // The grid's rectangle counts the header row, the engine's `rows` counts
+  // body rows — hence the -1 (and a floor of one body row, since a header
+  // alone can't take the caret).
+  const pickTable = useCallback(
+    (rows, cols) => {
+      runMarkdownCommand(viewRef.current, 'insertTable', { rows: Math.max(rows - 1, 1), cols })
+      viewRef.current?.focus()
+    },
+    []
+  )
 
   return html`
     <div class="field field-markdown" ref=${wrapperRef}>
@@ -511,6 +647,7 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection }) 
         <div class="editor-pane">
           ${viewMode.value !== 'rendered' && showToolbar
             ? html`
+                ${showTableStrip ? html`<${TableControlStrip} run=${runCommand} />` : null}
                 <${MarkdownToolbar}
                   run=${runCommand}
                   refocus=${refocusEditor}
@@ -527,11 +664,14 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection }) 
       </div>
       ${viewMode.value !== 'rendered'
         ? html`
-            <${InsertDropdown}
-              onImage=${() => onRequestImage?.()}
-              onTable=${() => controlRef.current?.insertAtCursor(STARTER_TABLE)}
-              onSection=${() => onRequestSection?.()}
-            />
+            <div class="insert-area">
+              <${InsertDropdown}
+                onImage=${() => onRequestImage?.()}
+                onTable=${() => setPickerOpen(true)}
+                onSection=${() => onRequestSection?.()}
+              />
+              <${TableGridPicker} open=${pickerOpen} onOpenChange=${setPickerOpen} onPick=${pickTable} />
+            </div>
           `
         : null}
     </div>
