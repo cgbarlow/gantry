@@ -434,7 +434,7 @@ function MarkdownToolbar({ run, refocus, headingsOpen, setHeadingsOpen, expanded
         'inlineCode',
         'Inline code',
         'Ctrl/Cmd+E',
-        html`<span class="md-glyph">&lt;/&gt;</span>`
+        html`<span class="md-glyph">${'</>'}</span>`
       )}
       ${button('link', 'Link', 'Ctrl/Cmd+K', ICONS.link)}
       <span class="md-sep" />
@@ -446,7 +446,7 @@ function MarkdownToolbar({ run, refocus, headingsOpen, setHeadingsOpen, expanded
         'blockquote',
         'Blockquote',
         null,
-        html`<span class="md-glyph md-quote-glyph">&ldquo;</span>`
+        html`<span class="md-glyph md-quote-glyph">${'\u201C'}</span>`
       )}
       ${button('horizontalRule', 'Horizontal rule', null, ICONS.horizontalRule)}
       ${button('codeBlock', 'Code block', null, ICONS.codeBlock)}
