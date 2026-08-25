@@ -138,7 +138,7 @@ test('the "+ New Workspace" wizard registers a workspace, creates an instance, a
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
 
       // ---------- Step 1: register a brand new workspace ----------
-      await page.getByRole('button', { name: 'Register new workspace' }).click()
+      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
       await page.locator('#ws-organization').fill(ORGANIZATION)
       await page.locator('#ws-project').fill(PROJECT)
       await page.locator('#ws-repository').fill(REPOSITORY)
@@ -213,7 +213,7 @@ test('the "+ New Workspace" wizard\'s pick-existing-workspace path adds a second
       // First pass: register the workspace and create the first instance.
       await page.goto(`${gantryBase}/new-workspace`)
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
-      await page.getByRole('button', { name: 'Register new workspace' }).click()
+      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
       await page.locator('#ws-organization').fill(ORGANIZATION)
       await page.locator('#ws-project').fill(PROJECT)
       await page.locator('#ws-repository').fill(REPOSITORY)
@@ -261,6 +261,159 @@ test('the "+ New Workspace" wizard\'s pick-existing-workspace path adds a second
       // workspace was registered for the second, picked pass.
       const workspaces = await (await fetch(`${gantryBase}/api/workspaces`)).json()
       assert.equal(workspaces.length, 1)
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
+// ---- #137: pick-mode empty-state affordance + back navigation ----
+
+test('#137: empty pick-mode offers a control to switch to Register', async () => {
+  await withWizardTestServer(async ({ gantryBase }) => {
+    const browser = await chromium.launch()
+    try {
+      const page = await browser.newPage()
+      await page.goto(`${gantryBase}/new-workspace`)
+      await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
+      // Pick mode is the default; with zero registered workspaces the list
+      // is empty after load completes.
+      await page.waitForSelector('#workspace-picker', { state: 'detached', timeout: 10_000 })
+      const hint = page.locator('.wizard-field-hint')
+      await hint.waitFor({ timeout: 10_000 })
+      const linkBtn = hint.locator('.btn-link')
+      assert.equal(await linkBtn.count(), 1, 'empty state contains a clickable control')
+      assert.match(await linkBtn.textContent(), /switch to "Register new workspace"/)
+      await linkBtn.click()
+      // Should now be in register mode — the register form fields appear.
+      await page.waitForSelector('#ws-organization', { timeout: 5_000 })
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
+test('#137: Back from Instance step returns to workspace picker with values intact', async () => {
+  await withWizardTestServer(async ({ gantryBase, adoBaseUrl }) => {
+    const client = createAzureDevOpsWorkItemsClient({ organization: ORGANIZATION, project: PROJECT, pat: VALID_PAT, baseUrl: adoBaseUrl })
+    await client.createWorkItem('Feature', { 'System.Title': 'Any parent' })
+
+    const browser = await chromium.launch()
+    try {
+      const page = await browser.newPage()
+      await installBaseUrlRoutes(page, adoBaseUrl)
+      await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+
+      // Register a workspace so the pick list has at least one entry.
+      await page.goto(`${gantryBase}/new-workspace`)
+      await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
+      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+      await page.locator('#ws-organization').fill(ORGANIZATION)
+      await page.locator('#ws-project').fill(PROJECT)
+      await page.locator('#ws-repository').fill(REPOSITORY)
+      await page.locator('#ws-owner').fill('a.architect')
+      await page.getByRole('button', { name: 'Register workspace' }).click()
+
+      // Arrived at Instance step — fill in Name (Directory auto-follows).
+      await page.waitForSelector('#instance-name', { timeout: 10_000 })
+      await page.locator('.definition-card').first().click()
+      await page.locator('#instance-name').fill('Test Instance')
+      const dirBefore = await page.locator('#instance-directory').inputValue()
+
+      // Click Back — should return to the workspace step.
+      await page.getByRole('button', { name: '← Back' }).click()
+      await page.waitForSelector('.wizard-mode-toggle', { timeout: 5_000 })
+
+      // workspaceMode is still 'register' (preserved from the registration
+      // flow) — switch to pick mode to see the workspace list.
+      await page.getByRole('button', { name: 'Pick existing workspace', exact: true }).click()
+      await page.waitForSelector('#workspace-picker', { timeout: 5_000 })
+      await page.locator('#workspace-picker .definition-card').first().click()
+      await page.getByRole('button', { name: 'Continue' }).click()
+      await page.waitForSelector('#instance-name', { timeout: 5_000 })
+      assert.equal(await page.locator('#instance-name').inputValue(), 'Test Instance')
+      assert.equal(await page.locator('#instance-directory').inputValue(), dirBefore)
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
+test('#137: Back from Link step returns to Instance step with values intact', async () => {
+  await withWizardTestServer(async ({ gantryBase, adoBaseUrl }) => {
+    const client = createAzureDevOpsWorkItemsClient({ organization: ORGANIZATION, project: PROJECT, pat: VALID_PAT, baseUrl: adoBaseUrl })
+    await client.createWorkItem('Feature', { 'System.Title': 'Any parent' })
+
+    const browser = await chromium.launch()
+    try {
+      const page = await browser.newPage()
+      await installBaseUrlRoutes(page, adoBaseUrl)
+      await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+
+      await page.goto(`${gantryBase}/new-workspace`)
+      await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
+      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+      await page.locator('#ws-organization').fill(ORGANIZATION)
+      await page.locator('#ws-project').fill(PROJECT)
+      await page.locator('#ws-repository').fill(REPOSITORY)
+      await page.getByRole('button', { name: 'Register workspace' }).click()
+
+      await page.waitForSelector('#instance-name', { timeout: 10_000 })
+      await page.locator('.definition-card').first().click()
+      await page.locator('#instance-name').fill('Back Test')
+      await page.getByRole('button', { name: 'Next: link a work item' }).click()
+
+      // Arrived at Link step.
+      await page.waitForSelector('#parent-work-item-id', { timeout: 10_000 })
+
+      // Click Back — should return to Instance step.
+      await page.getByRole('button', { name: '← Back' }).click()
+      await page.waitForSelector('#instance-name', { timeout: 5_000 })
+      assert.equal(await page.locator('#instance-name').inputValue(), 'Back Test')
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
+test('#137: mid-flow revisit of /new-workspace persists step; Back reaches workspace picker', async () => {
+  await withWizardTestServer(async ({ gantryBase, adoBaseUrl }) => {
+    const client = createAzureDevOpsWorkItemsClient({ organization: ORGANIZATION, project: PROJECT, pat: VALID_PAT, baseUrl: adoBaseUrl })
+    await client.createWorkItem('Feature', { 'System.Title': 'Any parent' })
+
+    const browser = await chromium.launch()
+    try {
+      const page = await browser.newPage()
+      await installBaseUrlRoutes(page, adoBaseUrl)
+      await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+
+      // Register a workspace and advance to Instance step.
+      await page.goto(`${gantryBase}/new-workspace`)
+      await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
+      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+      await page.locator('#ws-organization').fill(ORGANIZATION)
+      await page.locator('#ws-project').fill(PROJECT)
+      await page.locator('#ws-repository').fill(REPOSITORY)
+      await page.getByRole('button', { name: 'Register workspace' }).click()
+      await page.waitForSelector('#instance-name', { timeout: 10_000 })
+
+      // Client-side navigate away then back — module-scope signals persist
+      // across popstate/pushState (the preact-iso router's own path), not
+      // across a hard page.goto() reload.
+      await page.locator('a[href="/"]').click()
+      await page.waitForSelector('h2:has-text("Dashboard")', { timeout: 5_000 }).catch(() =>
+        page.waitForSelector('main', { timeout: 5_000 })
+      )
+      // Back in browser history returns to /new-workspace client-side.
+      await page.goBack()
+      await page.waitForSelector('#instance-name', { timeout: 5_000 })
+
+      // Back from Instance should reach the workspace step.
+      await page.getByRole('button', { name: '← Back' }).click()
+      await page.waitForSelector('.wizard-mode-toggle', { timeout: 5_000 })
+      // workspaceMode was 'register' — switch to pick to verify the list.
+      await page.getByRole('button', { name: 'Pick existing workspace', exact: true }).click()
+      await page.waitForSelector('#workspace-picker', { timeout: 5_000 })
     } finally {
       await browser.close()
     }

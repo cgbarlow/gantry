@@ -186,6 +186,7 @@ async function registerWorkspace() {
     }
     registerStatus.value = 'idle'
     selectedWorkspace.value = body
+    workspaces.value = null
     step.value = 'instance'
   } catch (err) {
     registerStatus.value = 'failed'
@@ -385,7 +386,7 @@ function WorkspaceStep() {
             ${workspacesLoadError.value ? html`<p class="load-error">${workspacesLoadError.value}</p>` : null}
             ${workspaces.value === null && !workspacesLoadError.value ? html`<p class="loading">Loading…</p>` : null}
             ${workspaces.value?.length === 0
-              ? html`<p class="wizard-field-hint">No workspaces registered yet — switch to "Register new workspace".</p>`
+              ? html`<p class="wizard-field-hint">No workspaces registered yet — <button type="button" class="btn-link" onClick=${() => (workspaceMode.value = 'register')}>switch to "Register new workspace"</button>.</p>`
               : null}
             ${workspaces.value?.length
               ? html`
@@ -558,7 +559,8 @@ function InstanceStep() {
       />
     </div>
 
-    <div class="wizard-field">
+    <div class="wizard-field" style="display:flex;gap:8px">
+      <button type="button" class="btn ghost" onClick=${() => (step.value = 'workspace')}>← Back</button>
       <button
         type="button"
         class="btn primary"
@@ -571,8 +573,8 @@ function InstanceStep() {
             ? 'Creating…'
             : 'Create instance'}
       </button>
-      ${!ticketingEnabled && createStatus.value === 'failed' ? html`<div class="inline-error">${createError.value}</div>` : null}
     </div>
+    ${!ticketingEnabled && createStatus.value === 'failed' ? html`<div class="inline-error">${createError.value}</div>` : null}
   `
 }
 
@@ -639,13 +641,14 @@ function LinkStep() {
       </select>
     </div>
 
-    <div class="wizard-field">
+    <div class="wizard-field" style="display:flex;gap:8px">
+      <button type="button" class="btn ghost" onClick=${() => (step.value = 'instance')}>← Back</button>
       <button type="button" class="btn primary" disabled=${!canSubmit} onClick=${createInstanceAndMaybeLink}>
         ${createStatus.value === 'creating' ? 'Creating…' : linkStatus.value === 'linking' ? 'Linking…' : 'Create instance & link'}
       </button>
-      ${createStatus.value === 'failed' ? html`<div class="inline-error">${createError.value}</div>` : null}
-      ${linkStatus.value === 'failed' ? html`<div class="inline-error">${linkError.value}</div>` : null}
     </div>
+    ${createStatus.value === 'failed' ? html`<div class="inline-error">${createError.value}</div>` : null}
+    ${linkStatus.value === 'failed' ? html`<div class="inline-error">${linkError.value}</div>` : null}
   `
 }
 
