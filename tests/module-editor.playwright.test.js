@@ -215,9 +215,16 @@ test('Render and Clear all fields live in the view-toggle bar; Render opens a di
         await dialog.waitFor({ state: 'visible', timeout: 5_000 })
         assert.deepEqual(await dialog.locator('.render-artefact-list button').allTextContents(), ['Solution on a Page'])
 
-        await dialog.getByRole('button', { name: 'Solution on a Page' }).click()
+        // The per-artefact button toggles selection — it does not render immediately.
+        const soapToggle = dialog.getByRole('button', { name: 'Solution on a Page' })
+        await soapToggle.click()
+        assert.equal(await soapToggle.evaluate((el) => el.classList.contains('toggled')), true)
+
+        // The dialog's own bottom action (relabelled from "Close" to "Render") renders every toggled artefact.
+        const dialogRenderButton = dialog.getByRole('button', { name: 'Render', exact: true })
+        await dialogRenderButton.click()
         await assert.doesNotReject(dialog.locator('text=Rendered to').waitFor({ timeout: 10_000 }))
-        await dialog.getByRole('button', { name: 'Close' }).click()
+        await page.keyboard.press('Escape')
         await dialog.waitFor({ state: 'hidden', timeout: 5_000 })
 
         // Navigate to the Detailed Design stage, which shares one gate between two artefacts (sad, ssad) — the dialog lists both.
@@ -231,7 +238,8 @@ test('Render and Clear all fields live in the view-toggle bar; Render opens a di
           await secondDialog.locator('.render-artefact-list button').allTextContents(),
           ['Solution Architecture Document', 'Solution Support Architecture Document']
         )
-        await secondDialog.getByRole('button', { name: 'Close' }).click()
+        await page.keyboard.press('Escape')
+        await secondDialog.waitFor({ state: 'hidden', timeout: 5_000 })
 
         // "Clear all fields" clears the currently mounted stage's own fields, wired via the registry now owned above StageScreen.
         const firstField = page.locator('.field-markdown .cm-content').first()
@@ -241,6 +249,71 @@ test('Render and Clear all fields live in the view-toggle bar; Render opens a di
         assert.match(await firstField.textContent(), /some content to clear/)
         await page.locator('.toolbar').getByRole('button', { name: 'Clear all fields' }).click()
         assert.equal(await firstField.textContent(), '')
+
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// Coverage specifically for the render dialog's toggle-and-batch behavior: multiple artefacts can be toggled on before rendering, one "Render" action renders all of them, and toggling back off before rendering excludes an artefact from the batch.
+test('Render dialog: toggling multiple artefacts renders them as one batch; untoggling excludes an artefact', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        // Detailed Design shares one gate between two artefacts (sad, ssad) — the case that actually exercises a multi-item batch.
+        await page.locator('#stage-nav button', { hasText: 'Detailed Design' }).click()
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        await page.locator('.toolbar').getByRole('button', { name: 'Render', exact: true }).click()
+        const dialog = page.locator('.modal', { hasText: 'Render' })
+        await dialog.waitFor({ state: 'visible', timeout: 5_000 })
+
+        const sadToggle = dialog.getByRole('button', { name: 'Solution Architecture Document' })
+        const ssadToggle = dialog.getByRole('button', { name: 'Solution Support Architecture Document' })
+        const renderButton = dialog.getByRole('button', { name: 'Render', exact: true })
+
+        // Nothing toggled yet: the batch action is disabled.
+        assert.equal(await renderButton.isDisabled(), true)
+
+        // Toggle both on.
+        await sadToggle.click()
+        await ssadToggle.click()
+        assert.equal(await sadToggle.evaluate((el) => el.classList.contains('toggled')), true)
+        assert.equal(await ssadToggle.evaluate((el) => el.classList.contains('toggled')), true)
+
+        // Toggle ssad back off before rendering — it must be excluded from the batch.
+        await ssadToggle.click()
+        assert.equal(await ssadToggle.evaluate((el) => el.classList.contains('toggled')), false)
+
+        assert.equal(await renderButton.isDisabled(), false)
+        await renderButton.click()
+
+        await assert.doesNotReject(
+          dialog.locator('text=Solution Architecture Document: rendered to').waitFor({ timeout: 10_000 })
+        )
+        // Give ssad's non-render a moment to definitely not appear, rather than racing the assertion against sad's own in-flight request.
+        await page.waitForTimeout(500)
+        assert.doesNotMatch(await dialog.locator('.save-status').textContent(), /Solution Support Architecture Document/)
 
         assert.deepEqual(pageErrors, [])
       } finally {
