@@ -215,9 +215,16 @@ test('Render and Clear all fields live in the view-toggle bar; Render opens a di
         await dialog.waitFor({ state: 'visible', timeout: 5_000 })
         assert.deepEqual(await dialog.locator('.render-artefact-list button').allTextContents(), ['Solution on a Page'])
 
-        await dialog.getByRole('button', { name: 'Solution on a Page' }).click()
+        // The per-artefact button toggles selection — it does not render immediately.
+        const soapToggle = dialog.getByRole('button', { name: 'Solution on a Page' })
+        await soapToggle.click()
+        assert.equal(await soapToggle.evaluate((el) => el.classList.contains('toggled')), true)
+
+        // The dialog's own bottom action (relabelled from "Close" to "Render") renders every toggled artefact.
+        const dialogRenderButton = dialog.getByRole('button', { name: 'Render', exact: true })
+        await dialogRenderButton.click()
         await assert.doesNotReject(dialog.locator('text=Rendered to').waitFor({ timeout: 10_000 }))
-        await dialog.getByRole('button', { name: 'Close' }).click()
+        await page.keyboard.press('Escape')
         await dialog.waitFor({ state: 'hidden', timeout: 5_000 })
 
         // Navigate to the Detailed Design stage, which shares one gate between two artefacts (sad, ssad) — the dialog lists both.
@@ -231,7 +238,8 @@ test('Render and Clear all fields live in the view-toggle bar; Render opens a di
           await secondDialog.locator('.render-artefact-list button').allTextContents(),
           ['Solution Architecture Document', 'Solution Support Architecture Document']
         )
-        await secondDialog.getByRole('button', { name: 'Close' }).click()
+        await page.keyboard.press('Escape')
+        await secondDialog.waitFor({ state: 'hidden', timeout: 5_000 })
 
         // "Clear all fields" clears the currently mounted stage's own fields, wired via the registry now owned above StageScreen.
         const firstField = page.locator('.field-markdown .cm-content').first()
