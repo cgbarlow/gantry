@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { createServer } from '../lib/server.js'
 import { createInstance, readInstance } from '../lib/instance.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
+import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
@@ -158,6 +159,59 @@ test('POST /api/instance/work-items/link succeeds, creating one child work item 
     const instance = readInstance('my-initiative', { instancesDir })
     assert.deepEqual(instance.workItem, body)
   })
+})
+
+test('POST /api/instance/work-items/link makes the link visible when browsing a not-yet-branched stage of a Workspace-backed instance', async () => {
+  const organization = 'workspace-org'
+  const project = 'workspace-project'
+  const repository = 'workspace-repo'
+  const slug = 'remote-initiative'
+
+  await withFakeAzureDevOpsServer(
+    {
+      organization,
+      project,
+      repository,
+      validPat: VALID_PAT,
+      files: { [`/gantry-workspace/${slug}/instance.yaml`]: `definition: design\nslug: ${slug}\nstage: shape\n` },
+    },
+    async (adoBaseUrl) => {
+      const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+      try {
+        registerInstance(
+          slug,
+          { kind: 'azureDevOps', organization, project, repository, baseUrl: adoBaseUrl },
+          { instancesDir }
+        )
+        const workItems = createAzureDevOpsWorkItemsClient({ organization, project, pat: VALID_PAT, baseUrl: adoBaseUrl })
+        const parentId = (await workItems.createWorkItem('Feature', { 'System.Title': 'Parent initiative' })).id
+
+        await withRunningServer(
+          { instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true },
+          async (gantryBase) => {
+            const linkRes = await fetch(`${gantryBase}/api/instance/work-items/link?slug=${slug}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+              body: JSON.stringify({ organization, project, parentId, baseUrl: adoBaseUrl }),
+            })
+            assert.equal(linkRes.status, 200)
+            const link = await linkRes.json()
+
+            const git = createAzureDevOpsClient({ organization, project, repository, pat: VALID_PAT, baseUrl: adoBaseUrl })
+            assert.equal(await git.branchExists(`gantry-workspace/${slug}/hld-define`), false)
+
+            const switched = await fetch(`${gantryBase}/api/instance?slug=${slug}&stage=hld-define`, {
+              headers: { Authorization: basicAuthHeader(VALID_PAT) },
+            })
+            assert.equal(switched.status, 200)
+            assert.deepEqual((await switched.json()).workItem, link)
+          }
+        )
+      } finally {
+        rmSync(instancesDir, { recursive: true, force: true })
+      }
+    }
+  )
 })
 
 test('POST /api/instance/work-items/link reports 409 for an instance already linked', async () => {
@@ -314,4 +368,3 @@ test('GET /api/instance/check now actually checks an Azure-DevOps-backed instanc
     }
   )
 })
-
