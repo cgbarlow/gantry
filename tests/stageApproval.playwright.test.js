@@ -58,6 +58,7 @@ async function fillShapeStage(azureDevOps, branch) {
     await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
   }
   await client.writeFile(`gantry-workspace/${SLUG}/out/soap.docx`, 'rendered soap', { branch })
+  await client.writeFile(`gantry-workspace/${SLUG}/out/soap-full.docx`, 'rendered full soap', { branch })
 }
 
 // Casts the Owner's reviewer vote directly against the fake Azure DevOps
@@ -71,6 +72,18 @@ async function castVote(adoBaseUrl, pullRequestId, vote) {
       method: 'PUT',
       headers: { Authorization: `Basic ${Buffer.from(`:${VALID_PAT}`, 'utf8').toString('base64')}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ displayName: 'The Owner', vote }),
+    }
+  )
+  assert.equal(res.status, 200)
+}
+
+async function abandonPullRequest(adoBaseUrl, pullRequestId) {
+  const res = await fetch(
+    `${adoBaseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/${REPOSITORY}/pullrequests/${pullRequestId}`,
+    {
+      method: 'PATCH',
+      headers: { Authorization: `Basic ${Buffer.from(`:${VALID_PAT}`, 'utf8').toString('base64')}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'abandoned' }),
     }
   )
   assert.equal(res.status, 200)
@@ -252,6 +265,51 @@ test('confirming opens a Pull Request, and the panel reflects it — including s
             page.locator('.request-approval-panel', { hasText: /Pull Request #\d+ is open/ }).waitFor({ timeout: 10_000 })
           )
 
+          assert.deepEqual(pageErrors, [])
+        })
+      }
+    )
+  })
+})
+
+test('reloading reflects a Pull Request abandoned outside gantry', async () => {
+  await withRemoteInstance(async ({ adoBaseUrl, instancesDir }) => {
+    const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl }
+    const branch = await resolveStageBranch(azureDevOps, definition, SLUG, SHAPE.id)
+    await fillShapeStage(azureDevOps, branch)
+
+    await withRunningServer(
+      { instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true },
+      async (base) => {
+        await withRunningBrowser(async (browser) => {
+          const page = await browser.newPage()
+          const pageErrors = []
+          page.on('pageerror', (err) => pageErrors.push(err.message))
+          page.on('console', (msg) => {
+            if (msg.type() === 'error') pageErrors.push(msg.text())
+          })
+
+          await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+          await page.goto(`${base}/instance/${SLUG}`)
+          const panel = page.locator('.request-approval-panel')
+          await panel.waitFor({ timeout: 10_000 })
+
+          await panel.getByRole('button', { name: 'Request approval' }).click()
+          const modal = page.locator('.modal[aria-label="Confirm request approval"]')
+          await modal.getByRole('button', { name: 'Confirm & request approval' }).click()
+          await assert.doesNotReject(panel.locator('text=/Pull Request #\\d+ is open/').waitFor({ timeout: 10_000 }))
+          const prId = Number((await panel.locator('text=/Pull Request #(\\d+)/').first().textContent()).match(/#(\d+)/)[1])
+
+          await abandonPullRequest(adoBaseUrl, prId)
+          await page.reload()
+          await panel.waitFor({ timeout: 10_000 })
+
+          assert.equal(await panel.getByText(/Pull Request #\d+ is open/).count(), 0)
+          await assert.doesNotReject(
+            panel.getByText(/Pull Request #\d+ was abandoned \(closed without merging\) for stage/).waitFor({ timeout: 10_000 })
+          )
+          assert.equal(await panel.getByText('Not assigned (pending)').count(), 0)
+          assert.equal(await panel.getByRole('button', { name: 'Check status' }).count(), 1)
           assert.deepEqual(pageErrors, [])
         })
       }
