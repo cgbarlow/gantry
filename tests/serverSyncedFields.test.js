@@ -9,6 +9,7 @@ import { registerInstance } from '../lib/instanceRegistry.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import { createAzureDevOpsPullRequestsClient } from '../lib/azureDevOpsPullRequestsClient.js'
+import { getStageSyncedFields } from '../lib/syncedFields.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
 // HTTP-boundary tests for #111's synced-fields panel routes: GET and PUT
@@ -272,6 +273,47 @@ test('GET synced-fields on a Workspace-backed instance reads the work-item state
           assert.equal(reread.title, 'Custom shape title')
         })
       })
+    }
+  )
+})
+
+test('getStageSyncedFields recovers a Workspace work-item link from another stage branch and writes it back to main', async () => {
+  const workItem = {
+    organization: ORGANIZATION,
+    project: PROJECT,
+    workItemType: 'Task',
+    parentId: 41,
+    stages: { shape: 42, 'hld-define': 43 },
+  }
+  const mainYaml = `definition: design\nslug: ${SLUG}\nstage: shape\n`
+
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      files: { [`/gantry-workspace/${SLUG}/instance.yaml`]: mainYaml },
+    },
+    async (adoBaseUrl) => {
+      const azureDevOps = {
+        organization: ORGANIZATION,
+        project: PROJECT,
+        repository: REPOSITORY,
+        pat: VALID_PAT,
+        baseUrl: adoBaseUrl,
+      }
+      const shapeBranch = `gantry-workspace/${SLUG}/shape`
+      const shapeYaml = `${mainYaml}workItem:\n  organization: ${ORGANIZATION}\n  project: ${PROJECT}\n  workItemType: Task\n  parentId: 41\n  baseUrl: ${adoBaseUrl}\n  stages:\n    shape: 42\n    hld-define: 43\n`
+      const git = createAzureDevOpsClient(azureDevOps)
+      await git.createBranch(shapeBranch, { from: 'main' })
+      await git.writeFile(`gantry-workspace/${SLUG}/instance.yaml`, shapeYaml, { branch: shapeBranch })
+      workItem.baseUrl = adoBaseUrl
+
+      const fields = await getStageSyncedFields(SLUG, { azureDevOps, stageId: 'hld-define' })
+      assert.equal(fields.linked, true)
+      assert.equal(fields.workItemId, 43)
+      assert.deepEqual((await readInstance(SLUG, { azureDevOps })).workItem, workItem)
     }
   )
 })
