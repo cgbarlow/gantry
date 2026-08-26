@@ -288,7 +288,7 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .render-artefact-list .btn.toggled:hover { background: #000; color: #fff; border-color: #000; }
 
 /* Synced-fields panel (#111) — sits at the top of the instance screen, above the modules, so it reads as a header card rather than one more section: a raised box (the only bordered panel on this screen) with its five fields laid out as a wrapping grid, each distinct. */
-.synced-fields-panel { border: var(--border-strong) solid var(--line-strong); background: var(--bg-raised); padding: 16px 20px; margin-bottom: 32px; }
+.synced-fields-panel { border: var(--border-strong) solid var(--line-strong); background: var(--bg-raised); padding: 16px 20px; margin-top: 32px; margin-bottom: 32px; }
 .synced-fields-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 12px; }
 .synced-fields-grid { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; }
 .synced-field { display: flex; flex-direction: column; gap: 4px; min-width: 160px; }
