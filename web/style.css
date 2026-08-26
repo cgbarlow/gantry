@@ -279,6 +279,12 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
  * toolbar's "Render" button. */
 .render-artefact-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .render-artefact-list .btn { width: 100%; margin: 0; text-align: left; }
+/* Deliberately a literal black, not a theme token — a toggled artefact
+ * should read as "selected for this batch" identically in every theme,
+ * not blend into whichever theme's own emphasis color already means
+ * something else (see .btn.active). */
+.render-artefact-list .btn.toggled,
+.render-artefact-list .btn.toggled:hover { background: #000; color: #fff; border-color: #000; }
 
 /* Synced-fields panel (#111) — sits at the top of the instance screen, above the modules, so it reads as a header card rather than one more section: a raised box (the only bordered panel on this screen) with its five fields laid out as a wrapping grid, each distinct. */
 .synced-fields-panel { border: var(--border-strong) solid var(--line-strong); background: var(--bg-raised); padding: 16px 20px; margin-bottom: 32px; }
@@ -570,7 +576,7 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 }
 .field-list input::placeholder { color: var(--text-muted); }
 
-.save-status { font-size: 0.9rem; color: var(--text-muted); min-height: 1.2em; margin-top: 0.5rem; }
+.save-status { font-size: 0.9rem; color: var(--text-muted); min-height: 1.2em; margin-top: 0.5rem; white-space: pre-line; }
 .load-error, .loading { padding-top: 48px; color: var(--text-muted); }
 
 /*

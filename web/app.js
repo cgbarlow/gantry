@@ -1291,24 +1291,43 @@ function AssetLibraryPage() {
 // work-item sync confirm modal above.
 function RenderDialog({ instance, onClose }) {
   const [status, setStatus] = useState('')
-  const [renderingId, setRenderingId] = useState(null)
+  const [selectedIds, setSelectedIds] = useState(new Set())
+  const [rendering, setRendering] = useState(false)
 
-  async function handleRender(artefact) {
-    setRenderingId(artefact.id)
-    setStatus('Rendering…')
+  function toggleArtefact(artefactId) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(artefactId)) next.delete(artefactId)
+      else next.add(artefactId)
+      return next
+    })
+  }
+
+  // Renders every toggled artefact as one batch, sequentially (not
+  // Promise.all) so `status` reports a stable, readable line per artefact
+  // as each finishes rather than a jumble of interleaved updates.
+  async function handleRenderBatch() {
+    const artefacts = instance.artefacts.filter((a) => selectedIds.has(a.id))
+    if (!artefacts.length) return
+    setRendering(true)
+    const lines = []
     // See ModuleCard's handleSave for why `?slug=` is required here now — the same gap, for the module editor's own "Render" action.
     const slug = currentSlug.value
-    const res = await apiFetchForInstance(slug, `/api/instance/render/${artefact.id}?slug=${encodeURIComponent(slug)}`, {
-      method: 'POST',
-    })
-    const body = await res.json()
-    // Azure-DevOps-backed instances report `azureDevOpsPath` (where the pandoc-rendered .docx was pushed back to, in the same repo the rest of the instance's data lives in); local instances report `docxPath` (a path on the machine running `gantry serve`).
-    setStatus(
-      res.ok
-        ? `Rendered to ${body.azureDevOpsPath ?? body.docxPath}`
-        : `Render failed: ${body.message ?? body.error}`
-    )
-    setRenderingId(null)
+    for (const artefact of artefacts) {
+      setStatus([...lines, `Rendering ${artefact.title}…`].join('\n'))
+      const res = await apiFetchForInstance(slug, `/api/instance/render/${artefact.id}?slug=${encodeURIComponent(slug)}`, {
+        method: 'POST',
+      })
+      const body = await res.json()
+      // Azure-DevOps-backed instances report `azureDevOpsPath` (where the pandoc-rendered .docx was pushed back to, in the same repo the rest of the instance's data lives in); local instances report `docxPath` (a path on the machine running `gantry serve`).
+      lines.push(
+        res.ok
+          ? `${artefact.title}: rendered to ${body.azureDevOpsPath ?? body.docxPath}`
+          : `${artefact.title}: render failed — ${body.message ?? body.error}`
+      )
+      setStatus(lines.join('\n'))
+    }
+    setRendering(false)
   }
 
   useEffect(() => {
@@ -1331,11 +1350,12 @@ function RenderDialog({ instance, onClose }) {
                     <li key=${artefact.id}>
                       <button
                         type="button"
-                        class="btn"
-                        disabled=${renderingId === artefact.id}
-                        onClick=${() => handleRender(artefact)}
+                        class="btn ${selectedIds.has(artefact.id) ? 'toggled' : ''}"
+                        aria-pressed=${selectedIds.has(artefact.id)}
+                        disabled=${rendering}
+                        onClick=${() => toggleArtefact(artefact.id)}
                       >
-                        ${renderingId === artefact.id ? 'Rendering…' : artefact.title}
+                        ${artefact.title}
                       </button>
                     </li>
                   `
@@ -1345,7 +1365,14 @@ function RenderDialog({ instance, onClose }) {
           : html`<p class="guidance">This stage has no artefacts to render yet.</p>`}
         <div class="save-status">${status}</div>
         <div class="modal-actions">
-          <button type="button" class="btn ghost" onClick=${onClose}>Close</button>
+          <button
+            type="button"
+            class="btn primary"
+            disabled=${rendering || selectedIds.size === 0}
+            onClick=${handleRenderBatch}
+          >
+            ${rendering ? 'Rendering…' : 'Render'}
+          </button>
         </div>
       </div>
     </div>
