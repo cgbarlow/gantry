@@ -915,12 +915,14 @@ function ListField({ field, onRegister, onRemove }) {
           (value, i) => html`
             <div class="list-row" key=${i}>
               <input type="text" value=${value} onInput=${(e) => updateRow(i, e.currentTarget.value)} />
-              <button type="button" class="btn small" onClick=${() => removeRow(i)}>Remove</button>
+              ${viewMode.value !== 'rendered'
+                ? html`<button type="button" class="btn small" onClick=${() => removeRow(i)}>Remove</button>`
+                : null}
             </div>
           `
         )}
       </div>
-      <button type="button" class="btn small" onClick=${addRow}>Add</button>
+      ${viewMode.value !== 'rendered' ? html`<button type="button" class="btn small" onClick=${addRow}>Add</button>` : null}
     </div>
   `
 }
@@ -1053,7 +1055,9 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
             />`
       })}
       <div class="save-status">${status}</div>
-      <button type="button" class="btn primary" onClick=${handleSave}>Save ${mod.title}</button>
+      ${viewMode.value !== 'rendered'
+        ? html`<button type="button" class="btn primary" onClick=${handleSave}>Save ${mod.title}</button>`
+        : null}
       ${imageFieldId !== null
         ? html`<${AssetInsertModal} onInsert=${handleInsertImage} onClose=${() => setImageFieldId(null)} />`
         : null}
@@ -1444,6 +1448,20 @@ function RenderDialog({ instance, onClose }) {
 }
 
 // ---------- Synced-fields panel (#111) ----------
+// Helpers for persistent hyperlinks (WI155) — built from the persisted instance record (org/project/repo + PR id, correct org) so links survive reload.
+function prWebUrlFor(instance, prId) {
+  const ws = instance.workspace
+  if (!ws || !prId) return null
+  const base = ws.baseUrl ?? 'https://dev.azure.com'
+  return `${base}/${encodeURIComponent(ws.organization)}/${encodeURIComponent(ws.project)}/_git/${encodeURIComponent(ws.repository)}/pullrequest/${prId}`
+}
+
+function workItemWebUrlFor(workItem, wiId) {
+  if (!workItem || !wiId) return null
+  const base = workItem.baseUrl ?? 'https://dev.azure.com'
+  return `${base}/${encodeURIComponent(workItem.organization)}/${encodeURIComponent(workItem.project)}/_workitems/edit/${wiId}`
+}
+
 // A new panel at the top of the instance screen (above the modules — see
 // StageScreen) showing the current stage's synced fields, each its own
 // distinct field rather than collapsed together: the work item type
@@ -1593,13 +1611,27 @@ function SyncedFieldsPanel({ instance }) {
         </div>
         <div class="synced-field">
           <span class="field-label">Status</span>
-          <span class="synced-value">${data.workItemId ? html`#${data.workItemId} · ${data.workItemState ?? '—'}` : '—'}</span>
+          <span class="synced-value"
+            >${data.workItemId
+              ? (() => {
+                  const wiUrl = workItemWebUrlFor(instance.workItem, data.workItemId)
+                  return wiUrl
+                    ? html`<a href=${wiUrl} target="_blank" rel="noreferrer">#${data.workItemId}</a> · ${data.workItemState ?? '—'}`
+                    : html`#${data.workItemId} · ${data.workItemState ?? '—'}`
+                })()
+              : '—'}</span
+          >
         </div>
         <div class="synced-field synced-field-wide">
           <span class="field-label">Pull request</span>
           <span class="synced-value">
             ${pr
-              ? html`#${pr.id} — ${pr.status}${pr.reviewState !== 'pending' ? ` (${pr.reviewState})` : ''}`
+              ? (() => {
+                  const prUrl = prWebUrlFor(instance, pr.id)
+                  return prUrl
+                    ? html`<a href=${prUrl} target="_blank" rel="noreferrer">#${pr.id}</a> — ${pr.status}${pr.reviewState !== 'pending' ? ` (${pr.reviewState})` : ''}`
+                    : html`#${pr.id} — ${pr.status}${pr.reviewState !== 'pending' ? ` (${pr.reviewState})` : ''}`
+                })()
               : 'No pull request open'}
           </span>
         </div>
@@ -1931,15 +1963,25 @@ function RequestApprovalPanel({ instance }) {
     }
   }
 
+  // Persistent hyperlink built from the persisted PR record (org/project/repo + PR id) — survives reload with the correct org (WI155). `justOpened.webUrl` is the transient server-built URL right after creation; fallback builds from `instance.workspace` so reloads still link.
+  const prUrl = justOpened?.webUrl ?? prWebUrlFor(instance, openPullRequestId)
+  const stageWorkItemId = instance.workItem?.stages?.[stageId]
+  const wiUrl = workItemWebUrlFor(instance.workItem, stageWorkItemId)
+
   return html`
-    <section class="request-approval-panel">
+    <section id="request-approval-panel" class="request-approval-panel">
       <h2>Request approval</h2>
       ${openPullRequestId
         ? html`
             <p>
-              Pull Request #${openPullRequestId} is open, requesting approval for stage "${instance.stage.title}".
-              ${justOpened?.webUrl
-                ? html`<a href=${justOpened.webUrl} target="_blank" rel="noreferrer">Open in Azure DevOps</a>`
+              ${prUrl
+                ? html`<a href=${prUrl} target="_blank" rel="noreferrer">Pull Request #${openPullRequestId}</a>`
+                : html`Pull Request #${openPullRequestId}`}
+              is open, requesting approval for stage "${instance.stage.title}".
+              ${stageWorkItemId
+                ? wiUrl
+                  ? html` · Work item <a href=${wiUrl} target="_blank" rel="noreferrer">#${stageWorkItemId}</a>`
+                  : html` · Work item #${stageWorkItemId}`
                 : null}
             </p>
             <div class="request-approval-review">
@@ -2038,20 +2080,52 @@ function ViewModeToolbar({ instance, onClearAllFields, requestApprovalSlug }) {
   }, [])
 
   function scrollToApprovalPanel() {
-    const panel = document.querySelector('.request-approval-panel')
+    const panel =
+      document.getElementById('request-approval-panel') ?? document.querySelector('.request-approval-panel')
     if (!panel) return
-    panel.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    // Flash the panel with a brief background highlight so the user's eye is drawn down
-    panel.classList.remove('flash')
-    // Force a reflow so removing then adding the class triggers a fresh animation
-    void panel.offsetHeight
-    panel.classList.add('flash')
-    // Remove the class after the animation completes so re-clicking re-triggers
-    const onEnd = () => {
+
+    function triggerFlash() {
       panel.classList.remove('flash')
-      panel.removeEventListener('animationend', onEnd)
+      // Force a reflow so removing then adding the class triggers a fresh animation
+      void panel.offsetHeight
+      panel.classList.add('flash')
+      // Remove the class after the animation completes so re-clicking re-triggers and it is not persistent
+      const onEnd = () => {
+        panel.classList.remove('flash')
+        panel.removeEventListener('animationend', onEnd)
+      }
+      panel.addEventListener('animationend', onEnd)
     }
-    panel.addEventListener('animationend', onEnd)
+
+    // Sequence flash after scroll settles: prefer the `scrollend` event, fall back to a timeout
+    // (~300 ms, the typical smooth-scroll duration). Must also flash when already in view
+    // (where no scroll occurs and `scrollend` may never fire), so the timeout is always armed
+    // as a fallback and the flash is one-shot.
+    let didFlash = false
+    function doFlashOnce() {
+      if (didFlash) return
+      didFlash = true
+      triggerFlash()
+    }
+
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' })
+
+    let fallbackTimer = null
+    const onScrollEnd = () => {
+      window.removeEventListener('scrollend', onScrollEnd)
+      document.removeEventListener('scrollend', onScrollEnd)
+      if (fallbackTimer) clearTimeout(fallbackTimer)
+      doFlashOnce()
+    }
+
+    if ('onscrollend' in window) {
+      window.addEventListener('scrollend', onScrollEnd, { once: true })
+      document.addEventListener('scrollend', onScrollEnd, { once: true })
+      // Fallback if scrollend never fires (e.g. already in view or no scroll distance)
+      fallbackTimer = setTimeout(onScrollEnd, 400)
+    } else {
+      fallbackTimer = setTimeout(doFlashOnce, 300)
+    }
   }
 
   return html`
@@ -2181,6 +2255,10 @@ function InstanceSwitcher({ slug }) {
   const currentGroup = groups.find((group) => group.instances.some((inst) => inst.slug === slug)) ?? null
   const siblings = currentGroup ? currentGroup.instances.filter((inst) => inst.slug !== slug) : []
   const otherGroups = groups.filter((group) => group.key !== currentGroup?.key)
+  const workspaceId = isWorkspaceGroup(currentGroup)
+    ? (currentGroup.instances[0]?.workspace?.id ?? currentGroup.key.replace(/^workspace:/, ''))
+    : null
+  const newInstanceHref = workspaceId ? `/new-instance?workspace=${encodeURIComponent(workspaceId)}` : '/new-instance'
 
   function renderInstanceLink(inst) {
     return html`
@@ -2209,6 +2287,7 @@ function InstanceSwitcher({ slug }) {
                 : isWorkspaceGroup(currentGroup)
                   ? html`<p class="switcher-empty">No other instances in this workspace.</p>`
                   : html`<p class="switcher-empty">No other instances — not part of a workspace.</p>`}
+              <a class="switcher-escape" href=${newInstanceHref} onClick=${() => setOpen(false)}>+ New Instance</a>
               ${otherGroups.length > 0
                 ? html`
                     <button
@@ -2432,7 +2511,7 @@ async function runRender(slug) {
 
 // Persists the instance record's own stored `assignee` (#97) — the instance detail pane's edit affordance for it, distinct from `PUT /api/instance/modules/:id`'s module-level `owner` (the untouched Design Authority sign-off convention). Not routed through ModuleCard's per-module save flow: this is instance-scoped, not module-scoped.
 async function saveAssignee(slug, assignee) {
-  const res = await apiFetch(`/api/instance/assignee?slug=${encodeURIComponent(slug)}`, {
+  const res = await apiFetchForInstance(slug, `/api/instance/assignee?slug=${encodeURIComponent(slug)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ assignee }),
@@ -2834,6 +2913,7 @@ function App() {
       <${Router}>
         <${Route} path="/instance/:slug" component=${ModuleEditorPage} />
         <${Route} path="/new-workspace" component=${NewWorkspaceWizardPage} />
+        <${Route} path="/new-instance" component=${NewWorkspaceWizardPage} />
         <${Route} path="/assets" component=${AssetLibraryPage} />
         <${Route} path="/settings" component=${GlobalSettingsPage} />
         <${Route} path="/settings/workspace" component=${WorkspaceSettingsPage} />

@@ -19,6 +19,25 @@ template doesn't already have one named the same.
 
 Usage:
     python3 build-reference-doc.py <source-hld.docx> <output-reference.docx>
+
+Post-WI153: the `design` definition no longer shares one `reference.docx`
+across all five artefacts. The render pipeline (lib/render.js) resolves
+the reference doc by artefact first (`reference-<artefact>.docx`) with a
+fallback to `reference.docx`. `reference-hld.docx` retains the original
+TAC footer ("Technical Architecture Committee – High Level Solution
+Design") — correct for HLD. `reference-soap.docx` and
+`reference-as-built.docx` have that committee line removed (no committee
+footer — SOAP is Business Case, as-built is "for noting"). `reference-sad.docx`
+and `reference-ssad.docx` are also stripped of the HLD footer but kept
+as distinct files with a placeholder comment pending the ARB/TAC vs
+Design Authority decision — so that decision can land as a docx-only
+edit without further code changes.
+
+To regenerate after updating the source HLD template:
+    python3 build-reference-doc.py <source-hld.docx> definitions/design/templates/reference.docx
+    # then re-derive the artefact variants (see inline patch_footer in the
+    # WI153 fix commit for the footer-stripping logic, or simply re-run the
+    # generation snippet from that commit's message).
 """
 
 import shutil

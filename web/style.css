@@ -168,6 +168,7 @@ header {
   color: var(--text-muted);
   cursor: pointer;
   font-family: var(--font-body);
+  text-decoration: none;
 }
 .instance-switcher .switcher-escape:hover,
 .instance-switcher .switcher-back:hover { color: var(--text); background: var(--bg); }
@@ -310,12 +311,15 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .request-approval-commits li { display: flex; gap: 12px; justify-content: space-between; margin: 4px 0; }
 .request-approval-commits time { color: var(--text-muted); white-space: nowrap; }
 
-/* Flash highlight animation (#145 Part 1) — brief background pulse on the
+/* Flash highlight animation (WI154, #145 Part 1) — brief background pulse on the
    request-approval panel when the view-bar button scrolls to it, giving the
-   user a visual anchor. The flash cycles through three half-opacity pulses
-   of the raised background, then holds transparent — enough to catch the
-   eye without lingering. `prefers-reduced-motion` (above, line 98) kills
-   the animation entirely, leaving the panel simply scrolled-into-view. */
+   user a visual anchor. Triggered sequenced *after* the smooth scroll settles
+   (via `scrollend` or a ~300 ms timeout fallback) so the eye catches it at
+   rest; one-shot and self-clearing via `animationend` so it never persists,
+   and still fires when the panel is already in view. The flash cycles through
+   pulses of the raised background, then holds transparent. `prefers-reduced-motion`
+   (above, line 98) kills the animation entirely, leaving the panel simply
+   scrolled-into-view. */
 @keyframes panel-flash {
   0%   { background: var(--bg-raised); }
   33%  { background: transparent; }

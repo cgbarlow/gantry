@@ -105,7 +105,25 @@ effect(() => {
   }
 })
 
+// Pre-scoped workspace via ?workspace=<id> (from the Switch-instance menu's
+// "+ New Instance" link, WI151) — once the workspace list loads, resolve
+// the id and advance straight to the instance step so the architect never
+// has to re-pick the workspace they were already viewing.
+const preselectedWorkspaceId = signal(null)
+effect(() => {
+  const id = preselectedWorkspaceId.value
+  const list = workspaces.value
+  if (!id || !list || selectedWorkspace.value) return
+  const found = list.find((w) => w.id === id)
+  if (found) {
+    pickedWorkspaceId.value = found.id
+    selectedWorkspace.value = found
+    step.value = 'instance'
+  }
+})
+
 function resetWizard() {
+  preselectedWorkspaceId.value = null
   workspaceMode.value = 'pick'
   workspaces.value = null
   workspacesLoadError.value = ''
@@ -667,6 +685,12 @@ function DoneStep() {
 
 export function NewWorkspaceWizardPage() {
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const ws = params.get('workspace')
+    if (ws) {
+      preselectedWorkspaceId.value = ws
+      if (workspaces.value === null) loadWorkspaces()
+    }
     fetch('/api/definitions')
       .then((res) => res.json())
       .then((body) => {
