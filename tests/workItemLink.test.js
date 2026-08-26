@@ -66,6 +66,16 @@ test('linkInstanceToWorkItem creates one child work item per definition stage, u
       assert.deepEqual(Object.keys(workItem.stages).sort(), ['detailed-design', 'handover', 'hld-define', 'shape'])
       assert.equal(typeof workItem.stages.shape, 'number')
 
+      const client = createAzureDevOpsWorkItemsClient({ organization: WI_ORGANIZATION, project: WI_PROJECT, pat: VALID_PAT, baseUrl })
+      const shapeChild = await client.getWorkItem(workItem.stages.shape)
+      assert.equal(
+        shapeChild.fields['System.Description'],
+        'Tracks the "Shape" stage (stage "shape", gate "business-case") of gantry instance "my-initiative".\n\n' +
+          'Artefacts for this stage:\n' +
+          '- Solution on a Page\n' +
+          '- Full Solution on a Page'
+      )
+
       // Recorded on instance.yaml — readInstance sees it directly.
       const instance = readInstance('my-initiative', { instancesDir })
       assert.deepEqual(instance.workItem, workItem)
