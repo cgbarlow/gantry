@@ -1,0 +1,80 @@
+# <%~ it.instance.slug %>: Full Solution on a Page
+
+## Metadata
+
+| Field | Value |
+| --- | --- |
+| Epic/Project | <%~ it.modules['soap-full-details']['epic-project'] %> |
+| Requested/lead by | <%~ it.modules['soap-full-details']['requested-lead-by'] %> |
+| Request date | <%~ it.modules['soap-full-details']['request-date'] %> |
+| Draft agreed date | <%~ it.modules['soap-full-details']['draft-agreed-date'] %> |
+| SOAP/estimate delivered date | <%~ it.modules['soap-full-details']['delivered-date'] %> |
+
+# Introduction
+
+## Problem statement
+
+<%~ it.modules.context.driver %>
+
+# Opportunity
+
+<%~ it.modules.context.opportunity %>
+
+# In Scope
+
+<%~ it.modules.context['in-scope'] %>
+
+# Out of Scope
+
+<%~ it.modules.context['out-of-scope'] %>
+
+# High Level Requirements
+
+<%~ it.modules['solution-definition']['high-level-requirements'] %>
+
+# High level solution overview
+
+<%~ it.modules['solution-definition']['high-level-solution-design'] %>
+
+# Teams required
+
+<% it.modules['team-and-estimates']['teams-and-contacts'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+# Dependencies
+
+<%~ it.modules.dependencies['dependencies-overview'] %>
+
+# Assumptions
+
+<%~ it.modules['solution-definition']['assumptions-and-considerations'] %>
+
+# Estimates
+
+<%~ it.modules['team-and-estimates'].estimates %>
+
+# Sequencing
+
+_Note: sequencing is a possible example based on timeframes estimated for each piece of this work. It does not represent capacity available to do this work and will need to be re-planned prior to development beginning._
+
+<%~ it.modules['soap-full-details'].sequencing %>
+
+# Questions
+
+<%~ it.modules['soap-full-details'].questions %>
+
+# Caveats
+
+- This is high level estimate based on the information and requirements collated above
+- The requirements may not have been sufficient to do more accurate estimates
+- The actual effort will differ once the IT requirements are elaborated
+- Timeframes are dependent on PI prioritisation and detailed requirements
+- Some of the changes may be able to be done incrementally
+- Architectural council recommendations may impact the options and their costings
+- Resource allocation depends on PEC prioritisation, PI planning and resource availability
+- Cost is based on full AST team allocation (unless using a story point estimate)
+
+# References
+
+<% it.modules['team-and-estimates'].references.forEach(function(item) { %>- <%~ item %>
+<% }) %>

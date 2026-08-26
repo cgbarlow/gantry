@@ -57,6 +57,7 @@ async function fillShapeStage(azureDevOps, branch) {
     const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
     await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
   }
+  await client.writeFile(`gantry-workspace/${SLUG}/out/soap.docx`, 'rendered soap', { branch })
 }
 
 async function castVote(adoBaseUrl, pullRequestId, vote) {

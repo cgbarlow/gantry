@@ -30,6 +30,38 @@ test('dry-run compiles the template without writing anything, with no HTML-entit
   assert.doesNotMatch(result.markdown, /&#39;|&quot;|&amp;/)
 })
 
+test('renders the Full SOAP with the reference sections, metadata, static caveats, and markdown tables', () => {
+  const result = renderArtefact('examples', 'soap-full')
+  assert.equal(existsSync(result.docxPath), true)
+  assert.match(result.markdown, /# Introduction\n\n## Problem statement/)
+  for (const heading of [
+    'Opportunity',
+    'In Scope',
+    'Out of Scope',
+    'High Level Requirements',
+    'High level solution overview',
+    'Teams required',
+    'Dependencies',
+    'Assumptions',
+    'Estimates',
+    'Sequencing',
+    'Questions',
+    'Caveats',
+    'References',
+  ]) {
+    assert.match(result.markdown, new RegExp(`# ${heading}`))
+  }
+  assert.match(result.markdown, /\| Section \| Requirement \|/)
+  assert.match(result.markdown, /\| Requirement \| Team \| Estimate \| Notes \|/)
+  assert.match(result.markdown, /Cost is based on full AST team allocation/)
+
+  const roundTrip = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown', result.docxPath], { encoding: 'utf8' })
+  assert.match(roundTrip, /Full Solution on a Page/)
+  assert.match(roundTrip, /High Level Requirements/)
+  assert.match(roundTrip, /SOAP\/estimate delivered date/)
+  assert.match(roundTrip, /Cost is based on full AST team allocation/)
+})
+
 test('renders a real docx styled from the HLD reference doc', () => {
   const result = renderArtefact('examples', 'soap')
   assert.equal(existsSync(result.docxPath), true)
@@ -340,7 +372,7 @@ test('a render against Azure DevOps reads instance/module data from, and pushes 
 
 // ---------- renderStageArtefacts (#123): render-to-branch on every save ----------
 
-// The Detailed Design stage's own two artefacts (sad/ssad) share the exact same `requires` list (docs/adr/0001) — a real multi-artefact stage, unlike Shape's single "soap", so these tests can prove renderStageArtefacts handles more than one artefact per gate without a bespoke fixture.
+// The Detailed Design stage's own two artefacts (sad/ssad) share the exact same `requires` list (docs/adr/0001), while Shape now has two SOAP variants with different requirements.
 function seedDetailedDesignAzureDevOpsFiles() {
   return {
     '/gantry-workspace/examples/instance.yaml': 'definition: design\nslug: examples\nstage: detailed-design\n',
@@ -416,11 +448,9 @@ test('renderStageArtefacts reports an artefact as skipped, not failed, when its 
 
       const results = await renderStageArtefacts('examples', definition, stage, { azureDevOps })
 
-      assert.equal(results.length, 1)
-      assert.equal(results[0].artefactId, 'soap')
-      assert.equal(results[0].rendered, false)
-      assert.equal(results[0].skipped, true)
-      assert.match(results[0].reason, /has no saved data/)
+      assert.deepEqual(results.map((result) => result.artefactId), ['soap', 'soap-full'])
+      assert.ok(results.every((result) => result.rendered === false && result.skipped === true))
+      assert.ok(results.every((result) => /has no saved data/.test(result.reason)))
 
       // Nothing was ever pushed for an artefact that couldn't be rendered.
       const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl })
@@ -480,10 +510,10 @@ test('renderStageArtefacts only considers artefacts belonging to the given stage
 
       const results = await renderStageArtefacts('examples', definition, stage, { azureDevOps })
 
-      // Only "soap" belongs to the "business-case" gate the Shape stage closes on — "hld"/"sad"/"ssad"/"as-built" all belong to later stages' gates and must never be attempted here.
+      // Both SOAP variants belong to the "business-case" gate the Shape stage closes on — "hld"/"sad"/"ssad"/"as-built" all belong to later stages' gates and must never be attempted here.
       assert.deepEqual(
         results.map((r) => r.artefactId),
-        ['soap']
+        ['soap', 'soap-full']
       )
     }
   )

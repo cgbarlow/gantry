@@ -20,7 +20,7 @@ fields:
   - id: dependencies-overview
     title: Dependencies overview
     type: markdown
-    required-at: [hld-tac-approved]
+    required-at: [business-case, hld-tac-approved]
     guidance: >
       What this solution depends on, and what depends on it — other
       initiatives, platforms, teams, or decisions still in flight. Enough

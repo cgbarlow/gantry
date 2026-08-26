@@ -145,6 +145,7 @@ gantry/
 │       │   └── ...
 │       └── templates/            # artefact templates
 │           ├── soap.md.tmpl
+│           ├── soap-full.md.tmpl
 │           └── reference.docx    # pandoc --reference-doc, derived from the real HLD template
 ├── instances/
 │   ├── instance-registry.json    # slug -> workspace/location map, gitignored

@@ -286,7 +286,7 @@ test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance also
     const body = await res.json()
     assert.deepEqual(
       body.rendered.map((r) => r.artefactId),
-      ['soap']
+      ['soap', 'soap-full']
     )
     assert.equal(body.rendered[0].rendered, true)
     assert.equal(body.rendered[0].azureDevOpsPath, 'gantry-workspace/my-initiative/out/soap.docx')
@@ -314,7 +314,7 @@ test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance stil
     assert.ok(body.modules.find((m) => m.id === 'context'))
     assert.deepEqual(
       body.rendered.map((r) => r.artefactId),
-      ['soap']
+      ['soap', 'soap-full']
     )
     assert.equal(body.rendered[0].rendered, false)
     assert.equal(body.rendered[0].skipped, true)

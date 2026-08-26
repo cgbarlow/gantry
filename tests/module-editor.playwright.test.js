@@ -179,7 +179,7 @@ test('the 3-way view-mode toggle switches modes, cycles via hotkey, stays global
   }
 })
 
-// Coverage for #114 — "Clear all fields" and the Render dialog, both moved into the view-toggle bar: a single "Render" button (replacing the old one-button-per-artefact layout) opens a dialog listing every artefact the current stage can produce, using the same dialog for a single-artefact stage (Shape -> soap) as for a multi-artefact one (Detailed Design -> sad/ssad) — not a special case per artefact count.
+// Coverage for #114 — "Clear all fields" and the Render dialog, both moved into the view-toggle bar: a single "Render" button (replacing the old one-button-per-artefact layout) opens a dialog listing every artefact the current stage can produce, using the same dialog for Shape's two SOAP variants and Detailed Design's sad/ssad pair.
 test('Render and Clear all fields live in the view-toggle bar; Render opens a dialog listing every artefact for the current stage', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
@@ -209,14 +209,17 @@ test('Render and Clear all fields live in the view-toggle bar; Render opens a di
         assert.equal(await page.locator('.artefacts').count(), 0, 'the old per-artefact section must be gone')
         assert.equal(await page.locator('.stage-actions').count(), 0, 'the old separate stage-actions bar must be gone')
 
-        // Shape stage (the default) produces exactly one artefact (soap) — the dialog lists it via the same button/dialog pattern as a multi-artefact stage, checked further down.
+        // Shape stage (the default) produces both SOAP variants.
         await renderButton.click()
         const dialog = page.locator('.modal', { hasText: 'Render' })
         await dialog.waitFor({ state: 'visible', timeout: 5_000 })
-        assert.deepEqual(await dialog.locator('.render-artefact-list button').allTextContents(), ['Solution on a Page'])
+        assert.deepEqual(
+          await dialog.locator('.render-artefact-list button').allTextContents(),
+          ['Solution on a Page', 'Full Solution on a Page']
+        )
 
         // The per-artefact button toggles selection — it does not render immediately.
-        const soapToggle = dialog.getByRole('button', { name: 'Solution on a Page' })
+        const soapToggle = dialog.getByRole('button', { name: 'Solution on a Page', exact: true })
         await soapToggle.click()
         assert.equal(await soapToggle.evaluate((el) => el.classList.contains('toggled')), true)
 
@@ -349,10 +352,10 @@ test("each markdown field has an Insert ▾ dropdown whose Image flow uploads, i
         const contextModule = page.locator('.module').first()
         await assert.doesNotReject(contextModule.locator('h2', { hasText: 'Context' }).waitFor({ timeout: 2_000 }))
 
-        // The old single affordance is gone; each of the context module's two markdown fields has its own generic dropdown instead.
+        // The old single affordance is gone; each of the context module's four markdown fields has its own generic dropdown instead.
         assert.equal(await page.getByRole('button', { name: '+ Insert asset' }).count(), 0)
         const triggers = contextModule.getByRole('button', { name: 'Insert ▾' })
-        assert.equal(await triggers.count(), 2)
+        assert.equal(await triggers.count(), 4)
         const firstTrigger = triggers.nth(0)
 
         // Hidden once the screen switches to Rendered-only view (that view is read-only).
@@ -425,7 +428,7 @@ test("each markdown field has an Insert ▾ dropdown whose Image flow uploads, i
         await page.waitForSelector('text=Saved', { timeout: 5_000 })
 
         // Asset library screen: the inserted asset shows USED IN >= 1; uploading one more, never referenced, shows UNUSED. Navigated to directly — the toolbar's "View asset library" link was removed as redundant once assets are insertable inline from the editor.
-        await page.goto(`${base}/assets`)
+        await page.goto(`${base}/assets?slug=examples`)
         await page.waitForSelector('.asset-library', { timeout: 10_000 })
         assert.equal(await page.locator('.asset-library h1').textContent(), 'Image library')
         const usedCard = page.locator('.lib-grid .card', { hasText: 'eligibility-flow.png' })
@@ -441,7 +444,7 @@ test("each markdown field has an Insert ▾ dropdown whose Image flow uploads, i
     const definition = loadDefinition('design')
     const data = readModule(definition, 'examples', 'context', { instancesDir })
     assert.match(data.fields.driver, /asset:/)
-    assert.match(data.fields['out-of-scope'], /asset:/)
+    assert.match(data.fields.opportunity, /asset:/)
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }
@@ -830,9 +833,9 @@ test('Insert ▾ → Section adds a titled custom field below the requesting fie
         const titles = await contextModule.locator('.field > label').allTextContents()
         assert.deepEqual(
           titles.map((t) => t.replace(/ \*$/, '')),
-          ['Business driver', 'Risks we carry', 'Affected domains', 'Explicitly out of scope']
+          ['Business driver', 'Risks we carry', 'Affected domains', 'Opportunity', 'In scope', 'Explicitly out of scope']
         )
-        assert.equal(await contextModule.getByRole('button', { name: 'Insert ▾' }).count(), 3)
+        assert.equal(await contextModule.getByRole('button', { name: 'Insert ▾' }).count(), 5)
 
         // Type into the new block, then save everything to disk.
         const newField = contextModule.locator('.field-markdown').nth(1)
@@ -861,6 +864,8 @@ test('Insert ▾ → Section adds a titled custom field below the requesting fie
       { field: 'driver' },
       { custom: { id: 'custom:risks-we-carry', title: 'Risks we carry', value: 'The June deadline.' } },
       { field: 'affected-domains' },
+      { field: 'opportunity' },
+      { field: 'in-scope' },
       { field: 'out-of-scope' },
     ])
   } finally {

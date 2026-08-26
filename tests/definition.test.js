@@ -12,11 +12,17 @@ test('loads the real design definition', () => {
   assert.equal(design.stages.length, 4)
 
   const shape = design.stages.find((stage) => stage.id === 'shape')
-  assert.deepEqual(shape.modules, ['context', 'solution-definition', 'team-and-estimates'])
+  assert.deepEqual(shape.modules, ['context', 'solution-definition', 'team-and-estimates', 'dependencies', 'soap-full-details'])
   assert.equal(shape.example, 'examples')
 
   const soap = design.artefacts.find((artefact) => artefact.id === 'soap')
   assert.deepEqual(soap.requires, ['context', 'solution-definition', 'team-and-estimates'])
+
+  const soapFull = design.artefacts.find((artefact) => artefact.id === 'soap-full')
+  assert.equal(soapFull.template, 'templates/soap-full.md.tmpl')
+  assert.ok(soapFull.requires.includes('context.opportunity'))
+  assert.ok(soapFull.requires.includes('solution-definition.high-level-requirements'))
+  assert.ok(soapFull.requires.includes('soap-full-details.sequencing'))
 
   const context = design.modules.get('context')
   assert.equal(context.title, 'Context')
@@ -27,7 +33,7 @@ test('loads the real design definition', () => {
   // dependencies uses required-at, not required, at the field level
   const dependencies = design.modules.get('dependencies')
   const overview = dependencies.fields.find((field) => field.id === 'dependencies-overview')
-  assert.deepEqual(overview.requiredAt, ['hld-tac-approved'])
+  assert.deepEqual(overview.requiredAt, ['business-case', 'hld-tac-approved'])
 })
 
 function withScratchDefinition(fn) {

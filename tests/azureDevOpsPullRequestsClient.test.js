@@ -140,6 +140,27 @@ test('getPullRequest reads back a rejected reviewer vote, distinguishable from a
   })
 })
 
+test('getPullRequestCommits returns the source branch history, and reviewer vote reset plus comments use their PR endpoints', async () => {
+  await withFakeServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: { '/initial.md': 'initial\n' } },
+    async (baseUrl) => {
+    const c = client(baseUrl)
+    await c.createPullRequest({ sourceBranch: 'main', targetBranch: 'main', title: 'History' })
+    const commits = await c.getPullRequestCommits(1)
+    assert.equal(commits.length, 1)
+    assert.equal(commits[0].comment, 'Initial repository content')
+
+    await castVote(baseUrl, 1, 'owner-1', 10)
+    const reset = await c.updateReviewerVote(1, 'owner-1', 0)
+    assert.equal(reset.vote, 0)
+    assert.equal(reset.voteUpdatedDate !== undefined, true)
+
+    const comment = await c.commentOnPullRequest(1, 'Please review the new commit.')
+    assert.equal(comment.comments[0].content, 'Please review the new commit.')
+    },
+  )
+})
+
 test('completePullRequest merges an approved pull request, threading through the current lastMergeSourceCommit', async () => {
   await withFakeAzureDevOpsServer(async (baseUrl) => {
     const c = client(baseUrl)

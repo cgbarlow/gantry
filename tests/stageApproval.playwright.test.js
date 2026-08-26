@@ -57,6 +57,7 @@ async function fillShapeStage(azureDevOps, branch) {
     const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
     await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
   }
+  await client.writeFile(`gantry-workspace/${SLUG}/out/soap.docx`, 'rendered soap', { branch })
 }
 
 // Casts the Owner's reviewer vote directly against the fake Azure DevOps
@@ -75,7 +76,7 @@ async function castVote(adoBaseUrl, pullRequestId, vote) {
   assert.equal(res.status, 200)
 }
 
-function withRemoteInstance(fn) {
+function withRemoteInstance(fn, serverOverrides = {}) {
   return withFakeAzureDevOpsServer(
     {
       organization: ORGANIZATION,
@@ -83,6 +84,7 @@ function withRemoteInstance(fn) {
       repository: REPOSITORY,
       validPat: VALID_PAT,
       files: { [`/gantry-workspace/${SLUG}/instance.yaml`]: `definition: design\nslug: ${SLUG}\nstage: shape\n` },
+      ...serverOverrides,
     },
     async (adoBaseUrl) => {
       await withScratchInstances(async (instancesDir) => {
@@ -321,5 +323,43 @@ test('Check status reports pending, then rejection, then approval — merging an
         })
       }
     )
+  })
+})
+
+test('a post-approval commit changes the panel to Request approval again, and resetting restores Check status', async () => {
+  await withRemoteInstance(async ({ adoBaseUrl, instancesDir }) => {
+    const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl }
+    const branch = await resolveStageBranch(azureDevOps, definition, SLUG, SHAPE.id)
+    await fillShapeStage(azureDevOps, branch)
+
+    await withRunningServer({ instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+      await withRunningBrowser(async (browser) => {
+        const page = await browser.newPage()
+        await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+        await page.goto(`${base}/instance/${SLUG}`)
+
+        const panel = page.locator('.request-approval-panel')
+        await panel.getByRole('button', { name: 'Request approval' }).click()
+        await panel.locator('.modal[aria-label="Confirm request approval"]').getByRole('button', { name: 'Confirm & request approval' }).click()
+        await panel.getByRole('button', { name: 'Check status' }).waitFor({ timeout: 10_000 })
+        const prId = Number((await panel.locator('text=/Pull Request #(\\d+)/').first().textContent()).match(/#(\d+)/)[1])
+
+        await castVote(adoBaseUrl, prId, 10)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        await createAzureDevOpsClient(azureDevOps).writeFile(
+          `gantry-workspace/${SLUG}/modules/context.md`,
+          `${readFileSync(join('instances', 'examples', 'modules', 'context.md'), 'utf8')}\nPost-approval browser edit.\n`,
+          { branch, message: 'Post-approval browser edit' },
+        )
+
+        await panel.getByRole('button', { name: 'Check status' }).click()
+        await panel.getByRole('button', { name: 'Request approval again' }).waitFor({ timeout: 10_000 })
+        assert.equal(await panel.locator('.request-approval-commits').getByText('Post-approval browser edit').count(), 1)
+
+        await panel.getByRole('button', { name: 'Request approval again' }).click()
+        await panel.getByRole('button', { name: 'Check status' }).waitFor({ timeout: 10_000 })
+        await assert.doesNotReject(panel.locator('text=Approval withdrawn from Pull Request').waitFor({ timeout: 10_000 }))
+      })
+    })
   })
 })

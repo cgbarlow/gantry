@@ -46,6 +46,7 @@ async function fillShapeStage(azureDevOps, branch) {
     const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
     await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
   }
+  await client.writeFile(`gantry-workspace/${SLUG}/out/soap.docx`, 'rendered soap', { branch })
 }
 
 async function castVote(adoBaseUrl, pullRequestId, vote) {
@@ -58,6 +59,10 @@ async function castVote(adoBaseUrl, pullRequestId, vote) {
     }
   )
   assert.equal(res.status, 200)
+}
+
+function waitForTimestampToAdvance() {
+  return new Promise((resolve) => setTimeout(resolve, 10))
 }
 
 test('interpretReviewerVotes distinguishes approval, rejection, changes-requested and pending', () => {
@@ -102,7 +107,7 @@ test('checkStageApprovalStatus throws when no Pull Request has been opened for t
   )
 })
 
-async function withOpenPullRequest(fn) {
+async function withOpenPullRequest(fn, serverOverrides = {}) {
   await withFakeAzureDevOpsServer(
     {
       organization: ORGANIZATION,
@@ -110,6 +115,7 @@ async function withOpenPullRequest(fn) {
       repository: REPOSITORY,
       validPat: VALID_PAT,
       files: { [`/gantry-workspace/${SLUG}/instance.yaml`]: `definition: design\nslug: ${SLUG}\nstage: shape\n` },
+      ...serverOverrides,
     },
     async (adoBaseUrl) => {
       await withScratchInstances(async (instancesDir) => {
@@ -178,6 +184,58 @@ test('a waiting-for-author vote is reported as changes-requested — distinct fr
   })
 })
 
+test('a commit after approval invalidates auto-merge, persists the state, and can be reset on request approval again', async () => {
+  await withOpenPullRequest(async ({ azureDevOps, branch, pullRequestId }) => {
+    await castVote(azureDevOps.baseUrl, pullRequestId, 10)
+    await waitForTimestampToAdvance()
+
+    const client = createAzureDevOpsClient(azureDevOps)
+    const current = readFileSync(join('instances', 'examples', 'modules', 'context.md'), 'utf8')
+    await client.writeFile(`gantry-workspace/${SLUG}/modules/context.md`, `${current}\nPost-approval edit.\n`, {
+      branch,
+      message: 'Post-approval edit',
+    })
+
+    const invalidated = await checkStageApprovalStatus(SLUG, { azureDevOps })
+    assert.equal(invalidated.review.state, 'approved-then-invalidated')
+    assert.equal(invalidated.merged, false)
+    assert.equal(invalidated.approvalState.state, 'invalidated')
+    assert.equal(invalidated.pullRequest.commits.some((commit) => commit.message === 'Post-approval edit'), true)
+
+    const persisted = await readInstance(SLUG, { azureDevOps: { ...azureDevOps, branch } })
+    assert.equal(persisted.approvalStates.shape.state, 'invalidated')
+
+    const reapproved = await requestStageApproval(SLUG, { azureDevOps })
+    assert.equal(reapproved.pullRequestId, pullRequestId)
+    assert.equal(reapproved.reapproval.method, 'vote-reset')
+    assert.equal(reapproved.pullRequest.review.state, 'pending')
+
+    const cleared = await readInstance(SLUG, { azureDevOps: { ...azureDevOps, branch } })
+    assert.equal(cleared.approvalStates, undefined)
+    const afterReset = await checkStageApprovalStatus(SLUG, { azureDevOps })
+    assert.equal(afterReset.review.state, 'pending')
+    assert.equal(afterReset.merged, false)
+  })
+})
+
+test('request approval again posts a fallback comment when Azure DevOps denies resetting the stale vote', async () => {
+  await withOpenPullRequest(
+    async ({ azureDevOps, branch, pullRequestId }) => {
+      await castVote(azureDevOps.baseUrl, pullRequestId, 10)
+      await waitForTimestampToAdvance()
+      const client = createAzureDevOpsClient(azureDevOps)
+      const current = readFileSync(join('instances', 'examples', 'modules', 'context.md'), 'utf8')
+      await client.writeFile(`gantry-workspace/${SLUG}/modules/context.md`, `${current}\nAnother edit.\n`, { branch })
+      await checkStageApprovalStatus(SLUG, { azureDevOps })
+
+      const result = await requestStageApproval(SLUG, { azureDevOps })
+      assert.equal(result.reapproval.method, 'comment')
+      assert.equal(result.pullRequest.review.state, 'approved')
+    },
+    { denyReviewerVoteReset: true },
+  )
+})
+
 test('detecting approval merges the Pull Request itself and advances the stage pointer', async () => {
   await withOpenPullRequest(async ({ azureDevOps, pullRequestId }) => {
     await castVote(azureDevOps.baseUrl, pullRequestId, 10)
@@ -243,6 +301,7 @@ test('approving the final stage completes its Pull Request without attempting an
           const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
           await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
         }
+        await client.writeFile(`gantry-workspace/${SLUG}/out/as-built.docx`, 'rendered as-built', { branch })
 
         const opened = await requestStageApproval(SLUG, { azureDevOps })
         await castVote(adoBaseUrl, opened.pullRequestId, 10)

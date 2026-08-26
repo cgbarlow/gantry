@@ -41,6 +41,8 @@ const DEFAULT_WORK_ITEM_TYPES = [
  * `workItemTypeStates`, if given, maps a work item type name (e.g. "Task") to the array of valid states GET .../workitemtypes/{type}/states should report for it — either full `{ name, category, color }` entries (Azure DevOps's own shape) or plain state-name strings (auto-filled with placeholder category/color). Falls back to a generic 4-state list for any type not given an explicit entry.
  *
  * Extended by #120 to also fake the Pull Requests create/get/complete endpoints lib/azureDevOpsPullRequestsClient.js talks to, plus the "cast a vote" endpoint (PUT .../pullrequests/{id}/reviewers/{reviewerId}) — not something that client itself exposes (voting is the Owner's own action, performed in Azure DevOps's real UI, per ADR-0014), but faked here so tests can simulate "the Owner approved/rejected this" via a plain `fetch` call against this same fake server, the same way a real test would exercise "Check status" detecting that vote.
+ * `denyReviewerVoteReset`, when true, makes vote-reset PUTs return 403 so
+ * tests can exercise ADR-0018's automated-comment fallback.
  *
  * `workItemTypes`, if given, is the array GET .../workitemtypes (the whole project's list of work item types, #121) should report — either full Azure-DevOps-shaped entries or plain type-name strings (auto-filled with placeholder description/color/icon). Falls back to a generic 4-type list (Epic/Feature/Task/Bug) when omitted.
  */
@@ -54,6 +56,7 @@ export function createFakeAzureDevOpsServer({
   failAfterPushes,
   workItemTypeStates = {},
   workItemTypes,
+  denyReviewerVoteReset = false,
   repoExists = true,
 } = {}) {
   // One independent { store, objectId } per branch — a branch with no
@@ -73,7 +76,13 @@ export function createFakeAzureDevOpsServer({
     if (entries.length === 0) return
     const store = new Map(entries.map(([path, content]) => [path.startsWith('/') ? path : `/${path}`, content]))
     globalCommitCount += 1
-    branches.set(name, { store, objectId: objectIdFor(globalCommitCount) })
+    const objectId = objectIdFor(globalCommitCount)
+    const now = new Date().toISOString()
+    branches.set(name, {
+      store,
+      objectId,
+      commits: [{ commitId: objectId, comment: 'Initial repository content', author: { name: 'Fake Seeder', date: now }, committer: { name: 'Fake Seeder', date: now } }],
+    })
   }
   seedBranch('main', files)
   for (const [branchName, seedFiles] of Object.entries(branchFiles)) {
@@ -281,7 +290,8 @@ export function createFakeAzureDevOpsServer({
           // source and the two diverge independently from here on.
           const sourceBranch = [...branches.values()].find((b) => b.objectId === update.newObjectId)
           const store = sourceBranch ? new Map(sourceBranch.store) : new Map()
-          branches.set(branchName, { store, objectId: update.newObjectId })
+          const commits = sourceBranch ? [...(sourceBranch.commits ?? [])] : []
+          branches.set(branchName, { store, objectId: update.newObjectId, commits })
         }
 
         return {
@@ -335,9 +345,18 @@ export function createFakeAzureDevOpsServer({
       globalCommitCount += 1
       pushesMade += 1
       const newObjectId = objectIdFor(globalCommitCount)
-      branches.set(branchName, { store, objectId: newObjectId })
-      // A real push response's `commits[]` entries carry full commit metadata (author/committer name+date, not just the commitId) — this is what lib/render.js's Azure-DevOps-backed render path (#98) reads its footer's commit hash/date from, rather than a separate call, so the fake mirrors that shape rather than the bare `{ commitId }` a caller uninterested in it might expect.
       const now = new Date().toISOString()
+      const commits = existingBranch ? [...(existingBranch.commits ?? [])] : []
+      commits.push(
+        ...push.commits.map((commit) => ({
+          commitId: newObjectId,
+          comment: commit.comment,
+          author: { name: 'Fake Pusher', date: now },
+          committer: { name: 'Fake Pusher', date: now },
+        })),
+      )
+      branches.set(branchName, { store, objectId: newObjectId, commits })
+      // A real push response's `commits[]` entries carry full commit metadata (author/committer name+date, not just the commitId) — this is what lib/render.js's Azure-DevOps-backed render path (#98) reads its footer's commit hash/date from, rather than a separate call, so the fake mirrors that shape rather than the bare `{ commitId }` a caller uninterested in it might expect.
       return json(201, {
         pushId: globalCommitCount,
         date: now,
@@ -453,6 +472,11 @@ export function createFakeAzureDevOpsServer({
         return json(200, pullRequestResponseBody(pr))
       }
 
+      if (subResource === 'commits' && req.method === 'GET') {
+        const sourceBranchName = pr.sourceRefName.replace(/^refs\/heads\//, '')
+        return json(200, { count: branches.get(sourceBranchName)?.commits?.length ?? 0, value: branches.get(sourceBranchName)?.commits ?? [] })
+      }
+
       if (subResource === undefined && req.method === 'PATCH') {
         let raw = ''
         for await (const chunk of req) raw += chunk
@@ -487,6 +511,23 @@ export function createFakeAzureDevOpsServer({
       // plain `fetch` PUT against this server), then assert the client's
       // own `getPullRequest` reads it back correctly.
       if (subResource === 'reviewers' && reviewerId !== undefined && req.method === 'PUT') {
+        if (denyReviewerVoteReset && req.headers['content-type']?.includes('application/json')) {
+          let raw = ''
+          for await (const chunk of req) raw += chunk
+          const body = JSON.parse(raw)
+          if (body.vote === 0) return json(403, { message: 'Vote reset is not permitted (fake server).' })
+          // Continue below with the already-consumed request body.
+          let reviewer = pr.reviewers.find((r) => r.id === reviewerId)
+          if (!reviewer) {
+            reviewer = { id: reviewerId, displayName: body.displayName ?? reviewerId, vote: 0 }
+            pr.reviewers.push(reviewer)
+          }
+          if (body.vote !== undefined) {
+            reviewer.vote = body.vote
+            reviewer.voteUpdatedDate = new Date().toISOString()
+          }
+          return json(200, reviewer)
+        }
         let raw = ''
         for await (const chunk of req) raw += chunk
         const body = JSON.parse(raw)
@@ -495,8 +536,20 @@ export function createFakeAzureDevOpsServer({
           reviewer = { id: reviewerId, displayName: body.displayName ?? reviewerId, vote: 0 }
           pr.reviewers.push(reviewer)
         }
-        if (body.vote !== undefined) reviewer.vote = body.vote
+        if (body.vote !== undefined) {
+          reviewer.vote = body.vote
+          reviewer.voteUpdatedDate = new Date().toISOString()
+        }
         return json(200, reviewer)
+      }
+
+      if (subResource === 'threads' && req.method === 'POST') {
+        let raw = ''
+        for await (const chunk of req) raw += chunk
+        const body = JSON.parse(raw)
+        pr.comments ??= []
+        pr.comments.push(...(body.comments ?? []))
+        return json(201, { id: pr.comments.length, comments: body.comments ?? [], status: body.status ?? 'active' })
       }
     }
 
@@ -613,7 +666,7 @@ export function createFakeAzureDevOpsServer({
  * Starts a `createFakeAzureDevOpsServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/server.test.js`'s `withRunningServer` helper's shape (per #82's testing decisions). Shared by `tests/azureDevOpsClient.test.js` and `tests/instance.test.js` so this lifecycle isn't duplicated across both.
  */
 export function withFakeAzureDevOpsServer(
-  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes, repoExists },
+  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes, denyReviewerVoteReset, repoExists },
   fn
 ) {
   return new Promise((resolve, reject) => {
@@ -627,6 +680,7 @@ export function withFakeAzureDevOpsServer(
       failAfterPushes,
       workItemTypeStates,
       workItemTypes,
+      denyReviewerVoteReset,
       repoExists,
     })
     server.listen(0, async () => {

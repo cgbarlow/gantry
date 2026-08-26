@@ -35,7 +35,10 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
     assert.equal(body.slug, 'examples')
     assert.equal(body.definition, 'design')
     assert.deepEqual(body.stage, { id: 'shape', title: 'Shape', gate: 'business-case' })
-    assert.deepEqual(body.artefacts, [{ id: 'soap', title: 'Solution on a Page' }])
+    assert.deepEqual(body.artefacts, [
+      { id: 'soap', title: 'Solution on a Page' },
+      { id: 'soap-full', title: 'Full Solution on a Page' },
+    ])
 
     const context = body.modules.find((m) => m.id === 'context')
     const driver = context.fields.find((f) => f.id === 'driver')

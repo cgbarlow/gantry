@@ -7,7 +7,9 @@ owner: c.barlow
 
 ## Dependencies overview
 
-Depends on the existing external provider-authentication service being able to onboard GP/nurse practitioner accounts in time for launch, and on EOS's intake API team having capacity to build the new create-application-document endpoint this quarter.
+Depends on the carrier providing its catalogue and provisioning API in time for
+launch, and on the existing intake, workflow, and payments teams having
+capacity to deliver the new application flow this quarter.
 
 ## Dependency list
 

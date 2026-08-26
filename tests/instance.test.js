@@ -35,7 +35,7 @@ test('creates a design instance with blank Shape-stage module files', () => {
   withScratchInstances((instancesDir) => {
     const result = createInstance('design', 'my-initiative', { instancesDir, owner: 'c.barlow' })
     assert.equal(result.stage, 'shape')
-    assert.deepEqual(result.modules, ['context', 'solution-definition', 'team-and-estimates'])
+    assert.deepEqual(result.modules, ['context', 'solution-definition', 'team-and-estimates', 'dependencies', 'soap-full-details'])
 
     const instance = readInstance('my-initiative', { instancesDir })
     assert.equal(instance.definition, 'design')
@@ -309,6 +309,8 @@ test('writeModule replays a supplied layout exactly, preserving a custom Section
       { custom: { id: 'custom:risks-we-carry', title: 'Risks we carry', value: 'The June deadline.' } },
       { field: 'affected-domains' },
       { field: 'out-of-scope' },
+      { field: 'opportunity' },
+      { field: 'in-scope' },
     ])
   })
 })
@@ -330,7 +332,7 @@ test('writeModule without a layout still emits defined-field sections in definit
     const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
     assert.deepEqual(
       [...stored.matchAll(/^## (.+)$/gm)].map((m) => m[1]),
-      ['Business driver', 'Affected domains', 'Explicitly out of scope']
+      ['Business driver', 'Affected domains', 'Opportunity', 'In scope', 'Explicitly out of scope']
     )
   })
 })
@@ -565,6 +567,8 @@ test('list-typed custom field round-trips through write/read with values intact'
       { custom: { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: ['Alice', 'Bob'] } },
       { field: 'affected-domains' },
       { field: 'out-of-scope' },
+      { field: 'opportunity' },
+      { field: 'in-scope' },
     ])
   })
 })
@@ -676,6 +680,8 @@ test('an empty custom list is omitted from the written file (WI 149)', () => {
       { field: 'driver' },
       { field: 'affected-domains' },
       { field: 'out-of-scope' },
+      { field: 'opportunity' },
+      { field: 'in-scope' },
     ])
   })
 })
@@ -877,7 +883,7 @@ test('createInstance writes instance.yaml and blank module files to Azure DevOps
     const azureDevOps = azureDevOpsOptions(baseUrl)
     const result = await createInstance('design', 'my-initiative', { azureDevOps, owner: 'c.barlow' })
     assert.equal(result.stage, 'shape')
-    assert.deepEqual(result.modules, ['context', 'solution-definition', 'team-and-estimates'])
+    assert.deepEqual(result.modules, ['context', 'solution-definition', 'team-and-estimates', 'dependencies', 'soap-full-details'])
 
     const instance = await readInstance('my-initiative', { azureDevOps })
     assert.equal(instance.definition, 'design')
@@ -1008,14 +1014,14 @@ test('createInstance against Azure DevOps refuses to overwrite an instance that 
 })
 
 test('createInstance against Azure DevOps reports exactly what was written and what remains if it fails partway through, instead of a bare network error', async () => {
-  // instance.yaml is the 1st push; each first-stage module ("context", "solution-definition", "team-and-estimates" for "design") is one push each after that. failAfterPushes: 2 lets instance.yaml + "context" through, then fails the very next push ("solution-definition") with a simulated outage — independent of exactly how many GETs the client makes per push, so this isn't coupled to that implementation detail.
+  // instance.yaml is the 1st push; each first-stage module is one push after that. failAfterPushes: 2 lets instance.yaml + "context" through, then fails the very next push ("solution-definition") with a simulated outage — independent of exactly how many GETs the client makes per push, so this isn't coupled to that implementation detail.
   await withFakeAzureDevOpsServer(
     { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {}, failAfterPushes: 2 },
     async (baseUrl) => {
       const azureDevOps = azureDevOpsOptions(baseUrl)
       await assert.rejects(
         () => createInstance('design', 'my-initiative', { azureDevOps }),
-        /partially created.*module\(s\) context were written, but module "solution-definition" failed.*writeModule directly for the remaining module\(s\) \(solution-definition, team-and-estimates\)/s
+        /partially created.*module\(s\) context were written, but module "solution-definition" failed.*writeModule directly for the remaining module\(s\) \(\s*solution-definition, team-and-estimates, dependencies, soap-full-details\)/s
       )
     }
   )

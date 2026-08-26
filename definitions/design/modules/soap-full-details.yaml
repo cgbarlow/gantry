@@ -1,0 +1,63 @@
+id: soap-full-details
+title: Full SOAP Details
+purpose: >
+  The metadata, sequencing, and open questions that complete the Full SOAP
+  without introducing a second copy of content owned by the shared Shape
+  modules.
+
+fields:
+  - id: epic-project
+    title: Epic/Project
+    type: markdown
+    required: false
+    guidance: >
+      Name or identifier of the Epic or project this SOAP and estimate belong
+      to.
+
+  - id: requested-lead-by
+    title: Requested/lead by
+    type: markdown
+    required: false
+    guidance: >
+      The person or group that requested the work and, where known, the lead
+      accountable for shaping it.
+
+  - id: request-date
+    title: Request date
+    type: markdown
+    required: false
+    guidance: >
+      The date the SOAP or estimate was requested. Use the date format your
+      organisation uses consistently.
+
+  - id: draft-agreed-date
+    title: Draft agreed date
+    type: markdown
+    required: false
+    guidance: >
+      The date the draft SOAP or estimate was agreed for circulation or
+      review.
+
+  - id: delivered-date
+    title: SOAP/estimate delivered date
+    type: markdown
+    required: false
+    guidance: >
+      The date the SOAP or estimate was delivered to its intended audience.
+
+  - id: sequencing
+    title: Sequencing
+    type: markdown
+    required: false
+    guidance: >
+      A possible sequence based on the estimates, not a commitment of team
+      capacity. Use a markdown table with exactly `Requirement`, `Team`,
+      `Estimate`, and `Notes` columns.
+
+  - id: questions
+    title: Questions
+    type: markdown
+    required: false
+    guidance: >
+      Questions that need answers to progress the design or clarify the
+      requirements and estimates.

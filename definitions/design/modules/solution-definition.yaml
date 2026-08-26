@@ -10,6 +10,16 @@ purpose: >
   docs/research/stages-gates-module-specs.md Section 4.2.
 
 fields:
+  - id: high-level-requirements
+    title: High-level requirements
+    type: markdown
+    required: false
+    guidance: >
+      The high-level requirements this solution must address. Use a markdown
+      table with `Section` and `Requirement` columns when the work has several
+      requirement groups; keep each requirement brief but specific enough to
+      define the expected functionality and its scope.
+
   - id: process-flow
     title: Process flow
     type: markdown

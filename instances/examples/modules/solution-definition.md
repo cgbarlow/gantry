@@ -5,6 +5,15 @@ owner: c.barlow
 ---
 # Solution Definition
 
+## High-level requirements
+
+| Section | Requirement |
+| --- | --- |
+| Application | Clients can apply for Mobile Phone Assistance through ContosoSelfService. |
+| Review | Staff can assess and approve or decline an application in CMS. |
+| Provisioning | An approved application provisions the phone plan and triggers payment. |
+| Review cycle | The benefit can be reviewed annually and stopped when it is no longer needed. |
+
 ## Process flow
 
 A client browses available phones and plans through a carrier-hosted

@@ -29,6 +29,9 @@ steps:
   - script: node bin/gantry.js render examples soap
     displayName: 'Render soap'
 
+  - script: node bin/gantry.js render examples soap-full
+    displayName: 'Render soap-full'
+
   - script: node bin/gantry.js render examples hld
     displayName: 'Render hld'
 

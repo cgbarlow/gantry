@@ -60,6 +60,7 @@ async function fillShapeStage(azureDevOps, branch) {
     const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
     await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
   }
+  await client.writeFile(`gantry-workspace/${SLUG}/out/soap.docx`, 'rendered soap', { branch })
 }
 
 test('POST /api/instance/request-approval rejects a local instance outright, never requiring a PAT', async () => {
@@ -209,6 +210,9 @@ test('POST /api/instance/request-approval opens a Pull Request once the gate has
             await fetch(`${base}/api/instance?slug=${SLUG}`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })
           ).json()
           assert.equal(after.pullRequests.shape, body.pullRequestId)
+          assert.equal(after.pullRequest.id, body.pullRequestId)
+          assert.equal(Array.isArray(after.pullRequest.commits), true)
+          assert.equal(after.pullRequest.commits.length > 0, true)
 
           // A second request for the same stage is a genuine conflict, not a silent no-op.
           const second = await fetch(`${base}/api/instance/request-approval?slug=${SLUG}`, {

@@ -20,6 +20,23 @@ fields:
     type: list
     required: true
 
+  - id: opportunity
+    title: Opportunity
+    type: markdown
+    required: false
+    guidance: >
+      The opportunity this initiative creates if the problem is addressed —
+      the better outcome, service, or capability that makes the change worth
+      pursuing.
+
+  - id: in-scope
+    title: In scope
+    type: markdown
+    required: false
+    guidance: >
+      The features, functionality, and deliverables included within the
+      boundaries of this solution and estimate.
+
   - id: out-of-scope
     title: Explicitly out of scope
     type: markdown

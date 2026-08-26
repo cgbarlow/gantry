@@ -1301,14 +1301,16 @@ function AssetInsertModal({ onInsert, onClose }) {
 function AssetLibraryPage() {
   const [assets, setAssets] = useState(null)
   const [error, setError] = useState('')
+  const routeSlug = new URLSearchParams(window.location.search).get('slug')
+  const librarySlug = routeSlug || currentSlug.value
 
   useEffect(() => {
-    const slug = currentSlug.value
+    const slug = routeSlug || currentSlug.value
     if (!slug) return
     fetchAssets(slug)
       .then(setAssets)
       .catch((err) => setError(err.message))
-  }, [])
+  }, [routeSlug])
 
   return html`
     <main class="asset-library">
@@ -1324,7 +1326,7 @@ function AssetLibraryPage() {
                 : assets.map(
                     (asset) => html`
                       <div class="card" key=${asset.id}>
-                        <img src=${assetFileUrl(asset.id, currentSlug.value)} alt=${asset.name} />
+                        <img src=${assetFileUrl(asset.id, librarySlug)} alt=${asset.name} />
                         <div class="name">${asset.name}</div>
                         <div class="meta">
                           ${asset.uploadedBy ? html`${asset.uploadedBy} · ` : null}
@@ -1643,8 +1645,7 @@ function WorkItemPanel({ instance }) {
       return
     }
     if (!body.pass) {
-      const outstanding = body.modules.filter((m) => !m.complete).map((m) => m.title)
-      setStatus(`FAIL — outstanding: ${outstanding.join(', ') || 'see modules'}`)
+      setStatus(formatGateFailure(body))
       return
     }
     setStatus('Gate passed.')
@@ -1732,8 +1733,7 @@ function AdvanceStagePanel({ instance }) {
       return
     }
     if (!body.pass) {
-      const outstanding = body.modules.filter((m) => !m.complete).map((m) => m.title)
-      setStatus(`FAIL — outstanding: ${outstanding.join(', ') || 'see modules'}`)
+      setStatus(formatGateFailure(body))
       return
     }
     setStatus('Gate passed.')
@@ -1832,6 +1832,9 @@ function RequestApprovalPanel({ instance }) {
 
   const stageId = instance.stage.id
   const openPullRequestId = justOpened?.pullRequestId ?? instance.pullRequests?.[stageId]
+  const pullRequest = justOpened?.pullRequest ?? instance.pullRequest
+  const approvalState = justOpened?.approvalState ?? instance.approvalStates?.[stageId]
+  const approvalInvalidated = approvalState?.state === 'invalidated' || pullRequest?.review?.state === 'approved-then-invalidated'
 
   async function handleCheckAndMaybeConfirm() {
     setStatus('Checking gate…')
@@ -1842,8 +1845,7 @@ function RequestApprovalPanel({ instance }) {
       return
     }
     if (!body.pass) {
-      const outstanding = body.modules.filter((m) => !m.complete).map((m) => m.title)
-      setStatus(`FAIL — outstanding: ${outstanding.join(', ') || 'see modules'}`)
+      setStatus(formatGateFailure(body))
       return
     }
     setStatus('Gate passed.')
@@ -1852,7 +1854,7 @@ function RequestApprovalPanel({ instance }) {
 
   async function handleConfirmRequest() {
     setConfirming(false)
-    setStatus('Opening Pull Request…')
+    setStatus(approvalInvalidated ? 'Resetting stale approval…' : 'Opening Pull Request…')
     const res = await apiFetchForInstance(
       currentSlug.value,
       `/api/instance/request-approval?slug=${encodeURIComponent(currentSlug.value)}`,
@@ -1864,7 +1866,13 @@ function RequestApprovalPanel({ instance }) {
       return
     }
     setJustOpened(body)
-    setStatus(`Pull Request #${body.pullRequestId} opened — awaiting the Owner's review.`)
+    if (body.reapproval?.method === 'comment') {
+      setStatus(`Approval reset was not permitted, so a note was posted to Pull Request #${body.pullRequestId}. The Owner must review and vote again.`)
+    } else if (body.reapproval) {
+      setStatus(`Approval withdrawn from Pull Request #${body.pullRequestId} — awaiting the Owner's review again.`)
+    } else {
+      setStatus(`Pull Request #${body.pullRequestId} opened — awaiting the Owner's review.`)
+    }
   }
 
   function handleDecline() {
@@ -1891,6 +1899,13 @@ function RequestApprovalPanel({ instance }) {
       return
     }
     if (!body.merged) {
+      setJustOpened(body)
+      if (body.review?.state === 'approved-then-invalidated') {
+        setStatus(
+          `Approval invalidated — commit(s) landed after ${body.review.approver?.displayName ?? 'the Owner'} approved Pull Request #${body.pullRequestId}. Request approval again for a fresh review.`,
+        )
+        return
+      }
       if (body.review?.state === 'rejected') {
         setStatus(
           `Rejected — the Owner voted to reject Pull Request #${body.pullRequestId}. Address the feedback, then re-request approval.`
@@ -1927,7 +1942,26 @@ function RequestApprovalPanel({ instance }) {
                 ? html`<a href=${justOpened.webUrl} target="_blank" rel="noreferrer">Open in Azure DevOps</a>`
                 : null}
             </p>
-            <button type="button" class="btn" onClick=${handleCheckStatus}>Check status</button>
+            <div class="request-approval-review">
+              <p>
+                Reviewer: ${pullRequest?.review?.approver?.displayName ?? 'Not assigned'}
+                (${pullRequest?.review?.state ?? 'pending'})
+              </p>
+              <h3>Pull Request commits</h3>
+              <ul class="request-approval-commits">
+                ${(pullRequest?.commits ?? []).map(
+                  (commit) => html`
+                    <li key=${commit.commitId}>
+                      <span>${commit.message || '(no message)'}</span>
+                      <time dateTime=${commit.timestamp ?? undefined}>${commit.timestamp ? new Date(commit.timestamp).toLocaleString() : 'Unknown time'}</time>
+                    </li>
+                  `,
+                )}
+              </ul>
+            </div>
+            ${approvalInvalidated
+              ? html`<button type="button" class="btn" onClick=${handleConfirmRequest}>Request approval again</button>`
+              : html`<button type="button" class="btn" onClick=${handleCheckStatus}>Check status</button>`}
           `
         : html`<button type="button" class="btn" onClick=${handleCheckAndMaybeConfirm}>Request approval</button>`}
       <div class="save-status">${status}</div>
@@ -2361,13 +2395,25 @@ function EmptyState() {
 }
 
 // Runs an instance's Check or Render action against the registry-listing API's slug (not the module editor's shared signals, which only track whichever single instance is currently open) — the dashboard can trigger either action for any listed instance without navigating away from it.
+function formatGateFailure(body) {
+  const incomplete = (body.artefacts ?? []).filter((artefact) => !artefact.complete)
+  if (incomplete.length) {
+    const closest = incomplete.reduce((best, artefact) =>
+      artefact.outstanding.length < best.outstanding.length ? artefact : best
+    )
+    return `FAIL — ${closest.title}: ${closest.outstanding.join(', ') || 'see required modules'}`
+  }
+
+  const outstanding = (body.modules ?? []).filter((module) => !module.complete).map((module) => module.title)
+  return `FAIL — outstanding: ${outstanding.join(', ') || 'see modules'}`
+}
+
 async function runCheck(slug) {
   const res = await apiFetchForInstance(slug, `/api/instance/check?slug=${encodeURIComponent(slug)}`)
   const body = await res.json()
   if (!res.ok) return `Check failed: ${body.message ?? body.error}`
   if (body.pass) return 'PASS — gate requirements met.'
-  const outstanding = body.modules.filter((m) => !m.complete).map((m) => m.title)
-  return `FAIL — outstanding: ${outstanding.join(', ') || 'see modules'}`
+  return formatGateFailure(body)
 }
 
 async function runRender(slug) {

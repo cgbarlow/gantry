@@ -10,7 +10,9 @@ stages:
   - id: shape
     title: Shape
     gate: business-case
-    modules: [context, solution-definition, team-and-estimates]
+    # The editor mounts the union of the two Shape artefacts' modules. Gate
+    # passing itself is scoped to each artefact's `requires` list below.
+    modules: [context, solution-definition, team-and-estimates, dependencies, soap-full-details]
     # The instance the web form's "Populate example text" button reads from for this stage's fields — one shared instance covering every stage, so `gantry serve examples` shows every gate screen populated.
     example: examples
 
@@ -40,6 +42,34 @@ artefacts:
     template: templates/soap.md.tmpl
     gate: business-case
     requires: [context, solution-definition, team-and-estimates]
+
+  - id: soap-full
+    title: Full Solution on a Page
+    template: templates/soap-full.md.tmpl
+    gate: business-case
+    # Field references let this heavier artefact reuse modules without making
+    # the lightweight SOAP's unrelated fields mandatory.
+    requires:
+      [
+        context.driver,
+        context.opportunity,
+        context.in-scope,
+        context.out-of-scope,
+        solution-definition.high-level-requirements,
+        solution-definition.high-level-solution-design,
+        solution-definition.assumptions-and-considerations,
+        team-and-estimates.teams-and-contacts,
+        team-and-estimates.estimates,
+        team-and-estimates.references,
+        dependencies.dependencies-overview,
+        soap-full-details.epic-project,
+        soap-full-details.requested-lead-by,
+        soap-full-details.request-date,
+        soap-full-details.draft-agreed-date,
+        soap-full-details.delivered-date,
+        soap-full-details.sequencing,
+        soap-full-details.questions,
+      ]
 
   - id: hld
     title: High Level Design
