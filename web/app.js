@@ -2110,11 +2110,8 @@ function ViewModeToolbar({ instance, onClearAllFields, requestApprovalSlug }) {
 // work-item link details). Every link carries an explicit `from` back to
 // this exact instance screen (`/instance/<slug>`) — not browser history —
 // so each Settings screen's own back control returns here. Its open/close
-// behaviour is the shared Dropdown's (web/lib/dropdown.js) — one open at a
-// time per dropdown, closed by any click outside it or by Escape.
-function SettingsMenu({ instance }) {
-  const [open, setOpen] = useState(false)
-
+// behaviour is the shared Dropdown's (web/lib/dropdown.js) — closed by any click outside it or by Escape. AppHeader owns which header menu is open so Settings and Instance Switcher cannot be open at the same time.
+function SettingsMenu({ instance, open, onOpenChange }) {
   const from = encodeURIComponent(`/instance/${instance.slug}`)
   const slug = encodeURIComponent(instance.slug)
 
@@ -2124,7 +2121,7 @@ function SettingsMenu({ instance }) {
       triggerLabel="Settings"
       menuRole="menu"
       open=${open}
-      onOpenChange=${setOpen}
+      onOpenChange=${onOpenChange}
     >
       <a role="menuitem" href=${`/settings?from=${from}`}>Global Settings</a>
       <a role="menuitem" href=${`/settings/workspace?slug=${slug}&from=${from}`}>Workspace Settings</a>
@@ -2166,8 +2163,7 @@ function isWorkspaceGroup(group) {
   return Boolean(group?.instances[0]?.workspace)
 }
 
-function InstanceSwitcher({ slug }) {
-  const [open, setOpen] = useState(false)
+function InstanceSwitcher({ slug, open, onOpenChange }) {
   const [instances, setInstances] = useState(null)
   const [error, setError] = useState('')
   // Resets to the default (own-workspace) view every time the menu is
@@ -2192,7 +2188,7 @@ function InstanceSwitcher({ slug }) {
   // target — so the Dropdown listens on the window directly).
   function handleOpenChange(next) {
     if (next) setCrossWorkspace(false)
-    setOpen(next)
+    onOpenChange(next)
   }
 
   const groups = instances ? groupInstancesByWorkspace(instances) : []
@@ -2206,7 +2202,7 @@ function InstanceSwitcher({ slug }) {
 
   function renderInstanceLink(inst) {
     return html`
-      <a key=${inst.slug} class="switcher-item" href="/instance/${inst.slug}" onClick=${() => setOpen(false)}>
+      <a key=${inst.slug} class="switcher-item" href="/instance/${inst.slug}" onClick=${() => onOpenChange(false)}>
         <span class="name">${inst.slug}</span>
         <span class="def">${inst.definition}</span>
       </a>
@@ -2231,7 +2227,7 @@ function InstanceSwitcher({ slug }) {
                 : isWorkspaceGroup(currentGroup)
                   ? html`<p class="switcher-empty">No other instances in this workspace.</p>`
                   : html`<p class="switcher-empty">No other instances — not part of a workspace.</p>`}
-              <a class="switcher-escape" href=${newInstanceHref} onClick=${() => setOpen(false)}>+ New Instance</a>
+              <a class="switcher-escape" href=${newInstanceHref} onClick=${() => onOpenChange(false)}>+ New Instance</a>
               ${otherGroups.length > 0
                 ? html`
                     <button
@@ -2273,6 +2269,8 @@ function InstanceSwitcher({ slug }) {
 // header (#113) — now lives solely in Settings (web/pages/settings.js's
 // SettingsHeader).
 function AppHeader({ instance }) {
+  const [openMenu, setOpenMenu] = useState(null)
+
   return html`
     <header>
       <div class="brand">
@@ -2281,8 +2279,16 @@ function AppHeader({ instance }) {
         </svg>
         <a class="btn small ghost" href="/">← Workspaces</a>
         <h1>${instance.slug} — ${instance.definition}</h1>
-        <${InstanceSwitcher} slug=${instance.slug} />
-        <${SettingsMenu} instance=${instance} />
+        <${InstanceSwitcher}
+          slug=${instance.slug}
+          open=${openMenu === 'instance-switcher'}
+          onOpenChange=${(next) => setOpenMenu(next ? 'instance-switcher' : null)}
+        />
+        <${SettingsMenu}
+          instance=${instance}
+          open=${openMenu === 'settings'}
+          onOpenChange=${(next) => setOpenMenu(next ? 'settings' : null)}
+        />
       </div>
       <p id="stage-line">${instance.stage.title} (gate: ${instance.stage.gate})</p>
       <nav id="stage-nav">

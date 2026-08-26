@@ -211,6 +211,16 @@ test('settings: from an instance screen, "Settings" opens a dropdown offering Gl
       assert.equal(await menu.locator('a', { hasText: 'Workspace Settings' }).count(), 1)
       assert.equal(await menu.locator('a', { hasText: 'Instance Settings' }).count(), 1)
 
+      // Header dropdowns share one open-menu owner: opening the switcher closes Settings, and opening Settings closes the switcher.
+      const switcherButton = page.getByRole('button', { name: 'Switch instance' })
+      const switcherMenu = page.locator('.instance-switcher .menu')
+      await switcherButton.click()
+      await switcherMenu.waitFor({ state: 'visible', timeout: 5_000 })
+      await menu.waitFor({ state: 'hidden', timeout: 2_000 })
+      await settingsButton.click()
+      await menu.waitFor({ state: 'visible', timeout: 2_000 })
+      await switcherMenu.waitFor({ state: 'hidden', timeout: 2_000 })
+
       // Global Settings: opened from this instance, so its back control
       // returns to this exact instance screen, not Home.
       await menu.locator('a', { hasText: 'Global Settings' }).click()
