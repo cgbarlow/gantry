@@ -1850,10 +1850,10 @@ function AdvanceStagePanel({ instance }) {
 // can ever actually be landing commits on today (a later stage only starts
 // once #125's own "advance the stage" moves the current-stage pointer
 // forward, which happens when its Check-status action merges this stage's
-// own Pull Request). Once a Pull Request is open, the panel offers #125's
-// "Check status" action in place of "Request approval" — reading the PR's
-// reviewer votes, auto-merging on approval (advancing the stage), and
-// reporting an explicit rejection/changes-requested distinctly from a
+// own Pull Request). Once a Pull Request has been recorded, the panel shows
+// its live Azure DevOps status and offers #125's "Check status" action in
+// place of "Request approval" — reading reviewer votes, auto-merging on
+// approval (advancing the stage), and reporting rejection distinctly from a
 // still-pending review.
 function RequestApprovalPanel({ instance }) {
   const [status, setStatus] = useState('')
@@ -1865,6 +1865,8 @@ function RequestApprovalPanel({ instance }) {
   const stageId = instance.stage.id
   const openPullRequestId = justOpened?.pullRequestId ?? instance.pullRequests?.[stageId]
   const pullRequest = justOpened?.pullRequest ?? instance.pullRequest
+  const prStatus = pullRequest?.status
+  const pullRequestIsActive = pullRequest !== null && (prStatus === undefined || prStatus === 'active')
   const approvalState = justOpened?.approvalState ?? instance.approvalStates?.[stageId]
   const approvalInvalidated = approvalState?.state === 'invalidated' || pullRequest?.review?.state === 'approved-then-invalidated'
 
@@ -1972,12 +1974,13 @@ function RequestApprovalPanel({ instance }) {
     <section id="request-approval-panel" class="request-approval-panel">
       <h2>Request approval</h2>
       ${openPullRequestId
-        ? html`
+        ? pullRequestIsActive
+          ? html`
             <p>
               ${prUrl
                 ? html`<a href=${prUrl} target="_blank" rel="noreferrer">Pull Request #${openPullRequestId}</a>`
                 : html`Pull Request #${openPullRequestId}`}
-              is open, requesting approval for stage "${instance.stage.title}".
+              ${` is open, requesting approval for stage "${instance.stage.title}".`}
               ${stageWorkItemId
                 ? wiUrl
                   ? html` · Work item <a href=${wiUrl} target="_blank" rel="noreferrer">#${stageWorkItemId}</a>`
@@ -1987,7 +1990,7 @@ function RequestApprovalPanel({ instance }) {
             <div class="request-approval-review">
               <p>
                 Reviewer: ${pullRequest?.review?.approver?.displayName ?? 'Not assigned'}
-                (${pullRequest?.review?.state ?? 'pending'})
+                ${` (${pullRequest?.review?.state ?? 'pending'})`}
               </p>
               <h3>Pull Request commits</h3>
               <ul class="request-approval-commits">
@@ -2004,7 +2007,20 @@ function RequestApprovalPanel({ instance }) {
             ${approvalInvalidated
               ? html`<button type="button" class="btn" onClick=${handleConfirmRequest}>Request approval again</button>`
               : html`<button type="button" class="btn" onClick=${handleCheckStatus}>Check status</button>`}
-          `
+            `
+          : html`
+              <p>
+                ${prUrl
+                  ? html`<a href=${prUrl} target="_blank" rel="noreferrer">Pull Request #${openPullRequestId}</a>`
+                  : html`Pull Request #${openPullRequestId}`}
+                ${prStatus === 'completed'
+                  ? ` was merged for stage "${instance.stage.title}".`
+                  : prStatus === 'abandoned'
+                    ? ` was abandoned (closed without merging) for stage "${instance.stage.title}".`
+                    : ` is no longer available for stage "${instance.stage.title}".`}
+              </p>
+              <button type="button" class="btn" onClick=${handleCheckStatus}>Check status</button>
+            `
         : html`<button type="button" class="btn" onClick=${handleCheckAndMaybeConfirm}>Request approval</button>`}
       <div class="save-status">${status}</div>
       ${confirming
