@@ -297,9 +297,6 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .synced-field-wide { flex: 1 1 260px; }
 .synced-value { font-size: 14px; padding: 6px 0; }
 
-.work-item-panel { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 32px; }
-.work-item-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }
-
 .advance-stage-panel { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 32px; }
 .advance-stage-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }
 

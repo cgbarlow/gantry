@@ -503,9 +503,10 @@ export function WorkspaceSettingsPage({ query }) {
 // ---------- Instance Settings (`/settings/instance?slug=<instance-slug>`) ----------
 // New (#107): hosts the instance's Assignee (editable, identity picker), per-instance
 // required-reviewer override (#145 Part 2), read-only instance info, and the instance's
-// own Azure DevOps work-item link details (read-only — re-linking isn't supported here;
-// that's still done from the module editor's own work-item panel, see web/app.js's
-// WorkItemPanel).
+// own Azure DevOps work-item link details (read-only — re-linking isn't supported here at
+// all; linking only ever happens at instance creation, via the "+ New Workspace" wizard's
+// work-item step, and the parent work item itself is linked from the module editor's own
+// "Work item details" card, see web/app.js's SyncedFieldsPanel, #171).
 
 async function fetchInstanceDetail(slug) {
   const res = await apiFetchForInstance(slug, `/api/instance?slug=${encodeURIComponent(slug)}`)
