@@ -9,14 +9,14 @@ import { createInstance, readInstance } from '../lib/instance.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
-// Browser smoke test for #111's synced-fields panel (web/app.js's
+// Browser smoke test for #111's Work item details panel (web/app.js's
 // SyncedFieldsPanel): the unlinked "Link to a work item" prompt taking the
 // panel's place, and — once the instance is linked (via the same server
 // route the "+ New Workspace" wizard calls at creation; #127 removed this
-// screen's own freetext link form) — the five distinct fields appearing,
+// screen's own freetext link form) — the six distinct fields appearing,
 // with a title override genuinely persisted server-side. Driven through a
-// real rendered page against a real running gantry server, mirroring
-// tests/workItemLink.playwright.test.js's own conventions.
+// real rendered page against a real running gantry server, mirroring the
+// other browser tests' conventions.
 
 const WI_ORGANIZATION = 'wi-org'
 const WI_PROJECT = 'wi-project'
@@ -108,9 +108,17 @@ test('the synced-fields panel shows the link prompt when unlinked, then the dist
               assert.equal(linkRes.status, 200)
               await page.reload()
 
-              // The synced-fields panel flips to its linked view: five distinct fields, not collapsed together.
+              // The Work item details panel flips to its linked view: six distinct fields, not collapsed together.
               await assert.doesNotReject(page.locator('.synced-fields-panel #synced-title').waitFor({ timeout: 10_000 }))
-              assert.equal(await panel.locator('.synced-field').count(), 5)
+              assert.equal(await panel.locator('.synced-field').count(), 6)
+              const parentWorkItem = panel.locator('.synced-field', { hasText: 'Parent work item' })
+              const parentWorkItemLink = parentWorkItem.locator('a')
+              assert.equal(
+                await parentWorkItemLink.getAttribute('href'),
+                `${wiBaseUrl}/${WI_ORGANIZATION}/${WI_PROJECT}/_workitems/edit/${parentId}`
+              )
+              assert.match(await parentWorkItemLink.innerText(), new RegExp(`#${parentId}`))
+              assert.equal(await page.locator('.work-item-panel').count(), 0)
               assert.equal(await panel.locator('.synced-value >> text=Task').count(), 1)
               assert.equal(await panel.locator('input#synced-title').inputValue(), 'my-initiative — Shape')
               assert.match(await panel.locator('.synced-value').nth(1).innerText(), /#\d+ · New/)

@@ -1470,7 +1470,8 @@ function workItemWebUrlFor(workItem, wiId) {
 // current Status (read straight from Azure DevOps via #121's getWorkItem),
 // the stage's Pull Request state (#120/#125's read), and the Assignee —
 // inherited from the instance's own stored assignee but overridable per
-// stage. Backed by GET/PUT /api/instance/synced-fields; title/assignee
+// stage, and a link to the parent work item. Backed by GET/PUT
+// /api/instance/synced-fields; title/assignee
 // edits save on blur or Enter (the same affordance the dashboard's own
 // assignee field uses), and an emptied field clears that override so the
 // default/inherited value comes back. An instance with no parent work item
@@ -1554,7 +1555,7 @@ function SyncedFieldsPanel({ instance }) {
   if (error) {
     return html`
       <section class="synced-fields-panel">
-        <h2>Synced fields</h2>
+        <h2>Work item details</h2>
         <p class="load-error">${error}</p>
       </section>
     `
@@ -1563,7 +1564,7 @@ function SyncedFieldsPanel({ instance }) {
   if (!data) {
     return html`
       <section class="synced-fields-panel">
-        <h2>Synced fields</h2>
+        <h2>Work item details</h2>
         <p class="loading">Loading…</p>
       </section>
     `
@@ -1576,7 +1577,7 @@ function SyncedFieldsPanel({ instance }) {
   if (!data.linked) {
     return html`
       <section class="synced-fields-panel">
-        <h2>Synced fields</h2>
+        <h2>Work item details</h2>
         <p class="guidance">
           <strong>Link to a work item</strong> to see this stage's synced fields (type, title, status, Pull Request
           state and assignee). Linking happens when the instance is created, via the "+ New Workspace" wizard's
@@ -1590,7 +1591,7 @@ function SyncedFieldsPanel({ instance }) {
 
   return html`
     <section class="synced-fields-panel">
-      <h2>Synced fields</h2>
+      <h2>Work item details</h2>
       <div class="synced-fields-grid">
         <div class="synced-field">
           <span class="field-label">Type</span>
@@ -1649,89 +1650,17 @@ function SyncedFieldsPanel({ instance }) {
             slug=${currentSlug.value}
           />
         </div>
+        <div class="synced-field">
+          <span class="field-label">Parent work item</span>
+          ${(() => {
+            const wiUrl = workItemWebUrlFor(instance.workItem, instance.workItem.parentId)
+            return wiUrl
+              ? html`<a class="synced-value" href=${wiUrl} target="_blank" rel="noreferrer">#${instance.workItem.parentId}</a>`
+              : html`<span class="synced-value">#${instance.workItem.parentId}</span>`
+          })()}
+        </div>
       </div>
       <div class="save-status">${status}</div>
-    </section>
-  `
-}
-
-// ---------- Azure DevOps work-item link + confirmed gate-pass sync (#103) ----------
-// One instance-level panel, shown once per stage screen (below the modules — see StageScreen; Render itself moved to the view-toggle bar, #114) rather than in AppHeader, since "which stage's work item" is stage-scoped even though the *link* itself is instance-level. Unlinked: renders nothing at all — #127 removed this panel's freetext link form (organization/project/parent id/type) entirely, since linking now happens at instance creation (the "+ New Workspace" wizard's link step) and an unlinked instance's "Link to a work item" prompt already takes the synced-fields panel's place above (see SyncedFieldsPanel). Linked: shows the parent id and this stage's own child work item id, plus a "Check gate & sync" action that runs the existing check first and only opens the confirm-before-push modal (mirroring PatPromptModal's shape) if the gate genuinely passes — declining it (or the gate failing) never calls POST /api/instance/work-items/sync at all, so the work item's state is left exactly as it was (#103's "declining leaves the work item's state unchanged" acceptance criterion).
-function WorkItemPanel({ instance }) {
-  const [status, setStatus] = useState('')
-  const [confirming, setConfirming] = useState(false)
-
-  const stageId = instance.stage.id
-  const workItem = instance.workItem
-  const stageWorkItemId = workItem?.stages?.[stageId]
-
-  if (!workItem) return null
-
-  // "Check gate & sync": runs the same check the dashboard's own Check action does — only once it genuinely PASSes does this open the confirm modal; a FAIL (or a check-request failure) reports status and stops there, exactly as if no linked work item existed at all.
-  async function handleCheckAndMaybeConfirm() {
-    setStatus('Checking gate…')
-    const res = await apiFetch(`/api/instance/check?slug=${encodeURIComponent(currentSlug.value)}`)
-    const body = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      setStatus(`Check failed: ${body.message ?? body.error}`)
-      return
-    }
-    if (!body.pass) {
-      setStatus(formatGateFailure(body))
-      return
-    }
-    setStatus('Gate passed.')
-    setConfirming(true)
-  }
-
-  async function handleConfirmSync() {
-    setConfirming(false)
-    setStatus('Pushing state to work item…')
-    const res = await apiFetch(`/api/instance/work-items/sync?slug=${encodeURIComponent(currentSlug.value)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    })
-    const body = await res.json().catch(() => ({}))
-    setStatus(
-      res.ok
-        ? `Pushed state "${body.state}" to work item #${body.workItemId}.`
-        : `Sync failed: ${body.message ?? body.error}`
-    )
-  }
-
-  function handleDecline() {
-    setConfirming(false)
-    setStatus('Declined — work item state left unchanged.')
-  }
-
-  return html`
-    <section class="work-item-panel">
-      <h2>Azure DevOps work item</h2>
-      <p>
-        Linked to parent work item #${workItem.parentId} (${workItem.organization}/${workItem.project}, type "${workItem.workItemType}").
-      </p>
-      <p>This stage's work item: ${stageWorkItemId ? html`#${stageWorkItemId}` : '—'}</p>
-      <button type="button" class="btn" onClick=${handleCheckAndMaybeConfirm}>Check gate & sync work item</button>
-      <div class="save-status">${status}</div>
-      ${confirming
-        ? html`
-            <div class="modal-backdrop" role="presentation">
-              <div class="modal" role="dialog" aria-modal="true" aria-label="Confirm work item state update">
-                <h3>Push a state update?</h3>
-                <p class="guidance">
-                  The gate for stage "${instance.stage.title}" has passed. Confirm to push a new state — drawn from
-                  work item #${stageWorkItemId}'s own configured type — to Azure DevOps. Declining leaves that work
-                  item's state unchanged.
-                </p>
-                <div class="modal-actions">
-                  <button type="button" class="btn ghost" onClick=${handleDecline}>Decline</button>
-                  <button type="button" class="btn primary" onClick=${handleConfirmSync}>Confirm & push</button>
-                </div>
-              </div>
-            </div>
-          `
-        : null}
     </section>
   `
 }
@@ -1744,8 +1673,8 @@ function WorkItemPanel({ instance }) {
 // === instance.currentStageId`) — advancing moves this instance's own
 // persisted stage pointer forward from wherever it currently sits, so it
 // never makes sense to offer it while browsing an earlier or later stage
-// via the stage switcher. Mirrors WorkItemPanel's own check-then-confirm
-// shape: "Advance to next stage" runs the same gate check every other
+// via the stage switcher. Mirrors this file's other gated actions' own
+// check-then-confirm shape: "Advance to next stage" runs the same gate check every other
 // gated action in this app runs, and only a genuine PASS opens the confirm
 // dialog — declining it (or a FAIL) leaves the instance's stage genuinely
 // unchanged.
@@ -1840,8 +1769,8 @@ function AdvanceStagePanel({ instance }) {
 // The Workspace-backed counterpart to AdvanceStagePanel above: opens this
 // stage's own real approval gate — a Pull Request from its branch into
 // "main" — once the gate has genuinely passed, rather than moving a local
-// instance's own stage pointer directly. Mirrors AdvanceStagePanel's/
-// WorkItemPanel's check-then-confirm shape exactly: "Request approval" runs
+// instance's own stage pointer directly. Mirrors AdvanceStagePanel's own
+// check-then-confirm shape exactly: "Request approval" runs
 // the same gate check every other gated action in this app runs, and only a
 // genuine PASS opens the confirm dialog — declining it (or a FAIL) opens no
 // Pull Request. Never rendered for a local instance (the opposite condition
@@ -2064,7 +1993,6 @@ function StageScreen({ instance, onFieldRegistered }) {
       )}
       <${AdvanceStagePanel} instance=${instance} />
       <${RequestApprovalPanel} instance=${instance} />
-      <${WorkItemPanel} instance=${instance} />
     </main>
   `
 }
