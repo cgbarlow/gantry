@@ -409,10 +409,37 @@ test('a post-approval commit changes the panel to Request approval again, and re
           `${readFileSync(join('instances', 'examples', 'modules', 'context.md'), 'utf8')}\nPost-approval browser edit.\n`,
           { branch, message: 'Post-approval browser edit' },
         )
+        for (let i = 1; i <= 40; i += 1) {
+          await createAzureDevOpsClient(azureDevOps).writeFile(
+            `gantry-workspace/${SLUG}/modules/context.md`,
+            `${readFileSync(join('instances', 'examples', 'modules', 'context.md'), 'utf8')}\nPost-approval browser edit ${i}.\n`,
+            { branch, message: `Post-approval browser edit ${i}` },
+          )
+        }
 
         await panel.getByRole('button', { name: 'Check status' }).click()
         await panel.getByRole('button', { name: 'Request approval again' }).waitFor({ timeout: 10_000 })
-        assert.equal(await panel.locator('.request-approval-commits').getByText('Post-approval browser edit').count(), 1)
+        assert.equal(await panel.locator('.request-approval-commits').count(), 0)
+
+        await panel.getByRole('button', { name: 'Show commit history' }).click()
+        const historyModal = page.locator('.modal[aria-label="Pull Request commit history"]')
+        await historyModal.waitFor({ state: 'visible', timeout: 5_000 })
+        assert.equal(await historyModal.locator('.request-approval-commits').getByText('Post-approval browser edit', { exact: true }).count(), 1)
+        const scrollState = await historyModal.evaluate((element) => ({
+          scrollable: element.scrollHeight > element.clientHeight,
+          height: element.clientHeight,
+          viewportHeight: window.innerHeight,
+        }))
+        assert.equal(scrollState.scrollable, true)
+        assert.ok(scrollState.height <= scrollState.viewportHeight * 0.85 + 2)
+
+        await page.keyboard.press('Escape')
+        await historyModal.waitFor({ state: 'hidden', timeout: 5_000 })
+
+        await panel.getByRole('button', { name: 'Show commit history' }).click()
+        await historyModal.waitFor({ state: 'visible', timeout: 5_000 })
+        await page.locator('.modal-backdrop').last().click({ position: { x: 5, y: 5 } })
+        await historyModal.waitFor({ state: 'hidden', timeout: 5_000 })
 
         await panel.getByRole('button', { name: 'Request approval again' }).click()
         await panel.getByRole('button', { name: 'Check status' }).waitFor({ timeout: 10_000 })

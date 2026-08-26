@@ -1076,6 +1076,25 @@ function uniqueCustomFieldClientId() {
   return `custom:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 }
 
+// Shared modal shell for dialogs that need the standard Escape and backdrop-click dismissal behavior. Existing dialogs retain their local shells for now; new dialogs should use this component instead of repeating that boilerplate.
+function Modal({ ariaLabel, onClose, children }) {
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  return html`
+    <div class="modal-backdrop" role="presentation" onClick=${(e) => e.target === e.currentTarget && onClose()}>
+      <div class="modal" role="dialog" aria-modal="true" aria-label=${ariaLabel}>
+        ${children}
+      </div>
+    </div>
+  `
+}
+
 // The Insert ▾ → Section prompt (#132): asks for the optional one-line title (rendered as the block's ## heading; blank becomes "Untitled section") and inserts the new block below the requesting field on confirm. Same modal shape as AssetInsertModal and the confirm dialogs above.
 function SectionDialog({ onConfirm, onClose }) {
   const [title, setTitle] = useState('')
@@ -1159,6 +1178,27 @@ function ListDialog({ onConfirm, onClose }) {
         </div>
       </div>
     </div>
+  `
+}
+
+function CommitHistoryDialog({ commits, onClose }) {
+  return html`
+    <${Modal} ariaLabel="Pull Request commit history" onClose=${onClose}>
+      <h3>Pull Request commit history</h3>
+      <ul class="request-approval-commits">
+        ${commits.map(
+          (commit) => html`
+            <li key=${commit.commitId}>
+              <span>${commit.message || '(no message)'}</span>
+              <time dateTime=${commit.timestamp ?? undefined}>${commit.timestamp ? new Date(commit.timestamp).toLocaleString() : 'Unknown time'}</time>
+            </li>
+          `,
+        )}
+      </ul>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" onClick=${onClose}>Close</button>
+      </div>
+    <//>
   `
 }
 
@@ -1787,6 +1827,7 @@ function AdvanceStagePanel({ instance }) {
 function RequestApprovalPanel({ instance }) {
   const [status, setStatus] = useState('')
   const [confirming, setConfirming] = useState(false)
+  const [commitHistoryOpen, setCommitHistoryOpen] = useState(false)
   const [justOpened, setJustOpened] = useState(null)
 
   if (!instance.workspaceBacked || instance.stage.id !== instance.currentStageId) return null
@@ -1898,6 +1939,7 @@ function RequestApprovalPanel({ instance }) {
   const prUrl = justOpened?.webUrl ?? prWebUrlFor(instance, openPullRequestId)
   const stageWorkItemId = instance.workItem?.stages?.[stageId]
   const wiUrl = workItemWebUrlFor(instance.workItem, stageWorkItemId)
+  const commits = pullRequest?.commits ?? []
 
   return html`
     <section id="request-approval-panel" class="request-approval-panel">
@@ -1921,17 +1963,7 @@ function RequestApprovalPanel({ instance }) {
                 Reviewer: ${pullRequest?.review?.approver?.displayName ?? 'Not assigned'}
                 ${` (${pullRequest?.review?.state ?? 'pending'})`}
               </p>
-              <h3>Pull Request commits</h3>
-              <ul class="request-approval-commits">
-                ${(pullRequest?.commits ?? []).map(
-                  (commit) => html`
-                    <li key=${commit.commitId}>
-                      <span>${commit.message || '(no message)'}</span>
-                      <time dateTime=${commit.timestamp ?? undefined}>${commit.timestamp ? new Date(commit.timestamp).toLocaleString() : 'Unknown time'}</time>
-                    </li>
-                  `,
-                )}
-              </ul>
+              <button type="button" class="btn" onClick=${() => setCommitHistoryOpen(true)}>Show commit history</button>
             </div>
             ${approvalInvalidated
               ? html`<button type="button" class="btn" onClick=${handleConfirmRequest}>Request approval again</button>`
@@ -1970,6 +2002,9 @@ function RequestApprovalPanel({ instance }) {
               </div>
             </div>
           `
+        : null}
+      ${commitHistoryOpen
+        ? html`<${CommitHistoryDialog} commits=${commits} onClose=${() => setCommitHistoryOpen(false)} />`
         : null}
     </section>
   `
