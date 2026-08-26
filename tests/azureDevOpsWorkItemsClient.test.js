@@ -6,6 +6,7 @@ import {
   AzureDevOpsNotFoundError,
   AzureDevOpsRequestError,
   DEFAULT_BASE_URL,
+  GANTRY_WORK_ITEM_TAG,
 } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer as withFakeServer } from './helpers/fakeAzureDevOpsServer.js'
 
@@ -73,6 +74,26 @@ test('updateWorkItem updates an existing work item\'s fields without touching ot
     assert.equal(updated.fields['System.State'], 'Active')
     assert.equal(updated.fields['System.Title'], 'Draft stage')
     assert.equal(updated.rev, 2)
+  })
+})
+
+test('ensureWorkItemTag preserves existing tags and is idempotent', async () => {
+  await withFakeAzureDevOpsServer({}, async (baseUrl) => {
+    const c = client(baseUrl)
+    const created = await c.createWorkItem('Task', {
+      'System.Title': 'Stage work',
+      'System.Tags': 'ready-for-agent; enhancement',
+    })
+
+    const first = await c.ensureWorkItemTag(created.id)
+    assert.equal(first.updated, true)
+    assert.equal(first.workItem.fields['System.Tags'], `ready-for-agent; enhancement; ${GANTRY_WORK_ITEM_TAG}`)
+    assert.equal(first.workItem.rev, 2)
+
+    const second = await c.ensureWorkItemTag(created.id)
+    assert.equal(second.updated, false)
+    assert.equal(second.workItem.fields['System.Tags'], first.workItem.fields['System.Tags'])
+    assert.equal(second.workItem.rev, 2)
   })
 })
 

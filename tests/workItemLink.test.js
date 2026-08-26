@@ -6,7 +6,14 @@ import { join } from 'node:path'
 import { createInstance, readInstance } from '../lib/instance.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
-import { linkInstanceToWorkItem, syncGatePassToWorkItem, pickPassedState, DEFAULT_WORK_ITEM_TYPE } from '../lib/workItemLink.js'
+import {
+  linkInstanceToWorkItem,
+  syncGatePassToWorkItem,
+  tagLinkedWorkItems,
+  tagAllLinkedWorkItems,
+  pickPassedState,
+  DEFAULT_WORK_ITEM_TYPE,
+} from '../lib/workItemLink.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
 // #95/#103: optional instance-level link to an Azure DevOps work item, per-stage child work-item auto-creation, and confirmed read-write state sync on gate pass. The Work Items side always talks to the in-process fake server (#99's extension of tests/helpers/fakeAzureDevOpsServer.js) — never a mocked client — the same convention every other Azure DevOps client test in this repo follows.
@@ -83,6 +90,114 @@ test('linkInstanceToWorkItem creates one child work item per definition stage, u
       // Every other pre-existing field on instance.yaml is preserved.
       assert.equal(instance.definition, 'design')
       assert.equal(instance.stage, 'shape')
+
+      const client = createAzureDevOpsWorkItemsClient({
+        organization: WI_ORGANIZATION,
+        project: WI_PROJECT,
+        pat: VALID_PAT,
+        baseUrl,
+      })
+      for (const workItemId of Object.values(workItem.stages)) {
+        const stageWorkItem = await client.getWorkItem(workItemId)
+        assert.equal(stageWorkItem.fields['System.Tags'], 'gantry')
+      }
+    })
+  })
+})
+
+test('tagLinkedWorkItems tags only recorded stage work items, preserves tags, and reports idempotent counts', async () => {
+  await withFakeWorkItemsServer({}, async (baseUrl) => {
+    await withScratchInstances(async (instancesDir) => {
+      createInstance('design', 'my-initiative', { instancesDir })
+      const parentId = await createParentWorkItem(baseUrl)
+      const workItem = await linkInstanceToWorkItem(
+        'my-initiative',
+        { organization: WI_ORGANIZATION, project: WI_PROJECT, parentId, pat: VALID_PAT, baseUrl },
+        { instancesDir }
+      )
+      const shapeId = workItem.stages.shape
+      const client = createAzureDevOpsWorkItemsClient({ organization: WI_ORGANIZATION, project: WI_PROJECT, pat: VALID_PAT, baseUrl })
+      for (const workItemId of Object.values(workItem.stages)) {
+        await client.updateWorkItem(workItemId, { 'System.Tags': 'ready-for-agent; bug' })
+      }
+
+      const first = await tagLinkedWorkItems('my-initiative', { instancesDir, pat: VALID_PAT, baseUrl })
+      assert.equal(first.updated, 4)
+      assert.equal(first.alreadyTagged, 0)
+      assert.equal((await client.getWorkItem(shapeId)).fields['System.Tags'], 'ready-for-agent; bug; gantry')
+
+      const second = await tagLinkedWorkItems('my-initiative', { instancesDir, pat: VALID_PAT, baseUrl })
+      assert.equal(second.updated, 0)
+      assert.equal(second.alreadyTagged, 4)
+    })
+  })
+})
+
+test('tagAllLinkedWorkItems scans every registered linked instance and skips unlinked instances', async () => {
+  await withFakeWorkItemsServer({}, async (baseUrl) => {
+    await withScratchInstances(async (instancesDir) => {
+      const linkedSlugs = ['first-initiative', 'second-initiative']
+      const links = []
+      for (const slug of [...linkedSlugs, 'unlinked-initiative']) {
+        createInstance('design', slug, { instancesDir })
+        if (slug === 'unlinked-initiative') continue
+        const parentId = await createParentWorkItem(baseUrl)
+        links.push(
+          await linkInstanceToWorkItem(
+            slug,
+            { organization: WI_ORGANIZATION, project: WI_PROJECT, parentId, pat: VALID_PAT, baseUrl },
+            { instancesDir }
+          )
+        )
+      }
+
+      const client = createAzureDevOpsWorkItemsClient({ organization: WI_ORGANIZATION, project: WI_PROJECT, pat: VALID_PAT, baseUrl })
+      for (const link of links) {
+        for (const workItemId of Object.values(link.stages)) {
+          await client.updateWorkItem(workItemId, { 'System.Tags': 'ready-for-agent' })
+        }
+      }
+
+      const result = await tagAllLinkedWorkItems({ instancesDir, pat: VALID_PAT })
+      assert.equal(result.updated, 8)
+      assert.equal(result.alreadyTagged, 0)
+      assert.deepEqual(result.failed, [])
+      assert.deepEqual(result.instances.map((instance) => instance.slug), linkedSlugs)
+    })
+  })
+})
+
+test('tagAllLinkedWorkItems accepts per-instance credentials and continues after an instance failure', async () => {
+  await withFakeWorkItemsServer({}, async (baseUrl) => {
+    await withScratchInstances(async (instancesDir) => {
+      const links = []
+      for (const slug of ['first-initiative', 'second-initiative']) {
+        createInstance('design', slug, { instancesDir })
+        const parentId = await createParentWorkItem(baseUrl)
+        links.push(
+          await linkInstanceToWorkItem(
+            slug,
+            { organization: WI_ORGANIZATION, project: WI_PROJECT, parentId, pat: VALID_PAT, baseUrl },
+            { instancesDir }
+          )
+        )
+      }
+
+      const client = createAzureDevOpsWorkItemsClient({ organization: WI_ORGANIZATION, project: WI_PROJECT, pat: VALID_PAT, baseUrl })
+      for (const link of links) {
+        for (const workItemId of Object.values(link.stages)) {
+          await client.updateWorkItem(workItemId, { 'System.Tags': 'ready-for-agent' })
+        }
+      }
+
+      const result = await tagAllLinkedWorkItems({
+        instancesDir,
+        patsBySlug: { 'first-initiative': 'rejected-pat', 'second-initiative': VALID_PAT },
+      })
+      assert.equal(result.updated, 4)
+      assert.equal(result.alreadyTagged, 0)
+      assert.deepEqual(result.instances.map((instance) => instance.slug), ['second-initiative'])
+      assert.deepEqual(result.failed.map((failure) => failure.slug), ['first-initiative'])
     })
   })
 })

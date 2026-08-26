@@ -10,7 +10,7 @@ import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
-// HTTP-boundary tests for #95/#103's new routes: POST /api/instance/work-items/link, POST /api/instance/work-items/sync, and the accompanying fix to GET /api/instance/check (previously local-only). Real HTTP requests against a real gantry server and a real (fake, in-process) Azure DevOps server throughout — nothing mocked.
+// HTTP-boundary tests for #95/#103's new routes: POST /api/instance/work-items/link, POST /api/instance/work-items/tag, POST /api/instance/work-items/sync, and the accompanying fix to GET /api/instance/check (previously local-only). Real HTTP requests against a real gantry server and a real (fake, in-process) Azure DevOps server throughout — nothing mocked.
 
 const WI_ORGANIZATION = 'wi-org'
 const WI_PROJECT = 'wi-project'
@@ -235,6 +235,82 @@ test('POST /api/instance/work-items/link reports 409 for an instance already lin
     assert.equal(second.status, 409)
     const body = await second.json()
     assert.match(body.error, /already linked/)
+  })
+})
+
+// ---------- POST /api/instance/work-items/tag ----------
+
+test('POST /api/instance/work-items/tag reports backfill counts and preserves unrelated parent work items', async () => {
+  await withScratchGantryServer(async (gantryBase, wiBaseUrl, instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    const parentId = await createParentWorkItem(wiBaseUrl)
+    const linkRes = await fetch(`${gantryBase}/api/instance/work-items/link?slug=my-initiative`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+      body: JSON.stringify({ organization: WI_ORGANIZATION, project: WI_PROJECT, parentId, baseUrl: wiBaseUrl }),
+    })
+    const link = await linkRes.json()
+    const client = createAzureDevOpsWorkItemsClient({ organization: WI_ORGANIZATION, project: WI_PROJECT, pat: VALID_PAT, baseUrl: wiBaseUrl })
+    for (const workItemId of Object.values(link.stages)) {
+      await client.updateWorkItem(workItemId, { 'System.Tags': 'ready-for-agent; bug' })
+    }
+
+    const first = await fetch(`${gantryBase}/api/instance/work-items/tag?slug=my-initiative`, {
+      method: 'POST',
+      headers: { Authorization: basicAuthHeader(VALID_PAT) },
+    })
+    assert.equal(first.status, 200)
+    assert.deepEqual(await first.json(), {
+      slug: 'my-initiative',
+      workItemIds: Object.values(link.stages),
+      updated: 4,
+      alreadyTagged: 0,
+    })
+    assert.equal((await client.getWorkItem(parentId)).fields['System.Tags'], undefined)
+
+    const second = await fetch(`${gantryBase}/api/instance/work-items/tag?slug=my-initiative`, {
+      method: 'POST',
+      headers: { Authorization: basicAuthHeader(VALID_PAT) },
+    })
+    assert.equal(second.status, 200)
+    const secondBody = await second.json()
+    assert.equal(secondBody.updated, 0)
+    assert.equal(secondBody.alreadyTagged, 4)
+  })
+})
+
+test('POST /api/work-items/tag backfills every registered linked instance', async () => {
+  await withScratchGantryServer(async (gantryBase, wiBaseUrl, instancesDir) => {
+    const links = []
+    for (const slug of ['first-initiative', 'second-initiative']) {
+      createInstance('design', slug, { instancesDir })
+      const parentId = await createParentWorkItem(wiBaseUrl)
+      const linkRes = await fetch(`${gantryBase}/api/instance/work-items/link?slug=${slug}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+        body: JSON.stringify({ organization: WI_ORGANIZATION, project: WI_PROJECT, parentId, baseUrl: wiBaseUrl }),
+      })
+      links.push(await linkRes.json())
+    }
+    createInstance('design', 'unlinked-initiative', { instancesDir })
+
+    const client = createAzureDevOpsWorkItemsClient({ organization: WI_ORGANIZATION, project: WI_PROJECT, pat: VALID_PAT, baseUrl: wiBaseUrl })
+    for (const link of links) {
+      for (const workItemId of Object.values(link.stages)) {
+        await client.updateWorkItem(workItemId, { 'System.Tags': 'ready-for-agent' })
+      }
+    }
+
+    const res = await fetch(`${gantryBase}/api/work-items/tag`, {
+      method: 'POST',
+      headers: { Authorization: basicAuthHeader(VALID_PAT) },
+    })
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    assert.equal(body.updated, 8)
+    assert.equal(body.alreadyTagged, 0)
+    assert.deepEqual(body.failed, [])
+    assert.deepEqual(body.instances.map((instance) => instance.slug), ['first-initiative', 'second-initiative'])
   })
 })
 
