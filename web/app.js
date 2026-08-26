@@ -91,7 +91,18 @@ function readFileAsBase64(file) {
 function renderPreview(node, text) {
   if (!node) return
   const slug = currentSlug.value
-  node.innerHTML = DOMPurify.sanitize(md.render(resolveAssetRefs(text ?? '', (id) => assetFileUrl(id, slug))))
+  const sources = assetSources.value
+  const withSources = resolveAssetRefs(
+    text ?? '',
+    (id) => assetFileUrl(id, slug),
+    (id) => sources[id] ?? null
+  )
+  node.innerHTML = DOMPurify.sanitize(md.render(withSources))
+  // Caption-styling hook: the citation renders as <p><em>Source: …</em></p>; mark that paragraph so the stylesheet can make it visually subordinate (caption) rather than body text.
+  node.querySelectorAll('p').forEach((p) => {
+    const em = p.querySelector('em')
+    if (em && em.textContent.startsWith('Source:')) p.classList.add('asset-source')
+  })
 }
 
 // ---------- Identity picker (#145 Part 2) ----------
@@ -254,6 +265,26 @@ effect(() => {
     })
     .catch((err) => {
       loadError.value = err.message
+    })
+})
+
+// Asset source map for citation rendering (#147) — populated on slug change via fetchAssets, used by renderPreview to emit `*Source: …*` below each image. Empty until fetch completes, so preview renders without citation then re-renders once sources arrive (see MarkdownField's stopAssetSourceSync).
+const assetSources = signal({})
+
+effect(() => {
+  const slug = currentSlug.value
+  if (!slug) {
+    assetSources.value = {}
+    return
+  }
+  fetchAssets(slug)
+    .then((list) => {
+      const map = {}
+      for (const a of list) if (a.source) map[a.id] = a.source
+      assetSources.value = map
+    })
+    .catch(() => {
+      assetSources.value = {}
     })
 })
 
@@ -712,6 +743,12 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection, on
       view.dispatch({ effects: editableCompartment.reconfigure(editableExtension(viewMode.value)) })
     })
 
+    // Re-render when the asset source map becomes available (initial async load) — citations depend on it, but the preview was already rendered once without them (#147).
+    const stopAssetSourceSync = effect(() => {
+      const _sources = assetSources.value
+      if (viewRef.current && previewRef.current) renderPreview(previewRef.current, viewRef.current.state.doc.toString())
+    })
+
     // Inserts a snippet at the current cursor position (or over the current selection), on its own line — "clicking one inserts its reference at the trigger point" (#80). The preview updates via the same updateListener/docChanged path a normal edit takes.
     function insertAtCursor(snippet) {
       const { from, to } = view.state.selection.main
@@ -764,6 +801,7 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection, on
       clearTimeout(hideToolbarTimer)
       viewRef.current = null
       stopViewModeSync()
+      stopAssetSourceSync()
       view.destroy()
     }
     // One editor per mount — the enclosing stage screen remounts wholesale (keyed by stage id) on stage switch, matching the old full-rebuild behaviour, so this never needs to react to `field` changing in place.
@@ -832,7 +870,7 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection, on
 }
 
 // ---------- List field ----------
-function ListField({ field, onRegister }) {
+function ListField({ field, onRegister, onRemove }) {
   const rowsRef = useRef(field.value?.length ? [...field.value] : [''])
   const [, bump] = useState(0)
   const rerender = () => bump((n) => n + 1)
@@ -853,7 +891,14 @@ function ListField({ field, onRegister }) {
     rerender()
   }
   function removeRow(i) {
-    rowsRef.current = rowsRef.current.filter((_, idx) => idx !== i)
+    const next = rowsRef.current.filter((_, idx) => idx !== i)
+    const nonEmpty = next.filter((v) => v.trim() !== '').length
+    // WI 149: removing the last remaining item from a custom-inserted list removes the whole segment including its heading. Scope is strictly custom lists — schema-defined type:list fields keep preserve-when-empty behaviour.
+    if (field.custom && nonEmpty === 0 && typeof onRemove === 'function') {
+      onRemove(field.id)
+      return
+    }
+    rowsRef.current = next
     rerender()
   }
   function addRow() {
@@ -921,6 +966,8 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
   }
 
   function handleInsertImage(asset) {
+    // Prime the source map so the just-inserted image's citation renders immediately, without waiting for the next async fetchAssets round-trip.
+    if (asset?.id && asset?.source) assetSources.value = { ...assetSources.value, [asset.id]: asset.source }
     controlsRef.current[imageFieldId]?.insertAtCursor?.(assetReference(asset))
     setImageFieldId(null)
   }
@@ -969,6 +1016,16 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
     setListAfterId(null)
   }
 
+  // WI 149: removing the last remaining item from a custom-inserted list removes the whole segment including its heading.
+  function handleRemoveCustomField(fieldId) {
+    const fields = mod.fields.filter((f) => f.id !== fieldId)
+    delete controlsRef.current[fieldId]
+    instanceData.value = {
+      ...instanceData.value,
+      modules: instanceData.value.modules.map((m) => (m.id === mod.id ? { ...m, fields } : m)),
+    }
+  }
+
   return html`
     <section class="module">
       <h2>${mod.title}</h2>
@@ -980,7 +1037,12 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
         }
         const isList = field.type === 'list'
         return isList
-          ? html`<${ListField} key=${field.id} field=${field} onRegister=${onRegister} />`
+          ? html`<${ListField}
+              key=${field.id}
+              field=${field}
+              onRegister=${onRegister}
+              onRemove=${field.custom ? handleRemoveCustomField : undefined}
+            />`
           : html`<${MarkdownField}
               key=${field.id}
               field=${field}
@@ -2163,7 +2225,6 @@ function AppHeader({ instance }) {
         <a class="btn small ghost" href="/">← Workspaces</a>
         <h1>${instance.slug} — ${instance.definition}</h1>
         <${InstanceSwitcher} slug=${instance.slug} />
-        <a class="btn small ghost" href="/new-workspace">+ New Workspace</a>
         <${SettingsMenu} instance=${instance} />
       </div>
       <p id="stage-line">${instance.stage.title} (gate: ${instance.stage.gate})</p>

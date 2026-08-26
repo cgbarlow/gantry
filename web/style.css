@@ -793,9 +793,29 @@ main.dashboard {
   display: block;
   width: 100%;
   max-width: 260px;
+  height: auto;
   border: var(--hairline) solid var(--line);
   border-radius: var(--radius);
-  margin: 6px 0;
+  margin: 6px 0 4px;
+}
+
+.field-markdown .preview .asset-source {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 2px 0 8px;
+  overflow-wrap: anywhere;
+}
+.field-markdown .preview .asset-source em { font-style: italic; }
+
+/* Rendered view (#148) — images fill the content width (representative of the
+ * exported .docx, which scales them to the page's text width) rather than the
+ * 260px thumbnail cap the editor's split-preview reuses for editing convenience.
+ * `height: auto` preserves aspect ratio while `max-width: 100%` lets the image
+ * scale to the preview container that is itself `flex: 1 1 100%` in rendered
+ * mode. Split/markdown previews keep the 260px cap above. */
+main[data-view-mode='rendered'] .field-markdown .preview img.asset-thumb {
+  max-width: 100%;
 }
 
 .modal-backdrop {

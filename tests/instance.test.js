@@ -636,6 +636,196 @@ test('layout records the interleaved order of defined and list-typed custom sect
   ])
 })
 
+// WI 149: removing the last remaining item from a custom-inserted list removes the whole segment — the writer must omit an empty custom list's heading entirely, while schema-defined type:list fields keep their heading even when empty.
+
+// An empty custom list (zero items) is omitted from the persisted file — the segment disappears.
+test('an empty custom list is omitted from the written file (WI 149)', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    const definition = loadDefinition('design')
+
+    writeModule(
+      definition,
+      'my-initiative',
+      'context',
+      {
+        status: 'draft',
+        owner: '',
+        fields: {
+          driver: 'Because.',
+          'affected-domains': [],
+          'out-of-scope': '',
+        },
+        layout: [
+          { field: 'driver' },
+          { custom: { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: [] } },
+          { field: 'affected-domains' },
+          { field: 'out-of-scope' },
+        ],
+      },
+      { instancesDir }
+    )
+
+    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
+    assert.ok(!stored.includes('## Stakeholders'), 'empty custom list heading must be omitted')
+
+    // Round-trip: the emptied custom list does not reappear after reload.
+    const data = readModule(definition, 'my-initiative', 'context', { instancesDir })
+    assert.deepEqual(data.customFields, [])
+    assert.deepEqual(data.layout, [
+      { field: 'driver' },
+      { field: 'affected-domains' },
+      { field: 'out-of-scope' },
+    ])
+  })
+})
+
+// A custom list emptied to zero items round-trips as removed, while a non-empty one survives.
+test('a custom list with one item emptied to zero removes its segment on the next write/read round-trip', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    const definition = loadDefinition('design')
+
+    // First, persist a custom list with one item and verify it exists.
+    writeModule(
+      definition,
+      'my-initiative',
+      'context',
+      {
+        status: 'draft',
+        owner: '',
+        fields: { driver: 'Because.', 'affected-domains': [], 'out-of-scope': '' },
+        layout: [
+          { field: 'driver' },
+          { custom: { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: ['Alice'] } },
+          { field: 'affected-domains' },
+          { field: 'out-of-scope' },
+        ],
+      },
+      { instancesDir }
+    )
+    let data = readModule(definition, 'my-initiative', 'context', { instancesDir })
+    assert.deepEqual(data.customFields, [
+      { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: ['Alice'] },
+    ])
+
+    // Simulate removing the last item (value becomes []) and persisting again.
+    writeModule(
+      definition,
+      'my-initiative',
+      'context',
+      {
+        status: 'draft',
+        owner: '',
+        fields: { driver: 'Because.', 'affected-domains': [], 'out-of-scope': '' },
+        layout: [
+          { field: 'driver' },
+          { custom: { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: [] } },
+          { field: 'affected-domains' },
+          { field: 'out-of-scope' },
+        ],
+      },
+      { instancesDir }
+    )
+
+    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
+    assert.ok(!stored.includes('## Stakeholders'))
+
+    data = readModule(definition, 'my-initiative', 'context', { instancesDir })
+    assert.deepEqual(data.customFields, [])
+  })
+})
+
+// Schema-defined type:list fields must keep preserve-when-empty behaviour unchanged (WI 149 is custom-only).
+test('schema-defined type:list heading is preserved even when its value is empty', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    const definition = loadDefinition('design')
+
+    writeModule(
+      definition,
+      'my-initiative',
+      'context',
+      {
+        status: 'draft',
+        owner: '',
+        fields: {
+          driver: 'Because.',
+          'affected-domains': [],
+          'out-of-scope': '',
+        },
+        // No custom layout entries — defined fields are emitted in definition order when not in layout.
+        layout: [{ field: 'driver' }, { field: 'affected-domains' }, { field: 'out-of-scope' }],
+      },
+      { instancesDir }
+    )
+
+    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
+    assert.ok(stored.includes('## Affected domains'), 'schema-defined list heading must remain even when empty')
+
+    // Clearing a custom list must not affect an adjacent schema-defined empty list.
+    writeModule(
+      definition,
+      'my-initiative',
+      'context',
+      {
+        status: 'draft',
+        owner: '',
+        fields: { driver: 'Because.', 'affected-domains': [], 'out-of-scope': '' },
+        layout: [
+          { field: 'driver' },
+          { custom: { id: 'custom:extra', title: 'Extra list', type: 'list', value: [] } },
+          { field: 'affected-domains' },
+          { field: 'out-of-scope' },
+        ],
+      },
+      { instancesDir }
+    )
+
+    const stored2 = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
+    assert.ok(!stored2.includes('## Extra list'))
+    assert.ok(stored2.includes('## Affected domains'))
+  })
+})
+
+// Mixed: a module with two custom lists, only the emptied one is removed.
+test('only the emptied custom list is removed; sibling custom lists remain', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    const definition = loadDefinition('design')
+
+    writeModule(
+      definition,
+      'my-initiative',
+      'context',
+      {
+        status: 'draft',
+        owner: '',
+        fields: { driver: 'Because.', 'affected-domains': [], 'out-of-scope': '' },
+        layout: [
+          { field: 'driver' },
+          { custom: { id: 'custom:first', title: 'First list', type: 'list', value: ['Alice'] } },
+          { custom: { id: 'custom:second', title: 'Second list', type: 'list', value: [] } },
+          { field: 'affected-domains' },
+          { field: 'out-of-scope' },
+        ],
+      },
+      { instancesDir }
+    )
+
+    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
+    assert.ok(stored.includes('## First list'))
+    assert.ok(!stored.includes('## Second list'))
+    assert.ok(stored.includes('- Alice'))
+
+    const data = readModule(definition, 'my-initiative', 'context', { instancesDir })
+    assert.deepEqual(
+      data.customFields.map((f) => f.title),
+      ['First list']
+    )
+  })
+})
+
 // Mixed prose and bullets in a custom section stays plain — proving the parser doesn't falsely classify it.
 test('warns (non-strict) on a duplicate heading, identifying which occurrence wins', () => {
   const definition = loadDefinition('design')
