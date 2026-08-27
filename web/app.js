@@ -497,6 +497,40 @@ function MarkdownToolbar({
   // don't implement — a labelled group makes no such contract.
   return html`
     <div class="md-toolbar" role="group" aria-label="Formatting">
+      <div class="md-headings">
+        <${Dropdown}
+          triggerLabel=${html`<span class="md-glyph">Headings ▾</span>`}
+          triggerClass="md-btn"
+          triggerAriaLabel="Headings"
+          triggerOnMouseDown=${keepEditorFocus}
+          open=${headingsOpen}
+          onOpenChange=${(open) => {
+            setHeadingsOpen(open)
+            // Only a keyboard-driven close (Escape with the trigger or menu
+            // holding focus) hands focus back to the editor. An outside click
+            // close means the user aimed somewhere else on purpose — refocusing
+            // there would yank them back mid-action.
+            if (!open && document.activeElement?.closest?.('.md-headings')) refocus()
+          }}
+        >
+          ${HEADING_LEVELS.map(
+            (level) => html`
+              <button
+                type="button"
+                class="md-menu-item"
+                onMouseDown=${keepEditorFocus}
+                onClick=${() => {
+                  setHeadingsOpen(false)
+                  run(`heading${level}`)
+                }}
+              >
+                Heading ${level}
+              </button>
+            `
+          )}
+        <//>
+      </div>
+      <span class="md-sep" />
       ${button('bold', 'Bold', 'Ctrl/Cmd+B', html`<span class="md-letter md-letter-bold">B</span>`)}
       ${button('italic', 'Italic', 'Ctrl/Cmd+I', html`<span class="md-letter md-letter-italic">I</span>`)}
       ${button(
@@ -564,39 +598,6 @@ function MarkdownToolbar({
         flipOnOverflow=${expanded}
         trigger=${button('insertTable', 'Table', null, ICONS.table, () => setPickerOpen(!pickerOpen), 0, pickerOpen, 'grid')}
       />
-      <div class="md-headings">
-        <${Dropdown}
-          triggerLabel=${html`<span class="md-glyph">Headings ▾</span>`}
-          triggerClass="md-btn"
-          triggerAriaLabel="Headings"
-          triggerOnMouseDown=${keepEditorFocus}
-          open=${headingsOpen}
-          onOpenChange=${(open) => {
-            setHeadingsOpen(open)
-            // Only a keyboard-driven close (Escape with the trigger or menu
-            // holding focus) hands focus back to the editor. An outside click
-            // close means the user aimed somewhere else on purpose — refocusing
-            // there would yank them back mid-action.
-            if (!open && document.activeElement?.closest?.('.md-headings')) refocus()
-          }}
-        >
-          ${HEADING_LEVELS.map(
-            (level) => html`
-              <button
-                type="button"
-                class="md-menu-item"
-                onMouseDown=${keepEditorFocus}
-                onClick=${() => {
-                  setHeadingsOpen(false)
-                  run(`heading${level}`)
-                }}
-              >
-                Heading ${level}
-              </button>
-            `
-          )}
-        <//>
-      </div>
       <span class="md-sep" />
       ${button(
         'fullscreen',
