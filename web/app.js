@@ -2507,20 +2507,6 @@ async function runRender(slug) {
   return results.join(' · ')
 }
 
-// Persists the instance record's own stored `assignee` (#97) — the instance detail pane's edit affordance for it, distinct from `PUT /api/instance/modules/:id`'s module-level `owner` (the untouched Design Authority sign-off convention). Not routed through ModuleCard's per-module save flow: this is instance-scoped, not module-scoped.
-async function saveAssignee(slug, assignee) {
-  const res = await apiFetchForInstance(slug, `/api/instance/assignee?slug=${encodeURIComponent(slug)}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ assignee }),
-  })
-  const body = await res.json().catch(() => ({}))
-  if (!res.ok) {
-    throw new Error(body.message ?? body.error ?? `Failed to save assignee (${res.status})`)
-  }
-  return body
-}
-
 // ---------- Grouping instances by workspace (#102) ----------
 // The Workspaces landing page's core grouping rule: an Azure-DevOps-backed row carries a `workspace` (lib/registry.js, #102) — every instance sharing that workspace's `id` groups into one row, one entry per workspace, per the ticket's acceptance criteria. A local instance has no `workspace` at all (Workspace is an Azure-DevOps-repo concept only, #96) — it groups on its own, keyed by its own slug, so a repo (or local instance) holding just one instance still renders through the exact same group shape as one holding several — nothing here special-cases a single-instance group.
 function groupInstancesByWorkspace(instances) {
@@ -2553,14 +2539,12 @@ function groupStatusClass(group) {
 }
 
 // ---------- Master-detail view ----------
-// The Workspaces landing page's default view (#102, superseding #77's flat per-instance listing): the list pane shows one row per workspace (groupInstancesByWorkspace above); selecting one shows every instance it holds in the detail pane, each its own card with definition/assignee/status, Check, Edit, and conditional management links.
-function MasterDetailView({ instances, onInstancesChange }) {
+// The Workspaces landing page's default view (#102, superseding #77's flat per-instance listing): the list pane shows one row per workspace (groupInstancesByWorkspace above); selecting one shows every instance it holds in the detail pane, each its own card with definition/assignee/status, Check, Edit, and conditional management links. Assignee is displayed here but edited only from Instance Settings.
+function MasterDetailView({ instances }) {
   const [filter, setFilter] = useState('')
   const [selectedKey, setSelectedKey] = useState(null)
-  // Keyed by instance slug (not the single shared string the old flat list used) — several instances can be in flight for the *same* selected workspace at once (one Check, one Render, one assignee save), and each must report its own status independently.
+  // Keyed by instance slug (not the single shared string the old flat list used) — several instances can be in flight for the *same* selected workspace at once (one Check or one Render), and each must report its own status independently.
   const [actionStatus, setActionStatus] = useState({})
-  const [assigneeDrafts, setAssigneeDrafts] = useState({})
-  const [assigneeStatus, setAssigneeStatus] = useState({})
 
   const groups = groupInstancesByWorkspace(instances)
 
@@ -2579,11 +2563,9 @@ function MasterDetailView({ instances, onInstancesChange }) {
   const effectiveKey = filtered.some((group) => group.key === selectedKey) ? selectedKey : (filtered[0]?.key ?? null)
   const selectedGroup = groups.find((group) => group.key === effectiveKey) ?? null
 
-  // Resets every instance-scoped edit/action state whenever the selected workspace changes — never while it's still the same workspace (that would clobber an in-progress edit or Check/Render status on every unrelated `instances` refresh), and seeds the assignee drafts from the newly-selected workspace's own instances.
+  // Reset instance-scoped action state whenever the selected workspace changes — never while it's still the same workspace, which would clobber an in-progress Check/Render status on every unrelated `instances` refresh.
   useEffect(() => {
     setActionStatus({})
-    setAssigneeStatus({})
-    setAssigneeDrafts(Object.fromEntries((selectedGroup?.instances ?? []).map((inst) => [inst.slug, inst.assignee ?? ''])))
     // eslint-disable-next-line
   }, [effectiveKey])
 
@@ -2591,20 +2573,6 @@ function MasterDetailView({ instances, onInstancesChange }) {
     setActionStatus((prev) => ({ ...prev, [slug]: 'Checking…' }))
     const result = await runCheck(slug)
     setActionStatus((prev) => ({ ...prev, [slug]: result }))
-  }
-
-  async function handleAssigneeSave(slug, draftOverride) {
-    const inst = selectedGroup?.instances.find((i) => i.slug === slug)
-    const draft = draftOverride ?? assigneeDrafts[slug] ?? ''
-    if (!inst || draft === (inst.assignee ?? '')) return
-    setAssigneeStatus((prev) => ({ ...prev, [slug]: 'Saving…' }))
-    try {
-      const saved = await saveAssignee(slug, draft)
-      setAssigneeStatus((prev) => ({ ...prev, [slug]: 'Saved.' }))
-      onInstancesChange?.((prev) => prev.map((i) => (i.slug === slug ? { ...i, assignee: saved.assignee } : i)))
-    } catch (err) {
-      setAssigneeStatus((prev) => ({ ...prev, [slug]: `Failed to save: ${err.message}` }))
-    }
   }
 
   return html`
@@ -2659,19 +2627,8 @@ function MasterDetailView({ instances, onInstancesChange }) {
                         </div>
                         <div class="instance-card-row">
                           <span class="field-label">Assignee</span>
-                          <${IdentityPicker}
-                            value=${assigneeDrafts[inst.slug] ?? ''}
-                            onChange=${(uniqueName) => {
-                              setAssigneeDrafts((prev) => ({ ...prev, [inst.slug]: uniqueName }))
-                              // Commit immediately — pass the value directly so it doesn't read stale state
-                              handleAssigneeSave(inst.slug, uniqueName)
-                            }}
-                            placeholder="Unassigned"
-                            slug=${inst.slug}
-                            className="mono"
-                          />
+                          <span class="assignee">${inst.assignee || 'Unassigned'}</span>
                         </div>
-                        <div class="save-status assignee-save-status">${assigneeStatus[inst.slug] ?? ''}</div>
                         <div class="detail-actions">
                           <a class="btn primary" href="/instance/${inst.slug}">Edit</a>
                           <button type="button" class="btn" onClick=${() => handleCheck(inst.slug)}>Check</button>
@@ -2860,7 +2817,7 @@ function DashboardPage() {
             ? html`<${EmptyState} />`
             : dashboardViewMode.value === 'swimlanes'
               ? html`<${SwimlaneView} instances=${instances} />`
-              : html`<${MasterDetailView} instances=${instances} onInstancesChange=${setInstances} />`}
+              : html`<${MasterDetailView} instances=${instances} />`}
     </main>
   `
 }

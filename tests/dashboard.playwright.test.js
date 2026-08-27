@@ -45,7 +45,7 @@ function withPage(fn) {
   }
 }
 
-test('dashboard: titled "Workspaces", master-detail is the default view, and its detail column shows each instance\'s definition/status/assignee with Check/Edit reachable', async () => {
+test('dashboard: titled "Workspaces", master-detail is the default view, and its detail column shows each instance\'s definition/status/read-only assignee with Check/Edit reachable', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     // Local instances have no workspace (#96 — Workspace is an Azure-DevOps-repo concept only), so each groups on its own, one row per instance — the single-instance case the ticket's own "a workspace with only one instance still displays correctly" criterion describes.
@@ -68,7 +68,8 @@ test('dashboard: titled "Workspaces", master-detail is the default view, and its
         assert.equal(await page.locator('.instance-card').count(), 1)
         assert.equal(await page.locator('.instance-card .name').textContent(), 'alpha-initiative')
         assert.match(await page.locator('.instance-card .def').textContent(), /design/)
-        assert.equal(await page.locator('.instance-card .identity-picker input').inputValue(), 'c.barlow')
+        assert.equal(await page.locator('.instance-card .assignee').textContent(), 'c.barlow')
+        assert.equal(await page.locator('.instance-card .identity-picker').count(), 0)
         assert.ok(await page.getByRole('button', { name: 'Check' }).isVisible())
         assert.equal(await page.locator('.instance-card').getByRole('button', { name: 'Render' }).count(), 0)
         assert.ok(await page.getByRole('link', { name: 'Edit' }).isVisible())
@@ -158,8 +159,9 @@ test('dashboard: selecting a workspace with multiple instances shows every one o
             assert.equal(await cards.count(), 2)
             const names = await page.locator('.instance-card .name').allTextContents()
             assert.deepEqual([...names].sort(), ['instance-one', 'instance-two'])
-            assert.equal(await page.locator('.instance-card .identity-picker input').count(), 2)
-            assert.equal(await page.locator('.instance-card').first().locator('.identity-picker input').inputValue(), 'c.barlow')
+            assert.equal(await page.locator('.instance-card .assignee').count(), 2)
+            assert.equal(await page.locator('.instance-card').first().locator('.assignee').textContent(), 'c.barlow')
+            assert.equal(await page.locator('.instance-card .identity-picker').count(), 0)
             assert.equal(await page.getByRole('button', { name: 'Check' }).count(), 2)
             assert.equal(await page.locator('.instance-card').getByRole('button', { name: 'Render' }).count(), 0)
             assert.equal(await page.getByRole('link', { name: 'Edit' }).count(), 2)
@@ -176,7 +178,7 @@ test('dashboard: selecting a workspace with multiple instances shows every one o
   )
 })
 
-test('dashboard: editing an instance card\'s assignee field saves it, and it survives a reload', async () => {
+test('dashboard: an instance card displays its assignee without an inline editor', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     createInstance('design', 'alpha-initiative', { instancesDir })
@@ -187,15 +189,9 @@ test('dashboard: editing an instance card\'s assignee field saves it, and it sur
         await page.goto(base)
         await page.waitForSelector('.instance-card', { timeout: 10_000 })
 
-        assert.equal(await page.locator('.identity-picker input').inputValue(), '')
-
-        await page.locator('.identity-picker input').fill('j.smith')
-        await page.locator('.identity-picker input').press('Enter')
-        await page.waitForFunction(() => document.querySelector('.assignee-save-status')?.textContent?.includes('Saved.'))
-
-        await page.reload()
-        await page.waitForSelector('.instance-card', { timeout: 10_000 })
-        assert.equal(await page.locator('.identity-picker input').inputValue(), 'j.smith')
+        assert.equal(await page.locator('.instance-card .assignee').textContent(), 'Unassigned')
+        assert.equal(await page.locator('.instance-card .identity-picker').count(), 0)
+        assert.equal(await page.locator('.instance-card .assignee-save-status').count(), 0)
       })
     )
   } finally {

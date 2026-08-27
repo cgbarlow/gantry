@@ -545,9 +545,7 @@ async function saveRequiredReviewer(slug, requiredReviewer) {
 
 // The instance's own stored Assignee — editable here, distinct from a
 // module's own frontmatter `owner` (the Design Authority sign-off
-// convention, untouched by this screen). Mirrors the dashboard's own
-// assignee editor (web/app.js's MasterDetailView), just as a single
-// labelled field rather than one per instance card.
+// convention, untouched by this screen).
 function AssigneeSection({ slug, assignee }) {
   const [draft, setDraft] = useState(assignee ?? '')
   const [status, setStatus] = useState('')
