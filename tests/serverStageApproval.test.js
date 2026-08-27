@@ -227,3 +227,45 @@ test('POST /api/instance/request-approval opens a Pull Request once the gate has
     }
   )
 })
+
+test('POST /api/instance/request-approval identifies a rejected PAT during required-reviewer resolution', async () => {
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      rejectIdentityRequests: true,
+      files: {
+        [`/gantry-workspace/${SLUG}/instance.yaml`]:
+          `definition: design\nslug: ${SLUG}\nstage: shape\nrequiredReviewer: testuser@example.com\n`,
+      },
+    },
+    async (adoBaseUrl) => {
+      await withScratchInstances(async (instancesDir) => {
+        registerInstance(
+          SLUG,
+          { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          { instancesDir }
+        )
+        const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl }
+        const branch = await resolveStageBranch(azureDevOps, definition, SLUG, SHAPE.id)
+        await fillShapeStage(azureDevOps, branch)
+
+        await withRunningServer({ instancesDir }, async (base) => {
+          const res = await fetch(`${base}/api/instance/request-approval?slug=${SLUG}`, {
+            method: 'POST',
+            headers: { Authorization: basicAuthHeader(VALID_PAT) },
+          })
+          const body = await res.json()
+          assert.equal(res.status, 401, JSON.stringify(body))
+          assert.equal(body.credentialRejected, true)
+          assert.equal(body.credentialStatus, 'rejected')
+          assert.equal(body.operation, 'resolving the required reviewer for Request Approval')
+          assert.match(body.message, /required reviewer for Request Approval/)
+          assert.match(body.message, /Identity \(Read\)/)
+        })
+      })
+    }
+  )
+})

@@ -4,7 +4,7 @@
 //
 // #104 generalizes "the right PAT" from always-the-global-default to workspace-aware: a caller that knows which workspace a request targets passes `{ workspaceId }` as a third argument, and `authHeaderForWorkspace` resolves that workspace's own override if one is set, the global default otherwise — see web/lib/credential.js's own doc comment. A caller with no workspace in mind (or targeting a local instance) simply omits it, which resolves to the global default exactly as every call always did before workspace overrides existed.
 import { untracked } from '@preact/signals'
-import { authHeaderForWorkspace, requestPat } from './credential.js'
+import { authHeaderForWorkspace, markCredentialRejected, requestPat } from './credential.js'
 
 function isAuthenticationRequired(body) {
   return body && body.error === 'authentication_required'
@@ -38,11 +38,19 @@ export async function apiFetch(url, options = {}, { workspaceId } = {}) {
   const body = await readJsonBody(res)
   if (!isAuthenticationRequired(body)) return res
 
+  if (body.credentialStatus === 'rejected') markCredentialRejected(workspaceId)
   // `workspaceId` is threaded through so `requestPat` can tell whether this 401 came from a workspace whose *own* override is the thing that's now invalid — see web/lib/credential.js's own doc comment on `requestPat`/`resolvePromptWith` for why that changes where the architect's submission gets written.
-  const granted = await requestPat(workspaceId)
+  const granted = await requestPat(workspaceId, body.credentialStatus === 'rejected' ? body : null)
   if (!granted) return res
 
-  return fetch(url, withAuthHeader(options, workspaceId))
+  const retry = await fetch(url, withAuthHeader(options, workspaceId))
+  if (retry.status === 401) {
+    const retryBody = await readJsonBody(retry)
+    if (isAuthenticationRequired(retryBody) && retryBody.credentialStatus === 'rejected') {
+      markCredentialRejected(workspaceId)
+    }
+  }
+  return retry
 }
 
 // ---------- Instance-scoped requests (#104) ----------

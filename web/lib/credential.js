@@ -9,6 +9,7 @@ const STORAGE_KEY = 'gantry:ado-pat'
 
 // A *second*, separate storage key for workspace-specific overrides — kept apart from `STORAGE_KEY` rather than folded into one serialized map, so the global default's own on-disk format stays byte-for-byte what it always was (a bare string, not JSON) — every existing test/user that reads `localStorage.getItem('gantry:ado-pat')` directly is unaffected by per-workspace overrides existing at all.
 const OVERRIDES_STORAGE_KEY = 'gantry:ado-pat-overrides'
+const REJECTED_CREDENTIALS_STORAGE_KEY = 'gantry:ado-pat-rejected'
 
 const DEFAULT_WORKSPACE_KEY = 'default'
 
@@ -61,12 +62,34 @@ function persistOverrides(map) {
   safeSetItem(OVERRIDES_STORAGE_KEY, JSON.stringify(overrides))
 }
 
+function readStoredRejectedCredentials() {
+  const raw = safeGetItem(REJECTED_CREDENTIALS_STORAGE_KEY)
+  if (!raw) return {}
+  let parsed
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return {}
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+  return Object.fromEntries(Object.entries(parsed).filter(([, rejected]) => rejected === true))
+}
+
+function persistRejectedCredentials(map) {
+  if (Object.keys(map).length === 0) {
+    safeRemoveItem(REJECTED_CREDENTIALS_STORAGE_KEY)
+    return
+  }
+  safeSetItem(REJECTED_CREDENTIALS_STORAGE_KEY, JSON.stringify(map))
+}
+
 // PATs keyed by workspace id (`DEFAULT_WORKSPACE_KEY` for the global default) — `{}` when nothing is stored at all. The default key's value still round-trips through `STORAGE_KEY` as a single bare string exactly as before #104; every other key round-trips through `OVERRIDES_STORAGE_KEY` as a JSON map — see readStoredOverrides/persistOverrides above.
 const initialPat = safeGetItem(STORAGE_KEY)
 const patsByWorkspace = signal({
   ...(initialPat === null ? {} : { [DEFAULT_WORKSPACE_KEY]: initialPat }),
   ...readStoredOverrides(),
 })
+const rejectedCredentialSlots = signal(readStoredRejectedCredentials())
 
 // The global default PAT — `null` when none is stored, matching `getCredential(req)`'s own "no usable credential" return value. This is what the Settings screen's Global Defaults tab manages, and what every workspace falls back to until it has its own override.
 export const pat = computed(() => patsByWorkspace.value[DEFAULT_WORKSPACE_KEY] ?? null)
@@ -82,6 +105,7 @@ export function setPat(value) {
   }
   const next = { ...patsByWorkspace.value, [DEFAULT_WORKSPACE_KEY]: trimmed }
   patsByWorkspace.value = next
+  clearCredentialRejection(DEFAULT_WORKSPACE_KEY)
   safeSetItem(STORAGE_KEY, trimmed)
 }
 
@@ -92,6 +116,7 @@ export function clearPat() {
   const next = { ...patsByWorkspace.value }
   delete next[DEFAULT_WORKSPACE_KEY]
   patsByWorkspace.value = next
+  clearCredentialRejection(DEFAULT_WORKSPACE_KEY)
   safeRemoveItem(STORAGE_KEY)
 }
 
@@ -115,6 +140,7 @@ export function setWorkspacePatOverride(workspaceId, value) {
   }
   const next = { ...patsByWorkspace.value, [workspaceId]: trimmed }
   patsByWorkspace.value = next
+  clearCredentialRejection(workspaceId)
   persistOverrides(next)
 }
 
@@ -126,7 +152,33 @@ export function clearWorkspacePatOverride(workspaceId) {
   const next = { ...patsByWorkspace.value }
   delete next[workspaceId]
   patsByWorkspace.value = next
+  clearCredentialRejection(workspaceId)
   persistOverrides(next)
+}
+
+function clearCredentialRejection(slot) {
+  if (!rejectedCredentialSlots.value[slot]) return
+  const next = { ...rejectedCredentialSlots.value }
+  delete next[slot]
+  rejectedCredentialSlots.value = next
+  persistRejectedCredentials(next)
+}
+
+function effectiveCredentialSlot(workspaceId) {
+  return workspaceId && hasWorkspacePatOverride(workspaceId) ? workspaceId : DEFAULT_WORKSPACE_KEY
+}
+
+export function markCredentialRejected(workspaceId) {
+  const slot = effectiveCredentialSlot(workspaceId)
+  const next = { ...rejectedCredentialSlots.value, [slot]: true }
+  rejectedCredentialSlots.value = next
+  persistRejectedCredentials(next)
+}
+
+export function credentialStatusForWorkspace(workspaceId) {
+  const slot = effectiveCredentialSlot(workspaceId)
+  if (!patForWorkspace(workspaceId)) return 'missing'
+  return rejectedCredentialSlots.value[slot] ? 'rejected' : 'set'
 }
 
 /**
@@ -164,6 +216,7 @@ export function authHeader() {
 //
 // #104 review fix: whether a submitted PAT lands in the global-default slot or a workspace-specific override depends on `workspaceId` — but only when that workspace *already has* its own override set. `hasWorkspacePatOverride(workspaceId)` is checked once, at the moment the prompt actually opens (not later, in `resolvePromptWith` — the override could otherwise be cleared/changed by something else while the prompt is still open). This distinction matters: the overwhelmingly common case is a request with *no* override at all (the workspace-unaware, pre-#104 behavior every existing test already exercises) — for that case, a newly submitted PAT must still become the global default, exactly as before, not silently create a brand-new override the architect never asked for just because the request happened to know which workspace it was for. Only when a workspace's own override is the very thing that's (now) invalid does a resubmission repair *that* override instead — otherwise the retry would silently keep resending the same rejected override PAT forever, since `authHeaderForWorkspace` always prefers an existing override over the global default.
 export const promptOpen = signal(false)
+export const promptContext = signal(null)
 
 let pendingResolve = null
 let pendingOverrideWorkspaceId = null
@@ -173,7 +226,7 @@ let pendingOverrideWorkspaceId = null
  *
  * `workspaceId` identifies which workspace the failing request targeted — omit it (or pass a falsy value) for a request with no specific workspace in mind, which always resolves to the global default, unchanged from before workspace overrides existed.
  */
-export function requestPat(workspaceId) {
+export function requestPat(workspaceId, context = null) {
   if (pendingResolve) {
     return new Promise((resolve) => {
       const previous = pendingResolve
@@ -185,6 +238,7 @@ export function requestPat(workspaceId) {
   }
   // See this section's own comment above for why this only ever targets an *existing* override, never creates a new one from a plain PAT prompt.
   pendingOverrideWorkspaceId = hasWorkspacePatOverride(workspaceId) ? workspaceId : null
+  promptContext.value = context
   promptOpen.value = true
   return new Promise((resolve) => {
     pendingResolve = resolve
@@ -205,6 +259,7 @@ export function resolvePromptWith(patValue) {
     }
   }
   promptOpen.value = false
+  promptContext.value = null
   const resolve = pendingResolve
   pendingResolve = null
   resolve?.(Boolean(patValue))

@@ -298,7 +298,7 @@ test('settings: Workspace Settings\' owner, PAT-override, and ticketing-system-o
       await row.waitFor({ state: 'visible', timeout: 10_000 })
 
       assert.equal(await row.locator('.workspace-owner input[type=text]').inputValue(), 'original-owner')
-      assert.match(await row.locator('.workspace-pat-status').textContent(), /USING GLOBAL DEFAULT/)
+       assert.match(await row.locator('.workspace-pat-status').textContent(), /NO GLOBAL DEFAULT/)
       assert.match(await row.locator('.workspace-ticketing-state').textContent(), /USING GLOBAL DEFAULT/)
 
       await row.locator('.workspace-owner input[type=text]').fill('new-owner')

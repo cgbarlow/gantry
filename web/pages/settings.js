@@ -9,6 +9,7 @@ import {
   clearPat,
   requestPat,
   hasWorkspacePatOverride,
+  credentialStatusForWorkspace,
   setWorkspacePatOverride,
   clearWorkspacePatOverride,
 } from '../lib/credential.js'
@@ -25,6 +26,7 @@ function IdentityPicker({ value, onChange, placeholder, slug, className }) {
   const [results, setResults] = useState([])
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [searchError, setSearchError] = useState('')
   const debounceRef = useRef(null)
   const inputRef = useRef(null)
   const wrapperRef = useRef(null)
@@ -50,15 +52,24 @@ function IdentityPicker({ value, onChange, placeholder, slug, className }) {
       return
     }
     setLoading(true)
+    setSearchError('')
     try {
       const params = new URLSearchParams({ q })
       if (slug) params.set('slug', slug)
       const res = slug ? await apiFetchForInstance(slug, `/api/identities?${params}`) : await apiFetch(`/api/identities?${params}`)
-      const data = await res.json().catch(() => [])
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setResults([])
+        setSearchError(data.message ?? data.error ?? `Identity search failed (${res.status})`)
+        setOpen(true)
+        return
+      }
       setResults(Array.isArray(data) ? data : [])
       setOpen(true)
-    } catch {
+    } catch (err) {
       setResults([])
+      setSearchError(err.message)
+      setOpen(true)
     } finally {
       setLoading(false)
     }
@@ -119,8 +130,9 @@ function IdentityPicker({ value, onChange, placeholder, slug, className }) {
         ? html`<button type="button" class="clear-btn" onClick=${handleClear} aria-label="Clear">\u00d7</button>`
         : null}
       <div class=${'identity-dropdown' + (open ? ' open' : '')}>
-        ${loading ? html`<div class="no-results">Searching\u2026</div>` : null}
-        ${!loading && results.length === 0 && query.trim()
+        ${searchError ? html`<div class="no-results">${searchError}</div>` : null}
+        ${!searchError && loading ? html`<div class="no-results">Searching\u2026</div>` : null}
+        ${!searchError && !loading && results.length === 0 && query.trim()
           ? html`<div class="no-results">No identities found for "${query}".</div>`
           : null}
         ${results.map(
@@ -180,16 +192,21 @@ function backHrefFrom(query) {
 //
 // The default PAT this section manages is the exact same one web/lib/credential.js already held (and web/app.js's per-instance editor header used to expose) — moved here wholesale, not reimplemented. A third state this section adds beyond "replace"/"clear" (which assumed a PAT already existed): a first-time "Set" action, since this is now the *only* place a PAT can be entered ahead of any 401 ever prompting for one.
 function GlobalPatSection() {
+  const patStatus = credentialStatusForWorkspace()
   return html`
     <section class="settings-section">
       <h2>Azure DevOps Personal Access Token</h2>
       <p class="guidance">
         Used for every Azure-DevOps-backed instance this gantry server serves. Stored only in this browser and sent
-        solely to your own gantry server — needs <strong>Code (Read &amp; write)</strong> and
-        <strong>Work Items (Read &amp; write)</strong> scope.
+        solely to your own gantry server — needs <strong>Code (Read &amp; write)</strong>,
+        <strong>Work Items (Read &amp; write)</strong>, and <strong>Identity (Read)</strong> scope.
       </p>
       <div class="settings-pat-status">
-        ${pat.value ? html`<span class="stamp agreed">SET</span>` : html`<span class="stamp draft">NOT SET</span>`}
+        ${patStatus === 'rejected'
+          ? html`<span class="stamp review">REJECTED</span>`
+          : patStatus === 'set'
+            ? html`<span class="stamp agreed">SET</span>`
+            : html`<span class="stamp draft">NOT SET</span>`}
       </div>
       <div class="settings-actions">
         ${pat.value
@@ -290,7 +307,7 @@ export function workspaceRepoUrl(workspace) {
 }
 
 // One workspace's editable fields: owner (server-persisted, identity-picker), a PAT override (client-only, never touches the server), and a ticketing-system override (server-persisted) — the same three fields #104's old Workspace overrides tab exposed per row, now rendered for exactly one workspace (the instance's own) rather than one row per registered workspace. The owner field is now an identity picker (#145 Part 2).
-function WorkspaceEditor({ workspace, onUpdated }) {
+function WorkspaceEditor({ workspace, onUpdated, slug }) {
   const [ownerDraft, setOwnerDraft] = useState(workspace.owner ?? '')
   const [ownerStatus, setOwnerStatus] = useState('')
   const [patDraft, setPatDraft] = useState('')
@@ -309,6 +326,7 @@ function WorkspaceEditor({ workspace, onUpdated }) {
   }, [workspace.owner])
 
   const hasPatOverride = hasWorkspacePatOverride(workspace.id)
+  const effectivePatStatus = credentialStatusForWorkspace(workspace.id)
   // Known, low-risk gap (#104 review; re-assessed, not fixed here): this is a *heuristic* ("does this workspace's stored value currently differ from the global default"), not a stored "was this ever explicitly overridden" flag — the workspace registry (#96, unchanged by this ticket) always persists one concrete `ticketingSystem` value, with no distinct "unset, tracks the global default" state. In principle that means this label could drift out from under an untouched workspace if the global default ever changed to a different value later.
   //
   // In practice, today, it can't: `jira` is rejected by validation everywhere a ticketing system can be chosen (globally, per-workspace, and at workspace creation — see workspaceRegistry.js's `assertValidTicketingSystem` and this file's own `TICKETING_SYSTEMS` enum), so `defaultTicketingSystem.value` and every workspace's `ticketingSystem` can only ever be `'azure-devops'` — there is no reachable state where the two sides of this comparison differ. This only becomes a real, visible misreporting risk once genuine Jira support ships (explicitly out of scope for this ticket, per spec #95's own "Out of Scope" list) and a real fix (an explicit override flag on the workspace record, intersecting the already-closed #96 ticket's schema) is worth building then, against real second-system requirements, rather than speculatively now.
@@ -366,6 +384,7 @@ function WorkspaceEditor({ workspace, onUpdated }) {
               handleSaveOwner()
             }}
             placeholder="Unset"
+            slug=${slug}
           />
           <button type="button" class="btn small" onClick=${handleSaveOwner}>Save owner</button>
         </div>
@@ -375,9 +394,13 @@ function WorkspaceEditor({ workspace, onUpdated }) {
       <div class="workspace-field workspace-pat">
         <label>Azure DevOps PAT override</label>
         <div class="workspace-pat-status">
-          ${hasPatOverride
-            ? html`<span class="stamp agreed">OVERRIDE SET</span>`
-            : html`<span class="stamp draft">USING GLOBAL DEFAULT</span>`}
+          ${effectivePatStatus === 'rejected'
+            ? html`<span class="stamp review">${hasPatOverride ? 'OVERRIDE REJECTED' : 'GLOBAL DEFAULT REJECTED'}</span>`
+            : effectivePatStatus === 'missing'
+              ? html`<span class="stamp draft">NO GLOBAL DEFAULT</span>`
+              : hasPatOverride
+                ? html`<span class="stamp agreed">OVERRIDE SET</span>`
+                : html`<span class="stamp draft">USING GLOBAL DEFAULT</span>`}
         </div>
         <div class="workspace-field-row">
           <input
@@ -491,7 +514,7 @@ export function WorkspaceSettingsPage({ query }) {
         ${state === 'ready'
           ? html`
               <div class="workspace-list">
-                <${WorkspaceEditor} workspace=${workspace} onUpdated=${setWorkspace} />
+                <${WorkspaceEditor} workspace=${workspace} onUpdated=${setWorkspace} slug=${slug} />
               </div>
             `
           : null}

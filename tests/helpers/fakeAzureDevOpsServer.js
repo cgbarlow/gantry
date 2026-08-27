@@ -57,6 +57,7 @@ export function createFakeAzureDevOpsServer({
   workItemTypeStates = {},
   workItemTypes,
   denyReviewerVoteReset = false,
+  rejectIdentityRequests = false,
   repoExists = true,
 } = {}) {
   // One independent { store, objectId } per branch — a branch with no
@@ -616,6 +617,7 @@ export function createFakeAzureDevOpsServer({
     // lib/azureDevOpsIdentityClient.js resolves identities correctly in
     // tests without needing to spin up a real Azure DevOps directory.
     if (req.method === 'GET' && pathname === `/${organization}/${project}/_apis/identities`) {
+      if (rejectIdentityRequests) return json(403, { message: 'TF400813: Identity scope rejected (fake server).' })
       const query = (url.searchParams.get('searchFilter') ?? url.searchParams.get('query') ?? '').toLowerCase()
       if (!query) return json(200, [])
       const fakeIdentity = {
@@ -666,7 +668,7 @@ export function createFakeAzureDevOpsServer({
  * Starts a `createFakeAzureDevOpsServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/server.test.js`'s `withRunningServer` helper's shape (per #82's testing decisions). Shared by `tests/azureDevOpsClient.test.js` and `tests/instance.test.js` so this lifecycle isn't duplicated across both.
  */
 export function withFakeAzureDevOpsServer(
-  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes, denyReviewerVoteReset, repoExists },
+  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes, denyReviewerVoteReset, rejectIdentityRequests, repoExists },
   fn
 ) {
   return new Promise((resolve, reject) => {
@@ -681,6 +683,7 @@ export function withFakeAzureDevOpsServer(
       workItemTypeStates,
       workItemTypes,
       denyReviewerVoteReset,
+      rejectIdentityRequests,
       repoExists,
     })
     server.listen(0, async () => {

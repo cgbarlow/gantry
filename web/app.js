@@ -12,7 +12,7 @@ import { keymap } from '@codemirror/view'
 import { indentWithTab } from '@codemirror/commands'
 import { syntaxTree } from '@codemirror/language'
 import { markdown } from '@codemirror/lang-markdown'
-import { promptOpen, resolvePromptWith } from './lib/credential.js'
+import { promptContext, promptOpen, resolvePromptWith } from './lib/credential.js'
 import { apiFetch, apiFetchForInstance } from './lib/apiFetch.js'
 import { renderMarkdown } from './lib/markdown.js'
 import { Dropdown } from './lib/dropdown.js'
@@ -116,6 +116,7 @@ function IdentityPicker({ value, onChange, placeholder, slug, className }) {
   const [results, setResults] = useState([])
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [searchError, setSearchError] = useState('')
   const debounceRef = useRef(null)
   const inputRef = useRef(null)
   const wrapperRef = useRef(null)
@@ -143,15 +144,24 @@ function IdentityPicker({ value, onChange, placeholder, slug, className }) {
       return
     }
     setLoading(true)
+    setSearchError('')
     try {
       const params = new URLSearchParams({ q })
       if (slug) params.set('slug', slug)
       const res = await apiFetchForInstance(slug, `/api/identities?${params}`)
-      const data = await res.json().catch(() => [])
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setResults([])
+        setSearchError(data.message ?? data.error ?? `Identity search failed (${res.status})`)
+        setOpen(true)
+        return
+      }
       setResults(Array.isArray(data) ? data : [])
       setOpen(true)
-    } catch {
+    } catch (err) {
       setResults([])
+      setSearchError(err.message)
+      setOpen(true)
     } finally {
       setLoading(false)
     }
@@ -220,8 +230,9 @@ function IdentityPicker({ value, onChange, placeholder, slug, className }) {
         ? html`<button type="button" class="clear-btn" onClick=${handleClear} aria-label="Clear">x</button>`
         : null}
       <div class=${'identity-dropdown' + (open ? ' open' : '')}>
-        ${loading ? html`<div class="no-results">Searching…</div>` : null}
-        ${!loading && results.length === 0 && query.trim()
+        ${searchError ? html`<div class="no-results">${searchError}</div>` : null}
+        ${!searchError && loading ? html`<div class="no-results">Searching…</div>` : null}
+        ${!searchError && !loading && results.length === 0 && query.trim()
           ? html`<div class="no-results">No identities found for "${query}".</div>`
           : null}
         ${results.map(
@@ -3096,6 +3107,8 @@ function DashboardPage() {
 function PatPromptModal() {
   const [value, setValue] = useState('')
   const [error, setError] = useState('')
+  const context = promptContext.value
+  const rejected = context?.credentialStatus === 'rejected'
 
   useEffect(() => {
     function onKeyDown(e) {
@@ -3116,10 +3129,11 @@ function PatPromptModal() {
   return html`
     <div class="modal-backdrop" role="presentation">
       <div class="modal" role="dialog" aria-modal="true" aria-label="Azure DevOps sign-in required">
-        <h3>Azure DevOps sign-in required</h3>
+        <h3>${rejected ? 'Azure DevOps PAT rejected' : 'Azure DevOps sign-in required'}</h3>
         <p class="guidance">
-          This instance's data lives in Azure DevOps. Paste a Personal Access Token (PAT) to continue — it needs
-          <strong>Code (Read & write)</strong> and <strong>Work Items (Read & write)</strong> scope.
+          ${rejected ? context.message : "This instance's data lives in Azure DevOps. Paste a Personal Access Token (PAT) to continue."}
+          It needs <strong>Code (Read & write)</strong>, <strong>Work Items (Read & write)</strong>, and
+          <strong>Identity (Read)</strong> scope.
           It's stored only in this browser and sent solely to your own gantry server.
         </p>
         <input

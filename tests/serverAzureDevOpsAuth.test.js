@@ -478,3 +478,24 @@ test('the PAT never appears in the "authentication required" response body, nor 
     assert.doesNotMatch(okText, new RegExp(VALID_PAT))
   })
 })
+
+test('GET /api/identities distinguishes a rejected PAT from a missing PAT', async () => {
+  await withAzureDevOpsBackedServer(SEED_FILES, {}, async (base) => {
+    const missing = await fetch(`${base}/api/identities?q=Test`)
+    const missingBody = await missing.json()
+    assert.equal(missing.status, 401)
+    assert.equal(missingBody.credentialRejected, undefined)
+
+    const rejected = await fetch(`${base}/api/identities?q=Test`, {
+      headers: { Authorization: basicAuthHeader('identity-scope-missing-pat') },
+    })
+    const rejectedBody = await rejected.json()
+    assert.equal(rejected.status, 401)
+    assert.equal(rejectedBody.credentialRejected, true)
+    assert.equal(rejectedBody.credentialStatus, 'rejected')
+    assert.equal(rejectedBody.operation, 'identity search')
+    assert.match(rejectedBody.message, /PAT already provided was rejected/)
+    assert.match(rejectedBody.message, /Identity \(Read\)/)
+    assert.doesNotMatch(JSON.stringify(rejectedBody), /identity-scope-missing-pat/)
+  })
+})
