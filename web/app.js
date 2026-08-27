@@ -12,13 +12,13 @@ import { keymap } from '@codemirror/view'
 import { indentWithTab } from '@codemirror/commands'
 import { syntaxTree } from '@codemirror/language'
 import { markdown } from '@codemirror/lang-markdown'
-import MarkdownIt from 'markdown-it'
-import DOMPurify from 'dompurify'
 import { promptOpen, resolvePromptWith } from './lib/credential.js'
 import { apiFetch, apiFetchForInstance } from './lib/apiFetch.js'
+import { renderMarkdown } from './lib/markdown.js'
 import { Dropdown } from './lib/dropdown.js'
 import { apply as applyMarkdownCommand, HEADING_LEVELS, findTable } from './lib/markdownCommands.js'
 import { NewWorkspaceWizardPage } from './pages/new-workspace-wizard.js'
+import { UserGuidePage } from './pages/user-guide.js'
 import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, workspaceRepoUrl } from './pages/settings.js'
 // Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79) markdown/split/rendered toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
@@ -33,19 +33,9 @@ import {
   sortArtefacts,
 } from './lib/artefactSelection.js'
 
-const md = new MarkdownIt()
-
 function assetFileUrl(assetId, slug) {
   const base = `/api/instance/assets/${encodeURIComponent(assetId)}/file`
   return slug ? `${base}?slug=${encodeURIComponent(slug)}` : base
-}
-
-// `image` tokens whose src resolves to gantry's own asset-file route get an `asset-thumb` class, so the Gate Ledger stylesheet can size/border an inserted asset as a real thumbnail rather than an arbitrary inline image (#80's "renders as an actual thumbnail" acceptance criterion).
-const defaultImageRenderer = md.renderer.rules.image
-md.renderer.rules.image = (tokens, idx, options, env, self) => {
-  const src = tokens[idx].attrGet('src') ?? ''
-  if (src.startsWith('/api/instance/assets/')) tokens[idx].attrJoin('class', 'asset-thumb')
-  return defaultImageRenderer(tokens, idx, options, env, self)
 }
 
 async function loadInstance(slug, stageId) {
@@ -105,7 +95,7 @@ function renderPreview(node, text) {
     (id) => assetFileUrl(id, slug),
     (id) => sources[id] ?? null
   )
-  node.innerHTML = DOMPurify.sanitize(md.render(withSources))
+  node.innerHTML = renderMarkdown(withSources)
   // Caption-styling hook: the citation renders as <p><em>Source: …</em></p>; mark that paragraph so the stylesheet can make it visually subordinate (caption) rather than body text.
   node.querySelectorAll('p').forEach((p) => {
     const em = p.querySelector('em')
@@ -2523,7 +2513,7 @@ function AppHeader({ instance }) {
   const [openMenu, setOpenMenu] = useState(null)
 
   return html`
-    <header>
+    <header class="app-header">
       <div class="brand">
         <${GantryBrandIcon} />
         <a class="btn small ghost" href="/">← Workspaces</a>
@@ -2533,6 +2523,7 @@ function AppHeader({ instance }) {
           open=${openMenu === 'instance-switcher'}
           onOpenChange=${(next) => setOpenMenu(next ? 'instance-switcher' : null)}
         />
+        <a class="btn small ghost" href="/user-guide">User Guide</a>
         <${SettingsMenu}
           instance=${instance}
           open=${openMenu === 'settings'}
@@ -3077,6 +3068,7 @@ function DashboardPage() {
         <div class="dashboard-controls">
           ${instances?.length ? html`<${ViewToggle} />` : null}
           <a class="btn small ghost" href="/new-workspace">+ New Workspace</a>
+          <a class="btn small ghost" href="/user-guide">User Guide</a>
           <a class="btn small ghost" href=${`/settings?from=${encodeURIComponent('/')}`}>Settings</a>
         </div>
       </div>
@@ -3149,7 +3141,7 @@ function PatPromptModal() {
 }
 
 // ---------- App shell: preact-iso routing ----------
-// Eight routes: the dashboard (#77, default/landing), the module editor per instance, the "+ New Workspace" wizard (#110/#126, replacing the old #78 instance-setup wizard), the asset library (#80), and three tab-free Settings screens (#107, superseding #101/#104's single tabbed `/settings`) — Global Settings, Workspace Settings (scoped to one instance's own workspace), and Instance Settings (assignee, read-only instance info, read-only work-item link details). `instanceData`/`loadError` above are populated regardless of which route is active (the `effect()` isn't scoped to a component), so the library screen never has to re-fetch instance data just to know which instance it's browsing.
+// Nine routes: the dashboard (#77, default/landing), the module editor per instance, the "+ New Workspace" wizard (#110/#126, replacing the old #78 instance-setup wizard), the asset library (#80), the User Guide (#193), and three tab-free Settings screens (#107, superseding #101/#104's single tabbed `/settings`) — Global Settings, Workspace Settings (scoped to one instance's own workspace), and Instance Settings (assignee, read-only instance info, read-only work-item link details). `instanceData`/`loadError` above are populated regardless of which route is active (the `effect()` isn't scoped to a component), so the library screen never has to re-fetch instance data just to know which instance it's browsing.
 function App() {
   return html`
     <${LocationProvider}>
@@ -3158,6 +3150,7 @@ function App() {
         <${Route} path="/new-workspace" component=${NewWorkspaceWizardPage} />
         <${Route} path="/new-instance" component=${NewWorkspaceWizardPage} />
         <${Route} path="/assets" component=${AssetLibraryPage} />
+        <${Route} path="/user-guide" component=${UserGuidePage} />
         <${Route} path="/settings" component=${GlobalSettingsPage} />
         <${Route} path="/settings/workspace" component=${WorkspaceSettingsPage} />
         <${Route} path="/settings/instance" component=${InstanceSettingsPage} />

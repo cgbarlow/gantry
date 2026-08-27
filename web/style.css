@@ -1059,6 +1059,52 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 }
 .wizard-header h1, .settings-header h1 { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; font-size: 20px; margin: 0; flex: 1; }
 
+/* ---------- User Guide (#193) ---------- */
+.guide-header {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 32px 32px 20px;
+  border-bottom: var(--border-strong) solid var(--line-strong);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.guide-header h1 { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; font-size: 22px; margin: 0; }
+.guide-page {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 32px 32px 140px;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 48px;
+  align-items: start;
+}
+.guide-navigation { position: sticky; top: 24px; }
+.guide-navigation h2 { font-family: var(--font-display); font-size: 13px; margin: 0 0 10px; }
+.guide-navigation ol { list-style: none; padding: 0; margin: 0; border-left: var(--hairline) solid var(--line); }
+.guide-navigation li { padding: 4px 0 4px 12px; font-size: 13px; }
+.guide-navigation li a { text-decoration: none; }
+.guide-navigation li a:hover { text-decoration: underline; }
+.guide-navigation li.pending a { color: var(--text-muted); }
+.guide-navigation li span { display: block; color: var(--text-muted); font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+.guide-content { min-width: 0; max-width: 72ch; }
+.guide-content h1 { font-family: var(--font-display); font-size: 28px; line-height: 1.2; margin: 0 0 20px; }
+.guide-content h2 { font-family: var(--font-display); font-size: 21px; line-height: 1.25; margin: 40px 0 12px; scroll-margin-top: 24px; }
+.guide-content h2:first-of-type { margin-top: 0; }
+.guide-content p { margin: 0 0 14px; }
+.guide-content ul { margin: 0 0 18px; padding-left: 22px; }
+.guide-content li { margin: 5px 0; }
+.guide-content code { font-family: var(--font-mono); font-size: 0.9em; }
+
+@media (max-width: 760px) {
+  .app-header .brand { flex-wrap: wrap; }
+  .app-header .brand h1 { min-width: 0; }
+  .guide-page { display: block; }
+  .guide-navigation { position: static; margin-bottom: 32px; }
+  .guide-navigation ol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-left: none; border-top: var(--hairline) solid var(--line); padding-top: 8px; }
+  .guide-navigation li { padding-left: 0; padding-right: 12px; }
+}
+
 .wizard-page, .settings-page { max-width: 860px; margin: 0 auto; padding: 32px 32px 140px; }
 .wizard-page h2 { font-family: var(--font-display); font-weight: 600; font-size: 22px; margin: 0; }
 .wizard-page .lede { color: var(--text-muted); margin: 6px 0 28px; max-width: 70ch; }
