@@ -2226,6 +2226,7 @@ function ViewModeToolbar({
   onClearAllFields,
   requestApprovalSlug,
   selectedArtefactId,
+  selectedArtefact,
   onArtefactChange,
 }) {
   const [renderOpen, setRenderOpen] = useState(false)
@@ -2311,13 +2312,17 @@ function ViewModeToolbar({
             `
           )}
         </div>
-        ${showArtefactSelector
+        ${artefacts.length > 0
           ? html`
               <label class="artefact-selector">
                 <span>Artefact</span>
-                <select aria-label="Artefact" value=${selectedArtefactId ?? ''} onChange=${(e) => onArtefactChange(e.currentTarget.value)}>
-                  ${artefacts.map((artefact) => html`<option value=${artefact.id} key=${artefact.id}>${artefact.title}</option>`)}
-                </select>
+                ${showArtefactSelector
+                  ? html`
+                      <select aria-label="Artefact" value=${selectedArtefactId ?? ''} onChange=${(e) => onArtefactChange(e.currentTarget.value)}>
+                        ${artefacts.map((artefact) => html`<option value=${artefact.id} key=${artefact.id}>${artefact.title}</option>`)}
+                      </select>
+                    `
+                  : html`<span class="artefact-value" aria-label="Artefact">${selectedArtefact?.title ?? ''}</span>`}
               </label>
             `
           : null}
@@ -2641,6 +2646,7 @@ function ModuleEditorPage({ slug }) {
     <${ViewModeToolbar}
       instance=${instance}
       selectedArtefactId=${selectedArtefact?.id ?? null}
+      selectedArtefact=${selectedArtefact}
       onArtefactChange=${changeArtefact}
       onClearAllFields=${clearAllFields}
       requestApprovalSlug=${instance.workspaceBacked ? instance.slug : null}

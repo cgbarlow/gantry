@@ -258,10 +258,13 @@ test('artefact selector filters Shape and Detailed Design fields, persists per s
         assert.equal(await page.locator('.field label', { hasText: 'Network and infrastructure' }).count(), 0)
         assert.equal(await page.locator('.field label', { hasText: 'Availability and continuity *' }).count(), 1)
 
-        // HLD has one artefact, so no selector is rendered there.
+        // HLD has one artefact, so the active artefact is shown as fixed text, not as an interactive selector.
         await page.locator('#stage-nav button', { hasText: 'High-level Design' }).click()
         await page.waitForSelector('.module', { timeout: 10_000 })
         assert.equal(await page.getByRole('combobox', { name: 'Artefact' }).count(), 0)
+        const fixedArtefact = page.locator('.artefact-selector .artefact-value')
+        assert.equal(await fixedArtefact.getAttribute('aria-label'), 'Artefact')
+        assert.equal(await fixedArtefact.textContent(), 'High Level Design')
 
         // Visiting Shape again starts from its alphanumeric-first default,
         // rather than carrying the earlier soap-full selection across stages.

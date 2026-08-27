@@ -220,7 +220,7 @@ header {
 .toolbar-left { gap: 14px; min-width: 0; }
 .toolbar-actions .btn { margin: 0 0 0 8px; }
 .artefact-selector { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
-.artefact-selector span { text-transform: uppercase; letter-spacing: 0.08em; }
+.artefact-selector > span:first-child { text-transform: uppercase; letter-spacing: 0.08em; }
 .artefact-selector select {
   font: 600 13px var(--font-body);
   color: var(--text);
@@ -229,6 +229,10 @@ header {
   border-radius: var(--radius);
   padding: 6px 28px 6px 9px;
   max-width: 280px;
+}
+.artefact-selector .artefact-value {
+  font: 600 13px var(--font-body);
+  color: var(--text);
 }
 
 /* View-mode visibility, driven by data-view-mode on main#modules (#79). */
