@@ -328,8 +328,11 @@ test('Render dialog: toggling multiple artefacts renders them as one batch; unto
   }
 })
 
-// Coverage for #132 — every markdown field carries its own generic "Insert ▾" dropdown (Image / Table / Section), replacing #80's single per-module "+ Insert asset" button. This test walks the Image path through both tabs of the (renamed) Insert image modal — including inline validation and live-preview thumbnails — proves per-field targeting (the second field's own dropdown inserts into the second field), that the dropdowns vanish in Rendered view, and that the library screen still reflects usage. Table and Section get their own tests below.
-test("each markdown field has an Insert ▾ dropdown whose Image flow uploads, inserts, and reflects usage; wording says Image, never Asset", async () => {
+// Coverage for #180 — Image moved to each field's formatting toolbar while
+// Section/List remain behind Insert ▾. This test walks the Image path through
+// both tabs of the (renamed) Insert image modal — including inline validation
+// and live-preview thumbnails — and proves direct toolbar targeting.
+test("Image is a direct formatting-toolbar action and Insert offers only Section/List", async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
@@ -352,11 +355,13 @@ test("each markdown field has an Insert ▾ dropdown whose Image flow uploads, i
         const contextModule = page.locator('.module').first()
         await assert.doesNotReject(contextModule.locator('h2', { hasText: 'Context' }).waitFor({ timeout: 2_000 }))
 
-        // The old single affordance is gone; each of the context module's four markdown fields has its own generic dropdown instead.
+        // The old single affordance is gone; each markdown field has its own generic dropdown instead.
         assert.equal(await page.getByRole('button', { name: '+ Insert asset' }).count(), 0)
         const triggers = contextModule.getByRole('button', { name: 'Insert ▾' })
         assert.equal(await triggers.count(), 4)
         const firstTrigger = triggers.nth(0)
+        const firstField = contextModule.locator('.field-markdown').nth(0)
+        const secondField = contextModule.locator('.field-markdown').nth(1)
 
         // Hidden once the screen switches to Rendered-only view (that view is read-only).
         await assert.doesNotReject(firstTrigger.waitFor({ state: 'visible', timeout: 5_000 }))
@@ -365,15 +370,19 @@ test("each markdown field has an Insert ▾ dropdown whose Image flow uploads, i
         await page.locator('.segmented').getByRole('button', { name: 'Split' }).click()
         await firstTrigger.waitFor({ state: 'visible', timeout: 5_000 })
 
-        // Open the FIRST field's dropdown: the menu offers exactly Image / Table / Section, and choosing Image opens the renamed modal.
+        // The remaining Insert menu offers exactly Section / List.
         await firstTrigger.click()
         const menu = contextModule.locator('.insert-dropdown .menu')
         await menu.waitFor({ state: 'visible', timeout: 5_000 })
         assert.deepEqual(
           await menu.getByRole('menuitem').allTextContents(),
-          ['Image', 'Table', 'Section', 'List']
+          ['Section', 'List']
         )
-        await menu.getByRole('menuitem', { name: 'Image' }).click()
+        await firstTrigger.click()
+
+        // Image now opens from the FIRST field's formatting toolbar.
+        await firstField.locator('.cm-content').click()
+        await firstField.locator('.md-toolbar').getByRole('button', { name: 'Image', exact: true }).click()
 
         const modal = page.locator('.modal')
         await modal.waitFor({ state: 'visible', timeout: 5_000 })
@@ -401,15 +410,15 @@ test("each markdown field has an Insert ▾ dropdown whose Image flow uploads, i
         await assert.doesNotReject(firstPreview.locator('img.asset-thumb').waitFor({ timeout: 5_000 }))
         assert.equal(await firstPreview.locator('img.asset-thumb').count(), 1)
 
-        // "Choose existing" via the SECOND field's own dropdown — the insert must land in the second field, proving the dropdowns target their own field rather than whichever one was focused last.
-        await triggers.nth(1).click()
-        await contextModule.locator('.insert-dropdown .menu').getByRole('menuitem', { name: 'Image' }).click()
+        // "Choose existing" via the SECOND field's own toolbar — the insert
+        // must land in the second field, not whichever one was focused last.
+        await secondField.locator('.cm-content').click()
+        await secondField.locator('.md-toolbar').getByRole('button', { name: 'Image', exact: true }).click()
         await modal.waitFor({ state: 'visible', timeout: 5_000 })
         await page.getByRole('button', { name: 'Choose existing' }).click()
         await modal.locator('.grid-library .card').first().waitFor({ timeout: 5_000 })
         await modal.locator('.grid-library .card').first().click()
         await modal.waitFor({ state: 'hidden', timeout: 5_000 })
-        const secondField = contextModule.locator('.field-markdown').nth(1)
         await assert.doesNotReject(secondField.locator('.preview img.asset-thumb').first().waitFor({ timeout: 5_000 }))
         assert.equal(await firstPreview.locator('img.asset-thumb').count(), 1, 'the first field must be untouched')
 
@@ -450,8 +459,8 @@ test("each markdown field has an Insert ▾ dropdown whose Image flow uploads, i
   }
 })
 
-// Coverage for #134 — Loop-style table editing: the Insert ▾ size grid, the
-// contextual control strip, the Tab/Enter keyboard flow, graceful degradation
+// Coverage for #134/#180 — Loop-style table editing: the formatting-toolbar
+// Table action's size grid, the contextual control strip, the Tab/Enter keyboard flow, graceful degradation
 // on malformed input, and themed preview rendering.
 
 // CodeMirror renders one .cm-line per document line with no separators, so
@@ -475,7 +484,7 @@ async function eventually(fn, timeout = 3000) {
   throw lastErr
 }
 
-test('Insert ▾ → Table opens a size grid whose pick inserts a live table with the caret parked (#134)', async () => {
+test('toolbar Table opens a size grid whose pick inserts a live table with the caret parked (#134, #180)', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
@@ -501,12 +510,23 @@ test('Insert ▾ → Table opens a size grid whose pick inserts a live table wit
         await firstField.locator('.cm-content').click()
         await page.keyboard.press('ControlOrMeta+a')
         await page.keyboard.type('Key decisions:')
-        await firstField.getByRole('button', { name: 'Insert ▾' }).click()
-        await contextModule.locator('.insert-dropdown .menu').getByRole('menuitem', { name: 'Table' }).click()
+        const tableButton = firstField.locator('.md-toolbar').getByRole('button', { name: 'Table', exact: true })
+        await tableButton.click()
 
         const grid = contextModule.locator('.table-picker-grid')
         await grid.waitFor({ state: 'visible', timeout: 5_000 })
         assert.equal(await grid.locator('.table-picker-cell').count(), 64, 'an 8×8 grid')
+        assert.equal(await tableButton.getAttribute('aria-haspopup'), 'grid')
+        assert.equal(await contextModule.locator('.table-picker .menu').getAttribute('role'), 'grid')
+
+        // Escape dismisses the picker and returns focus to the editor rather
+        // than leaving focus on the cell that is about to be unmounted.
+        await grid.locator('.table-picker-cell').first().focus()
+        await page.keyboard.press('Escape')
+        await grid.waitFor({ state: 'hidden', timeout: 5_000 })
+        assert.equal(await firstField.locator('.cm-content').evaluate((el) => el === document.activeElement), true)
+        await tableButton.click()
+        await grid.waitFor({ state: 'visible', timeout: 5_000 })
 
         // Hovering a corner lights up exactly its R×C rectangle and the
         // caption reads out the size.
@@ -570,8 +590,7 @@ test('Tab walks the cells, Enter appends a row from the last one, Shift-Tab retr
         await page.keyboard.press('ControlOrMeta+a')
 
         // Seed a 2×2 table through the picker.
-        await firstField.getByRole('button', { name: 'Insert ▾' }).click()
-        await firstField.locator('.insert-dropdown .menu').getByRole('menuitem', { name: 'Table' }).click()
+        await firstField.locator('.md-toolbar').getByRole('button', { name: 'Table', exact: true }).click()
         const grid = firstField.locator('.table-picker-grid')
         await grid.waitFor({ state: 'visible', timeout: 5_000 })
         await grid.locator('[data-row="2"][data-col="2"]').click()
@@ -630,8 +649,7 @@ test('the contextual strip adds/removes rows and columns and cycles alignment (#
         await firstField.locator('.cm-content').click()
         await page.keyboard.press('ControlOrMeta+a')
 
-        await firstField.getByRole('button', { name: 'Insert ▾' }).click()
-        await firstField.locator('.insert-dropdown .menu').getByRole('menuitem', { name: 'Table' }).click()
+        await firstField.locator('.md-toolbar').getByRole('button', { name: 'Table', exact: true }).click()
         const grid = firstField.locator('.table-picker-grid')
         await grid.waitFor({ state: 'visible', timeout: 5_000 })
         await grid.locator('[data-row="2"][data-col="2"]').click()
@@ -761,8 +779,7 @@ test('preview tables are token-styled in all three themes (#134)', async () => {
         const firstField = page.locator('.field-markdown').nth(0)
         await firstField.locator('.cm-content').click()
         await page.keyboard.press('ControlOrMeta+a')
-        await firstField.getByRole('button', { name: 'Insert ▾' }).click()
-        await firstField.locator('.insert-dropdown .menu').getByRole('menuitem', { name: 'Table' }).click()
+        await firstField.locator('.md-toolbar').getByRole('button', { name: 'Table', exact: true }).click()
         const grid = firstField.locator('.table-picker-grid')
         await grid.waitFor({ state: 'visible', timeout: 5_000 })
         await grid.locator('[data-row="2"][data-col="2"]').click()
@@ -911,16 +928,28 @@ test('formatting toolbar follows field focus, hides on blur, and never shows in 
           'Strikethrough',
           'Inline code',
           'Link',
-          'Bullet list',
-          'Numbered list',
-          'Task list',
+          'Lists',
           'Blockquote',
           'Horizontal rule',
           'Code block',
+          'Image',
+          'Table',
           'Headings',
         ]) {
           assert.equal(await toolbar.getByRole('button', { name, exact: true }).count(), 1, `${name} button`)
         }
+        assert.equal(await toolbar.getByRole('button', { name: 'Bullet list', exact: true }).count(), 0)
+        assert.equal(await toolbar.getByRole('button', { name: 'Numbered list', exact: true }).count(), 0)
+        assert.equal(await toolbar.getByRole('button', { name: 'Task list', exact: true }).count(), 0)
+        assert.equal(await toolbar.getByRole('button', { name: 'Image', exact: true }).getAttribute('tabindex'), '0')
+        assert.equal(await toolbar.getByRole('button', { name: 'Table', exact: true }).getAttribute('tabindex'), '0')
+
+        const listsTrigger = toolbar.getByRole('button', { name: 'Lists', exact: true })
+        await listsTrigger.click()
+        const listsMenu = field.locator('.md-lists .menu')
+        await listsMenu.waitFor({ state: 'visible', timeout: 2_000 })
+        assert.deepEqual(await listsMenu.locator('button').allTextContents(), ['Bullet list', 'Numbered list', 'Task list'])
+        await listsTrigger.click()
 
         // Blur (click the page header) takes the toolbar with it.
         await page.locator('header h1').click()
@@ -1099,7 +1128,18 @@ test('task list, blockquote, and horizontal rule write real markdown to disk (#1
         await page.keyboard.type('first\nsecond')
         await page.keyboard.press('ControlOrMeta+a')
 
-        await toolbar.getByRole('button', { name: 'Task list', exact: true }).click()
+        const chooseList = async (label) => {
+          await toolbar.getByRole('button', { name: 'Lists', exact: true }).click()
+          await field.locator('.md-lists .menu').getByRole('button', { name: label, exact: true }).click()
+        }
+        await chooseList('Bullet list')
+        assert.equal(await docText(field), '- first\n- second')
+        await page.keyboard.press('ControlOrMeta+a')
+        await chooseList('Numbered list')
+        assert.equal(await docText(field), '1. first\n1. second')
+        await page.keyboard.press('ControlOrMeta+a')
+        await chooseList('Task list')
+        assert.equal(await docText(field), '- [ ] first\n- [ ] second')
         await toolbar.getByRole('button', { name: 'Blockquote', exact: true }).click()
         await page.keyboard.press('ControlOrMeta+End')
         await toolbar.getByRole('button', { name: 'Horizontal rule', exact: true }).click()
@@ -1373,13 +1413,10 @@ test('⤢ expands a field full-screen with both split panes and its toolbar; Esc
         await field.locator('.preview').click()
         await toolbar.waitFor({ state: 'visible', timeout: 5_000 })
 
-        // In full-screen mode the trigger is at the bottom of the viewport;
-        // the complete Insert menu therefore flips above it instead of being
-        // clipped below the viewport.
-        await insert.click()
-        await insertMenu.waitFor({ state: 'visible', timeout: 5_000 })
-        assert.equal(await insertMenu.evaluate((el) => el.classList.contains('menu-up')), true)
-        await insert.click()
+        // Insert is absent while the field is full-screen; its Section/List
+        // actions return with the normal editing layout.
+        assert.equal(await insert.count(), 0)
+        assert.equal(await insertMenu.count(), 0)
 
         // The sticky view bar is suppressed while full-screen.
         assert.equal(
@@ -1416,6 +1453,7 @@ test('⤢ expands a field full-screen with both split panes and its toolbar; Esc
           )
         }
         assert.equal(await page.locator('.toolbar').evaluate((el) => getComputedStyle(el).position), 'sticky')
+        await insert.waitFor({ state: 'visible', timeout: 5_000 })
 
         // The same button exits too.
         await content.click()

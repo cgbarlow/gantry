@@ -1,6 +1,6 @@
 # Markdown tables as line-scanned text transforms with graceful degradation
 
-The table feature (#134) needs Loop-style editing inside markdown fields: a hover-grid size picker behind Insert ▾ ▸ Table, a contextual control strip (add/remove rows and columns, per-column alignment), and a keyboard flow — Tab walks the cells, Enter appends a row from the last one — while preview tables render styled in every theme.
+The table feature (#134, with its trigger moved to the formatting toolbar by #180) needs Loop-style editing inside markdown fields: a hover-grid size picker behind the Table action, a contextual control strip (add/remove rows and columns, per-column alignment), and a keyboard flow — Tab walks the cells, Enter appends a row from the last one — while preview tables render styled in every theme.
 
 ADR-0017's seam already gives us commands as pure functions over `{ tree, text, from, to }`, and tables fit it without extension: every table command is a pure transform in `web/lib/markdownCommands.js` returning new full-document text plus a selection, dispatched as one transaction by the same `runMarkdownCommand` glue. One addition to the contract: **a table command may return `null`, meaning "there is no well-formed table here — do nothing"**, and the glue treats that exactly like an unconsumed keypress (`runMarkdownCommand` returns false so the keymap falls through).
 

@@ -515,8 +515,13 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
   transform: translateY(-2px);
 }
 .md-sep { width: 1px; height: 16px; background: var(--line); margin: 0 4px; }
-.md-headings { margin-left: auto; position: relative; }
-.md-headings .menu {
+.md-headings { margin-left: auto; }
+.md-headings,
+.md-lists {
+  position: relative;
+}
+.md-headings .menu,
+.md-lists .menu {
   display: none;
   position: absolute;
   right: 0;
@@ -530,8 +535,10 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
   min-width: 130px;
 }
-.md-headings .menu-open .menu { display: block; }
-.md-headings .menu button {
+.md-headings .menu-open .menu,
+.md-lists .menu-open .menu { display: block; }
+.md-headings .menu button,
+.md-lists .menu button {
   display: block;
   width: 100%;
   text-align: left;
@@ -544,12 +551,13 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
   cursor: pointer;
   box-sizing: border-box;
 }
-.md-headings .menu button:hover { background: var(--bg); }
+.md-headings .menu button:hover,
+.md-lists .menu button:hover { background: var(--bg); }
 
 /*
  * Full-screen field expansion (#135) — the field's own wrapper is the
  * full-screen element, so the UA's "fills the viewport" default is re-flowed
- * into the Gate Ledger layout: label and Insert ▾ keep their natural height
+ * into the Gate Ledger layout: label keeps its natural height
  * while the split row takes everything that's left, meaning markdown mode
  * gets a full-height editor, split mode gets BOTH panes filling the screen,
  * and each pane scrolls internally rather than pushing the toolbar away.
@@ -568,7 +576,7 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 }
 .field-markdown:fullscreen > label,
 .field-markdown:fullscreen > .guidance,
-.field-markdown:fullscreen > .insert-dropdown { flex-shrink: 0; }
+.field-markdown:fullscreen > .insert-area { flex-shrink: 0; }
 
 .field-list .list-row { display: flex; gap: 8px; margin-bottom: 6px; }
 .field-list input {
@@ -741,7 +749,7 @@ main.dashboard {
 
 /*
  * Per-field Insert dropdown (#132) — every markdown field carries its own
- * "Insert ▾" control offering Image / Table / Section, replacing #80's single
+ * "Insert ▾" control offering Section / List, replacing #80's single
  * "+ Insert asset" button after each module. The trigger keeps that button's
  * quiet mono-underlined look so it reads as an affordance, not chrome; the
  * popup reuses the exact menu shape of .settings-menu (#107), just anchored
@@ -800,6 +808,7 @@ main.dashboard {
  * wrapper is the positioned ancestor both menus share, so the grid opens
  * directly under the trigger that summoned it. */
 .insert-area { position: relative; display: inline-flex; margin-top: 10px; }
+.md-toolbar .table-picker { position: relative; display: inline-flex; }
 .table-picker .menu {
   display: none;
   position: absolute;

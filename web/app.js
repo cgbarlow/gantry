@@ -385,6 +385,19 @@ const ICONS = {
       <path d="M9.1 7.4a3 3 0 0 0-4.5-.3l-1.9 1.9a3 3 0 0 0 4.2 4.2l1.2-1.2" />
     <//>
   `,
+  image: html`
+    <${ToolbarIcon}>
+      <rect x="2" y="2.5" width="12" height="11" rx="1" />
+      <circle cx="5.5" cy="6" r="1" />
+      <path d="M3.2 12l3.2-3 2.2 2 1.7-1.5 2.5 2.5" />
+    <//>
+  `,
+  table: html`
+    <${ToolbarIcon}>
+      <rect x="2" y="2.5" width="12" height="11" rx="1" />
+      <path d="M2 6.2h12M2 9.8h12M6 2.5v11M10 2.5v11" />
+    <//>
+  `,
   bulletList: html`
     <${ToolbarIcon}>
       <circle cx="2.9" cy="3.8" r="0.5" fill="currentColor" stroke="none" />
@@ -435,13 +448,24 @@ const ICONS = {
   `,
 }
 
-function MarkdownToolbar({ run, refocus, headingsOpen, setHeadingsOpen, expanded, onToggleFullscreen }) {
+function MarkdownToolbar({
+  run,
+  refocus,
+  headingsOpen,
+  setHeadingsOpen,
+  listsOpen,
+  setListsOpen,
+  pickerOpen,
+  setPickerOpen,
+  pickTable,
+  expanded,
+  onToggleFullscreen,
+  onImage,
+}) {
   const keepEditorFocus = (e) => e.preventDefault()
-  // Buttons are shortcut-only by design (tabindex="-1" below): keyboard users
-  // reach every command via its Ctrl/Cmd chord, so Tab skips straight past
-  // these twelve buttons instead of parking on each one between the field and
-  // the page.
-  const button = (name, label, shortcut, content, onClick) =>
+  // Formatting buttons with keyboard shortcuts are shortcut-only by design
+  // (tabindex="-1" below). Direct insertion actions stay in the tab order.
+  const button = (name, label, shortcut, content, onClick, tabIndex = -1, menuOpen, popupRole = 'menu') =>
     html`
       <button
         type="button"
@@ -451,7 +475,10 @@ function MarkdownToolbar({ run, refocus, headingsOpen, setHeadingsOpen, expanded
         title=${shortcut ? `${label} (${shortcut})` : label}
         onMouseDown=${keepEditorFocus}
         onClick=${onClick ?? (() => run(name))}
-        tabindex="-1"
+        tabindex=${tabIndex}
+        data-dropdown-trigger=${menuOpen === undefined ? undefined : 'true'}
+        aria-haspopup=${menuOpen === undefined ? undefined : popupRole}
+        aria-expanded=${menuOpen}
       >
         ${content}
       </button>
@@ -479,9 +506,39 @@ function MarkdownToolbar({ run, refocus, headingsOpen, setHeadingsOpen, expanded
       )}
       ${button('link', 'Link', 'Ctrl/Cmd+K', ICONS.link)}
       <span class="md-sep" />
-      ${button('bulletList', 'Bullet list', 'Ctrl/Cmd+Shift+8', ICONS.bulletList)}
-      ${button('numberedList', 'Numbered list', 'Ctrl/Cmd+Shift+7', ICONS.numberedList)}
-      ${button('taskList', 'Task list', 'Ctrl/Cmd+Shift+9', ICONS.taskList)}
+      <div class="md-lists">
+        <${Dropdown}
+          triggerLabel=${html`<span class="md-glyph">Lists ▾</span>`}
+          triggerClass="md-btn"
+          triggerAriaLabel="Lists"
+          triggerOnMouseDown=${keepEditorFocus}
+          open=${listsOpen}
+          onOpenChange=${(open) => {
+            setListsOpen(open)
+            if (!open && document.activeElement?.closest?.('.md-lists')) refocus()
+          }}
+        >
+          ${[
+            ['bulletList', 'Bullet list'],
+            ['numberedList', 'Numbered list'],
+            ['taskList', 'Task list'],
+          ].map(
+            ([command, label]) => html`
+              <button
+                type="button"
+                class="md-menu-item"
+                onMouseDown=${keepEditorFocus}
+                onClick=${() => {
+                  setListsOpen(false)
+                  run(command)
+                }}
+              >
+                ${label}
+              </button>
+            `
+          )}
+        <//>
+      </div>
       <span class="md-sep" />
       ${button(
         'blockquote',
@@ -491,11 +548,20 @@ function MarkdownToolbar({ run, refocus, headingsOpen, setHeadingsOpen, expanded
       )}
       ${button('horizontalRule', 'Horizontal rule', null, ICONS.horizontalRule)}
       ${button('codeBlock', 'Code block', null, ICONS.codeBlock)}
+      ${button('image', 'Image', null, ICONS.image, onImage, 0)}
+      <${TableGridPicker}
+        open=${pickerOpen}
+        onOpenChange=${setPickerOpen}
+        onPick=${pickTable}
+        flipOnOverflow=${expanded}
+        trigger=${button('insertTable', 'Table', null, ICONS.table, () => setPickerOpen(!pickerOpen), 0, pickerOpen, 'grid')}
+      />
       <div class="md-headings">
         <${Dropdown}
           triggerLabel=${html`<span class="md-glyph">Headings ▾</span>`}
           triggerClass="md-btn"
           triggerAriaLabel="Headings"
+          triggerOnMouseDown=${keepEditorFocus}
           open=${headingsOpen}
           onOpenChange=${(open) => {
             setHeadingsOpen(open)
@@ -538,10 +604,10 @@ function MarkdownToolbar({ run, refocus, headingsOpen, setHeadingsOpen, expanded
 // ---------- Markdown field ----------
 // EditorView.updateListener -> markdown-it -> DOMPurify -> sibling preview pane, per docs/adr/0004-markdown-editor-codemirror.md. The CodeMirror instance is the source of truth for the field's value, so getValue/setValue read and write it directly rather than duplicating it into component state.
 //
-// Every markdown field carries its own generic **Insert ▾** dropdown (#132) — Image (opens the shared image-insert modal), Table (opens a Loop-style hover-grid size picker, #134), Section (a new custom field appended below this one) — replacing the single per-module "+ Insert asset" button that preceded it. Hidden in Rendered view along with every other editing affordance, since that view is read-only.
+// Every markdown field carries its own generic **Insert ▾** dropdown (#132) — Section (a new custom field appended below this one) and List (a new custom list field) — replacing the single per-module "+ Insert asset" button that preceded it. Image and Table live on the formatting toolbar (#180). Hidden in Rendered view along with every other editing affordance, since that view is read-only.
 
-// The four-item menu behind every field's Insert ▾ (#132, #144). Openness is controlled (the shared Dropdown's contract); each item closes the menu before acting, matching how SwimlaneChip's items dismiss through their parent.
-function InsertDropdown({ onImage, onTable, onSection, onList, flipOnOverflow }) {
+// The remaining two-item menu behind every field's Insert ▾ (#132, #144, #180). Openness is controlled (the shared Dropdown's contract); each item closes the menu before acting, matching how SwimlaneChip's items dismiss through their parent.
+function InsertDropdown({ onSection, onList, flipOnOverflow }) {
   const [open, setOpen] = useState(false)
 
   function pick(action) {
@@ -559,23 +625,20 @@ function InsertDropdown({ onImage, onTable, onSection, onList, flipOnOverflow })
       open=${open}
       onOpenChange=${setOpen}
     >
-      <button type="button" role="menuitem" onClick=${() => pick(onImage)}>Image</button>
-      <button type="button" role="menuitem" onClick=${() => pick(onTable)}>Table</button>
       <button type="button" role="menuitem" onClick=${() => pick(onSection)}>Section</button>
       <button type="button" role="menuitem" onClick=${() => pick(onList)}>List</button>
     <//>
   `
 }
 
-// The Loop-style size grid behind Insert ▾ ▸ Table (#134): hovering or
-// focusing a cell lights up the R×C rectangle it corners, the caption reads
-// out the current size, and clicking inserts. Eight is a deliberate ceiling —
-// bigger tables are one Tab-away from growing once they exist. The picker has
-// no trigger of its own: InsertDropdown's Table item owns that moment, so the
-// Dropdown renders only its menu via the body-function seam.
+// The Loop-style size grid behind the toolbar's Table action (#134, #180):
+// hovering or focusing a cell lights up the R×C rectangle it corners, the
+// caption reads out the current size, and clicking inserts. Eight is a
+// deliberate ceiling — bigger tables are one Tab-away from growing once they
+// exist. The picker accepts its toolbar trigger through the body-function seam.
 const TABLE_GRID_SIZE = 8
 
-function TableGridPicker({ open, onOpenChange, onPick, flipOnOverflow }) {
+function TableGridPicker({ open, onOpenChange, onPick, flipOnOverflow, trigger }) {
   const [hover, setHover] = useState(null)
 
   // A fresh open starts with no preview lit; without this the grid would
@@ -593,6 +656,9 @@ function TableGridPicker({ open, onOpenChange, onPick, flipOnOverflow }) {
           class="table-picker-cell${hover && r <= hover.r && c <= hover.c ? ' lit' : ''}"
           data-row=${r}
           data-col=${c}
+          role="gridcell"
+          aria-rowindex=${r}
+          aria-colindex=${c}
           aria-label="${c} by ${r} table"
           onMouseEnter=${() => setHover({ r, c })}
           onFocus=${() => setHover({ r, c })}
@@ -611,7 +677,8 @@ function TableGridPicker({ open, onOpenChange, onPick, flipOnOverflow }) {
       open=${open}
       onOpenChange=${onOpenChange}
       flipOnOverflow=${flipOnOverflow}
-      body=${({ menu }) => menu}
+      menuRole="grid"
+      body=${({ menu }) => html`${trigger ?? null}${menu}`}
     >
       <div class="table-picker-grid" onMouseLeave=${() => setHover(null)}>${cells}</div>
       <div class="table-picker-caption" aria-live="polite">
@@ -669,12 +736,13 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection, on
   const viewRef = useRef(null)
   const [focused, setFocused] = useState(false)
   const [headingsOpen, setHeadingsOpen] = useState(false)
+  const [listsOpen, setListsOpen] = useState(false)
   // True while THIS field's wrapper is the document's full-screen element (#135). State follows the native `fullscreenchange` event — not the toggling click alone — so a browser-driven exit (Esc, F11-ish browser chrome, or the element leaving the DOM) un-expands us exactly when the platform does.
   const [expanded, setExpanded] = useState(false)
 
-  // Full-screen expansion (#135): the wrapper (label + guidance + split panes
-  // + Insert ▾) is what requests full-screen, so everything the field owns
-  // travels into it together and CSS re-flows it to fill the viewport. While
+  // Full-screen expansion (#135): the wrapper (label + guidance + split panes)
+  // is what requests full-screen, so everything the field owns travels into it
+  // together and CSS re-flows it to fill the viewport. While
   // any field is expanded we also stamp `data-field-fullscreen` on <html> —
   // the view-mode bar reads that to unstick itself for the duration.
   useEffect(() => {
@@ -817,11 +885,18 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection, on
 
   const runCommand = useCallback((name, extra) => runMarkdownCommand(viewRef.current, name, extra), [])
   const refocusEditor = useCallback(() => viewRef.current?.focus(), [])
-  // Visible while the field holds focus, and stays up while the headings
-  // menu is open (the menu click moves focus to the trigger button). While
+  const handlePickerOpenChange = useCallback(
+    (open) => {
+      setPickerOpen(open)
+      if (!open && document.activeElement?.closest?.('.table-picker')) refocusEditor()
+    },
+    [refocusEditor]
+  )
+  // Visible while the field holds focus, and stays up while the headings or
+  // lists menu is open (a menu click moves focus to its trigger button). While
   // the field is full-screen the bar is unconditional (#135): the expanded
   // panel must keep its toolbar even if focus wanders into the preview.
-  const showToolbar = focused || headingsOpen || expanded
+  const showToolbar = focused || headingsOpen || listsOpen || expanded
   const showTableStrip = showToolbar && inTable
   // The grid picker inserts straight through the command dispatcher, so the
   // new table arrives with blank-line hygiene and a parked caret for free.
@@ -850,8 +925,14 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection, on
                   refocus=${refocusEditor}
                   headingsOpen=${headingsOpen}
                   setHeadingsOpen=${setHeadingsOpen}
+                  listsOpen=${listsOpen}
+                  setListsOpen=${setListsOpen}
+                  pickerOpen=${pickerOpen}
+                  setPickerOpen=${handlePickerOpenChange}
+                  pickTable=${pickTable}
                   expanded=${expanded}
                   onToggleFullscreen=${toggleFullscreen}
+                  onImage=${() => onRequestImage?.()}
                 />
               `
             : null}
@@ -859,20 +940,12 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection, on
         </div>
         <div class="preview" ref=${previewRef}></div>
       </div>
-      ${viewMode.value !== 'rendered'
+      ${viewMode.value !== 'rendered' && !expanded
         ? html`
             <div class="insert-area">
               <${InsertDropdown}
-                onImage=${() => onRequestImage?.()}
-                onTable=${() => setPickerOpen(true)}
                 onSection=${() => onRequestSection?.()}
                 onList=${() => onRequestList?.()}
-                flipOnOverflow=${expanded}
-              />
-              <${TableGridPicker}
-                open=${pickerOpen}
-                onOpenChange=${setPickerOpen}
-                onPick=${pickTable}
                 flipOnOverflow=${expanded}
               />
             </div>
@@ -943,7 +1016,9 @@ function ListField({ field, onRegister, onRemove }) {
 // ---------- One module's card: fields + its own Save button/status ----------
 function ModuleCard({ mod, stageId, onFieldRegistered }) {
   const [status, setStatus] = useState('')
-  // Which markdown field the image-insert modal targets: the one whose own Insert ▾ → Image was clicked (each field owns its dropdown now, #132 — no more module-level affordance guessing from focus). Null = closed.
+  // Which markdown field the image-insert modal targets: the one whose own
+  // toolbar Image action was clicked (#180 — no more module-level affordance
+  // guessing from focus). Null = closed.
   const [imageFieldId, setImageFieldId] = useState(null)
   // Which field the new Section goes below: the one whose Insert ▾ → Section was clicked. Null = dialog closed.
   const [sectionAfterId, setSectionAfterId] = useState(null)
@@ -1216,7 +1291,13 @@ function CommitHistoryDialog({ commits, onClose }) {
 }
 
 // ---------- Insert-image modal: Upload new / Choose existing ----------
-// Opened by any markdown field's Insert ▾ → Image item (#132, which renamed the wording Asset → Image throughout the UI while leaving `asset:<id>` storage and the /api routes untouched). Hidden in Rendered view along with every other editing affordance (see MarkdownField/ModuleCard). Ported from Variant A of web/prototypes/asset-insertion.prototype.html (#73), the variant #74 locked in: a modal with two tabs, the "Upload new" tab blocked by an inline error until both the file and the mandatory source-location field are valid.
+// Opened by any markdown field's toolbar Image action (#180; #132 renamed the
+// wording Asset → Image throughout the UI while leaving `asset:<id>` storage
+// and the /api routes untouched). Hidden in Rendered view along with every
+// other editing affordance (see MarkdownField/ModuleCard). Ported from Variant
+// A of web/prototypes/asset-insertion.prototype.html (#73), the variant #74
+// locked in: a modal with two tabs, the "Upload new" tab blocked by an inline
+// error until both the file and the mandatory source-location field are valid.
 function AssetInsertModal({ onInsert, onClose }) {
   const [tab, setTab] = useState('upload')
   const [file, setFile] = useState(null)

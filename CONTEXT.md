@@ -48,4 +48,4 @@ A repo-driven pipeline for staged, gated processes: content is captured once as 
 
 **Field ("Section" in the UI)**: A labelled markdown block inside a module (e.g. `problem-statement`'s "Current state"), edited directly in the module editor. Users add new ones via Insert → Section — these custom fields are ordinary fields with an optional title. _Avoid_: "Section" in code identifiers, storage, or API names — Section is UI copy only, never a distinct concept from Field
 
-**Asset ("Image" in the UI)**: An uploaded binary referenced from markdown as `![name](asset:<id>)`. "Image" is merely the Insert-menu label for inserting an asset reference. _Avoid_: renaming stored references to `image:` or treating "Image" as a concept distinct from Asset
+**Asset ("Image" in the UI)**: An uploaded binary referenced from markdown as `![name](asset:<id>)`. "Image" is the UI label for the toolbar action that inserts an asset reference. _Avoid_: renaming stored references to `image:` or treating "Image" as a concept distinct from Asset

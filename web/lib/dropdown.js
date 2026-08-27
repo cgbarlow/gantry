@@ -35,6 +35,9 @@ export function Dropdown({
   triggerLabel,
   triggerClass = 'btn small ghost',
   triggerAriaLabel,
+  // Toolbar callers can prevent the trigger from stealing an editor's
+  // selection before a menu command is chosen.
+  triggerOnMouseDown,
   // Only SettingsMenu's hand-rolled original carried `role="menu"` on its
   // popup; kept opt-in so menus without full arrow-key navigation (e.g. the
   // instance switcher) aren't handed an ARIA contract they can't honour.
@@ -99,6 +102,7 @@ export function Dropdown({
       aria-haspopup="true"
       aria-expanded=${open}
       aria-label=${triggerAriaLabel}
+      onMouseDown=${triggerOnMouseDown}
       onClick=${(e) => {
         e.stopPropagation()
         onOpenChange(!open)
