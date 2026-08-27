@@ -516,7 +516,7 @@ function MarkdownToolbar({
       <span class="md-sep" />
       <div class="md-lists">
         <${Dropdown}
-          triggerLabel=${html`<span class="md-glyph">Lists ▾</span>`}
+          triggerLabel=${ICONS.bulletList}
           triggerClass="md-btn"
           triggerAriaLabel="Lists"
           triggerOnMouseDown=${keepEditorFocus}

@@ -1041,10 +1041,12 @@ test('formatting toolbar follows field focus, hides on blur, and never shows in 
         assert.equal(await toolbar.getByRole('button', { name: 'Bullet list', exact: true }).count(), 0)
         assert.equal(await toolbar.getByRole('button', { name: 'Numbered list', exact: true }).count(), 0)
         assert.equal(await toolbar.getByRole('button', { name: 'Task list', exact: true }).count(), 0)
+        const listsTrigger = toolbar.getByRole('button', { name: 'Lists', exact: true })
+        assert.equal(await listsTrigger.textContent(), '')
+        assert.equal(await listsTrigger.locator('svg').count(), 1)
         assert.equal(await toolbar.getByRole('button', { name: 'Image', exact: true }).getAttribute('tabindex'), '0')
         assert.equal(await toolbar.getByRole('button', { name: 'Table', exact: true }).getAttribute('tabindex'), '0')
 
-        const listsTrigger = toolbar.getByRole('button', { name: 'Lists', exact: true })
         await listsTrigger.click()
         const listsMenu = field.locator('.md-lists .menu')
         await listsMenu.waitFor({ state: 'visible', timeout: 2_000 })
