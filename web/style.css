@@ -649,15 +649,49 @@ main.dashboard {
  */
 .workspace-instances { display: flex; flex-direction: column; gap: 16px; }
 .instance-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px;
   padding: 16px 20px;
   background: var(--bg-raised);
   border: var(--border-strong) solid var(--line-strong);
   border-radius: var(--radius);
 }
+.instance-card-content { min-width: 0; }
 .instance-card-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .instance-card-header .name { font-family: var(--font-display); font-weight: 600; font-size: 16px; }
 .instance-card-header .def { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
 .instance-card-row { margin-bottom: 4px; }
+.manage-card {
+  align-self: end;
+  min-width: 150px;
+  padding: 10px 12px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.manage-card h3 {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.manage-link {
+  display: block;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.manage-link + .manage-link { margin-top: 4px; }
+
+@media (max-width: 700px) {
+  .instance-card { grid-template-columns: 1fr; }
+  .manage-card { justify-self: stretch; }
+}
 
 /* ---------- Stage swimlanes ---------- */
 .swimlane-group + .swimlane-group { margin-top: 32px; }
@@ -754,6 +788,13 @@ main.dashboard {
   white-space: nowrap;
 }
 .insert-dropdown .menu button:hover { background: var(--bg); }
+.insert-dropdown .menu.menu-up,
+.table-picker .menu.menu-up {
+  top: auto;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: 6px;
+}
 /* The size grid (#134) hangs off the same anchor as Insert ▾ itself: the
  * wrapper is the positioned ancestor both menus share, so the grid opens
  * directly under the trigger that summoned it. */

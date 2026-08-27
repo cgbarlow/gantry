@@ -284,7 +284,7 @@ async function patchWorkspace(id, updates) {
 }
 
 // The standard `https://dev.azure.com/{organization}/{project}/_git/{repository}` shape — the reverse of web/lib/validateRepo.js's `parseRepoUrl` — with `baseUrl` (an on-premises Azure DevOps Server location) substituted in place of `https://dev.azure.com` when a workspace carries one.
-function workspaceRepoUrl(workspace) {
+export function workspaceRepoUrl(workspace) {
   const base = workspace.baseUrl ?? 'https://dev.azure.com'
   return `${base}/${encodeURIComponent(workspace.organization)}/${encodeURIComponent(workspace.project)}/_git/${encodeURIComponent(workspace.repository)}`
 }

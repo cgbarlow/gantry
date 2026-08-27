@@ -19,7 +19,7 @@ import { apiFetch, apiFetchForInstance } from './lib/apiFetch.js'
 import { Dropdown } from './lib/dropdown.js'
 import { apply as applyMarkdownCommand, HEADING_LEVELS, findTable } from './lib/markdownCommands.js'
 import { NewWorkspaceWizardPage } from './pages/new-workspace-wizard.js'
-import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage } from './pages/settings.js'
+import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, workspaceRepoUrl } from './pages/settings.js'
 // Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79) markdown/split/rendered toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
@@ -541,7 +541,7 @@ function MarkdownToolbar({ run, refocus, headingsOpen, setHeadingsOpen, expanded
 // Every markdown field carries its own generic **Insert ▾** dropdown (#132) — Image (opens the shared image-insert modal), Table (opens a Loop-style hover-grid size picker, #134), Section (a new custom field appended below this one) — replacing the single per-module "+ Insert asset" button that preceded it. Hidden in Rendered view along with every other editing affordance, since that view is read-only.
 
 // The four-item menu behind every field's Insert ▾ (#132, #144). Openness is controlled (the shared Dropdown's contract); each item closes the menu before acting, matching how SwimlaneChip's items dismiss through their parent.
-function InsertDropdown({ onImage, onTable, onSection, onList }) {
+function InsertDropdown({ onImage, onTable, onSection, onList, flipOnOverflow }) {
   const [open, setOpen] = useState(false)
 
   function pick(action) {
@@ -555,6 +555,7 @@ function InsertDropdown({ onImage, onTable, onSection, onList }) {
       triggerLabel="Insert ▾"
       triggerClass="insert-trigger"
       menuRole="menu"
+      flipOnOverflow=${flipOnOverflow}
       open=${open}
       onOpenChange=${setOpen}
     >
@@ -574,7 +575,7 @@ function InsertDropdown({ onImage, onTable, onSection, onList }) {
 // Dropdown renders only its menu via the body-function seam.
 const TABLE_GRID_SIZE = 8
 
-function TableGridPicker({ open, onOpenChange, onPick }) {
+function TableGridPicker({ open, onOpenChange, onPick, flipOnOverflow }) {
   const [hover, setHover] = useState(null)
 
   // A fresh open starts with no preview lit; without this the grid would
@@ -605,7 +606,13 @@ function TableGridPicker({ open, onOpenChange, onPick }) {
   }
 
   return html`
-    <${Dropdown} className="table-picker" open=${open} onOpenChange=${onOpenChange} body=${({ menu }) => menu}>
+    <${Dropdown}
+      className="table-picker"
+      open=${open}
+      onOpenChange=${onOpenChange}
+      flipOnOverflow=${flipOnOverflow}
+      body=${({ menu }) => menu}
+    >
       <div class="table-picker-grid" onMouseLeave=${() => setHover(null)}>${cells}</div>
       <div class="table-picker-caption" aria-live="polite">
         ${hover ? `${hover.c} × ${hover.r}` : 'Rows × Columns'}
@@ -860,8 +867,14 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection, on
                 onTable=${() => setPickerOpen(true)}
                 onSection=${() => onRequestSection?.()}
                 onList=${() => onRequestList?.()}
+                flipOnOverflow=${expanded}
               />
-              <${TableGridPicker} open=${pickerOpen} onOpenChange=${setPickerOpen} onPick=${pickTable} />
+              <${TableGridPicker}
+                open=${pickerOpen}
+                onOpenChange=${setPickerOpen}
+                onPick=${pickTable}
+                flipOnOverflow=${expanded}
+              />
             </div>
           `
         : null}
@@ -1497,7 +1510,7 @@ function prWebUrlFor(instance, prId) {
 }
 
 function workItemWebUrlFor(workItem, wiId) {
-  if (!workItem || !wiId) return null
+  if (!workItem?.organization || !workItem.project || !wiId) return null
   const base = workItem.baseUrl ?? 'https://dev.azure.com'
   return `${base}/${encodeURIComponent(workItem.organization)}/${encodeURIComponent(workItem.project)}/_workitems/edit/${wiId}`
 }
@@ -2540,7 +2553,7 @@ function groupStatusClass(group) {
 }
 
 // ---------- Master-detail view ----------
-// The Workspaces landing page's default view (#102, superseding #77's flat per-instance listing): the list pane shows one row per workspace (groupInstancesByWorkspace above); selecting one shows every instance it holds in the detail pane, each its own card with definition/assignee/status and the same Check/Render/Open-editor actions the old flat list offered per instance.
+// The Workspaces landing page's default view (#102, superseding #77's flat per-instance listing): the list pane shows one row per workspace (groupInstancesByWorkspace above); selecting one shows every instance it holds in the detail pane, each its own card with definition/assignee/status, Check, Edit, and conditional management links.
 function MasterDetailView({ instances, onInstancesChange }) {
   const [filter, setFilter] = useState('')
   const [selectedKey, setSelectedKey] = useState(null)
@@ -2577,12 +2590,6 @@ function MasterDetailView({ instances, onInstancesChange }) {
   async function handleCheck(slug) {
     setActionStatus((prev) => ({ ...prev, [slug]: 'Checking…' }))
     const result = await runCheck(slug)
-    setActionStatus((prev) => ({ ...prev, [slug]: result }))
-  }
-
-  async function handleRender(slug) {
-    setActionStatus((prev) => ({ ...prev, [slug]: 'Rendering…' }))
-    const result = await runRender(slug)
     setActionStatus((prev) => ({ ...prev, [slug]: result }))
   }
 
@@ -2644,32 +2651,55 @@ function MasterDetailView({ instances, onInstancesChange }) {
                 ${selectedGroup.instances.map(
                   (inst) => html`
                     <div class="instance-card" key=${inst.slug}>
-                      <div class="instance-card-header">
-                        <span class="name">${inst.slug}</span>
-                        <span class="def">${inst.definition}</span>
-                        <${StatusStamp} status=${inst.status} />
+                      <div class="instance-card-content">
+                        <div class="instance-card-header">
+                          <span class="name">${inst.slug}</span>
+                          <span class="def">${inst.definition}</span>
+                          <${StatusStamp} status=${inst.status} />
+                        </div>
+                        <div class="instance-card-row">
+                          <span class="field-label">Assignee</span>
+                          <${IdentityPicker}
+                            value=${assigneeDrafts[inst.slug] ?? ''}
+                            onChange=${(uniqueName) => {
+                              setAssigneeDrafts((prev) => ({ ...prev, [inst.slug]: uniqueName }))
+                              // Commit immediately — pass the value directly so it doesn't read stale state
+                              handleAssigneeSave(inst.slug, uniqueName)
+                            }}
+                            placeholder="Unassigned"
+                            slug=${inst.slug}
+                            className="mono"
+                          />
+                        </div>
+                        <div class="save-status assignee-save-status">${assigneeStatus[inst.slug] ?? ''}</div>
+                        <div class="detail-actions">
+                          <a class="btn primary" href="/instance/${inst.slug}">Edit</a>
+                          <button type="button" class="btn" onClick=${() => handleCheck(inst.slug)}>Check</button>
+                        </div>
+                        <div class="save-status">${actionStatus[inst.slug] ?? ''}</div>
                       </div>
-                      <div class="instance-card-row">
-                        <span class="field-label">Assignee</span>
-                        <${IdentityPicker}
-                          value=${assigneeDrafts[inst.slug] ?? ''}
-                          onChange=${(uniqueName) => {
-                            setAssigneeDrafts((prev) => ({ ...prev, [inst.slug]: uniqueName }))
-                            // Commit immediately — pass the value directly so it doesn't read stale state
-                            handleAssigneeSave(inst.slug, uniqueName)
-                          }}
-                          placeholder="Unassigned"
-                          slug=${inst.slug}
-                          className="mono"
-                        />
+                      <div class="manage-card">
+                        <h3>Manage</h3>
+                        ${inst.workItem?.parentId
+                          ? html`
+                              <a
+                                class="manage-link"
+                                href=${workItemWebUrlFor(inst.workItem, inst.workItem.parentId)}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Track Work Item
+                              </a>
+                            `
+                          : null}
+                        ${inst.workspace
+                          ? html`
+                              <a class="manage-link" href=${workspaceRepoUrl(inst.workspace)} target="_blank" rel="noreferrer">
+                                Open Repository
+                              </a>
+                            `
+                          : null}
                       </div>
-                      <div class="save-status assignee-save-status">${assigneeStatus[inst.slug] ?? ''}</div>
-                      <div class="detail-actions">
-                        <a class="btn primary" href="/instance/${inst.slug}">Open editor</a>
-                        <button type="button" class="btn" onClick=${() => handleCheck(inst.slug)}>Check</button>
-                        <button type="button" class="btn" onClick=${() => handleRender(inst.slug)}>Render</button>
-                      </div>
-                      <div class="save-status">${actionStatus[inst.slug] ?? ''}</div>
                     </div>
                   `
                 )}

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { createServer } from '../lib/server.js'
-import { createInstance } from '../lib/instance.js'
+import { createInstance, recordInstanceWorkItemLink } from '../lib/instance.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
@@ -45,7 +45,7 @@ function withPage(fn) {
   }
 }
 
-test('dashboard: titled "Workspaces", master-detail is the default view, and its detail column shows each instance\'s definition/status/assignee with Check/Render reachable', async () => {
+test('dashboard: titled "Workspaces", master-detail is the default view, and its detail column shows each instance\'s definition/status/assignee with Check/Edit reachable', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     // Local instances have no workspace (#96 — Workspace is an Azure-DevOps-repo concept only), so each groups on its own, one row per instance — the single-instance case the ticket's own "a workspace with only one instance still displays correctly" criterion describes.
@@ -70,8 +70,44 @@ test('dashboard: titled "Workspaces", master-detail is the default view, and its
         assert.match(await page.locator('.instance-card .def').textContent(), /design/)
         assert.equal(await page.locator('.instance-card .identity-picker input').inputValue(), 'c.barlow')
         assert.ok(await page.getByRole('button', { name: 'Check' }).isVisible())
-        assert.ok(await page.getByRole('button', { name: 'Render' }).isVisible())
-        assert.ok(await page.getByRole('link', { name: 'Open editor' }).isVisible())
+        assert.equal(await page.locator('.instance-card').getByRole('button', { name: 'Render' }).count(), 0)
+        assert.ok(await page.getByRole('link', { name: 'Edit' }).isVisible())
+        assert.equal(await page.locator('.manage-card').count(), 1)
+        assert.equal(await page.locator('.manage-card .manage-link').count(), 0)
+      })
+    )
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('dashboard: Manage tracks a linked parent work item without inventing a repository link for a local instance', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'linked-initiative', { instancesDir })
+    recordInstanceWorkItemLink(
+      'linked-initiative',
+      {
+        organization: 'work-org',
+        project: 'work-project',
+        workItemType: 'Task',
+        parentId: 42,
+        stages: { shape: 43 },
+      },
+      { instancesDir }
+    )
+
+    await withRunningServer(
+      { instancesDir },
+      withPage(async (page, base) => {
+        await page.goto(base)
+        await page.waitForSelector('.instance-card', { timeout: 10_000 })
+
+        const manage = page.locator('.manage-card')
+        const track = manage.getByRole('link', { name: 'Track Work Item' })
+        assert.equal(await track.getAttribute('href'), 'https://dev.azure.com/work-org/work-project/_workitems/edit/42')
+        assert.equal(await track.getAttribute('target'), '_blank')
+        assert.equal(await manage.getByRole('link', { name: 'Open Repository' }).count(), 0)
       })
     )
   } finally {
@@ -117,7 +153,7 @@ test('dashboard: selecting a workspace with multiple instances shows every one o
             assert.equal(await page.locator('.detail-pane h2').textContent(), REPOSITORY)
             assert.match(await page.locator('.workspace-subtitle').textContent(), new RegExp(`${ORGANIZATION}/${PROJECT}`))
 
-            // Both instances, each its own card, each independently showing definition/assignee/status and its own Check/Render/Open-editor actions.
+            // Both instances, each its own card, each independently showing definition/assignee/status and its own Check/Edit actions.
             const cards = page.locator('.instance-card')
             assert.equal(await cards.count(), 2)
             const names = await page.locator('.instance-card .name').allTextContents()
@@ -125,8 +161,12 @@ test('dashboard: selecting a workspace with multiple instances shows every one o
             assert.equal(await page.locator('.instance-card .identity-picker input').count(), 2)
             assert.equal(await page.locator('.instance-card').first().locator('.identity-picker input').inputValue(), 'c.barlow')
             assert.equal(await page.getByRole('button', { name: 'Check' }).count(), 2)
-            assert.equal(await page.getByRole('button', { name: 'Render' }).count(), 2)
-            assert.equal(await page.getByRole('link', { name: 'Open editor' }).count(), 2)
+            assert.equal(await page.locator('.instance-card').getByRole('button', { name: 'Render' }).count(), 0)
+            assert.equal(await page.getByRole('link', { name: 'Edit' }).count(), 2)
+            assert.equal(await page.getByRole('link', { name: 'Open Repository' }).count(), 2)
+            for (const link of await page.getByRole('link', { name: 'Open Repository' }).all()) {
+              assert.equal(await link.getAttribute('target'), '_blank')
+            }
           })
         )
       } finally {

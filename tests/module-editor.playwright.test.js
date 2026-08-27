@@ -1313,6 +1313,15 @@ test('⤢ expands a field full-screen with both split panes and its toolbar; Esc
         await toolbar.waitFor({ state: 'visible', timeout: 5_000 })
         assert.equal(await toolbar.getByRole('button', { name: 'Full screen', exact: true }).count(), 1)
 
+        // With normal document flow there is room below this field's Insert
+        // trigger, so the menu keeps its existing downward placement.
+        const insert = field.getByRole('button', { name: 'Insert ▾' })
+        await insert.click()
+        const insertMenu = field.locator('.insert-dropdown .menu')
+        await insertMenu.waitFor({ state: 'visible', timeout: 5_000 })
+        assert.equal(await insertMenu.evaluate((el) => el.classList.contains('menu-up')), false)
+        await insert.click()
+
         // Expand: the native Fullscreen API takes the field wrapper itself.
         // Waits cover BOTH the platform state and the page's own reaction to
         // it (the data-field-fullscreen stamp) — fullscreenchange is queued
@@ -1363,6 +1372,14 @@ test('⤢ expands a field full-screen with both split panes and its toolbar; Esc
         // …even once focus wanders into the preview pane — expansion pins it.
         await field.locator('.preview').click()
         await toolbar.waitFor({ state: 'visible', timeout: 5_000 })
+
+        // In full-screen mode the trigger is at the bottom of the viewport;
+        // the complete Insert menu therefore flips above it instead of being
+        // clipped below the viewport.
+        await insert.click()
+        await insertMenu.waitFor({ state: 'visible', timeout: 5_000 })
+        assert.equal(await insertMenu.evaluate((el) => el.classList.contains('menu-up')), true)
+        await insert.click()
 
         // The sticky view bar is suppressed while full-screen.
         assert.equal(

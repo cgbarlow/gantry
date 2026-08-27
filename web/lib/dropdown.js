@@ -26,7 +26,7 @@
 // row it shares with the assignee stamp) for the chip's layout to hold — so
 // `body` may instead be a function receiving `{ trigger, menu }` vnodes to
 // place wherever the surrounding markup needs them.
-import { useEffect } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useRef } from 'preact/hooks'
 import { html } from 'htm/preact'
 
 export function Dropdown({
@@ -39,10 +39,39 @@ export function Dropdown({
   // popup; kept opt-in so menus without full arrow-key navigation (e.g. the
   // instance switcher) aren't handed an ARIA contract they can't honour.
   menuRole,
+  // Opt-in viewport-aware placement for menus whose normal downward position
+  // can run past the bottom of the viewport.
+  flipOnOverflow = false,
   open,
   onOpenChange,
   children,
 }) {
+  const rootRef = useRef(null)
+
+  useLayoutEffect(() => {
+    if (!open || !flipOnOverflow) return
+    const root = rootRef.current
+    // Custom body layouts (such as the table picker) may contain menu buttons
+    // without rendering the trigger; use the root as their placement anchor.
+    const anchor = root?.querySelector('[data-dropdown-trigger="true"]') ?? root
+    const menu = root?.querySelector('.menu')
+    if (!anchor || !menu) return
+
+    function updatePlacement() {
+      menu.classList.remove('menu-up')
+      const anchorRect = anchor.getBoundingClientRect()
+      const menuHeight = menu.getBoundingClientRect().height
+      const margin = 6
+      const fitsBelow = anchorRect.bottom + margin + menuHeight <= window.innerHeight
+      const fitsAbove = anchorRect.top - margin - menuHeight >= 0
+      menu.classList.toggle('menu-up', !fitsBelow && fitsAbove)
+    }
+
+    updatePlacement()
+    window.addEventListener('resize', updatePlacement)
+    return () => window.removeEventListener('resize', updatePlacement)
+  }, [open, flipOnOverflow])
+
   useEffect(() => {
     if (!open) return
     function onWindowClick() {
@@ -65,6 +94,7 @@ export function Dropdown({
   const trigger = html`
     <button
       type="button"
+      data-dropdown-trigger="true"
       class=${triggerClass}
       aria-haspopup="true"
       aria-expanded=${open}
@@ -87,7 +117,7 @@ export function Dropdown({
       : null
 
   return html`
-    <div class=${(className ?? '') + (open ? ' menu-open' : '')}>
+    <div ref=${rootRef} class=${(className ?? '') + (open ? ' menu-open' : '')}>
       ${typeof body === 'function' ? body({ trigger, menu }) : html`${body}${trigger}${menu}`}
     </div>
   `
