@@ -75,6 +75,23 @@ test('dashboard: titled "Workspaces", master-detail is the default view, and its
         assert.ok(await page.getByRole('link', { name: 'Edit' }).isVisible())
         assert.equal(await page.locator('.manage-card').count(), 1)
         assert.equal(await page.locator('.manage-card .manage-link').count(), 0)
+
+        const card = page.locator('.instance-card')
+        const contentBox = await card.locator('.instance-card-content').boundingBox()
+        const manageBox = await card.locator('.manage-card').boundingBox()
+        assert.ok(Math.abs(contentBox.y - manageBox.y) < 1, 'Manage card should align with the instance card content')
+        assert.equal(await card.locator('.save-status').count(), 0, 'empty action status should not reserve space')
+
+        await card.getByRole('button', { name: 'Check' }).click()
+        const actionStatus = card.locator('.save-status')
+        await actionStatus.waitFor({ state: 'visible', timeout: 10_000 })
+        assert.notEqual((await actionStatus.textContent()).trim(), '')
+        const statusStyles = await actionStatus.evaluate((element) => {
+          const styles = getComputedStyle(element)
+          return { marginTop: styles.marginTop, minHeight: styles.minHeight }
+        })
+        assert.notEqual(statusStyles.marginTop, '0px')
+        assert.notEqual(statusStyles.minHeight, '0px')
       })
     )
   } finally {

@@ -2694,7 +2694,7 @@ function MasterDetailView({ instances }) {
                           <a class="btn primary" href="/instance/${inst.slug}">Edit</a>
                           <button type="button" class="btn" onClick=${() => handleCheck(inst.slug)}>Check</button>
                         </div>
-                        <div class="save-status">${actionStatus[inst.slug] ?? ''}</div>
+                        ${actionStatus[inst.slug] ? html`<div class="save-status">${actionStatus[inst.slug]}</div>` : null}
                       </div>
                       <div class="manage-card">
                         <h3>Manage</h3>

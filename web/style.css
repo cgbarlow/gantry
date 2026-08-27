@@ -664,7 +664,7 @@ main.dashboard {
 .instance-card-header .def { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
 .instance-card-row { margin-bottom: 4px; }
 .manage-card {
-  align-self: end;
+  align-self: start;
   min-width: 150px;
   padding: 10px 12px;
   border: var(--hairline) solid var(--line);
