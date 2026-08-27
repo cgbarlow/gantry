@@ -23,6 +23,9 @@ steps:
   - script: npm install
     displayName: 'Install dependencies'
 
+  - script: npx playwright install --with-deps chromium
+    displayName: 'Install Playwright browser'
+
   - script: npm test
     displayName: 'Run tests'
 
