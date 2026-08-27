@@ -228,6 +228,57 @@ test('POST /api/instance/request-approval opens a Pull Request once the gate has
   )
 })
 
+// Regression coverage for the identity client's real-API mismatches (wrong
+// host, wrong searchFilter/filterValue params, wrong response field names —
+// all three let identity resolution appear to work in tests while actually
+// failing against every real Azure DevOps org). Unlike the "opens a Pull
+// Request" test above (no requiredReviewer, so resolution never runs), this
+// configures one and asserts the fake identity is actually found and
+// attached as a required reviewer on the opened Pull Request.
+test('POST /api/instance/request-approval resolves a configured required reviewer and attaches them to the Pull Request', async () => {
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      files: {
+        [`/gantry-workspace/${SLUG}/instance.yaml`]: `definition: design\nslug: ${SLUG}\nstage: shape\nrequiredReviewer: testuser@example.com\n`,
+      },
+    },
+    async (adoBaseUrl) => {
+      await withScratchInstances(async (instancesDir) => {
+        registerInstance(
+          SLUG,
+          { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          { instancesDir }
+        )
+        const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl }
+        const branch = await resolveStageBranch(azureDevOps, definition, SLUG, SHAPE.id)
+        await fillShapeStage(azureDevOps, branch)
+
+        await withRunningServer({ instancesDir }, async (base) => {
+          const res = await fetch(`${base}/api/instance/request-approval?slug=${SLUG}`, {
+            method: 'POST',
+            headers: { Authorization: basicAuthHeader(VALID_PAT) },
+          })
+          assert.equal(res.status, 200)
+          const body = await res.json()
+          assert.equal(body.reviewer.uniqueName, 'testuser@example.com')
+
+          const after = await (
+            await fetch(`${base}/api/instance?slug=${SLUG}`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })
+          ).json()
+          const reviewers = after.pullRequest.review.reviewers
+          assert.equal(reviewers.length, 1)
+          assert.equal(reviewers[0].id, 'fake-identity-id-001')
+          assert.equal(reviewers[0].required, true)
+        })
+      })
+    }
+  )
+})
+
 test('POST /api/instance/request-approval identifies a rejected PAT during required-reviewer resolution', async () => {
   await withFakeAzureDevOpsServer(
     {

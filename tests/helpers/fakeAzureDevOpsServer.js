@@ -610,28 +610,42 @@ export function createFakeAzureDevOpsServer({
       }
     }
 
-    // Identity search endpoint (#145 Part 2) — a minimal fake of
-    // `/_apis/identities` that returns a single hardcoded identity
-    // (`fakeUser`) when the query matches its displayName or uniqueName,
-    // an empty array otherwise. Just enough to prove
-    // lib/azureDevOpsIdentityClient.js resolves identities correctly in
-    // tests without needing to spin up a real Azure DevOps directory.
+    // Identity search endpoint (#145 Part 2) — a minimal fake of the real
+    // Identities REST API (organization-scoped, no project segment — see
+    // lib/azureDevOpsIdentityClient.js's own comment on why) that returns a
+    // single hardcoded identity (`fakeUser`) when the query matches its
+    // display name or account name, an empty result otherwise. Just enough
+    // to prove lib/azureDevOpsIdentityClient.js resolves identities
+    // correctly in tests without needing to spin up a real Azure DevOps
+    // directory.
     //
-    // Reads `filterValue` — the real Azure DevOps API's actual search-text
-    // parameter (`searchFilter` names which field to match, e.g. 'General';
-    // it is never the query text itself, see lib/azureDevOpsIdentityClient.js).
-    if (req.method === 'GET' && pathname === `/${organization}/${project}/_apis/identities`) {
+    // Shape mirrors a real Identity object (confirmed against a live org):
+    // the envelope is `{count, value}`, not a bare array, and there is no
+    // top-level `uniqueName`/`displayName`/`mailAddress` — those live under
+    // `customDisplayName`/`providerDisplayName` and
+    // `properties.Account.$value`/`properties.Mail.$value`.
+    //
+    // Reads `filterValue` — the real API's actual search-text parameter
+    // (`searchFilter` names which field to match, e.g. 'General'; it is
+    // never the query text itself).
+    if (req.method === 'GET' && pathname === `/${organization}/_apis/identities`) {
       if (rejectIdentityRequests) return json(403, { message: 'TF400813: Identity scope rejected (fake server).' })
       const query = (url.searchParams.get('filterValue') ?? url.searchParams.get('query') ?? '').toLowerCase()
-      if (!query) return json(200, [])
+      if (!query) return json(200, { count: 0, value: [] })
       const fakeIdentity = {
         id: 'fake-identity-id-001',
-        displayName: 'Test User',
-        uniqueName: 'testuser@example.com',
-        emailAddress: 'testuser@example.com',
+        customDisplayName: 'Test User',
+        providerDisplayName: 'Test User',
+        properties: {
+          Account: { $type: 'System.String', $value: 'testuser@example.com' },
+          Mail: { $type: 'System.String', $value: 'testuser@example.com' },
+        },
       }
-      const matches = fakeIdentity.displayName.toLowerCase().includes(query) || fakeIdentity.uniqueName.toLowerCase().includes(query)
-      return json(200, matches ? [fakeIdentity] : [])
+      const matches =
+        fakeIdentity.customDisplayName.toLowerCase().includes(query) ||
+        fakeIdentity.properties.Account.$value.toLowerCase().includes(query)
+      const value = matches ? [fakeIdentity] : []
+      return json(200, { count: value.length, value })
     }
 
     // POST reviewers endpoint (#145 Part 2) — adds reviewers to an
@@ -648,9 +662,15 @@ export function createFakeAzureDevOpsServer({
       }
       let raw = ''
       for await (const chunk of req) raw += chunk
+      // The real endpoint's bulk-add body is a bare array (`addReviewers`
+      // sends `[{id, vote, required}]` directly, not `{reviewers: [...]}`)
+      // — this used to read `body.reviewers`, which is always undefined on
+      // an array, so this endpoint silently added nothing no matter what was
+      // sent. Nothing caught it because no prior test checked the resulting
+      // PR's reviewers list after a real addReviewers call.
       const body = JSON.parse(raw)
       const added = []
-      for (const r of (body.reviewers ?? [])) {
+      for (const r of (Array.isArray(body) ? body : [])) {
         const existing = pr.reviewers.find((rev) => rev.id === r.id)
         if (existing) {
           if (r.required !== undefined) existing.required = r.required
