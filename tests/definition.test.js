@@ -12,10 +12,12 @@ test('loads the real design definition', () => {
   assert.equal(design.stages.length, 4)
 
   const shape = design.stages.find((stage) => stage.id === 'shape')
+  assert.match(shape.purpose, /business case/i)
   assert.deepEqual(shape.modules, ['context', 'solution-definition', 'team-and-estimates', 'dependencies', 'soap-full-details'])
   assert.equal(shape.example, 'examples')
 
   const soap = design.artefacts.find((artefact) => artefact.id === 'soap')
+  assert.match(soap.purpose, /summarise/i)
   assert.deepEqual(soap.requires, ['context', 'solution-definition', 'team-and-estimates'])
 
   const soapFull = design.artefacts.find((artefact) => artefact.id === 'soap-full')
@@ -43,6 +45,9 @@ test('loads the real design definition', () => {
   const dependencies = design.modules.get('dependencies')
   const overview = dependencies.fields.find((field) => field.id === 'dependencies-overview')
   assert.deepEqual(overview.requiredAt, ['business-case', 'hld-tac-approved'])
+
+  assert.ok(design.stages.every((stage) => stage.purpose))
+  assert.ok(design.artefacts.every((artefact) => artefact.purpose))
 })
 
 function withScratchDefinition(fn) {
