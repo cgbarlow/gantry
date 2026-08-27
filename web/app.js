@@ -1408,8 +1408,8 @@ function AssetLibraryPage() {
 // same dialog whether the current stage produces one artefact (e.g. `soap`)
 // or several sharing a gate (e.g. `sad`/`ssad`), per the ticket's "not a
 // special case" acceptance criterion. Follows the same
-// modal-backdrop/modal/modal-actions shape as AssetInsertModal and the
-// work-item sync confirm modal above.
+// modal-backdrop/modal/modal-actions shape as the other editor confirmation
+// modals.
 function RenderDialog({ instance, onClose }) {
   const [status, setStatus] = useState('')
   const [selectedIds, setSelectedIds] = useState(new Set())
@@ -1537,6 +1537,8 @@ function SyncedFieldsPanel({ instance }) {
   // Null means "not editing" — the input then shows the server's current value. Mirrors the dashboard assignee drafts' pattern without clobbering the loaded value on every unrelated rerender.
   const [titleDraft, setTitleDraft] = useState(null)
   const [assigneeDraft, setAssigneeDraft] = useState(null)
+  const [syncStatus, setSyncStatus] = useState('')
+  const [syncConfirming, setSyncConfirming] = useState(false)
   // A ref (not state): save() reads it synchronously to debounce itself, and no render ever depends on it — the status line already reports the in-flight save.
   const savingRef = useRef(false)
 
@@ -1603,6 +1605,46 @@ function SyncedFieldsPanel({ instance }) {
     if (!data || assigneeDraft === null || assigneeDraft === data.assignee) return
     // Same rule: emptying the field reverts to the inherited instance assignee.
     save({ assignee: assigneeDraft.trim() ? assigneeDraft.trim() : '' })
+  }
+
+  // The manual work-item sync action lives in this details card now that the
+  // redundant standalone panel has gone. Both requests are instance-scoped:
+  // resolve the workspace PAT before the first request, not only after a 401.
+  async function handleCheckAndMaybeSync() {
+    setSyncStatus('Checking gate…')
+    const res = await apiFetchForInstance(currentSlug.value, `/api/instance/check?slug=${encodeURIComponent(currentSlug.value)}`)
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setSyncStatus(`Check failed: ${body.message ?? body.error}`)
+      return
+    }
+    if (!body.pass) {
+      setSyncStatus(formatGateFailure(body))
+      return
+    }
+    setSyncStatus('Gate passed.')
+    setSyncConfirming(true)
+  }
+
+  async function handleConfirmSync() {
+    setSyncConfirming(false)
+    setSyncStatus('Pushing state to work item…')
+    const res = await apiFetchForInstance(currentSlug.value, `/api/instance/work-items/sync?slug=${encodeURIComponent(currentSlug.value)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    const body = await res.json().catch(() => ({}))
+    setSyncStatus(
+      res.ok
+        ? `Pushed state "${body.state}" to work item #${body.workItemId}.`
+        : `Sync failed: ${body.message ?? body.error}`
+    )
+  }
+
+  function handleDeclineSync() {
+    setSyncConfirming(false)
+    setSyncStatus('Declined — work item state left unchanged.')
   }
 
   if (error) {
@@ -1714,6 +1756,25 @@ function SyncedFieldsPanel({ instance }) {
         </div>
       </div>
       <div class="save-status">${status}</div>
+      <button type="button" class="btn" onClick=${handleCheckAndMaybeSync}>Check gate & sync work item</button>
+      <div class="save-status">${syncStatus}</div>
+      ${syncConfirming
+        ? html`
+            <div class="modal-backdrop" role="presentation">
+              <div class="modal" role="dialog" aria-modal="true" aria-label="Confirm work item state update">
+                <h3>Push a state update?</h3>
+                <p class="guidance">
+                  The gate for stage "${instance.stage.title}" has passed. Confirm to push a new state to this
+                  stage's work item in Azure DevOps. Declining leaves that work item's state unchanged.
+                </p>
+                <div class="modal-actions">
+                  <button type="button" class="btn ghost" onClick=${handleDeclineSync}>Decline</button>
+                  <button type="button" class="btn primary" onClick=${handleConfirmSync}>Confirm & push</button>
+                </div>
+              </div>
+            </div>
+          `
+        : null}
     </section>
   `
 }
