@@ -82,14 +82,73 @@ artefacts:
     title: Solution Architecture Document
     template: templates/sad.md.tmpl
     gate: build-ready-checklist
-    requires: [architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations]
+    # SAD renders the complete architecture, requirements, security and
+    # dependency views, plus only the support handover summary. The detailed
+    # operational content belongs to SSAD.
+    requires:
+      [
+        architecture.business-context,
+        architecture.design-decisions,
+        architecture.solution-description,
+        architecture.logical-components,
+        architecture.standards,
+        architecture.architectural-risks,
+        architecture.constraints-and-assumptions,
+        integration.interfaces,
+        integration.network-and-infrastructure,
+        integration.environments,
+        data.logical-data-model,
+        data.data-classification,
+        data.data-retention-and-archiving,
+        data.data-migration,
+        data.data-replication,
+        nfrs.performance,
+        nfrs.availability-and-continuity,
+        nfrs.disaster-recovery-and-backup,
+        nfrs.scalability-and-capacity,
+        nfrs.other-nfrs,
+        nfrs.requirements-traceability,
+        security.identity-and-access,
+        security.security-architecture,
+        security.regulations-and-standards,
+        security.privacy-and-confidentiality,
+        risks.risk-register,
+        risks.open-issues,
+        dependencies.dependencies-overview,
+        dependencies.dependency-list,
+        support-and-operations.support-handover-readiness,
+      ]
 
   - id: ssad
     title: Solution Support Architecture Document
-    # Deliberately the same `requires` list as `sad` — SAD and SSAD are two renderings of one module set, not two independently-authored documents. See docs/research/stages-gates-module-specs.md Section 4.4 and docs/adr/0001.
     template: templates/ssad.md.tmpl
     gate: build-ready-checklist
-    requires: [architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations]
+    # SSAD is the support-focused rendering of the same design data. It needs
+    # operational readiness in full, but only the design fields that its
+    # support-oriented template actually presents.
+    requires:
+      [
+        support-and-operations.stakeholders,
+        support-and-operations.environments-and-domains,
+        support-and-operations.release-procedures,
+        support-and-operations.support-handover-readiness,
+        support-and-operations.operational-accounts-and-licenses,
+        support-and-operations.operational-security-controls,
+        support-and-operations.monitoring-and-alerting,
+        architecture.solution-description,
+        architecture.logical-components,
+        architecture.architectural-risks,
+        integration.interfaces,
+        data.data-classification,
+        risks.risk-register,
+        risks.open-issues,
+        nfrs.availability-and-continuity,
+        nfrs.disaster-recovery-and-backup,
+        nfrs.scalability-and-capacity,
+        security.identity-and-access,
+        security.privacy-and-confidentiality,
+        dependencies.dependency-list,
+      ]
 
   - id: as-built
     title: Detailed Design / As-built

@@ -36,8 +36,31 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
     assert.equal(body.definition, 'design')
     assert.deepEqual(body.stage, { id: 'shape', title: 'SOAP', gate: 'business-case' })
     assert.deepEqual(body.artefacts, [
-      { id: 'soap', title: 'Solution on a Page' },
-      { id: 'soap-full', title: 'Full Solution on a Page' },
+      { id: 'soap', title: 'Solution on a Page', requires: ['context', 'solution-definition', 'team-and-estimates'] },
+      {
+        id: 'soap-full',
+        title: 'Full Solution on a Page',
+        requires: [
+          'context.driver',
+          'context.opportunity',
+          'context.in-scope',
+          'context.out-of-scope',
+          'solution-definition.high-level-requirements',
+          'solution-definition.high-level-solution-design',
+          'solution-definition.assumptions-and-considerations',
+          'team-and-estimates.teams-and-contacts',
+          'team-and-estimates.estimates',
+          'team-and-estimates.references',
+          'dependencies.dependencies-overview',
+          'soap-full-details.epic-project',
+          'soap-full-details.requested-lead-by',
+          'soap-full-details.request-date',
+          'soap-full-details.draft-agreed-date',
+          'soap-full-details.delivered-date',
+          'soap-full-details.sequencing',
+          'soap-full-details.questions',
+        ],
+      },
     ])
 
     const context = body.modules.find((m) => m.id === 'context')
@@ -60,7 +83,7 @@ test('GET /api/instance?stage=<id> browses a different stage\'s modules without 
     const body = await res.json()
     assert.deepEqual(body.stage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-tac-approved' })
     assert.equal(body.currentStageId, 'shape')
-    assert.deepEqual(body.artefacts, [{ id: 'hld', title: 'High Level Design' }])
+    assert.deepEqual(body.artefacts, [{ id: 'hld', title: 'High Level Design', requires: ['hld-submission', 'problem-statement', 'proposed-solution', 'alternatives-considered', 'open-questions', 'nfrs', 'risks', 'security', 'dependencies'] }])
     assert.ok(body.modules.some((m) => m.id === 'hld-submission'))
 
     const instance = readInstance('examples')

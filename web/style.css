@@ -216,8 +216,20 @@ header {
  * "Render" (which opens the render-artefact-picker dialog), replacing the
  * old per-stage stage-actions bar and per-artefact Render button set.
  */
-.toolbar-actions { display: flex; align-items: center; }
+.toolbar-left, .toolbar-actions { display: flex; align-items: center; }
+.toolbar-left { gap: 14px; min-width: 0; }
 .toolbar-actions .btn { margin: 0 0 0 8px; }
+.artefact-selector { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.artefact-selector span { text-transform: uppercase; letter-spacing: 0.08em; }
+.artefact-selector select {
+  font: 600 13px var(--font-body);
+  color: var(--text);
+  background: var(--bg-raised);
+  border: var(--border-strong) solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 6px 28px 6px 9px;
+  max-width: 280px;
+}
 
 /* View-mode visibility, driven by data-view-mode on main#modules (#79). */
 main[data-view-mode='markdown'] .field-markdown .preview { display: none; }
@@ -225,6 +237,13 @@ main[data-view-mode='markdown'] .field-markdown .editor-host { flex: 1 1 auto; }
 main[data-view-mode='markdown'] .field-markdown .editor-pane { flex: 1 1 100%; }
 main[data-view-mode='rendered'] .field-markdown .editor-pane { display: none; }
 main[data-view-mode='rendered'] .field-markdown .preview { flex: 1 1 100%; }
+
+@media (max-width: 680px) {
+  .toolbar { align-items: stretch; flex-direction: column; gap: 10px; }
+  .toolbar-left { flex-wrap: wrap; }
+  .toolbar-actions { justify-content: flex-end; flex-wrap: wrap; }
+  .artefact-selector select { max-width: min(280px, 65vw); }
+}
 
 main#modules, .load-error, .loading {
   max-width: 1120px;

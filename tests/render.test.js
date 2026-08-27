@@ -372,7 +372,9 @@ test('a render against Azure DevOps reads instance/module data from, and pushes 
 
 // ---------- renderStageArtefacts (#123): render-to-branch on every save ----------
 
-// The Detailed Design stage's own two artefacts (sad/ssad) share the exact same `requires` list (docs/adr/0001), while Shape now has two SOAP variants with different requirements.
+// The Detailed Design stage's own two artefacts (sad/ssad) share the same
+// modules but now have field-accurate, divergent requirements (docs/adr/0021),
+// while Shape has two SOAP variants with different requirements.
 function seedDetailedDesignAzureDevOpsFiles() {
   return {
     '/gantry-workspace/examples/instance.yaml': 'definition: design\nslug: examples\nstage: detailed-design\n',

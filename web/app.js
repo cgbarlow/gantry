@@ -24,6 +24,14 @@ import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, worksp
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
 import { assetReference, resolveAssetRefs } from './lib/assetRefs.js'
+import {
+  artefactFieldIds,
+  artefactsHaveDifferentRequirements,
+  defaultArtefactId,
+  persistArtefactSelection,
+  readArtefactSelection,
+  sortArtefacts,
+} from './lib/artefactSelection.js'
 
 const md = new MarkdownIt()
 
@@ -1014,7 +1022,7 @@ function ListField({ field, onRegister, onRemove }) {
 }
 
 // ---------- One module's card: fields + its own Save button/status ----------
-function ModuleCard({ mod, stageId, onFieldRegistered }) {
+function ModuleCard({ mod, stageId, onFieldRegistered, visibleFieldIds }) {
   const [status, setStatus] = useState('')
   // Which markdown field the image-insert modal targets: the one whose own
   // toolbar Image action was clicked (#180 — no more module-level affordance
@@ -1032,7 +1040,12 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
     // The document's section sequence, replayed for the writer (#132): defined fields and custom fields in exactly the displayed order, so a Section inserted below its neighbour stays there across save/reload.
     const layout = []
     mod.fields.forEach((field) => {
-      const value = controlsRef.current[field.id]?.getValue()
+      // Hidden fields are not mounted while an artefact is selected. Keep
+      // their current value instead of clearing them on a save from the
+      // filtered view.
+      const value = !visibleFieldIds || visibleFieldIds.has(`${mod.id}.${field.id}`)
+        ? controlsRef.current[field.id]?.getValue() ?? field.value
+        : field.value
       fields[field.id] = value
       layout.push(field.custom ? { custom: { id: field.id, title: field.title, value } } : { field: field.id })
     })
@@ -1120,10 +1133,10 @@ function ModuleCard({ mod, stageId, onFieldRegistered }) {
     <section class="module">
       <h2>${mod.title}</h2>
       ${mod.purpose ? html`<p class="purpose">${mod.purpose}</p>` : null}
-      ${mod.fields.map((field) => {
+      ${mod.fields.filter((field) => !visibleFieldIds || visibleFieldIds.has(`${mod.id}.${field.id}`)).map((field) => {
         const onRegister = (control) => {
           controlsRef.current[field.id] = control
-          onFieldRegistered(field, control)
+          onFieldRegistered(field, control, mod.id)
         }
         const isList = field.type === 'list'
         return isList
@@ -2167,16 +2180,21 @@ function RequestApprovalPanel({ instance }) {
 
 // ---------- The viewed stage's whole screen: modules + work-item panel ----------
 // Keyed by stage id from the parent (see ModuleEditorPage) so switching stages remounts this wholesale — fresh CodeMirror instances, matching the old full-DOM-rebuild behaviour. "Clear all fields" and "Render" now live in the view-toggle bar (see ViewModeToolbar, ModuleEditorPage) rather than here, so the field registry they depend on is owned by ModuleEditorPage instead — `onFieldRegistered` is threaded straight through.
-function StageScreen({ instance, onFieldRegistered }) {
+function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
+  const modules = visibleFieldIds
+    ? instance.modules.filter((mod) => mod.fields.some((field) => visibleFieldIds.has(`${mod.id}.${field.id}`)))
+    : instance.modules
+
   return html`
     <main id="modules" data-view-mode=${viewMode.value}>
       <${SyncedFieldsPanel} key=${instance.workItem ? 'linked' : 'unlinked'} instance=${instance} />
-      ${instance.modules.map(
+      ${modules.map(
         (mod) => html`
           <${ModuleCard}
             key=${mod.id}
             mod=${mod}
             stageId=${instance.stage.id}
+            visibleFieldIds=${visibleFieldIds}
             onFieldRegistered=${onFieldRegistered}
           />
         `
@@ -2198,8 +2216,16 @@ const VIEW_MODE_HOTKEY = { ctrlKey: true, shiftKey: true, key: 'v' }
 // `requestApprovalSlug` signals a "Request Approval" shortcut button —
 // (#145 Part 1) clicking it scrolls to the RequestApprovalPanel and
 // briefly highlights it so the author's eye is drawn down.
-function ViewModeToolbar({ instance, onClearAllFields, requestApprovalSlug }) {
+function ViewModeToolbar({
+  instance,
+  onClearAllFields,
+  requestApprovalSlug,
+  selectedArtefactId,
+  onArtefactChange,
+}) {
   const [renderOpen, setRenderOpen] = useState(false)
+  const artefacts = sortArtefacts(instance.artefacts)
+  const showArtefactSelector = artefactsHaveDifferentRequirements(instance.modules, artefacts)
 
   useEffect(() => {
     function onKeyDown(e) {
@@ -2264,20 +2290,32 @@ function ViewModeToolbar({ instance, onClearAllFields, requestApprovalSlug }) {
 
   return html`
     <div class="toolbar">
-      <div class="segmented" role="group" aria-label="View mode">
-        ${VIEW_MODES.map(
-          (mode) => html`
-            <button
-              type="button"
-              key=${mode}
-              class=${'btn small' + (viewMode.value === mode ? ' active' : '')}
-              aria-pressed=${viewMode.value === mode}
-              onClick=${() => (viewMode.value = mode)}
-            >
-              ${VIEW_MODE_LABELS[mode]}
-            </button>
-          `
-        )}
+      <div class="toolbar-left">
+        <div class="segmented" role="group" aria-label="View mode">
+          ${VIEW_MODES.map(
+            (mode) => html`
+              <button
+                type="button"
+                key=${mode}
+                class=${'btn small' + (viewMode.value === mode ? ' active' : '')}
+                aria-pressed=${viewMode.value === mode}
+                onClick=${() => (viewMode.value = mode)}
+              >
+                ${VIEW_MODE_LABELS[mode]}
+              </button>
+            `
+          )}
+        </div>
+        ${showArtefactSelector
+          ? html`
+              <label class="artefact-selector">
+                <span>Artefact</span>
+                <select aria-label="Artefact" value=${selectedArtefactId ?? ''} onChange=${(e) => onArtefactChange(e.currentTarget.value)}>
+                  ${artefacts.map((artefact) => html`<option value=${artefact.id} key=${artefact.id}>${artefact.title}</option>`)}
+                </select>
+              </label>
+            `
+          : null}
       </div>
       <div class="toolbar-actions">
         <button type="button" class="btn" onClick=${onClearAllFields}>Clear all fields</button>
@@ -2515,6 +2553,7 @@ function ModuleEditorPage({ slug }) {
 
   const instance = instanceData.value
   const error = loadError.value
+  const [selectedArtefactId, setSelectedArtefactId] = useState(null)
 
   // The field registry backing "Clear all fields" (#114 moved this button,
   // and hence this registry, up from StageScreen into this parent — the
@@ -2529,25 +2568,77 @@ function ModuleEditorPage({ slug }) {
   // resets synchronously before recording the new field, so there's no
   // window where a genuinely-current registration can be discarded.
   const registryRef = useRef({ stageId: null, entries: [] })
+  const selectionContextRef = useRef({ slug: null, stageId: null })
 
-  function registerField(field, control) {
+  useEffect(() => {
+    if (!instance) return
+    const previous = selectionContextRef.current
+    const stageChanged = previous.slug === instance.slug && previous.stageId !== null && previous.stageId !== instance.stage.id
+    const next = stageChanged ? defaultArtefactId(instance.artefacts) : readArtefactSelection(instance.slug, instance.stage.id, instance.artefacts)
+    if (stageChanged && next) persistArtefactSelection(instance.slug, instance.stage.id, next)
+    setSelectedArtefactId(next)
+    selectionContextRef.current = { slug: instance.slug, stageId: instance.stage.id }
+  }, [instance?.slug, instance?.stage?.id])
+
+  function registerField(field, control, moduleId) {
     if (registryRef.current.stageId !== instance.stage.id) {
       registryRef.current = { stageId: instance.stage.id, entries: [] }
     }
-    registryRef.current.entries.push({ field, control })
+    registryRef.current.entries.push({ field, control, moduleId })
   }
 
   function clearAllFields() {
     registryRef.current.entries.forEach(({ field, control }) => control.setValue(field.type === 'list' ? [] : ''))
   }
 
+  function changeArtefact(artefactId) {
+    // Selection changes hide some editors. Capture their live drafts first so
+    // switching back to the artefact does not discard text typed this visit.
+    const drafts = new Map(
+      registryRef.current.entries.map(({ field, control, moduleId }) => [`${moduleId}.${field.id}`, control.getValue()])
+    )
+    if (drafts.size) {
+      instanceData.value = {
+        ...instanceData.value,
+        modules: instanceData.value.modules.map((mod) => ({
+          ...mod,
+          fields: mod.fields.map((field) => {
+            const key = `${mod.id}.${field.id}`
+            return drafts.has(key) ? { ...field, value: drafts.get(key) } : field
+          }),
+        })),
+      }
+    }
+    const nextArtefact = instance.artefacts.find((artefact) => artefact.id === artefactId)
+    const nextVisibleFieldIds = artefactFieldIds(instance.modules, nextArtefact)
+    registryRef.current.entries = registryRef.current.entries.filter(({ field, moduleId }) =>
+      nextVisibleFieldIds.has(`${moduleId}.${field.id}`)
+    )
+    persistArtefactSelection(instance.slug, instance.stage.id, artefactId)
+    setSelectedArtefactId(artefactId)
+  }
+
   if (error) return html`<p class="load-error">Failed to load: ${error}</p>`
   if (!instance || instance.slug !== slug) return html`<p class="loading">Loading…</p>`
 
+  const selectedArtefact = instance.artefacts.find((artefact) => artefact.id === selectedArtefactId) ??
+    instance.artefacts.find((artefact) => artefact.id === defaultArtefactId(instance.artefacts)) ?? null
+  const visibleFieldIds = selectedArtefact ? artefactFieldIds(instance.modules, selectedArtefact) : null
   return html`
     <${AppHeader} instance=${instance} />
-    <${ViewModeToolbar} instance=${instance} onClearAllFields=${clearAllFields} requestApprovalSlug=${instance.workspaceBacked ? instance.slug : null} />
-    <${StageScreen} key=${instance.stage.id} instance=${instance} onFieldRegistered=${registerField} />
+    <${ViewModeToolbar}
+      instance=${instance}
+      selectedArtefactId=${selectedArtefact?.id ?? null}
+      onArtefactChange=${changeArtefact}
+      onClearAllFields=${clearAllFields}
+      requestApprovalSlug=${instance.workspaceBacked ? instance.slug : null}
+    />
+    <${StageScreen}
+      key=${instance.stage.id}
+      instance=${instance}
+      visibleFieldIds=${visibleFieldIds}
+      onFieldRegistered=${registerField}
+    />
   `
 }
 

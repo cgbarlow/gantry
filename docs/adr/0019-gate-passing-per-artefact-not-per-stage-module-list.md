@@ -2,11 +2,13 @@
 
 Amends ADR-0001's stage/gate topology. Every gate today happens to have a
 single answer to "what does complete mean," because every existing gate's
-artefacts share one identical `requires` list — SAD and SSAD both require
-exactly `[architecture, integration, data, nfrs, security, risks,
-dependencies, support-and-operations]`. `checkGate` exploits that coincidence
-directly: it evaluates the *stage's* own `modules` list as one monolithic
-AND, never looking at individual artefacts at all.
+artefacts share one identical `requires` list. At the time of this decision,
+SAD and SSAD both required exactly `[architecture, integration, data, nfrs,
+security, risks, dependencies, support-and-operations]`; ADR-0021 later made
+their requirements field-accurate while preserving the same per-artefact rule.
+`checkGate` exploits that old coincidence directly: it evaluates the
+*stage's* own `modules` list as one monolithic AND, never looking at
+individual artefacts at all.
 
 Adding a second Shape-stage artefact (`soap-full`, alongside the existing
 `soap`) breaks that coincidence on purpose: `soap-full` reuses `soap`'s
@@ -28,13 +30,10 @@ role: it's now the union of everything the stage's artefacts might need
 (what the module editor mounts and offers for authoring), not the
 gate-passing source of truth.
 
-This is a no-op for every gate that exists before this change: with
-identical `requires` across a gate's artefacts (SAD/SSAD today), "any one
-complete" and "the shared list complete" are the same check with the same
-answer. Nothing about SAD/SSAD's actual behavior changes; the rule that
-happened to make their shared check correct is now stated explicitly and
-generalized, rather than left as an accident of every gate so far having
-only one shape of artefact.
+This was initially a no-op for the detailed-design gate because SAD and SSAD
+had identical `requires` lists. ADR-0021 now makes their lists diverge at the
+field level without changing this rule: either artefact can still satisfy the
+shared gate, and `stage.modules` remains the editor's union of available data.
 
 This changes what "the gate passed" means for every caller that trusts it —
 `requestStageApproval` (opening the approval PR), `advanceStage` (a local

@@ -24,6 +24,15 @@ test('loads the real design definition', () => {
   assert.ok(soapFull.requires.includes('solution-definition.high-level-requirements'))
   assert.ok(soapFull.requires.includes('soap-full-details.sequencing'))
 
+  const sad = design.artefacts.find((artefact) => artefact.id === 'sad')
+  const ssad = design.artefacts.find((artefact) => artefact.id === 'ssad')
+  assert.notDeepEqual(sad.requires, ssad.requires)
+  assert.ok(sad.requires.includes('architecture.design-decisions'))
+  assert.ok(sad.requires.includes('support-and-operations.support-handover-readiness'))
+  assert.ok(ssad.requires.includes('support-and-operations.monitoring-and-alerting'))
+  assert.ok(ssad.requires.includes('nfrs.availability-and-continuity'))
+  assert.ok(!ssad.requires.includes('architecture.design-decisions'))
+
   const context = design.modules.get('context')
   assert.equal(context.title, 'Context')
   const driver = context.fields.find((field) => field.id === 'driver')

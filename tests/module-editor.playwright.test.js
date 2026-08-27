@@ -179,6 +179,106 @@ test('the 3-way view-mode toggle switches modes, cycles via hotkey, stays global
   }
 })
 
+// Coverage for #181 — the artefact selector is shown only when artefacts have
+// different field requirements, filters at field granularity, remembers the
+// choice for this instance/stage across reloads, and uses the first artefact
+// for a newly visited stage.
+test('artefact selector filters Shape and Detailed Design fields, persists per stage, and leaves required badges unchanged', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage()
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const selector = page.getByRole('combobox', { name: 'Artefact' })
+        await selector.waitFor({ state: 'visible', timeout: 5_000 })
+        assert.deepEqual(await selector.locator('option').allTextContents(), ['Solution on a Page', 'Full Solution on a Page'])
+        assert.equal(await selector.inputValue(), 'soap')
+
+        // The lightweight SOAP uses the whole shared Shape modules, but not
+        // Full SOAP's extra dependencies/details modules.
+        assert.equal(await page.locator('.module h2', { hasText: 'Dependencies' }).count(), 0)
+        assert.equal(await page.locator('.module h2', { hasText: 'Full SOAP Details' }).count(), 0)
+        assert.equal(await page.locator('.field label', { hasText: 'Affected domains' }).count(), 1)
+        assert.equal(await page.locator('.field label', { hasText: 'Business driver *' }).count(), 1)
+
+        await selector.selectOption('soap-full')
+        assert.equal(await page.locator('.module h2', { hasText: 'Dependencies' }).count(), 1)
+        assert.equal(await page.locator('.module h2', { hasText: 'Full SOAP Details' }).count(), 1)
+        assert.equal(await page.locator('.field label', { hasText: 'Affected domains' }).count(), 0)
+        assert.equal(await page.locator('.field label', { hasText: 'Process flow' }).count(), 0)
+        assert.equal(await page.locator('.field label', { hasText: 'Feature breakdown and involved teams' }).count(), 0)
+        assert.equal(await page.locator('.field label', { hasText: 'Dependency list' }).count(), 0)
+        assert.equal(await page.locator('.field label', { hasText: 'Business driver *' }).count(), 1)
+
+        // A reload restores the selected artefact for this instance/stage.
+        await page.reload()
+        await page.waitForSelector('.module', { timeout: 10_000 })
+        assert.equal(await page.getByRole('combobox', { name: 'Artefact' }).inputValue(), 'soap-full')
+        assert.equal(await page.locator('.field label', { hasText: 'Affected domains' }).count(), 0)
+
+        // Drafts in fields hidden by the selected artefact survive switching
+        // away and back, even before the module is saved.
+        await selector.selectOption('soap')
+        const processField = page.locator('.field-markdown', { has: page.locator('label', { hasText: 'Process flow' }) })
+        await processField.locator('.cm-content').click()
+        await page.keyboard.press('ControlOrMeta+a')
+        await page.keyboard.type('An unsaved process-flow draft.')
+        await selector.selectOption('soap-full')
+        assert.equal(await page.locator('.field label', { hasText: 'Process flow' }).count(), 0)
+        await selector.selectOption('soap')
+        assert.match(await processField.locator('.cm-content').textContent(), /An unsaved process-flow draft\./)
+        await selector.selectOption('soap-full')
+
+        // Detailed Design defaults independently to its alphanumeric-first
+        // artefact and exposes the selector because SAD/SSAD differ.
+        await page.locator('#stage-nav button', { hasText: 'Detailed Design' }).click()
+        await page.waitForSelector('.module', { timeout: 10_000 })
+        const detailedSelector = page.getByRole('combobox', { name: 'Artefact' })
+        await detailedSelector.waitFor({ state: 'visible', timeout: 5_000 })
+        assert.equal(await detailedSelector.inputValue(), 'sad')
+        assert.equal(await page.locator('.field label', { hasText: 'Design decisions' }).count(), 1)
+        assert.equal(await page.locator('.field label', { hasText: 'Operational accounts and licenses' }).count(), 0)
+
+        await detailedSelector.selectOption('ssad')
+        assert.equal(await page.locator('.field label', { hasText: 'Design decisions' }).count(), 0)
+        assert.equal(await page.locator('.field label', { hasText: 'Operational accounts and licenses' }).count(), 1)
+        assert.equal(await page.locator('.field label', { hasText: 'Network and infrastructure' }).count(), 0)
+        assert.equal(await page.locator('.field label', { hasText: 'Availability and continuity *' }).count(), 1)
+
+        // HLD has one artefact, so no selector is rendered there.
+        await page.locator('#stage-nav button', { hasText: 'High-level Design' }).click()
+        await page.waitForSelector('.module', { timeout: 10_000 })
+        assert.equal(await page.getByRole('combobox', { name: 'Artefact' }).count(), 0)
+
+        // Visiting Shape again starts from its alphanumeric-first default,
+        // rather than carrying the earlier soap-full selection across stages.
+        await page.locator('#stage-nav button', { hasText: 'SOAP' }).click()
+        await page.waitForSelector('.module', { timeout: 10_000 })
+        assert.equal(await page.getByRole('combobox', { name: 'Artefact' }).inputValue(), 'soap')
+
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
 // Coverage for #114 — "Clear all fields" and the Render dialog, both moved into the view-toggle bar: a single "Render" button (replacing the old one-button-per-artefact layout) opens a dialog listing every artefact the current stage can produce, using the same dialog for Shape's two SOAP variants and Detailed Design's sad/ssad pair.
 test('Render and Clear all fields live in the view-toggle bar; Render opens a dialog listing every artefact for the current stage', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
