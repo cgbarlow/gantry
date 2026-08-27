@@ -177,6 +177,14 @@ test('an asset:<id> reference (#80) inserted into a module field compiles into a
     const roundTrip = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown', result.docxPath], {
       encoding: 'utf8',
     })
+    const documentXml = execFileSync('unzip', ['-p', result.docxPath, 'word/document.xml'], {
+      encoding: 'utf8',
+    })
+    assert.match(documentXml, /<w:hyperlink r:id="[^"]+">/, 'expected the source citation URL to be a Word hyperlink')
+    const relationshipsXml = execFileSync('unzip', ['-p', result.docxPath, 'word/_rels/document.xml.rels'], {
+      encoding: 'utf8',
+    })
+    assert.match(relationshipsXml, /Target="https:\/\/draw\.io\/diagrams\/eligibility-flow"/)
     const driverIndex = roundTrip.indexOf('Business driver')
     const imageIndex = roundTrip.indexOf('![Eligibility flow]')
     const affectedDomainsIndex = roundTrip.indexOf('Affected domains')

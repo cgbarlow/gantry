@@ -3,12 +3,69 @@ import assert from 'node:assert/strict'
 import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import MarkdownIt from 'markdown-it'
 import { createServer } from '../lib/server.js'
 import { createInstance } from '../lib/instance.js'
+import { createAsset, resolveAssetFileRefs } from '../lib/assets.js'
+import { resolveAssetRefs } from '../web/lib/assetRefs.js'
 
 // A minimal real 1x1 red PNG, base64-encoded — small enough to inline, real enough to round-trip through the same file-write/serve path a genuine upload takes.
 const ONE_PX_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+
+const markdown = new MarkdownIt()
+
+test('live asset citations render their source URL as a link while keeping the citation italic', () => {
+  const source = 'https://draw.io/diagrams/eligibility-flow-(v2)?section=a]b'
+  const resolved = resolveAssetRefs(
+    '![Eligibility flow](asset:asset-1)',
+    (id) => `/api/assets/${id}.png`,
+    () => source
+  )
+
+  assert.equal(
+    resolved,
+    `![Eligibility flow](/api/assets/asset-1.png)\n\n*Source: [${source.replaceAll(']', '\\]')}](<${source}>)*`
+  )
+  assert.ok(
+    markdown.render(resolved).includes(`<p><em>Source: <a href="${encodeURI(source)}">${source}</a></em></p>`)
+  )
+})
+
+test('file asset citations render their source URL as a link while keeping the citation italic', () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'my-initiative', { instancesDir })
+    const asset = createAsset(
+      'my-initiative',
+      {
+        filename: 'eligibility-flow.png',
+        buffer: Buffer.from(ONE_PX_PNG_BASE64, 'base64'),
+        name: 'Eligibility flow',
+        source: 'https://draw.io/diagrams/eligibility-flow-(v2)?section=a]b',
+      },
+      { instancesDir }
+    )
+    const resolved = resolveAssetFileRefs(
+      `![Eligibility flow](asset:${asset.id})`,
+      'my-initiative',
+      { instancesDir }
+    )
+
+    assert.ok(
+      resolved.endsWith(
+        `\n\n*Source: [${asset.source.replaceAll(']', '\\]')}](<${asset.source}>)*`
+      )
+    )
+    assert.ok(
+      markdown.render(resolved).includes(
+        `<p><em>Source: <a href="${encodeURI(asset.source)}">${asset.source}</a></em></p>`
+      )
+    )
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
 
 function withRunningServer(options, fn) {
   return new Promise((resolve, reject) => {

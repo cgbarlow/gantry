@@ -10,7 +10,7 @@ export function assetReference(asset) {
 
 /**
  * Rewrites every `![alt](asset:<id>)` reference in `markdown` to `![alt](<resolveUrl(id)>)`, so a downstream markdown renderer sees an ordinary, fetchable image URL. Leaves everything else untouched.
- * When `resolveSource` is supplied, also emits a caption-styled citation immediately below the image — `*Source: <source>*` — for assets that carry a `source` URL. No citation is emitted when the asset lacks a source.
+ * When `resolveSource` is supplied, also emits a caption-styled citation immediately below the image — `*Source: [<source>](<<source>>)*` — for assets that carry a `source` URL. No citation is emitted when the asset lacks a source.
  */
 export function resolveAssetRefs(markdown, resolveUrl, resolveSource) {
   return markdown.replace(ASSET_REF_RE, (match, alt, id) => {
@@ -19,6 +19,7 @@ export function resolveAssetRefs(markdown, resolveUrl, resolveSource) {
     if (!resolveSource) return base
     const source = resolveSource(id)
     if (!source) return base
-    return `${base}\n\n*Source: ${source}*`
+    const label = source.replaceAll(']', '\\]')
+    return `${base}\n\n*Source: [${label}](<${source}>)*`
   })
 }
