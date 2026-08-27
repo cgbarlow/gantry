@@ -622,11 +622,44 @@ main.dashboard {
   padding: 40px 32px 140px;
 }
 .dashboard-topbar { display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; margin-bottom: 24px; }
+.dashboard-heading { display: flex; align-items: center; gap: 10px; }
+.dashboard-heading svg { flex-shrink: 0; }
 .dashboard-topbar h1 { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; font-size: 26px; margin: 0; }
 .dashboard-controls { display: flex; align-items: center; gap: 10px; }
 .lede { color: var(--text-muted); margin: 6px 0 0; max-width: 70ch; }
 
-.view-toggle { display: flex; gap: 8px; }
+.view-toggle { position: relative; display: inline-flex; }
+.view-toggle .menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 6px;
+  z-index: 9;
+  background: var(--bg-raised);
+  border: var(--border-strong) solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+  min-width: 140px;
+}
+.view-toggle.menu-open .menu { display: block; }
+.view-toggle .menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-family: var(--font-body);
+  color: var(--text);
+  background: none;
+  border: none;
+  box-sizing: border-box;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.view-toggle .menu button:hover,
+.view-toggle .menu button.selected { background: var(--bg); }
+.view-toggle .menu button.selected { font-weight: 600; }
 
 .dashboard-empty {
   text-align: center;

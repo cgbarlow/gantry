@@ -9,7 +9,7 @@ import { createInstance, recordInstanceWorkItemLink } from '../lib/instance.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
-// Browser smoke test for the Workspaces landing page (#77, restructured by #102) — the landing screen at `/`, backed by the multi-instance registry (`GET /api/instances`, #76). Mirrors tests/module-editor.playwright.test.js's pattern: a real server, a real Chromium page, asserting no console/page errors alongside the ticket's acceptance criteria — the "Workspaces" title, master-detail grouping instances by workspace (one row per workspace, a multi-instance workspace's detail column listing every instance it holds), a working toggle to stage swimlanes, the view choice persisting across a reload (via localStorage), and the empty state's "new instance" call to action.
+// Browser smoke test for the Workspaces landing page (#77, restructured by #102) — the landing screen at `/`, backed by the multi-instance registry (`GET /api/instances`, #76). Mirrors tests/module-editor.playwright.test.js's pattern: a real server, a real Chromium page, asserting no console/page errors alongside the ticket's acceptance criteria — the "Workspaces" title, master-detail grouping instances by workspace (one row per workspace, a multi-instance workspace's detail column listing every instance it holds), a working view-mode menu, the view choice persisting across a reload (via localStorage), and the empty state's "new instance" call to action.
 function withRunningServer(options, fn) {
   return new Promise((resolve, reject) => {
     const server = createServer(options)
@@ -59,8 +59,17 @@ test('dashboard: titled "Workspaces", master-detail is the default view, and its
         await page.waitForSelector('.master-detail', { timeout: 10_000 })
 
         assert.equal(await page.locator('.dashboard-topbar h1').textContent(), 'Workspaces')
+        assert.equal(await page.locator('.dashboard-heading svg').count(), 1)
         assert.equal(await page.locator('.instance-list .list-item').count(), 2)
-        assert.equal(await page.locator('.view-toggle button.active').textContent(), 'Master-detail')
+        const viewTrigger = page.getByRole('button', { name: 'View mode' })
+        assert.equal(await viewTrigger.count(), 1)
+        await viewTrigger.click()
+        const viewMenu = page.locator('.view-toggle .menu')
+        await viewMenu.waitFor({ state: 'visible', timeout: 2_000 })
+        assert.deepEqual(await viewMenu.getByRole('menuitem').allTextContents(), ['Default', 'Swimlanes'])
+        assert.equal(await viewMenu.getByRole('menuitem', { name: 'Default' }).getAttribute('aria-current'), 'true')
+        await viewMenu.getByRole('menuitem', { name: 'Default' }).click()
+        await viewMenu.waitFor({ state: 'hidden', timeout: 2_000 })
 
         // First group (sorted by title: alpha-initiative) is selected by default — its one instance shows up as its own card in the detail column.
         await page.waitForSelector('.instance-card', { timeout: 10_000 })
@@ -216,7 +225,7 @@ test('dashboard: an instance card displays its assignee without an inline editor
   }
 })
 
-test('dashboard: toggling to stage swimlanes groups instances into lanes by current stage, and the choice persists across a reload', async () => {
+test('dashboard: view-mode menu switches to swimlanes and the choice persists across a reload', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     createInstance('design', 'alpha-initiative', { instancesDir })
@@ -227,7 +236,8 @@ test('dashboard: toggling to stage swimlanes groups instances into lanes by curr
         await page.goto(base)
         await page.waitForSelector('.master-detail', { timeout: 10_000 })
 
-        await page.getByRole('button', { name: 'Stage swimlanes' }).click()
+        await page.getByRole('button', { name: 'View mode' }).click()
+        await page.getByRole('menuitem', { name: 'Swimlanes' }).click()
         await page.waitForSelector('.swimlanes', { timeout: 10_000 })
         assert.ok(await page.locator('.lane').count() >= 4, 'expected one lane per design stage')
         assert.match(await page.locator('.lane').first().textContent(), /SOAP/)
@@ -236,7 +246,11 @@ test('dashboard: toggling to stage swimlanes groups instances into lanes by curr
         // Reload — the view choice (localStorage) survives, so swimlanes renders again without needing to re-toggle.
         await page.reload()
         await page.waitForSelector('.swimlanes', { timeout: 10_000 })
-        assert.equal(await page.locator('.view-toggle button.active').textContent(), 'Stage swimlanes')
+        const viewTrigger = page.getByRole('button', { name: 'View mode' })
+        await viewTrigger.click()
+        const viewMenu = page.locator('.view-toggle .menu')
+        await viewMenu.waitFor({ state: 'visible', timeout: 2_000 })
+        assert.equal(await viewMenu.getByRole('menuitem', { name: 'Swimlanes' }).getAttribute('aria-current'), 'true')
       })
     )
   } finally {
@@ -253,7 +267,8 @@ test('dashboard: swimlane chip overflow menu can open the module editor for that
       { instancesDir },
       withPage(async (page, base) => {
         await page.goto(base)
-        await page.getByRole('button', { name: 'Stage swimlanes' }).click()
+        await page.getByRole('button', { name: 'View mode' }).click()
+        await page.getByRole('menuitem', { name: 'Swimlanes' }).click()
         await page.waitForSelector('.chip', { timeout: 10_000 })
 
         await page.locator('.chip .menu-btn').click()

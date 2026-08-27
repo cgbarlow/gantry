@@ -2496,15 +2496,21 @@ function InstanceSwitcher({ slug, open, onOpenChange }) {
 // the Workspaces landing header, the setup wizard header, and Settings'
 // header (#113) — now lives solely in Settings (web/pages/settings.js's
 // SettingsHeader).
+function GantryBrandIcon() {
+  return html`
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M3 20h18M6 20V8l6-4 6 4v12M6 8h12" />
+    </svg>
+  `
+}
+
 function AppHeader({ instance }) {
   const [openMenu, setOpenMenu] = useState(null)
 
   return html`
     <header>
       <div class="brand">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M3 20h18M6 20V8l6-4 6 4v12M6 8h12" />
-        </svg>
+        <${GantryBrandIcon} />
         <a class="btn small ghost" href="/">← Workspaces</a>
         <h1>${instance.slug} — ${instance.definition}</h1>
         <${InstanceSwitcher}
@@ -2676,22 +2682,36 @@ function StatusStamp({ status }) {
 }
 
 function ViewToggle() {
+  const [open, setOpen] = useState(false)
+
+  function selectViewMode(mode) {
+    dashboardViewMode.value = mode
+    setOpen(false)
+  }
+
   return html`
-    <div class="view-toggle" role="group" aria-label="Dashboard view">
+    <${Dropdown}
+      className="view-toggle"
+      triggerLabel="View mode"
+      menuRole="menu"
+      open=${open}
+      onOpenChange=${setOpen}
+    >
       ${DASHBOARD_VIEW_MODES.map(
         (mode) => html`
           <button
             type="button"
             key=${mode}
-            class=${'btn small' + (dashboardViewMode.value === mode ? ' active' : '')}
-            aria-pressed=${dashboardViewMode.value === mode}
-            onClick=${() => (dashboardViewMode.value = mode)}
+            role="menuitem"
+            class=${'view-mode-option' + (dashboardViewMode.value === mode ? ' selected' : '')}
+            aria-current=${dashboardViewMode.value === mode ? 'true' : undefined}
+            onClick=${() => selectViewMode(mode)}
           >
-            ${mode === 'master-detail' ? 'Master-detail' : 'Stage swimlanes'}
+            ${mode === 'master-detail' ? 'Default' : 'Swimlanes'}
           </button>
         `
       )}
-    </div>
+    <//>
   `
 }
 
@@ -3035,7 +3055,10 @@ function DashboardPage() {
   return html`
     <main class="dashboard">
       <div class="dashboard-topbar">
-        <h1>Workspaces</h1>
+        <div class="dashboard-heading">
+          <${GantryBrandIcon} />
+          <h1>Workspaces</h1>
+        </div>
         <div class="dashboard-controls">
           ${instances?.length ? html`<${ViewToggle} />` : null}
           <a class="btn small ghost" href="/new-workspace">+ New Workspace</a>
