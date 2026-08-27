@@ -123,7 +123,7 @@ test('GET /api/instance against an Azure-DevOps-backed instance with a valid PAT
     const body = await res.json()
     assert.equal(body.slug, 'my-initiative')
     assert.equal(body.definition, 'design')
-    assert.deepEqual(body.stage, { id: 'shape', title: 'Shape', gate: 'business-case' })
+    assert.deepEqual(body.stage, { id: 'shape', title: 'SOAP', gate: 'business-case' })
 
     const context = body.modules.find((m) => m.id === 'context')
     const driver = context.fields.find((f) => f.id === 'driver')

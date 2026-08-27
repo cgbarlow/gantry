@@ -34,7 +34,7 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
     const body = await res.json()
     assert.equal(body.slug, 'examples')
     assert.equal(body.definition, 'design')
-    assert.deepEqual(body.stage, { id: 'shape', title: 'Shape', gate: 'business-case' })
+    assert.deepEqual(body.stage, { id: 'shape', title: 'SOAP', gate: 'business-case' })
     assert.deepEqual(body.artefacts, [
       { id: 'soap', title: 'Solution on a Page' },
       { id: 'soap-full', title: 'Full Solution on a Page' },
@@ -58,7 +58,7 @@ test('GET /api/instance?stage=<id> browses a different stage\'s modules without 
     const res = await fetch(`${base}/api/instance?stage=hld-define`)
     assert.equal(res.status, 200)
     const body = await res.json()
-    assert.deepEqual(body.stage, { id: 'hld-define', title: 'HLD Definition', gate: 'hld-tac-approved' })
+    assert.deepEqual(body.stage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-tac-approved' })
     assert.equal(body.currentStageId, 'shape')
     assert.deepEqual(body.artefacts, [{ id: 'hld', title: 'High Level Design' }])
     assert.ok(body.modules.some((m) => m.id === 'hld-submission'))
@@ -246,7 +246,7 @@ test('GET /api/instance/check reports pass/fail for the instance\'s current gate
     await withRunningServer({ instancesDir }, async (base) => {
       const passing = await (await fetch(`${base}/api/instance/check?slug=examples`)).json()
       assert.equal(passing.pass, true)
-      assert.deepEqual(passing.stage, { id: 'shape', title: 'Shape', gate: 'business-case' })
+      assert.deepEqual(passing.stage, { id: 'shape', title: 'SOAP', gate: 'business-case' })
 
       const failing = await (await fetch(`${base}/api/instance/check?slug=my-initiative`)).json()
       assert.equal(failing.pass, false)
@@ -275,8 +275,8 @@ test('GET /api/definitions/:id/stages reports the definition\'s stages in order,
     assert.equal(res.status, 200)
     const stages = await res.json()
     assert.deepEqual(stages, [
-      { id: 'shape', title: 'Shape', gate: 'business-case' },
-      { id: 'hld-define', title: 'HLD Definition', gate: 'hld-tac-approved' },
+      { id: 'shape', title: 'SOAP', gate: 'business-case' },
+      { id: 'hld-define', title: 'High-level Design', gate: 'hld-tac-approved' },
       { id: 'detailed-design', title: 'Detailed Design', gate: 'build-ready-checklist' },
       { id: 'handover', title: 'Operational Handover', gate: 'operational-handover' },
     ])
@@ -486,8 +486,8 @@ test('GET /api/definitions lists every definition with its stages, for the setup
     const design = body.find((d) => d.id === 'design')
     assert.equal(design.title, 'Solution Design')
     assert.deepEqual(design.stages, [
-      { id: 'shape', title: 'Shape' },
-      { id: 'hld-define', title: 'HLD Definition' },
+      { id: 'shape', title: 'SOAP' },
+      { id: 'hld-define', title: 'High-level Design' },
       { id: 'detailed-design', title: 'Detailed Design' },
       { id: 'handover', title: 'Operational Handover' },
     ])

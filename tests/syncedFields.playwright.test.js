@@ -137,7 +137,7 @@ test('the synced-fields panel shows the link prompt when unlinked, then the dist
               assert.match(await parentWorkItemLink.innerText(), new RegExp(`#${parentId}`))
               assert.equal(await page.locator('.work-item-panel').count(), 0)
               assert.equal(await panel.locator('.synced-value >> text=Task').count(), 1)
-              assert.equal(await panel.locator('input#synced-title').inputValue(), 'my-initiative — Shape')
+               assert.equal(await panel.locator('input#synced-title').inputValue(), 'my-initiative — SOAP')
               assert.match(await panel.locator('.synced-value').nth(1).innerText(), /#\d+ · New/)
               assert.match(await panel.locator('.synced-value').nth(2).innerText(), /No pull request open/)
               assert.equal(await panel.locator('.identity-picker input').inputValue(), 'Ada Lovelace')
@@ -164,7 +164,7 @@ test('the synced-fields panel shows the link prompt when unlinked, then the dist
               await panel.locator('input#synced-title').fill('')
               await panel.locator('input#synced-title').press('Enter')
               await assert.doesNotReject(panel.locator('text=Title · overridden').waitFor({ state: 'hidden', timeout: 10_000 }))
-              assert.equal(await panel.locator('input#synced-title').inputValue(), 'my-initiative — Shape')
+               assert.equal(await panel.locator('input#synced-title').inputValue(), 'my-initiative — SOAP')
 
               assert.deepEqual(pageErrors, [])
             } finally {

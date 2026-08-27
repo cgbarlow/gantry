@@ -61,8 +61,8 @@ test('moves the instance to the next stage once the current gate has passed, pre
 
     const result = advanceStage('my-initiative', { instancesDir })
 
-    assert.deepEqual(result.fromStage, { id: 'shape', title: 'Shape', gate: 'business-case' })
-    assert.deepEqual(result.toStage, { id: 'hld-define', title: 'HLD Definition', gate: 'hld-tac-approved' })
+    assert.deepEqual(result.fromStage, { id: 'shape', title: 'SOAP', gate: 'business-case' })
+    assert.deepEqual(result.toStage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-tac-approved' })
 
     const instance = readInstance('my-initiative', { instancesDir })
     assert.equal(instance.stage, 'hld-define')

@@ -244,7 +244,7 @@ test('detecting approval merges the Pull Request itself and advances the stage p
     assert.equal(result.review.state, 'approved')
     assert.equal(result.merged, true)
     assert.equal(result.prStatus, 'completed')
-    assert.deepEqual(result.advancedTo, { id: 'hld-define', title: 'HLD Definition', gate: 'hld-tac-approved' })
+    assert.deepEqual(result.advancedTo, { id: 'hld-define', title: 'High-level Design', gate: 'hld-tac-approved' })
 
     // The merge happened on Azure DevOps's side…
     assert.equal(await getPrStatus(azureDevOps, pullRequestId), 'completed')

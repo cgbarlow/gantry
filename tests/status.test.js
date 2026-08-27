@@ -24,7 +24,7 @@ test('a freshly-created instance is incomplete, with every required field outsta
 
     assert.equal(status.slug, 'my-initiative')
     assert.equal(status.definition, 'design')
-    assert.deepEqual(status.stage, { id: 'shape', title: 'Shape', gate: 'business-case' })
+    assert.deepEqual(status.stage, { id: 'shape', title: 'SOAP', gate: 'business-case' })
     assert.equal(status.complete, false)
 
     const context = status.modules.find((m) => m.id === 'context')
@@ -61,7 +61,7 @@ test('stageId lets a caller evaluate a stage other than the instance\'s current 
     createInstance('design', 'my-initiative', { instancesDir })
     const status = getStatus('my-initiative', { instancesDir, stageId: 'hld-define' })
 
-    assert.deepEqual(status.stage, { id: 'hld-define', title: 'HLD Definition', gate: 'hld-tac-approved' })
+    assert.deepEqual(status.stage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-tac-approved' })
     assert.equal(status.complete, false)
     const hldSubmission = status.modules.find((m) => m.id === 'hld-submission')
     assert.equal(hldSubmission.exists, false)
@@ -103,7 +103,7 @@ test('getStatus against Azure DevOps reports the same shape as the local path, w
 
       assert.equal(status.slug, 'my-initiative')
       assert.equal(status.definition, 'design')
-      assert.deepEqual(status.stage, { id: 'shape', title: 'Shape', gate: 'business-case' })
+      assert.deepEqual(status.stage, { id: 'shape', title: 'SOAP', gate: 'business-case' })
       assert.equal(status.complete, false)
 
       const context = status.modules.find((m) => m.id === 'context')

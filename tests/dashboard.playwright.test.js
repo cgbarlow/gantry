@@ -213,7 +213,7 @@ test('dashboard: toggling to stage swimlanes groups instances into lanes by curr
         await page.getByRole('button', { name: 'Stage swimlanes' }).click()
         await page.waitForSelector('.swimlanes', { timeout: 10_000 })
         assert.ok(await page.locator('.lane').count() >= 4, 'expected one lane per design stage')
-        assert.match(await page.locator('.lane').first().textContent(), /Shape/)
+        assert.match(await page.locator('.lane').first().textContent(), /SOAP/)
         assert.equal(await page.locator('.chip .name').first().textContent(), 'alpha-initiative')
 
         // Reload — the view choice (localStorage) survives, so swimlanes renders again without needing to re-toggle.

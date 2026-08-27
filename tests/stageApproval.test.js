@@ -84,7 +84,7 @@ test('requestStageApproval opens a Pull Request from the stage branch into "main
     assert.equal(pr.sourceRefName, `refs/heads/${branch}`)
     assert.equal(pr.targetRefName, 'refs/heads/main')
     assert.equal(pr.title, `Request approval: ${SHAPE.title} — ${SLUG}`)
-    assert.match(pr.description, /Requests approval for the "Shape" stage of gantry instance "my-initiative" \(gate "business-case"\)\./)
+    assert.match(pr.description, /Requests approval for the "SOAP" stage of gantry instance "my-initiative" \(gate "business-case"\)\./)
     assert.match(pr.description, /\[Solution on a Page\]\(http:\/\/localhost:\d+\/stage-approval-org\/stage-approval-project\/_git\/stage-approval-repo\?path=%2Fgantry-workspace%2Fmy-initiative%2Fout%2Fsoap\.docx&version=GBgantry-workspace%2Fmy-initiative%2Fshape&_a=contents\)/)
 
     // Recorded on instance.yaml, on the stage's own branch (not "main" —

@@ -61,7 +61,7 @@ test('GET synced-fields for an unlinked local instance reports the defaults and 
       assert.equal(body.linked, false)
       // Type defaults to Task; title defaults to "{instance name} — {stage title}"; nothing is overridden yet.
       assert.equal(body.type, 'Task')
-      assert.equal(body.title, 'my-initiative — Shape')
+      assert.equal(body.title, 'my-initiative — SOAP')
       assert.equal(body.titleOverridden, false)
       assert.equal(body.workItemId, null)
       assert.equal(body.workItemState, null)
@@ -100,7 +100,7 @@ test('PUT synced-fields overrides the title and assignee per stage, and clearing
       res = await put({ title: '', assignee: '' })
       assert.equal(res.status, 200)
       body = await res.json()
-      assert.equal(body.title, 'my-initiative — Shape')
+      assert.equal(body.title, 'my-initiative — SOAP')
       assert.equal(body.titleOverridden, false)
       assert.equal(body.assignee, 'Ada Lovelace')
       assert.equal(body.assigneeInherited, true)

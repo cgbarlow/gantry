@@ -156,7 +156,7 @@ test('fails a freshly-created instance against its current stage, with every req
     assert.equal(result.pass, false)
     assert.equal(result.complete, false)
     assert.equal(result.gate, 'business-case')
-    assert.deepEqual(result.stage, { id: 'shape', title: 'Shape', gate: 'business-case' })
+    assert.deepEqual(result.stage, { id: 'shape', title: 'SOAP', gate: 'business-case' })
 
     const context = result.modules.find((m) => m.id === 'context')
     assert.deepEqual(context.outstanding, ['driver', 'affected-domains'])
@@ -275,7 +275,7 @@ test('--gate resolves the stage owning that gate, even when it is not the instan
     createInstance('design', 'my-initiative', { instancesDir })
     const result = checkGate('my-initiative', { instancesDir, gate: 'hld-tac-approved' })
 
-    assert.deepEqual(result.stage, { id: 'hld-define', title: 'HLD Definition', gate: 'hld-tac-approved' })
+    assert.deepEqual(result.stage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-tac-approved' })
     assert.equal(result.gate, 'hld-tac-approved')
     assert.equal(result.pass, false)
 
@@ -305,7 +305,7 @@ test('checkGate against Azure DevOps fails a freshly-created instance the same w
     const result = await checkGate('my-initiative', { azureDevOps })
     assert.equal(result.pass, false)
     assert.equal(result.gate, 'business-case')
-    assert.deepEqual(result.stage, { id: 'shape', title: 'Shape', gate: 'business-case' })
+    assert.deepEqual(result.stage, { id: 'shape', title: 'SOAP', gate: 'business-case' })
   })
 })
 
@@ -328,7 +328,7 @@ test('checkGate against Azure DevOps honours --gate, resolving a stage other tha
   await withFakeRepo(seedFiles, async (baseUrl) => {
     const azureDevOps = azureDevOpsOptions(baseUrl)
     const result = await checkGate('my-initiative', { azureDevOps, gate: 'hld-tac-approved' })
-    assert.deepEqual(result.stage, { id: 'hld-define', title: 'HLD Definition', gate: 'hld-tac-approved' })
+    assert.deepEqual(result.stage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-tac-approved' })
     assert.equal(result.pass, false)
   })
 })

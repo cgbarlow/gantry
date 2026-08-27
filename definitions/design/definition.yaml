@@ -8,7 +8,7 @@ description: >
 
 stages:
   - id: shape
-    title: Shape
+    title: SOAP
     gate: business-case
     # The editor mounts the union of the two Shape artefacts' modules. Gate
     # passing itself is scoped to each artefact's `requires` list below.
@@ -17,7 +17,7 @@ stages:
     example: examples
 
   - id: hld-define
-    title: HLD Definition
+    title: High-level Design
     gate: hld-tac-approved
     # nfrs, risks, security and dependencies are introduced here in early/light form and carried forward — not re-declared — at detailed-design, where the same module ids are required in fuller form. See each module's guidance.
     modules:

@@ -77,7 +77,7 @@ test('linkInstanceToWorkItem creates one child work item per definition stage, u
       const shapeChild = await client.getWorkItem(workItem.stages.shape)
       assert.equal(
         shapeChild.fields['System.Description'],
-        'Tracks the "Shape" stage (stage "shape", gate "business-case") of gantry instance "my-initiative".\n\n' +
+        'Tracks the "SOAP" stage (stage "shape", gate "business-case") of gantry instance "my-initiative".\n\n' +
           'Artefacts for this stage:\n' +
           '- Solution on a Page\n' +
           '- Full Solution on a Page'

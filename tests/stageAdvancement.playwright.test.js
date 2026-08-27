@@ -152,9 +152,9 @@ test('confirming advances the instance to its next stage, and the header reflect
         // asserts on what genuinely survives the remount: the header's
         // stage line, and the stage nav's own "(current)" marker, both
         // now reporting the new stage.
-        await assert.doesNotReject(page.locator('#stage-line', { hasText: 'HLD Definition' }).waitFor({ timeout: 10_000 }))
+        await assert.doesNotReject(page.locator('#stage-line', { hasText: 'High-level Design' }).waitFor({ timeout: 10_000 }))
         await assert.doesNotReject(
-          page.locator('#stage-nav button', { hasText: 'HLD Definition (current)' }).waitFor({ timeout: 10_000 })
+          page.locator('#stage-nav button', { hasText: 'High-level Design (current)' }).waitFor({ timeout: 10_000 })
         )
 
         assert.deepEqual(pageErrors, [])
@@ -202,7 +202,7 @@ test('confirming advances the instance exactly once, even after the current stag
 
         // The ordinary interaction that sets `viewedStage.value` to a
         // non-null value: click the current stage's own nav button.
-        await page.getByRole('button', { name: 'Shape (current)' }).click()
+        await page.getByRole('button', { name: 'SOAP (current)' }).click()
         await page.waitForTimeout(200)
 
         getInstanceRequestCount = 0
@@ -212,7 +212,7 @@ test('confirming advances the instance exactly once, even after the current stag
         await modal.waitFor({ state: 'visible', timeout: 10_000 })
         await modal.getByRole('button', { name: 'Confirm & advance' }).click()
 
-        await assert.doesNotReject(page.locator('#stage-line', { hasText: 'HLD Definition' }).waitFor({ timeout: 10_000 }))
+        await assert.doesNotReject(page.locator('#stage-line', { hasText: 'High-level Design' }).waitFor({ timeout: 10_000 }))
         // Never a stale error banner masking the successful advance.
         assert.equal(await page.locator('.load-error').count(), 0)
         // Exactly one reload, not two racing ones.

@@ -368,7 +368,7 @@ test('Check status reports pending, then rejection, then approval — merging an
           await checkButton.click()
           await assert.doesNotReject(page.locator('text=/Approved — Pull Request #\\d+ merged; stage advanced to/').waitFor({ timeout: 10_000 }))
           await assert.doesNotReject(
-            page.locator('#stage-line', { hasText: 'HLD Definition' }).waitFor({ timeout: 10_000 })
+            page.locator('#stage-line', { hasText: 'High-level Design' }).waitFor({ timeout: 10_000 })
           )
           // The merged stage's Pull Request is gone from the panel — the
           // screen now shows the next stage, which hasn't requested
