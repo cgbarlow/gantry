@@ -91,12 +91,6 @@ test('linkInstanceToWorkItem creates one child work item per definition stage, u
       assert.equal(instance.definition, 'design')
       assert.equal(instance.stage, 'shape')
 
-      const client = createAzureDevOpsWorkItemsClient({
-        organization: WI_ORGANIZATION,
-        project: WI_PROJECT,
-        pat: VALID_PAT,
-        baseUrl,
-      })
       for (const workItemId of Object.values(workItem.stages)) {
         const stageWorkItem = await client.getWorkItem(workItemId)
         assert.equal(stageWorkItem.fields['System.Tags'], 'gantry')

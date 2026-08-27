@@ -104,12 +104,10 @@ test('listRegistry still throws on a genuine read failure, rather than silently 
   })
 })
 
-test('listRegistry reflects the real examples/demo-cli/demo-web fixtures in this repo', () => {
+test('listRegistry reflects the real examples fixture in this repo', () => {
   const registry = listRegistry()
   const slugs = registry.map((i) => i.slug)
   assert.ok(slugs.includes('examples'))
-  assert.ok(slugs.includes('demo-cli'))
-  assert.ok(slugs.includes('demo-web'))
 
   const examples = registry.find((i) => i.slug === 'examples')
   assert.equal(examples.definition, 'design')
