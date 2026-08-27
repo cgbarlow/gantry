@@ -534,7 +534,7 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
   transform: translateY(-2px);
 }
 .md-sep { width: 1px; height: 16px; background: var(--line); margin: 0 4px; }
-.md-headings { margin-left: auto; }
+.md-toolbar [data-command="fullscreen"] { margin-left: auto; }
 .md-headings,
 .md-lists {
   position: relative;
