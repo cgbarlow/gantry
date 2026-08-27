@@ -1506,7 +1506,7 @@ function AssetLibraryPage() {
 // modal-backdrop/modal/modal-actions shape as the other editor confirmation
 // modals.
 function RenderDialog({ instance, onClose }) {
-  const [status, setStatus] = useState('')
+  const [status, setStatus] = useState([])
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [rendering, setRendering] = useState(false)
 
@@ -1530,7 +1530,7 @@ function RenderDialog({ instance, onClose }) {
     // See ModuleCard's handleSave for why `?slug=` is required here now — the same gap, for the module editor's own "Render" action.
     const slug = currentSlug.value
     for (const artefact of artefacts) {
-      setStatus([...lines, `Rendering ${artefact.title}…`].join('\n'))
+      setStatus([...lines, { text: `Rendering ${artefact.title}…` }])
       const res = await apiFetchForInstance(slug, `/api/instance/render/${artefact.id}?slug=${encodeURIComponent(slug)}`, {
         method: 'POST',
       })
@@ -1538,10 +1538,14 @@ function RenderDialog({ instance, onClose }) {
       // Azure-DevOps-backed instances report `azureDevOpsPath` (where the pandoc-rendered .docx was pushed back to, in the same repo the rest of the instance's data lives in); local instances report `docxPath` (a path on the machine running `gantry serve`).
       lines.push(
         res.ok
-          ? `${artefact.title}: rendered to ${body.azureDevOpsPath ?? body.docxPath}`
-          : `${artefact.title}: render failed — ${body.message ?? body.error}`
+          ? {
+              title: artefact.title,
+              path: body.azureDevOpsPath ?? body.docxPath,
+              url: body.azureDevOpsPath ? body.azureDevOpsUrl : null,
+            }
+          : { text: `${artefact.title}: render failed — ${body.message ?? body.error}` }
       )
-      setStatus(lines.join('\n'))
+      setStatus([...lines])
     }
     setRendering(false)
   }
@@ -1579,7 +1583,17 @@ function RenderDialog({ instance, onClose }) {
               </ul>
             `
           : html`<p class="guidance">This stage has no artefacts to render yet.</p>`}
-        <div class="save-status">${status}</div>
+        <div class="save-status">
+          ${status.map(
+            (line, index) => html`
+              <div key=${index}>
+                ${line.url
+                  ? html`${line.title}: rendered to <a href=${line.url} target="_blank" rel="noreferrer">${line.path}</a>`
+                  : line.text ?? `${line.title}: rendered to ${line.path}`}
+              </div>
+            `
+          )}
+        </div>
         <div class="modal-actions">
           <button
             type="button"

@@ -249,6 +249,7 @@ test('POST /api/instance/render/:artefact renders a real docx via the web form p
       assert.equal(res.status, 200)
       const body = await res.json()
       assert.equal(body.artefact, 'soap')
+      assert.equal(body.azureDevOpsUrl, undefined)
       assert.match(body.docxPath, /out[/\\]soap\.docx$/)
       // Absolute, not relative to wherever `gantry serve` happened to be launched from — the browser has no way to resolve a relative path.
       assert.equal(isAbsolute(body.docxPath), true)

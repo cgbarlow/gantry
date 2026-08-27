@@ -411,6 +411,11 @@ test('POST /api/instance/render/:artefact against an Azure-DevOps-backed instanc
     // No local docxPath reported — the rendered artefact's real location is now the Azure DevOps repo it was rendered from, not a scratch path on whichever machine `gantry serve` happens to run on.
     assert.equal(body.docxPath, undefined)
     assert.equal(body.azureDevOpsPath, 'gantry-workspace/my-initiative/out/soap.docx')
+    const artefactUrl = new URL(body.azureDevOpsUrl)
+    assert.equal(artefactUrl.pathname, '/fake-org/fake-project/_git/fake-repo')
+    assert.equal(artefactUrl.searchParams.get('path'), '/gantry-workspace/my-initiative/out/soap.docx')
+    assert.equal(artefactUrl.searchParams.get('version'), 'GBgantry-workspace/my-initiative/shape')
+    assert.equal(artefactUrl.searchParams.get('_a'), 'contents')
 
     const client = createAzureDevOpsClient({
       organization: ORGANIZATION,

@@ -412,8 +412,9 @@ test('Render dialog: toggling multiple artefacts renders them as one batch; unto
         await renderButton.click()
 
         await assert.doesNotReject(
-          dialog.locator('text=Solution Architecture Document: rendered to').waitFor({ timeout: 10_000 })
+          dialog.locator('.save-status').getByText('Solution Architecture Document: rendered to', { exact: false }).waitFor({ timeout: 10_000 })
         )
+        assert.equal(await dialog.locator('.save-status a').count(), 0)
         // Give ssad's non-render a moment to definitely not appear, rather than racing the assertion against sad's own in-flight request.
         await page.waitForTimeout(500)
         assert.doesNotMatch(await dialog.locator('.save-status').textContent(), /Solution Support Architecture Document/)
