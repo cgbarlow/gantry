@@ -270,6 +270,10 @@ const PROJECT = 'fake-project'
 const REPOSITORY = 'fake-repo'
 const VALID_PAT = 'valid-test-pat'
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 // Seeds a fake Azure DevOps repo with the exact same instance/module data as the local "examples" fixture, so the Azure-DevOps-backed render tests below exercise the real "soap" template against real content, the same way the local-path tests above do, rather than a bespoke minimal fixture.
 function seedExamplesAzureDevOpsFiles() {
   return {
@@ -280,7 +284,7 @@ function seedExamplesAzureDevOpsFiles() {
   }
 }
 
-test('a render against Azure DevOps carries a footer whose commit hash/date come from the push response, and the same footer ends up in what is actually stored there', async () => {
+test('a render against Azure DevOps links the short footer hash to the full push commit, and the same footer ends up in what is actually stored there', async () => {
   await withFakeAzureDevOpsServer(
     { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: seedExamplesAzureDevOpsFiles() },
     async (baseUrl) => {
@@ -289,10 +293,12 @@ test('a render against Azure DevOps carries a footer whose commit hash/date come
 
       // The function's own return value reports the commit its footer names — a real (fake-server-assigned) commit hash/date, not a placeholder.
       assert.match(result.commit.hash, /^[0-9a-f]{7}$/)
+      assert.match(result.commit.fullHash, /^[0-9a-f]{40}$/)
       assert.match(result.commit.date, /^\d{4}-\d{2}-\d{2}$/)
+      const commitLink = '[`' + result.commit.hash + '`](' + baseUrl + `/fake-org/fake-project/_git/fake-repo/commit/${result.commit.fullHash})`
       assert.match(
         result.markdown,
-        new RegExp(`Rendered from commit \`${result.commit.hash}\` \\(${result.commit.date}\\)\\.`)
+        new RegExp(`Rendered from commit ${escapeRegExp(commitLink)} \\(${escapeRegExp(result.commit.date)}\\)\\.`)
       )
 
       // What is actually sitting in the (fake) Azure DevOps repo at out/soap.docx right now — not just the local scratch copy — also carries that exact same footer.
@@ -302,7 +308,7 @@ test('a render against Azure DevOps carries a footer whose commit hash/date come
         input: Buffer.from(pushedContent, 'base64'),
         encoding: 'utf8',
       })
-      assert.match(pushedMarkdown, new RegExp(`Rendered from commit \`${result.commit.hash}\` \\(${result.commit.date}\\)\\.`))
+      assert.match(pushedMarkdown, new RegExp(`Rendered from commit\\s+\\[[^\\]]+\\]\\([^)]*${escapeRegExp(result.commit.fullHash)}\\)\\s+\\(${escapeRegExp(result.commit.date)}\\)\\.`))
       assert.match(pushedMarkdown, /Solution on a Page/)
     }
   )
