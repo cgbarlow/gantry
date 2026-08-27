@@ -616,9 +616,13 @@ export function createFakeAzureDevOpsServer({
     // an empty array otherwise. Just enough to prove
     // lib/azureDevOpsIdentityClient.js resolves identities correctly in
     // tests without needing to spin up a real Azure DevOps directory.
+    //
+    // Reads `filterValue` — the real Azure DevOps API's actual search-text
+    // parameter (`searchFilter` names which field to match, e.g. 'General';
+    // it is never the query text itself, see lib/azureDevOpsIdentityClient.js).
     if (req.method === 'GET' && pathname === `/${organization}/${project}/_apis/identities`) {
       if (rejectIdentityRequests) return json(403, { message: 'TF400813: Identity scope rejected (fake server).' })
-      const query = (url.searchParams.get('searchFilter') ?? url.searchParams.get('query') ?? '').toLowerCase()
+      const query = (url.searchParams.get('filterValue') ?? url.searchParams.get('query') ?? '').toLowerCase()
       if (!query) return json(200, [])
       const fakeIdentity = {
         id: 'fake-identity-id-001',
