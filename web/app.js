@@ -1625,15 +1625,88 @@ function workItemWebUrlFor(workItem, wiId) {
   return `${base}/${encodeURIComponent(workItem.organization)}/${encodeURIComponent(workItem.project)}/_workitems/edit/${wiId}`
 }
 
+// ---- Review grouping by outcome (#215) ----
+// Once a stage accumulates more than a couple of review requests, the flat
+// list gets hard to scan for "does anything need my attention" — so the
+// Reviews section buckets them into pending / changes-requested / approved.
+// Today the only status a review record ever carries is whatever native
+// Azure DevOps work-item state its Task landed on (`lib/stageReview.js`
+// defaults to "New", then re-reads `System.State` on every "Check status");
+// #214's richer `Custom.GantryReviewStatus` vocabulary (Requested/In
+// review/Changes requested/Approved/Rejected, on a separate not-yet-merged
+// branch) isn't here yet. This classifier deliberately keys off lowercased
+// *substrings* of whatever status string is already on the record rather
+// than an exact/native-state allowlist, so it buckets both today's ADO
+// states (New/Active/Closed/Removed, or a differently-configured process
+// template's own vocabulary) and #214's future values correctly without
+// any changes once that field lands — "changes requested"/"rejected" (or
+// any status containing "reject"/"block") reads as needing another look,
+// "approved"/"closed"/"done"/"resolved"/"completed" reads as settled, and
+// everything else (new/active/requested/in review/unknown) defaults to
+// pending, the safe default for a status this code doesn't recognise yet.
+const REVIEW_OUTCOME_GROUPS = [
+  { key: 'pending', label: 'Pending' },
+  { key: 'changesRequested', label: 'Changes requested' },
+  { key: 'approved', label: 'Approved' },
+]
+const CHANGES_REQUESTED_STATUS_PATTERN = /reject|changes requested|change requested|block/
+const APPROVED_STATUS_PATTERN = /approved|closed|done|resolved|completed/
+
+function classifyReviewOutcome(status) {
+  const normalized = (status ?? '').toString().trim().toLowerCase()
+  if (CHANGES_REQUESTED_STATUS_PATTERN.test(normalized)) return 'changesRequested'
+  if (APPROVED_STATUS_PATTERN.test(normalized)) return 'approved'
+  return 'pending'
+}
+
+function groupReviewsByOutcome(reviews) {
+  const groups = { pending: [], changesRequested: [], approved: [] }
+  for (const review of reviews) {
+    groups[classifyReviewOutcome(review.status)].push(review)
+  }
+  return groups
+}
+
+// Single rendering of one review row — shared by both the flat list (a
+// couple of reviews or fewer) and each outcome group's own list, so the
+// two paths can never drift into showing different information per review.
+function ReviewListItem({ review, instance }) {
+  const wiUrl = workItemWebUrlFor(instance.workItem, review.workItemId)
+  return html`
+    <li key=${review.workItemId}>
+      <span class="review-reviewer">${review.reviewerDisplayName ?? review.reviewer}</span>
+      <span class="review-meta">
+        ${wiUrl ? html`<a href=${wiUrl} target="_blank" rel="noreferrer">#${review.workItemId}</a>` : html`#${review.workItemId}`}
+        <span class="review-status">${review.status ?? 'Unknown'}</span>
+      </span>
+    </li>
+  `
+}
+
+// The most recent commit in a Pull Request's commit list, by timestamp —
+// not by array position, since this file makes no assumption about the
+// order Azure DevOps' own commits API returns (`CommitHistoryDialog` below
+// just renders whatever order it's given). Falls back to the first entry
+// if none carry a timestamp.
+function latestCommit(commits) {
+  if (!commits.length) return null
+  const timestamped = commits.filter((commit) => commit.timestamp)
+  if (!timestamped.length) return commits[0]
+  return timestamped.reduce((latest, commit) => (new Date(commit.timestamp) > new Date(latest.timestamp) ? commit : latest))
+}
+
 // A new panel at the top of the instance screen (above the modules — see
 // StageScreen) showing the current stage's synced fields, each its own
 // distinct field rather than collapsed together: the work item type
 // (defaulting to "Task"), a title auto-populated as "{instance name} —
 // {stage title}" but overridable per stage, the linked work item's own
 // current Status (read straight from Azure DevOps via #121's getWorkItem),
-// the stage's Pull Request state (#120/#125's read), and the Assignee —
-// inherited from the instance's own stored assignee but overridable per
-// stage, and a link to the parent work item. Backed by GET/PUT
+// and the Assignee — inherited from the instance's own stored assignee but
+// overridable per stage, and a link to the parent work item. The Pull
+// Request itself is *not* one of these fields (#215) — it's shown exactly
+// once, in the Sign-off section below, which already carries the richer
+// picture (reviewer, approval state, commit history); duplicating it here
+// too was #213's own leftover overlap. Backed by GET/PUT
 // /api/instance/synced-fields; title/assignee
 // edits save on blur or Enter (the same affordance the dashboard's own
 // assignee field uses), and an emptied field clears that override so the
@@ -1649,12 +1722,40 @@ function SyncedFieldsPanel({ instance }) {
   const [assigneeDraft, setAssigneeDraft] = useState(null)
   const [syncStatus, setSyncStatus] = useState('')
   const [syncConfirming, setSyncConfirming] = useState(false)
-  const [checkingReviewId, setCheckingReviewId] = useState(null)
-  const [reviewStatus, setReviewStatus] = useState('')
   // A ref (not state): save() reads it synchronously to debounce itself, and no render ever depends on it — the status line already reports the in-flight save.
   const savingRef = useRef(false)
 
+  // Reviews & sign-off (#213): everything the old standalone Request-Review
+  // and Review/Sign-off panels owned now lives on this card. Every existing
+  // review is shown exactly once, in the card's own rich "Reviews" list
+  // (below) — the "Request Review" dialog is purely an add-new-reviewer(s)
+  // form, so it starts blank rather than pre-populated with reviews already
+  // sent (the old standalone panel duplicated the whole list this way,
+  // rendering it once compactly in the details card and again richly in
+  // its own dialog; #213 collapses that to the one list). The dialog's own
+  // per-row "Check status" is gone too — reviews refresh from the one
+  // "Check status" button at the top of the card instead (mirrors
+  // ADR-0014's own "single Check status action" shape, just widened to
+  // cover reviews and sign-off together).
+  const [reviewRows, setReviewRows] = useState(() => [{ id: 'new-1', reviewer: '', review: null, error: '' }])
+  const [reviewDialogOpen, setReviewDialogOpen] = useState(false)
+  const [nextRowId, setNextRowId] = useState(2)
+
+  // Sign-off (#124/#125, ADR-0014/ADR-0018) — same state RequestApprovalPanel used to own.
+  const [signoffStatus, setSignoffStatus] = useState('')
+  const [signoffConfirming, setSignoffConfirming] = useState(false)
+  const [commitHistoryOpen, setCommitHistoryOpen] = useState(false)
+  const [justOpened, setJustOpened] = useState(null)
+
+  // The card's single "Check status" action (#213): refreshes this stage's
+  // linked/parent work item + Pull Request fields, every review work item,
+  // and (while viewing the instance's own current stage) the sign-off Pull
+  // Request together, in one click.
+  const [checking, setChecking] = useState(false)
+  const [checkStatusMessage, setCheckStatusMessage] = useState('')
+
   const stageId = instance.stage.id
+  const isCurrentStage = instance.stage.id === instance.currentStageId
 
   useEffect(() => {
     let cancelled = false
@@ -1680,6 +1781,15 @@ function SyncedFieldsPanel({ instance }) {
     // StageScreen remounts this panel wholesale on stage switch (keyed by stage id), so this only ever fires once per mount.
     // eslint-disable-next-line
   }, [])
+
+  // Opening the dialog always starts from one blank row — any rows left
+  // over from a previous visit (sent-and-closed, or abandoned mid-fill)
+  // aren't what "Request Review" means the next time it's clicked.
+  function openReviewDialog() {
+    setReviewRows([{ id: 'new-1', reviewer: '', review: null, error: '' }])
+    setNextRowId(2)
+    setReviewDialogOpen(true)
+  }
 
   async function save(updates) {
     // One save in flight at a time — a rapid double-Enter (or blur-then-Enter) must not fire two PUTs.
@@ -1759,191 +1869,500 @@ function SyncedFieldsPanel({ instance }) {
     setSyncStatus('Declined — work item state left unchanged.')
   }
 
-  async function handleCheckReviewStatus(review) {
-    setCheckingReviewId(review.workItemId)
-    setReviewStatus('Checking review status…')
-    try {
-      const res = await apiFetchForInstance(currentSlug.value, `/api/instance/review-status?slug=${encodeURIComponent(currentSlug.value)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reviewId: review.workItemId, stage: stageId }),
-      })
-      const body = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(body.message ?? body.error ?? `Status check failed (${res.status})`)
+  // ---- Request Review (#197): create a new advisory review request. Ported
+  // from the old standalone RequestReviewPanel — reviewer picker rows, one
+  // "Send request" per unsent row. The per-row "Check status" that used to
+  // sit here is gone; the card's one "Check status" button refreshes every
+  // review together instead.
+  function updateReviewRow(rowId, updates) {
+    setReviewRows((current) => current.map((row) => (row.id === rowId ? { ...row, ...updates } : row)))
+  }
+
+  function addReviewer() {
+    setReviewRows((current) => [...current, { id: `new-${nextRowId}`, reviewer: '', review: null, error: '' }])
+    setNextRowId((value) => value + 1)
+  }
+
+  function syncInstanceReviews(review) {
+    const current = instanceData.value
+    if (!current || current.stage.id !== stageId) return
+    const reviews = [...(current.reviews ?? []).filter((item) => item.workItemId !== review.workItemId), review]
+    instanceData.value = { ...current, reviews }
+  }
+
+  async function sendReviewRequest(row) {
+    if (!row.reviewer.trim() || row.review) return
+    updateReviewRow(row.id, { sending: true, error: '' })
+    const res = await apiFetchForInstance(currentSlug.value, `/api/instance/request-review?slug=${encodeURIComponent(currentSlug.value)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reviewer: row.reviewer, stage: stageId }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      updateReviewRow(row.id, { sending: false, error: body.message ?? body.error ?? `Request failed (${res.status})` })
+      return
+    }
+    updateReviewRow(row.id, { sending: false, review: body.review })
+    syncInstanceReviews(body.review)
+  }
+
+  // ---- Sign-off (#124/#125, ADR-0014/ADR-0018): the Pull-Request-backed
+  // approval gate. Ported from the old standalone RequestApprovalPanel —
+  // "Request Sign-off" only opens a Pull Request once the gate has passed
+  // (check-then-confirm, same shape every other gated action in this file
+  // uses), and only while viewing the instance's own current stage (a past
+  // stage's sign-off is shown read-only below instead).
+  const openPullRequestId = justOpened?.pullRequestId ?? instance.pullRequests?.[stageId]
+  const pullRequest = justOpened?.pullRequest ?? instance.pullRequest
+  const prStatus = pullRequest?.status
+  const pullRequestIsActive = pullRequest !== null && (prStatus === undefined || prStatus === 'active')
+  const approvalState = justOpened?.approvalState ?? instance.approvalStates?.[stageId]
+  const approvalInvalidated = approvalState?.state === 'invalidated' || pullRequest?.review?.state === 'approved-then-invalidated'
+
+  async function handleCheckAndMaybeRequestSignoff() {
+    setSignoffStatus('Checking gate…')
+    const res = await apiFetchForInstance(currentSlug.value, `/api/instance/check?slug=${encodeURIComponent(currentSlug.value)}`)
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setSignoffStatus(`Check failed: ${body.message ?? body.error}`)
+      return
+    }
+    if (!body.pass) {
+      setSignoffStatus(formatGateFailure(body))
+      return
+    }
+    setSignoffStatus('Gate passed.')
+    setSignoffConfirming(true)
+  }
+
+  async function handleConfirmSignoffRequest() {
+    setSignoffConfirming(false)
+    setSignoffStatus(approvalInvalidated ? 'Resetting stale approval…' : 'Opening Pull Request…')
+    const res = await apiFetchForInstance(
+      currentSlug.value,
+      `/api/instance/request-approval?slug=${encodeURIComponent(currentSlug.value)}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }
+    )
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setSignoffStatus(`Request sign-off failed: ${body.message ?? body.error}`)
+      return
+    }
+    setJustOpened(body)
+    if (body.pullRequest) {
       const current = instanceData.value
-      if (current?.stage.id === stageId) {
-        instanceData.value = {
-          ...current,
-          reviews: (current.reviews ?? []).map((item) => item.workItemId === body.review.workItemId ? body.review : item),
-        }
-      }
-      setReviewStatus(`Review #${review.workItemId} is ${body.review.status}.`)
-    } catch (err) {
-      setReviewStatus(`Review status check failed: ${err.message}`)
-    } finally {
-      setCheckingReviewId(null)
+      if (current?.stage.id === stageId) instanceData.value = { ...current, pullRequest: body.pullRequest }
+    }
+    if (body.reapproval?.method === 'comment') {
+      setSignoffStatus(`Approval reset was not permitted, so a note was posted to Pull Request #${body.pullRequestId}. The Owner must review and vote again.`)
+    } else if (body.reapproval) {
+      setSignoffStatus(`Approval withdrawn from Pull Request #${body.pullRequestId} — awaiting the Owner's review again.`)
+    } else {
+      setSignoffStatus(`Pull Request #${body.pullRequestId} opened — awaiting the Owner's review.`)
     }
   }
 
-  if (error) {
-    return html`
-      <section class="synced-fields-panel">
-        <h2>Work item details</h2>
-        <p class="load-error">${error}</p>
-      </section>
-    `
+  function handleDeclineSignoff() {
+    setSignoffConfirming(false)
+    setSignoffStatus('Declined — no Pull Request opened.')
   }
 
-  if (!data) {
-    return html`
-      <section class="synced-fields-panel">
-        <h2>Work item details</h2>
-        <p class="loading">Loading…</p>
-      </section>
-    `
+  // ---- Check status (#213): the card's single refresh action, replacing
+  // every per-section/per-row "Check status" the old panels each had of
+  // their own. Refreshes, in one click: this stage's linked/parent work
+  // item + Pull Request fields (re-reads synced fields), every review work
+  // item for this stage, and — while viewing the instance's own current
+  // stage, the only stage a sign-off check is ever valid for (checkStatus
+  // gate resolution always targets the instance's persisted current stage,
+  // never whichever stage happens to be viewed) — the sign-off Pull
+  // Request. On approval, sign-off's own merge/advance behaviour (ADR-0014)
+  // is unchanged.
+  async function handleCheckStatus() {
+    setChecking(true)
+    setCheckStatusMessage('Checking status…')
+    const messages = []
+    try {
+      const params = new URLSearchParams({ slug: currentSlug.value, stage: stageId })
+      const fieldsRes = await apiFetchForInstance(currentSlug.value, `/api/instance/synced-fields?${params}`)
+      const fieldsBody = await fieldsRes.json().catch(() => ({}))
+      if (fieldsRes.ok) {
+        setData(fieldsBody)
+      } else {
+        messages.push(`Work item refresh failed: ${fieldsBody.message ?? fieldsBody.error}`)
+      }
+
+      const reviews = instance.reviews ?? []
+      if (reviews.length) {
+        const outcomes = await Promise.all(
+          reviews.map((review) =>
+            apiFetchForInstance(currentSlug.value, `/api/instance/review-status?slug=${encodeURIComponent(currentSlug.value)}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ reviewId: review.workItemId, stage: stageId }),
+            }).then(async (res) => ({ ok: res.ok, body: await res.json().catch(() => ({})) }))
+          )
+        )
+        const updated = []
+        for (const outcome of outcomes) {
+          if (outcome.ok) updated.push(outcome.body.review)
+          else messages.push(`Review status check failed: ${outcome.body.message ?? outcome.body.error}`)
+        }
+        if (updated.length) {
+          const current = instanceData.value
+          if (current?.stage.id === stageId) {
+            instanceData.value = {
+              ...current,
+              reviews: (current.reviews ?? []).map((item) => updated.find((u) => u.workItemId === item.workItemId) ?? item),
+            }
+          }
+        }
+      }
+
+      if (isCurrentStage && openPullRequestId) {
+        const res = await apiFetchForInstance(
+          currentSlug.value,
+          `/api/instance/check-status?slug=${encodeURIComponent(currentSlug.value)}`,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }
+        )
+        const body = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          messages.push(`Sign-off check failed: ${body.message ?? body.error}`)
+        } else if (!body.merged) {
+          setJustOpened(body)
+          if (body.pullRequest) {
+            const current = instanceData.value
+            if (current?.stage.id === stageId) instanceData.value = { ...current, pullRequest: body.pullRequest }
+          }
+          if (body.review?.state === 'approved-then-invalidated') {
+            messages.push(
+              `Approval invalidated — commit(s) landed after ${body.review.approver?.displayName ?? 'the Owner'} approved Pull Request #${body.pullRequestId}. Request Sign-off again for a fresh review.`
+            )
+          } else if (body.review?.state === 'rejected') {
+            messages.push(`Rejected — the Owner voted to reject Pull Request #${body.pullRequestId}. Address the feedback, then re-request sign-off.`)
+          } else if (body.review?.state === 'changes-requested') {
+            messages.push(`Changes requested — the Owner sent Pull Request #${body.pullRequestId} back for more work before approving.`)
+          } else {
+            messages.push(`Still pending — the Owner hasn't reviewed Pull Request #${body.pullRequestId} yet.`)
+          }
+        } else {
+          messages.push(
+            body.advancedTo
+              ? `Approved — Pull Request #${body.pullRequestId} merged; stage advanced to "${body.advancedTo.title}".`
+              : `Approved — Pull Request #${body.pullRequestId} merged. This was the final stage; the instance is complete.`
+          )
+          // Flush the message *before* triggering the stage-changing reload
+          // below — that reload remounts this whole card (StageScreen keys
+          // on stage id), so any state set after it starts lands on a
+          // component that's already gone. Mirrors the old
+          // RequestApprovalPanel's own ordering exactly, for the same
+          // reason.
+          setCheckStatusMessage(messages.join(' '))
+          const effectWillReload = viewedStage.value !== null
+          viewedStage.value = null
+          if (!effectWillReload) {
+            instanceData.value = await loadInstance(currentSlug.value, null)
+          }
+          return
+        }
+      }
+
+      setCheckStatusMessage(messages.length ? messages.join(' ') : 'Up to date.')
+    } finally {
+      setChecking(false)
+    }
   }
 
-  // Unlinked at all: the prompt takes this panel's place — no fields shown.
-  // (#127 removed the instance screen's own freetext link form, so this is
-  // the only linking surface left for a pre-existing unlinked instance to
-  // discover — pointing at where linking actually happens now.)
-  if (!data.linked) {
-    return html`
-      <section class="synced-fields-panel">
-        <h2>Work item details</h2>
-        <p class="guidance">
-          <strong>Link to a work item</strong> to see this stage's synced fields (type, title, status, Pull Request
-          state and assignee). Linking happens when the instance is created, via the "+ New Workspace" wizard's
-          work-item step.
-        </p>
-      </section>
-    `
-  }
-
-  const pr = data.pullRequest
-  const signoff = instance.pullRequest ?? pr
+  // Whether a work item is linked at all is a distinct question from
+  // whether this is a Workspace-backed instance (ADR-0014): the sign-off
+  // Pull Request flow gates on a real Azure DevOps *repo*, not on a linked
+  // *work item* — a ticketing system's work item, where configured, keeps
+  // its board-visible tracking role but plays no part in the gate. So the
+  // reviews/sign-off sub-card (and its "Check status") render for any
+  // workspace-backed instance below, independently of whether this synced-
+  // fields section itself has anything linked to show yet.
+  const linked = Boolean(data?.linked)
+  // Persistent hyperlink built from the persisted PR record (org/project/repo + PR id) — survives reload with the correct org (WI155). `justOpened.webUrl` is the transient server-built URL right after creation; fallback builds from `instance.workspace` so reloads still link.
+  const signoffPrUrl = justOpened?.webUrl ?? prWebUrlFor(instance, openPullRequestId)
+  const signoffCommits = pullRequest?.commits ?? []
+  const latestSignoffCommit = latestCommit(signoffCommits)
+  const groupedReviews = groupReviewsByOutcome(instance.reviews ?? [])
 
   return html`
-    <section class="synced-fields-panel">
-      <h2>Work item details</h2>
-      <div class="synced-fields-grid">
-        <div class="synced-field">
-          <span class="field-label">Type</span>
-          <span class="synced-value">${data.type}</span>
-        </div>
-        <div class="synced-field synced-field-wide">
-          <label class="field-label" for="synced-title">Title${data.titleOverridden ? ' · overridden' : ''}</label>
-          <input
-            id="synced-title"
-            class="text-field"
-            type="text"
-            placeholder=${`${instance.slug} — ${instance.stage.title}`}
-            value=${titleDraft ?? data.title}
-            onInput=${(e) => setTitleDraft(e.currentTarget.value)}
-            onBlur=${commitTitle}
-            onKeyDown=${(e) => e.key === 'Enter' && e.currentTarget.blur()}
-          />
-        </div>
-        <div class="synced-field">
-          <span class="field-label">Status</span>
-          <span class="synced-value"
-            >${data.workItemId
-              ? (() => {
-                  const wiUrl = workItemWebUrlFor(instance.workItem, data.workItemId)
-                  return wiUrl
-                    ? html`<a href=${wiUrl} target="_blank" rel="noreferrer">#${data.workItemId}</a> · ${data.workItemState ?? '—'}`
-                    : html`#${data.workItemId} · ${data.workItemState ?? '—'}`
-                })()
-              : '—'}</span
-          >
-        </div>
-        <div class="synced-field synced-field-wide">
-          <span class="field-label">Pull request</span>
-          <span class="synced-value">
-            ${pr
-              ? (() => {
-                  const prUrl = prWebUrlFor(instance, pr.id)
-                  return prUrl
-                    ? html`<a href=${prUrl} target="_blank" rel="noreferrer">#${pr.id}</a> — ${pr.status}${pr.reviewState !== 'pending' ? ` (${pr.reviewState})` : ''}`
-                    : html`#${pr.id} — ${pr.status}${pr.reviewState !== 'pending' ? ` (${pr.reviewState})` : ''}`
-                })()
-              : 'No pull request open'}
-          </span>
-        </div>
-        <div class="synced-field">
-          <label class="field-label" for="synced-assignee">Assignee${data.assigneeInherited ? '' : ' · overridden'}</label>
-          <${IdentityPicker}
-            value=${assigneeDraft ?? data.assignee}
-            onChange=${(uniqueName) => {
-              setAssigneeDraft(uniqueName)
-              // Commit immediately on select (no blur-based commit needed — the picker's selection is already definitive)
-              if (!data || uniqueName === data.assignee) return
-              save({ assignee: uniqueName.trim() ? uniqueName.trim() : '' })
-            }}
-            placeholder=${instance.assignee ? `${instance.assignee} (inherited)` : 'Inherited from the instance'}
-            slug=${currentSlug.value}
-          />
-        </div>
-        <div class="synced-field">
-          <span class="field-label">Parent work item</span>
-          ${(() => {
-            const wiUrl = workItemWebUrlFor(instance.workItem, instance.workItem.parentId)
-            return wiUrl
-              ? html`<a class="synced-value" href=${wiUrl} target="_blank" rel="noreferrer">#${instance.workItem.parentId}</a>`
-              : html`<span class="synced-value">#${instance.workItem.parentId}</span>`
-          })()}
-        </div>
+    <section class="synced-fields-panel" id="work-item-detail-card">
+      <div class="panel-header">
+        <h2>Work item details</h2>
+        ${instance.workspaceBacked
+          ? html`
+              <button type="button" class="btn" disabled=${checking} onClick=${handleCheckStatus}>
+                ${checking ? 'Checking…' : 'Check status'}
+              </button>
+            `
+          : null}
       </div>
+      ${error
+        ? html`<p class="load-error">${error}</p>`
+        : !data
+          ? html`<p class="loading">Loading…</p>`
+          : !linked
+            ? html`
+                <p class="guidance">
+                  <strong>Link to a work item</strong> to see this stage's synced fields (type, title, status, Pull
+                  Request state and assignee). Linking happens when the instance is created, via the "+ New
+                  Workspace" wizard's work-item step.
+                </p>
+              `
+            : html`
+                <div class="synced-fields-grid">
+                  <div class="synced-field">
+                    <span class="field-label">Type</span>
+                    <span class="synced-value">${data.type}</span>
+                  </div>
+                  <div class="synced-field synced-field-wide">
+                    <label class="field-label" for="synced-title">Title${data.titleOverridden ? ' · overridden' : ''}</label>
+                    <input
+                      id="synced-title"
+                      class="text-field"
+                      type="text"
+                      placeholder=${`${instance.slug} — ${instance.stage.title}`}
+                      value=${titleDraft ?? data.title}
+                      onInput=${(e) => setTitleDraft(e.currentTarget.value)}
+                      onBlur=${commitTitle}
+                      onKeyDown=${(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                    />
+                  </div>
+                  <div class="synced-field">
+                    <span class="field-label">Status</span>
+                    <span class="synced-value"
+                      >${data.workItemId
+                        ? (() => {
+                            const wiUrl = workItemWebUrlFor(instance.workItem, data.workItemId)
+                            return wiUrl
+                              ? html`<a href=${wiUrl} target="_blank" rel="noreferrer">#${data.workItemId}</a> · ${data.workItemState ?? '—'}`
+                              : html`#${data.workItemId} · ${data.workItemState ?? '—'}`
+                          })()
+                        : '—'}</span
+                    >
+                  </div>
+                  <div class="synced-field">
+                    <label class="field-label" for="synced-assignee">Assignee${data.assigneeInherited ? '' : ' · overridden'}</label>
+                    <${IdentityPicker}
+                      value=${assigneeDraft ?? data.assignee}
+                      onChange=${(uniqueName) => {
+                        setAssigneeDraft(uniqueName)
+                        // Commit immediately on select (no blur-based commit needed — the picker's selection is already definitive)
+                        if (!data || uniqueName === data.assignee) return
+                        save({ assignee: uniqueName.trim() ? uniqueName.trim() : '' })
+                      }}
+                      placeholder=${instance.assignee ? `${instance.assignee} (inherited)` : 'Inherited from the instance'}
+                      slug=${currentSlug.value}
+                    />
+                  </div>
+                  <div class="synced-field">
+                    <span class="field-label">Parent work item</span>
+                    ${(() => {
+                      const wiUrl = workItemWebUrlFor(instance.workItem, instance.workItem.parentId)
+                      return wiUrl
+                        ? html`<a class="synced-value" href=${wiUrl} target="_blank" rel="noreferrer">#${instance.workItem.parentId}</a>`
+                        : html`<span class="synced-value">#${instance.workItem.parentId}</span>`
+                    })()}
+                  </div>
+                </div>
+              `}
       ${instance.workspaceBacked
         ? html`
-            <div class="review-status-card" aria-label="Review and sign-off status">
-              <div>
-                <span class="field-label">Reviews</span>
-                ${instance.reviews?.length
-                  ? html`
-                      <ul class="review-status-list">
-                        ${instance.reviews.map((review) => html`
-                          <li key=${review.workItemId}>
-                            <span>${review.reviewerDisplayName ?? review.reviewer}</span>
-                            <span class="review-status-actions">
-                              <span class="review-status">${review.status ?? 'Unknown'}</span>
-                              <button type="button" class="btn small" disabled=${checkingReviewId === review.workItemId} onClick=${() => handleCheckReviewStatus(review)}>
-                                ${checkingReviewId === review.workItemId ? 'Checking…' : 'Check status'}
-                              </button>
-                            </span>
-                          </li>
-                        `)}
-                      </ul>
-                    `
-                  : html`<span class="synced-value">No review requests</span>`}
+            <div class="review-signoff-card">
+              <div class="review-signoff-section reviews-section">
+                <div class="review-signoff-header">
+                  <span class="field-label">Reviews</span>
+                  ${isCurrentStage
+                    ? html`<button type="button" class="btn small" onClick=${openReviewDialog}>Request Review</button>`
+                    : null}
+                </div>
+                ${!instance.reviews?.length
+                  ? html`<p class="synced-value">No review requests</p>`
+                  : instance.reviews.length > 2
+                    ? html`
+                        ${REVIEW_OUTCOME_GROUPS.map(({ key, label }) => {
+                          const group = groupedReviews[key]
+                          if (!group.length) return null
+                          return html`
+                            <div class="review-group" key=${key}>
+                              <div class="review-group-label">
+                                <span>${label}</span>
+                                <span class="review-group-count">${group.length}</span>
+                              </div>
+                              <ul class="review-list">
+                                ${group.map((review) => html`<${ReviewListItem} key=${review.workItemId} review=${review} instance=${instance} />`)}
+                              </ul>
+                            </div>
+                          `
+                        })}
+                      `
+                    : html`
+                        <ul class="review-list">
+                          ${instance.reviews.map((review) => html`<${ReviewListItem} key=${review.workItemId} review=${review} instance=${instance} />`)}
+                        </ul>
+                      `}
               </div>
-              <div>
-                <span class="field-label">Sign-off</span>
-                <span class="synced-value">${signoff ? (signoff.review?.state ?? signoff.reviewState ?? signoff.status) : 'Not requested'}</span>
+              <div class="review-signoff-section signoff-section">
+                <div class="review-signoff-header">
+                  <span class="field-label">Sign-off</span>
+                </div>
+                ${openPullRequestId
+                  ? pullRequestIsActive
+                    ? html`
+                        <p>
+                          ${signoffPrUrl
+                            ? html`<a href=${signoffPrUrl} target="_blank" rel="noreferrer">Pull Request #${openPullRequestId}</a>`
+                            : html`Pull Request #${openPullRequestId}`}
+                          ${` is open, requesting approval for stage "${instance.stage.title}".`}
+                        </p>
+                        <p class="signoff-reviewer">
+                          Reviewer: ${pullRequest?.review?.approver?.displayName ?? 'Not assigned'}
+                          ${` (${pullRequest?.review?.state ?? 'pending'})`}
+                        </p>
+                        ${isCurrentStage && approvalInvalidated
+                          ? html`
+                              <div class="signoff-actions">
+                                <button type="button" class="btn small" onClick=${handleConfirmSignoffRequest}>Request Sign-off again</button>
+                              </div>
+                            `
+                          : null}
+                      `
+                    : html`
+                        <p>
+                          ${signoffPrUrl
+                            ? html`<a href=${signoffPrUrl} target="_blank" rel="noreferrer">Pull Request #${openPullRequestId}</a>`
+                            : html`Pull Request #${openPullRequestId}`}
+                          ${prStatus === 'completed'
+                            ? ` was merged for stage "${instance.stage.title}".`
+                            : prStatus === 'abandoned'
+                              ? ` was abandoned (closed without merging) for stage "${instance.stage.title}".`
+                              : ` is no longer available for stage "${instance.stage.title}".`}
+                        </p>
+                      `
+                  : isCurrentStage
+                    ? html`<button type="button" class="btn small" onClick=${handleCheckAndMaybeRequestSignoff}>Request Sign-off</button>`
+                    : html`<p class="synced-value">Not requested</p>`}
+                ${signoffStatus ? html`<p class="save-status">${signoffStatus}</p>` : null}
               </div>
+              ${signoffCommits.length
+                ? html`
+                    <div class="review-signoff-section commit-history-section">
+                      <div class="review-signoff-header">
+                        <span class="field-label">Commit history</span>
+                        <button type="button" class="btn small" onClick=${() => setCommitHistoryOpen(true)}>Show commit history</button>
+                      </div>
+                      <p class="commit-history-summary">
+                        ${signoffCommits.length} commit${signoffCommits.length === 1 ? '' : 's'} on Pull Request #${openPullRequestId}
+                        ${latestSignoffCommit
+                          ? html`
+                              <span class="commit-history-latest">
+                                · latest: “${latestSignoffCommit.message || '(no message)'}”
+                                ${latestSignoffCommit.timestamp
+                                  ? html`<time dateTime=${latestSignoffCommit.timestamp}>${new Date(latestSignoffCommit.timestamp).toLocaleString()}</time>`
+                                  : null}
+                              </span>
+                            `
+                          : null}
+                      </p>
+                    </div>
+                  `
+                : null}
             </div>
           `
         : null}
-      <div class="save-status">${reviewStatus}</div>
-      <div class="save-status">${status}</div>
-      <button type="button" class="btn" onClick=${handleCheckAndMaybeSync}>Check gate & sync work item</button>
-      <div class="save-status">${syncStatus}</div>
-      ${syncConfirming
+      ${instance.workspaceBacked ? html`<div class="save-status">${checkStatusMessage}</div>` : null}
+      ${linked
+        ? html`
+            <div class="save-status">${status}</div>
+            <button type="button" class="btn" onClick=${handleCheckAndMaybeSync}>Check gate & sync work item</button>
+            <div class="save-status">${syncStatus}</div>
+            ${syncConfirming
+              ? html`
+                  <div class="modal-backdrop" role="presentation">
+                    <div class="modal" role="dialog" aria-modal="true" aria-label="Confirm work item state update">
+                      <h3>Push a state update?</h3>
+                      <p class="guidance">
+                        The gate for stage "${instance.stage.title}" has passed. Confirm to push a new state to this
+                        stage's work item in Azure DevOps. Declining leaves that work item's state unchanged.
+                      </p>
+                      <div class="modal-actions">
+                        <button type="button" class="btn ghost" onClick=${handleDeclineSync}>Decline</button>
+                        <button type="button" class="btn primary" onClick=${handleConfirmSync}>Confirm & push</button>
+                      </div>
+                    </div>
+                  </div>
+                `
+              : null}
+          `
+        : null}
+      ${reviewDialogOpen
+        ? html`
+            <${Modal} ariaLabel="Request Review" onClose=${() => setReviewDialogOpen(false)}>
+              <h3>Request Review</h3>
+              <p class="guidance">Ask one or more people to review this stage. Each request is tracked separately.</p>
+              <div class="review-request-list">
+                ${reviewRows.map((row) => html`
+                  <div class="review-request-row" key=${row.id}>
+                    <div class="reviewer-field">
+                      <span class="field-label">Reviewer</span>
+                      <${IdentityPicker}
+                        value=${row.reviewer}
+                        onChange=${(uniqueName) => updateReviewRow(row.id, { reviewer: uniqueName })}
+                        placeholder="Search for a reviewer"
+                        slug=${currentSlug.value}
+                      />
+                    </div>
+                    ${row.review
+                      ? html`
+                          <div class="review-request-result">
+                            <span>
+                              ${workItemWebUrlFor(instance.workItem, row.review.workItemId)
+                                ? html`<a href=${workItemWebUrlFor(instance.workItem, row.review.workItemId)} target="_blank" rel="noreferrer">Work item #${row.review.workItemId}</a>`
+                                : `Work item #${row.review.workItemId}`}
+                              · ${row.review.status ?? 'Unknown'}
+                            </span>
+                          </div>
+                        `
+                      : html`
+                          <button type="button" class="btn small" disabled=${row.sending || !row.reviewer.trim()} onClick=${() => sendReviewRequest(row)}>
+                            ${row.sending ? 'Sending…' : 'Send request'}
+                          </button>
+                        `}
+                    ${row.error ? html`<p class="save-status">${row.error}</p>` : null}
+                  </div>
+                `)}
+              </div>
+              <div class="modal-actions">
+                <button type="button" class="btn" onClick=${addReviewer}>Add reviewer</button>
+                <button type="button" class="btn ghost" onClick=${() => setReviewDialogOpen(false)}>Close</button>
+              </div>
+            <//>
+          `
+        : null}
+      ${signoffConfirming
         ? html`
             <div class="modal-backdrop" role="presentation">
-              <div class="modal" role="dialog" aria-modal="true" aria-label="Confirm work item state update">
-                <h3>Push a state update?</h3>
+              <div class="modal" role="dialog" aria-modal="true" aria-label="Confirm request sign-off">
+                <h3>Open a Pull Request for sign-off?</h3>
                 <p class="guidance">
-                  The gate for stage "${instance.stage.title}" has passed. Confirm to push a new state to this
-                  stage's work item in Azure DevOps. Declining leaves that work item's state unchanged.
+                  The gate for stage "${instance.stage.title}" has passed. Confirm to open a Pull Request from this
+                  stage's own branch into "main", requesting the Owner's sign-off. Declining opens nothing.
                 </p>
                 <div class="modal-actions">
-                  <button type="button" class="btn ghost" onClick=${handleDeclineSync}>Decline</button>
-                  <button type="button" class="btn primary" onClick=${handleConfirmSync}>Confirm & push</button>
+                  <button type="button" class="btn ghost" onClick=${handleDeclineSignoff}>Decline</button>
+                  <button type="button" class="btn primary" onClick=${handleConfirmSignoffRequest}>
+                    Confirm & request sign-off
+                  </button>
                 </div>
               </div>
             </div>
           `
+        : null}
+      ${commitHistoryOpen
+        ? html`<${CommitHistoryDialog} commits=${signoffCommits} onClose=${() => setCommitHistoryOpen(false)} />`
         : null}
     </section>
   `
@@ -2049,349 +2468,6 @@ function AdvanceStagePanel({ instance }) {
   `
 }
 
-// ---------- Request review (Workspace-backed instances only; #197) ----------
-// Advisory reviews are independent Azure DevOps Tasks. Each row has its own
-// reviewer, send action, and explicit status check; none of this participates
-// in the Pull Request sign-off gate.
-function RequestReviewPanel({ instance }) {
-  const initialReviews = instance.reviews ?? []
-  const [rows, setRows] = useState(() => [
-    ...initialReviews.map((review) => ({ id: `review-${review.workItemId}`, reviewer: review.reviewer, review, error: '' })),
-    { id: 'new-1', reviewer: '', review: null, error: '' },
-  ])
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [nextRowId, setNextRowId] = useState(2)
-
-  useEffect(() => {
-    const reviews = instance.reviews ?? []
-    setRows([
-      ...reviews.map((review) => ({ id: `review-${review.workItemId}`, reviewer: review.reviewer, review, error: '' })),
-      { id: `new-${nextRowId}`, reviewer: '', review: null, error: '' },
-    ])
-    // The value is only used to give unsent rows stable local keys.
-    // eslint-disable-next-line
-  }, [instance.stage.id])
-
-  if (!instance.workspaceBacked || instance.stage.id !== instance.currentStageId) return null
-
-  function updateRow(rowId, updates) {
-    setRows((current) => current.map((row) => (row.id === rowId ? { ...row, ...updates } : row)))
-  }
-
-  function addReviewer() {
-    setRows((current) => [...current, { id: `new-${nextRowId}`, reviewer: '', review: null, error: '' }])
-    setNextRowId((value) => value + 1)
-  }
-
-  function syncInstanceReviews(review) {
-    const current = instanceData.value
-    if (!current || current.stage.id !== instance.stage.id) return
-    const reviews = [...(current.reviews ?? []).filter((item) => item.workItemId !== review.workItemId), review]
-    instanceData.value = { ...current, reviews }
-  }
-
-  async function sendRequest(row) {
-    if (!row.reviewer.trim() || row.review) return
-    updateRow(row.id, { sending: true, error: '' })
-    const res = await apiFetchForInstance(currentSlug.value, `/api/instance/request-review?slug=${encodeURIComponent(currentSlug.value)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reviewer: row.reviewer, stage: instance.stage.id }),
-    })
-    const body = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      updateRow(row.id, { sending: false, error: body.message ?? body.error ?? `Request failed (${res.status})` })
-      return
-    }
-    updateRow(row.id, { sending: false, review: body.review })
-    syncInstanceReviews(body.review)
-  }
-
-  async function checkStatus(row) {
-    if (!row.review) return
-    updateRow(row.id, { checking: true, error: '' })
-    const res = await apiFetchForInstance(currentSlug.value, `/api/instance/review-status?slug=${encodeURIComponent(currentSlug.value)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reviewId: row.review.workItemId, stage: instance.stage.id }),
-    })
-    const body = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      updateRow(row.id, { checking: false, error: body.message ?? body.error ?? `Status check failed (${res.status})` })
-      return
-    }
-    updateRow(row.id, { checking: false, review: body.review })
-    syncInstanceReviews(body.review)
-  }
-
-  return html`
-    <section class="request-review-panel">
-      <h2>Request Review</h2>
-      <button type="button" class="btn" onClick=${() => setDialogOpen(true)}>Request Review</button>
-      ${dialogOpen
-        ? html`
-            <${Modal} ariaLabel="Request Review" onClose=${() => setDialogOpen(false)}>
-              <h3>Request Review</h3>
-              <p class="guidance">Ask one or more people to review this stage. Each request is tracked separately.</p>
-              <div class="review-request-list">
-                ${rows.map((row) => html`
-                  <div class="review-request-row" key=${row.id}>
-                    <div class="reviewer-field">
-                      <span class="field-label">Reviewer</span>
-                      <${IdentityPicker}
-                        value=${row.reviewer}
-                        onChange=${(uniqueName) => updateRow(row.id, { reviewer: uniqueName })}
-                        placeholder="Search for a reviewer"
-                        slug=${currentSlug.value}
-                      />
-                    </div>
-                    ${row.review
-                      ? html`
-                          <div class="review-request-result">
-                            <span>
-                              ${workItemWebUrlFor(instance.workItem, row.review.workItemId)
-                                ? html`<a href=${workItemWebUrlFor(instance.workItem, row.review.workItemId)} target="_blank" rel="noreferrer">Work item #${row.review.workItemId}</a>`
-                                : `Work item #${row.review.workItemId}`}
-                              · ${row.review.status ?? 'Unknown'}
-                            </span>
-                            <button type="button" class="btn small" disabled=${row.checking} onClick=${() => checkStatus(row)}>
-                              ${row.checking ? 'Checking…' : 'Check status'}
-                            </button>
-                          </div>
-                        `
-                      : html`
-                          <button type="button" class="btn small" disabled=${row.sending || !row.reviewer.trim()} onClick=${() => sendRequest(row)}>
-                            ${row.sending ? 'Sending…' : 'Send request'}
-                          </button>
-                        `}
-                    ${row.error ? html`<p class="save-status">${row.error}</p>` : null}
-                  </div>
-                `)}
-              </div>
-              <div class="modal-actions">
-                <button type="button" class="btn" onClick=${addReviewer}>Add reviewer</button>
-                <button type="button" class="btn ghost" onClick=${() => setDialogOpen(false)}>Close</button>
-              </div>
-            <//>
-          `
-        : null}
-    </section>
-  `
-}
-
-// ---------- Request sign-off (Workspace-backed instances only; #124, ADR-0014) ----------
-// The Workspace-backed counterpart to AdvanceStagePanel above: opens this
-// stage's own real approval gate — a Pull Request from its branch into
-// "main" — once the gate has genuinely passed, rather than moving a local
-// instance's own stage pointer directly. Mirrors AdvanceStagePanel's own
-// check-then-confirm shape exactly: "Request Sign-off" runs
-// the same gate check every other gated action in this app runs, and only a
-// genuine PASS opens the confirm dialog — declining it (or a FAIL) opens no
-// Pull Request. Never rendered for a local instance (the opposite condition
-// from AdvanceStagePanel), and — like AdvanceStagePanel — only while viewing
-// the instance's own *current* stage, since that's the only stage a save
-// can ever actually be landing commits on today (a later stage only starts
-// once #125's own "advance the stage" moves the current-stage pointer
-// forward, which happens when its Check-status action merges this stage's
-// own Pull Request). Once a Pull Request has been recorded, the panel shows
-// its live Azure DevOps status and offers #125's "Check status" action in
-// place of "Request Sign-off" — reading reviewer votes, auto-merging on
-// approval (advancing the stage), and reporting rejection distinctly from a
-// still-pending review.
-function RequestApprovalPanel({ instance }) {
-  const [status, setStatus] = useState('')
-  const [confirming, setConfirming] = useState(false)
-  const [commitHistoryOpen, setCommitHistoryOpen] = useState(false)
-  const [justOpened, setJustOpened] = useState(null)
-
-  if (!instance.workspaceBacked || instance.stage.id !== instance.currentStageId) return null
-
-  const stageId = instance.stage.id
-  const openPullRequestId = justOpened?.pullRequestId ?? instance.pullRequests?.[stageId]
-  const pullRequest = justOpened?.pullRequest ?? instance.pullRequest
-  const prStatus = pullRequest?.status
-  const pullRequestIsActive = pullRequest !== null && (prStatus === undefined || prStatus === 'active')
-  const approvalState = justOpened?.approvalState ?? instance.approvalStates?.[stageId]
-  const approvalInvalidated = approvalState?.state === 'invalidated' || pullRequest?.review?.state === 'approved-then-invalidated'
-
-  async function handleCheckAndMaybeConfirm() {
-    setStatus('Checking gate…')
-    const res = await apiFetchForInstance(currentSlug.value, `/api/instance/check?slug=${encodeURIComponent(currentSlug.value)}`)
-    const body = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      setStatus(`Check failed: ${body.message ?? body.error}`)
-      return
-    }
-    if (!body.pass) {
-      setStatus(formatGateFailure(body))
-      return
-    }
-    setStatus('Gate passed.')
-    setConfirming(true)
-  }
-
-  async function handleConfirmRequest() {
-    setConfirming(false)
-    setStatus(approvalInvalidated ? 'Resetting stale approval…' : 'Opening Pull Request…')
-    const res = await apiFetchForInstance(
-      currentSlug.value,
-      `/api/instance/request-approval?slug=${encodeURIComponent(currentSlug.value)}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }
-    )
-    const body = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      setStatus(`Request sign-off failed: ${body.message ?? body.error}`)
-      return
-    }
-    setJustOpened(body)
-    if (body.pullRequest) {
-      const current = instanceData.value
-      if (current?.stage.id === instance.stage.id) instanceData.value = { ...current, pullRequest: body.pullRequest }
-    }
-    if (body.reapproval?.method === 'comment') {
-      setStatus(`Approval reset was not permitted, so a note was posted to Pull Request #${body.pullRequestId}. The Owner must review and vote again.`)
-    } else if (body.reapproval) {
-      setStatus(`Approval withdrawn from Pull Request #${body.pullRequestId} — awaiting the Owner's review again.`)
-    } else {
-      setStatus(`Pull Request #${body.pullRequestId} opened — awaiting the Owner's review.`)
-    }
-  }
-
-  function handleDecline() {
-    setConfirming(false)
-    setStatus('Declined — no Pull Request opened.')
-  }
-
-  // "Check status" (#125, ADR-0014): the explicitly-triggered read of the
-  // open Pull Request's reviewer votes. On approval the server merges the
-  // PR itself and advances the stage pointer, so a merged result reloads
-  // the instance (reset to the new current stage, mirroring
-  // AdvanceStagePanel's own post-advance reload) rather than leaving the
-  // screen on the now-completed stage.
-  async function handleCheckStatus() {
-    setStatus('Checking Pull Request status…')
-    const res = await apiFetchForInstance(
-      currentSlug.value,
-      `/api/instance/check-status?slug=${encodeURIComponent(currentSlug.value)}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }
-    )
-    const body = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      setStatus(`Check status failed: ${body.message ?? body.error}`)
-      return
-    }
-    if (!body.merged) {
-      setJustOpened(body)
-      if (body.pullRequest) {
-        const current = instanceData.value
-        if (current?.stage.id === instance.stage.id) instanceData.value = { ...current, pullRequest: body.pullRequest }
-      }
-      if (body.review?.state === 'approved-then-invalidated') {
-        setStatus(
-          `Approval invalidated — commit(s) landed after ${body.review.approver?.displayName ?? 'the Owner'} approved Pull Request #${body.pullRequestId}. Request Sign-off again for a fresh review.`,
-        )
-        return
-      }
-      if (body.review?.state === 'rejected') {
-        setStatus(
-          `Rejected — the Owner voted to reject Pull Request #${body.pullRequestId}. Address the feedback, then re-request sign-off.`
-        )
-      } else if (body.review?.state === 'changes-requested') {
-        setStatus(
-          `Changes requested — the Owner sent Pull Request #${body.pullRequestId} back for more work before approving.`
-        )
-      } else {
-        setStatus(`Still pending — the Owner hasn't reviewed Pull Request #${body.pullRequestId} yet.`)
-      }
-      return
-    }
-    setStatus(
-      body.advancedTo
-        ? `Approved — Pull Request #${body.pullRequestId} merged; stage advanced to "${body.advancedTo.title}".`
-        : `Approved — Pull Request #${body.pullRequestId} merged. This was the final stage; the instance is complete.`
-    )
-    const effectWillReload = viewedStage.value !== null
-    viewedStage.value = null
-    if (!effectWillReload) {
-      instanceData.value = await loadInstance(currentSlug.value, null)
-    }
-  }
-
-  // Persistent hyperlink built from the persisted PR record (org/project/repo + PR id) — survives reload with the correct org (WI155). `justOpened.webUrl` is the transient server-built URL right after creation; fallback builds from `instance.workspace` so reloads still link.
-  const prUrl = justOpened?.webUrl ?? prWebUrlFor(instance, openPullRequestId)
-  const stageWorkItemId = instance.workItem?.stages?.[stageId]
-  const wiUrl = workItemWebUrlFor(instance.workItem, stageWorkItemId)
-  const commits = pullRequest?.commits ?? []
-
-  return html`
-    <section id="request-approval-panel" class="request-approval-panel">
-      <h2>Review / Sign-off</h2>
-      ${openPullRequestId
-        ? pullRequestIsActive
-          ? html`
-            <p>
-              ${prUrl
-                ? html`<a href=${prUrl} target="_blank" rel="noreferrer">Pull Request #${openPullRequestId}</a>`
-                : html`Pull Request #${openPullRequestId}`}
-              ${` is open, requesting approval for stage "${instance.stage.title}".`}
-              ${stageWorkItemId
-                ? wiUrl
-                  ? html` · Work item <a href=${wiUrl} target="_blank" rel="noreferrer">#${stageWorkItemId}</a>`
-                  : html` · Work item #${stageWorkItemId}`
-                : null}
-            </p>
-            <div class="request-approval-review">
-              <p>
-                Reviewer: ${pullRequest?.review?.approver?.displayName ?? 'Not assigned'}
-                ${` (${pullRequest?.review?.state ?? 'pending'})`}
-              </p>
-              <button type="button" class="btn" onClick=${() => setCommitHistoryOpen(true)}>Show commit history</button>
-            </div>
-            ${approvalInvalidated
-              ? html`<button type="button" class="btn" onClick=${handleConfirmRequest}>Request Sign-off again</button>`
-              : html`<button type="button" class="btn" onClick=${handleCheckStatus}>Check status</button>`}
-            `
-          : html`
-              <p>
-                ${prUrl
-                  ? html`<a href=${prUrl} target="_blank" rel="noreferrer">Pull Request #${openPullRequestId}</a>`
-                  : html`Pull Request #${openPullRequestId}`}
-                ${prStatus === 'completed'
-                  ? ` was merged for stage "${instance.stage.title}".`
-                  : prStatus === 'abandoned'
-                    ? ` was abandoned (closed without merging) for stage "${instance.stage.title}".`
-                    : ` is no longer available for stage "${instance.stage.title}".`}
-              </p>
-              <button type="button" class="btn" onClick=${handleCheckStatus}>Check status</button>
-            `
-        : html`<button type="button" class="btn" onClick=${handleCheckAndMaybeConfirm}>Request Sign-off</button>`}
-      <div class="save-status">${status}</div>
-      ${confirming
-        ? html`
-            <div class="modal-backdrop" role="presentation">
-              <div class="modal" role="dialog" aria-modal="true" aria-label="Confirm request sign-off">
-                <h3>Open a Pull Request for sign-off?</h3>
-                <p class="guidance">
-                  The gate for stage "${instance.stage.title}" has passed. Confirm to open a Pull Request from this
-                  stage's own branch into "main", requesting the Owner's sign-off. Declining opens nothing.
-                </p>
-                <div class="modal-actions">
-                  <button type="button" class="btn ghost" onClick=${handleDecline}>Decline</button>
-                  <button type="button" class="btn primary" onClick=${handleConfirmRequest}>
-                    Confirm & request sign-off
-                  </button>
-                </div>
-              </div>
-            </div>
-          `
-        : null}
-      ${commitHistoryOpen
-        ? html`<${CommitHistoryDialog} commits=${commits} onClose=${() => setCommitHistoryOpen(false)} />`
-        : null}
-    </section>
-  `
-}
-
 // ---------- The viewed stage's whole screen: modules + work-item panel ----------
 // Keyed by stage id from the parent (see ModuleEditorPage) so switching stages remounts this wholesale — fresh CodeMirror instances, matching the old full-DOM-rebuild behaviour. "Clear all fields" and "Render" now live in the view-toggle bar (see ViewModeToolbar, ModuleEditorPage) rather than here, so the field registry they depend on is owned by ModuleEditorPage instead — `onFieldRegistered` is threaded straight through.
 function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
@@ -2414,10 +2490,6 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
         `
       )}
       <${AdvanceStagePanel} instance=${instance} />
-      <div class="stage-action-panels">
-        <${RequestReviewPanel} key=${instance.stage.id} instance=${instance} />
-        <${RequestApprovalPanel} instance=${instance} />
-      </div>
     </main>
   `
 }
@@ -2431,8 +2503,10 @@ const VIEW_MODE_HOTKEY = { ctrlKey: true, shiftKey: true, key: 'v' }
 // pair moved here from the stage screen (#114) — both now sit on the right
 // of this same bar, "Clear all fields" immediately left of "Render".
 // `requestApprovalSlug` signals a "Review / Sign-off" shortcut button —
-// (#145 Part 1) clicking it scrolls to the RequestApprovalPanel and
-// briefly highlights it so the author's eye is drawn down.
+// (#145 Part 1) clicking it scrolls to the Work Item Detail card (#213
+// folded the old standalone Review/Sign-off panel's review and sign-off
+// functionality into that card, so this shortcut now targets it directly)
+// and briefly highlights it so the author's eye is drawn down.
 function ViewModeToolbar({
   instance,
   onClearAllFields,
@@ -2459,7 +2533,7 @@ function ViewModeToolbar({
 
   function scrollToApprovalPanel() {
     const panel =
-      document.getElementById('request-approval-panel') ?? document.querySelector('.request-approval-panel')
+      document.getElementById('work-item-detail-card') ?? document.querySelector('.synced-fields-panel')
     if (!panel) return
 
     function triggerFlash() {

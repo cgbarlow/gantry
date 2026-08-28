@@ -498,11 +498,19 @@ test('the Workspace-backed screen exposes Review / Sign-off labels and the Reque
           try {
             await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), PAT)
             await page.goto(`${base}/instance/${SLUG}`)
-            await page.locator('.request-review-panel').waitFor({ timeout: 10_000 })
+            // #213 folded the old standalone "Request Review" and
+            // "Review / Sign-off" panels entirely into the Work item
+            // details card — both live as `.reviews-section`/`.signoff-section`
+            // sub-sections of `#work-item-detail-card` now, with one
+            // "Check status" button in the card's own header (no separate
+            // panel, and no per-section/per-row status-check controls).
+            const card = page.locator('#work-item-detail-card')
+            await card.locator('.review-signoff-card').waitFor({ timeout: 10_000 })
             assert.equal(await page.getByRole('button', { name: 'Review / Sign-off' }).count(), 1)
-            assert.equal(await page.locator('.request-approval-panel').getByRole('button', { name: 'Request Sign-off' }).count(), 1)
+            assert.equal(await card.locator('.signoff-section').getByRole('button', { name: 'Request Sign-off' }).count(), 1)
+            assert.equal(await card.locator('.panel-header').getByRole('button', { name: 'Check status' }).count(), 1)
 
-            await page.locator('.request-review-panel').getByRole('button', { name: 'Request Review' }).click()
+            await card.locator('.reviews-section').getByRole('button', { name: 'Request Review' }).click()
             const dialog = page.locator('.modal[aria-label="Request Review"]')
             await dialog.waitFor({ state: 'visible', timeout: 5_000 })
             await dialog.locator('.identity-picker input').pressSequentially('testuser@example.com')
@@ -511,26 +519,28 @@ test('the Workspace-backed screen exposes Review / Sign-off labels and the Reque
             await dialog.getByText(/Work item #\d+/).waitFor({ timeout: 10_000 })
             await dialog.getByRole('button', { name: 'Add reviewer' }).click()
             assert.equal(await dialog.locator('.identity-picker input').count(), 2)
-
-            // The sent row's own "Check status" button re-checks that one
-            // review independently of any other row (#197's "independent
-            // reviewer rows").
-            const sentRow = dialog.locator('.review-request-row').filter({ hasText: 'Work item #' })
-            await sentRow.getByRole('button', { name: 'Check status' }).click()
-            await sentRow.getByText('Requested').waitFor({ timeout: 10_000 })
+            // The dialog is purely an add-reviewer form now — no per-row
+            // "Check status" (that's the card's one button's job).
+            assert.equal(await dialog.getByRole('button', { name: 'Check status' }).count(), 0)
 
             await dialog.getByRole('button', { name: 'Close' }).click()
             await dialog.waitFor({ state: 'hidden', timeout: 5_000 })
 
-            // The Work item details status card (#197) surfaces the same
-            // review outside the dialog, with its own independent status
-            // check action.
-            const statusCard = page.locator('.review-status-card')
-            await statusCard.waitFor({ timeout: 10_000 })
-            const statusRow = statusCard.locator('.review-status-list li')
-            assert.equal(await statusRow.count(), 1)
-            await statusRow.getByRole('button', { name: 'Check status' }).click()
-            await page.getByText(/Review #\d+ is Requested\./).waitFor({ timeout: 10_000 })
+            // The card's own "Reviews" list is the single place this review
+            // is shown — updated reactively from the dialog's own request,
+            // no reload or separate status check needed to see it.
+            const reviewRow = card.locator('.reviews-section .review-list li')
+            assert.equal(await reviewRow.count(), 1)
+            // WI214 (already merged) sets the new review's status to
+            // "Requested" via its custom REVIEW_STATUS_FIELD at creation
+            // time — no longer native ADO state ("New").
+            await assert.doesNotReject(reviewRow.getByText('Requested').waitFor({ timeout: 10_000 }))
+            assert.equal(await reviewRow.getByRole('button').count(), 0)
+
+            // The one "Check status" button refreshes it (and everything
+            // else the card shows) together.
+            await card.locator('.panel-header').getByRole('button', { name: 'Check status' }).click()
+            await assert.doesNotReject(card.getByText('Up to date.').waitFor({ timeout: 10_000 }))
           } finally {
             await page.close()
           }
@@ -595,6 +605,97 @@ test('checkStageReviewStatus infers Requested/In review from native System.State
         const whileActive = await checkStageReviewStatus(SLUG, { reviewId: legacyReview.id, stageId: 'shape' }, { azureDevOps })
         assert.equal(whileActive.review.status, 'In review')
       } finally {
+        rmSync(instancesDir, { recursive: true, force: true })
+      }
+    },
+  )
+})
+
+test('the Reviews list groups by outcome (#215) once a stage has more than a couple of review requests', async () => {
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: PAT,
+      files: { [`/gantry-workspace/${SLUG}/instance.yaml`]: `definition: design\nslug: ${SLUG}\nstage: shape\n` },
+    },
+    async (adoBaseUrl) => {
+      const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-review-groups-'))
+      const browser = await launchBrowser()
+      try {
+        registerInstance(
+          SLUG,
+          { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          { instancesDir },
+        )
+        const client = createAzureDevOpsWorkItemsClient({ organization: ORGANIZATION, project: PROJECT, pat: PAT, baseUrl: adoBaseUrl })
+        const parent = await client.createWorkItem('Feature', { 'System.Title': 'Parent initiative' })
+
+        await withRunningServer({ instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+          const linkResponse = await fetch(`${base}/api/instance/work-items/link?slug=${SLUG}`, {
+            method: 'POST',
+            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ organization: ORGANIZATION, project: PROJECT, parentId: parent.id, baseUrl: adoBaseUrl }),
+          })
+          assert.equal(linkResponse.status, 200)
+
+          // Three review requests — same reviewer identity each time (the
+          // fake Azure DevOps server only ever resolves the one fixed
+          // "testuser@example.com" identity), pushed to three distinct
+          // outcomes via ADR-0024's REVIEW_STATUS_FIELD — not native
+          // System.State, which stays locked to New/Active/Closed/Removed
+          // (WI214, already merged, is why this is the field to use now).
+          // #215's grouping keys off whatever status is already on the
+          // review record (see web/app.js's classifyReviewOutcome), so
+          // these three real vocabulary values are enough to land one
+          // review in each of the three outcome buckets.
+          async function requestReview() {
+            const res = await fetch(`${base}/api/instance/request-review?slug=${SLUG}`, {
+              method: 'POST',
+              headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+              body: JSON.stringify({ stage: 'shape', reviewer: 'testuser@example.com' }),
+            })
+            assert.equal(res.status, 200)
+            return (await res.json()).review
+          }
+          // Left on its request-time default status ("Requested") — the "pending" bucket's own default for a status this code doesn't otherwise recognise.
+          await requestReview()
+          const changesRequested = await requestReview()
+          const approved = await requestReview()
+
+          await client.updateWorkItem(changesRequested.workItemId, { [REVIEW_STATUS_FIELD]: 'Changes requested' })
+          await client.updateWorkItem(approved.workItemId, { [REVIEW_STATUS_FIELD]: 'Approved' })
+
+          const page = await browser.newPage()
+          try {
+            await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), PAT)
+            await page.goto(`${base}/instance/${SLUG}`)
+            const card = page.locator('#work-item-detail-card')
+            const reviewsSection = card.locator('.reviews-section')
+            await card.locator('.review-signoff-card').waitFor({ timeout: 10_000 })
+
+            // The two updates set directly against the fake Azure DevOps
+            // server (bypassing gantry) aren't reflected until the card's
+            // one "Check status" action re-reads each review's status.
+            await card.locator('.panel-header').getByRole('button', { name: 'Check status' }).click()
+            await assert.doesNotReject(card.getByText('Up to date.').waitFor({ timeout: 10_000 }))
+
+            await assert.doesNotReject(reviewsSection.locator('.review-group').first().waitFor({ timeout: 10_000 }))
+            assert.equal(await reviewsSection.locator('.review-group').count(), 3)
+            // Fixed bucket order (pending / changes-requested / approved), each with its own one-review count.
+            // `innerText` reflects the CSS `text-transform: uppercase` the group labels render with.
+            assert.deepEqual(await reviewsSection.locator('.review-group-label span').allInnerTexts(), [
+              'PENDING', '1', 'CHANGES REQUESTED', '1', 'APPROVED', '1',
+            ])
+            // Every review still renders exactly once, in its bucket's own `.review-list` — grouping never drops or duplicates a row.
+            assert.equal(await reviewsSection.locator('.review-list li').count(), 3)
+          } finally {
+            await page.close()
+          }
+        })
+      } finally {
+        await browser.close()
         rmSync(instancesDir, { recursive: true, force: true })
       }
     },

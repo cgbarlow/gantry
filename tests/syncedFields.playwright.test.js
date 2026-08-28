@@ -126,9 +126,16 @@ test('the synced-fields panel shows the link prompt when unlinked, then the dist
               assert.equal(linkRes.status, 200)
               await page.reload()
 
-              // The Work item details panel flips to its linked view: six distinct fields, not collapsed together.
+              // The Work item details panel flips to its linked view: five
+              // distinct fields, not collapsed together. #215 removed the
+              // grid's own "Pull request" field (six down to five) — this
+              // instance isn't Workspace-backed, so there's no Sign-off
+              // section either; the PR reference simply has nowhere to
+              // duplicate into any more.
               await assert.doesNotReject(page.locator('.synced-fields-panel #synced-title').waitFor({ timeout: 10_000 }))
-              assert.equal(await panel.locator('.synced-field').count(), 6)
+              assert.equal(await panel.locator('.synced-field').count(), 5)
+              assert.equal(await panel.locator('.field-label', { hasText: 'Pull request' }).count(), 0)
+              assert.equal(await page.locator('.review-signoff-card').count(), 0)
               const parentWorkItem = panel.locator('.synced-field', { hasText: 'Parent work item' })
               const parentWorkItemLink = parentWorkItem.locator('a')
               assert.equal(
@@ -140,7 +147,6 @@ test('the synced-fields panel shows the link prompt when unlinked, then the dist
               assert.equal(await panel.locator('.synced-value >> text=Task').count(), 1)
                assert.equal(await panel.locator('input#synced-title').inputValue(), 'my-initiative — SOAP')
               assert.match(await panel.locator('.synced-value').nth(1).innerText(), /#\d+ · New/)
-              assert.match(await panel.locator('.synced-value').nth(2).innerText(), /No pull request open/)
               assert.equal(await panel.locator('.identity-picker input').inputValue(), 'Ada Lovelace')
 
               // The manual gate-sync action remains on the consolidated

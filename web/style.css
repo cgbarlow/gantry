@@ -310,52 +310,73 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .render-artefact-list .btn.toggled,
 .render-artefact-list .btn.toggled:hover { background: #000; color: #fff; border-color: #000; }
 
-/* Synced-fields panel (#111) — sits at the top of the instance screen, above the modules, so it reads as a header card rather than one more section: a raised box (the only bordered panel on this screen) with its five fields laid out as a wrapping grid, each distinct. */
+/* Work item details card (#111, folded into by #213) — sits at the top of
+   the instance screen, above the modules, so it reads as a header card
+   rather than one more section: a raised box (the only bordered panel on
+   this screen) with its fields laid out as a wrapping grid, each distinct.
+   #213 folded the old standalone "Request Review" and "Review / Sign-off"
+   panels' entire functionality into this one card (one "Check status"
+   button, a richer reviews list, and the sign-off flow) — there is no
+   longer a separate bottom-of-page section for any of it. */
 .synced-fields-panel { border: var(--border-strong) solid var(--line-strong); background: var(--bg-raised); padding: 16px 20px; margin-top: 32px; margin-bottom: 32px; }
+.panel-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; }
+.panel-header h2 { margin: 0; }
 .synced-fields-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 12px; }
 .synced-fields-grid { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; }
 .synced-field { display: flex; flex-direction: column; gap: 4px; min-width: 160px; }
 .synced-field .field-label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
 .synced-field .text-field { max-width: 320px; }
 .synced-field-wide { flex: 1 1 260px; }
-.synced-value { font-size: 14px; padding: 6px 0; }
+.synced-value { font-size: 14px; padding: 6px 0; margin: 0; }
 
-/* Review/sign-off summary (#197) — kept as a compact sub-card at the lower
-   right of the work-item details card, so advisory reviews sit beside the
-   existing sign-off state without becoming another gate or panel. */
-.review-status-card {
-  display: grid;
-  grid-template-columns: minmax(180px, auto) minmax(140px, auto);
-  gap: 16px;
-  width: fit-content;
-  max-width: 100%;
-  margin: 18px 0 0 auto;
-  padding: 10px 12px;
-  border: var(--hairline) solid var(--line);
-  background: var(--bg);
-}
-.review-status-list { list-style: none; margin: 4px 0 0; padding: 0; }
-.review-status-list li { display: flex; gap: 10px; justify-content: space-between; align-items: center; font-size: 13px; }
-.review-status-actions { display: inline-flex; align-items: center; gap: 8px; }
-.review-status-actions .btn { margin: 0; }
-.review-status { color: var(--text-muted); white-space: nowrap; }
+/* Reviews & sign-off sub-card (#197, consolidated by #213) — the single
+   place on the page for both: a two-column layout (stacking on narrow
+   viewports) sitting directly inside the details card, each side its own
+   richer per-row list (reviewer name, work item link, status) rather than
+   the old compact one-line summary — that summary and the standalone
+   panels' own rich lists were the same data shown twice; this is the one
+   copy. Every action here reads/writes through the card's shared state;
+   the only "Check status" control is the button in .panel-header above. */
+.review-signoff-card { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 20px; padding-top: 16px; border-top: var(--hairline) solid var(--line); }
+.review-signoff-section { min-width: 0; }
+.review-signoff-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.review-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.review-list li { display: flex; gap: 10px; justify-content: space-between; align-items: baseline; font-size: 13px; }
+.review-reviewer { overflow-wrap: anywhere; }
+.review-meta { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.review-status { color: var(--text-muted); }
+.signoff-reviewer { margin: 8px 0; font-size: 13px; }
+.signoff-actions { display: flex; align-items: center; gap: 8px; }
+
+/* Review grouping by outcome (#215) — once a stage's Reviews list grows
+   past a couple of requests, `.reviews-section` renders one `.review-group`
+   per non-empty outcome bucket (pending / changes-requested / approved,
+   see web/app.js's `classifyReviewOutcome`) instead of one flat
+   `.review-list`; two or fewer reviews still render that same flat list
+   directly, no group labels. */
+.review-group + .review-group { margin-top: 14px; }
+.review-group-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 6px; }
+.review-group-count { color: var(--text-muted); font-size: 11px; }
+
+/* Inline commit-history summary (#215) — a third sub-section of
+   `.review-signoff-card`, spanning both columns beneath Reviews/Sign-off,
+   showing a one-line "N commits · latest: ..." summary once the sign-off
+   Pull Request has any commits. The existing full-history modal
+   (CommitHistoryDialog) remains the one place to see every commit; this
+   is deliberately just a glance, not a second copy of that list. */
+.commit-history-section { grid-column: 1 / -1; }
+.commit-history-summary { font-size: 13px; margin: 0; }
+.commit-history-latest { color: var(--text-muted); }
+.commit-history-latest time { white-space: nowrap; }
 
 .advance-stage-panel { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 32px; }
 .advance-stage-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }
 
-.request-approval-panel { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 32px; }
-.request-approval-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }
-.request-approval-review { margin: 12px 0; }
-.request-approval-review h3 { font-size: 13px; margin: 16px 0 6px; }
 .request-approval-commits { margin: 0; padding-left: 20px; }
 .request-approval-commits li { display: flex; gap: 12px; justify-content: space-between; margin: 4px 0; }
 .request-approval-commits li span { overflow-wrap: anywhere; }
 .request-approval-commits time { color: var(--text-muted); white-space: nowrap; }
 
-.stage-action-panels { display: flex; align-items: flex-start; gap: 32px; margin-top: 32px; }
-.stage-action-panels > section { flex: 1 1 0; min-width: 0; }
-.request-review-panel, .request-approval-panel { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 0; }
-.request-review-panel h2, .request-approval-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }
 .review-request-list { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
 .review-request-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; align-items: end; }
 .reviewer-field { min-width: 0; }
@@ -363,18 +384,18 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .review-request-row > .save-status { grid-column: 1 / -1; margin: 0; }
 
 @media (max-width: 760px) {
-  .stage-action-panels { flex-direction: column; gap: 20px; }
-  .stage-action-panels > section { width: 100%; }
-  .review-status-card { width: 100%; grid-template-columns: 1fr 1fr; }
+  .review-signoff-card { grid-template-columns: 1fr; gap: 20px; }
 }
 
-/* Flash highlight animation (WI154, #145 Part 1) — brief background pulse on the
-   request-approval panel when the view-bar button scrolls to it, giving the
-   user a visual anchor. Triggered sequenced *after* the smooth scroll settles
-   (via `scrollend` or a ~300 ms timeout fallback) so the eye catches it at
-   rest; one-shot and self-clearing via `animationend` so it never persists,
-   and still fires when the panel is already in view. The flash cycles through
-   pulses of the raised background, then holds transparent. `prefers-reduced-motion`
+/* Flash highlight animation (WI154, #145 Part 1) — brief background pulse on
+   the Work item details card when the view-bar's "Review / Sign-off"
+   shortcut scrolls to it (#213 retargeted this from the old standalone
+   sign-off panel to the merged card), giving the user a visual anchor.
+   Triggered sequenced *after* the smooth scroll settles (via `scrollend` or
+   a ~300 ms timeout fallback) so the eye catches it at rest; one-shot and
+   self-clearing via `animationend` so it never persists, and still fires
+   when the panel is already in view. The flash cycles through pulses of
+   the raised background, then holds transparent. `prefers-reduced-motion`
    (above, line 98) kills the animation entirely, leaving the panel simply
    scrolled-into-view. */
 @keyframes panel-flash {
@@ -383,7 +404,7 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
   66%  { background: var(--bg-raised); }
   100% { background: transparent; }
 }
-.request-approval-panel.flash { animation: panel-flash 1.2s ease-out; }
+.synced-fields-panel.flash { animation: panel-flash 1.2s ease-out; }
 
 /*
  * Identity picker (#145 Part 2) — a combobox-style input with a

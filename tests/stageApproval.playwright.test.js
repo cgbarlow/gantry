@@ -12,13 +12,17 @@ import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { resolveStageBranch } from '../lib/stageBranch.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
-// Browser smoke test for #124's Request-approval panel (web/app.js's
-// RequestApprovalPanel): the Workspace-backed counterpart to
-// tests/stageAdvancement.playwright.test.js's own Stage-advancement-panel
-// coverage — opens a real Pull Request from the stage's own branch once its
-// gate has passed, driven through a real rendered page against a real
-// running gantry server and a real (fake, in-process) Azure DevOps server.
-// Nothing mocked at the browser or HTTP layer.
+// Browser smoke test for #124's sign-off flow — the Workspace-backed
+// counterpart to tests/stageAdvancement.playwright.test.js's own
+// Stage-advancement-panel coverage. #213 folded the old standalone
+// RequestApprovalPanel into the Work Item Detail card (web/app.js's
+// SyncedFieldsPanel) as its `.signoff-section` sub-section, with the
+// card's own top-of-card "Check status" button (`#work-item-detail-card
+// .panel-header`) replacing the section's former per-section one — opens a
+// real Pull Request from the stage's own branch once its gate has passed,
+// driven through a real rendered page against a real running gantry server
+// and a real (fake, in-process) Azure DevOps server. Nothing mocked at the
+// browser or HTTP layer.
 
 const ORGANIZATION = 'fake-org'
 const PROJECT = 'fake-project'
@@ -140,7 +144,7 @@ test('the Request approval panel is never shown for a local instance', async () 
         await page.goto(`${base}/instance/my-initiative`)
         await page.waitForSelector('#modules', { timeout: 10_000 })
 
-        assert.equal(await page.locator('.request-approval-panel').count(), 0)
+        assert.equal(await page.locator('.signoff-section').count(), 0)
         // The Stage advancement panel (an unrelated, local-instance-only
         // panel) is still there — confirming the page genuinely loaded
         // this instance's real stage screen, rather than the request-
@@ -174,8 +178,8 @@ test('the Request approval panel blocks on a failing gate for a Workspace-backed
           await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
 
           await page.goto(`${base}/instance/${SLUG}`)
-          await page.waitForSelector('.request-approval-panel', { timeout: 10_000 })
-          const panel = page.locator('.request-approval-panel')
+          await page.waitForSelector('.signoff-section', { timeout: 10_000 })
+          const panel = page.locator('.signoff-section')
 
           await panel.getByRole('button', { name: 'Request Sign-off' }).click()
           await assert.doesNotReject(panel.locator('text=FAIL').waitFor({ timeout: 10_000 }))
@@ -209,8 +213,8 @@ test('declining the confirmation opens no Pull Request', async () => {
           await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
 
           await page.goto(`${base}/instance/${SLUG}`)
-          await page.waitForSelector('.request-approval-panel', { timeout: 10_000 })
-          const panel = page.locator('.request-approval-panel')
+          await page.waitForSelector('.signoff-section', { timeout: 10_000 })
+          const panel = page.locator('.signoff-section')
 
           await panel.getByRole('button', { name: 'Request Sign-off' }).click()
           const modal = page.locator('.modal[aria-label="Confirm request sign-off"]')
@@ -247,8 +251,8 @@ test('confirming opens a Pull Request, and the panel reflects it — including s
           await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
 
           await page.goto(`${base}/instance/${SLUG}`)
-          await page.waitForSelector('.request-approval-panel', { timeout: 10_000 })
-          const panel = page.locator('.request-approval-panel')
+          await page.waitForSelector('.signoff-section', { timeout: 10_000 })
+          const panel = page.locator('.signoff-section')
 
           await panel.getByRole('button', { name: 'Request Sign-off' }).click()
           const modal = page.locator('.modal[aria-label="Confirm request sign-off"]')
@@ -264,9 +268,9 @@ test('confirming opens a Pull Request, and the panel reflects it — including s
           // instance's own persisted `pullRequests` field (#124), not just
           // transient in-page state from the action's own response.
           await page.reload()
-          await page.waitForSelector('.request-approval-panel', { timeout: 10_000 })
+          await page.waitForSelector('.signoff-section', { timeout: 10_000 })
           await assert.doesNotReject(
-            page.locator('.request-approval-panel', { hasText: /Pull Request #\d+ is open/ }).waitFor({ timeout: 10_000 })
+            page.locator('.signoff-section', { hasText: /Pull Request #\d+ is open/ }).waitFor({ timeout: 10_000 })
           )
 
           assert.deepEqual(pageErrors, [])
@@ -295,7 +299,7 @@ test('reloading reflects a Pull Request abandoned outside gantry', async () => {
 
           await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
           await page.goto(`${base}/instance/${SLUG}`)
-          const panel = page.locator('.request-approval-panel')
+          const panel = page.locator('.signoff-section')
           await panel.waitFor({ timeout: 10_000 })
 
           await panel.getByRole('button', { name: 'Request Sign-off' }).click()
@@ -313,7 +317,14 @@ test('reloading reflects a Pull Request abandoned outside gantry', async () => {
             panel.getByText(/Pull Request #\d+ was abandoned \(closed without merging\) for stage/).waitFor({ timeout: 10_000 })
           )
           assert.equal(await panel.getByText('Not assigned (pending)').count(), 0)
-          assert.equal(await panel.getByRole('button', { name: 'Check status' }).count(), 1)
+          // #213: the sign-off section no longer carries its own "Check
+          // status" button — the card's single top-of-card control (inside
+          // #work-item-detail-card's .panel-header) covers it instead.
+          assert.equal(await panel.getByRole('button', { name: 'Check status' }).count(), 0)
+          assert.equal(
+            await page.locator('#work-item-detail-card .panel-header').getByRole('button', { name: 'Check status' }).count(),
+            1
+          )
           assert.deepEqual(pageErrors, [])
         })
       }
@@ -342,7 +353,8 @@ test('Check status reports pending, then rejection, then approval — merging an
           await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
 
           await page.goto(`${base}/instance/${SLUG}`)
-          const panel = page.locator('.request-approval-panel')
+          const card = page.locator('#work-item-detail-card')
+          const panel = page.locator('.signoff-section')
           await panel.waitFor({ timeout: 10_000 })
 
           // Open the Pull Request first.
@@ -353,19 +365,24 @@ test('Check status reports pending, then rejection, then approval — merging an
           await assert.doesNotReject(panel.locator('text=/Pull Request #\\d+ is open/').waitFor({ timeout: 10_000 }))
           const prId = Number((await panel.locator('text=/Pull Request #(\\d+)/').first().textContent()).match(/#(\d+)/)[1])
 
-          // "Check status" is now the panel's offered action.
-          const checkButton = panel.getByRole('button', { name: 'Check status' })
+          // #213: "Check status" is now the one control at the top of the
+          // whole Work item details card, not a per-section button — the
+          // sign-off section itself no longer offers its own.
+          assert.equal(await panel.getByRole('button', { name: 'Check status' }).count(), 0)
+          const checkButton = card.locator('.panel-header').getByRole('button', { name: 'Check status' })
           assert.equal(await checkButton.count(), 1)
 
-          // No decision yet → explicitly pending.
+          // No decision yet → explicitly pending. The result lands in the
+          // card's own status line (below the reviews/sign-off sub-card),
+          // not inside the sign-off section.
           await castVote(adoBaseUrl, prId, 0)
           await checkButton.click()
-          await assert.doesNotReject(panel.locator('text=Still pending — the Owner hasn\'t reviewed').waitFor({ timeout: 10_000 }))
+          await assert.doesNotReject(card.locator('text=Still pending — the Owner hasn\'t reviewed').waitFor({ timeout: 10_000 }))
 
           // An explicit rejection reads as a decision, not as silence.
           await castVote(adoBaseUrl, prId, -10)
           await checkButton.click()
-          await assert.doesNotReject(panel.locator('text=Rejected — the Owner voted to reject').waitFor({ timeout: 10_000 }))
+          await assert.doesNotReject(card.locator('text=Rejected — the Owner voted to reject').waitFor({ timeout: 10_000 }))
 
           // Approval auto-merges and advances; the screen follows the
           // instance to its new current stage.
@@ -379,7 +396,7 @@ test('Check status reports pending, then rejection, then approval — merging an
           // screen now shows the next stage, which hasn't requested
           // approval yet, so "Request Sign-off" is offered afresh.
           await assert.doesNotReject(
-            page.locator('.request-approval-panel').getByRole('button', { name: 'Request Sign-off' }).waitFor({ timeout: 10_000 })
+            page.locator('.signoff-section').getByRole('button', { name: 'Request Sign-off' }).waitFor({ timeout: 10_000 })
           )
 
           assert.deepEqual(pageErrors, [])
@@ -401,10 +418,21 @@ test('a post-approval commit changes the panel to Request approval again, and re
         await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
         await page.goto(`${base}/instance/${SLUG}`)
 
-        const panel = page.locator('.request-approval-panel')
+        // #213: "Check status" lives once, at the top of the Work item
+        // details card, not inside the sign-off section itself.
+        const card = page.locator('#work-item-detail-card')
+        const checkButton = card.locator('.panel-header').getByRole('button', { name: 'Check status' })
+        const panel = page.locator('.signoff-section')
+        // #215: "Show commit history" moved out of `.signoff-section` into
+        // its own inline `.commit-history-section` (a short summary,
+        // adjacent to Reviews/Sign-off) — the modal it opens is unchanged.
+        const commitHistorySection = page.locator('.commit-history-section')
         await panel.getByRole('button', { name: 'Request Sign-off' }).click()
-        await panel.locator('.modal[aria-label="Confirm request sign-off"]').getByRole('button', { name: 'Confirm & request sign-off' }).click()
-        await panel.getByRole('button', { name: 'Check status' }).waitFor({ timeout: 10_000 })
+        // The confirm modal is a card-level overlay (not nested inside
+        // `.signoff-section` itself), same as every other confirm dialog on
+        // this card — scope to the page, not the section.
+        await page.locator('.modal[aria-label="Confirm request sign-off"]').getByRole('button', { name: 'Confirm & request sign-off' }).click()
+        await assert.doesNotReject(panel.locator('text=/Pull Request #\\d+ is open/').waitFor({ timeout: 10_000 }))
         const prId = Number((await panel.locator('text=/Pull Request #(\\d+)/').first().textContent()).match(/#(\d+)/)[1])
 
         await castVote(adoBaseUrl, prId, 10)
@@ -422,11 +450,18 @@ test('a post-approval commit changes the panel to Request approval again, and re
           )
         }
 
-        await panel.getByRole('button', { name: 'Check status' }).click()
+        await checkButton.click()
         await panel.getByRole('button', { name: 'Request Sign-off again' }).waitFor({ timeout: 10_000 })
         assert.equal(await panel.locator('.request-approval-commits').count(), 0)
 
-        await panel.getByRole('button', { name: 'Show commit history' }).click()
+        // #215: a short commit-history summary sits inline in the card,
+        // near Reviews/Sign-off — not just the full list reachable only via
+        // the modal.
+        await commitHistorySection.waitFor({ timeout: 10_000 })
+        assert.match(await commitHistorySection.locator('.commit-history-summary').innerText(), /\d+ commits? on Pull Request #\d+/)
+        assert.equal(await commitHistorySection.locator('.request-approval-commits').count(), 0)
+
+        await commitHistorySection.getByRole('button', { name: 'Show commit history' }).click()
         const historyModal = page.locator('.modal[aria-label="Pull Request commit history"]')
         await historyModal.waitFor({ state: 'visible', timeout: 5_000 })
         assert.equal(await historyModal.locator('.request-approval-commits').getByText('Post-approval browser edit', { exact: true }).count(), 1)
@@ -441,13 +476,12 @@ test('a post-approval commit changes the panel to Request approval again, and re
         await page.keyboard.press('Escape')
         await historyModal.waitFor({ state: 'hidden', timeout: 5_000 })
 
-        await panel.getByRole('button', { name: 'Show commit history' }).click()
+        await commitHistorySection.getByRole('button', { name: 'Show commit history' }).click()
         await historyModal.waitFor({ state: 'visible', timeout: 5_000 })
         await page.locator('.modal-backdrop').last().click({ position: { x: 5, y: 5 } })
         await historyModal.waitFor({ state: 'hidden', timeout: 5_000 })
 
         await panel.getByRole('button', { name: 'Request Sign-off again' }).click()
-        await panel.getByRole('button', { name: 'Check status' }).waitFor({ timeout: 10_000 })
         await assert.doesNotReject(panel.locator('text=Approval withdrawn from Pull Request').waitFor({ timeout: 10_000 }))
       })
     })
