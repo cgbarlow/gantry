@@ -76,7 +76,7 @@ RUN mkdir -p results \
 FROM source AS test-e2e
 
 ENV CI=true
-RUN npx playwright install --with-deps chromium
+RUN npx playwright install --with-deps chromium chromium-headless-shell
 RUN mkdir -p results \
     && npm run test:e2e:ci \
     ; TEST_EXIT=$? \
