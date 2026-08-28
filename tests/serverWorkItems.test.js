@@ -262,7 +262,7 @@ test('POST /api/instance/work-items/tag reports backfill counts and preserves un
     assert.equal(first.status, 200)
     assert.deepEqual(await first.json(), {
       slug: 'my-initiative',
-      workItemIds: Object.values(link.stages),
+      workItemIds: Object.keys(link.stages).sort().map((k) => link.stages[k]),
       updated: 4,
       alreadyTagged: 0,
     })
