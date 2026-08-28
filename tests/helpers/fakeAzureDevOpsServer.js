@@ -551,6 +551,15 @@ export function createFakeAzureDevOpsServer({
         return json(200, reviewer)
       }
 
+      // DELETE reviewers/{id} endpoint — backs lib/azureDevOpsPullRequestsClient.js's
+      // `removeReviewer` (previously untested against this fake server at
+      // all). Mirrors the real Azure DevOps API: removing a reviewer who
+      // isn't currently on the pull request is a no-op, not an error.
+      if (subResource === 'reviewers' && reviewerId !== undefined && req.method === 'DELETE') {
+        pr.reviewers = pr.reviewers.filter((r) => r.id !== reviewerId)
+        return json(200, {})
+      }
+
       if (subResource === 'threads' && req.method === 'POST') {
         let raw = ''
         for await (const chunk of req) raw += chunk
@@ -670,7 +679,7 @@ export function createFakeAzureDevOpsServer({
       let raw = ''
       for await (const chunk of req) raw += chunk
       // The real endpoint's bulk-add body is a bare array (`addReviewers`
-      // sends `[{id, vote, required}]` directly, not `{reviewers: [...]}`)
+      // sends `[{id, vote, isRequired}]` directly, not `{reviewers: [...]}`)
       // — this used to read `body.reviewers`, which is always undefined on
       // an array, so this endpoint silently added nothing no matter what was
       // sent. Nothing caught it because no prior test checked the resulting
@@ -680,10 +689,10 @@ export function createFakeAzureDevOpsServer({
       for (const r of (Array.isArray(body) ? body : [])) {
         const existing = pr.reviewers.find((rev) => rev.id === r.id)
         if (existing) {
-          if (r.required !== undefined) existing.required = r.required
+          if (r.isRequired !== undefined) existing.isRequired = r.isRequired
           added.push(existing)
         } else {
-          const reviewer = { id: r.id, displayName: r.displayName ?? r.id, vote: 0, required: r.required ?? false }
+          const reviewer = { id: r.id, displayName: r.displayName ?? r.id, vote: 0, isRequired: r.isRequired ?? false }
           pr.reviewers.push(reviewer)
           added.push(reviewer)
         }

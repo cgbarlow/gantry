@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { checkStageApprovalStatus, interpretReviewerVotes } from '../lib/stageStatus.js'
+import { checkStageApprovalStatus, interpretReviewerVotes, summarizePullRequest } from '../lib/stageStatus.js'
 import { requestStageApproval } from '../lib/stageApproval.js'
 import { readInstance } from '../lib/instance.js'
 import { linkInstanceToWorkItem } from '../lib/workItemLink.js'
@@ -74,6 +74,34 @@ test('interpretReviewerVotes distinguishes approval, rejection, changes-requeste
   assert.equal(interpretReviewerVotes([{ displayName: 'a', vote: -5 }]), 'changes-requested')
   // A single rejection blocks, no matter who else approved.
   assert.equal(interpretReviewerVotes([{ displayName: 'a', vote: 10 }, { displayName: 'b', vote: -10 }]), 'rejected')
+})
+
+test('summarizePullRequest reads a reviewer\'s required flag off Azure DevOps\'s real isRequired field (WI199), not the wrong `required` field', () => {
+  const pullRequest = {
+    pullRequestId: 1,
+    status: 'active',
+    reviewers: [
+      // No isRequired at all — must default to not-required, not throw.
+      { id: 'optional-1', displayName: 'Optional Reviewer', vote: 0 },
+      // isRequired explicitly false.
+      { id: 'optional-2', displayName: 'Optional Reviewer 2', vote: 0, isRequired: false },
+      // Azure DevOps's real shape carries isRequired — a stray `required`
+      // field (e.g. left over from a caller still using the old wrong
+      // name, or from some other source) must never be trusted instead.
+      // Listed last, so a correct pick below proves `required` (not
+      // array order) drove the selection.
+      { id: 'owner-1', displayName: 'The Owner', vote: 0, isRequired: true, required: false },
+    ],
+  }
+
+  const summary = summarizePullRequest(pullRequest)
+  assert.equal(summary.review.reviewers[0].required, false)
+  assert.equal(summary.review.reviewers[1].required, false)
+  assert.equal(summary.review.reviewers[2].required, true)
+  // The picked "approver" for display purposes should be the required
+  // reviewer, not just the first one in the array — proving `required`
+  // actually drove that selection rather than being reported but ignored.
+  assert.equal(summary.review.approver.id, 'owner-1')
 })
 
 test('checkStageApprovalStatus is Workspace-backed only', async () => {

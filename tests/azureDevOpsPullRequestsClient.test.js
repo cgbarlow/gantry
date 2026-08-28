@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { createServer } from 'node:http'
 import {
   createAzureDevOpsPullRequestsClient,
   AzureDevOpsAuthenticationError,
@@ -161,6 +162,40 @@ test('getPullRequestCommits returns the source branch history, and reviewer vote
   )
 })
 
+test('removeReviewer removes a reviewer previously added via addReviewers, leaving other reviewers untouched', async () => {
+  await withFakeAzureDevOpsServer(async (baseUrl) => {
+    const c = client(baseUrl)
+    const created = await c.createPullRequest({ sourceBranch: 'hld-stage', targetBranch: 'main', title: 'HLD' })
+
+    await c.addReviewers(created.pullRequestId, [
+      { id: 'reviewer-to-remove' },
+      { id: 'reviewer-to-keep' },
+    ])
+    let pr = await c.getPullRequest(created.pullRequestId)
+    assert.equal(pr.reviewers.length, 2)
+
+    await c.removeReviewer(created.pullRequestId, 'reviewer-to-remove')
+
+    pr = await c.getPullRequest(created.pullRequestId)
+    assert.equal(pr.reviewers.length, 1)
+    assert.equal(pr.reviewers[0].id, 'reviewer-to-keep')
+  })
+})
+
+test('removeReviewer is a no-op (not an error) for a reviewer who is not on the pull request, mirroring Azure DevOps\'s own idempotent DELETE', async () => {
+  await withFakeAzureDevOpsServer(async (baseUrl) => {
+    const c = client(baseUrl)
+    const created = await c.createPullRequest({ sourceBranch: 'hld-stage', targetBranch: 'main', title: 'HLD' })
+
+    // Never added, so this is removing something that was never there —
+    // must not throw.
+    await c.removeReviewer(created.pullRequestId, 'never-added')
+
+    const pr = await c.getPullRequest(created.pullRequestId)
+    assert.equal(pr.reviewers.length, 0)
+  })
+})
+
 test('completePullRequest merges an approved pull request, threading through the current lastMergeSourceCommit', async () => {
   await withFakeAzureDevOpsServer(async (baseUrl) => {
     const c = client(baseUrl)
@@ -255,6 +290,36 @@ test('a network failure reaching the Azure DevOps API surfaces as AzureDevOpsReq
     () => c.createPullRequest({ sourceBranch: 'a', targetBranch: 'main', title: 'X' }),
     AzureDevOpsRequestError
   )
+})
+
+test('a non-auth, non-not-found HTTP error response surfaces as AzureDevOpsRequestError carrying the status and response body', async () => {
+  // A raw local HTTP server standing in for Azure DevOps, returning a
+  // generic 500 with a body — exercises the `!res.ok` fallback branch in
+  // `request()` (distinct from the dedicated 401/403/404 branches covered
+  // elsewhere in this file), which reads back and attaches the response
+  // body to the thrown error.
+  const server = createServer((req, res) => {
+    res.writeHead(500, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ message: 'TF400898: An Internal Error Occurred (fake outage).' }))
+  })
+  await new Promise((resolve) => server.listen(0, resolve))
+  try {
+    const { port } = server.address()
+    const c = client(`http://127.0.0.1:${port}`)
+
+    await assert.rejects(
+      () => c.createPullRequest({ sourceBranch: 'a', targetBranch: 'main', title: 'X' }),
+      (err) => {
+        assert.ok(err instanceof AzureDevOpsRequestError)
+        assert.equal(err.status, 500)
+        assert.match(err.body, /Internal Error Occurred/)
+        assert.match(err.message, /HTTP 500/)
+        return true
+      }
+    )
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+  }
 })
 
 test('base URL defaults to the real Azure DevOps API but is configurable/overridable for tests', async () => {

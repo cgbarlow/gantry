@@ -9,6 +9,7 @@ import { registerInstance } from '../lib/instanceRegistry.js'
 import { loadDefinition } from '../lib/definition.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { resolveStageBranch } from '../lib/stageBranch.js'
+import { createAzureDevOpsPullRequestsClient } from '../lib/azureDevOpsPullRequestsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
 // HTTP-boundary tests for #124's new route: POST /api/instance/request-approval
@@ -273,6 +274,19 @@ test('POST /api/instance/request-approval resolves a configured required reviewe
           assert.equal(reviewers.length, 1)
           assert.equal(reviewers[0].id, 'fake-identity-id-001')
           assert.equal(reviewers[0].required, true)
+
+          // Assert the actual wire format sent to (and stored by) Azure
+          // DevOps uses `isRequired` — Azure DevOps's real field name for
+          // this (WI199). A test asserting only the server's own normalized
+          // `required` output above would have passed even under the
+          // original bug, since that field is populated by mapping from
+          // whatever raw field this client reads — it would never catch a
+          // regression back to sending the wrong field name on the wire.
+          const pullRequestsClient = createAzureDevOpsPullRequestsClient(azureDevOps)
+          const rawPullRequest = await pullRequestsClient.getPullRequest(body.pullRequestId)
+          assert.equal(rawPullRequest.reviewers.length, 1)
+          assert.equal(rawPullRequest.reviewers[0].isRequired, true)
+          assert.equal(rawPullRequest.reviewers[0].required, undefined)
         })
       })
     }
