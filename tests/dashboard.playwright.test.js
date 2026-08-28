@@ -298,7 +298,9 @@ test('dashboard: swimlane chip overflow menu can open the module editor for that
         await page.locator('.chip .menu-btn').click()
         await page.getByRole('link', { name: 'Open' }).click()
         await page.waitForSelector('.module', { timeout: 10_000 })
-        assert.equal(page.url(), `${base}/instance/alpha-initiative`)
+        // Canonical numeric reference (WI200, docs/adr/0024) — this dashboard's only local instance is workspace 0 (no
+        // real Azure DevOps workspace), instance 1.
+        assert.equal(page.url(), `${base}/instance/w0i1`)
         assert.match(await page.locator('header h1').textContent(), /alpha-initiative/)
       })
     )

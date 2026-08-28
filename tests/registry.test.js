@@ -24,10 +24,40 @@ test('listRegistry lists every instance, sorted by slug, with definition, curren
     createInstance('design', 'alpha-initiative', { instancesDir, assignee: 'c.barlow' })
 
     const registry = listRegistry({ instancesDir })
-    assert.deepEqual(registry.map(({ slug, definition, stage, status, assignee }) => ({ slug, definition, stage, status, assignee })), [
-      { slug: 'alpha-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: 'c.barlow' },
-      { slug: 'zebra-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: '' },
-    ])
+    assert.deepEqual(
+      registry.map(({ slug, definition, stage, status, assignee, workspaceNumber, instanceNumber, ref }) => ({
+        slug,
+        definition,
+        stage,
+        status,
+        assignee,
+        workspaceNumber,
+        instanceNumber,
+        ref,
+      })),
+      [
+        {
+          slug: 'alpha-initiative',
+          definition: 'design',
+          stage: 'shape',
+          status: 'incomplete',
+          assignee: 'c.barlow',
+          workspaceNumber: 0,
+          instanceNumber: 1,
+          ref: 'w0i1',
+        },
+        {
+          slug: 'zebra-initiative',
+          definition: 'design',
+          stage: 'shape',
+          status: 'incomplete',
+          assignee: '',
+          workspaceNumber: 0,
+          instanceNumber: 2,
+          ref: 'w0i2',
+        },
+      ]
+    )
     for (const row of registry) {
       assert.deepEqual(
         { stageNumber: row.stageNumber, stageCount: row.stageCount, stageTitle: row.stageTitle, pullRequestId: row.pullRequestId },

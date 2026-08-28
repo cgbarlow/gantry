@@ -246,8 +246,26 @@ test('POST /api/instances/adopt reports 409 when the found slug is already regis
     const listing = await (await fetch(`${gantryBase}/api/instances`)).json()
     const local = listing.find((i) => i.slug === 'my-initiative')
     assert.deepEqual(
-      (({ slug, definition, stage, status, assignee }) => ({ slug, definition, stage, status, assignee }))(local),
-      { slug: 'my-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: 'local-assignee' }
+      (({ slug, definition, stage, status, assignee, workspaceNumber, instanceNumber, ref }) => ({
+        slug,
+        definition,
+        stage,
+        status,
+        assignee,
+        workspaceNumber,
+        instanceNumber,
+        ref,
+      }))(local),
+      {
+        slug: 'my-initiative',
+        definition: 'design',
+        stage: 'shape',
+        status: 'incomplete',
+        assignee: 'local-assignee',
+        workspaceNumber: 0,
+        instanceNumber: 1,
+        ref: 'w0i1',
+      }
     )
     assert.deepEqual(
       { stageNumber: local.stageNumber, stageCount: local.stageCount, stageTitle: local.stageTitle, pullRequestId: local.pullRequestId },

@@ -34,7 +34,7 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
     const body = await res.json()
     assert.equal(body.slug, 'examples')
     assert.equal(body.definition, 'design')
-    assert.deepEqual(body.stage, { id: 'shape', title: 'SOAP', gate: 'business-case' })
+    assert.deepEqual(body.stage, { id: 'shape', title: 'SOAP', gate: 'business-case', number: 1 })
     assert.deepEqual(body.artefacts, [
       { id: 'soap', title: 'Solution on a Page', requires: ['context', 'solution-definition', 'team-and-estimates'] },
       {
@@ -81,7 +81,7 @@ test('GET /api/instance?stage=<id> browses a different stage\'s modules without 
     const res = await fetch(`${base}/api/instance?stage=hld-define`)
     assert.equal(res.status, 200)
     const body = await res.json()
-    assert.deepEqual(body.stage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-tac-approved' })
+    assert.deepEqual(body.stage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-tac-approved', number: 2 })
     assert.equal(body.currentStageId, 'shape')
     assert.deepEqual(body.artefacts, [{ id: 'hld', title: 'High Level Design', requires: ['hld-submission', 'problem-statement', 'proposed-solution', 'alternatives-considered', 'open-questions', 'nfrs', 'risks', 'security', 'dependencies'] }])
     assert.ok(body.modules.some((m) => m.id === 'hld-submission'))
@@ -380,10 +380,40 @@ test('GET /api/instances lists every registered instance, without the server bei
       const res = await fetch(`${base}/api/instances`)
       assert.equal(res.status, 200)
       const body = await res.json()
-      assert.deepEqual(body.map(({ slug, definition, stage, status, assignee }) => ({ slug, definition, stage, status, assignee })), [
-        { slug: 'alpha-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: 'c.barlow' },
-        { slug: 'zebra-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: '' },
-      ])
+      assert.deepEqual(
+        body.map(({ slug, definition, stage, status, assignee, workspaceNumber, instanceNumber, ref }) => ({
+          slug,
+          definition,
+          stage,
+          status,
+          assignee,
+          workspaceNumber,
+          instanceNumber,
+          ref,
+        })),
+        [
+          {
+            slug: 'alpha-initiative',
+            definition: 'design',
+            stage: 'shape',
+            status: 'incomplete',
+            assignee: 'c.barlow',
+            workspaceNumber: 0,
+            instanceNumber: 1,
+            ref: 'w0i1',
+          },
+          {
+            slug: 'zebra-initiative',
+            definition: 'design',
+            stage: 'shape',
+            status: 'incomplete',
+            assignee: '',
+            workspaceNumber: 0,
+            instanceNumber: 2,
+            ref: 'w0i2',
+          },
+        ]
+      )
       assert.deepEqual(
         body.map(({ stageNumber, stageCount, stageTitle, pullRequestId }) => ({ stageNumber, stageCount, stageTitle, pullRequestId })),
         [
@@ -538,13 +568,25 @@ test('POST /api/instances registers a new instance, which then appears in GET /a
       assert.equal(res.status, 201)
       const created = await res.json()
       assert.deepEqual(
-        (({ slug, definition, stage, status, assignee }) => ({ slug, definition, stage, status, assignee }))(created),
+        (({ slug, definition, stage, status, assignee, workspaceNumber, instanceNumber, ref }) => ({
+          slug,
+          definition,
+          stage,
+          status,
+          assignee,
+          workspaceNumber,
+          instanceNumber,
+          ref,
+        }))(created),
         {
-        slug: 'claims-modernisation',
-        definition: 'design',
-        stage: 'shape',
-        status: 'incomplete',
-        assignee: '',
+          slug: 'claims-modernisation',
+          definition: 'design',
+          stage: 'shape',
+          status: 'incomplete',
+          assignee: '',
+          workspaceNumber: 0,
+          instanceNumber: 1,
+          ref: 'w0i1',
         }
       )
       assert.deepEqual(
@@ -872,8 +914,26 @@ test('POST /api/instances with an Azure DevOps location reusing a slug that alre
         const listing = await (await fetch(`${base}/api/instances`)).json()
         const local = listing.find((i) => i.slug === 'local-initiative')
         assert.deepEqual(
-          (({ slug, definition, stage, status, assignee }) => ({ slug, definition, stage, status, assignee }))(local),
-          { slug: 'local-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: 'local-assignee' }
+          (({ slug, definition, stage, status, assignee, workspaceNumber, instanceNumber, ref }) => ({
+            slug,
+            definition,
+            stage,
+            status,
+            assignee,
+            workspaceNumber,
+            instanceNumber,
+            ref,
+          }))(local),
+          {
+            slug: 'local-initiative',
+            definition: 'design',
+            stage: 'shape',
+            status: 'incomplete',
+            assignee: 'local-assignee',
+            workspaceNumber: 0,
+            instanceNumber: 1,
+            ref: 'w0i1',
+          }
         )
         assert.deepEqual(
           { stageNumber: local.stageNumber, stageCount: local.stageCount, stageTitle: local.stageTitle, pullRequestId: local.pullRequestId },

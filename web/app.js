@@ -38,6 +38,24 @@ function assetFileUrl(assetId, slug) {
   return slug ? `${base}?slug=${encodeURIComponent(slug)}` : base
 }
 
+// WI200/docs/adr/0024's numeric references: `/instance/:ref` accepts a numeric reference
+// (`w<workspaceNumber>`, `w<workspaceNumber>i<instanceNumber>`, or `w<workspaceNumber>i<instanceNumber>s<stageNumber>`)
+// as well as the pre-existing plain slug — this is the same grammar `lib/numberRegistry.js`'s
+// `parseInstanceRef` accepts server-side, kept in sync by hand since the web form has no shared
+// module with lib/ (no bundler, ADR-0006). Used purely to decide *how* to resolve the route's own
+// `:ref` segment (via `?ref=` against the server) — never to parse it further client-side; the
+// server remains the sole source of truth for what a reference resolves to.
+const NUMERIC_REF_RE = /^w\d+(i\d+)?(s\d+)?$/i
+
+async function resolveInstanceRef(ref) {
+  const res = await apiFetch(`/api/instance?ref=${encodeURIComponent(ref)}`)
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.message ?? body.error ?? `Failed to resolve reference "${ref}" (${res.status})`)
+  }
+  return res.json()
+}
+
 async function loadInstance(slug, stageId) {
   const params = new URLSearchParams()
   if (slug) params.set('slug', slug)
@@ -2726,7 +2744,7 @@ function InstanceSwitcher({ slug, open, onOpenChange }) {
 
   function renderInstanceLink(inst) {
     return html`
-      <a key=${inst.slug} class="switcher-item" href="/instance/${inst.slug}" onClick=${() => onOpenChange(false)}>
+      <a key=${inst.slug} class="switcher-item" href=${instanceHref(inst)} onClick=${() => onOpenChange(false)}>
         <span class="name">${inst.slug}</span>
         <span class="def">${inst.definition}</span>
       </a>
@@ -2809,6 +2827,7 @@ function AppHeader({ instance }) {
         <${GantryBrandIcon} />
         <a class="btn small ghost" href="/">← Workspaces</a>
         <h1>${instance.slug} — ${instance.definition}</h1>
+        <span class="instance-ref" title="Numeric reference (WI200) — the canonical short URL for this instance">${instance.ref}</span>
         <${InstanceSwitcher}
           slug=${instance.slug}
           open=${openMenu === 'instance-switcher'}
@@ -2844,15 +2863,42 @@ function AppHeader({ instance }) {
 
 // ---------- Page: composes header + the viewed stage's screen ----------
 // `slug` arrives as a route param from `/instance/:slug` (preact-iso passes matched params as top-level props). Re-pins the shared instance-scoped signals to this slug on mount and whenever the route's slug changes — e.g. following an "Open editor" link (#102 — this screen used to call that link "Open workspace", renamed to avoid colliding with the Workspace entity, #96) from one instance straight to another without an intervening full page load — clearing the previous instance's stale data first so it's never shown against the new slug. `batch()` matters here: without it, `currentSlug.value = slug` alone fires the instance-loading effect below (it's already subscribed to `currentSlug`) using whatever `viewedStage` was still left over from the instance just navigated away from — a stage that may not even be this new instance's current one — before the very next line resets it. That fires a real, wasted request for the wrong stage, whose response can race the correct one. Batching applies all four writes as one update, so the effect runs exactly once, with the new slug and `viewedStage: null` together.
-function ModuleEditorPage({ slug }) {
+function ModuleEditorPage({ slug: routeRef }) {
   useEffect(() => {
     batch(() => {
-      currentSlug.value = slug
-      viewedStage.value = null
       instanceData.value = null
       loadError.value = null
     })
-  }, [slug])
+
+    // A numeric reference (WI200, docs/adr/0024) resolves through the server first — the one
+    // source of truth for what it means — then pins `currentSlug`/`viewedStage` to the *real*
+    // slug/stage id it resolved to, exactly as a plain legacy slug route always has: every other
+    // fetch in this file (module saves, asset uploads, render, etc.) is keyed off those two
+    // signals holding real values, never a numeric ref. The bootstrap response is reused as this
+    // page's first render (no second round-trip) — the instance-loading effect below still fires
+    // once more when `currentSlug`/`viewedStage` change, a harmless redundant fetch of the exact
+    // same data.
+    if (NUMERIC_REF_RE.test(routeRef)) {
+      resolveInstanceRef(routeRef)
+        .then((data) => {
+          batch(() => {
+            currentSlug.value = data.slug
+            viewedStage.value = data.stage.id
+            instanceData.value = data
+            loadError.value = null
+          })
+        })
+        .catch((err) => {
+          loadError.value = err.message
+        })
+      return
+    }
+
+    batch(() => {
+      currentSlug.value = routeRef
+      viewedStage.value = null
+    })
+  }, [routeRef])
 
   const instance = instanceData.value
   const error = loadError.value
@@ -2922,7 +2968,9 @@ function ModuleEditorPage({ slug }) {
   }
 
   if (error) return html`<p class="load-error">Failed to load: ${error}</p>`
-  if (!instance || instance.slug !== slug) return html`<p class="loading">Loading…</p>`
+  // Compared against `currentSlug` (the real slug the route's own ref/slug already resolved to),
+  // not the raw `routeRef` prop — a numeric reference (WI200) never equals `instance.slug` itself.
+  if (!instance || instance.slug !== currentSlug.value) return html`<p class="loading">Loading…</p>`
 
   const selectedArtefact = instance.artefacts.find((artefact) => artefact.id === selectedArtefactId) ??
     instance.artefacts.find((artefact) => artefact.id === defaultArtefactId(instance.artefacts)) ?? null
@@ -3078,6 +3126,18 @@ async function runRender(slug) {
   return results.join(' · ')
 }
 
+// The canonical link to an instance's module editor (WI200, docs/adr/0024): a numeric reference
+// (`/instance/w<workspaceNumber>i<instanceNumber>`) when the row carries one — every `GET /api/instances`
+// row does, since `lib/registry.js` assigns one lazily on read — falling back to the legacy
+// `/instance/<slug>` form only for a row shape that somehow lacks it (defensive; not expected in
+// practice). `ModuleEditorPage` accepts either form interchangeably (see NUMERIC_REF_RE above).
+function instanceHref(inst) {
+  if (inst.workspaceNumber !== undefined && inst.instanceNumber !== undefined) {
+    return `/instance/w${inst.workspaceNumber}i${inst.instanceNumber}`
+  }
+  return `/instance/${inst.slug}`
+}
+
 // ---------- Grouping instances by workspace (#102) ----------
 // The Workspaces landing page's core grouping rule: an Azure-DevOps-backed row carries a `workspace` (lib/registry.js, #102) — every instance sharing that workspace's `id` groups into one row, one entry per workspace, per the ticket's acceptance criteria. A local instance has no `workspace` at all (Workspace is an Azure-DevOps-repo concept only, #96) — it groups on its own, keyed by its own slug, so a repo (or local instance) holding just one instance still renders through the exact same group shape as one holding several — nothing here special-cases a single-instance group.
 function groupInstancesByWorkspace(instances) {
@@ -3193,6 +3253,7 @@ function MasterDetailView({ instances }) {
                       <div class="instance-card-content">
                         <div class="instance-card-header">
                           <span class="name">${inst.slug}</span>
+                          <span class="ref" title="Numeric reference (WI200)">${inst.ref}</span>
                           <span class="def">${inst.definition}</span>
                           <span class="instance-card-status">
                             <${StatusStamp} status=${inst.status} />
@@ -3208,7 +3269,7 @@ function MasterDetailView({ instances }) {
                           <span class="assignee">${inst.assignee || 'Unassigned'}</span>
                         </div>
                         <div class="detail-actions">
-                          <a class="btn primary" href="/instance/${inst.slug}">Edit</a>
+                          <a class="btn primary" href=${instanceHref(inst)}>Edit</a>
                           <button type="button" class="btn" onClick=${() => handleCheck(inst.slug)}>Check</button>
                         </div>
                         ${actionStatus[inst.slug] ? html`<div class="save-status">${actionStatus[inst.slug]}</div>` : null}
@@ -3273,7 +3334,7 @@ function SwimlaneChip({ instance, menuOpen, onOpenMenu, onAction }) {
         ${menu}
       `}
     >
-      <a href="/instance/${instance.slug}">Open</a>
+      <a href=${instanceHref(instance)}>Open</a>
       <button type="button" onClick=${() => onAction(instance.slug, 'check')}>Check</button>
       <button type="button" onClick=${() => onAction(instance.slug, 'render')}>Render</button>
     <//>

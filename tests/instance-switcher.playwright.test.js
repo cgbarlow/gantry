@@ -99,7 +99,10 @@ test('instance switcher: defaults to the current workspace\'s other instances, a
             // the Workspaces landing page ("/").
             await menu.locator('.switcher-item').click()
             await page.waitForSelector('.module', { timeout: 10_000 })
-            assert.equal(page.url(), `${base}/instance/instance-two`)
+            // Canonical numeric reference (WI200, docs/adr/0024): the workspace shared by instance-one/instance-two is
+            // the first (and only) real Azure DevOps workspace registered, so it's workspace 1 — instance-two is its
+            // second instance in alphabetical listing order.
+            assert.equal(page.url(), `${base}/instance/w1i2`)
             assert.match(await page.locator('header h1').textContent(), /instance-two/)
 
             // Re-opened on instance-two: its own sibling is instance-one, and
@@ -119,7 +122,9 @@ test('instance switcher: defaults to the current workspace\'s other instances, a
             )
             await menu.locator('.switcher-item', { hasText: 'local-initiative' }).click()
             await page.waitForSelector('.module', { timeout: 10_000 })
-            assert.equal(page.url(), `${base}/instance/local-initiative`)
+            // local-initiative has no real Azure DevOps workspace of its own — workspace 0 (LOCAL_WORKSPACE_NUMBER),
+            // instance 1 (the only local instance registered).
+            assert.equal(page.url(), `${base}/instance/w0i1`)
             assert.match(await page.locator('header h1').textContent(), /local-initiative/)
           })
         )

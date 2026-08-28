@@ -6,6 +6,7 @@ import { checkGate } from '../lib/check.js'
 import { validateDefinition } from '../lib/validate.js'
 import { createServer } from '../lib/server.js'
 import { createInstance, listInstances } from '../lib/instance.js'
+import { backfillNumberRegistry } from '../lib/numberRegistry.js'
 
 const program = new Command()
 
@@ -151,6 +152,22 @@ program
       console.log(`  [${problem.type}] ${problem.message}`)
     }
     process.exitCode = 1
+  })
+
+program
+  .command('backfill-numeric-refs')
+  .description(
+    'One-time backfill of numeric workspace/instance references (WI200, docs/adr/0024) for workspaces/instances that predate this feature. Safe to run more than once — only fills in what is still missing.'
+  )
+  .action(() => {
+    const { workspacesAssigned, instancesAssigned } = backfillNumberRegistry()
+    if (workspacesAssigned === 0 && instancesAssigned === 0) {
+      console.log('Nothing to backfill — every workspace/instance already has a numeric reference.')
+      return
+    }
+    console.log(
+      `Assigned numeric references to ${workspacesAssigned} workspace(s) and ${instancesAssigned} instance(s).`
+    )
   })
 
 program.parseAsync(process.argv)

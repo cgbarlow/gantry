@@ -119,6 +119,15 @@ header {
   flex: 1;
 }
 .theme-toggle { margin: 0; text-transform: capitalize; }
+/* WI200/docs/adr/0024's numeric reference — shown next to the instance name so it's discoverable on screen, not just in the URL bar. */
+.instance-ref {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  border: var(--border-strong) solid var(--line-strong);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
 
 /*
  * Instance switcher (#112) — a toggle button in AppHeader plus an
@@ -783,6 +792,7 @@ main.dashboard {
 .instance-card-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .instance-card-header .name { font-family: var(--font-display); font-weight: 600; font-size: 16px; }
 .instance-card-header .def { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+.instance-card-header .ref { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
 .instance-card-status { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
 .pr-badge { padding: 2px 5px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); font-family: var(--font-mono); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; }
 .instance-card-context { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; }
