@@ -6,9 +6,9 @@ import { renderMarkdown } from '../lib/markdown.js'
 const GUIDE_SECTIONS = [
   { id: 'getting-started', label: 'Getting Started' },
   { id: 'workspaces-instances', label: 'Workspaces & Instances' },
-  { id: 'stages-gates', label: 'Stages & Gates', pending: true },
+  { id: 'stages-gates', label: 'Stages & Gates' },
   { id: 'modules-fields', label: 'Modules & Fields' },
-  { id: 'artefacts-rendering', label: 'Artefacts & Rendering', pending: true },
+  { id: 'artefacts-rendering', label: 'Artefacts & Rendering' },
   { id: 'approval-workflow', label: 'Approval workflow' },
   { id: 'settings', label: 'Settings' },
 ]

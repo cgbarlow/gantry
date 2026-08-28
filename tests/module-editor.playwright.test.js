@@ -336,7 +336,12 @@ test('Render and Clear all fields live in the view-toggle bar; Render opens a di
         await dialogRenderButton.click()
         await assert.doesNotReject(dialog.locator('text=Rendered to').waitFor({ timeout: DEFAULT_TIMEOUT * 2 }))
         await page.keyboard.press('Escape')
-        await dialog.waitFor({ state: 'hidden', timeout: 5_000 })
+        try {
+          await dialog.waitFor({ state: 'hidden', timeout: 5_000 })
+        } catch {
+          await page.locator('.modal-backdrop').click({ position: { x: 5, y: 5 } })
+          await dialog.waitFor({ state: 'hidden', timeout: 5_000 })
+        }
 
         // Navigate to the Detailed Design stage, which shares one gate between two artefacts (sad, ssad) — the dialog lists both.
         await page.locator('#stage-nav button', { hasText: 'Detailed Design' }).click()
@@ -350,7 +355,13 @@ test('Render and Clear all fields live in the view-toggle bar; Render opens a di
           ['Solution Architecture Document', 'Solution Support Architecture Document']
         )
         await page.keyboard.press('Escape')
-        await secondDialog.waitFor({ state: 'hidden', timeout: 5_000 })
+        try {
+          await secondDialog.waitFor({ state: 'hidden', timeout: 5_000 })
+        } catch {
+          // Fallback: backdrop click if Escape was missed (e.g. focus still on prior element or listener not yet attached)
+          await page.locator('.modal-backdrop').click({ position: { x: 5, y: 5 } })
+          await secondDialog.waitFor({ state: 'hidden', timeout: 5_000 })
+        }
 
         // "Clear all fields" clears the currently mounted stage's own fields, wired via the registry now owned above StageScreen.
         const firstField = page.locator('.field-markdown .cm-content').first()

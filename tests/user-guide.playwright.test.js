@@ -20,7 +20,7 @@ function withRunningServer(fn) {
   })
 }
 
-test('User Guide: loads markdown content, ordered navigation, and pending sections', async () => {
+test('User Guide: loads markdown content, ordered navigation, and definition-backed sections', async () => {
   await withRunningServer(async (base) => {
     const browser = await launchBrowser()
     try {
@@ -39,9 +39,9 @@ test('User Guide: loads markdown content, ordered navigation, and pending sectio
       assert.deepEqual(await page.locator('.guide-navigation li').allTextContents(), [
         'Getting Started',
         'Workspaces & Instances',
-        'Stages & GatesPending',
+        'Stages & Gates',
         'Modules & Fields',
-        'Artefacts & RenderingPending',
+        'Artefacts & Rendering',
         'Approval workflow',
         'Settings',
       ])
@@ -54,7 +54,7 @@ test('User Guide: loads markdown content, ordered navigation, and pending sectio
         'Approval workflow',
         'Settings',
       ])
-      assert.equal(await page.locator('.guide-navigation li.pending').count(), 2)
+      assert.equal(await page.locator('.guide-navigation li.pending').count(), 0)
       assert.equal(await page.locator('.guide-navigation a').nth(2).getAttribute('href'), '#stages-gates')
       assert.equal(await page.locator('.guide-content h2').nth(2).getAttribute('id'), 'stages-gates')
       assert.deepEqual(await page.locator('.guide-content h2').evaluateAll((headings) => headings.map((heading) => heading.id)), [
@@ -82,6 +82,18 @@ test('User Guide: loads markdown content, ordered navigation, and pending sectio
       assert.deepEqual(collidingHeadingIds, ['foo', 'foo-2', 'foo-3'])
       assert.match(await page.locator('.guide-content').textContent(), /Request Approval/)
       assert.match(await page.locator('.guide-content').textContent(), /Workspace Settings/)
+      const guideText = await page.locator('.guide-content').textContent()
+      assert.match(guideText, /Shape an initiative into a clear business case/)
+      assert.match(guideText, /Define the proposed solution in enough detail for approval/)
+      assert.match(guideText, /Describe the architecture, integration, data, quality, security, risk/)
+      assert.match(guideText, /Record the as-built solution and the information needed to hand it over/)
+      assert.match(guideText, /Summarise the initiative's context, solution, team, and estimates/)
+      assert.match(guideText, /Provide a fuller Solution on a Page with detailed scope/)
+      assert.match(guideText, /Present the proposed solution, alternatives, risks, and open questions/)
+      assert.match(guideText, /Describe the complete solution architecture and its requirements/)
+      assert.match(guideText, /Frame the solution's design and operational readiness/)
+      assert.match(guideText, /Capture what was built and the final handover information/)
+      assert.match(guideText, /context\.driver/)
       assert.deepEqual(pageErrors, [])
     } finally {
       await browser.close()

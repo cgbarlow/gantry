@@ -27,7 +27,13 @@ The storage choice changes how stage advancement works, but not what a Module or
 
 ## Stages & Gates
 
-**Pending:** This section will explain the stages and gates that structure a process. It is being completed separately; the navigation link is present so the guide's sections remain stable.
+A **Stage** is an ordered phase of a Definition. It makes the relevant modules available for authoring and ends at one **Gate**.
+
+A **Gate** is the decision point at the end of a Stage. A gate checks the artefact requirements declared by the Definition. Passing a gate permits the next action; it does not advance an Instance by itself. Local Instances advance explicitly, while Workspace-backed Instances advance when their approved Pull Request is merged.
+
+The `design` Definition has these stages:
+
+<!-- GANTRY-DESIGN-STAGES -->
 
 ## Modules & Fields
 
@@ -39,7 +45,13 @@ You normally work through the editor's Module cards and save each Module as you 
 
 ## Artefacts & Rendering
 
-**Pending:** This section will explain how artefacts are rendered from module data. It is being completed separately; this placeholder keeps the navigation link from leading to a missing section.
+An **Artefact** is a rendered output such as a summary, design document or handover document. Artefacts are generated from module data on demand and are never the authored source of truth.
+
+Each artefact declares the module or field content it `requires`. Those requirements determine whether that artefact is complete for its gate. Multiple artefacts can therefore render different views of the same modules without asking authors to duplicate content.
+
+The `design` Definition has these artefacts:
+
+<!-- GANTRY-DESIGN-ARTEFACTS -->
 
 ## Approval workflow
 
