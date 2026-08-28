@@ -3060,6 +3060,14 @@ function StatusStamp({ status }) {
   return html`<span class="stamp ${statusStampClass(status)}">${status.toUpperCase()}</span>`
 }
 
+function pullRequestBadge(inst) {
+  if (!inst.workspace || inst.pullRequestId == null) return null
+  const status = inst.pullRequestStatus
+  if (status === null || status === undefined) return html`<span class="pr-badge">PR OPEN</span>`
+  if (status === 'active' || status === 'notSet') return html`<span class="pr-badge">PR OPEN</span>`
+  return null
+}
+
 function relativeUpdatedAt(updatedAt) {
   const timestamp = Date.parse(updatedAt)
   if (!Number.isFinite(timestamp)) return 'unknown'
@@ -3290,7 +3298,7 @@ function MasterDetailView({ instances }) {
                           <span class="def">${inst.definition}</span>
                           <span class="instance-card-status">
                             <${StatusStamp} status=${inst.status} />
-                            ${inst.workspace && inst.pullRequestId != null ? html`<span class="pr-badge">PR OPEN</span>` : null}
+                            ${pullRequestBadge(inst)}
                           </span>
                         </div>
                         <div class="instance-card-context">
