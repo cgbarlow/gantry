@@ -244,10 +244,16 @@ test('POST /api/instances/adopt reports 409 when the found slug is already regis
 
     // The pre-existing local registry entry must be untouched.
     const listing = await (await fetch(`${gantryBase}/api/instances`)).json()
+    const local = listing.find((i) => i.slug === 'my-initiative')
     assert.deepEqual(
-      listing.find((i) => i.slug === 'my-initiative'),
+      (({ slug, definition, stage, status, assignee }) => ({ slug, definition, stage, status, assignee }))(local),
       { slug: 'my-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: 'local-assignee' }
     )
+    assert.deepEqual(
+      { stageNumber: local.stageNumber, stageCount: local.stageCount, stageTitle: local.stageTitle, pullRequestId: local.pullRequestId },
+      { stageNumber: 1, stageCount: 4, stageTitle: 'SOAP', pullRequestId: null }
+    )
+    assert.doesNotThrow(() => new Date(local.updatedAt).toISOString())
   })
 })
 

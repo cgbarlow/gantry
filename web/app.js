@@ -2704,6 +2704,26 @@ function StatusStamp({ status }) {
   return html`<span class="stamp ${statusStampClass(status)}">${status.toUpperCase()}</span>`
 }
 
+function relativeUpdatedAt(updatedAt) {
+  const timestamp = Date.parse(updatedAt)
+  if (!Number.isFinite(timestamp)) return 'unknown'
+
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000))
+  if (seconds < 60) return 'just now'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}d ago`
+  return new Date(timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+function UpdatedAt({ value }) {
+  if (!value) return null
+  return html`<span class="updated-at" title=${value}>Updated ${relativeUpdatedAt(value)}</span>`
+}
+
 function ViewToggle() {
   const [open, setOpen] = useState(false)
 
@@ -2899,7 +2919,14 @@ function MasterDetailView({ instances }) {
                         <div class="instance-card-header">
                           <span class="name">${inst.slug}</span>
                           <span class="def">${inst.definition}</span>
-                          <${StatusStamp} status=${inst.status} />
+                          <span class="instance-card-status">
+                            <${StatusStamp} status=${inst.status} />
+                            ${inst.workspace && inst.pullRequestId != null ? html`<span class="pr-badge">PR OPEN</span>` : null}
+                          </span>
+                        </div>
+                        <div class="instance-card-context">
+                          <span class="stage-position">Stage ${inst.stageNumber} of ${inst.stageCount}: ${inst.stageTitle}</span>
+                          <${UpdatedAt} value=${inst.updatedAt} />
                         </div>
                         <div class="instance-card-row">
                           <span class="field-label">Assignee</span>

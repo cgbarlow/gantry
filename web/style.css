@@ -726,6 +726,11 @@ main.dashboard {
 .instance-card-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .instance-card-header .name { font-family: var(--font-display); font-weight: 600; font-size: 16px; }
 .instance-card-header .def { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+.instance-card-status { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.pr-badge { padding: 2px 5px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); font-family: var(--font-mono); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; }
+.instance-card-context { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+.stage-position { font-family: var(--font-display); font-size: 13px; }
+.updated-at { color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; }
 .instance-card-row { margin-bottom: 4px; }
 .manage-card {
   align-self: start;

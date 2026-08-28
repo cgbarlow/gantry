@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInstance, writeModule } from '../lib/instance.js'
@@ -24,10 +24,36 @@ test('listRegistry lists every instance, sorted by slug, with definition, curren
     createInstance('design', 'alpha-initiative', { instancesDir, assignee: 'c.barlow' })
 
     const registry = listRegistry({ instancesDir })
-    assert.deepEqual(registry, [
+    assert.deepEqual(registry.map(({ slug, definition, stage, status, assignee }) => ({ slug, definition, stage, status, assignee })), [
       { slug: 'alpha-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: 'c.barlow' },
       { slug: 'zebra-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: '' },
     ])
+    for (const row of registry) {
+      assert.deepEqual(
+        { stageNumber: row.stageNumber, stageCount: row.stageCount, stageTitle: row.stageTitle, pullRequestId: row.pullRequestId },
+        { stageNumber: 1, stageCount: 4, stageTitle: 'SOAP', pullRequestId: null }
+      )
+      assert.doesNotThrow(() => new Date(row.updatedAt).toISOString())
+    }
+  })
+})
+
+test('listRegistry uses the newest local instance or module mtime for updatedAt', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    // Let any one-time module heading migration finish before making the timestamps deterministic for this assertion.
+    listRegistry({ instancesDir })
+    const instancePath = join(instancesDir, 'my-initiative', 'instance.yaml')
+    const older = new Date('2026-01-01T00:00:00Z')
+    const newer = new Date('2026-02-01T00:00:00Z')
+    const definition = loadDefinition('design')
+    utimesSync(instancePath, older, older)
+    for (const moduleId of definition.stages[0].modules) {
+      utimesSync(join(instancesDir, 'my-initiative', 'modules', `${moduleId}.md`), older, older)
+    }
+    utimesSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), newer, newer)
+
+    assert.equal(listRegistry({ instancesDir })[0].updatedAt, newer.toISOString())
   })
 })
 
@@ -154,6 +180,47 @@ test('listRegistry carries a `workspace` field on an Azure-DevOps-backed row, ma
         assert.equal(row.workspace.project, PROJECT)
         assert.equal(row.workspace.repository, REPOSITORY)
         assert.equal(typeof row.workspace.id, 'string')
+        assert.deepEqual(
+          { stageNumber: row.stageNumber, stageCount: row.stageCount, stageTitle: row.stageTitle, pullRequestId: row.pullRequestId },
+          { stageNumber: 1, stageCount: 4, stageTitle: 'SOAP', pullRequestId: null }
+        )
+        assert.doesNotThrow(() => new Date(row.updatedAt).toISOString())
+      }
+    )
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('listRegistry uses the current stage branch for a workspace row and carries its open PR id', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    const branch = 'gantry-workspace/remote-initiative/shape'
+    await withFakeAzureDevOpsServer(
+      {
+        organization: ORGANIZATION,
+        project: PROJECT,
+        repository: REPOSITORY,
+        validPat: VALID_PAT,
+        files: { '/gantry-workspace/remote-initiative/instance.yaml': 'definition: design\nstage: shape\n' },
+        branchFiles: {
+          [branch]: {
+            '/gantry-workspace/remote-initiative/instance.yaml':
+              'definition: design\nstage: shape\npullRequests:\n  shape: 42\n',
+          },
+        },
+      },
+      async (adoBaseUrl) => {
+        registerInstance(
+          'remote-initiative',
+          { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          { instancesDir }
+        )
+
+        const row = (await listRegistry({ instancesDir, pat: VALID_PAT }))[0]
+        assert.equal(row.pullRequestId, 42)
+        assert.ok(row.updatedAt)
+        assert.doesNotThrow(() => new Date(row.updatedAt).toISOString())
       }
     )
   } finally {

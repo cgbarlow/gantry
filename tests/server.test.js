@@ -380,10 +380,18 @@ test('GET /api/instances lists every registered instance, without the server bei
       const res = await fetch(`${base}/api/instances`)
       assert.equal(res.status, 200)
       const body = await res.json()
-      assert.deepEqual(body, [
+      assert.deepEqual(body.map(({ slug, definition, stage, status, assignee }) => ({ slug, definition, stage, status, assignee })), [
         { slug: 'alpha-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: 'c.barlow' },
         { slug: 'zebra-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: '' },
       ])
+      assert.deepEqual(
+        body.map(({ stageNumber, stageCount, stageTitle, pullRequestId }) => ({ stageNumber, stageCount, stageTitle, pullRequestId })),
+        [
+          { stageNumber: 1, stageCount: 4, stageTitle: 'SOAP', pullRequestId: null },
+          { stageNumber: 1, stageCount: 4, stageTitle: 'SOAP', pullRequestId: null },
+        ]
+      )
+      for (const row of body) assert.doesNotThrow(() => new Date(row.updatedAt).toISOString())
     })
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
@@ -529,13 +537,21 @@ test('POST /api/instances registers a new instance, which then appears in GET /a
       })
       assert.equal(res.status, 201)
       const created = await res.json()
-      assert.deepEqual(created, {
+      assert.deepEqual(
+        (({ slug, definition, stage, status, assignee }) => ({ slug, definition, stage, status, assignee }))(created),
+        {
         slug: 'claims-modernisation',
         definition: 'design',
         stage: 'shape',
         status: 'incomplete',
         assignee: '',
-      })
+        }
+      )
+      assert.deepEqual(
+        { stageNumber: created.stageNumber, stageCount: created.stageCount, stageTitle: created.stageTitle, pullRequestId: created.pullRequestId },
+        { stageNumber: 1, stageCount: 4, stageTitle: 'SOAP', pullRequestId: null }
+      )
+      assert.doesNotThrow(() => new Date(created.updatedAt).toISOString())
 
       const listing = await (await fetch(`${base}/api/instances`)).json()
       assert.ok(listing.some((i) => i.slug === 'claims-modernisation'))
@@ -854,10 +870,16 @@ test('POST /api/instances with an Azure DevOps location reusing a slug that alre
 
         // Still routed locally — never overwritten — and still listed.
         const listing = await (await fetch(`${base}/api/instances`)).json()
+        const local = listing.find((i) => i.slug === 'local-initiative')
         assert.deepEqual(
-          listing.find((i) => i.slug === 'local-initiative'),
+          (({ slug, definition, stage, status, assignee }) => ({ slug, definition, stage, status, assignee }))(local),
           { slug: 'local-initiative', definition: 'design', stage: 'shape', status: 'incomplete', assignee: 'local-assignee' }
         )
+        assert.deepEqual(
+          { stageNumber: local.stageNumber, stageCount: local.stageCount, stageTitle: local.stageTitle, pullRequestId: local.pullRequestId },
+          { stageNumber: 1, stageCount: 4, stageTitle: 'SOAP', pullRequestId: null }
+        )
+        assert.doesNotThrow(() => new Date(local.updatedAt).toISOString())
       })
     })
   } finally {

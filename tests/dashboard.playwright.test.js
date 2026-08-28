@@ -149,7 +149,7 @@ test('dashboard: selecting a workspace with multiple instances shows every one o
   const REPOSITORY = 'fake-repo'
   const VALID_PAT = 'valid-test-pat'
   const SEED_FILES = {
-    '/gantry-workspace/instance-one/instance.yaml': 'definition: design\nstage: shape\nassignee: c.barlow\n',
+    '/gantry-workspace/instance-one/instance.yaml': 'definition: design\nstage: shape\nassignee: c.barlow\npullRequests:\n  shape: 42\n',
     '/gantry-workspace/instance-two/instance.yaml': 'definition: design\nstage: shape\nassignee: c.barlow\n',
   }
 
@@ -190,6 +190,8 @@ test('dashboard: selecting a workspace with multiple instances shows every one o
             assert.equal(await page.locator('.instance-card').first().locator('.assignee').textContent(), 'c.barlow')
             assert.equal(await page.locator('.instance-card .identity-picker').count(), 0)
             assert.equal(await page.getByRole('button', { name: 'Check' }).count(), 2)
+            assert.equal(await page.locator('.instance-card .pr-badge').count(), 1)
+            assert.equal(await page.locator('.instance-card .pr-badge').textContent(), 'PR OPEN')
             assert.equal(await page.locator('.instance-card').getByRole('button', { name: 'Render' }).count(), 0)
             assert.equal(await page.getByRole('link', { name: 'Edit' }).count(), 2)
             assert.equal(await page.getByRole('link', { name: 'Open Repository' }).count(), 2)
@@ -219,6 +221,27 @@ test('dashboard: an instance card displays its assignee without an inline editor
         assert.equal(await page.locator('.instance-card .assignee').textContent(), 'Unassigned')
         assert.equal(await page.locator('.instance-card .identity-picker').count(), 0)
         assert.equal(await page.locator('.instance-card .assignee-save-status').count(), 0)
+      })
+    )
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('dashboard: an instance card shows stage position, last updated, and no PR badge for a local instance', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'alpha-initiative', { instancesDir })
+
+    await withRunningServer(
+      { instancesDir },
+      withPage(async (page, base) => {
+        await page.goto(base)
+        await page.waitForSelector('.instance-card', { timeout: 10_000 })
+
+        assert.equal(await page.locator('.instance-card .stage-position').textContent(), 'Stage 1 of 4: SOAP')
+        assert.match(await page.locator('.instance-card .updated-at').textContent(), /^Updated /)
+        assert.equal(await page.locator('.instance-card .pr-badge').count(), 0)
       })
     )
   } finally {

@@ -44,6 +44,18 @@ test('getFileContent works with a path missing its leading slash', async () => {
   })
 })
 
+test('getLatestCommit returns the newest commit for the requested branch', async () => {
+  await withFakeAzureDevOpsServer({ '/instance.yaml': 'v1\n' }, async (baseUrl) => {
+    const c = client(baseUrl)
+    await c.writeFile('/instance.yaml', 'v2\n')
+
+    const commit = await c.getLatestCommit()
+    assert.equal(commit.comment, 'Update /instance.yaml')
+    assert.equal(typeof commit.committer.date, 'string')
+    assert.equal(await c.getLatestCommit({ branch: 'missing' }), null)
+  })
+})
+
 test('getFileContent throws AzureDevOpsNotFoundError for a path with no item', async () => {
   await withFakeAzureDevOpsServer({}, async (baseUrl) => {
     await assert.rejects(() => client(baseUrl).getFileContent('/missing.md'), AzureDevOpsNotFoundError)

@@ -175,6 +175,13 @@ export function createFakeAzureDevOpsServer({
       return json(200, { id: repository, name: repository, defaultBranch: 'refs/heads/main' })
     }
 
+    if (req.method === 'GET' && pathname === `${basePath}/commits`) {
+      const branchName = url.searchParams.get('searchCriteria.itemVersion.version') ?? 'main'
+      const commits = branches.get(branchName)?.commits ?? []
+      const top = Number(url.searchParams.get('$top') ?? commits.length)
+      return json(200, { count: commits.length, value: commits.slice().reverse().slice(0, top) })
+    }
+
     if (req.method === 'GET' && pathname === `${basePath}/items`) {
       // Every real call here (lib/azureDevOpsClient.js's getFileContent/
       // listFolder) always sends `versionDescriptor.version` — defaulting
