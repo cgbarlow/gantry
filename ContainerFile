@@ -60,6 +60,9 @@ COPY tests/             tests/
 # PublishTestResults (failTaskOnFailedTests) enforces the gate.
 FROM source AS test
 
+ENV CI=true
+RUN npx playwright install --with-deps chromium chromium-headless-shell
+
 RUN mkdir -p results \
     && npm run test:unit:ci \
     ; TEST_EXIT=$? \

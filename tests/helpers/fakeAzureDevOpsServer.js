@@ -59,6 +59,7 @@ export function createFakeAzureDevOpsServer({
   denyReviewerVoteReset = false,
   rejectIdentityRequests = false,
   repoExists = true,
+  connectionDataUser,
 } = {}) {
   // One independent { store, objectId } per branch — a branch with no
   // entry here has never had a commit (mirrors the pre-#118 "commitCount
@@ -644,6 +645,16 @@ export function createFakeAzureDevOpsServer({
     // Reads `filterValue` — the real API's actual search-text parameter
     // (`searchFilter` names which field to match, e.g. 'General'; it is
     // never the query text itself).
+    // Connection data endpoint (lib/azureDevOpsWorkItemsClient.js's
+    // getCurrentUser, #197) — a minimal fake of the real
+    // `_apis/connectionData` response, returning `connectionDataUser` as
+    // `authenticatedUser` verbatim when the caller supplied one, otherwise
+    // `null` (a PAT the endpoint recognizes but with no resolvable identity —
+    // exercises the "no requester attribution available" fallback).
+    if (req.method === 'GET' && pathname === `/${organization}/_apis/connectionData`) {
+      return json(200, { authenticatedUser: connectionDataUser ?? null })
+    }
+
     if (req.method === 'GET' && pathname === `/${organization}/_apis/identities`) {
       if (rejectIdentityRequests) return json(403, { message: 'TF400813: Identity scope rejected (fake server).' })
       const query = (url.searchParams.get('filterValue') ?? url.searchParams.get('query') ?? '').toLowerCase()
@@ -708,7 +719,7 @@ export function createFakeAzureDevOpsServer({
  * Starts a `createFakeAzureDevOpsServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/server.test.js`'s `withRunningServer` helper's shape (per #82's testing decisions). Shared by `tests/azureDevOpsClient.test.js` and `tests/instance.test.js` so this lifecycle isn't duplicated across both.
  */
 export function withFakeAzureDevOpsServer(
-  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes, denyReviewerVoteReset, rejectIdentityRequests, repoExists },
+  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes, denyReviewerVoteReset, rejectIdentityRequests, repoExists, connectionDataUser },
   fn
 ) {
   return new Promise((resolve, reject) => {
@@ -725,6 +736,7 @@ export function withFakeAzureDevOpsServer(
       denyReviewerVoteReset,
       rejectIdentityRequests,
       repoExists,
+      connectionDataUser,
     })
     server.listen(0, async () => {
       const { port } = server.address()

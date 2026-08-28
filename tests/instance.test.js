@@ -13,6 +13,8 @@ import {
   listInstances,
   updateInstanceAssignee,
   migrateModuleHeadingScale,
+  recordInstanceReviewRequest,
+  recordInstanceReviewStatus,
 } from '../lib/instance.js'
 import { AzureDevOpsAuthenticationError, AzureDevOpsNotFoundError, createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
@@ -1360,5 +1362,113 @@ test('createInstance/readInstance/readModule/writeModule stay fully synchronous 
       { instancesDir }
     )
     assert.equal(written instanceof Promise, false)
+  })
+})
+
+// --- recordInstanceReviewRequest / recordInstanceReviewStatus (#197) -------
+
+test('recordInstanceReviewRequest and recordInstanceReviewStatus require a Workspace-backed (Azure DevOps) instance', async () => {
+  await assert.rejects(
+    () => recordInstanceReviewRequest('local-only', 'shape', { workItemId: 1, reviewer: 'a@example.com', status: 'New' }),
+    /recordInstanceReviewRequest is for Workspace-backed instances only/
+  )
+  await assert.rejects(
+    () => recordInstanceReviewStatus('local-only', 'shape', 1, 'Active'),
+    /recordInstanceReviewStatus is for Workspace-backed instances only/
+  )
+})
+
+test('recordInstanceReviewRequest appends reviews for a stage, keeping other stages\' review history untouched', async () => {
+  await withFakeRepo({}, async (baseUrl) => {
+    const azureDevOps = azureDevOpsOptions(baseUrl)
+    await createInstance('design', 'my-initiative', { azureDevOps })
+
+    const first = { workItemId: 101, reviewer: 'a@example.com', reviewerDisplayName: 'A', status: 'New' }
+    await recordInstanceReviewRequest('my-initiative', 'shape', first, { azureDevOps })
+    const second = { workItemId: 102, reviewer: 'b@example.com', reviewerDisplayName: 'B', status: 'New' }
+    const after = await recordInstanceReviewRequest('my-initiative', 'shape', second, { azureDevOps })
+
+    assert.deepEqual(after.reviewRequests.shape.map((r) => r.workItemId), [101, 102])
+
+    const instance = await readInstance('my-initiative', { azureDevOps })
+    assert.deepEqual(instance.reviewRequests.shape.map((r) => r.workItemId), [101, 102])
+    assert.equal(instance.reviewRequests.shape[1].reviewerDisplayName, 'B')
+  })
+})
+
+test('recordInstanceReviewStatus updates only the matching review\'s status, leaving its other fields and sibling reviews untouched', async () => {
+  await withFakeRepo({}, async (baseUrl) => {
+    const azureDevOps = azureDevOpsOptions(baseUrl)
+    await createInstance('design', 'my-initiative', { azureDevOps })
+    await recordInstanceReviewRequest(
+      'my-initiative',
+      'shape',
+      { workItemId: 201, reviewer: 'a@example.com', reviewerDisplayName: 'A', status: 'New' },
+      { azureDevOps }
+    )
+    await recordInstanceReviewRequest(
+      'my-initiative',
+      'shape',
+      { workItemId: 202, reviewer: 'b@example.com', reviewerDisplayName: 'B', status: 'New' },
+      { azureDevOps }
+    )
+
+    const updated = await recordInstanceReviewStatus('my-initiative', 'shape', 201, 'Active', { azureDevOps })
+    const [review201, review202] = updated.reviewRequests.shape
+    assert.equal(review201.status, 'Active')
+    assert.equal(review201.reviewer, 'a@example.com')
+    assert.equal(review202.status, 'New')
+  })
+})
+
+test('recordInstanceReviewStatus reports a review that does not exist for the stage instead of writing a phantom entry', async () => {
+  await withFakeRepo({}, async (baseUrl) => {
+    const azureDevOps = azureDevOpsOptions(baseUrl)
+    await createInstance('design', 'my-initiative', { azureDevOps })
+    await recordInstanceReviewRequest(
+      'my-initiative',
+      'shape',
+      { workItemId: 301, reviewer: 'a@example.com', status: 'New' },
+      { azureDevOps }
+    )
+
+    await assert.rejects(
+      () => recordInstanceReviewStatus('my-initiative', 'shape', 999, 'Active', { azureDevOps }),
+      /has no review request for work item #999 on stage "shape"/
+    )
+
+    const instance = await readInstance('my-initiative', { azureDevOps })
+    assert.equal(instance.reviewRequests.shape.length, 1)
+  })
+})
+
+test('recordInstanceReviewRequest serializes concurrent writes for the same instance so no request is lost to a stale read', async () => {
+  await withFakeRepo({}, async (baseUrl) => {
+    const azureDevOps = azureDevOpsOptions(baseUrl)
+    await createInstance('design', 'my-initiative', { azureDevOps })
+
+    // Fired without awaiting each other: without the write lock, both would
+    // read the same pre-write instance.yaml and the second write would clobber
+    // the first reviewer's entry.
+    await Promise.all([
+      recordInstanceReviewRequest(
+        'my-initiative',
+        'shape',
+        { workItemId: 401, reviewer: 'a@example.com', status: 'New' },
+        { azureDevOps }
+      ),
+      recordInstanceReviewRequest(
+        'my-initiative',
+        'shape',
+        { workItemId: 402, reviewer: 'b@example.com', status: 'New' },
+        { azureDevOps }
+      ),
+    ])
+
+    const instance = await readInstance('my-initiative', { azureDevOps })
+    assert.deepEqual(
+      instance.reviewRequests.shape.map((r) => r.workItemId).sort((a, b) => a - b),
+      [401, 402]
+    )
   })
 })

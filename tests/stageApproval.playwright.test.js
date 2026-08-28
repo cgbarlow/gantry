@@ -177,9 +177,9 @@ test('the Request approval panel blocks on a failing gate for a Workspace-backed
           await page.waitForSelector('.request-approval-panel', { timeout: 10_000 })
           const panel = page.locator('.request-approval-panel')
 
-          await panel.getByRole('button', { name: 'Request approval' }).click()
+          await panel.getByRole('button', { name: 'Request Sign-off' }).click()
           await assert.doesNotReject(panel.locator('text=FAIL').waitFor({ timeout: 10_000 }))
-          assert.equal(await page.locator('.modal[aria-label="Confirm request approval"]').count(), 0)
+          assert.equal(await page.locator('.modal[aria-label="Confirm request sign-off"]').count(), 0)
 
           assert.deepEqual(pageErrors, [])
         })
@@ -212,8 +212,8 @@ test('declining the confirmation opens no Pull Request', async () => {
           await page.waitForSelector('.request-approval-panel', { timeout: 10_000 })
           const panel = page.locator('.request-approval-panel')
 
-          await panel.getByRole('button', { name: 'Request approval' }).click()
-          const modal = page.locator('.modal[aria-label="Confirm request approval"]')
+          await panel.getByRole('button', { name: 'Request Sign-off' }).click()
+          const modal = page.locator('.modal[aria-label="Confirm request sign-off"]')
           await modal.waitFor({ state: 'visible', timeout: 10_000 })
           await modal.getByRole('button', { name: 'Decline' }).click()
           await assert.doesNotReject(panel.locator('text=Declined — no Pull Request opened.').waitFor({ timeout: 5_000 }))
@@ -250,15 +250,15 @@ test('confirming opens a Pull Request, and the panel reflects it — including s
           await page.waitForSelector('.request-approval-panel', { timeout: 10_000 })
           const panel = page.locator('.request-approval-panel')
 
-          await panel.getByRole('button', { name: 'Request approval' }).click()
-          const modal = page.locator('.modal[aria-label="Confirm request approval"]')
+          await panel.getByRole('button', { name: 'Request Sign-off' }).click()
+          const modal = page.locator('.modal[aria-label="Confirm request sign-off"]')
           await modal.waitFor({ state: 'visible', timeout: 10_000 })
-          await modal.getByRole('button', { name: 'Confirm & request approval' }).click()
+          await modal.getByRole('button', { name: 'Confirm & request sign-off' }).click()
 
           await assert.doesNotReject(panel.locator('text=/Pull Request #\\d+ is open/').waitFor({ timeout: 10_000 }))
           // The button itself is replaced once a Pull Request is open — no
           // way to accidentally request a second one from this panel.
-          assert.equal(await panel.getByRole('button', { name: 'Request approval' }).count(), 0)
+          assert.equal(await panel.getByRole('button', { name: 'Request Sign-off' }).count(), 0)
 
           // Surviving a full reload proves this is read back off the
           // instance's own persisted `pullRequests` field (#124), not just
@@ -298,9 +298,9 @@ test('reloading reflects a Pull Request abandoned outside gantry', async () => {
           const panel = page.locator('.request-approval-panel')
           await panel.waitFor({ timeout: 10_000 })
 
-          await panel.getByRole('button', { name: 'Request approval' }).click()
-          const modal = page.locator('.modal[aria-label="Confirm request approval"]')
-          await modal.getByRole('button', { name: 'Confirm & request approval' }).click()
+          await panel.getByRole('button', { name: 'Request Sign-off' }).click()
+          const modal = page.locator('.modal[aria-label="Confirm request sign-off"]')
+          await modal.getByRole('button', { name: 'Confirm & request sign-off' }).click()
           await assert.doesNotReject(panel.locator('text=/Pull Request #\\d+ is open/').waitFor({ timeout: 10_000 }))
           const prId = Number((await panel.locator('text=/Pull Request #(\\d+)/').first().textContent()).match(/#(\d+)/)[1])
 
@@ -346,10 +346,10 @@ test('Check status reports pending, then rejection, then approval — merging an
           await panel.waitFor({ timeout: 10_000 })
 
           // Open the Pull Request first.
-          await panel.getByRole('button', { name: 'Request approval' }).click()
-          const modal = page.locator('.modal[aria-label="Confirm request approval"]')
+          await panel.getByRole('button', { name: 'Request Sign-off' }).click()
+          const modal = page.locator('.modal[aria-label="Confirm request sign-off"]')
           await modal.waitFor({ state: 'visible', timeout: 10_000 })
-          await modal.getByRole('button', { name: 'Confirm & request approval' }).click()
+          await modal.getByRole('button', { name: 'Confirm & request sign-off' }).click()
           await assert.doesNotReject(panel.locator('text=/Pull Request #\\d+ is open/').waitFor({ timeout: 10_000 }))
           const prId = Number((await panel.locator('text=/Pull Request #(\\d+)/').first().textContent()).match(/#(\d+)/)[1])
 
@@ -377,9 +377,9 @@ test('Check status reports pending, then rejection, then approval — merging an
           )
           // The merged stage's Pull Request is gone from the panel — the
           // screen now shows the next stage, which hasn't requested
-          // approval yet, so "Request approval" is offered afresh.
+          // approval yet, so "Request Sign-off" is offered afresh.
           await assert.doesNotReject(
-            page.locator('.request-approval-panel').getByRole('button', { name: 'Request approval' }).waitFor({ timeout: 10_000 })
+            page.locator('.request-approval-panel').getByRole('button', { name: 'Request Sign-off' }).waitFor({ timeout: 10_000 })
           )
 
           assert.deepEqual(pageErrors, [])
@@ -402,8 +402,8 @@ test('a post-approval commit changes the panel to Request approval again, and re
         await page.goto(`${base}/instance/${SLUG}`)
 
         const panel = page.locator('.request-approval-panel')
-        await panel.getByRole('button', { name: 'Request approval' }).click()
-        await panel.locator('.modal[aria-label="Confirm request approval"]').getByRole('button', { name: 'Confirm & request approval' }).click()
+        await panel.getByRole('button', { name: 'Request Sign-off' }).click()
+        await panel.locator('.modal[aria-label="Confirm request sign-off"]').getByRole('button', { name: 'Confirm & request sign-off' }).click()
         await panel.getByRole('button', { name: 'Check status' }).waitFor({ timeout: 10_000 })
         const prId = Number((await panel.locator('text=/Pull Request #(\\d+)/').first().textContent()).match(/#(\d+)/)[1])
 
@@ -423,7 +423,7 @@ test('a post-approval commit changes the panel to Request approval again, and re
         }
 
         await panel.getByRole('button', { name: 'Check status' }).click()
-        await panel.getByRole('button', { name: 'Request approval again' }).waitFor({ timeout: 10_000 })
+        await panel.getByRole('button', { name: 'Request Sign-off again' }).waitFor({ timeout: 10_000 })
         assert.equal(await panel.locator('.request-approval-commits').count(), 0)
 
         await panel.getByRole('button', { name: 'Show commit history' }).click()
@@ -446,7 +446,7 @@ test('a post-approval commit changes the panel to Request approval again, and re
         await page.locator('.modal-backdrop').last().click({ position: { x: 5, y: 5 } })
         await historyModal.waitFor({ state: 'hidden', timeout: 5_000 })
 
-        await panel.getByRole('button', { name: 'Request approval again' }).click()
+        await panel.getByRole('button', { name: 'Request Sign-off again' }).click()
         await panel.getByRole('button', { name: 'Check status' }).waitFor({ timeout: 10_000 })
         await assert.doesNotReject(panel.locator('text=Approval withdrawn from Pull Request').waitFor({ timeout: 10_000 }))
       })

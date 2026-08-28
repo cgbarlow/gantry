@@ -1649,6 +1649,8 @@ function SyncedFieldsPanel({ instance }) {
   const [assigneeDraft, setAssigneeDraft] = useState(null)
   const [syncStatus, setSyncStatus] = useState('')
   const [syncConfirming, setSyncConfirming] = useState(false)
+  const [checkingReviewId, setCheckingReviewId] = useState(null)
+  const [reviewStatus, setReviewStatus] = useState('')
   // A ref (not state): save() reads it synchronously to debounce itself, and no render ever depends on it — the status line already reports the in-flight save.
   const savingRef = useRef(false)
 
@@ -1757,6 +1759,32 @@ function SyncedFieldsPanel({ instance }) {
     setSyncStatus('Declined — work item state left unchanged.')
   }
 
+  async function handleCheckReviewStatus(review) {
+    setCheckingReviewId(review.workItemId)
+    setReviewStatus('Checking review status…')
+    try {
+      const res = await apiFetchForInstance(currentSlug.value, `/api/instance/review-status?slug=${encodeURIComponent(currentSlug.value)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reviewId: review.workItemId, stage: stageId }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.message ?? body.error ?? `Status check failed (${res.status})`)
+      const current = instanceData.value
+      if (current?.stage.id === stageId) {
+        instanceData.value = {
+          ...current,
+          reviews: (current.reviews ?? []).map((item) => item.workItemId === body.review.workItemId ? body.review : item),
+        }
+      }
+      setReviewStatus(`Review #${review.workItemId} is ${body.review.status}.`)
+    } catch (err) {
+      setReviewStatus(`Review status check failed: ${err.message}`)
+    } finally {
+      setCheckingReviewId(null)
+    }
+  }
+
   if (error) {
     return html`
       <section class="synced-fields-panel">
@@ -1793,6 +1821,7 @@ function SyncedFieldsPanel({ instance }) {
   }
 
   const pr = data.pullRequest
+  const signoff = instance.pullRequest ?? pr
 
   return html`
     <section class="synced-fields-panel">
@@ -1865,6 +1894,37 @@ function SyncedFieldsPanel({ instance }) {
           })()}
         </div>
       </div>
+      ${instance.workspaceBacked
+        ? html`
+            <div class="review-status-card" aria-label="Review and sign-off status">
+              <div>
+                <span class="field-label">Reviews</span>
+                ${instance.reviews?.length
+                  ? html`
+                      <ul class="review-status-list">
+                        ${instance.reviews.map((review) => html`
+                          <li key=${review.workItemId}>
+                            <span>${review.reviewerDisplayName ?? review.reviewer}</span>
+                            <span class="review-status-actions">
+                              <span class="review-status">${review.status ?? 'Unknown'}</span>
+                              <button type="button" class="btn small" disabled=${checkingReviewId === review.workItemId} onClick=${() => handleCheckReviewStatus(review)}>
+                                ${checkingReviewId === review.workItemId ? 'Checking…' : 'Check status'}
+                              </button>
+                            </span>
+                          </li>
+                        `)}
+                      </ul>
+                    `
+                  : html`<span class="synced-value">No review requests</span>`}
+              </div>
+              <div>
+                <span class="field-label">Sign-off</span>
+                <span class="synced-value">${signoff ? (signoff.review?.state ?? signoff.reviewState ?? signoff.status) : 'Not requested'}</span>
+              </div>
+            </div>
+          `
+        : null}
+      <div class="save-status">${reviewStatus}</div>
       <div class="save-status">${status}</div>
       <button type="button" class="btn" onClick=${handleCheckAndMaybeSync}>Check gate & sync work item</button>
       <div class="save-status">${syncStatus}</div>
@@ -1989,12 +2049,142 @@ function AdvanceStagePanel({ instance }) {
   `
 }
 
-// ---------- Request approval (Workspace-backed instances only; #124, ADR-0014) ----------
+// ---------- Request review (Workspace-backed instances only; #197) ----------
+// Advisory reviews are independent Azure DevOps Tasks. Each row has its own
+// reviewer, send action, and explicit status check; none of this participates
+// in the Pull Request sign-off gate.
+function RequestReviewPanel({ instance }) {
+  const initialReviews = instance.reviews ?? []
+  const [rows, setRows] = useState(() => [
+    ...initialReviews.map((review) => ({ id: `review-${review.workItemId}`, reviewer: review.reviewer, review, error: '' })),
+    { id: 'new-1', reviewer: '', review: null, error: '' },
+  ])
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [nextRowId, setNextRowId] = useState(2)
+
+  useEffect(() => {
+    const reviews = instance.reviews ?? []
+    setRows([
+      ...reviews.map((review) => ({ id: `review-${review.workItemId}`, reviewer: review.reviewer, review, error: '' })),
+      { id: `new-${nextRowId}`, reviewer: '', review: null, error: '' },
+    ])
+    // The value is only used to give unsent rows stable local keys.
+    // eslint-disable-next-line
+  }, [instance.stage.id])
+
+  if (!instance.workspaceBacked || instance.stage.id !== instance.currentStageId) return null
+
+  function updateRow(rowId, updates) {
+    setRows((current) => current.map((row) => (row.id === rowId ? { ...row, ...updates } : row)))
+  }
+
+  function addReviewer() {
+    setRows((current) => [...current, { id: `new-${nextRowId}`, reviewer: '', review: null, error: '' }])
+    setNextRowId((value) => value + 1)
+  }
+
+  function syncInstanceReviews(review) {
+    const current = instanceData.value
+    if (!current || current.stage.id !== instance.stage.id) return
+    const reviews = [...(current.reviews ?? []).filter((item) => item.workItemId !== review.workItemId), review]
+    instanceData.value = { ...current, reviews }
+  }
+
+  async function sendRequest(row) {
+    if (!row.reviewer.trim() || row.review) return
+    updateRow(row.id, { sending: true, error: '' })
+    const res = await apiFetchForInstance(currentSlug.value, `/api/instance/request-review?slug=${encodeURIComponent(currentSlug.value)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reviewer: row.reviewer, stage: instance.stage.id }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      updateRow(row.id, { sending: false, error: body.message ?? body.error ?? `Request failed (${res.status})` })
+      return
+    }
+    updateRow(row.id, { sending: false, review: body.review })
+    syncInstanceReviews(body.review)
+  }
+
+  async function checkStatus(row) {
+    if (!row.review) return
+    updateRow(row.id, { checking: true, error: '' })
+    const res = await apiFetchForInstance(currentSlug.value, `/api/instance/review-status?slug=${encodeURIComponent(currentSlug.value)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reviewId: row.review.workItemId, stage: instance.stage.id }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      updateRow(row.id, { checking: false, error: body.message ?? body.error ?? `Status check failed (${res.status})` })
+      return
+    }
+    updateRow(row.id, { checking: false, review: body.review })
+    syncInstanceReviews(body.review)
+  }
+
+  return html`
+    <section class="request-review-panel">
+      <h2>Request Review</h2>
+      <button type="button" class="btn" onClick=${() => setDialogOpen(true)}>Request Review</button>
+      ${dialogOpen
+        ? html`
+            <${Modal} ariaLabel="Request Review" onClose=${() => setDialogOpen(false)}>
+              <h3>Request Review</h3>
+              <p class="guidance">Ask one or more people to review this stage. Each request is tracked separately.</p>
+              <div class="review-request-list">
+                ${rows.map((row) => html`
+                  <div class="review-request-row" key=${row.id}>
+                    <div class="reviewer-field">
+                      <span class="field-label">Reviewer</span>
+                      <${IdentityPicker}
+                        value=${row.reviewer}
+                        onChange=${(uniqueName) => updateRow(row.id, { reviewer: uniqueName })}
+                        placeholder="Search for a reviewer"
+                        slug=${currentSlug.value}
+                      />
+                    </div>
+                    ${row.review
+                      ? html`
+                          <div class="review-request-result">
+                            <span>
+                              ${workItemWebUrlFor(instance.workItem, row.review.workItemId)
+                                ? html`<a href=${workItemWebUrlFor(instance.workItem, row.review.workItemId)} target="_blank" rel="noreferrer">Work item #${row.review.workItemId}</a>`
+                                : `Work item #${row.review.workItemId}`}
+                              · ${row.review.status ?? 'Unknown'}
+                            </span>
+                            <button type="button" class="btn small" disabled=${row.checking} onClick=${() => checkStatus(row)}>
+                              ${row.checking ? 'Checking…' : 'Check status'}
+                            </button>
+                          </div>
+                        `
+                      : html`
+                          <button type="button" class="btn small" disabled=${row.sending || !row.reviewer.trim()} onClick=${() => sendRequest(row)}>
+                            ${row.sending ? 'Sending…' : 'Send request'}
+                          </button>
+                        `}
+                    ${row.error ? html`<p class="save-status">${row.error}</p>` : null}
+                  </div>
+                `)}
+              </div>
+              <div class="modal-actions">
+                <button type="button" class="btn" onClick=${addReviewer}>Add reviewer</button>
+                <button type="button" class="btn ghost" onClick=${() => setDialogOpen(false)}>Close</button>
+              </div>
+            <//>
+          `
+        : null}
+    </section>
+  `
+}
+
+// ---------- Request sign-off (Workspace-backed instances only; #124, ADR-0014) ----------
 // The Workspace-backed counterpart to AdvanceStagePanel above: opens this
 // stage's own real approval gate — a Pull Request from its branch into
 // "main" — once the gate has genuinely passed, rather than moving a local
 // instance's own stage pointer directly. Mirrors AdvanceStagePanel's own
-// check-then-confirm shape exactly: "Request approval" runs
+// check-then-confirm shape exactly: "Request Sign-off" runs
 // the same gate check every other gated action in this app runs, and only a
 // genuine PASS opens the confirm dialog — declining it (or a FAIL) opens no
 // Pull Request. Never rendered for a local instance (the opposite condition
@@ -2005,7 +2195,7 @@ function AdvanceStagePanel({ instance }) {
 // forward, which happens when its Check-status action merges this stage's
 // own Pull Request). Once a Pull Request has been recorded, the panel shows
 // its live Azure DevOps status and offers #125's "Check status" action in
-// place of "Request approval" — reading reviewer votes, auto-merging on
+// place of "Request Sign-off" — reading reviewer votes, auto-merging on
 // approval (advancing the stage), and reporting rejection distinctly from a
 // still-pending review.
 function RequestApprovalPanel({ instance }) {
@@ -2050,10 +2240,14 @@ function RequestApprovalPanel({ instance }) {
     )
     const body = await res.json().catch(() => ({}))
     if (!res.ok) {
-      setStatus(`Request approval failed: ${body.message ?? body.error}`)
+      setStatus(`Request sign-off failed: ${body.message ?? body.error}`)
       return
     }
     setJustOpened(body)
+    if (body.pullRequest) {
+      const current = instanceData.value
+      if (current?.stage.id === instance.stage.id) instanceData.value = { ...current, pullRequest: body.pullRequest }
+    }
     if (body.reapproval?.method === 'comment') {
       setStatus(`Approval reset was not permitted, so a note was posted to Pull Request #${body.pullRequestId}. The Owner must review and vote again.`)
     } else if (body.reapproval) {
@@ -2088,15 +2282,19 @@ function RequestApprovalPanel({ instance }) {
     }
     if (!body.merged) {
       setJustOpened(body)
+      if (body.pullRequest) {
+        const current = instanceData.value
+        if (current?.stage.id === instance.stage.id) instanceData.value = { ...current, pullRequest: body.pullRequest }
+      }
       if (body.review?.state === 'approved-then-invalidated') {
         setStatus(
-          `Approval invalidated — commit(s) landed after ${body.review.approver?.displayName ?? 'the Owner'} approved Pull Request #${body.pullRequestId}. Request approval again for a fresh review.`,
+          `Approval invalidated — commit(s) landed after ${body.review.approver?.displayName ?? 'the Owner'} approved Pull Request #${body.pullRequestId}. Request Sign-off again for a fresh review.`,
         )
         return
       }
       if (body.review?.state === 'rejected') {
         setStatus(
-          `Rejected — the Owner voted to reject Pull Request #${body.pullRequestId}. Address the feedback, then re-request approval.`
+          `Rejected — the Owner voted to reject Pull Request #${body.pullRequestId}. Address the feedback, then re-request sign-off.`
         )
       } else if (body.review?.state === 'changes-requested') {
         setStatus(
@@ -2127,7 +2325,7 @@ function RequestApprovalPanel({ instance }) {
 
   return html`
     <section id="request-approval-panel" class="request-approval-panel">
-      <h2>Request approval</h2>
+      <h2>Review / Sign-off</h2>
       ${openPullRequestId
         ? pullRequestIsActive
           ? html`
@@ -2150,7 +2348,7 @@ function RequestApprovalPanel({ instance }) {
               <button type="button" class="btn" onClick=${() => setCommitHistoryOpen(true)}>Show commit history</button>
             </div>
             ${approvalInvalidated
-              ? html`<button type="button" class="btn" onClick=${handleConfirmRequest}>Request approval again</button>`
+              ? html`<button type="button" class="btn" onClick=${handleConfirmRequest}>Request Sign-off again</button>`
               : html`<button type="button" class="btn" onClick=${handleCheckStatus}>Check status</button>`}
             `
           : html`
@@ -2166,21 +2364,21 @@ function RequestApprovalPanel({ instance }) {
               </p>
               <button type="button" class="btn" onClick=${handleCheckStatus}>Check status</button>
             `
-        : html`<button type="button" class="btn" onClick=${handleCheckAndMaybeConfirm}>Request approval</button>`}
+        : html`<button type="button" class="btn" onClick=${handleCheckAndMaybeConfirm}>Request Sign-off</button>`}
       <div class="save-status">${status}</div>
       ${confirming
         ? html`
             <div class="modal-backdrop" role="presentation">
-              <div class="modal" role="dialog" aria-modal="true" aria-label="Confirm request approval">
-                <h3>Open a Pull Request for review?</h3>
+              <div class="modal" role="dialog" aria-modal="true" aria-label="Confirm request sign-off">
+                <h3>Open a Pull Request for sign-off?</h3>
                 <p class="guidance">
                   The gate for stage "${instance.stage.title}" has passed. Confirm to open a Pull Request from this
-                  stage's own branch into "main", requesting the Owner's approval. Declining opens nothing.
+                  stage's own branch into "main", requesting the Owner's sign-off. Declining opens nothing.
                 </p>
                 <div class="modal-actions">
                   <button type="button" class="btn ghost" onClick=${handleDecline}>Decline</button>
                   <button type="button" class="btn primary" onClick=${handleConfirmRequest}>
-                    Confirm & request approval
+                    Confirm & request sign-off
                   </button>
                 </div>
               </div>
@@ -2216,7 +2414,10 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
         `
       )}
       <${AdvanceStagePanel} instance=${instance} />
-      <${RequestApprovalPanel} instance=${instance} />
+      <div class="stage-action-panels">
+        <${RequestReviewPanel} key=${instance.stage.id} instance=${instance} />
+        <${RequestApprovalPanel} instance=${instance} />
+      </div>
     </main>
   `
 }
@@ -2229,7 +2430,7 @@ const VIEW_MODE_HOTKEY = { ctrlKey: true, shiftKey: true, key: 'v' }
 // `instance` and `onClearAllFields` back the "Clear all fields" + "Render"
 // pair moved here from the stage screen (#114) — both now sit on the right
 // of this same bar, "Clear all fields" immediately left of "Render".
-// `requestApprovalSlug` signals a "Request Approval" shortcut button —
+// `requestApprovalSlug` signals a "Review / Sign-off" shortcut button —
 // (#145 Part 1) clicking it scrolls to the RequestApprovalPanel and
 // briefly highlights it so the author's eye is drawn down.
 function ViewModeToolbar({
@@ -2342,7 +2543,7 @@ function ViewModeToolbar({
         <button type="button" class="btn" onClick=${onClearAllFields}>Clear all fields</button>
         <button type="button" class="btn primary" onClick=${() => setRenderOpen(true)}>Render</button>
         ${requestApprovalSlug
-          ? html`<button type="button" class="btn request-approval-btn" onClick=${scrollToApprovalPanel}>Request Approval</button>`
+          ? html`<button type="button" class="btn request-approval-btn" onClick=${scrollToApprovalPanel}>Review / Sign-off</button>`
           : null}
       </div>
     </div>

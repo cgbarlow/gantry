@@ -15,9 +15,9 @@ const PROJECT = 'fake-project'
 const VALID_PAT = 'valid-test-pat'
 
 // Mirrors tests/azureDevOpsClient.test.js's own wrapper: pins this file's fixed organization/project/PAT constants so call sites below only need to supply whatever varies (usually just `workItemTypeStates`). No `repository` is passed — Work Items endpoints aren't repository-scoped.
-function withFakeAzureDevOpsServer({ workItemTypeStates, workItemTypes } = {}, fn) {
+function withFakeAzureDevOpsServer({ workItemTypeStates, workItemTypes, connectionDataUser } = {}, fn) {
   return withFakeServer(
-    { organization: ORGANIZATION, project: PROJECT, validPat: VALID_PAT, workItemTypeStates, workItemTypes },
+    { organization: ORGANIZATION, project: PROJECT, validPat: VALID_PAT, workItemTypeStates, workItemTypes, connectionDataUser },
     fn
   )
 }
@@ -62,6 +62,64 @@ test('createChildWorkItem creates a work item linked to its parent via a Hierarc
     assert.equal(child.relations.length, 1)
     assert.equal(child.relations[0].rel, 'System.LinkTypes.Hierarchy-Reverse')
     assert.ok(child.relations[0].url.endsWith(`/workItems/${parent.id}`))
+  })
+})
+
+test('createRelatedWorkItem creates a work item linked via a Related relation', async () => {
+  await withFakeAzureDevOpsServer({}, async (baseUrl) => {
+    const c = client(baseUrl)
+    const target = await c.createWorkItem('Task', { 'System.Title': 'Stage work item' })
+    const review = await c.createRelatedWorkItem(target.id, 'Task', { 'System.Title': 'Review stage work item' })
+
+    assert.equal(review.relations.length, 1)
+    assert.equal(review.relations[0].rel, 'System.LinkTypes.Related')
+    assert.ok(review.relations[0].url.endsWith(`/workItems/${target.id}`))
+  })
+})
+
+test('getCurrentUser returns the identity connectionData reports as authenticatedUser', async () => {
+  await withFakeAzureDevOpsServer(
+    {
+      connectionDataUser: {
+        customDisplayName: 'Chris Barlow',
+        properties: {
+          Account: { $type: 'System.String', $value: 'c.barlow@example.com' },
+        },
+      },
+    },
+    async (baseUrl) => {
+      const user = await client(baseUrl).getCurrentUser()
+      assert.deepEqual(user, { displayName: 'Chris Barlow', uniqueName: 'c.barlow@example.com' })
+    }
+  )
+})
+
+test('getCurrentUser falls back through providerDisplayName/displayName/uniqueName when the friendlier fields are absent', async () => {
+  await withFakeAzureDevOpsServer(
+    {
+      connectionDataUser: {
+        providerDisplayName: 'C Barlow',
+        properties: { Mail: { $type: 'System.String', $value: 'c.barlow@example.com' } },
+      },
+    },
+    async (baseUrl) => {
+      const user = await client(baseUrl).getCurrentUser()
+      assert.deepEqual(user, { displayName: 'C Barlow', uniqueName: 'c.barlow@example.com' })
+    }
+  )
+})
+
+test('getCurrentUser returns null when connectionData reports no authenticated user', async () => {
+  await withFakeAzureDevOpsServer({}, async (baseUrl) => {
+    const user = await client(baseUrl).getCurrentUser()
+    assert.equal(user, null)
+  })
+})
+
+test('a rejected PAT surfaces as AzureDevOpsAuthenticationError on getCurrentUser', async () => {
+  await withFakeAzureDevOpsServer({}, async (baseUrl) => {
+    const badClient = client(baseUrl, { pat: 'wrong' })
+    await assert.rejects(() => badClient.getCurrentUser(), AzureDevOpsAuthenticationError)
   })
 })
 

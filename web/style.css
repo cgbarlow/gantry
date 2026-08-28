@@ -320,6 +320,26 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .synced-field-wide { flex: 1 1 260px; }
 .synced-value { font-size: 14px; padding: 6px 0; }
 
+/* Review/sign-off summary (#197) — kept as a compact sub-card at the lower
+   right of the work-item details card, so advisory reviews sit beside the
+   existing sign-off state without becoming another gate or panel. */
+.review-status-card {
+  display: grid;
+  grid-template-columns: minmax(180px, auto) minmax(140px, auto);
+  gap: 16px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 18px 0 0 auto;
+  padding: 10px 12px;
+  border: var(--hairline) solid var(--line);
+  background: var(--bg);
+}
+.review-status-list { list-style: none; margin: 4px 0 0; padding: 0; }
+.review-status-list li { display: flex; gap: 10px; justify-content: space-between; align-items: center; font-size: 13px; }
+.review-status-actions { display: inline-flex; align-items: center; gap: 8px; }
+.review-status-actions .btn { margin: 0; }
+.review-status { color: var(--text-muted); white-space: nowrap; }
+
 .advance-stage-panel { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 32px; }
 .advance-stage-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }
 
@@ -331,6 +351,22 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .request-approval-commits li { display: flex; gap: 12px; justify-content: space-between; margin: 4px 0; }
 .request-approval-commits li span { overflow-wrap: anywhere; }
 .request-approval-commits time { color: var(--text-muted); white-space: nowrap; }
+
+.stage-action-panels { display: flex; align-items: flex-start; gap: 32px; margin-top: 32px; }
+.stage-action-panels > section { flex: 1 1 0; min-width: 0; }
+.request-review-panel, .request-approval-panel { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 0; }
+.request-review-panel h2, .request-approval-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }
+.review-request-list { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
+.review-request-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; align-items: end; }
+.reviewer-field { min-width: 0; }
+.review-request-result { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 12px; text-align: right; }
+.review-request-row > .save-status { grid-column: 1 / -1; margin: 0; }
+
+@media (max-width: 760px) {
+  .stage-action-panels { flex-direction: column; gap: 20px; }
+  .stage-action-panels > section { width: 100%; }
+  .review-status-card { width: 100%; grid-template-columns: 1fr 1fr; }
+}
 
 /* Flash highlight animation (WI154, #145 Part 1) — brief background pulse on the
    request-approval panel when the view-bar button scrolls to it, giving the
