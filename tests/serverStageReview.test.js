@@ -8,6 +8,9 @@ import { createServer } from '../lib/server.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import { requestStageReview, checkStageReviewStatus } from '../lib/stageReview.js'
+import { REVIEW_STATUS_FIELD } from '../lib/reviewStatus.js'
+import { linkInstanceToWorkItem } from '../lib/workItemLink.js'
+import { recordInstanceReviewRequest } from '../lib/instance.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
 const ORGANIZATION = 'review-org'
@@ -74,7 +77,9 @@ test('Request Review creates independently tracked related Tasks and checks nati
           })
           assert.equal(request.status, 200)
           const requested = await request.json()
-          assert.equal(requested.review.status, 'New')
+          // ADR-0024: newly created review Tasks are set to "Requested" in
+          // the new custom field, not left on native System.State.
+          assert.equal(requested.review.status, 'Requested')
           assert.match(requested.webUrl, new RegExp(`/_workitems/edit/${requested.review.workItemId}$`))
 
           const reviewWorkItem = await client.getWorkItem(requested.review.workItemId, { expand: 'relations' })
@@ -84,19 +89,29 @@ test('Request Review creates independently tracked related Tasks and checks nati
           assert.match(reviewWorkItem.fields['System.Description'], new RegExp(`/instance/${SLUG}\\?stage=shape`))
           assert.equal(reviewWorkItem.relations[0].rel, 'System.LinkTypes.Related')
           assert.ok(reviewWorkItem.relations[0].url.endsWith(`/workItems/${link.stages.shape}`))
+          // Additive: native System.State is untouched (still the Task
+          // type's default), only the new custom field carries the
+          // lifecycle value.
+          assert.equal(reviewWorkItem.fields['System.State'], 'New')
+          assert.equal(reviewWorkItem.fields[REVIEW_STATUS_FIELD], 'Requested')
 
-          await client.updateWorkItem(requested.review.workItemId, { 'System.State': 'Active' })
+          // A reviewer's decision (e.g. asking for changes) is recorded on
+          // the custom field directly — System.State stays put.
+          await client.updateWorkItem(requested.review.workItemId, { [REVIEW_STATUS_FIELD]: 'Changes requested' })
           const status = await fetch(`${base}/api/instance/review-status?slug=${SLUG}`, {
             method: 'POST',
             headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ stage: 'shape', reviewId: requested.review.workItemId }),
           })
           assert.equal(status.status, 200)
-          assert.equal((await status.json()).review.status, 'Active')
+          assert.equal((await status.json()).review.status, 'Changes requested')
+
+          const stateAfterDecision = await client.getWorkItem(requested.review.workItemId)
+          assert.equal(stateAfterDecision.fields['System.State'], 'New')
 
           const instance = await fetch(`${base}/api/instance?slug=${SLUG}`, { headers: { Authorization: authHeader(PAT) } }).then((res) => res.json())
           assert.equal(instance.reviews.length, 1)
-          assert.equal(instance.reviews[0].status, 'Active')
+          assert.equal(instance.reviews[0].status, 'Changes requested')
           assert.equal(instance.reviewRequests.shape[0].workItemId, requested.review.workItemId)
         })
       } finally {
@@ -502,7 +517,7 @@ test('the Workspace-backed screen exposes Review / Sign-off labels and the Reque
             // reviewer rows").
             const sentRow = dialog.locator('.review-request-row').filter({ hasText: 'Work item #' })
             await sentRow.getByRole('button', { name: 'Check status' }).click()
-            await sentRow.getByText('New').waitFor({ timeout: 10_000 })
+            await sentRow.getByText('Requested').waitFor({ timeout: 10_000 })
 
             await dialog.getByRole('button', { name: 'Close' }).click()
             await dialog.waitFor({ state: 'hidden', timeout: 5_000 })
@@ -515,13 +530,71 @@ test('the Workspace-backed screen exposes Review / Sign-off labels and the Reque
             const statusRow = statusCard.locator('.review-status-list li')
             assert.equal(await statusRow.count(), 1)
             await statusRow.getByRole('button', { name: 'Check status' }).click()
-            await page.getByText(/Review #\d+ is New\./).waitFor({ timeout: 10_000 })
+            await page.getByText(/Review #\d+ is Requested\./).waitFor({ timeout: 10_000 })
           } finally {
             await page.close()
           }
         })
       } finally {
         await browser.close()
+        rmSync(instancesDir, { recursive: true, force: true })
+      }
+    },
+  )
+})
+
+test('checkStageReviewStatus infers Requested/In review from native System.State for a review Task that predates REVIEW_STATUS_FIELD (ADR-0024 §4)', async () => {
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: PAT,
+      files: { [`/gantry-workspace/${SLUG}/instance.yaml`]: `definition: design\nslug: ${SLUG}\nstage: shape\n` },
+    },
+    async (adoBaseUrl) => {
+      const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-review-legacy-'))
+      try {
+        registerInstance(
+          SLUG,
+          { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          { instancesDir },
+        )
+        const client = createAzureDevOpsWorkItemsClient({ organization: ORGANIZATION, project: PROJECT, pat: PAT, baseUrl: adoBaseUrl })
+        const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: PAT, baseUrl: adoBaseUrl }
+
+        await linkInstanceToWorkItem(
+          SLUG,
+          { organization: ORGANIZATION, project: PROJECT, parentId: 1, workItemType: 'Task', pat: PAT, baseUrl: adoBaseUrl },
+          { azureDevOps },
+        )
+
+        // A review Task created the old way — no REVIEW_STATUS_FIELD set at
+        // all, exactly like every review Task created before ADR-0024.
+        const legacyReview = await client.createWorkItem('Task', {
+          'System.Title': 'Review requested: SOAP — review-initiative',
+          'System.AssignedTo': 'legacy-reviewer@example.com',
+        })
+        assert.equal(legacyReview.fields[REVIEW_STATUS_FIELD], undefined)
+        await recordInstanceReviewRequest(
+          SLUG,
+          'shape',
+          { workItemId: legacyReview.id, reviewer: 'legacy-reviewer@example.com', reviewerDisplayName: 'Legacy Reviewer', status: 'New' },
+          { azureDevOps },
+        )
+
+        // Native state is still "New" (the Task type's default) — no
+        // forced backfill migration, just a graceful inference.
+        const whileNew = await checkStageReviewStatus(SLUG, { reviewId: legacyReview.id, stageId: 'shape' }, { azureDevOps })
+        assert.equal(whileNew.review.status, 'Requested')
+
+        // Once someone picks it up (native state moves to Active, still no
+        // custom field), the inferred status follows — still never an
+        // error or blank value.
+        await client.updateWorkItem(legacyReview.id, { 'System.State': 'Active' })
+        const whileActive = await checkStageReviewStatus(SLUG, { reviewId: legacyReview.id, stageId: 'shape' }, { azureDevOps })
+        assert.equal(whileActive.review.status, 'In review')
+      } finally {
         rmSync(instancesDir, { recursive: true, force: true })
       }
     },

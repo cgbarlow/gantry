@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { checkStageApprovalStatus, interpretReviewerVotes, summarizePullRequest } from '../lib/stageStatus.js'
+import { reviewStatusFromVoteState } from '../lib/reviewStatus.js'
 import { requestStageApproval } from '../lib/stageApproval.js'
 import { readInstance } from '../lib/instance.js'
 import { linkInstanceToWorkItem } from '../lib/workItemLink.js'
@@ -74,6 +75,22 @@ test('interpretReviewerVotes distinguishes approval, rejection, changes-requeste
   assert.equal(interpretReviewerVotes([{ displayName: 'a', vote: -5 }]), 'changes-requested')
   // A single rejection blocks, no matter who else approved.
   assert.equal(interpretReviewerVotes([{ displayName: 'a', vote: 10 }, { displayName: 'b', vote: -10 }]), 'rejected')
+})
+
+// ADR-0024: sign-off's PR-vote-derived state mapped onto the same
+// five-value vocabulary review work items use — one shared status
+// language, not two.
+test('reviewStatusFromVoteState maps every interpretReviewerVotes outcome (plus invalidation) onto the shared five-value vocabulary', () => {
+  assert.equal(reviewStatusFromVoteState('pending'), 'In review')
+  assert.equal(reviewStatusFromVoteState('approved'), 'Approved')
+  assert.equal(reviewStatusFromVoteState('rejected'), 'Rejected')
+  assert.equal(reviewStatusFromVoteState('changes-requested'), 'Changes requested')
+  // A stale approval a later commit invalidated is back under review, not
+  // itself a rejection (mirrors ADR-0014).
+  assert.equal(reviewStatusFromVoteState('approved-then-invalidated'), 'In review')
+  // An unrecognized/future vote-state value degrades to "In review" rather
+  // than throwing or returning something blank.
+  assert.equal(reviewStatusFromVoteState('some-unknown-state'), 'In review')
 })
 
 test('summarizePullRequest reads a reviewer\'s required flag off Azure DevOps\'s real isRequired field (WI199), not the wrong `required` field', () => {
@@ -176,6 +193,8 @@ test('a still-pending review reports pending and merges nothing', async () => {
 
     const result = await checkStageApprovalStatus(SLUG, { azureDevOps })
     assert.equal(result.review.state, 'pending')
+    // ADR-0024: the same five-value vocabulary review work items use.
+    assert.equal(result.review.reviewStatus, 'In review')
     assert.equal(result.merged, false)
     assert.equal(result.advancedTo, null)
     assert.equal(result.prStatus, 'active')
@@ -192,6 +211,7 @@ test('an explicit rejection is reported as rejected — not merged, stage untouc
 
     const result = await checkStageApprovalStatus(SLUG, { azureDevOps })
     assert.equal(result.review.state, 'rejected')
+    assert.equal(result.review.reviewStatus, 'Rejected')
     assert.equal(result.merged, false)
     assert.equal(result.advancedTo, null)
     assert.equal(await getPrStatus(azureDevOps, pullRequestId), 'active')
@@ -207,6 +227,7 @@ test('a waiting-for-author vote is reported as changes-requested — distinct fr
 
     const result = await checkStageApprovalStatus(SLUG, { azureDevOps })
     assert.equal(result.review.state, 'changes-requested')
+    assert.equal(result.review.reviewStatus, 'Changes requested')
     assert.equal(result.merged, false)
     assert.equal(await getPrStatus(azureDevOps, pullRequestId), 'active')
   })
@@ -226,6 +247,9 @@ test('a commit after approval invalidates auto-merge, persists the state, and ca
 
     const invalidated = await checkStageApprovalStatus(SLUG, { azureDevOps })
     assert.equal(invalidated.review.state, 'approved-then-invalidated')
+    // A stale, invalidated approval reads as back "In review", not
+    // "Approved" — ADR-0024 mirrors ADR-0014's invalidation treatment.
+    assert.equal(invalidated.review.reviewStatus, 'In review')
     assert.equal(invalidated.merged, false)
     assert.equal(invalidated.approvalState.state, 'invalidated')
     assert.equal(invalidated.pullRequest.commits.some((commit) => commit.message === 'Post-approval edit'), true)
@@ -270,6 +294,7 @@ test('detecting approval merges the Pull Request itself and advances the stage p
 
     const result = await checkStageApprovalStatus(SLUG, { azureDevOps })
     assert.equal(result.review.state, 'approved')
+    assert.equal(result.review.reviewStatus, 'Approved')
     assert.equal(result.merged, true)
     assert.equal(result.prStatus, 'completed')
     assert.deepEqual(result.advancedTo, { id: 'hld-define', title: 'High-level Design', gate: 'hld-tac-approved' })
