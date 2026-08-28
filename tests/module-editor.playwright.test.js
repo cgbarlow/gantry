@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium } from 'playwright'
+import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { createServer } from '../lib/server.js'
 import { readModule } from '../lib/instance.js'
 import { loadDefinition } from '../lib/definition.js'
@@ -39,9 +39,10 @@ test('the ported module editor page loads with no errors and a markdown field sa
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+      const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
         const pageErrors = []
         page.on('pageerror', (err) => pageErrors.push(err.message))
         page.on('console', (msg) => {
@@ -84,9 +85,10 @@ test('module editor: the header no longer has its own theme toggle (moved to Set
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+      const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
         await page.goto(`${base}/instance/examples`)
         await page.waitForSelector('.module', { timeout: 10_000 })
         assert.equal(await page.locator('header .theme-toggle').count(), 0)
@@ -107,9 +109,10 @@ test('the 3-way view-mode toggle switches modes, cycles via hotkey, stays global
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+      const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
         const pageErrors = []
         page.on('pageerror', (err) => pageErrors.push(err.message))
         page.on('console', (msg) => {
@@ -164,9 +167,10 @@ test('the 3-way view-mode toggle switches modes, cycles via hotkey, stays global
 
     // A fresh visit (new page load) resets to Split, not persisted from the previous session.
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+      const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
         await page.goto(`${base}/instance/examples`)
         await page.waitForSelector('.module', { timeout: 10_000 })
         assert.equal(await page.locator('#modules').getAttribute('data-view-mode'), 'split')
@@ -190,7 +194,7 @@ test('artefact selector filters Shape and Detailed Design fields, persists per s
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+      const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
         const pageErrors = []
@@ -290,9 +294,10 @@ test('Render and Clear all fields live in the view-toggle bar; Render opens a di
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+      const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
         const pageErrors = []
         page.on('pageerror', (err) => pageErrors.push(err.message))
         page.on('console', (msg) => {
@@ -329,7 +334,7 @@ test('Render and Clear all fields live in the view-toggle bar; Render opens a di
         // The dialog's own bottom action (relabelled from "Close" to "Render") renders every toggled artefact.
         const dialogRenderButton = dialog.getByRole('button', { name: 'Render', exact: true })
         await dialogRenderButton.click()
-        await assert.doesNotReject(dialog.locator('text=Rendered to').waitFor({ timeout: 10_000 }))
+        await assert.doesNotReject(dialog.locator('text=Rendered to').waitFor({ timeout: DEFAULT_TIMEOUT * 2 }))
         await page.keyboard.press('Escape')
         await dialog.waitFor({ state: 'hidden', timeout: 5_000 })
 
@@ -374,7 +379,7 @@ test('Render dialog: toggling multiple artefacts renders them as one batch; unto
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+       const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
         const pageErrors = []
@@ -415,7 +420,10 @@ test('Render dialog: toggling multiple artefacts renders them as one batch; unto
         await renderButton.click()
 
         await assert.doesNotReject(
-          dialog.locator('.save-status').getByText('Solution Architecture Document: rendered to', { exact: false }).waitFor({ timeout: 10_000 })
+           dialog
+             .locator('.save-status')
+             .getByText('Solution Architecture Document: rendered to', { exact: false })
+             .waitFor({ timeout: DEFAULT_TIMEOUT * 2 })
         )
         assert.equal(await dialog.locator('.save-status a').count(), 0)
         // Give ssad's non-render a moment to definitely not appear, rather than racing the assertion against sad's own in-flight request.
@@ -443,9 +451,10 @@ test("Image is a direct formatting-toolbar action and Insert offers only Section
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+      const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
         const pageErrors = []
         page.on('pageerror', (err) => pageErrors.push(err.message))
         page.on('console', (msg) => {
@@ -595,9 +604,10 @@ test('toolbar Table opens a size grid whose pick inserts a live table with the c
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+      const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
         const pageErrors = []
         page.on('pageerror', (err) => pageErrors.push(err.message))
         page.on('console', (msg) => {
@@ -677,7 +687,7 @@ test('Tab walks the cells, Enter appends a row from the last one, Shift-Tab retr
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+       const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
         const pageErrors = []
@@ -737,7 +747,7 @@ test('the contextual strip adds/removes rows and columns and cycles alignment (#
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+       const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
         const pageErrors = []
@@ -817,7 +827,7 @@ test('a malformed pseudo-table degrades gracefully: no strip, no corruption (#13
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+       const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
         const pageErrors = []
@@ -874,7 +884,7 @@ test('preview tables are token-styled in all three themes (#134)', async () => {
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+       const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
         await page.goto(`${base}/instance/examples`)
@@ -924,9 +934,10 @@ test('Insert ▾ → Section adds a titled custom field below the requesting fie
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+      const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
         const pageErrors = []
         page.on('pageerror', (err) => pageErrors.push(err.message))
         page.on('console', (msg) => {
@@ -1004,7 +1015,7 @@ test('formatting toolbar follows field focus, hides on blur, and never shows in 
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+         const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
         const pageErrors = []
@@ -1093,7 +1104,7 @@ test('bold round-trips via button then shortcut, and empty-cursor markers wrap t
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+       const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
         const pageErrors = []
@@ -1150,7 +1161,7 @@ test('headings dropdown applies H3-H6, re-levels, and strips on re-invoke (#133)
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+         const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
         const pageErrors = []
@@ -1214,7 +1225,7 @@ test('task list, blockquote, and horizontal rule write real markdown to disk (#1
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+       const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
         const pageErrors = []
@@ -1275,7 +1286,7 @@ test("inline code, link, and code block buttons render real preview output (#133
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+       const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
         const pageErrors = []
@@ -1339,7 +1350,7 @@ test('B/I/S toolbar letters are visually self-demonstrating across all three the
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+       const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
         await page.goto(`${base}/instance/examples`)
@@ -1381,7 +1392,7 @@ test('view-mode bar sticks to the top while scrolling and returns below the head
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+       const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
         const pageErrors = []
@@ -1438,7 +1449,7 @@ test('⤢ expands a field full-screen with both split panes and its toolbar; Esc
       )
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+       const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
         const pageErrors = []

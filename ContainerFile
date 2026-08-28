@@ -1,0 +1,134 @@
+# syntax=docker/dockerfile:1
+
+# ── Stage 1: base ─────────────────────────────────────────────
+# Shared environment: Node 24 LTS + system dependencies (pandoc, git).
+# Both verification and runtime stages inherit from here so the
+# tool versions are identical everywhere.
+FROM node:24-slim AS base
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends pandoc git unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# ── Stage 2: deps ────────────────────────────────────────────
+# Install ALL dependencies (including devDependencies) so that
+# verification stages have access to test tooling (playwright).
+FROM base AS deps
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# ── Stage 3: source ──────────────────────────────────────────
+# Layer all project files on top of installed deps.  Every
+# verification stage branches from here.
+FROM deps AS source
+
+COPY .git/              .git/
+COPY gantry.yaml       ./
+COPY bin/               bin/
+COPY lib/               lib/
+COPY web/               web/
+COPY definitions/       definitions/
+COPY instances/         instances/
+COPY docs/user-guide/   docs/user-guide/
+COPY tests/             tests/
+
+# TODO: Stage – lint
+# When linters are introduced, add a stage here that:
+#   1. FROM source AS lint
+#   2. RUN npm run lint (exit non-zero on failure, like render)
+#   3. Write SARIF output to /results/sarif/ for CI extraction
+# Then add COPY --from=lint /results/sarif/ /ci-results/sarif/
+# to the runtime stage for extraction, and optionally a sentinel
+# COPY --from=lint /verified-lint /tmp/ for a build-time gate.
+#
+# Candidate linters (see separate work stream):
+#   - eslint           for JS   (lib/, bin/, web/, tests/)
+#     → eslint --format @microsoft/eslint-formatter-sarif -o results/sarif/eslint.sarif
+#   - stylelint        for CSS  (web/style.css)
+#   - markdownlint-cli2 for MD  (definitions/, instances/, docs/)
+#   - prettier --check for YAML (gantry.yaml, definitions/**/*.yaml)
+#   - htmlhint         for HTML (web/**/*.html)
+
+# ── Stage 4: test ────────────────────────────────────────────
+# Unit and integration tests with code coverage — no browser
+# required.  Always writes JUnit XML + LCOV results to /results/
+# for CI extraction.  The stage always exits 0 so results are
+# available regardless of test outcome; the CI pipeline's
+# PublishTestResults (failTaskOnFailedTests) enforces the gate.
+FROM source AS test
+
+RUN mkdir -p results \
+    && npm run test:unit:ci \
+    ; TEST_EXIT=$? \
+    ; mkdir -p /results/test-results /results/coverage \
+    ; cp results/TEST-unit.xml /results/test-results/ 2>/dev/null || true \
+    ; cp results/coverage.lcov /results/coverage/ 2>/dev/null || true \
+    ; exit 0
+
+# ── Stage 5: test-e2e ────────────────────────────────────────
+# Playwright browser tests — installs Chromium + system deps.
+# Always writes JUnit XML results to /results/ for CI extraction.
+# The stage always exits 0 so results are available regardless of
+# test outcome; the CI pipeline's PublishTestResults enforces the gate.
+FROM source AS test-e2e
+
+ENV CI=true
+RUN npx playwright install --with-deps chromium
+RUN mkdir -p results \
+    && npm run test:e2e:ci \
+    ; TEST_EXIT=$? \
+    ; mkdir -p /results/e2e-results \
+    ; cp results/TEST-e2e.xml /results/e2e-results/ 2>/dev/null || true \
+    ; exit 0
+
+# ── Stage 6: render ──────────────────────────────────────────
+# Render every example artefact to verify templates work.
+FROM source AS render
+
+RUN npm run render:examples \
+    && touch /verified-render
+
+# ── Stage 7: runtime ─────────────────────────────────────────
+# Minimal production image.  Render is gated by a sentinel; test
+# results are embedded for CI extraction (see azure-pipelines.yml).
+FROM base AS runtime
+
+WORKDIR /app
+
+# Render gate — render exits non-zero on failure (no exit-0
+# wrapper), so this COPY fails the build when rendering breaks.
+COPY --from=render /verified-render /tmp/
+
+# Test results and coverage — embedded so the CI pipeline can
+# extract them with `docker cp` after a single build.  The test
+# stages always exit 0 (so results exist even on failure); the
+# pipeline's PublishTestResults failTaskOnFailedTests is the gate.
+# TODO: When linters produce SARIF, also copy:
+# COPY --from=lint /results/sarif/ /ci-results/sarif/
+COPY --from=test     /results/test-results/ /ci-results/test-results/
+COPY --from=test     /results/coverage/     /ci-results/coverage/
+COPY --from=test-e2e /results/e2e-results/  /ci-results/e2e-results/
+
+# Production dependencies only (no devDependencies)
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+# Application code (from the source stage that all tests ran against)
+COPY --from=source /app/gantry.yaml        ./
+COPY --from=source /app/bin/               bin/
+COPY --from=source /app/lib/               lib/
+COPY --from=source /app/web/               web/
+COPY --from=source /app/definitions/       definitions/
+COPY --from=source /app/instances/         instances/
+COPY --from=source /app/docs/user-guide/   docs/user-guide/
+
+EXPOSE 3000
+
+# Entrypoint/CMD split: `docker run gantry` starts the web UI;
+# override CMD to run any other gantry command, e.g.:
+#   docker run gantry render examples soap
+ENTRYPOINT ["node", "bin/gantry.js"]
+CMD ["serve", "--port", "3000"]

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium } from 'playwright'
+import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { createServer } from '../lib/server.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
@@ -80,9 +80,10 @@ function withAzureDevOpsBackedServer(fn) {
 
 test('opening an Azure-DevOps-backed instance with no stored PAT prompts for one (with scope guidance); submitting it loads the instance and persists the PAT', async () => {
   await withAzureDevOpsBackedServer(async (base) => {
-    const browser = await chromium.launch()
+    const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
       const pageErrors = []
       page.on('pageerror', (err) => pageErrors.push(err.message))
 
@@ -116,9 +117,10 @@ test('opening an Azure-DevOps-backed instance with no stored PAT prompts for one
 
 test('a stored PAT is attached automatically on every subsequent request — no re-prompt on reload, and edit/save round-trips', async () => {
   await withAzureDevOpsBackedServer(async (base) => {
-    const browser = await chromium.launch()
+    const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
       const pageErrors = []
       page.on('pageerror', (err) => pageErrors.push(err.message))
 
@@ -147,9 +149,10 @@ test('a stored PAT is attached automatically on every subsequent request — no 
 
 test('clearing the stored PAT (from the Settings screen, #101) re-triggers the prompt on the next Azure-DevOps-touching action', async () => {
   await withAzureDevOpsBackedServer(async (base) => {
-    const browser = await chromium.launch()
+    const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
 
       // PAT management moved off the per-instance editor header entirely (#101) onto the global Settings screen's "Global Defaults" tab — exercised there instead of on `/instance/my-initiative`. Seeded via `page.evaluate` after an initial navigation (not `addInitScript`, which reruns on *every* subsequent navigation this test makes — including the one right after clearing — and would silently re-seed the very value this test clears).
       await page.goto(`${base}/settings`)
@@ -178,9 +181,10 @@ test('clearing the stored PAT (from the Settings screen, #101) re-triggers the p
 
 test('the Settings screen\'s "Replace Azure DevOps PAT" control (#101) opens the prompt directly (with no failed request needed first) and overwrites the stored value', async () => {
   await withAzureDevOpsBackedServer(async (base) => {
-    const browser = await chromium.launch()
+    const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
 
       // Seeded via `page.evaluate` + `reload` after an initial navigation, not `addInitScript` — see the previous test's own comment on why `addInitScript` is unsafe once a test navigates more than once (it would re-seed VALID_PAT right before the later `/instance/my-initiative` navigation below, silently overwriting the replacement PAT this test proves gets used instead).
       await page.goto(`${base}/settings`)
@@ -222,9 +226,10 @@ test('a local instance never shows the PAT prompt, and its editor header shows n
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+      const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
         const pageErrors = []
         page.on('pageerror', (err) => pageErrors.push(err.message))
 

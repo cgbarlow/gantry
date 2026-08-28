@@ -483,3 +483,78 @@ Conventions:
 - Guidance text in module specs is written for the person filling it in, not for a reviewer.
 - Never add a field that exists only to satisfy a template's layout.
 - Comment/prose text (code comments, `CONTEXT.md`, `docs/adr/`) is written one paragraph per line, not hard-wrapped at a fixed column — see `docs/adr/0015`.
+
+# Container demo
+
+A multi-stage `ContainerFile` at the repo root builds a minimal runtime image (~180 MB) with Node.js 22, Pandoc, and Git — everything needed to serve the web UI and render artefacts.
+
+## Build the image
+
+```bash
+docker build -f ContainerFile -t gantry .
+podman rm -f gantry
+podman build --file ContainerFile \
+  --volume /etc/ssl/certs/ca-certificates.crt:/certs/corporate-ca.pem:ro \
+  --env NODE_EXTRA_CA_CERTS=/certs/corporate-ca.pem -t gantry .
+```
+
+## Corporate proxy / custom CA certificates
+
+If running behind a TLS-intercepting proxy (e.g. Zscaler), mount your certificate chain into the container and tell Node.js to trust it via `NODE_EXTRA_CA_CERTS`:
+
+```bash
+podman run -d \
+  --name gantry \
+  --publish 8080:8080 \
+  --volume /etc/ssl/certs/ca-certificates.crt:/certs/corporate-ca.pem:ro \
+  --env NODE_EXTRA_CA_CERTS=/certs/corporate-ca.pem \
+  localhost/gantry serve --port 8080
+```
+
+## Run the web UI
+
+```bash
+docker run -p 3000:3000 gantry
+```
+
+Open http://localhost:3000 in a browser. The dashboard lists the demo instances shipped with the repo (`demo-web`, `demo-cli`, `examples`). Click any instance to view its stages, modules, and completeness.
+
+## Render an artefact
+
+The default entrypoint is `node bin/gantry.js`, so any gantry subcommand can be passed directly:
+
+```bash
+# Render the SOAP artefact for the "examples" instance
+docker run gantry render examples soap
+
+# Extract the rendered .docx to your host
+docker run -v "$(pwd)/output:/app/instances/examples/out" gantry render examples soap
+```
+
+After the volume-mounted run, the rendered document is at `./output/soap.docx`.
+
+## Other commands
+
+```bash
+# List instances
+docker run gantry instances
+
+# Check gate status
+docker run gantry status examples
+
+# Validate the design definition
+docker run gantry validate design
+```
+
+## Customise
+
+| Override | How |
+|---|---|
+| Port | `docker run -p 8080:8080 gantry serve --port 8080` |
+| Your own definitions/instances | Mount a volume: `-v /path/to/your/repo:/app` |
+| Custom CA certs | `-v /etc/pki/tls/certs/ca-bundle.crt:/certs/ca-bundle.crt:ro -e NODE_EXTRA_CA_CERTS=/certs/ca-bundle.crt` |
+| Shell into the container | `docker run -it --entrypoint sh gantry` |
+
+## Issues
+
+1. For testing with git dependencies it is using the source git folder instead of setting up a dedicated fixture

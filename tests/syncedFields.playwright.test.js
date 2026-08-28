@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium } from 'playwright'
+import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { createServer } from '../lib/server.js'
 import { createInstance, readInstance } from '../lib/instance.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
@@ -72,9 +72,10 @@ test('the synced-fields panel shows the link prompt when unlinked, then the dist
               baseUrl: wiBaseUrl,
             })
 
-            const browser = await chromium.launch()
+            const browser = await launchBrowser()
             try {
               const page = await browser.newPage()
+              page.setDefaultTimeout(DEFAULT_TIMEOUT)
               const pageErrors = []
               page.on('pageerror', (err) => pageErrors.push(err.message))
               page.on('console', (msg) => {

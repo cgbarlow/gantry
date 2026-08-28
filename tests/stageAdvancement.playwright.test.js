@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium } from 'playwright'
+import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { createServer } from '../lib/server.js'
 import { createInstance, readInstance, writeInstanceStage } from '../lib/instance.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
@@ -54,9 +54,10 @@ test('the Stage advancement panel blocks on a failing gate, then advances the in
     createInstance('design', 'my-initiative', { instancesDir })
 
     await withRunningServer({ slug: 'my-initiative', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+      const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
         const pageErrors = []
         page.on('pageerror', (err) => pageErrors.push(err.message))
         page.on('console', (msg) => {
@@ -91,9 +92,10 @@ test('declining the confirmation leaves the instance at its current stage', asyn
     fillShapeStage(instancesDir, 'my-initiative')
 
     await withRunningServer({ slug: 'my-initiative', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+      const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
         const pageErrors = []
         page.on('pageerror', (err) => pageErrors.push(err.message))
         page.on('console', (msg) => {
@@ -127,9 +129,10 @@ test('confirming advances the instance to its next stage, and the header reflect
     fillShapeStage(instancesDir, 'my-initiative')
 
     await withRunningServer({ slug: 'my-initiative', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+      const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
         const pageErrors = []
         page.on('pageerror', (err) => pageErrors.push(err.message))
         page.on('console', (msg) => {
@@ -183,9 +186,10 @@ test('confirming advances the instance exactly once, even after the current stag
     fillShapeStage(instancesDir, 'my-initiative')
 
     await withRunningServer({ slug: 'my-initiative', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+      const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
         const pageErrors = []
         page.on('pageerror', (err) => pageErrors.push(err.message))
         page.on('console', (msg) => {
@@ -250,9 +254,10 @@ test('the Stage advancement panel is never shown for a Workspace-backed instance
         await withRunningServer(
           { instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true },
           async (base) => {
-            const browser = await chromium.launch()
+            const browser = await launchBrowser()
             try {
               const page = await browser.newPage()
+              page.setDefaultTimeout(DEFAULT_TIMEOUT)
               const pageErrors = []
               page.on('pageerror', (err) => pageErrors.push(err.message))
               page.on('console', (msg) => {
@@ -293,9 +298,10 @@ test('the Stage advancement panel is never shown once the instance is already at
     writeInstanceStage('my-initiative', 'handover', { instancesDir })
 
     await withRunningServer({ slug: 'my-initiative', instancesDir }, async (base) => {
-      const browser = await chromium.launch()
+      const browser = await launchBrowser()
       try {
         const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
         const pageErrors = []
         page.on('pageerror', (err) => pageErrors.push(err.message))
         page.on('console', (msg) => {

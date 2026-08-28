@@ -1,48 +1,95 @@
-trigger:
-  branches:
-    include:
-      - main
+# All verification (tests, renders) is orchestrated by the ContainerFile
+# build stages, which in turn call the npm scripts defined in package.json.
+# This keeps local dev, container build, and CI pipeline in sync.
+#
+# To run the same checks locally:
+#   npm run test:unit          # unit & integration tests
+#   npm run test:unit:ci       # same, with JUnit XML + LCOV output
+#   npm run test:e2e           # Playwright browser tests
+#   npm run test:e2e:ci        # same, with JUnit XML output
+#   npm run render:examples    # render all example artefacts
+#
+# Or the full verified container build:
+#   podman build --file ContainerFile --tag gantry .
 
-pr:
-  branches:
-    include:
-      - main
+# Branch protection pipeline — triggered only by Azure DevOps build validation policy.
+# No CI or PR triggers; the branch policy controls when this runs.
+trigger: none
+pr: none
 
 pool:
   vmImage: ubuntu-latest
 
 steps:
-  - task: NodeTool@0
+  # Single build: runs tests, renders examples, and produces
+  # the runtime image.  Test results are embedded at /ci-results/
+  # inside the image and extracted afterward for CI publishing.
+  #
+  # --no-cache-filter on test stages: these stages always `exit 0`
+  # (so results exist even on failure), which means Docker would
+  # cache a failing run as "successful".  This flag ensures tests
+  # re-run against the current source on every build.  The render
+  # stage exits non-zero on failure (natural cache invalidation),
+  # so it does not need this flag.
+  - script: >
+      docker build --file ContainerFile
+      --no-cache-filter test
+      --no-cache-filter test-e2e
+      --tag gantry .
+    displayName: 'Build and verify'
+
+  # Extract test results, coverage, and (future) SARIF artifacts
+  # from the built image.  Tolerates a missing image (e.g. if the
+  # render gate failed the build) so the publish steps can still
+  # report "missing results" cleanly.
+  - script: |
+      id=$(docker create gantry 2>/dev/null) && {
+        docker cp "$id":/ci-results $(System.DefaultWorkingDirectory)/ci-results
+        docker rm "$id"
+      } || echo "##vso[task.logissue type=warning]Could not extract results — image did not build"
+    displayName: 'Extract test results'
+    condition: always()
+
+  # ── Publish: test results ──────────────────────────────────
+  - task: PublishTestResults@2
     inputs:
-      versionSpec: '22.x'
-    displayName: 'Install Node.js 22'
+      testResultsFormat: 'JUnit'
+      testResultsFiles: '**/TEST-unit.xml'
+      searchFolder: '$(System.DefaultWorkingDirectory)/ci-results'
+      testRunTitle: 'Unit Tests'
+      mergeTestResults: true
+      failTaskOnFailedTests: true
+      failTaskOnMissingResultsFile: true
+    condition: always()
+    displayName: 'Publish unit test results'
 
-  - script: sudo apt-get update && sudo apt-get install -y pandoc
-    displayName: 'Install pandoc'
+  - task: PublishTestResults@2
+    inputs:
+      testResultsFormat: 'JUnit'
+      testResultsFiles: '**/TEST-e2e.xml'
+      searchFolder: '$(System.DefaultWorkingDirectory)/ci-results'
+      testRunTitle: 'E2E Tests (Playwright)'
+      mergeTestResults: true
+      failTaskOnFailedTests: true
+      failTaskOnMissingResultsFile: true
+    condition: always()
+    displayName: 'Publish E2E test results'
 
-  - script: npm install
-    displayName: 'Install dependencies'
+  # ── Publish: code coverage ─────────────────────────────────
+  - task: PublishCodeCoverageResults@2
+    inputs:
+      summaryFileLocation: '$(System.DefaultWorkingDirectory)/ci-results/coverage/coverage.lcov'
+      pathToSources: '$(System.DefaultWorkingDirectory)'
+    condition: always()
+    displayName: 'Publish code coverage'
 
-  - script: npx playwright install --with-deps chromium
-    displayName: 'Install Playwright browser'
-
-  - script: npm test
-    displayName: 'Run tests'
-
-  - script: node bin/gantry.js render examples soap
-    displayName: 'Render soap'
-
-  - script: node bin/gantry.js render examples soap-full
-    displayName: 'Render soap-full'
-
-  - script: node bin/gantry.js render examples hld
-    displayName: 'Render hld'
-
-  - script: node bin/gantry.js render examples sad
-    displayName: 'Render sad'
-
-  - script: node bin/gantry.js render examples ssad
-    displayName: 'Render ssad'
-
-  - script: node bin/gantry.js render examples as-built
-    displayName: 'Render as-built'
+  # ── Publish: SARIF (static analysis) ───────────────────────
+  # TODO: Uncomment when linters produce SARIF output.
+  # The SARIF Scans Tab extension and Defender for ADO both
+  # consume artifacts published under 'CodeAnalysisLogs'.
+  # - task: PublishBuildArtifacts@1
+  #   inputs:
+  #     pathToPublish: '$(System.DefaultWorkingDirectory)/ci-results/sarif'
+  #     artifactName: 'CodeAnalysisLogs'
+  #   condition: always()
+  #   displayName: 'Publish SARIF results'

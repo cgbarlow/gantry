@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium } from 'playwright'
+import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { createServer } from '../lib/server.js'
 import { createInstance, readInstance, recordInstanceWorkItemLink } from '../lib/instance.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
@@ -29,9 +29,10 @@ function withRunningServer(options, fn) {
 
 function withPage(fn) {
   return async (base) => {
-    const browser = await chromium.launch()
+    const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
       const pageErrors = []
       page.on('pageerror', (err) => pageErrors.push(err.message))
       page.on('console', (msg) => {

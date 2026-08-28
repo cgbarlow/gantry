@@ -1,0 +1,17 @@
+.devcontainer/
+node_modules/
+reference/
+vendor/
+docs/
+!docs/user-guide/
+README.md
+CONTEXT.md
+CLAUDE.md
+AGENTS.md
+exec-summary.md
+azure-pipelines.yml
+instances/*/out/
+instances/instance-registry.json
+instances/workspace-registry.json
+results/
+ci-results/

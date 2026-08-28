@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium } from 'playwright'
+import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { createServer } from '../lib/server.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
@@ -123,9 +123,10 @@ test('the "+ New Workspace" wizard registers a workspace, creates an instance, a
     const client = createAzureDevOpsWorkItemsClient({ organization: ORGANIZATION, project: PROJECT, pat: VALID_PAT, baseUrl: adoBaseUrl })
     const parent = await client.createWorkItem('Feature', { 'System.Title': 'Parent initiative' })
 
-    const browser = await chromium.launch()
+    const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
       const pageErrors = []
       page.on('pageerror', (err) => pageErrors.push(err.message))
       page.on('console', (msg) => {
@@ -204,9 +205,10 @@ test('the "+ New Workspace" wizard\'s pick-existing-workspace path adds a second
     const parentA = await client.createWorkItem('Feature', { 'System.Title': 'Parent A' })
     const parentB = await client.createWorkItem('Feature', { 'System.Title': 'Parent B' })
 
-    const browser = await chromium.launch()
+    const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
       await installBaseUrlRoutes(page, adoBaseUrl)
       await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
 
@@ -271,7 +273,7 @@ test('the "+ New Workspace" wizard\'s pick-existing-workspace path adds a second
 
 test('#137: empty pick-mode offers a control to switch to Register', async () => {
   await withWizardTestServer(async ({ gantryBase }) => {
-    const browser = await chromium.launch()
+    const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
       await page.goto(`${gantryBase}/new-workspace`)
@@ -298,7 +300,7 @@ test('#137: Back from Instance step returns to workspace picker with values inta
     const client = createAzureDevOpsWorkItemsClient({ organization: ORGANIZATION, project: PROJECT, pat: VALID_PAT, baseUrl: adoBaseUrl })
     await client.createWorkItem('Feature', { 'System.Title': 'Any parent' })
 
-    const browser = await chromium.launch()
+    const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
       await installBaseUrlRoutes(page, adoBaseUrl)
@@ -344,7 +346,7 @@ test('#137: Back from Link step returns to Instance step with values intact', as
     const client = createAzureDevOpsWorkItemsClient({ organization: ORGANIZATION, project: PROJECT, pat: VALID_PAT, baseUrl: adoBaseUrl })
     await client.createWorkItem('Feature', { 'System.Title': 'Any parent' })
 
-    const browser = await chromium.launch()
+    const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
       await installBaseUrlRoutes(page, adoBaseUrl)
@@ -381,7 +383,7 @@ test('#137: mid-flow revisit of /new-workspace persists step; Back reaches works
     const client = createAzureDevOpsWorkItemsClient({ organization: ORGANIZATION, project: PROJECT, pat: VALID_PAT, baseUrl: adoBaseUrl })
     await client.createWorkItem('Feature', { 'System.Title': 'Any parent' })
 
-    const browser = await chromium.launch()
+    const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
       await installBaseUrlRoutes(page, adoBaseUrl)
@@ -424,7 +426,7 @@ test('#137: mid-flow revisit of /new-workspace persists step; Back reaches works
 
 test('#138: Instance step renders "New Instance" heading between Workspace card and Definition picker', async () => {
   await withWizardTestServer(async ({ gantryBase, adoBaseUrl }) => {
-    const browser = await chromium.launch()
+    const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
       await installBaseUrlRoutes(page, adoBaseUrl)

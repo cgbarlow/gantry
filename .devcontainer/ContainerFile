@@ -1,0 +1,20 @@
+FROM mcr.microsoft.com/devcontainers/javascript-node:24 AS development
+
+COPY setup_proxy_certificate.sh /tmp/setup_proxy_certificate.sh
+COPY zscaler-root.crt /tmp/zscaler-root.crt
+RUN bash /tmp/setup_proxy_certificate.sh \
+    && rm /tmp/setup_proxy_certificate.sh /tmp/zscaler-root.crt
+
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+RUN npm config set cafile /etc/ssl/certs/ca-certificates.crt --global
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+    ripgrep \
+    pandoc \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL -o /tmp/install-opencode.sh https://opencode.ai/install \
+    && bash /tmp/install-opencode.sh --version 1.18.23 \
+    && cp ~/.opencode/bin/opencode /usr/bin/opencode \
+    && rm -rf ~/.opencode /tmp/install-opencode.sh

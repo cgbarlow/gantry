@@ -2,3 +2,5 @@ node_modules/
 instances/*/out/
 instances/instance-registry.json
 instances/workspace-registry.json
+results/
+ci-results/

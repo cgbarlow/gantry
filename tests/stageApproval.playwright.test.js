@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium } from 'playwright'
+import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { createServer } from '../lib/server.js'
 import { createInstance } from '../lib/instance.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
@@ -114,7 +114,7 @@ function withRemoteInstance(fn, serverOverrides = {}) {
 
 function withRunningBrowser(fn) {
   return (async () => {
-    const browser = await chromium.launch()
+    const browser = await launchBrowser()
     try {
       await fn(browser)
     } finally {
@@ -130,6 +130,7 @@ test('the Request approval panel is never shown for a local instance', async () 
     await withRunningServer({ slug: 'my-initiative', instancesDir }, async (base) => {
       await withRunningBrowser(async (browser) => {
         const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
         const pageErrors = []
         page.on('pageerror', (err) => pageErrors.push(err.message))
         page.on('console', (msg) => {
@@ -163,6 +164,7 @@ test('the Request approval panel blocks on a failing gate for a Workspace-backed
       async (base) => {
         await withRunningBrowser(async (browser) => {
           const page = await browser.newPage()
+          page.setDefaultTimeout(DEFAULT_TIMEOUT)
           const pageErrors = []
           page.on('pageerror', (err) => pageErrors.push(err.message))
           page.on('console', (msg) => {
@@ -197,6 +199,7 @@ test('declining the confirmation opens no Pull Request', async () => {
       async (base) => {
         await withRunningBrowser(async (browser) => {
           const page = await browser.newPage()
+          page.setDefaultTimeout(DEFAULT_TIMEOUT)
           const pageErrors = []
           page.on('pageerror', (err) => pageErrors.push(err.message))
           page.on('console', (msg) => {
@@ -234,6 +237,7 @@ test('confirming opens a Pull Request, and the panel reflects it — including s
       async (base) => {
         await withRunningBrowser(async (browser) => {
           const page = await browser.newPage()
+          page.setDefaultTimeout(DEFAULT_TIMEOUT)
           const pageErrors = []
           page.on('pageerror', (err) => pageErrors.push(err.message))
           page.on('console', (msg) => {
@@ -328,6 +332,7 @@ test('Check status reports pending, then rejection, then approval — merging an
       async (base) => {
         await withRunningBrowser(async (browser) => {
           const page = await browser.newPage()
+          page.setDefaultTimeout(DEFAULT_TIMEOUT)
           const pageErrors = []
           page.on('pageerror', (err) => pageErrors.push(err.message))
           page.on('console', (msg) => {

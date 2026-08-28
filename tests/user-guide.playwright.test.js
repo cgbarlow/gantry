@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chromium } from 'playwright'
+import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { createServer } from '../lib/server.js'
 
 function withRunningServer(fn) {
@@ -22,9 +22,10 @@ function withRunningServer(fn) {
 
 test('User Guide: loads markdown content, ordered navigation, and pending sections', async () => {
   await withRunningServer(async (base) => {
-    const browser = await chromium.launch()
+    const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
       const pageErrors = []
       page.on('pageerror', (err) => pageErrors.push(err.message))
       page.on('console', (msg) => {
@@ -32,7 +33,7 @@ test('User Guide: loads markdown content, ordered navigation, and pending sectio
       })
 
       await page.goto(`${base}/user-guide`)
-      await page.waitForSelector('.guide-content h2', { timeout: 10_000 })
+      await page.waitForSelector('.guide-content h2', { timeout: DEFAULT_TIMEOUT })
 
       assert.equal(await page.locator('.guide-header h1').textContent(), 'User Guide')
       assert.deepEqual(await page.locator('.guide-navigation li').allTextContents(), [
@@ -90,9 +91,10 @@ test('User Guide: loads markdown content, ordered navigation, and pending sectio
 
 test('User Guide: landing and instance headers place the link before Settings', async () => {
   await withRunningServer(async (base) => {
-    const browser = await chromium.launch()
+    const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
       await page.goto(base)
       await page.waitForSelector('.dashboard-topbar')
       assert.deepEqual(await page.locator('.dashboard-controls a').allTextContents(), ['+ New Workspace', 'User Guide', 'Settings'])
