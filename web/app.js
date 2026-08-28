@@ -1774,6 +1774,7 @@ function SyncedFieldsPanel({ instance }) {
 
   const stageId = instance.stage.id
   const isCurrentStage = instance.stage.id === instance.currentStageId
+  const isFinalStage = instance.stages[instance.stages.length - 1]?.id === stageId
 
   useEffect(() => {
     let cancelled = false
@@ -2064,11 +2065,13 @@ function SyncedFieldsPanel({ instance }) {
             messages.push(`Still pending — the Owner hasn't reviewed Pull Request #${body.pullRequestId} yet.`)
           }
         } else {
-          messages.push(
-            body.advancedTo
-              ? `Approved — Pull Request #${body.pullRequestId} merged; stage advanced to "${body.advancedTo.title}".`
-              : `Approved — Pull Request #${body.pullRequestId} merged. This was the final stage; the instance is complete.`
-          )
+          if (body.advancedTo) {
+            messages.push(`Approved — Pull Request #${body.pullRequestId} merged; stage advanced to "${body.advancedTo.title}".`)
+          } else if (isFinalStage) {
+            messages.push(`Approved — Pull Request #${body.pullRequestId} merged. This was the final stage; the instance is complete.`)
+          } else {
+            messages.push(`Approved — Pull Request #${body.pullRequestId} is already merged; the instance is already past this stage.`)
+          }
           // Flush the message *before* triggering the stage-changing reload
           // below — that reload remounts this whole card (StageScreen keys
           // on stage id), so any state set after it starts lands on a
