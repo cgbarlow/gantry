@@ -354,7 +354,7 @@ test('approving the final stage completes its Pull Request without attempting an
           const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
           await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
         }
-        await client.writeFile(`gantry-workspace/${SLUG}/out/Remote Initiative - Detailed Design - As-built.docx`, 'rendered as-built', { branch })
+        await client.writeFile(`gantry-workspace/${SLUG}/out/Remote Initiative - As-built.docx`, 'rendered as-built', { branch })
 
         const opened = await requestStageApproval(SLUG, { azureDevOps })
         await castVote(adoBaseUrl, opened.pullRequestId, 10)

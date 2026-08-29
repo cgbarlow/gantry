@@ -179,7 +179,7 @@ artefacts:
       ]
 
   - id: as-built
-    title: Detailed Design / As-built
+    title: As-built
     purpose: >
       Capture what was built and the final handover information for operational
       use and TAC noting.

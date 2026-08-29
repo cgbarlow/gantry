@@ -1659,12 +1659,15 @@ function RenderDialog({ instance, onClose }) {
 // ---------- Synced-fields panel (#111) ----------
 // Helpers for persistent hyperlinks (WI155) — built from the persisted instance record (org/project/repo + PR id, correct org) so links survive reload.
 // Deep link into a Workspace repo's Azure DevOps browser, scoped to one
-// instance's folder (`/instances/<slug>`). Shared by the Work-item-details
-// card's "Show files" button and the dashboard manage-card's "Show files"
-// link so the two can't drift (WI226). `workspaceRepoUrl` already
-// encodeURIComponent's its own segments.
+// instance's folder. A workspace-backed instance's data lives under
+// `gantry-workspace/<slug>/` in the repo (lib/instance.js's
+// AZURE_DEVOPS_WORKSPACE_ROOT), not `instances/<slug>` — that's this
+// engine's own repo layout, not a Workspace repo's. Shared by the
+// Work-item-details card's "Show files" button and the dashboard
+// manage-card's "Show files" link so the two can't drift (WI226).
+// `workspaceRepoUrl` already encodeURIComponent's its own segments.
 function instanceFilesUrl(workspace, slug) {
-  return `${workspaceRepoUrl(workspace)}?path=/instances/${encodeURIComponent(slug)}`
+  return `${workspaceRepoUrl(workspace)}?path=/gantry-workspace/${encodeURIComponent(slug)}`
 }
 
 function prWebUrlFor(instance, prId) {
@@ -2355,47 +2358,40 @@ function SyncedFieldsPanel({ instance }) {
                     : null}
                 </div>
                 ${openPullRequestId
-                  ? pullRequestIsActive
-                    ? html`
-                        <ul class="review-list">
-                          <li>
-                            <span class="review-reviewer">${pullRequest?.review?.approver?.displayName ?? 'Not assigned'}</span>
-                            <span class="review-meta">
-                              ${signoffWiUrl
-                                ? html`<a href=${signoffWiUrl} target="_blank" rel="noreferrer">#${signoffWorkItemId}</a>`
-                                : signoffWorkItemId
-                                  ? html`#${signoffWorkItemId}`
-                                  : null}
-                              <span class="review-status">${pullRequest?.review?.reviewStatus ?? pullRequest?.review?.state ?? 'pending'}</span>
-                            </span>
-                          </li>
-                        </ul>
-                        <p class="signoff-pr-ref">
-                          ${signoffPrUrl
-                            ? html`<a href=${signoffPrUrl} target="_blank" rel="noreferrer">Pull Request #${openPullRequestId}</a>`
-                            : html`Pull Request #${openPullRequestId}`}
-                          ${` is open, requesting approval for stage "${instance.stage.title}".`}
-                        </p>
-                        ${isCurrentStage && approvalInvalidated
-                          ? html`
-                              <div class="signoff-actions">
-                                <button type="button" class="btn small" onClick=${handleConfirmSignoffRequest}>Request Sign-off again</button>
-                              </div>
-                            `
-                          : null}
-                      `
-                    : html`
-                        <p>
-                          ${signoffPrUrl
-                            ? html`<a href=${signoffPrUrl} target="_blank" rel="noreferrer">Pull Request #${openPullRequestId}</a>`
-                            : html`Pull Request #${openPullRequestId}`}
-                          ${prStatus === 'completed'
+                  ? html`
+                      <ul class="review-list">
+                        <li>
+                          <span class="review-reviewer">${pullRequest?.review?.approver?.displayName ?? 'Not assigned'}</span>
+                          <span class="review-meta">
+                            ${signoffWiUrl
+                              ? html`<a href=${signoffWiUrl} target="_blank" rel="noreferrer">#${signoffWorkItemId}</a>`
+                              : signoffWorkItemId
+                                ? html`#${signoffWorkItemId}`
+                                : null}
+                            <span class="review-status">${pullRequest?.review?.reviewStatus ?? pullRequest?.review?.state ?? 'pending'}</span>
+                          </span>
+                        </li>
+                      </ul>
+                      <p class="signoff-pr-ref">
+                        ${signoffPrUrl
+                          ? html`<a href=${signoffPrUrl} target="_blank" rel="noreferrer">Pull Request #${openPullRequestId}</a>`
+                          : html`Pull Request #${openPullRequestId}`}
+                        ${pullRequestIsActive
+                          ? ` is open, requesting approval for stage "${instance.stage.title}".`
+                          : prStatus === 'completed'
                             ? ` was merged for stage "${instance.stage.title}".`
                             : prStatus === 'abandoned'
                               ? ` was abandoned (closed without merging) for stage "${instance.stage.title}".`
                               : ` is no longer available for stage "${instance.stage.title}".`}
-                        </p>
-                      `
+                      </p>
+                      ${pullRequestIsActive && isCurrentStage && approvalInvalidated
+                        ? html`
+                            <div class="signoff-actions">
+                              <button type="button" class="btn small" onClick=${handleConfirmSignoffRequest}>Request Sign-off again</button>
+                            </div>
+                          `
+                        : null}
+                    `
                   : isCurrentStage
                     ? null
                     : html`<p class="synced-value">Not requested</p>`}

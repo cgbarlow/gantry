@@ -197,7 +197,7 @@ test('dashboard: selecting a workspace with multiple instances shows every one o
             assert.equal(await page.getByRole('link', { name: 'Show files' }).count(), 2)
             for (const link of await page.getByRole('link', { name: 'Show files' }).all()) {
               assert.equal(await link.getAttribute('target'), '_blank')
-              assert.match(await link.getAttribute('href'), /_git\/[^?]+\?path=\/instances\/instance-(one|two)$/)
+              assert.match(await link.getAttribute('href'), /_git\/[^?]+\?path=\/gantry-workspace\/instance-(one|two)$/)
             }
           })
         )

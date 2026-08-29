@@ -465,7 +465,7 @@ test('a post-approval commit changes the panel to Request approval again, and re
         const showFiles = commitHistorySection.getByRole('link', { name: 'Show files' })
         assert.equal(await showFiles.count(), 1)
         assert.equal(await showFiles.getAttribute('target'), '_blank')
-        assert.match(await showFiles.getAttribute('href'), /_git\/[^?]+\?path=\/instances\/remote-initiative$/)
+        assert.match(await showFiles.getAttribute('href'), /_git\/[^?]+\?path=\/gantry-workspace\/remote-initiative$/)
 
         await commitHistorySection.getByRole('button', { name: 'Show commit history' }).click()
         const historyModal = page.locator('.modal[aria-label="Commit history"]')
