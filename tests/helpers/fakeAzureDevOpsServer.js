@@ -60,6 +60,7 @@ export function createFakeAzureDevOpsServer({
   rejectIdentityRequests = false,
   repoExists = true,
   connectionDataUser,
+  simulateMissingReviewStatusField = false,
 } = {}) {
   // One independent { store, objectId } per branch — a branch with no
   // entry here has never had a commit (mirrors the pre-#118 "commitCount
@@ -384,6 +385,9 @@ export function createFakeAzureDevOpsServer({
       let raw = ''
       for await (const chunk of req) raw += chunk
       const patch = JSON.parse(raw)
+      if (simulateMissingReviewStatusField && patch.some((op) => op.path === '/fields/Custom.GantryReviewStatus')) {
+        return json(400, { message: 'TF51535: Cannot find field Custom.GantryReviewStatus (fake server, simulateMissingReviewStatusField).', typeKey: 'FieldNotFoundException' })
+      }
 
       const now = new Date().toISOString()
       const id = nextWorkItemId++
@@ -618,6 +622,9 @@ export function createFakeAzureDevOpsServer({
 
         const fieldsParam = url.searchParams.get('fields')
         if (!fieldsParam) return json(200, body)
+        if (simulateMissingReviewStatusField && fieldsParam.includes('Custom.GantryReviewStatus')) {
+          return json(400, { message: 'TF51535: Cannot find field Custom.GantryReviewStatus (fake server, simulateMissingReviewStatusField).', typeKey: 'FieldNotFoundException' })
+        }
 
         const requestedFields = fieldsParam.split(',').map((f) => f.trim())
         const narrowedFields = Object.fromEntries(

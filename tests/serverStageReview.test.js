@@ -701,3 +701,58 @@ test('the Reviews list groups by outcome (#215) once a stage has more than a cou
     },
   )
 })
+
+test('WI219: requestStageReview and checkStageReviewStatus degrade gracefully when Custom.GantryReviewStatus is missing (TF51535)', async () => {
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: PAT,
+      files: { [`/gantry-workspace/${SLUG}/instance.yaml`]: `definition: design\nslug: ${SLUG}\nstage: shape\n` },
+      simulateMissingReviewStatusField: true,
+    },
+    async (adoBaseUrl) => {
+      const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-review-missing-field-'))
+      try {
+        registerInstance(
+          SLUG,
+          { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          { instancesDir },
+        )
+        const client = createAzureDevOpsWorkItemsClient({ organization: ORGANIZATION, project: PROJECT, pat: PAT, baseUrl: adoBaseUrl })
+        const parent = await client.createWorkItem('Feature', { 'System.Title': 'Parent' })
+        await withRunningServer({ instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+          await fetch(`${base}/api/instance/work-items/link?slug=${SLUG}`, {
+            method: 'POST',
+            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ organization: ORGANIZATION, project: PROJECT, parentId: parent.id, baseUrl: adoBaseUrl }),
+          })
+          // Request Review should succeed even though the fake server will reject the Custom.GantryReviewStatus field — the retry without the field must kick in.
+          const reqRes = await fetch(`${base}/api/instance/request-review?slug=${SLUG}`, {
+            method: 'POST',
+            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stage: 'shape', reviewer: 'testuser@example.com' }),
+          })
+          assert.equal(reqRes.status, 200)
+          const reqBody = await reqRes.json()
+          assert.equal(reqBody.review.status, 'Requested')
+          // The created work item should exist but have no Custom.GantryReviewStatus field — only System.State.
+          const workItem = await client.getWorkItem(reqBody.review.workItemId)
+          assert.equal(workItem.fields['Custom.GantryReviewStatus'], undefined)
+          assert.equal(workItem.fields['System.State'], 'New')
+          // Check status should also succeed via the System.State fallback — the fake server will reject the combined fields read, the retry with System.State alone must succeed.
+          const statusRes = await fetch(`${base}/api/instance/review-status?slug=${SLUG}`, {
+            method: 'POST',
+            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stage: 'shape', reviewId: reqBody.review.workItemId }),
+          })
+          assert.equal(statusRes.status, 200)
+          assert.equal((await statusRes.json()).review.status, 'Requested')
+        })
+      } finally {
+        rmSync(instancesDir, { recursive: true, force: true })
+      }
+    },
+  )
+})
