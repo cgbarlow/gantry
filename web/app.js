@@ -2106,7 +2106,6 @@ function SyncedFieldsPanel({ instance }) {
   // Persistent hyperlink built from the persisted PR record (org/project/repo + PR id) — survives reload with the correct org (WI155). `justOpened.webUrl` is the transient server-built URL right after creation; fallback builds from `instance.workspace` so reloads still link.
   const signoffPrUrl = justOpened?.webUrl ?? prWebUrlFor(instance, openPullRequestId)
   const signoffCommits = pullRequest?.commits ?? []
-  const latestSignoffCommit = latestCommit(signoffCommits)
   const groupedReviews = groupReviewsByOutcome(instance.reviews ?? [])
 
   return html`
@@ -2275,19 +2274,6 @@ function SyncedFieldsPanel({ instance }) {
                         <span class="field-label">Commit history</span>
                         <button type="button" class="btn small" onClick=${() => setCommitHistoryOpen(true)}>Show commit history</button>
                       </div>
-                      <p class="commit-history-summary">
-                        ${signoffCommits.length} commit${signoffCommits.length === 1 ? '' : 's'} on Pull Request #${openPullRequestId}
-                        ${latestSignoffCommit
-                          ? html`
-                              <span class="commit-history-latest">
-                                · latest: “${latestSignoffCommit.message || '(no message)'}”
-                                ${latestSignoffCommit.timestamp
-                                  ? html`<time dateTime=${latestSignoffCommit.timestamp}>${new Date(latestSignoffCommit.timestamp).toLocaleString()}</time>`
-                                  : null}
-                              </span>
-                            `
-                          : null}
-                      </p>
                     </div>
                   `
                 : null}

@@ -454,11 +454,10 @@ test('a post-approval commit changes the panel to Request approval again, and re
         await panel.getByRole('button', { name: 'Request Sign-off again' }).waitFor({ timeout: 10_000 })
         assert.equal(await panel.locator('.request-approval-commits').count(), 0)
 
-        // #215: a short commit-history summary sits inline in the card,
-        // near Reviews/Sign-off — not just the full list reachable only via
-        // the modal.
+        // WI216: inline commit-history-summary removed — history only in dialog
         await commitHistorySection.waitFor({ timeout: 10_000 })
-        assert.match(await commitHistorySection.locator('.commit-history-summary').innerText(), /\d+ commits? on Pull Request #\d+/)
+        assert.equal(await commitHistorySection.locator('.commit-history-summary').count(), 0)
+        assert.equal(await commitHistorySection.getByRole('button', { name: 'Show commit history' }).count(), 1)
         assert.equal(await commitHistorySection.locator('.request-approval-commits').count(), 0)
 
         await commitHistorySection.getByRole('button', { name: 'Show commit history' }).click()
