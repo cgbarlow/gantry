@@ -480,3 +480,16 @@ test('createAzureDevOpsClient requires organization, project, repository and pat
   assert.throws(() => createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, pat: VALID_PAT }), /repository/)
   assert.throws(() => createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }), /pat/)
 })
+
+test('listBranchCommits returns commits on a branch diffed against main (WI198)', async () => {
+  await withFakeAzureDevOpsServer({ '/a.md': 'main v1\n' }, async (baseUrl) => {
+    const c = client(baseUrl)
+    await c.createBranch('feature')
+    await c.writeFile('/b.md', 'feature commit\n', { branch: 'feature', message: 'feature commit' })
+    const commits = await c.listBranchCommits('feature', { compareTo: 'main' })
+    assert.equal(commits.length, 1)
+    assert.match(commits[0].comment, /feature commit/)
+    const empty = await c.listBranchCommits('missing-branch', { compareTo: 'main' })
+    assert.deepEqual(empty, [])
+  })
+})
