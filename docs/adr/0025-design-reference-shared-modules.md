@@ -68,6 +68,27 @@ re-sliced without double-rendering content shared with the HLD, which is a
 larger and riskier change than the originally-reported case warrants holding
 up.
 
+**Update — WI #228 (SAD side applied).** `introduction`, `recovery-plan` and
+`data-security-controls` are now in the `detailed-design` stage `modules:`
+and the `sad` artefact `requires` (field-level: `introduction.overview` /
+`.purpose` / `.scope`, `recovery-plan.recovery-approach`,
+`data-security-controls.controls`). `sad.md.tmpl` is reordered to the
+`SAD Template.docx` spine: `# Introduction` at the top, a named
+`# Failure and recovery` section (`recovery-plan.*` plus
+`nfrs.disaster-recovery-and-backup` as `## Backup and archiving policy`),
+`## Security concerns` inside `# Security`, `# Glossary` trailing. No instance
+prose re-slice was needed: the `introduction.md` files created here for the
+handover stage already read as canonical opening framing, distinct from
+`problem-statement.md` / `architecture.md`. Boundary chosen: **the HLD keeps
+its own `problem-statement` / `proposed-solution` framing; only the SAD (and
+as-built) reference the shared `introduction` module** — verified as zero
+verbatim Introduction/Overview/Scope duplication between the rendered SAD and
+HLD for both instances. `nfrs.disaster-recovery-and-backup` is **kept, not
+merged** into `recovery-plan` — they are the "Backup & Archiving Policy" and
+"Disaster Recovery" halves of the reference's Failure & Recovery section
+respectively, and `nfrs` also has an independent HLD-stage use. The `ssad`
+reorder (Follow-up WI 2) is still outstanding.
+
 ## Notes
 
 - A `module.field` entry in an artefact's `requires` is checked for

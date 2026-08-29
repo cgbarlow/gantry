@@ -102,6 +102,12 @@ test('throws, and writes nothing, once the instance is already at its definition
       'dependencies',
       'support-and-operations',
       'glossary', // WI #227: shared module now referenced by the sad/ssad artefacts
+      // WI #228: introduction / recovery-plan / data-security-controls are now
+      // shared into detailed-design and the sad artefact's `requires`, so the
+      // build-ready-checklist gate needs their gating fields filled too.
+      'introduction',
+      'recovery-plan',
+      'data-security-controls',
     ])
     advanceStage('my-initiative', { instancesDir }) // detailed-design -> handover
 

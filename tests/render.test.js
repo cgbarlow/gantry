@@ -405,6 +405,14 @@ function seedDetailedDesignAzureDevOpsFiles() {
     ),
     // WI #227: `glossary` is a shared module the SAD and SSAD artefacts now reference.
     '/gantry-workspace/examples/modules/glossary.md': readFileSync('instances/examples/modules/glossary.md', 'utf8'),
+    // WI #228: `introduction` / `recovery-plan` / `data-security-controls` are now
+    // shared into detailed-design and referenced (field-level) by the SAD artefact.
+    '/gantry-workspace/examples/modules/introduction.md': readFileSync('instances/examples/modules/introduction.md', 'utf8'),
+    '/gantry-workspace/examples/modules/recovery-plan.md': readFileSync('instances/examples/modules/recovery-plan.md', 'utf8'),
+    '/gantry-workspace/examples/modules/data-security-controls.md': readFileSync(
+      'instances/examples/modules/data-security-controls.md',
+      'utf8'
+    ),
   }
 }
 

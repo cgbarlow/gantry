@@ -1,4 +1,53 @@
 # <%~ it.instance.slug %>: Solution Architecture Document
+<%
+  const intro = it.modules.introduction || {}
+  const recovery = it.modules['recovery-plan'] || {}
+  const dsc = it.modules['data-security-controls'] || {}
+  const glossary = it.modules.glossary || {}
+%>
+<% if (intro.overview || intro.purpose || intro.scope) { %>
+# Introduction
+<% if (intro.overview) { %>
+## Overview
+
+<%~ intro.overview %>
+<% } %>
+<% if (intro.purpose) { %>
+## Purpose
+
+<%~ intro.purpose %>
+<% } %>
+<% if (intro.scope) { %>
+## Scope
+
+<%~ intro.scope %>
+<% } %>
+<% if (intro.constraints) { %>
+## Constraints
+
+<%~ intro.constraints %>
+<% } %>
+<% if (intro.assumptions) { %>
+## Assumptions
+
+<%~ intro.assumptions %>
+<% } %>
+<% if (intro.caveats) { %>
+## Caveats
+
+<%~ intro.caveats %>
+<% } %>
+<% if (intro['design-principles']) { %>
+## Design principles
+
+<%~ intro['design-principles'] %>
+<% } %>
+<% if (intro['outcomes-and-deliverables']) { %>
+## Outcomes and deliverables
+
+<%~ intro['outcomes-and-deliverables'] %>
+<% } %>
+<% } %>
 
 # Architecture
 <% if (it.modules.architecture['business-context']) { %>
@@ -53,6 +102,31 @@
 <% }) %>
 <% } %>
 
+# Failure and recovery
+
+## Recovery approach
+
+<%~ recovery['recovery-approach'] %>
+<% if (recovery.resiliency) { %>
+## Resiliency
+
+<%~ recovery.resiliency %>
+<% } %>
+<% if (recovery['test-scenarios']) { %>
+## Test scenarios
+
+<%~ recovery['test-scenarios'] %>
+<% } %>
+<% if (recovery.raci) { %>
+## RACI
+
+<%~ recovery.raci %>
+<% } %>
+
+## Backup and archiving policy
+
+<%~ it.modules.nfrs['disaster-recovery-and-backup'] %>
+
 # Data
 
 ## Logical data model
@@ -77,33 +151,6 @@
 <%~ it.modules.data['data-replication'] %>
 <% } %>
 
-# Non-functional requirements
-
-## Performance
-
-<%~ it.modules.nfrs.performance %>
-
-## Availability and continuity
-
-<%~ it.modules.nfrs['availability-and-continuity'] %>
-
-## Disaster recovery and backup
-
-<%~ it.modules.nfrs['disaster-recovery-and-backup'] %>
-
-## Scalability and capacity
-
-<%~ it.modules.nfrs['scalability-and-capacity'] %>
-<% if (it.modules.nfrs['other-nfrs']) { %>
-## Other non-functional requirements
-
-<%~ it.modules.nfrs['other-nfrs'] %>
-<% } %>
-
-## Requirements traceability
-
-<%~ it.modules.nfrs['requirements-traceability'] %>
-
 # Security
 
 ## Identity and access management
@@ -122,6 +169,39 @@
 ## Privacy and confidentiality concerns
 
 <%~ it.modules.security['privacy-and-confidentiality'] %>
+<% if (dsc.controls) { %>
+## Security concerns
+
+<%~ dsc.controls %>
+<% } %>
+<% if (dsc['inheritance-and-dependencies']) { %>
+## Security control inheritance and dependencies
+
+<%~ dsc['inheritance-and-dependencies'] %>
+<% } %>
+
+# Non-functional requirements
+
+## Performance
+
+<%~ it.modules.nfrs.performance %>
+
+## Availability and continuity
+
+<%~ it.modules.nfrs['availability-and-continuity'] %>
+
+## Scalability and capacity
+
+<%~ it.modules.nfrs['scalability-and-capacity'] %>
+<% if (it.modules.nfrs['other-nfrs']) { %>
+## Other non-functional requirements
+
+<%~ it.modules.nfrs['other-nfrs'] %>
+<% } %>
+
+## Requirements traceability
+
+<%~ it.modules.nfrs['requirements-traceability'] %>
 
 # Risks
 
@@ -151,8 +231,8 @@
 <%~ it.modules['support-and-operations']['support-handover-readiness'] %>
 
 _Full support and operations detail is maintained in this solution's SSAD._
-<% if (it.modules.glossary && it.modules.glossary['terms-and-definitions']) { %>
+<% if (glossary['terms-and-definitions']) { %>
 # Glossary
 
-<%~ it.modules.glossary['terms-and-definitions'] %>
+<%~ glossary['terms-and-definitions'] %>
 <% } %>

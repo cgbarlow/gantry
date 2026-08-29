@@ -36,11 +36,14 @@ stages:
       Describe the architecture, integration, data, quality, security, risk,
       dependency, and operational details needed to build the solution.
     gate: build-ready-checklist
-    # glossary is a shared module (also required by the `handover` stage / `as-built`
-    # artefact) — the SAD and SSAD reference templates both carry a Glossary section.
-    # Wiring introduction / recovery-plan / data-security-controls in here too is a
-    # documented follow-up (see the reconciliation doc, Sections 5-6 and 8).
-    modules: [architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations, glossary]
+    # glossary, introduction, recovery-plan and data-security-controls are shared
+    # modules (also required by the `handover` stage / `as-built` artefact). The SAD
+    # reference template (`SAD Template.docx`) carries first-class Introduction /
+    # Overview / Solution Scope, a named "Failure & Recovery" section, "Security
+    # Concerns" inside its Security View, and a trailing Glossary — all now sourced
+    # from these shared modules rather than re-typed at this stage. See the
+    # reconciliation doc, Section 5 (WI #228 applied the SAD side; #227 the glossary).
+    modules: [architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations, glossary, introduction, recovery-plan, data-security-controls]
     example: examples
 
   - id: handover
@@ -119,8 +122,22 @@ artefacts:
     # SAD renders the complete architecture, requirements, security and
     # dependency views, plus only the support handover summary. The detailed
     # operational content belongs to SSAD.
+    #
+    # WI #228: the shared introduction / recovery-plan / data-security-controls
+    # modules are wired in field-level, matching the `as-built` pattern — only the
+    # fields that must gate are listed (introduction overview/purpose/scope,
+    # recovery-plan.recovery-approach, data-security-controls.controls). The
+    # optional shared-module fields (introduction.constraints…, recovery-plan
+    # resiliency/test-scenarios/raci, data-security-controls.inheritance-and-dependencies)
+    # are rendered by the template's `if` guards when an instance fills them.
+    # `nfrs.disaster-recovery-and-backup` is retained: it carries the Backup &
+    # Archiving Policy, rendered alongside recovery-plan under the single
+    # "Failure and recovery" section (see the reconciliation doc, Section 5).
     requires:
       [
+        introduction.overview,
+        introduction.purpose,
+        introduction.scope,
         architecture.business-context,
         architecture.design-decisions,
         architecture.solution-description,
@@ -151,6 +168,8 @@ artefacts:
         dependencies.dependencies-overview,
         dependencies.dependency-list,
         support-and-operations.support-handover-readiness,
+        recovery-plan.recovery-approach,
+        data-security-controls.controls,
         glossary.terms-and-definitions,
       ]
 
