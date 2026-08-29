@@ -330,6 +330,7 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .synced-fields-panel { border: var(--border-strong) solid var(--line-strong); background: var(--bg-raised); padding: 16px 20px; margin-top: 32px; margin-bottom: 32px; }
 .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; }
 .panel-header h2 { margin: 0; }
+.panel-header-actions { display: flex; align-items: center; gap: 8px; }
 .synced-fields-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 12px; }
 .synced-fields-grid { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; }
 .synced-field { display: flex; flex-direction: column; gap: 4px; min-width: 160px; }
@@ -367,16 +368,9 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .review-group-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 6px; }
 .review-group-count { color: var(--text-muted); font-size: 11px; }
 
-/* Inline commit-history summary (#215) — a third sub-section of
-   `.review-signoff-card`, spanning both columns beneath Reviews/Sign-off,
-   showing a one-line "N commits · latest: ..." summary once the sign-off
-   Pull Request has any commits. The existing full-history modal
-   (CommitHistoryDialog) remains the one place to see every commit; this
-   is deliberately just a glance, not a second copy of that list. */
-.commit-history-section { grid-column: 1 / -1; }
-.commit-history-summary { font-size: 13px; margin: 0; }
-.commit-history-latest { color: var(--text-muted); }
-.commit-history-latest time { white-space: nowrap; }
+/* Commit history (#225) — the trigger now lives in `.panel-header`
+   alongside "Check status"; the full-history modal (CommitHistoryDialog)
+   is the one place to see every commit. */
 
 .advance-stage-panel { border-top: var(--border-strong) solid var(--line-strong); padding-top: 20px; margin-top: 32px; }
 .advance-stage-panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 8px; }

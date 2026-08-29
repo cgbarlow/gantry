@@ -423,10 +423,9 @@ test('a post-approval commit changes the panel to Request approval again, and re
         const card = page.locator('#work-item-detail-card')
         const checkButton = card.locator('.panel-header').getByRole('button', { name: 'Check status' })
         const panel = page.locator('.signoff-section')
-        // #215: "Show commit history" moved out of `.signoff-section` into
-        // its own inline `.commit-history-section` (a short summary,
-        // adjacent to Reviews/Sign-off) — the modal it opens is unchanged.
-        const commitHistorySection = page.locator('.commit-history-section')
+        // #225: "Show commit history" now lives in the card's `.panel-header`,
+        // immediately left of "Check status" — the modal it opens is unchanged.
+        const commitHistorySection = card.locator('.panel-header')
         await panel.getByRole('button', { name: 'Request Sign-off' }).click()
         // The confirm modal is a card-level overlay (not nested inside
         // `.signoff-section` itself), same as every other confirm dialog on
@@ -454,7 +453,8 @@ test('a post-approval commit changes the panel to Request approval again, and re
         await panel.getByRole('button', { name: 'Request Sign-off again' }).waitFor({ timeout: 10_000 })
         assert.equal(await panel.locator('.request-approval-commits').count(), 0)
 
-        // WI216: inline commit-history-summary removed — history only in dialog
+        // WI216: inline commit-history summary removed — history only in dialog.
+        // WI225: the only commit-history control is the header button.
         await commitHistorySection.waitFor({ timeout: 10_000 })
         assert.equal(await commitHistorySection.locator('.commit-history-summary').count(), 0)
         assert.equal(await commitHistorySection.getByRole('button', { name: 'Show commit history' }).count(), 1)

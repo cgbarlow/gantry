@@ -2190,9 +2190,12 @@ function SyncedFieldsPanel({ instance }) {
         <h2>Work item details</h2>
         ${instance.workspaceBacked
           ? html`
-              <button type="button" class="btn" disabled=${checking} onClick=${handleCheckStatus}>
-                ${checking ? 'Checking…' : 'Check status'}
-              </button>
+              <div class="panel-header-actions">
+                <button type="button" class="btn" onClick=${handleOpenCommitHistory}>Show commit history</button>
+                <button type="button" class="btn" disabled=${checking} onClick=${handleCheckStatus}>
+                  ${checking ? 'Checking…' : 'Check status'}
+                </button>
+              </div>
             `
           : null}
       </div>
@@ -2309,6 +2312,9 @@ function SyncedFieldsPanel({ instance }) {
               <div class="review-signoff-section signoff-section">
                 <div class="review-signoff-header">
                   <span class="field-label">Sign-off</span>
+                  ${!openPullRequestId && isCurrentStage
+                    ? html`<button type="button" class="btn small" onClick=${handleCheckAndMaybeRequestSignoff}>Request Sign-off</button>`
+                    : null}
                 </div>
                 ${openPullRequestId
                   ? pullRequestIsActive
@@ -2344,15 +2350,9 @@ function SyncedFieldsPanel({ instance }) {
                         </p>
                       `
                   : isCurrentStage
-                    ? html`<button type="button" class="btn small" onClick=${handleCheckAndMaybeRequestSignoff}>Request Sign-off</button>`
+                    ? null
                     : html`<p class="synced-value">Not requested</p>`}
                 ${signoffStatus ? html`<p class="save-status">${signoffStatus}</p>` : null}
-              </div>
-              <div class="review-signoff-section commit-history-section">
-                <div class="review-signoff-header">
-                  <span class="field-label">Commit history</span>
-                  <button type="button" class="btn small" onClick=${handleOpenCommitHistory}>Show commit history</button>
-                </div>
               </div>
             </div>
           `
