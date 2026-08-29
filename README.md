@@ -557,7 +557,9 @@ docker run gantry render examples soap
 docker run -v "$(pwd)/output:/app/instances/examples/out" gantry render examples soap
 ```
 
-After the volume-mounted run, the rendered document is at `./output/soap.docx`.
+After the volume-mounted run, the rendered document is at `./output/Examples - Solution on a Page.docx` —
+rendered artefacts are named `<Instance name> - <Full artefact title>.docx` (the instance's `name:`, or a
+title-cased form of its slug, plus the artefact's title from the definition).
 
 ## Other commands
 

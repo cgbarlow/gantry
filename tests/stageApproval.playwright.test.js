@@ -61,8 +61,8 @@ async function fillShapeStage(azureDevOps, branch) {
     const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
     await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
   }
-  await client.writeFile(`gantry-workspace/${SLUG}/out/soap.docx`, 'rendered soap', { branch })
-  await client.writeFile(`gantry-workspace/${SLUG}/out/soap-full.docx`, 'rendered full soap', { branch })
+  await client.writeFile(`gantry-workspace/${SLUG}/out/Remote Initiative - Solution on a Page.docx`, 'rendered soap', { branch })
+  await client.writeFile(`gantry-workspace/${SLUG}/out/Remote Initiative - Full Solution on a Page.docx`, 'rendered full soap', { branch })
 }
 
 // Casts the Owner's reviewer vote directly against the fake Azure DevOps
@@ -459,6 +459,13 @@ test('a post-approval commit changes the panel to Request approval again, and re
         assert.equal(await commitHistorySection.locator('.commit-history-summary').count(), 0)
         assert.equal(await commitHistorySection.getByRole('button', { name: 'Show commit history' }).count(), 1)
         assert.equal(await commitHistorySection.locator('.request-approval-commits').count(), 0)
+
+        // WI226: a "Show files" link sits immediately left of "Show commit
+        // history", deep-linking to this instance's folder in the repo.
+        const showFiles = commitHistorySection.getByRole('link', { name: 'Show files' })
+        assert.equal(await showFiles.count(), 1)
+        assert.equal(await showFiles.getAttribute('target'), '_blank')
+        assert.match(await showFiles.getAttribute('href'), /_git\/[^?]+\?path=\/instances\/remote-initiative$/)
 
         await commitHistorySection.getByRole('button', { name: 'Show commit history' }).click()
         const historyModal = page.locator('.modal[aria-label="Commit history"]')

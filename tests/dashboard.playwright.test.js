@@ -135,7 +135,7 @@ test('dashboard: Manage tracks a linked parent work item without inventing a rep
         const track = manage.getByRole('link', { name: 'Track Work Item' })
         assert.equal(await track.getAttribute('href'), 'https://dev.azure.com/work-org/work-project/_workitems/edit/42')
         assert.equal(await track.getAttribute('target'), '_blank')
-        assert.equal(await manage.getByRole('link', { name: 'Open Repository' }).count(), 0)
+        assert.equal(await manage.getByRole('link', { name: 'Show files' }).count(), 0)
       })
     )
   } finally {
@@ -194,9 +194,10 @@ test('dashboard: selecting a workspace with multiple instances shows every one o
             assert.equal(await page.locator('.instance-card .pr-badge').textContent(), 'PR OPEN')
             assert.equal(await page.locator('.instance-card').getByRole('button', { name: 'Render' }).count(), 0)
             assert.equal(await page.getByRole('link', { name: 'Edit' }).count(), 2)
-            assert.equal(await page.getByRole('link', { name: 'Open Repository' }).count(), 2)
-            for (const link of await page.getByRole('link', { name: 'Open Repository' }).all()) {
+            assert.equal(await page.getByRole('link', { name: 'Show files' }).count(), 2)
+            for (const link of await page.getByRole('link', { name: 'Show files' }).all()) {
               assert.equal(await link.getAttribute('target'), '_blank')
+              assert.match(await link.getAttribute('href'), /_git\/[^?]+\?path=\/instances\/instance-(one|two)$/)
             }
           })
         )

@@ -1642,6 +1642,15 @@ function RenderDialog({ instance, onClose }) {
 
 // ---------- Synced-fields panel (#111) ----------
 // Helpers for persistent hyperlinks (WI155) — built from the persisted instance record (org/project/repo + PR id, correct org) so links survive reload.
+// Deep link into a Workspace repo's Azure DevOps browser, scoped to one
+// instance's folder (`/instances/<slug>`). Shared by the Work-item-details
+// card's "Show files" button and the dashboard manage-card's "Show files"
+// link so the two can't drift (WI226). `workspaceRepoUrl` already
+// encodeURIComponent's its own segments.
+function instanceFilesUrl(workspace, slug) {
+  return `${workspaceRepoUrl(workspace)}?path=/instances/${encodeURIComponent(slug)}`
+}
+
 function prWebUrlFor(instance, prId) {
   const ws = instance.workspace
   if (!ws || !prId) return null
@@ -2191,6 +2200,17 @@ function SyncedFieldsPanel({ instance }) {
         ${instance.workspaceBacked
           ? html`
               <div class="panel-header-actions">
+                ${instance.workspace?.organization && instance.workspace?.project && instance.workspace?.repository
+                  ? html`
+                      <a
+                        class="btn"
+                        href=${instanceFilesUrl(instance.workspace, instance.slug)}
+                        target="_blank"
+                        rel="noreferrer"
+                        >Show files</a
+                      >
+                    `
+                  : null}
                 <button type="button" class="btn" onClick=${handleOpenCommitHistory}>Show commit history</button>
                 <button type="button" class="btn" disabled=${checking} onClick=${handleCheckStatus}>
                   ${checking ? 'Checking…' : 'Check status'}
@@ -3385,8 +3405,13 @@ function MasterDetailView({ instances }) {
                           : null}
                         ${inst.workspace
                           ? html`
-                              <a class="manage-link" href=${workspaceRepoUrl(inst.workspace)} target="_blank" rel="noreferrer">
-                                Open Repository
+                              <a
+                                class="manage-link"
+                                href=${instanceFilesUrl(inst.workspace, inst.slug)}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Show files
                               </a>
                             `
                           : null}

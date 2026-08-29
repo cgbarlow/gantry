@@ -470,7 +470,10 @@ test('renderStageArtefacts reports an artefact as skipped, not failed, when its 
 
       // Nothing was ever pushed for an artefact that couldn't be rendered.
       const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl })
-      await assert.rejects(() => client.getFileContent('gantry-workspace/examples/out/soap.docx', { branch }), AzureDevOpsNotFoundError)
+      await assert.rejects(
+        () => client.getFileContent('gantry-workspace/examples/out/Examples - Solution on a Page.docx', { branch }),
+        AzureDevOpsNotFoundError
+      )
     }
   )
 })

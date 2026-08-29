@@ -289,12 +289,12 @@ test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance also
       ['soap', 'soap-full']
     )
     assert.equal(body.rendered[0].rendered, true)
-    assert.equal(body.rendered[0].azureDevOpsPath, 'gantry-workspace/my-initiative/out/soap.docx')
+    assert.equal(body.rendered[0].azureDevOpsPath, 'gantry-workspace/my-initiative/out/MY Initiative - Solution on a Page.docx')
 
     // The rendered artefact actually landed on the "shape" stage's own branch, not 'main' — the same write path (#122) the module save itself used.
     const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
     const stageBranch = stageBranchName('my-initiative', 'shape')
-    const pushedContent = await client.getFileContent('gantry-workspace/my-initiative/out/soap.docx', { branch: stageBranch })
+    const pushedContent = await client.getFileContent('gantry-workspace/my-initiative/out/MY Initiative - Solution on a Page.docx', { branch: stageBranch })
     const pushedBytes = Buffer.from(pushedContent, 'base64')
     assert.equal(pushedBytes.subarray(0, 2).toString(), 'PK')
   })
@@ -410,10 +410,10 @@ test('POST /api/instance/render/:artefact against an Azure-DevOps-backed instanc
     assert.equal(body.artefact, 'soap')
     // No local docxPath reported — the rendered artefact's real location is now the Azure DevOps repo it was rendered from, not a scratch path on whichever machine `gantry serve` happens to run on.
     assert.equal(body.docxPath, undefined)
-    assert.equal(body.azureDevOpsPath, 'gantry-workspace/my-initiative/out/soap.docx')
+    assert.equal(body.azureDevOpsPath, 'gantry-workspace/my-initiative/out/MY Initiative - Solution on a Page.docx')
     const artefactUrl = new URL(body.azureDevOpsUrl)
     assert.equal(artefactUrl.pathname, '/fake-org/fake-project/_git/fake-repo')
-    assert.equal(artefactUrl.searchParams.get('path'), '/gantry-workspace/my-initiative/out/soap.docx')
+    assert.equal(artefactUrl.searchParams.get('path'), '/gantry-workspace/my-initiative/out/MY Initiative - Solution on a Page.docx')
     assert.equal(artefactUrl.searchParams.get('version'), 'GBgantry-workspace/my-initiative/shape')
     assert.equal(artefactUrl.searchParams.get('_a'), 'contents')
 
@@ -426,7 +426,7 @@ test('POST /api/instance/render/:artefact against an Azure-DevOps-backed instanc
     })
     // The render pipeline is a genuine write (#122) — it pushes onto the "shape" stage's own branch, not 'main'.
     const stageBranch = stageBranchName('my-initiative', 'shape')
-    const pushedContent = await client.getFileContent('gantry-workspace/my-initiative/out/soap.docx', { branch: stageBranch })
+    const pushedContent = await client.getFileContent('gantry-workspace/my-initiative/out/MY Initiative - Solution on a Page.docx', { branch: stageBranch })
     const pushedBytes = Buffer.from(pushedContent, 'base64')
     // A real .docx is a zip archive — starts with the "PK" magic bytes.
     assert.equal(pushedBytes.subarray(0, 2).toString(), 'PK')
@@ -447,7 +447,7 @@ test('rendering the same artefact against an Azure-DevOps-backed instance twice 
       })
       assert.equal(res.status, 200)
       const body = await res.json()
-      assert.equal(body.azureDevOpsPath, 'gantry-workspace/my-initiative/out/soap.docx')
+      assert.equal(body.azureDevOpsPath, 'gantry-workspace/my-initiative/out/MY Initiative - Solution on a Page.docx')
     }
   })
 })

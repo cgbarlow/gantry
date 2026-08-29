@@ -47,7 +47,7 @@ async function fillShapeStage(azureDevOps, branch) {
     const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
     await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
   }
-  await client.writeFile(`gantry-workspace/${SLUG}/out/soap.docx`, 'rendered soap', { branch })
+  await client.writeFile(`gantry-workspace/${SLUG}/out/Remote Initiative - Solution on a Page.docx`, 'rendered soap', { branch })
 }
 
 async function castVote(adoBaseUrl, pullRequestId, vote) {
@@ -354,7 +354,7 @@ test('approving the final stage completes its Pull Request without attempting an
           const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
           await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
         }
-        await client.writeFile(`gantry-workspace/${SLUG}/out/as-built.docx`, 'rendered as-built', { branch })
+        await client.writeFile(`gantry-workspace/${SLUG}/out/Remote Initiative - Detailed Design - As-built.docx`, 'rendered as-built', { branch })
 
         const opened = await requestStageApproval(SLUG, { azureDevOps })
         await castVote(adoBaseUrl, opened.pullRequestId, 10)

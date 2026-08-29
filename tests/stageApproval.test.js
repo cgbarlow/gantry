@@ -6,7 +6,7 @@ import { loadDefinition } from '../lib/definition.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { createAzureDevOpsPullRequestsClient } from '../lib/azureDevOpsPullRequestsClient.js'
 import { resolveStageBranch, stageBranchName } from '../lib/stageBranch.js'
-import { readInstance } from '../lib/instance.js'
+import { readInstance, instanceDisplayName, renderedArtefactBasename } from '../lib/instance.js'
 import { requestStageApproval } from '../lib/stageApproval.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
@@ -24,6 +24,13 @@ const VALID_PAT = 'valid-test-pat'
 const SLUG = 'my-initiative'
 
 const definition = loadDefinition('design')
+// WI226: rendered artefacts are pushed as "<Instance name> - <Full artefact title>.docx".
+const INSTANCE_NAME = instanceDisplayName({ slug: SLUG })
+const outDocxRepoPath = (artefactId) =>
+  `gantry-workspace/${SLUG}/out/${renderedArtefactBasename(
+    INSTANCE_NAME,
+    definition.artefacts.find((a) => a.id === artefactId).title
+  )}.docx`
 const [SHAPE] = definition.stages
 const DETAILED_DESIGN = definition.stages.find((stage) => stage.id === 'detailed-design')
 
@@ -47,7 +54,7 @@ async function fillShapeStage(azureDevOps, branch) {
     const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
     await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
   }
-  await client.writeFile(`gantry-workspace/${SLUG}/out/soap.docx`, 'rendered soap', { branch })
+  await client.writeFile(outDocxRepoPath('soap'), 'rendered soap', { branch })
 }
 
 async function fillDetailedDesignStage(azureDevOps, branch) {
@@ -57,7 +64,7 @@ async function fillDetailedDesignStage(azureDevOps, branch) {
     await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
   }
   for (const artefactId of ['sad', 'ssad']) {
-    await client.writeFile(`gantry-workspace/${SLUG}/out/${artefactId}.docx`, `rendered ${artefactId}`, { branch })
+    await client.writeFile(outDocxRepoPath(artefactId), `rendered ${artefactId}`, { branch })
   }
 }
 
@@ -85,7 +92,7 @@ test('requestStageApproval opens a Pull Request from the stage branch into "main
     assert.equal(pr.targetRefName, 'refs/heads/main')
     assert.equal(pr.title, `Request approval: ${SHAPE.title} — ${SLUG}`)
     assert.match(pr.description, /Requests approval for the "SOAP" stage of gantry instance "my-initiative" \(gate "business-case"\)\./)
-    assert.match(pr.description, /\[Solution on a Page\]\(http:\/\/localhost:\d+\/stage-approval-org\/stage-approval-project\/_git\/stage-approval-repo\?path=%2Fgantry-workspace%2Fmy-initiative%2Fout%2Fsoap\.docx&version=GBgantry-workspace%2Fmy-initiative%2Fshape&_a=contents\)/)
+    assert.match(pr.description, /\[Solution on a Page\]\(http:\/\/localhost:\d+\/stage-approval-org\/stage-approval-project\/_git\/stage-approval-repo\?path=%2Fgantry-workspace%2Fmy-initiative%2Fout%2FMY\+Initiative\+-\+Solution\+on\+a\+Page\.docx&version=GBgantry-workspace%2Fmy-initiative%2Fshape&_a=contents\)/)
 
     // Recorded on instance.yaml, on the stage's own branch (not "main" —
     // the stage hasn't merged yet).
@@ -106,8 +113,8 @@ test('requestStageApproval verifies and links every rendered artefact for a mult
     const result = await requestStageApproval(SLUG, { azureDevOps })
     const pr = await createAzureDevOpsPullRequestsClient(azureDevOps).getPullRequest(result.pullRequestId)
 
-    assert.match(pr.description, /\[Solution Architecture Document\]\([^)]*path=%2Fgantry-workspace%2Fmy-initiative%2Fout%2Fsad\.docx[^)]*version=GBgantry-workspace%2Fmy-initiative%2Fdetailed-design[^)]*\)/)
-    assert.match(pr.description, /\[Solution Support Architecture Document\]\([^)]*path=%2Fgantry-workspace%2Fmy-initiative%2Fout%2Fssad\.docx[^)]*version=GBgantry-workspace%2Fmy-initiative%2Fdetailed-design[^)]*\)/)
+    assert.match(pr.description, /\[Solution Architecture Document\]\([^)]*path=%2Fgantry-workspace%2Fmy-initiative%2Fout%2FMY\+Initiative\+-\+Solution\+Architecture\+Document\.docx[^)]*version=GBgantry-workspace%2Fmy-initiative%2Fdetailed-design[^)]*\)/)
+    assert.match(pr.description, /\[Solution Support Architecture Document\]\([^)]*path=%2Fgantry-workspace%2Fmy-initiative%2Fout%2FMY\+Initiative\+-\+Solution\+Support\+Architecture\+Document\.docx[^)]*version=GBgantry-workspace%2Fmy-initiative%2Fdetailed-design[^)]*\)/)
   })
 })
 
@@ -123,7 +130,7 @@ test('requestStageApproval refuses to open a Pull Request when a required render
 
     await assert.rejects(
       () => requestStageApproval(SLUG, { azureDevOps }),
-      /Cannot request approval: required rendered artefact "Solution on a Page".*out\/soap\.docx.*missing.*shape/
+      /Cannot request approval: required rendered artefact "Solution on a Page".*out\/MY Initiative - Solution on a Page\.docx.*missing.*shape/
     )
 
     await assert.rejects(() => createAzureDevOpsPullRequestsClient(azureDevOps).getPullRequest(1), /Azure DevOps found no item/)
