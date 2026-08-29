@@ -25,11 +25,17 @@ Instances can be local or Workspace-backed:
 
 The storage choice changes how stage advancement works, but not what a Module or Field means. Both kinds of Instance use the same Definition and the same authoring experience.
 
+### Numeric references
+
+Every Workspace, Instance and Stage also carries a short numeric reference. Workspaces are numbered from 1 across the server; an Instance is numbered from 1 within its Workspace; a Stage's number is its position in the Instance's Definition, so Stage 1 is always the first Stage. Gantry shows these references on the Workspaces page and in the Instance header, and uses them as the canonical short form in links — for example `/instance/w2i1` opens the first Instance in Workspace 2, and `/instance/w2i1s3` opens that Instance's third Stage. A Workspace-only reference resolves to that Workspace's first Instance, and an Instance-only reference resolves to its first Stage. Older links that use an Instance's directory name still work.
+
 ## Stages & Gates
 
 A **Stage** is an ordered phase of a Definition. It makes the relevant modules available for authoring and ends at one **Gate**.
 
 A **Gate** is the decision point at the end of a Stage. A gate checks the artefact requirements declared by the Definition. Passing a gate permits the next action; it does not advance an Instance by itself. Local Instances advance explicitly, while Workspace-backed Instances advance when their approved Pull Request is merged.
+
+For a Workspace-backed Instance the gate is checked as part of the Work Item Detail card's **Check status** action; a local Instance checks it with **Check gate & sync work item**. See *Approval workflow* for the full sequence.
 
 The `design` Definition has these stages:
 
@@ -57,11 +63,35 @@ The `design` Definition has these artefacts:
 
 A gate passing permits the next action; it does not advance an Instance by itself.
 
-For a local Instance, such as a local run of the `design` Definition, use **Advance to next stage** after the current gate has passed. Gantry performs the advancement directly and the Instance moves to the next Stage.
+For a local Instance, such as a local run of the `design` Definition, use **Advance to next stage** after the current gate has passed. Gantry performs the advancement directly and the Instance moves to the next Stage. A local Instance with a linked work item also keeps a **Check gate & sync work item** button, which re-checks the current gate and, if it passes, offers to push a state update to that work item in Azure DevOps.
 
-For a Workspace-backed Instance, such as a `design` initiative stored in Azure DevOps, use **Request Approval** after the gate has passed. Gantry opens that Stage's Pull Request into `main`. The Owner reviews and approves the Pull Request in Azure DevOps. Return to Gantry and choose **Check status** to read the review result. When the Pull Request is approved, Gantry merges it, advances the Instance and updates any linked work item. A rejection or request for changes must be addressed before approval can complete.
+For a Workspace-backed Instance, such as a `design` initiative stored in Azure DevOps, everything to do with review and sign-off happens in the **Work Item Detail card** at the top of the Stage screen. There is no separate section further down the page.
 
-The linked work item is a tracking surface, not the approval mechanism. The Pull Request is what gates a Workspace-backed Stage, and Gantry does not provide a separate in-app approval button.
+### The Work Item Detail card
+
+The card shows this Stage's synced fields — work item type, title, status, assignee and parent work item — alongside its Reviews, its Sign-off Pull Request and its commit history. You edit the title and assignee in place; clearing an override restores the inherited value.
+
+### Check status
+
+One **Check status** button at the top of the card refreshes everything in a single click: the linked and parent work items, every review request for the Stage, and the sign-off Pull Request. For a Workspace-backed Instance the same click then runs the gate-check-and-sync step — if the current Stage's gate passes and a work item is linked, Gantry offers to push a state update to it. When the sign-off Pull Request has been approved, this is also the click that merges it, advances the Instance and updates the linked work item.
+
+### Reviews
+
+Use **Request Review** to ask one or more people to look at the Stage before sign-off. Each request is tracked as its own work item and shows the reviewer's name. Reviews refresh from the card's **Check status** button, not per row. Once a Stage has more than two reviews, Gantry groups them by outcome — pending, changes requested and approved — so it is easy to see what still needs attention.
+
+### Sign-off
+
+Use **Request Sign-off** after the gate has passed. Gantry opens that Stage's Pull Request into `main` and records the Owner as the reviewer. The Owner reviews and approves the Pull Request in Azure DevOps; you then return to Gantry and choose **Check status**. A rejection, a request for changes, or an approval invalidated by later commits on the branch must be resolved before sign-off can complete.
+
+The linked work item is a tracking surface, not the approval mechanism. The Pull Request is what gates a Workspace-backed Stage, and there is no separate in-app Request Approval button.
+
+### Review and sign-off status
+
+Each review and sign-off item carries a Gantry status — Requested, In review, Changes requested, Approved or Rejected — kept separate from the native Azure DevOps work item state, which continues to drive the board. If a project has not been set up with the custom status field, Gantry falls back to reading the native state instead, so the card still shows a sensible status.
+
+### Commit history
+
+Use **Show commit history** on the card to open a dialog listing the commits on the current Stage's branch. This works before a Pull Request exists, so you can see what has been committed to the Stage while it is still in progress.
 
 ## Settings
 
