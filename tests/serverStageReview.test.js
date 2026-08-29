@@ -689,10 +689,10 @@ test('the Reviews list groups by outcome (#215) once a stage has more than a cou
 
             await assert.doesNotReject(reviewsSection.locator('.review-group').first().waitFor({ timeout: 10_000 }))
             assert.equal(await reviewsSection.locator('.review-group').count(), 3)
-            // Fixed bucket order (pending / changes-requested / approved), each with its own one-review count.
+            // Fixed bucket order (pending / changes-requested / approved).
             // `innerText` reflects the CSS `text-transform: uppercase` the group labels render with.
             assert.deepEqual(await reviewsSection.locator('.review-group-label span').allInnerTexts(), [
-              'PENDING', '1', 'CHANGES REQUESTED', '1', 'APPROVED', '1',
+              'PENDING', 'CHANGES REQUESTED', 'APPROVED',
             ])
             // Every review still renders exactly once, in its bucket's own `.review-list` — grouping never drops or duplicates a row.
             assert.equal(await reviewsSection.locator('.review-list li').count(), 3)

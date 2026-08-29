@@ -110,6 +110,10 @@ header {
 }
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand svg { flex-shrink: 0; }
+/* `.btn`'s default `margin: 0.5rem 0.5rem 0 0` would drop every header button
+   (incl. the instance switcher) below the zero-margin `.instance-ref` badge in
+   this centred flex row — the row's own `gap` handles spacing. */
+.brand .btn { margin: 0; }
 .brand h1 {
   font-family: var(--font-display);
   font-weight: 600;
@@ -355,7 +359,7 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .review-reviewer { overflow-wrap: anywhere; }
 .review-meta { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .review-status { color: var(--text-muted); }
-.signoff-reviewer { margin: 8px 0; font-size: 13px; }
+.signoff-pr-ref { margin: 8px 0 0; font-size: 13px; }
 .signoff-actions { display: flex; align-items: center; gap: 8px; }
 
 /* Review grouping by outcome (#215) — once a stage's Reviews list grows
@@ -365,8 +369,7 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
    `.review-list`; two or fewer reviews still render that same flat list
    directly, no group labels. */
 .review-group + .review-group { margin-top: 14px; }
-.review-group-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 6px; }
-.review-group-count { color: var(--text-muted); font-size: 11px; }
+.review-group-label { display: flex; align-items: center; gap: 8px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 6px; }
 
 /* Commit history (#225) — the trigger now lives in `.panel-header`
    alongside "Check status"; the full-history modal (CommitHistoryDialog)
@@ -661,18 +664,28 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .field-markdown:fullscreen > .guidance,
 .field-markdown:fullscreen > .insert-area { flex-shrink: 0; }
 
-.field-list .list-row { display: flex; gap: 8px; margin-bottom: 6px; }
-.field-list input {
+.field-list .list-row { display: flex; gap: 8px; margin-bottom: 6px; align-items: flex-start; }
+.field-list input,
+.field-list textarea {
   flex: 1;
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: 13px;
+  line-height: 1.5;
   padding: 7px 10px;
   border-radius: var(--radius);
   border: var(--border-strong) solid var(--line-strong);
   background: var(--bg-raised);
   color: var(--text);
 }
-.field-list input::placeholder { color: var(--text-muted); }
+.field-list textarea {
+  resize: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.field-list input::placeholder,
+.field-list textarea::placeholder { color: var(--text-muted); }
 
 .save-status { font-size: 0.9rem; color: var(--text-muted); min-height: 1.2em; margin-top: 0.5rem; white-space: pre-line; }
 .load-error, .loading { padding-top: 48px; color: var(--text-muted); }

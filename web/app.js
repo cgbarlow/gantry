@@ -984,6 +984,14 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection, on
 }
 
 // ---------- List field ----------
+// List rows are textareas, not single-line inputs, so an entry longer than the
+// column wraps and grows to show every line instead of scrolling out of view.
+function autosizeTextarea(el) {
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight}px`
+}
+
 function ListField({ field, onRegister, onRemove }) {
   const rowsRef = useRef(field.value?.length ? [...field.value] : [''])
   const [, bump] = useState(0)
@@ -1028,7 +1036,15 @@ function ListField({ field, onRegister, onRemove }) {
         ${rowsRef.current.map(
           (value, i) => html`
             <div class="list-row" key=${i}>
-              <input type="text" value=${value} onInput=${(e) => updateRow(i, e.currentTarget.value)} />
+              <textarea
+                rows="1"
+                value=${value}
+                ref=${autosizeTextarea}
+                onInput=${(e) => {
+                  autosizeTextarea(e.currentTarget)
+                  updateRow(i, e.currentTarget.value)
+                }}
+              ></textarea>
               ${viewMode.value !== 'rendered'
                 ? html`<button type="button" class="btn small" onClick=${() => removeRow(i)}>Remove</button>`
                 : null}
@@ -2192,6 +2208,9 @@ function SyncedFieldsPanel({ instance }) {
   // Persistent hyperlink built from the persisted PR record (org/project/repo + PR id) — survives reload with the correct org (WI155). `justOpened.webUrl` is the transient server-built URL right after creation; fallback builds from `instance.workspace` so reloads still link.
   const signoffPrUrl = justOpened?.webUrl ?? prWebUrlFor(instance, openPullRequestId)
   const groupedReviews = groupReviewsByOutcome(instance.reviews ?? [])
+  // Sign-off shown the same way a review row is (name · ticket · status): the "ticket" is this stage's own sign-off work item, when the instance is work-item-linked.
+  const signoffWorkItemId = instance.workItem?.stages?.[instance.stage.id] ?? null
+  const signoffWiUrl = workItemWebUrlFor(instance.workItem, signoffWorkItemId)
 
   return html`
     <section class="synced-fields-panel" id="work-item-detail-card">
@@ -2314,7 +2333,6 @@ function SyncedFieldsPanel({ instance }) {
                             <div class="review-group" key=${key}>
                               <div class="review-group-label">
                                 <span>${label}</span>
-                                <span class="review-group-count">${group.length}</span>
                               </div>
                               <ul class="review-list">
                                 ${group.map((review) => html`<${ReviewListItem} key=${review.workItemId} review=${review} instance=${instance} />`)}
@@ -2339,15 +2357,24 @@ function SyncedFieldsPanel({ instance }) {
                 ${openPullRequestId
                   ? pullRequestIsActive
                     ? html`
-                        <p>
+                        <ul class="review-list">
+                          <li>
+                            <span class="review-reviewer">${pullRequest?.review?.approver?.displayName ?? 'Not assigned'}</span>
+                            <span class="review-meta">
+                              ${signoffWiUrl
+                                ? html`<a href=${signoffWiUrl} target="_blank" rel="noreferrer">#${signoffWorkItemId}</a>`
+                                : signoffWorkItemId
+                                  ? html`#${signoffWorkItemId}`
+                                  : null}
+                              <span class="review-status">${pullRequest?.review?.reviewStatus ?? pullRequest?.review?.state ?? 'pending'}</span>
+                            </span>
+                          </li>
+                        </ul>
+                        <p class="signoff-pr-ref">
                           ${signoffPrUrl
                             ? html`<a href=${signoffPrUrl} target="_blank" rel="noreferrer">Pull Request #${openPullRequestId}</a>`
                             : html`Pull Request #${openPullRequestId}`}
                           ${` is open, requesting approval for stage "${instance.stage.title}".`}
-                        </p>
-                        <p class="signoff-reviewer">
-                          Reviewer: ${pullRequest?.review?.approver?.displayName ?? 'Not assigned'}
-                          ${` (${pullRequest?.review?.state ?? 'pending'})`}
                         </p>
                         ${isCurrentStage && approvalInvalidated
                           ? html`
