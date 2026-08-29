@@ -72,7 +72,7 @@ The key rule: **artefacts are derived, modules are authored.** If you find yours
 
 Gantry runs anywhere Node.js and Pandoc do, including Windows — you don't need WSL. It's built and CI-tested on Linux, so Windows works in principle but is unverified in practice; WSL is the safer bet if you want the exact environment this project is tested against.
 
-**1. Install Node.js 22+**
+**1. Install Node.js 24+** (`package.json` `engines.node` is `>=24`)
 
 - **Linux (Debian/Ubuntu)**:
   ```bash
@@ -113,7 +113,7 @@ npm link             # makes `gantry` available on your PATH
 
 | Dependency | Version | Why |
 |---|---|---|
-| Node.js | 22+ | Engine runtime and CLI (`package.json` `engines.node`) |
+| Node.js | 24+ | Engine runtime and CLI (`package.json` `engines.node` is `>=24`) |
 | `pandoc` | 3.x confirmed (3.1.3) | **Required at render time** — `gantry render` shells out to it to convert the compiled Markdown to `.docx` |
 | Git | 2.x+ | Instance history and audit trail |
 | A text editor | any | Modules are markdown; no tooling required to author them |
@@ -144,12 +144,13 @@ gantry/
 │       │   ├── solution-definition.yaml
 │       │   └── ...
 │       └── templates/            # artefact templates
-│           ├── soap.md.tmpl
-│           ├── soap-full.md.tmpl
-│           └── reference.docx    # pandoc --reference-doc, derived from the real HLD template
+│           ├── soap.md.tmpl      # one .md.tmpl per artefact (soap, soap-full, hld, sad, ssad, as-built)
+│           ├── ...
+│           └── reference-*.docx  # pandoc --reference-doc, one per artefact, derived from the real templates
 ├── instances/
 │   ├── instance-registry.json    # slug -> workspace/location map, gitignored
 │   ├── workspace-registry.json   # Azure DevOps org/project/repo entities, gitignored
+│   ├── number-registry.json      # scoped numeric refs (ADR-0024): workspace/instance/stage ordinals, gitignored
 │   └── <initiative-slug>/        # local instances only — an Azure DevOps-backed
 │       ├── instance.yaml         # instance lives at gantry-workspace/<slug>/ in
 │       ├── modules/              # its own repo instead (see below), never here
@@ -157,10 +158,12 @@ gantry/
 │       │   └── solution-definition.md
 │       └── out/                  # rendered artefacts (gitignored by default)
 ├── lib/                          # the engine: definition/instance loading, render, status, the web server
-│   ├── server.js                 # HTTP routes, incl. the work-item, workspace, stage-advancement/approval
-│   │                             # and synced-fields endpoints
+│   ├── server.js                 # HTTP routes, incl. the work-item, workspace, stage-advancement/approval,
+│   │                             # stage-review and synced-fields (Work item details card) endpoints
 │   ├── instanceRegistry.js       # slug -> workspace/location lookup/registration (the registry above)
 │   ├── workspaceRegistry.js      # Azure DevOps org/project/repository entities instances reference
+│   ├── numberRegistry.js         # scoped numeric workspace/instance/stage references layered over slugs
+│   │                             # (docs/adr/0024-scoped-numeric-references-layered-over-slugs.md)
 │   ├── azureDevOpsClient.js       # PAT-authenticated Azure DevOps REST client (Git)
 │   ├── azureDevOpsWorkItemsClient.js  # PAT-authenticated Azure DevOps REST client (Work Items)
 │   ├── azureDevOpsPullRequestsClient.js # PAT-authenticated Azure DevOps REST client (Pull Requests):
@@ -168,10 +171,12 @@ gantry/
 │   ├── stageBranch.js             # per-stage branch names/lifecycle for Workspace-backed instances
 │   │                              # (gantry-workspace/<slug>/<stageId>, stacked on an open prior stage's branch)
 │   ├── stageAdvancement.js        # local instances' gate-gated self-serve "Advance to next stage"
-│   ├── stageApproval.js           # Workspace-backed "Request approval": open the stage's gate-pass-gated PR
+│   ├── stageApproval.js           # Workspace-backed "Request Sign-off": open the stage's gate-pass-gated PR
 │   ├── stageStatus.js             # "Check status": read the PR's reviewer votes; on approval, merge,
 │   │                              # advance the stage and push the linked work item
-│   ├── syncedFields.js            # the instance screen's synced-fields panel (type/title/status/PR state/assignee)
+│   ├── stageReview.js             # Workspace-backed "Request Review": informal, non-gating reviewer feedback
+│   ├── reviewStatus.js            # custom review/sign-off status field on the Work item details card
+│   ├── syncedFields.js            # the instance screen's Work item details card (type/title/status/PR state/assignee)
 │   ├── workItemLink.js           # link an instance to a work item; confirmed gate-pass state sync
 │   ├── repoCheck.js              # "does this Azure DevOps repo already hold instance data", incl.
 │   │                             # the legacy-root-to-gantry-workspace/<slug>/ migration routine
@@ -180,9 +185,10 @@ gantry/
 └── web/
     ├── index.html                # app shell
     ├── app.js                     # dashboard + module editor (incl. stage advancement/approval panels,
-    │                              # the synced-fields panel and the workspace-scoped instance switcher)
+    │                              # the Work item details card and the workspace-scoped instance switcher)
     ├── pages/new-workspace-wizard.js # "+ New Workspace" — pick/register a workspace, then instance fields
     ├── pages/settings.js         # /settings, /settings/workspace, /settings/instance — tab-free
+    ├── pages/user-guide.js       # /user-guide — the in-product, end-user-facing User Guide (separate surface from this README)
     ├── lib/credential.js         # client-side PAT storage/prompt, incl. per-workspace overrides
     ├── lib/ticketingSystem.js    # client-side default-ticketing-system setting
     ├── lib/apiFetch.js           # fetch wrapper: attaches the right PAT, retries once on 401
@@ -224,10 +230,10 @@ Settings is three separate, tab-free screens, reached differently depending on w
 Each screen's own back control returns to wherever it was actually opened from (Home, or that same instance screen) — not browser history — falling back to Home for a direct/bookmarked Settings URL.
 
 - **Global Settings** (`/settings`) — set, replace or clear the Azure DevOps PAT ahead of ever being prompted for one, and pick the default **ticketing system** new workspaces use. Azure DevOps is the only ticketing system gantry actually talks to today; a second option is listed but disabled ("coming soon") so the schema and UI don't need a migration once a second one ships.
-- **Workspace Settings** (`/settings/workspace`, from an instance's own Settings dropdown) — the workspace *behind that one instance* (never a picker across every registered workspace): its Azure DevOps repo URL and three editable fields — a free-text **owner** label, a **PAT override** for that workspace alone (falls back to the Global Settings PAT when unset, and — like the global PAT — never leaves the browser), and a per-workspace **ticketing-system** override. A local instance has no workspace, so this screen reports that instead.
-- **Instance Settings** (`/settings/instance`, from an instance's own Settings dropdown) — that instance's own stored **Assignee** (editable), read-only instance info (slug, definition, current stage), and a read-only view of its Azure DevOps work-item link (organization/project/parent work item/type, and each stage's own child work item id). Re-linking isn't supported here or anywhere else after creation — linking happens only at instance creation (see "Linking an instance to an Azure DevOps work item" below).
+- **Workspace Settings** (`/settings/workspace`, from an instance's own Settings dropdown) — the workspace *behind that one instance* (never a picker across every registered workspace): its Azure DevOps repo URL and three editable fields — a free-text **owner** label, a **PAT override** for that workspace alone (falls back to the Global Settings PAT when unset, and — like the global PAT — never leaves the browser), and a per-workspace **ticketing-system** override. It also offers **Archive** — a reversible "set aside" that drops the workspace out of the default dashboard and API listings without deleting anything on disk or in Azure DevOps (blocked while it still has an active instance; `?archived=1` reveals archived rows for a per-row Restore). A local instance has no workspace, so this screen reports that instead.
+- **Instance Settings** (`/settings/instance`, from an instance's own Settings dropdown) — that instance's own stored **Assignee** (editable), read-only instance info (slug, definition, current stage), and a read-only view of its Azure DevOps work-item link (organization/project/parent work item/type, and each stage's own child work item id). Re-linking isn't supported here or anywhere else after creation — linking happens only at instance creation (see "Linking an instance to an Azure DevOps work item" below). This screen also offers **Archive** for the instance itself — the same reversible set-aside as for a workspace; an archived instance still resolves read-only at its direct URL.
 
-Once registered, a local and an Azure DevOps-backed instance are indistinguishable from the dashboard's point of view — same listing, same module editor, same render command. Where each one's data actually lives is tracked server-side across two registry files (`instances/instance-registry.json`: slug -> workspace; `instances/workspace-registry.json`: workspace -> organization/project/repository/owner/ticketing-system — both gitignored, application state, not source), not in any client-visible config.
+Once registered, a local and an Azure DevOps-backed instance are indistinguishable from the dashboard's point of view — same listing, same module editor, same render command. Where each one's data actually lives is tracked server-side across three registry files (`instances/instance-registry.json`: slug -> workspace; `instances/workspace-registry.json`: workspace -> organization/project/repository/owner/ticketing-system/`archived`; `instances/number-registry.json`: the scoped numeric ordinals of ADR-0024 — all gitignored, application state, not source), not in any client-visible config.
 
 ## Linking an instance to an Azure DevOps work item
 
@@ -235,8 +241,9 @@ Optionally, an instance can be linked to a parent Azure DevOps work item so its 
 
 Linking creates one child work item per stage in the instance's definition underneath that parent, in one step. From then on:
 
-- A **synced-fields panel** at the top of the instance screen shows the current stage's live tracking fields at a glance: the work item type (default `Task`), a title auto-populated as "{instance name} — {stage title}" but overridable per stage, the linked work item's own current Status read straight from Azure DevOps, the stage's Pull Request state, and the Assignee (inherited from the instance's stored assignee, overridable per stage).
-- The **Azure DevOps work item** panel below the modules keeps the existing **Check gate & sync work item** action — it checks the currently-viewed stage's gate and, only if it passes, opens a confirmation dialog before pushing a new state to that stage's own work item; declining leaves the state untouched. The state actually pushed is drawn from whatever states the configured work item type genuinely supports in your project (via its own `getWorkItemTypeStates` lookup), never a fixed list Gantry invents — see `docs/adr/0011-azure-devops-work-item-linking.md`.
+- A **Work item details** card at the top of the instance screen (the old "synced-fields" panel, consolidated by WI213/WI217) shows the current stage's live tracking fields at a glance: the work item type (default `Task`), a title auto-populated as "{instance name} — {stage title}" but overridable per stage, the linked work item's own current Status read straight from Azure DevOps, the stage's Pull Request state, and the Assignee (inherited from the instance's stored assignee, overridable per stage). The same card now also carries the stage's **Reviews & sign-off** — see "Stage advancement and approval" below — and its commit-history dialog.
+- The card keeps a **Check gate & sync work item** action — it checks the currently-viewed stage's gate and, only if it passes, opens a confirmation dialog before pushing a new state to that stage's own work item; declining leaves the state untouched. The state actually pushed is drawn from whatever states the configured work item type genuinely supports in your project (via its own `getWorkItemTypeStates` lookup), never a fixed list Gantry invents — see `docs/adr/0011-azure-devops-work-item-linking.md`. For a Workspace-backed instance this gate-check-and-confirm step is folded into the card's single "Check status" click (WI217); a local instance keeps it as its own standalone button.
+- Gantry also tracks a custom review/sign-off status alongside native `System.State` (`Requested` / `In review` / `Changes requested` / `Approved` / `Rejected`), because the `Task` type's `System.State` transitions are locked — see `docs/adr/0024-custom-review-status-field.md`.
 - For a **Workspace-backed** instance the linked work item is a board-visible tracking surface only (title, status, assignee) — it plays no part in gating stage advancement any more; that's the stage's Pull Request (see below).
 
 ## Stage advancement and approval
@@ -249,8 +256,8 @@ Nothing moves an instance from one stage to the next by itself — advancement i
 
 1. The moment the first save of a stage lands, that stage gets its own branch — `gantry-workspace/<slug>/<stageId>` — and every subsequent read/write targets it. If the previous stage's branch is still open (its PR unmerged), the new branch stacks on top of it rather than forking fresh from `main`, so work continues in sequence through approval latency; `main` itself only ever reflects fully-approved, merged stages.
 2. Every module save re-renders whichever of the stage's artefacts have enough data and commits them to the same branch, so the eventual Pull Request's diff always carries the generated documents alongside the module files.
-3. **Request approval** opens that stage's Pull Request into `main` — the actual approval gate — but only once the stage's gate has passed. Committing to the branch before that is unrestricted throughout the stage; opening the PR is what's gated.
-4. The Owner reviews and votes on the Pull Request directly in Azure DevOps. **Check status** then reads the PR's reviewer votes — explicitly distinguishing a rejection or changes-requested vote from a merely-still-pending review, so "the Owner asked for changes" never reads as an ambiguous "not yet approved".
+3. **Request Sign-off** (called "Request approval" in `docs/adr/0014`) opens that stage's Pull Request into `main` — the actual approval gate — but only once the stage's gate has passed. Committing to the branch before that is unrestricted throughout the stage; opening the PR is what's gated. Separately, **Request Review** (WI197) sends an informal, non-gating feedback request — one Azure DevOps work item per reviewer — available at any point in the stage.
+4. The Owner reviews and votes on the Pull Request directly in Azure DevOps. **Check status** then reads the PR's reviewer votes — explicitly distinguishing a rejection or changes-requested vote from a merely-still-pending review, so "the Owner asked for changes" never reads as an ambiguous "not yet approved". The one "Check status" button on the Work item details card refreshes reviews and sign-off together.
 5. On detecting approval, gantry completes (merges) the Pull Request itself, advances the instance's stage pointer, and pushes the linked work item's state where one is linked — one click resolves everything, with no second manual merge step. Detection stays manual (this explicit "Check status" click): no polling, no webhooks.
 
 ## Your first instance
@@ -279,8 +286,9 @@ gantry render my-initiative soap                # produce the artefact
 | `gantry status <slug> [--json]` | Current stage, module completeness, what's outstanding | Implemented |
 | `gantry check <slug> [--gate <id>] [--json]` | Validate an instance against a gate's requirements — any gate, not just the instance's current stage | Implemented |
 | `gantry render <slug> <artefact> [--dry-run]` | Render an artefact to `out/` | Implemented |
-| `gantry serve [slug] [--port <port>]` | Serve the web form (port 3000): a dashboard of every registered instance at `/`, local or Azure DevOps-backed, and the stage-by-stage form at `/instance/<slug>`. `[slug]` only sets a fallback default for API requests made with no `?slug=<slug>` of their own — it doesn't change what the dashboard shows or require picking one instance up front. `/new-workspace` is the "+ New Workspace" wizard, `/settings` is the Settings screen (see "Backing an instance with Azure DevOps" above) | Implemented |
+| `gantry serve [slug] [--port <port>]` | Serve the web app (default port 3000): a dashboard of every registered instance at `/`, local or Azure DevOps-backed, and the stage-by-stage form at `/instance/<slug>`. `[slug]` only sets a fallback default for API requests made with no `?slug=<slug>` of their own — it doesn't change what the dashboard shows or require picking one instance up front. `/new-workspace` is the "+ New Workspace" wizard, `/settings` the Settings screens, `/user-guide` the in-product User Guide (see "Backing an instance with Azure DevOps" above) | Implemented |
 | `gantry validate <definition> [--json]` | Report every structural problem with a definition in one pass | Implemented |
+| `gantry backfill-numeric-refs` | One-time (idempotent) backfill of scoped numeric workspace/instance references (ADR-0024) for workspaces/instances that predate the feature | Implemented |
 
 `status`, `check` and `validate` all emit structured output with `--json` for scripting and agent use.
 
@@ -292,38 +300,54 @@ gantry render my-initiative soap                # produce the artefact
 id: design
 title: Solution Design
 description: >
-  Design content for an initiative, from shaping through to build readiness
-  and operational handover.
+  Design content for an initiative, from shaping through HLD approval,
+  build-ready detailed design, and operational handover.
 
 stages:
   - id: shape
-    title: Shape
+    title: SOAP
     gate: business-case
-    modules: [context, problem, options, indicative-cost]
+    modules: [context, solution-definition, team-and-estimates, dependencies, soap-full-details]
 
-  - id: define
-    title: Define
-    gate: design-authority
-    modules: [chosen-option, architecture, integration, nfrs, security, risks]
+  - id: hld-define
+    title: High-level Design
+    gate: hld-tac-approved
+    modules: [hld-submission, problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies]
 
-  - id: build-ready
-    title: Build Ready
+  - id: detailed-design
+    title: Detailed Design
     gate: build-ready-checklist
-    modules: [increment-scope, open-investigations, decisions]
+    modules: [architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations]
+
+  - id: handover
+    title: Operational Handover
+    gate: operational-handover
+    modules: [as-built-notes]
 
 artefacts:
   - id: soap
     title: Solution on a Page
     template: templates/soap.md.tmpl
     gate: business-case
-    requires: [context, problem, options, indicative-cost]
+    requires: [context, solution-definition, team-and-estimates]
 
-  - id: detailed-design
-    title: Detailed Design
-    template: templates/detailed-design.md.tmpl
-    gate: design-authority
-    requires: [chosen-option, architecture, integration, nfrs, security]
+  - id: soap-full            # heavier variant sharing the business-case gate; field-level requires
+    title: Full Solution on a Page
+    template: templates/soap-full.md.tmpl
+    gate: business-case
+    requires: [context.driver, context.opportunity, solution-definition.high-level-requirements, ...]
+
+  - id: hld
+    title: High Level Design
+    template: templates/hld.md.tmpl
+    gate: hld-tac-approved
+    requires: [hld-submission, problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies]
+
+  # sad and ssad also render at build-ready-checklist, each with its own field-level requires list;
+  # as-built renders at operational-handover. See definitions/design/definition.yaml for the full file.
 ```
+
+A gate passes when *at least one* of its gate-matching artefacts has its own `requires` complete — not when a stage's whole `modules` list is filled in (`docs/adr/0019-gate-passing-per-artefact-not-per-stage-module-list.md`). `requires` entries can be whole module ids or `module.field` references, so a heavier artefact (`soap-full`, `sad`, `ssad`) can reuse a module without dragging in every field a lighter artefact on the same gate leaves optional (`docs/adr/0020-full-soap-artefact.md`, `docs/adr/0021-sad-ssad-artefact-requirements.md`).
 
 ## Module specs
 
@@ -440,15 +464,17 @@ The definition is the contract. Because every module carries a machine-readable 
 npm install
 ```
 
-There is no build/compile step — the CLI and engine (`bin/`, `lib/`) run directly as Node ESM, and the web form (`web/`) is static, served as-is by `gantry serve`.
+There is no build/compile step — the CLI and engine (`bin/`, `lib/`) run directly as Node ESM, and the web app (`web/`) is static, served as-is by `gantry serve`.
 
 ## Test
 
 ```bash
-npm test               # engine unit tests (node --test)
+npm run test:unit      # engine unit & integration tests (node --test, excludes Playwright)
+npm run test:e2e       # Playwright browser tests (web UI)
+npm test               # node --test with no filter — runs every *.test.js, Playwright specs included
 ```
 
-> **TODO:** add coverage thresholds once the schema stabilises.
+`npm run test:unit:ci` runs the same unit suite with coverage gates (`--test-coverage-lines=80`, `--test-coverage-branches=75`, `--test-coverage-functions=70` over `lib/`, `bin/`, `web/`) plus JUnit XML and LCOV output; `npm run test:e2e:ci` does the same for the Playwright suite.
 
 ## Validating definitions and instances
 
@@ -460,7 +486,7 @@ npm test               # engine unit tests (node --test)
 
 ## Continuous integration
 
-`azure-pipelines.yml` (repo root) runs on every pull request and push to `main`: `npm test`, then `gantry render` for every artefact the `design` definition currently defines, against the `examples` fixture instance — a failure in any step fails the build.
+`azure-pipelines.yml` (repo root) has no CI or PR triggers of its own (`trigger: none`, `pr: none`) — it runs only when an Azure DevOps branch-protection build-validation policy invokes it. The pipeline does a single `docker build` of `ContainerFile`, whose stages run `npm run test:unit:ci`, `npm run test:e2e:ci`, and `npm run render:examples` (rendering the `examples` fixture for `soap`, `hld`, `sad`, `ssad` and `as-built`). Test results and coverage are embedded in the image and extracted afterwards; the pipeline's `PublishTestResults` (`failTaskOnFailedTests`) and the render stage's non-zero exit are the gates.
 
 ---
 
@@ -486,7 +512,7 @@ Conventions:
 
 # Container demo
 
-A multi-stage `ContainerFile` at the repo root builds a minimal runtime image (~180 MB) with Node.js 22, Pandoc, and Git — everything needed to serve the web UI and render artefacts.
+A multi-stage `ContainerFile` at the repo root builds a minimal runtime image (`node:24-slim` base) with Node.js 24, Pandoc, and Git — everything needed to serve the web UI and render artefacts.
 
 ## Build the image
 
@@ -517,7 +543,7 @@ podman run -d \
 docker run -p 3000:3000 gantry
 ```
 
-Open http://localhost:3000 in a browser. The dashboard lists the demo instances shipped with the repo (`demo-web`, `demo-cli`, `examples`). Click any instance to view its stages, modules, and completeness.
+Open http://localhost:3000 in a browser. The dashboard lists the instances shipped with the repo (`examples`, a fixture with content for every stage, and `atlas-reference-design`, a worked reference instance). Click any instance to view its stages, modules, and completeness.
 
 ## Render an artefact
 
