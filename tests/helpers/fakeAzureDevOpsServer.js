@@ -726,7 +726,7 @@ export function createFakeAzureDevOpsServer({
  * Starts a `createFakeAzureDevOpsServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/server.test.js`'s `withRunningServer` helper's shape (per #82's testing decisions). Shared by `tests/azureDevOpsClient.test.js` and `tests/instance.test.js` so this lifecycle isn't duplicated across both.
  */
 export function withFakeAzureDevOpsServer(
-  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes, denyReviewerVoteReset, rejectIdentityRequests, repoExists, connectionDataUser },
+  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes, denyReviewerVoteReset, rejectIdentityRequests, repoExists, connectionDataUser, simulateMissingReviewStatusField },
   fn
 ) {
   return new Promise((resolve, reject) => {
@@ -744,6 +744,7 @@ export function withFakeAzureDevOpsServer(
       rejectIdentityRequests,
       repoExists,
       connectionDataUser,
+      simulateMissingReviewStatusField,
     })
     server.listen(0, async () => {
       const { port } = server.address()
