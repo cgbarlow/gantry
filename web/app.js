@@ -2027,16 +2027,24 @@ function SyncedFieldsPanel({ instance }) {
     }
   }
 
-  // ---- Check status (#213): the card's single refresh action, replacing
-  // every per-section/per-row "Check status" the old panels each had of
-  // their own. Refreshes, in one click: this stage's linked/parent work
-  // item + Pull Request fields (re-reads synced fields), every review work
-  // item for this stage, and — while viewing the instance's own current
-  // stage, the only stage a sign-off check is ever valid for (checkStatus
-  // gate resolution always targets the instance's persisted current stage,
-  // never whichever stage happens to be viewed) — the sign-off Pull
-  // Request. On approval, sign-off's own merge/advance behaviour (ADR-0014)
-  // is unchanged.
+  // ---- Check status (#213, consolidated by #217): the card's single
+  // refresh action, replacing every per-section/per-row "Check status" the
+  // old panels each had of their own. Refreshes, in one click: this stage's
+  // linked/parent work item + Pull Request fields (re-reads synced fields),
+  // every review work item for this stage, and — while viewing the
+  // instance's own current stage, the only stage a sign-off check is ever
+  // valid for (checkStatus gate resolution always targets the instance's
+  // persisted current stage, never whichever stage happens to be viewed) —
+  // the sign-off Pull Request. On approval, sign-off's own merge/advance
+  // behaviour (ADR-0014) is unchanged. For a Workspace-backed instance,
+  // once that sequence finishes *without* having just advanced, a second
+  // gate-check-and-confirm-sync step runs in the same click (WI217):
+  // checks the current stage's content gate and, only if it passes and a
+  // work item is linked, opens the existing confirm-and-push dialog
+  // (reused verbatim from Check gate & sync work item). If nothing is
+  // linked that step runs silently; if the gate fails its detail is shown
+  // in the same status-message area. Local instances keep their own
+  // separate Check gate & sync button unchanged.
   async function handleCheckStatus() {
     setChecking(true)
     setCheckStatusMessage('Checking status…')
@@ -2126,6 +2134,35 @@ function SyncedFieldsPanel({ instance }) {
           }
           return
         }
+      }
+
+      // WI217: Workspace-backed second step — gate-check-and-confirm-sync,
+      // sequenced after the refresh/merge detection above and skipped when
+      // that detection already advanced the stage (the return above).
+      if (instance.workspaceBacked) {
+        const isLinked = Boolean(data?.linked)
+        // Re-read linked from the just-refreshed synced-fields if available,
+        // falling back to the pre-click snapshot — avoids missing a link
+        // created between clicks.
+        const linkedNow = fieldsBody?.linked !== undefined ? Boolean(fieldsBody.linked) : isLinked
+        if (linkedNow) {
+          const res = await apiFetchForInstance(currentSlug.value, `/api/instance/check?slug=${encodeURIComponent(currentSlug.value)}`)
+          const body = await res.json().catch(() => ({}))
+          if (!res.ok) {
+            messages.push(`Check failed: ${body.message ?? body.error}`)
+          } else if (!body.pass) {
+            messages.push(formatGateFailure(body))
+          } else {
+            // Gate passed and linked — open the existing confirm-and-push
+            // dialog verbatim (same copy, same server re-check on confirm).
+            // Flush any pending status messages first so the dialog doesn't
+            // clobber them.
+            setCheckStatusMessage(messages.length ? messages.join(' ') : 'Up to date.')
+            setSyncConfirming(true)
+            return
+          }
+        }
+        // Not linked — explicitly silent: no gate check, no message, no dialog.
       }
 
       setCheckStatusMessage(messages.length ? messages.join(' ') : 'Up to date.')
@@ -2231,6 +2268,11 @@ function SyncedFieldsPanel({ instance }) {
       ${instance.workspaceBacked
         ? html`
             <div class="review-signoff-card">
+              ${!isCurrentStage
+                ? html`<p class="guidance stage-advance-hint">
+                    This stage is not current. Request Review and Request Sign-off are available only on the current stage. To advance to this stage, go to the current stage and run Check status after its Pull Request has been merged.
+                  </p>`
+                : null}
               <div class="review-signoff-section reviews-section">
                 <div class="review-signoff-header">
                   <span class="field-label">Reviews</span>
@@ -2319,25 +2361,30 @@ function SyncedFieldsPanel({ instance }) {
       ${linked
         ? html`
             <div class="save-status">${status}</div>
-            <button type="button" class="btn" onClick=${handleCheckAndMaybeSync}>Check gate & sync work item</button>
-            <div class="save-status">${syncStatus}</div>
-            ${syncConfirming
+            ${!instance.workspaceBacked
               ? html`
-                  <div class="modal-backdrop" role="presentation">
-                    <div class="modal" role="dialog" aria-modal="true" aria-label="Confirm work item state update">
-                      <h3>Push a state update?</h3>
-                      <p class="guidance">
-                        The gate for stage "${instance.stage.title}" has passed. Confirm to push a new state to this
-                        stage's work item in Azure DevOps. Declining leaves that work item's state unchanged.
-                      </p>
-                      <div class="modal-actions">
-                        <button type="button" class="btn ghost" onClick=${handleDeclineSync}>Decline</button>
-                        <button type="button" class="btn primary" onClick=${handleConfirmSync}>Confirm & push</button>
-                      </div>
-                    </div>
-                  </div>
+                  <button type="button" class="btn" onClick=${handleCheckAndMaybeSync}>Check gate & sync work item</button>
+                  <div class="save-status">${syncStatus}</div>
                 `
-              : null}
+              : syncStatus
+                ? html`<div class="save-status">${syncStatus}</div>`
+                : null}
+          `
+        : null}
+      ${linked && syncConfirming
+        ? html`
+            <div class="modal-backdrop" role="presentation">
+              <div class="modal" role="dialog" aria-modal="true" aria-label="Confirm work item state update">
+                <h3>Push a state update?</h3>
+                <p class="guidance">
+                  The gate for stage "${instance.stage.title}" has passed. Confirm to push a new state to this stage's work item in Azure DevOps. Declining leaves that work item's state unchanged.
+                </p>
+                <div class="modal-actions">
+                  <button type="button" class="btn ghost" onClick=${handleDeclineSync}>Decline</button>
+                  <button type="button" class="btn primary" onClick=${handleConfirmSync}>Confirm & push</button>
+                </div>
+              </div>
+            </div>
           `
         : null}
       ${reviewDialogOpen

@@ -538,9 +538,13 @@ test('the Workspace-backed screen exposes Review / Sign-off labels and the Reque
             assert.equal(await reviewRow.getByRole('button').count(), 0)
 
             // The one "Check status" button refreshes it (and everything
-            // else the card shows) together.
+            // else the card shows) together. WI217: Check status now also
+            // runs the gate-check-and-confirm-sync step after refresh when
+            // workspace-backed and not already advanced — this fixture's
+            // Shape stage is empty so gate fails, showing FAIL detail in
+            // same status-message area instead of "Up to date.".
             await card.locator('.panel-header').getByRole('button', { name: 'Check status' }).click()
-            await assert.doesNotReject(card.getByText('Up to date.').waitFor({ timeout: 10_000 }))
+            await assert.doesNotReject(card.getByText(/FAIL —/).waitFor({ timeout: 10_000 }))
           } finally {
             await page.close()
           }
@@ -678,8 +682,10 @@ test('the Reviews list groups by outcome (#215) once a stage has more than a cou
             // The two updates set directly against the fake Azure DevOps
             // server (bypassing gantry) aren't reflected until the card's
             // one "Check status" action re-reads each review's status.
+            // WI217: same gate-check now runs here — Shape modules empty so
+            // gate fails, showing FAIL in same area.
             await card.locator('.panel-header').getByRole('button', { name: 'Check status' }).click()
-            await assert.doesNotReject(card.getByText('Up to date.').waitFor({ timeout: 10_000 }))
+            await assert.doesNotReject(card.getByText(/FAIL —/).waitFor({ timeout: 10_000 }))
 
             await assert.doesNotReject(reviewsSection.locator('.review-group').first().waitFor({ timeout: 10_000 }))
             assert.equal(await reviewsSection.locator('.review-group').count(), 3)
