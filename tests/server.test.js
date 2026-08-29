@@ -1035,3 +1035,124 @@ test('POST /api/instances with an Azure DevOps location whose repository does no
     rmSync(instancesDir, { recursive: true, force: true })
   }
 })
+
+// ---------- WI198: pre-Pull-Request commit history for a stage branch ----------
+
+test('GET /api/instance/commits returns an empty list when the stage branch does not exist yet, and the branch-scoped commits once it does', async () => {
+  const SLUG = 'commit-history-initiative'
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withFakeAzureDevOpsServer(
+      {
+        organization: ORGANIZATION,
+        project: PROJECT,
+        repository: REPOSITORY,
+        validPat: VALID_PAT,
+        files: { [`/gantry-workspace/${SLUG}/instance.yaml`]: `definition: design\nslug: ${SLUG}\nstage: shape\n` },
+      },
+      async (adoBaseUrl) => {
+        registerInstance(
+          SLUG,
+          { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          { instancesDir },
+        )
+        const stageBranch = `gantry-workspace/${SLUG}/shape`
+        await withRunningServer(
+          { instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true },
+          async (base) => {
+            // No stage branch yet — the endpoint reports it cleanly rather than 404ing.
+            const before = await fetch(`${base}/api/instance/commits?slug=${SLUG}&stage=shape`, {
+              headers: { Authorization: basicAuthHeader(VALID_PAT) },
+            })
+            assert.equal(before.status, 200)
+            const beforeBody = await before.json()
+            assert.equal(beforeBody.branch, stageBranch)
+            assert.equal(beforeBody.ref, `refs/heads/${stageBranch}`)
+            assert.deepEqual(beforeBody.commits, [])
+
+            // Start the stage branch and put one commit on it that isn't on main.
+            const client = createAzureDevOpsClient({
+              organization: ORGANIZATION,
+              project: PROJECT,
+              repository: REPOSITORY,
+              pat: VALID_PAT,
+              baseUrl: adoBaseUrl,
+            })
+            await client.createBranch(stageBranch)
+            await client.writeFile('/shape.md', 'shape work\n', { branch: stageBranch, message: 'Draft the shape' })
+
+            const after = await fetch(`${base}/api/instance/commits?slug=${SLUG}&stage=shape`, {
+              headers: { Authorization: basicAuthHeader(VALID_PAT) },
+            })
+            assert.equal(after.status, 200)
+            const afterBody = await after.json()
+            assert.equal(afterBody.branch, stageBranch)
+            assert.equal(afterBody.commits.length, 1)
+            assert.match(afterBody.commits[0].message, /Draft the shape/)
+            assert.ok(afterBody.commits[0].commitId)
+            assert.ok(afterBody.commits[0].timestamp)
+
+            // Unknown stage id → 400, not 500.
+            const badStage = await fetch(`${base}/api/instance/commits?slug=${SLUG}&stage=not-a-real-stage`, {
+              headers: { Authorization: basicAuthHeader(VALID_PAT) },
+            })
+            assert.equal(badStage.status, 400)
+            assert.match((await badStage.json()).error, /no stage "not-a-real-stage"/)
+
+            // A PAT the fake server rejects → the auth error surfaces as 401, not a 400/500 leak.
+            const badPat = await fetch(`${base}/api/instance/commits?slug=${SLUG}&stage=shape`, {
+              headers: { Authorization: basicAuthHeader('wrong-pat') },
+            })
+            assert.equal(badPat.status, 401)
+          },
+        )
+      },
+    )
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('GET /api/instance/commits surfaces a missing instance.yaml as a clean 4xx, not a 500', async () => {
+  const SLUG = 'commit-history-ghost'
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withFakeAzureDevOpsServer(
+      { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {} },
+      async (adoBaseUrl) => {
+        registerInstance(
+          SLUG,
+          { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          { instancesDir },
+        )
+        await withRunningServer(
+          { instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true },
+          async (base) => {
+            const res = await fetch(`${base}/api/instance/commits?slug=${SLUG}&stage=shape`, {
+              headers: { Authorization: basicAuthHeader(VALID_PAT) },
+            })
+            assert.ok(res.status === 400 || res.status === 404, `expected 400/404, got ${res.status}`)
+            assert.match((await res.json()).error, /\S/)
+          },
+        )
+      },
+    )
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('GET /api/instance/commits rejects a local (non-Workspace-backed) instance with 400', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'local-initiative', { instancesDir })
+    await withRunningServer({ instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instance/commits?slug=local-initiative&stage=shape`)
+      assert.equal(res.status, 400)
+      const body = await res.json()
+      assert.match(body.error, /not Workspace-backed/)
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})

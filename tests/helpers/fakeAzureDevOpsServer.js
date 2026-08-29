@@ -179,7 +179,13 @@ export function createFakeAzureDevOpsServer({
 
     if (req.method === 'GET' && pathname === `${basePath}/commits`) {
       const branchName = url.searchParams.get('searchCriteria.itemVersion.version') ?? 'main'
-      const commits = branches.get(branchName)?.commits ?? []
+      const compareBranchName = url.searchParams.get('searchCriteria.compareVersion.version')
+      let commits = branches.get(branchName)?.commits ?? []
+      if (compareBranchName) {
+        const compareCommits = branches.get(compareBranchName)?.commits ?? []
+        const compareIds = new Set(compareCommits.map((c) => c.commitId))
+        commits = commits.filter((c) => !compareIds.has(c.commitId))
+      }
       const top = Number(url.searchParams.get('$top') ?? commits.length)
       return json(200, { count: commits.length, value: commits.slice().reverse().slice(0, top) })
     }
