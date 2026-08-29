@@ -9,6 +9,9 @@ import {
   registerInstance,
   listRegisteredInstances,
   resolveInstanceWorkspaceId,
+  archiveInstance,
+  restoreInstance,
+  isInstanceArchived,
 } from '../lib/instanceRegistry.js'
 import { listWorkspaces, resolveWorkspace, findWorkspaceByLocation } from '../lib/workspaceRegistry.js'
 
@@ -294,6 +297,85 @@ test('resolveInstanceWorkspaceId returns the real workspace id for an Azure-DevO
     const location = resolveInstanceLocation('remote-initiative', { instancesDir })
     const workspace = findWorkspaceByLocation(location, { instancesDir })
     assert.equal(resolveInstanceWorkspaceId('remote-initiative', { instancesDir }), workspace.id)
+  })
+})
+
+// ---------- #223: archive / restore ----------
+
+test('archiveInstance sets archived: true on the entry; restoreInstance removes it (exact prior shape)', () => {
+  withScratchInstances((instancesDir) => {
+    registerInstance('my-initiative', { kind: 'local' }, { instancesDir })
+
+    archiveInstance('my-initiative', { instancesDir })
+    assert.equal(isInstanceArchived('my-initiative', { instancesDir }), true)
+
+    const registryPath = join(instancesDir, 'instance-registry.json')
+    assert.deepEqual(JSON.parse(readFileSync(registryPath, 'utf8'))['my-initiative'], {
+      kind: 'local',
+      archived: true,
+    })
+
+    restoreInstance('my-initiative', { instancesDir })
+    assert.equal(isInstanceArchived('my-initiative', { instancesDir }), false)
+    assert.deepEqual(JSON.parse(readFileSync(registryPath, 'utf8'))['my-initiative'], { kind: 'local' })
+  })
+})
+
+test('archiveInstance keeps an Azure-DevOps entry as a workspace reference, archived last', () => {
+  withScratchInstances((instancesDir) => {
+    registerInstance(
+      'remote-initiative',
+      { kind: 'azureDevOps', organization: 'fake-org', project: 'fake-project', repository: 'fake-repo' },
+      { instancesDir }
+    )
+    archiveInstance('remote-initiative', { instancesDir })
+
+    const persisted = JSON.parse(readFileSync(join(instancesDir, 'instance-registry.json'), 'utf8'))['remote-initiative']
+    assert.deepEqual(Object.keys(persisted), ['kind', 'workspaceId', 'archived'])
+    assert.equal(persisted.kind, 'azureDevOps')
+    assert.equal(typeof persisted.workspaceId, 'string')
+    // Still resolves to the familiar denormalized shape.
+    assert.deepEqual(resolveInstanceLocation('remote-initiative', { instancesDir }), {
+      kind: 'azureDevOps',
+      organization: 'fake-org',
+      project: 'fake-project',
+      repository: 'fake-repo',
+    })
+  })
+})
+
+test('listRegisteredInstances excludes archived by default, includes them (with an archived flag) on includeArchived', () => {
+  withScratchInstances((instancesDir) => {
+    registerInstance('alpha', { kind: 'local' }, { instancesDir })
+    registerInstance('beta', { kind: 'local' }, { instancesDir })
+    archiveInstance('beta', { instancesDir })
+
+    assert.deepEqual(listRegisteredInstances({ instancesDir }), [{ slug: 'alpha', location: { kind: 'local' } }])
+    assert.deepEqual(listRegisteredInstances({ instancesDir, includeArchived: true }), [
+      { slug: 'alpha', location: { kind: 'local' }, archived: false },
+      { slug: 'beta', location: { kind: 'local' }, archived: true },
+    ])
+  })
+})
+
+test('archiveInstance / restoreInstance are idempotent, and throw for an unknown slug', () => {
+  withScratchInstances((instancesDir) => {
+    registerInstance('my-initiative', { kind: 'local' }, { instancesDir })
+    archiveInstance('my-initiative', { instancesDir })
+    assert.doesNotThrow(() => archiveInstance('my-initiative', { instancesDir }))
+    restoreInstance('my-initiative', { instancesDir })
+    assert.doesNotThrow(() => restoreInstance('my-initiative', { instancesDir }))
+
+    assert.throws(() => archiveInstance('nowhere', { instancesDir }), /Unknown instance/)
+    assert.throws(() => restoreInstance('nowhere', { instancesDir }), /Unknown instance/)
+  })
+})
+
+test('an archived instance still resolves at resolveInstanceLocation (read-only-resolves, #223)', () => {
+  withScratchInstances((instancesDir) => {
+    registerInstance('my-initiative', { kind: 'local' }, { instancesDir })
+    archiveInstance('my-initiative', { instancesDir })
+    assert.deepEqual(resolveInstanceLocation('my-initiative', { instancesDir }), { kind: 'local' })
   })
 })
 

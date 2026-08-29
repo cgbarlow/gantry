@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { createInstance, writeModule } from '../lib/instance.js'
 import { loadDefinition } from '../lib/definition.js'
 import { listRegistry } from '../lib/registry.js'
-import { registerInstance } from '../lib/instanceRegistry.js'
+import { registerInstance, archiveInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
 function withScratchInstances(fn) {
@@ -129,6 +129,32 @@ test('listRegistry falls back to \'\' for assignee when the instance record has 
 test('listRegistry returns an empty array when instancesDir has no instances', () => {
   withScratchInstances((instancesDir) => {
     assert.deepEqual(listRegistry({ instancesDir }), [])
+  })
+})
+
+test('listRegistry excludes an archived instance by default, and includes it (with archived: true) on includeArchived (#223)', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'alpha-initiative', { instancesDir })
+    createInstance('design', 'zebra-initiative', { instancesDir })
+    // Backfill both, then archive one.
+    listRegistry({ instancesDir })
+    archiveInstance('zebra-initiative', { instancesDir })
+
+    assert.deepEqual(
+      listRegistry({ instancesDir }).map((i) => i.slug),
+      ['alpha-initiative']
+    )
+    // Default rows carry no `archived` key at all — shape unchanged from before #223.
+    assert.equal('archived' in listRegistry({ instancesDir })[0], false)
+
+    const withArchived = listRegistry({ instancesDir, includeArchived: true })
+    assert.deepEqual(
+      withArchived.map((i) => ({ slug: i.slug, archived: i.archived })),
+      [
+        { slug: 'alpha-initiative', archived: false },
+        { slug: 'zebra-initiative', archived: true },
+      ]
+    )
   })
 })
 

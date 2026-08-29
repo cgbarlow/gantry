@@ -279,12 +279,31 @@ async function fetchInstanceWorkspaceId(slug) {
 }
 
 async function fetchWorkspaceById(workspaceId) {
-  const res = await apiFetch('/api/workspaces')
+  // `?archived=1` so an already-archived workspace is still found here — otherwise its own
+  // Workspace Settings screen couldn't offer "Restore" (#223).
+  const res = await apiFetch('/api/workspaces?archived=1')
   const body = await res.json().catch(() => ({}))
   if (!res.ok) {
     throw new Error(body.message ?? body.error ?? `Failed to load workspaces (${res.status})`)
   }
   return body.find((w) => w.id === workspaceId) ?? null
+}
+
+// #223 — archive / restore. Both are plain registry-metadata writes: no PAT, no Azure DevOps
+// round-trip, identical for a local and a Workspace-backed instance. The server is idempotent, so
+// a double-click can't error; a 409 from the workspace-archive route means the workspace still has
+// active instances (its message names them).
+async function postArchiveAction(path, body) {
+  const res = await apiFetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const parsed = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(parsed.message ?? parsed.error ?? `Request failed (${res.status})`)
+  }
+  return parsed
 }
 
 async function patchWorkspace(id, updates) {
@@ -455,6 +474,59 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
   `
 }
 
+// #223 — archive / restore this workspace. Archiving only removes it from the default dashboard;
+// nothing is deleted and Restore brings it back to exactly its prior state. Archiving is blocked
+// server-side while the workspace still has active (non-archived) instances — that 409's message
+// (which names them) is surfaced here verbatim.
+function WorkspaceArchiveSection({ workspace, onChanged }) {
+  const [archived, setArchived] = useState(Boolean(workspace.archived))
+  const [status, setStatus] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    setArchived(Boolean(workspace.archived))
+  }, [workspace.archived])
+
+  async function run(action) {
+    if (busy) return
+    if (action === 'archive' && !window.confirm(`Archive this workspace? It will be hidden from the dashboard until restored. Nothing is deleted.`)) {
+      return
+    }
+    setBusy(true)
+    setStatus(action === 'archive' ? 'Archiving…' : 'Restoring…')
+    try {
+      await postArchiveAction(`/api/workspace/${action}`, { workspaceId: workspace.id })
+      setArchived(action === 'archive')
+      setStatus(action === 'archive' ? 'Archived.' : 'Restored.')
+      onChanged?.(action === 'archive')
+    } catch (err) {
+      setStatus(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return html`
+    <section class="settings-section">
+      <h2>Archive</h2>
+      <p class="guidance">
+        Archiving removes this workspace from the dashboard and the default listing — its data on disk is
+        retained, and Restore brings it back exactly as it was. A workspace with active (non-archived)
+        instances can't be archived until those are archived or restored first.
+      </p>
+      <div class="settings-pat-status">
+        ${archived ? html`<span class="stamp review">ARCHIVED</span>` : html`<span class="stamp agreed">ACTIVE</span>`}
+      </div>
+      <div class="settings-actions">
+        ${archived
+          ? html`<button type="button" class="btn primary" disabled=${busy} onClick=${() => run('restore')}>Restore workspace</button>`
+          : html`<button type="button" class="btn" disabled=${busy} onClick=${() => run('archive')}>Archive workspace</button>`}
+      </div>
+      <div class="workspace-field-status">${status}</div>
+    </section>
+  `
+}
+
 export function WorkspaceSettingsPage({ query }) {
   const slug = query?.slug
   const [state, setState] = useState('loading') // 'loading' | 'no-slug' | 'no-workspace' | 'ready' | 'error'
@@ -519,6 +591,12 @@ export function WorkspaceSettingsPage({ query }) {
             `
           : null}
       </section>
+      ${state === 'ready'
+        ? html`<${WorkspaceArchiveSection}
+            workspace=${workspace}
+            onChanged=${(isArchived) => setWorkspace({ ...workspace, archived: isArchived || undefined })}
+          />`
+        : null}
     </main>
   `
 }
@@ -730,6 +808,54 @@ function WorkItemLinkSection({ instance }) {
   `
 }
 
+// #223 — archive / restore this instance. Same contract as the workspace section: archiving only
+// hides it from the dashboard, its data (local files or its Azure DevOps repo) is retained, and
+// Restore brings it back to exactly its prior state. Works identically for a local and a
+// Workspace-backed instance. An archived instance still opens (read-only) at its direct URL.
+function InstanceArchiveSection({ slug, archived: initialArchived }) {
+  const [archived, setArchived] = useState(Boolean(initialArchived))
+  const [status, setStatus] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function run(action) {
+    if (busy) return
+    if (action === 'archive' && !window.confirm(`Archive "${slug}"? It will be hidden from the dashboard until restored. Nothing is deleted.`)) {
+      return
+    }
+    setBusy(true)
+    setStatus(action === 'archive' ? 'Archiving…' : 'Restoring…')
+    try {
+      await postArchiveAction(`/api/instance/${action}`, { slug })
+      setArchived(action === 'archive')
+      setStatus(action === 'archive' ? 'Archived.' : 'Restored.')
+    } catch (err) {
+      setStatus(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return html`
+    <section class="settings-section">
+      <h2>Archive</h2>
+      <p class="guidance">
+        Archiving removes this instance from the dashboard and the default listing — its data is retained,
+        and Restore brings it back exactly as it was. The instance still opens read-only at its direct link
+        while archived.
+      </p>
+      <div class="settings-pat-status">
+        ${archived ? html`<span class="stamp review">ARCHIVED</span>` : html`<span class="stamp agreed">ACTIVE</span>`}
+      </div>
+      <div class="settings-actions">
+        ${archived
+          ? html`<button type="button" class="btn primary" disabled=${busy} onClick=${() => run('restore')}>Restore instance</button>`
+          : html`<button type="button" class="btn" disabled=${busy} onClick=${() => run('archive')}>Archive instance</button>`}
+      </div>
+      <div class="workspace-field-status">${status}</div>
+    </section>
+  `
+}
+
 export function InstanceSettingsPage({ query }) {
   const slug = query?.slug
   const [state, setState] = useState('loading') // 'loading' | 'no-slug' | 'ready' | 'error'
@@ -771,6 +897,7 @@ export function InstanceSettingsPage({ query }) {
             <${RequiredReviewerSection} slug=${slug} requiredReviewer=${instance.requiredReviewer} />
             <${InstanceInfoSection} instance=${instance} />
             <${WorkItemLinkSection} instance=${instance} />
+            <${InstanceArchiveSection} slug=${slug} archived=${instance.archived} />
           `
         : null}
     </main>

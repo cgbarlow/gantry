@@ -698,6 +698,28 @@ main.dashboard {
 .dashboard-controls { display: flex; align-items: center; gap: 10px; }
 .lede { color: var(--text-muted); margin: 6px 0 0; max-width: 70ch; }
 
+/* Archived-instance banner (#223) — shown at the top of the module editor for an archived instance. */
+.archived-banner {
+  margin: 0 auto 16px;
+  max-width: 1120px;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-muted);
+  border-radius: 8px;
+  background: var(--surface-raised, transparent);
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* Archived instances (#223) — a collapsed list below the active dashboard views. */
+.archived-panel { margin-top: 32px; border-top: 1px solid var(--border); padding-top: 16px; }
+.archived-panel > summary { cursor: pointer; color: var(--text-muted); font-size: 14px; user-select: none; }
+.archived-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.archived-row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.archived-row .name { font-weight: 600; }
+.archived-row .def { color: var(--text-muted); font-size: 13px; }
+.archived-row .btn { margin-left: auto; }
+
 .view-toggle { position: relative; display: inline-flex; }
 .view-toggle .menu {
   display: none;

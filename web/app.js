@@ -3057,6 +3057,13 @@ function ModuleEditorPage({ slug: routeRef }) {
   const visibleFieldIds = selectedArtefact ? artefactFieldIds(instance.modules, selectedArtefact) : null
   return html`
     <${AppHeader} instance=${instance} />
+    ${instance.archived
+      ? html`<div class="archived-banner">
+          This instance is <strong>archived</strong> and hidden from the dashboard. Restore it from
+          <a href=${`/settings/instance?slug=${encodeURIComponent(instance.slug)}&from=${encodeURIComponent('/instance/' + instance.slug)}`}>Instance Settings</a>
+          to make changes.
+        </div>`
+      : null}
     <${ViewModeToolbar}
       instance=${instance}
       selectedArtefactId=${selectedArtefact?.id ?? null}
@@ -3512,19 +3519,94 @@ function SwimlaneView({ instances }) {
   `
 }
 
+// ---------- Archived instances (#223) ----------
+// A collapsed-by-default list of every archived instance, each with a Restore action, sitting
+// under the dashboard's active views. Archiving/restoring happens from Instance Settings; this is
+// the "explicit show-archived affordance" the acceptance criteria call for, plus a quick restore.
+// Fetches on its own (`?archived=1` — a superset listing carrying an `archived` flag per row) so
+// the main dashboard's request and shape are untouched.
+function ArchivedInstancesPanel({ onRestored }) {
+  const [rows, setRows] = useState(null)
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState({})
+
+  function reload() {
+    apiFetch('/api/instances?archived=1')
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`Failed to load (${res.status})`))))
+      .then((data) => {
+        setRows(data.filter((inst) => inst.archived))
+        setError(null)
+      })
+      .catch((err) => setError(err.message))
+  }
+
+  useEffect(reload, [])
+
+  async function restore(slug) {
+    setBusy((prev) => ({ ...prev, [slug]: true }))
+    try {
+      const res = await apiFetchForInstance(slug, '/api/instance/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.message ?? body.error ?? `Restore failed (${res.status})`)
+      }
+      reload()
+      onRestored?.()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy((prev) => ({ ...prev, [slug]: false }))
+    }
+  }
+
+  if (error) return html`<p class="load-error">Archived instances: ${error}</p>`
+  if (!rows || rows.length === 0) return null
+
+  return html`
+    <details class="archived-panel">
+      <summary>Archived instances (${rows.length})</summary>
+      <div class="archived-list">
+        ${rows.map(
+          (inst) => html`
+            <div class="archived-row" key=${inst.slug}>
+              <span class="name">${inst.slug}</span>
+              <span class="def">${inst.definition}</span>
+              ${inst.workspace ? html`<span class="def">${inst.workspace.organization}/${inst.workspace.project}</span>` : null}
+              <button
+                type="button"
+                class="btn small"
+                disabled=${busy[inst.slug]}
+                onClick=${() => restore(inst.slug)}
+              >
+                Restore
+              </button>
+            </div>
+          `
+        )}
+      </div>
+    </details>
+  `
+}
+
 // ---------- Dashboard page ----------
 function DashboardPage() {
   const [instances, setInstances] = useState(null)
   const [error, setError] = useState(null)
 
-  useEffect(() => {
+  function reloadInstances() {
     loadInstances()
       .then((data) => {
         setInstances(data)
         setError(null)
       })
       .catch((err) => setError(err.message))
-  }, [])
+  }
+
+  useEffect(reloadInstances, [])
 
   return html`
     <main class="dashboard">
@@ -3549,6 +3631,7 @@ function DashboardPage() {
             : dashboardViewMode.value === 'swimlanes'
               ? html`<${SwimlaneView} instances=${instances} />`
               : html`<${MasterDetailView} instances=${instances} />`}
+      ${instances ? html`<${ArchivedInstancesPanel} onRestored=${reloadInstances} />` : null}
     </main>
   `
 }

@@ -405,3 +405,36 @@ test('settings: Instance Settings reports "not linked" when the instance has no 
     })(base)
   })
 })
+
+// #223 — archive / restore an instance from Instance Settings, then see it surface in (and leave
+// via) the dashboard's "Archived instances" panel.
+test('settings: an instance can be archived from Instance Settings and restored from the dashboard archived panel', async () => {
+  await withScratchServer(async (base, instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+
+    await withPage(async (page) => {
+      page.on('dialog', (dialog) => dialog.accept())
+
+      // Archive from Instance Settings.
+      await page.goto(`${base}/settings/instance?slug=my-initiative`)
+      await page.waitForSelector('.settings-section', { timeout: 10_000 })
+      const archiveSection = page.locator('section.settings-section', { hasText: 'Archive' })
+      await archiveSection.getByRole('button', { name: 'Archive instance' }).click()
+      await page.waitForSelector('text=Archived.', { timeout: 5_000 })
+      assert.equal(await archiveSection.getByRole('button', { name: 'Restore instance' }).count(), 1)
+
+      // Gone from the default dashboard listing, present in the Archived panel.
+      await page.goto(base)
+      await page.waitForSelector('.dashboard', { timeout: 10_000 })
+      const archivedPanel = page.locator('details.archived-panel')
+      await archivedPanel.waitFor({ timeout: 5_000 })
+      assert.match(await archivedPanel.textContent(), /my-initiative/)
+
+      // Restore from the panel — row disappears.
+      await archivedPanel.click()
+      await archivedPanel.getByRole('button', { name: 'Restore' }).click()
+      await page.waitForFunction(() => !document.querySelector('details.archived-panel'), { timeout: 5_000 })
+    })(base)
+  })
+})
+

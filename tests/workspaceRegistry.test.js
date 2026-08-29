@@ -10,6 +10,9 @@ import {
   findWorkspaceByLocation,
   getOrCreateWorkspace,
   updateWorkspace,
+  archiveWorkspace,
+  restoreWorkspace,
+  isWorkspaceArchived,
   assertValidTicketingSystem,
   TICKETING_SYSTEMS,
   DEFAULT_TICKETING_SYSTEM,
@@ -246,4 +249,88 @@ test('assertValidTicketingSystem accepts "azure-devops" and rejects "jira" and a
   assert.doesNotThrow(() => assertValidTicketingSystem('azure-devops'))
   assert.throws(() => assertValidTicketingSystem('jira'), /not supported yet/)
   assert.throws(() => assertValidTicketingSystem('trello'), /Unknown ticketing system/)
+})
+
+// ---------- #223: archive / restore ----------
+
+test('archiveWorkspace sets archived: true; restoreWorkspace removes the flag entirely (exact prior state)', () => {
+  withScratchInstances((instancesDir) => {
+    const created = registerWorkspace({ ...LOCATION, owner: 'c.barlow' }, { instancesDir })
+
+    const archived = archiveWorkspace(created.id, { instancesDir })
+    assert.equal(archived.archived, true)
+    assert.equal(isWorkspaceArchived(created.id, { instancesDir }), true)
+
+    const restored = restoreWorkspace(created.id, { instancesDir })
+    assert.equal(restored.archived, undefined)
+    assert.equal(isWorkspaceArchived(created.id, { instancesDir }), false)
+    // Back to byte-for-byte the record it was registered as.
+    assert.deepEqual(restored, created)
+  })
+})
+
+test('archiveWorkspace writes canonical JSON with archived last, and restore rewrites without it', () => {
+  withScratchInstances((instancesDir) => {
+    const created = registerWorkspace({ ...LOCATION, baseUrl: 'https://ado.example.internal' }, { instancesDir })
+    const registryPath = join(instancesDir, 'workspace-registry.json')
+
+    archiveWorkspace(created.id, { instancesDir })
+    assert.deepEqual(Object.keys(JSON.parse(readFileSync(registryPath, 'utf8'))[created.id]), [
+      'organization',
+      'project',
+      'repository',
+      'baseUrl',
+      'owner',
+      'ticketingSystem',
+      'archived',
+    ])
+
+    restoreWorkspace(created.id, { instancesDir })
+    const restoredKeys = Object.keys(JSON.parse(readFileSync(registryPath, 'utf8'))[created.id])
+    assert.ok(!restoredKeys.includes('archived'))
+  })
+})
+
+test('listWorkspaces excludes archived by default, includes them with includeArchived', () => {
+  withScratchInstances((instancesDir) => {
+    const a = registerWorkspace(LOCATION, { instancesDir })
+    const b = registerWorkspace({ organization: 'other-org', project: 'p', repository: 'r' }, { instancesDir })
+    archiveWorkspace(b.id, { instancesDir })
+
+    assert.deepEqual(listWorkspaces({ instancesDir }).map((w) => w.id), [a.id])
+    assert.deepEqual(
+      listWorkspaces({ instancesDir, includeArchived: true }).map((w) => w.id).sort(),
+      [a.id, b.id].sort()
+    )
+    // The archived one carries archived: true on the includeArchived listing.
+    assert.equal(
+      listWorkspaces({ instancesDir, includeArchived: true }).find((w) => w.id === b.id).archived,
+      true
+    )
+  })
+})
+
+test('archiveWorkspace / restoreWorkspace are idempotent, and throw for an unknown id', () => {
+  withScratchInstances((instancesDir) => {
+    const created = registerWorkspace(LOCATION, { instancesDir })
+    archiveWorkspace(created.id, { instancesDir })
+    assert.doesNotThrow(() => archiveWorkspace(created.id, { instancesDir }))
+    restoreWorkspace(created.id, { instancesDir })
+    assert.doesNotThrow(() => restoreWorkspace(created.id, { instancesDir }))
+
+    assert.throws(() => archiveWorkspace('nowhere', { instancesDir }), /Unknown workspace/)
+    assert.throws(() => restoreWorkspace('nowhere', { instancesDir }), /Unknown workspace/)
+  })
+})
+
+test('updateWorkspace preserves an archived flag through an unrelated owner edit', () => {
+  withScratchInstances((instancesDir) => {
+    const created = registerWorkspace(LOCATION, { instancesDir })
+    archiveWorkspace(created.id, { instancesDir })
+
+    const updated = updateWorkspace(created.id, { owner: 'c.barlow' }, { instancesDir })
+    assert.equal(updated.owner, 'c.barlow')
+    assert.equal(updated.archived, true)
+    assert.equal(isWorkspaceArchived(created.id, { instancesDir }), true)
+  })
 })
