@@ -7,6 +7,7 @@ import {
   AzureDevOpsRequestError,
   DEFAULT_BASE_URL,
   GANTRY_WORK_ITEM_TAG,
+  isAzureDevOpsFieldNotFoundError,
 } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer as withFakeServer } from './helpers/fakeAzureDevOpsServer.js'
 
@@ -340,4 +341,26 @@ test('createAzureDevOpsWorkItemsClient requires organization, project and pat (n
   assert.throws(() => createAzureDevOpsWorkItemsClient({ project: PROJECT, pat: VALID_PAT }), /organization/)
   assert.throws(() => createAzureDevOpsWorkItemsClient({ organization: ORGANIZATION, pat: VALID_PAT }), /project/)
   assert.throws(() => createAzureDevOpsWorkItemsClient({ organization: ORGANIZATION, project: PROJECT }), /pat/)
+})
+
+test('isAzureDevOpsFieldNotFoundError distinguishes TF51535 from other failures', () => {
+  assert.equal(isAzureDevOpsFieldNotFoundError(new Error('generic'), 'Custom.GantryReviewStatus'), false)
+  assert.equal(isAzureDevOpsFieldNotFoundError(new AzureDevOpsAuthenticationError('auth'), 'Custom.GantryReviewStatus'), false)
+  const other400 = new AzureDevOpsRequestError('other', { body: 'some other 400' })
+  assert.equal(isAzureDevOpsFieldNotFoundError(other400, 'Custom.GantryReviewStatus'), false)
+
+  const tfString = new AzureDevOpsRequestError('missing', { body: 'TF51535: Cannot find field Custom.GantryReviewStatus' })
+  assert.equal(isAzureDevOpsFieldNotFoundError(tfString), true)
+  assert.equal(isAzureDevOpsFieldNotFoundError(tfString, 'Custom.GantryReviewStatus'), true)
+  assert.equal(isAzureDevOpsFieldNotFoundError(tfString, 'Custom.OtherField'), false)
+
+  const fieldException = new AzureDevOpsRequestError('missing', { body: JSON.stringify({ message: 'FieldNotFoundException', field: 'Custom.GantryReviewStatus' }) })
+  assert.equal(isAzureDevOpsFieldNotFoundError(fieldException, 'Custom.GantryReviewStatus'), true)
+  assert.equal(isAzureDevOpsFieldNotFoundError(fieldException), true)
+
+  const noFieldFilter = new AzureDevOpsRequestError('missing', { body: 'FieldNotFoundException: TF51535' })
+  assert.equal(isAzureDevOpsFieldNotFoundError(noFieldFilter), true)
+
+  const bodyObject = new AzureDevOpsRequestError('missing', { body: { message: 'TF51535 field Custom.GantryReviewStatus missing' } })
+  assert.equal(isAzureDevOpsFieldNotFoundError(bodyObject, 'Custom.GantryReviewStatus'), true)
 })
