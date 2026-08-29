@@ -353,6 +353,10 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
    the only "Check status" control is the button in .panel-header above. */
 .review-signoff-card { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 20px; padding-top: 16px; border-top: var(--hairline) solid var(--line); }
 .review-signoff-section { min-width: 0; }
+/* The "not the current stage" hint is a full-width note above the two
+   columns — without this it takes the first grid cell and pushes Reviews
+   and Sign-off out of their columns. */
+.review-signoff-card .stage-advance-hint { grid-column: 1 / -1; margin: 0; }
 .review-signoff-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 .review-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .review-list li { display: flex; gap: 10px; justify-content: space-between; align-items: baseline; font-size: 13px; }
@@ -798,7 +802,8 @@ main.dashboard {
 .master-detail .list-item .meta .def { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
 .master-detail .detail-pane { padding: 28px; }
 .master-detail .detail-pane h2 { font-family: var(--font-display); font-weight: 600; font-size: 20px; margin: 0 0 4px; }
-.master-detail .workspace-subtitle { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); margin: 0 0 20px; }
+.master-detail .workspace-subtitle { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); margin: 0 0 8px; }
+.master-detail .workspace-settings-link { font-size: 13px; margin: 0 0 20px; }
 .instance-card .field-label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 2px; }
 .instance-card .assignee { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
 .master-detail .detail-actions { display: flex; gap: 10px; }

@@ -2315,7 +2315,7 @@ function SyncedFieldsPanel({ instance }) {
             <div class="review-signoff-card">
               ${!isCurrentStage
                 ? html`<p class="guidance stage-advance-hint">
-                    This stage is not current. Request Review and Request Sign-off are available only on the current stage. To advance to this stage, go to the current stage and run Check status after its Pull Request has been merged.
+                    This isn't the current stage — Request Review and Request Sign-off act on the current stage only.
                   </p>`
                 : null}
               <div class="review-signoff-section reviews-section">
@@ -3384,6 +3384,17 @@ function MasterDetailView({ instances }) {
           : html`
               <h2>${selectedGroup.title}</h2>
               <p class="workspace-subtitle">${selectedGroup.subtitle}</p>
+              ${(() => {
+                // A path to Workspace Settings (where archive / owner / ticketing-system live) from
+                // the dashboard — otherwise it's only reachable by first opening one of the
+                // workspace's instances. Scoped via any one of its instances, like the SettingsMenu.
+                const wsInstance = selectedGroup.instances.find((inst) => inst.workspace)
+                return wsInstance
+                  ? html`<p class="workspace-settings-link">
+                      <a href=${`/settings/workspace?slug=${encodeURIComponent(wsInstance.slug)}&from=${encodeURIComponent('/')}`}>Workspace settings →</a>
+                    </p>`
+                  : null
+              })()}
               <div class="workspace-instances">
                 ${selectedGroup.instances.map(
                   (inst) => html`
@@ -3640,6 +3651,72 @@ function ArchivedInstancesPanel({ onRestored }) {
   `
 }
 
+// ---------- Archived workspaces (#223) ----------
+// The workspace-level counterpart to ArchivedInstancesPanel above: archived workspaces never appear
+// in the dashboard's workspace grouping (it's built from the active-instance listing), so without
+// this there is no way to see or restore one from the dashboard. Restore is a plain
+// registry-metadata write — no PAT, no Azure DevOps call.
+function ArchivedWorkspacesPanel({ onRestored }) {
+  const [rows, setRows] = useState(null)
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState({})
+
+  function reload() {
+    apiFetch('/api/workspaces?archived=1')
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`Failed to load (${res.status})`))))
+      .then((data) => {
+        setRows(data.filter((ws) => ws.archived))
+        setError(null)
+      })
+      .catch((err) => setError(err.message))
+  }
+
+  useEffect(reload, [])
+
+  async function restore(id) {
+    setBusy((prev) => ({ ...prev, [id]: true }))
+    try {
+      const res = await apiFetch('/api/workspace/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: id }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.message ?? body.error ?? `Restore failed (${res.status})`)
+      }
+      reload()
+      onRestored?.()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy((prev) => ({ ...prev, [id]: false }))
+    }
+  }
+
+  if (error) return html`<p class="load-error">Archived workspaces: ${error}</p>`
+  if (!rows || rows.length === 0) return null
+
+  return html`
+    <details class="archived-panel">
+      <summary>Archived workspaces (${rows.length})</summary>
+      <div class="archived-list">
+        ${rows.map(
+          (ws) => html`
+            <div class="archived-row" key=${ws.id}>
+              <span class="name">${ws.repository}</span>
+              <span class="def">${ws.organization}/${ws.project}</span>
+              <button type="button" class="btn small" disabled=${busy[ws.id]} onClick=${() => restore(ws.id)}>
+                Restore
+              </button>
+            </div>
+          `
+        )}
+      </div>
+    </details>
+  `
+}
+
 // ---------- Dashboard page ----------
 function DashboardPage() {
   const [instances, setInstances] = useState(null)
@@ -3680,6 +3757,7 @@ function DashboardPage() {
               ? html`<${SwimlaneView} instances=${instances} />`
               : html`<${MasterDetailView} instances=${instances} />`}
       ${instances ? html`<${ArchivedInstancesPanel} onRestored=${reloadInstances} />` : null}
+      ${instances ? html`<${ArchivedWorkspacesPanel} onRestored=${reloadInstances} />` : null}
     </main>
   `
 }
