@@ -1,4 +1,54 @@
 # <%~ it.instance.slug %>: Solution Support Architecture Document
+<%
+  const intro = it.modules.introduction || {}
+%>
+<% if (intro.purpose || intro.scope || intro['content-standards']) { %>
+# Introduction
+<% if (intro.purpose) { %>
+## Purpose
+
+<%~ intro.purpose %>
+<% } %>
+<% if (intro.scope) { %>
+## Scope
+
+<%~ intro.scope %>
+<% } %>
+<% if (intro['content-standards']) { %>
+## Content standards
+
+<%~ intro['content-standards'] %>
+<% } %>
+<% } %>
+
+# Solution overview
+
+<%~ it.modules.architecture['solution-description'] %>
+
+## Logical components
+
+<% it.modules.architecture['logical-components'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+## Interfaces
+
+<%~ it.modules.integration.interfaces %>
+
+## Data classification
+
+<%~ it.modules.data['data-classification'] %>
+
+# Architectural risks
+
+<%~ it.modules.risks['risk-register'] %>
+<% if (it.modules.architecture['architectural-risks']) { %>
+<%~ it.modules.architecture['architectural-risks'] %>
+<% } %>
+<% if (it.modules.risks['open-issues']) { %>
+## Open issues
+
+<%~ it.modules.risks['open-issues'] %>
+<% } %>
 
 # Stakeholders and support contacts
 
@@ -33,35 +83,6 @@
 # Monitoring and alerting
 
 <%~ it.modules['support-and-operations']['monitoring-and-alerting'] %>
-<% } %>
-
-# Solution overview
-
-<%~ it.modules.architecture['solution-description'] %>
-
-## Logical components
-
-<% it.modules.architecture['logical-components'].forEach(function(item) { %>- <%~ item %>
-<% }) %>
-
-## Interfaces
-
-<%~ it.modules.integration.interfaces %>
-
-## Data classification
-
-<%~ it.modules.data['data-classification'] %>
-
-# Architectural risks
-
-<%~ it.modules.risks['risk-register'] %>
-<% if (it.modules.architecture['architectural-risks']) { %>
-<%~ it.modules.architecture['architectural-risks'] %>
-<% } %>
-<% if (it.modules.risks['open-issues']) { %>
-## Open issues
-
-<%~ it.modules.risks['open-issues'] %>
 <% } %>
 
 # Availability, continuity and security posture

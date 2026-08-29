@@ -83,3 +83,12 @@ Certification and Accreditation (C&A) sign-off obtained before go-live.
 | Design | Solution architecture (SAD/SSAD), C&A evidence pack | Architecture |
 | Build | `provider-portal` and `intake-api` services, `007_reference_codes.sql` migration, `eos-sync` extension, Terraform | Provider Portal delivery team |
 | Handover | This as-built document, runbook links, operational handover to Contoso Digital Support | Delivery lead + Architecture |
+
+## Content standards
+
+This SSAD is the support-oriented view of the same design dataset as the SAD;
+where a topic is covered in full by the SAD, this document summarises it and
+points there rather than repeating it. Component and sequence diagrams use the
+C4 model; infrastructure diagrams are generated from the Terraform plan and so
+follow AWS's own iconography. Diagrams contributed by the provider-authentication
+vendor keep their original house style.

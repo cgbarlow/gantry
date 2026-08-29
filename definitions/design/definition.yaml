@@ -183,8 +183,20 @@ artefacts:
     # SSAD is the support-focused rendering of the same design data. It needs
     # operational readiness in full, but only the design fields that its
     # support-oriented template actually presents.
+    #
+    # WI #229: the shared `introduction` module is wired in field-level
+    # (introduction.purpose / .scope) — a first-class `# Introduction` now opens
+    # the SSAD, matching the FV Help Tool SSAD reference. `introduction.content-standards`
+    # (the reference's "Content Standards" sub-section) is optional and rendered
+    # by the template's `if` guard when an instance fills it. The SAD and SSAD
+    # sharing `introduction.purpose` / `.scope` is the same shared-module pattern
+    # as their existing `nfrs` / `security` / `architecture.solution-description`
+    # overlap — the HLD keeps its own `problem-statement` framing and does not
+    # reference `introduction` (see the reconciliation doc, Section 6).
     requires:
       [
+        introduction.purpose,
+        introduction.scope,
         support-and-operations.stakeholders,
         support-and-operations.environments-and-domains,
         support-and-operations.release-procedures,

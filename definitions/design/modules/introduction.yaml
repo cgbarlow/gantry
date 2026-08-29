@@ -10,9 +10,9 @@ purpose: >
   stage. See docs/research/design-definition-reference-reconciliation.md
   Section 1.
 
-  Wired into the `handover` stage and the `as-built` artefact now; wiring it
-  into `detailed-design` / `sad` / `ssad` is a documented follow-up (see the
-  reconciliation doc, Sections 5–6 and 8).
+  Wired into the `handover` stage / `as-built` artefact (WI #227), the
+  `detailed-design` stage / `sad` artefact (WI #228) and the `ssad` artefact
+  (WI #229). See the reconciliation doc, Sections 5, 6 and 8.
 
 fields:
   - id: overview
@@ -83,3 +83,15 @@ fields:
     guidance: >
       The concrete outputs this work produces and who owns each — by phase
       where that helps (Design / Triage / Build / Handover).
+
+  - id: content-standards
+    title: Content standards
+    type: markdown
+    required: false
+    guidance: >
+      Conventions a reader needs to interpret this document — e.g. that
+      diagrams are collated from several parties and so vary in style, which
+      notation is used, or how this document relates to the fuller SAD. Only
+      the SSAD renders this field (the "Content Standards" sub-section of the
+      FV Help Tool SSAD's Introduction); the SAD and as-built templates leave
+      it out, so filling it does not affect them.

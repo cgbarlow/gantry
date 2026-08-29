@@ -89,6 +89,27 @@ merged** into `recovery-plan` — they are the "Backup & Archiving Policy" and
 respectively, and `nfrs` also has an independent HLD-stage use. The `ssad`
 reorder (Follow-up WI 2) is still outstanding.
 
+**Update — WI #229 (SSAD side applied).** `introduction.purpose` and
+`introduction.scope` are now in the `ssad` artefact `requires` (field-level).
+`ssad.md.tmpl` gains a first-class `# Introduction` at the top (`## Purpose`,
+`## Scope`, and `## Content standards` — the last from a **new optional
+`introduction.content-standards` field**, the reference SSAD's third
+Introduction sub-section). `content-standards` is rendered only by
+`ssad.md.tmpl`, behind an `if` guard; `sad.md.tmpl` and `as-built.md.tmpl` do
+not reference it, so an instance filling it leaves the SAD and as-built
+unchanged. `ssad.md.tmpl` is reordered so `# Solution overview` and
+`# Architectural risks` lead (ahead of the operational
+`# Stakeholders…` / `# Environments…` sections), tracking the reference's
+"Solution Products → Architectural Risks → …" order — a reorder + insert, not
+a rewrite; every pre-existing section keeps its content. `detailed-design`
+already listed `introduction` (from WI #228), so no stage change and no
+fixture change was needed. The SAD and SSAD now render `introduction.purpose`
+/ `.scope` verbatim-identically — the same shared-module pattern as their
+existing `nfrs` / `security` / `architecture.solution-description` overlap;
+the HLD still does not reference `introduction`, so there is zero
+Introduction/Purpose/Scope overlap between the rendered SSAD and HLD. This
+completes Follow-up WI 2.
+
 ## Notes
 
 - A `module.field` entry in an artefact's `requires` is checked for
