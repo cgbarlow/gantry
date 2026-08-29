@@ -60,6 +60,7 @@ export function createFakeAzureDevOpsServer({
   rejectIdentityRequests = false,
   repoExists = true,
   connectionDataUser,
+  simulateMissingReviewStatusField = false,
 } = {}) {
   // One independent { store, objectId } per branch — a branch with no
   // entry here has never had a commit (mirrors the pre-#118 "commitCount
@@ -384,6 +385,9 @@ export function createFakeAzureDevOpsServer({
       let raw = ''
       for await (const chunk of req) raw += chunk
       const patch = JSON.parse(raw)
+      if (simulateMissingReviewStatusField && patch.some((op) => op.path === '/fields/Custom.GantryReviewStatus')) {
+        return json(400, { message: 'TF51535: Cannot find field Custom.GantryReviewStatus (fake server, simulateMissingReviewStatusField).', typeKey: 'FieldNotFoundException' })
+      }
 
       const now = new Date().toISOString()
       const id = nextWorkItemId++
@@ -618,6 +622,9 @@ export function createFakeAzureDevOpsServer({
 
         const fieldsParam = url.searchParams.get('fields')
         if (!fieldsParam) return json(200, body)
+        if (simulateMissingReviewStatusField && fieldsParam.includes('Custom.GantryReviewStatus')) {
+          return json(400, { message: 'TF51535: Cannot find field Custom.GantryReviewStatus (fake server, simulateMissingReviewStatusField).', typeKey: 'FieldNotFoundException' })
+        }
 
         const requestedFields = fieldsParam.split(',').map((f) => f.trim())
         const narrowedFields = Object.fromEntries(
@@ -719,7 +726,7 @@ export function createFakeAzureDevOpsServer({
  * Starts a `createFakeAzureDevOpsServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/server.test.js`'s `withRunningServer` helper's shape (per #82's testing decisions). Shared by `tests/azureDevOpsClient.test.js` and `tests/instance.test.js` so this lifecycle isn't duplicated across both.
  */
 export function withFakeAzureDevOpsServer(
-  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes, denyReviewerVoteReset, rejectIdentityRequests, repoExists, connectionDataUser },
+  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes, denyReviewerVoteReset, rejectIdentityRequests, repoExists, connectionDataUser, simulateMissingReviewStatusField },
   fn
 ) {
   return new Promise((resolve, reject) => {
@@ -737,6 +744,7 @@ export function withFakeAzureDevOpsServer(
       rejectIdentityRequests,
       repoExists,
       connectionDataUser,
+      simulateMissingReviewStatusField,
     })
     server.listen(0, async () => {
       const { port } = server.address()
