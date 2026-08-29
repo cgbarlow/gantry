@@ -1302,20 +1302,32 @@ function ListDialog({ onConfirm, onClose }) {
   `
 }
 
-function CommitHistoryDialog({ commits, onClose }) {
+function CommitHistoryDialog({ commits, onClose, stageTitle, refName, status, loading = false }) {
+  const list = commits ?? []
+  const hasCommits = list.length > 0
+  const heading = stageTitle ? `Commit history - ${stageTitle}` : 'Commit history'
+
   return html`
-    <${Modal} ariaLabel="Pull Request commit history" onClose=${onClose}>
-      <h3>Pull Request commit history</h3>
-      <ul class="request-approval-commits">
-        ${commits.map(
-          (commit) => html`
-            <li key=${commit.commitId}>
-              <span>${commit.message || '(no message)'}</span>
-              <time dateTime=${commit.timestamp ?? undefined}>${commit.timestamp ? new Date(commit.timestamp).toLocaleString() : 'Unknown time'}</time>
-            </li>
-          `,
-        )}
-      </ul>
+    <${Modal} ariaLabel="Commit history" onClose=${onClose}>
+      <h3>${heading}</h3>
+      ${refName ? html`<p class="commit-history-ref"><code>${refName}</code></p>` : null}
+      ${loading ? html`<p class="save-status">Loading...</p>` : null}
+      ${!loading && status ? html`<p class="save-status">${status}</p>` : null}
+      ${!loading && !hasCommits && !status ? html`<p class="save-status">No commits yet</p>` : null}
+      ${hasCommits
+        ? html`
+            <ul class="request-approval-commits">
+              ${list.map(
+                (commit) => html`
+                  <li key=${commit.commitId}>
+                    <span>${commit.message || '(no message)'}</span>
+                    <time dateTime=${commit.timestamp ?? undefined}>${commit.timestamp ? new Date(commit.timestamp).toLocaleString() : 'Unknown time'}</time>
+                  </li>
+                `,
+              )}
+            </ul>
+          `
+        : null}
       <div class="modal-actions">
         <button type="button" class="btn ghost" onClick=${onClose}>Close</button>
       </div>
@@ -1701,18 +1713,6 @@ function ReviewListItem({ review, instance }) {
   `
 }
 
-// The most recent commit in a Pull Request's commit list, by timestamp —
-// not by array position, since this file makes no assumption about the
-// order Azure DevOps' own commits API returns (`CommitHistoryDialog` below
-// just renders whatever order it's given). Falls back to the first entry
-// if none carry a timestamp.
-function latestCommit(commits) {
-  if (!commits.length) return null
-  const timestamped = commits.filter((commit) => commit.timestamp)
-  if (!timestamped.length) return commits[0]
-  return timestamped.reduce((latest, commit) => (new Date(commit.timestamp) > new Date(latest.timestamp) ? commit : latest))
-}
-
 // A new panel at the top of the instance screen (above the modules — see
 // StageScreen) showing the current stage's synced fields, each its own
 // distinct field rather than collapsed together: the work item type
@@ -1763,6 +1763,10 @@ function SyncedFieldsPanel({ instance }) {
   const [signoffStatus, setSignoffStatus] = useState('')
   const [signoffConfirming, setSignoffConfirming] = useState(false)
   const [commitHistoryOpen, setCommitHistoryOpen] = useState(false)
+  const [commitHistory, setCommitHistory] = useState([])
+  const [commitHistoryStatus, setCommitHistoryStatus] = useState('')
+  const [commitHistoryLoading, setCommitHistoryLoading] = useState(false)
+  const [commitHistoryRef, setCommitHistoryRef] = useState(null)
   const [justOpened, setJustOpened] = useState(null)
 
   // The card's single "Check status" action (#213): refreshes this stage's
@@ -1939,6 +1943,15 @@ function SyncedFieldsPanel({ instance }) {
   const approvalState = justOpened?.approvalState ?? instance.approvalStates?.[stageId]
   const approvalInvalidated = approvalState?.state === 'invalidated' || pullRequest?.review?.state === 'approved-then-invalidated'
 
+  useEffect(() => {
+    setCommitHistory([])
+    setCommitHistoryStatus('')
+    setCommitHistoryLoading(false)
+    if (currentSlug.value) {
+      setCommitHistoryRef(`refs/heads/gantry-workspace/${currentSlug.value}/${stageId}`)
+    }
+  }, [stageId])
+
   async function handleCheckAndMaybeRequestSignoff() {
     setSignoffStatus('Checking gate…')
     const res = await apiFetchForInstance(currentSlug.value, `/api/instance/check?slug=${encodeURIComponent(currentSlug.value)}`)
@@ -1985,6 +1998,33 @@ function SyncedFieldsPanel({ instance }) {
   function handleDeclineSignoff() {
     setSignoffConfirming(false)
     setSignoffStatus('Declined — no Pull Request opened.')
+  }
+
+  async function handleOpenCommitHistory() {
+    const branchRef = `refs/heads/gantry-workspace/${currentSlug.value}/${stageId}`
+    setCommitHistoryRef(branchRef)
+    setCommitHistoryStatus('')
+    setCommitHistoryOpen(true)
+    setCommitHistoryLoading(true)
+    try {
+      const params = new URLSearchParams({ slug: currentSlug.value, stage: stageId })
+      const res = await apiFetchForInstance(currentSlug.value, `/api/instance/commits?${params}`)
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setCommitHistoryStatus(body.message ?? body.error ?? `Failed to load commits (${res.status})`)
+        setCommitHistory(Array.isArray(body.commits) ? body.commits : [])
+        if (body.ref || body.branch) setCommitHistoryRef(body.ref ?? `refs/heads/${body.branch}`)
+        return
+      }
+      const commits = Array.isArray(body.commits) ? body.commits : []
+      setCommitHistory(commits)
+      setCommitHistoryRef(body.ref ?? (body.branch ? `refs/heads/${body.branch}` : branchRef))
+      setCommitHistoryStatus(commits.length ? '' : 'No commits yet')
+    } catch (err) {
+      setCommitHistoryStatus(err.message)
+    } finally {
+      setCommitHistoryLoading(false)
+    }
   }
 
   // ---- Check status (#213): the card's single refresh action, replacing
@@ -2105,7 +2145,6 @@ function SyncedFieldsPanel({ instance }) {
   const linked = Boolean(data?.linked)
   // Persistent hyperlink built from the persisted PR record (org/project/repo + PR id) — survives reload with the correct org (WI155). `justOpened.webUrl` is the transient server-built URL right after creation; fallback builds from `instance.workspace` so reloads still link.
   const signoffPrUrl = justOpened?.webUrl ?? prWebUrlFor(instance, openPullRequestId)
-  const signoffCommits = pullRequest?.commits ?? []
   const groupedReviews = groupReviewsByOutcome(instance.reviews ?? [])
 
   return html`
@@ -2267,16 +2306,12 @@ function SyncedFieldsPanel({ instance }) {
                     : html`<p class="synced-value">Not requested</p>`}
                 ${signoffStatus ? html`<p class="save-status">${signoffStatus}</p>` : null}
               </div>
-              ${signoffCommits.length
-                ? html`
-                    <div class="review-signoff-section commit-history-section">
-                      <div class="review-signoff-header">
-                        <span class="field-label">Commit history</span>
-                        <button type="button" class="btn small" onClick=${() => setCommitHistoryOpen(true)}>Show commit history</button>
-                      </div>
-                    </div>
-                  `
-                : null}
+              <div class="review-signoff-section commit-history-section">
+                <div class="review-signoff-header">
+                  <span class="field-label">Commit history</span>
+                  <button type="button" class="btn small" onClick=${handleOpenCommitHistory}>Show commit history</button>
+                </div>
+              </div>
             </div>
           `
         : null}
@@ -2369,7 +2404,16 @@ function SyncedFieldsPanel({ instance }) {
           `
         : null}
       ${commitHistoryOpen
-        ? html`<${CommitHistoryDialog} commits=${signoffCommits} onClose=${() => setCommitHistoryOpen(false)} />`
+        ? html`
+            <${CommitHistoryDialog}
+              commits=${commitHistory}
+              stageTitle=${instance.stage.title}
+              refName=${commitHistoryRef}
+              status=${commitHistoryStatus}
+              loading=${commitHistoryLoading}
+              onClose=${() => setCommitHistoryOpen(false)}
+            />
+          `
         : null}
     </section>
   `
