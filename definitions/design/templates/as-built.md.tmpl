@@ -1,30 +1,116 @@
-# <%~ it.instance.slug %>: Detailed Design / As-built
+# <%~ it.instance.slug %>: As-built
 
-# Business process flows
+<%
+  const intro = it.modules.introduction || {}
+  const glossary = it.modules.glossary || {}
+  const notes = it.modules['as-built-notes'] || {}
+  const recovery = it.modules['recovery-plan'] || {}
+  const dsc = it.modules['data-security-controls'] || {}
+%>
+<% if (glossary['terms-and-definitions']) { %>
+# Terms & Definitions
 
-<%~ it.modules['as-built-notes']['business-process-flows'] %>
+<%~ glossary['terms-and-definitions'] %>
+<% } %>
+# Introduction
 
-# Detailed technical design
+## Overview
 
-<%~ it.modules['as-built-notes']['detailed-technical-design'] %>
+<%~ intro.overview %>
+
+## Purpose
+
+<%~ intro.purpose %>
+
+## Scope
+
+<%~ intro.scope %>
+<% if (intro.constraints) { %>
+## Constraints
+
+<%~ intro.constraints %>
+<% } %>
+<% if (intro.assumptions) { %>
+## Assumptions
+
+<%~ intro.assumptions %>
+<% } %>
+<% if (intro.caveats) { %>
+## Caveats
+
+<%~ intro.caveats %>
+<% } %>
+<% if (intro['design-principles']) { %>
+## Design principles
+
+<%~ intro['design-principles'] %>
+<% } %>
+<% if (intro['outcomes-and-deliverables']) { %>
+## Outcomes and deliverables
+
+<%~ intro['outcomes-and-deliverables'] %>
+<% } %>
+# As-built design
+
+## Overview
+
+<%~ notes['design-overview'] %>
+<% if (notes['architecture-decisions']) { %>
+## Architecture decisions
+
+<%~ notes['architecture-decisions'] %>
+<% } %>
+## Data migration and process flows
+
+<%~ notes['process-flows'] %>
 
 # Infrastructure and configuration
 
-<%~ it.modules['as-built-notes']['infrastructure-and-configuration'] %>
+<%~ notes['infrastructure-and-configuration'] %>
 
+# Recovery plan
+
+<%~ recovery['recovery-approach'] %>
+<% if (recovery.resiliency) { %>
+## Resiliency
+
+<%~ recovery.resiliency %>
+<% } %>
+<% if (recovery['test-scenarios']) { %>
+## Test scenarios
+
+<%~ recovery['test-scenarios'] %>
+<% } %>
+<% if (recovery.raci) { %>
+## RACI
+
+<%~ recovery.raci %>
+<% } %>
+# Data security controls
+
+<%~ dsc.controls %>
+<% if (dsc['inheritance-and-dependencies']) { %>
+## Inheritance and dependencies
+
+<%~ dsc['inheritance-and-dependencies'] %>
+<% } %>
+<% if (notes.appendix) { %>
+# Appendix
+
+<%~ notes.appendix %>
+<% } %>
 # Changes from the agreed design
 
-<%~ it.modules['as-built-notes']['changes-from-design'] %>
+<%~ notes['changes-from-design'] %>
 
 # Acceptance criteria
 
-<%~ it.modules['as-built-notes']['acceptance-criteria'] %>
-<% if (it.modules['as-built-notes']['operational-notes']) { %>
+<%~ notes['acceptance-criteria'] %>
+<% if (notes['operational-notes']) { %>
 # Operational notes
 
-<%~ it.modules['as-built-notes']['operational-notes'] %>
+<%~ notes['operational-notes'] %>
 <% } %>
-
 # Handover confirmation
 
-<%~ it.modules['as-built-notes']['handover-confirmation'] %>
+<%~ notes['handover-confirmation'] %>

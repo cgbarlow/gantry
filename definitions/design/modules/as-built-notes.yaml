@@ -1,4 +1,6 @@
-# Field set confirmed 2026-08-20 (ticket #53), superseding the earlier minimal placeholder. Evidence: the Post-SOAP Artefact Coverage Assessment spreadsheet's "Detailed Design / As-built" column and its threaded comments ("good enough for the technical person who is not familiar with the system to successfully rebuild it from scratch"; "handover of the document does not include the handover of responsibility"), plus a direct statement on ownership and required depth: as-builts are the responsibility of senior developers/tech leads or contingent Architecture support, and must cover detailed business process flows, field-level logic, detailed API specifications, UI wireframes, validation rules, code-level sequence diagrams, and detailed acceptance criteria.
+# Field set confirmed 2026-08-20 (ticket #53); reconciled against the approved ATLAS reference design 2026-08-29 (WI #227). Evidence: the Post-SOAP Artefact Coverage Assessment spreadsheet's "Detailed Design / As-built" column and its threaded comments ("good enough for the technical person who is not familiar with the system to successfully rebuild it from scratch"; "handover of the document does not include the handover of responsibility"), plus a direct statement on ownership and required depth: as-builts are the responsibility of senior developers/tech leads or contingent Architecture support, and must cover detailed business process flows, field-level logic, detailed API specifications, UI wireframes, validation rules, code-level sequence diagrams, and detailed acceptance criteria.
+#
+# WI #227: the sections this module previously re-implemented as ad-hoc sub-headings inside free-text fields — Terms & Definitions, Introduction/Overview/Purpose/Scope/Constraints/Assumptions/Caveats/Design Principles/Outcomes, Recovery Plan, Data Security Controls — now live in the shared `glossary`, `introduction`, `recovery-plan` and `data-security-controls` modules, referenced from the `as-built` artefact alongside this one. This module is reduced to the genuinely as-built-specific content. See docs/research/design-definition-reference-reconciliation.md Sections 1 and 4.
 
 id: as-built-notes
 title: As-Built Notes
@@ -10,24 +12,36 @@ purpose: >
   needs to safely operate and change it.
 
 fields:
-  - id: business-process-flows
-    title: Business process flows
+  - id: design-overview
+    title: Design overview
     type: markdown
     required: true
     guidance: >
-      Detailed as-implemented business process flows, step by step, as the
-      system actually behaves — not the intended flows from design.
+      The as-built equivalent of the reference design's "Migration
+      Infrastructure Design → Overview": the key architecture and technology
+      as it was actually implemented, and how it aligns to the design that
+      was approved. Reference a diagram if you have one, but describe the
+      structure in words too.
 
-  - id: detailed-technical-design
-    title: Detailed technical design
+  - id: architecture-decisions
+    title: Architecture decisions
+    type: markdown
+    required: false
+    guidance: >
+      The key design decisions as implemented — for each, the decision, and
+      a note of what it means in practice. The reference design records these
+      as a numbered list (ATLAS "KD01"…). Distinct from the SAD's
+      `architecture.design-decisions` (the decisions as proposed at build
+      readiness) — this is what was actually done, including any that changed.
+
+  - id: process-flows
+    title: Data migration and process flows
     type: markdown
     required: true
     guidance: >
-      Field-level logic, API specifications, UI wireframes, validation
-      rules, and code-level sequence diagrams — the code-level detail a
-      rebuild needs. Owned by senior developers/tech leads or contingent
-      Architecture support. Distinct from SAD/SSAD, which cover
-      architectural intent, not implementation detail.
+      Detailed as-implemented process and data flows, step by step, as the
+      system actually behaves — not the intended flows from design. Covers
+      the "Data Migration Flows" the reference design opens its body with.
 
   - id: infrastructure-and-configuration
     title: Infrastructure and configuration
@@ -35,9 +49,20 @@ fields:
     required: true
     guidance: >
       Environment and infrastructure detail sufficient to rebuild without
-      any Contoso-specific familiarity — IP addresses, ports, network
-      configuration, resource names, and equivalent build-time
-      configuration values.
+      any Contoso-specific familiarity — the reference design's "Migration
+      Services": on-premises and cloud services, IP addresses, ports,
+      network configuration, resource names, roles/permissions, and
+      equivalent build-time configuration values.
+
+  - id: appendix
+    title: Appendix
+    type: markdown
+    required: false
+    guidance: >
+      Supporting reference material that would clutter the body — the
+      reference design's "Appendix A": firewall rule tables, test use cases,
+      and the Security Risk Assessment (SRA) control register with each
+      control's concern, remediation and rationale.
 
   - id: changes-from-design
     title: Changes from the agreed design
@@ -61,7 +86,9 @@ fields:
     required: false
     guidance: >
       Anything a support engineer would need that isn't already captured in
-      `support-and-operations` — quirks, workarounds, known limitations.
+      `support-and-operations`, the shared `recovery-plan`, or the shared
+      `data-security-controls` module — quirks, workarounds, known
+      limitations.
 
   - id: handover-confirmation
     title: Handover confirmation

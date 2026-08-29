@@ -101,10 +101,19 @@ test('throws, and writes nothing, once the instance is already at its definition
       'risks',
       'dependencies',
       'support-and-operations',
+      'glossary', // WI #227: shared module now referenced by the sad/ssad artefacts
     ])
     advanceStage('my-initiative', { instancesDir }) // detailed-design -> handover
 
-    fillStageModules(instancesDir, 'my-initiative', ['as-built-notes'])
+    // WI #227: the handover stage's module set is the shared glossary / introduction /
+    // recovery-plan / data-security-controls plus as-built-notes.
+    fillStageModules(instancesDir, 'my-initiative', [
+      'glossary',
+      'introduction',
+      'as-built-notes',
+      'recovery-plan',
+      'data-security-controls',
+    ])
     assert.throws(() => advanceStage('my-initiative', { instancesDir }), /already at its final stage/)
 
     const instance = readInstance('my-initiative', { instancesDir })

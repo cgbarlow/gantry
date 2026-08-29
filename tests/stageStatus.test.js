@@ -350,7 +350,9 @@ test('approving the final stage completes its Pull Request without attempting an
         const handover = definition.stages.find((s) => s.id === 'handover')
         const branch = await resolveStageBranch(azureDevOps, definition, SLUG, handover.id)
         const client = createAzureDevOpsClient(azureDevOps)
-        for (const moduleId of ['as-built-notes']) {
+        // WI #227: the handover gate now spans the shared glossary / introduction /
+        // recovery-plan / data-security-controls modules as well as as-built-notes.
+        for (const moduleId of ['glossary', 'introduction', 'as-built-notes', 'recovery-plan', 'data-security-controls']) {
           const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
           await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
         }

@@ -1,0 +1,51 @@
+id: recovery-plan
+title: Recovery Plan
+purpose: >
+  How the solution recovers from failure — failover behaviour, resiliency
+  patterns, the scenarios tested, and who is responsible for each recovery
+  action. A recurring section across the reference documents (the SAD
+  template's "Failure & Recovery" / "Disaster Recovery", and the approved
+  ATLAS design's "Recovery Plan"), so it is a shared module rather than
+  content re-typed per stage. See
+  docs/research/design-definition-reference-reconciliation.md Section 1.
+
+  Complements the shared `nfrs` module: `nfrs.disaster-recovery-and-backup`
+  carries the RTO/RPO targets and backup schedule summary; this module
+  carries the full failover/resiliency/test/RACI detail. Wired into the
+  `handover` stage and the `as-built` artefact now; wiring it into
+  `detailed-design` / `sad` is a documented follow-up (see the reconciliation
+  doc, Sections 5 and 8).
+
+fields:
+  - id: recovery-approach
+    title: Recovery approach
+    type: markdown
+    required-at: [operational-handover]
+    guidance: >
+      The failover model for each layer of the solution (platform,
+      workloads) — active-active vs active-passive, the availability tier and
+      its RTO/RPO, and the tool used to redeploy on failover.
+
+  - id: resiliency
+    title: Resiliency
+    type: markdown
+    required: false
+    guidance: >
+      How the solution stays available through a zone or component failure —
+      redundancy, availability zones, network/peering design.
+
+  - id: test-scenarios
+    title: Test scenarios
+    type: markdown
+    required: false
+    guidance: >
+      The recovery scenarios that are tested, the failover type for each,
+      and a link to the technical recovery plan / runbook that covers it.
+
+  - id: raci
+    title: RACI
+    type: markdown
+    required: false
+    guidance: >
+      Who is Responsible, Accountable, Consulted and Informed for each
+      recovery and ongoing-support task.

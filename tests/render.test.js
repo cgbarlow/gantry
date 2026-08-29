@@ -403,6 +403,8 @@ function seedDetailedDesignAzureDevOpsFiles() {
       'instances/examples/modules/support-and-operations.md',
       'utf8'
     ),
+    // WI #227: `glossary` is a shared module the SAD and SSAD artefacts now reference.
+    '/gantry-workspace/examples/modules/glossary.md': readFileSync('instances/examples/modules/glossary.md', 'utf8'),
   }
 }
 

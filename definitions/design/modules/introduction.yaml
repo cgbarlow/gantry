@@ -1,0 +1,85 @@
+id: introduction
+title: Introduction
+purpose: >
+  The framing a design document opens with — what the solution is, why it
+  exists, what it covers, and the constraints/assumptions/principles it was
+  designed under. A recurring opening section across the reference documents
+  (the SAD template's "Introduction" / "Overview" / "Solution Scope", the FV
+  Help Tool SSAD's "Introduction", and the approved ATLAS design's
+  "Introduction"), so it is a shared module rather than content re-typed per
+  stage. See docs/research/design-definition-reference-reconciliation.md
+  Section 1.
+
+  Wired into the `handover` stage and the `as-built` artefact now; wiring it
+  into `detailed-design` / `sad` / `ssad` is a documented follow-up (see the
+  reconciliation doc, Sections 5–6 and 8).
+
+fields:
+  - id: overview
+    title: Overview
+    type: markdown
+    required-at: [operational-handover]
+    guidance: >
+      A short plain-language description of the solution and the change it
+      delivers — enough for a reader with no prior knowledge to understand
+      what this document is about.
+
+  - id: purpose
+    title: Purpose
+    type: markdown
+    required-at: [operational-handover]
+    guidance: >
+      What this document is for and who is expected to use it (e.g.
+      security teams for C&A sign-off, engineers to build or rebuild from).
+
+  - id: scope
+    title: Scope
+    type: markdown
+    required-at: [operational-handover]
+    guidance: >
+      What the design covers and what it explicitly does not. Use "In scope"
+      and "Out of scope" sub-headings. Silence on out-of-scope is the most
+      common cause of a design being sent back with questions.
+
+  - id: constraints
+    title: Constraints
+    type: markdown
+    required: false
+    guidance: >
+      Fixed limits the design had to work within — deployment tooling,
+      pre-existing infrastructure it cannot change, other in-flight work it
+      is bound by.
+
+  - id: assumptions
+    title: Assumptions
+    type: markdown
+    required: false
+    guidance: >
+      What was taken as given for the design to hold. Things that would
+      change the shape of the solution if they turned out false.
+
+  - id: caveats
+    title: Caveats
+    type: markdown
+    required: false
+    guidance: >
+      Qualifications a reader should carry into the rest of the document —
+      e.g. a short-lived workload, a known-incomplete area, a time-bound
+      exception.
+
+  - id: design-principles
+    title: Design principles
+    type: markdown
+    required: false
+    guidance: >
+      The principles used as a guide when weighing options — e.g. common
+      services shared where possible, least privilege, separation of
+      concerns. A table (Ref / Principle / How it is achieved) works well.
+
+  - id: outcomes-and-deliverables
+    title: Outcomes and deliverables
+    type: markdown
+    required: false
+    guidance: >
+      The concrete outputs this work produces and who owns each — by phase
+      where that helps (Design / Triage / Build / Handover).

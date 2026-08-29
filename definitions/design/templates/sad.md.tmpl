@@ -151,3 +151,8 @@
 <%~ it.modules['support-and-operations']['support-handover-readiness'] %>
 
 _Full support and operations detail is maintained in this solution's SSAD._
+<% if (it.modules.glossary && it.modules.glossary['terms-and-definitions']) { %>
+# Glossary
+
+<%~ it.modules.glossary['terms-and-definitions'] %>
+<% } %>

@@ -90,3 +90,8 @@
 
 <% it.modules.dependencies['dependency-list'].forEach(function(item) { %>- <%~ item %>
 <% }) %>
+<% if (it.modules.glossary && it.modules.glossary['terms-and-definitions']) { %>
+# Glossary
+
+<%~ it.modules.glossary['terms-and-definitions'] %>
+<% } %>

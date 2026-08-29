@@ -36,7 +36,11 @@ stages:
       Describe the architecture, integration, data, quality, security, risk,
       dependency, and operational details needed to build the solution.
     gate: build-ready-checklist
-    modules: [architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations]
+    # glossary is a shared module (also required by the `handover` stage / `as-built`
+    # artefact) — the SAD and SSAD reference templates both carry a Glossary section.
+    # Wiring introduction / recovery-plan / data-security-controls in here too is a
+    # documented follow-up (see the reconciliation doc, Sections 5-6 and 8).
+    modules: [architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations, glossary]
     example: examples
 
   - id: handover
@@ -46,7 +50,12 @@ stages:
       for operation and submission to the Technical Architecture Committee for
       noting.
     gate: operational-handover
-    modules: [as-built-notes]
+    # glossary, introduction, recovery-plan and data-security-controls are shared modules
+    # (see docs/research/design-definition-reference-reconciliation.md). They carry the
+    # reference ATLAS design's Terms & Definitions / Introduction / Recovery Plan / Data
+    # Security Controls sections, which this stage previously buried inside as-built-notes
+    # free-text fields.
+    modules: [glossary, introduction, as-built-notes, recovery-plan, data-security-controls]
     example: examples
 
 artefacts:
@@ -142,6 +151,7 @@ artefacts:
         dependencies.dependencies-overview,
         dependencies.dependency-list,
         support-and-operations.support-handover-readiness,
+        glossary.terms-and-definitions,
       ]
 
   - id: ssad
@@ -176,6 +186,7 @@ artefacts:
         security.identity-and-access,
         security.privacy-and-confidentiality,
         dependencies.dependency-list,
+        glossary.terms-and-definitions,
       ]
 
   - id: as-built
@@ -185,4 +196,27 @@ artefacts:
       use and TAC noting.
     template: templates/as-built.md.tmpl
     gate: operational-handover
-    requires: [as-built-notes]
+    # Section order mirrors the approved ATLAS reference design: Terms & Definitions →
+    # Introduction → As-built design → Infrastructure → Recovery plan → Data security
+    # controls → Appendix, then the gantry-only governance sections (see the template).
+    # Only the fields that must be present to pass the gate are listed here — a
+    # `module.field` entry is checked for non-emptiness regardless of the field's own
+    # `required` flag, so the optional fields (introduction.constraints…, recovery-plan
+    # detail, as-built-notes.appendix/architecture-decisions/operational-notes,
+    # data-security-controls.inheritance-and-dependencies) are left out and rendered
+    # by the template's `if` guards when the instance fills them.
+    requires:
+      [
+        glossary.terms-and-definitions,
+        introduction.overview,
+        introduction.purpose,
+        introduction.scope,
+        as-built-notes.design-overview,
+        as-built-notes.process-flows,
+        as-built-notes.infrastructure-and-configuration,
+        as-built-notes.changes-from-design,
+        as-built-notes.acceptance-criteria,
+        as-built-notes.handover-confirmation,
+        recovery-plan.recovery-approach,
+        data-security-controls.controls,
+      ]

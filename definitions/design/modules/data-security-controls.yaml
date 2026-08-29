@@ -1,0 +1,40 @@
+id: data-security-controls
+title: Data Security Controls
+purpose: >
+  The operational security controls that protect the solution's data —
+  encryption in transit and at rest, incident management, network controls,
+  access management — and what those controls inherit from or depend on. A
+  recurring section (the SAD template's "Security View" controls / "Security
+  Concerns", and the approved ATLAS design's "Data Security Controls"), so it
+  is a shared module rather than content re-typed per stage. See
+  docs/research/design-definition-reference-reconciliation.md Section 1.
+
+  Distinct from the shared `security` module, which carries the design-time
+  security posture (identity model, security architecture, regulations); this
+  module is the concrete control set the built solution runs under. The
+  Security Risk Assessment (SRA) control register itself is evidence about
+  the built system and lives with the as-built `appendix` field. Wired into
+  the `handover` stage and the `as-built` artefact now; wiring it into
+  `detailed-design` / `sad` is a documented follow-up (see the reconciliation
+  doc, Sections 5 and 8).
+
+fields:
+  - id: controls
+    title: Controls
+    type: markdown
+    required-at: [operational-handover]
+    guidance: >
+      The security controls in force, grouped (e.g. Encryption, Incident
+      management, Networking, Virtual machines, Availability, Access
+      management, Documentation). For each, the concern it addresses and how
+      it is implemented.
+
+  - id: inheritance-and-dependencies
+    title: Inheritance and dependencies
+    type: markdown
+    required: false
+    guidance: >
+      What the solution's security posture inherits from an underlying
+      platform (e.g. the cloud platform's own controls), the services relied
+      on, data locality, and the security regulations/standards it is held
+      to.
