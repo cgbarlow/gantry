@@ -1215,3 +1215,66 @@ test('GET /api/definitions/no-such-def/versions/1/changelog rejects unknown defi
     assert.match(body.error, /Unknown definition/)
   })
 })
+
+// ---------- #235: definition version detail endpoint ----------
+
+test('GET /api/definitions/design/versions/1 returns full read-only projection', async () => {
+  await withRunningServer({}, async (base) => {
+    const res = await fetch(`${base}/api/definitions/design/versions/1`)
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    assert.equal(body.id, 'design')
+    assert.equal(body.version, 1)
+    assert.equal(body.status, 'published')
+    assert.ok(Array.isArray(body.stages))
+    const shape = body.stages.find((s) => s.id === 'shape')
+    assert.ok(shape, 'shape stage present')
+    assert.equal(shape.gate, 'business-case')
+    assert.ok(Array.isArray(body.artefacts))
+    const soap = body.artefacts.find((a) => a.id === 'soap')
+    assert.ok(soap, 'soap artefact present')
+    assert.ok(Array.isArray(soap.requires) && soap.requires.length > 0)
+    assert.ok(Array.isArray(body.modules))
+    const ctx = body.modules.find((m) => m.id === 'context')
+    assert.ok(ctx, 'context module present')
+    assert.ok(Array.isArray(ctx.fields) && ctx.fields.length > 0)
+    const field = ctx.fields[0]
+    assert.ok('id' in field && 'title' in field && 'type' in field)
+    // guidance / required / requiredAt are optional keys — JSON omits undefined, so check presence of at least id/title/type
+    assert.ok('guidance' in field || field.guidance === undefined)
+  })
+})
+
+test('GET /api/definitions/:id/versions/:n rejects unknown id with 400', async () => {
+  await withRunningServer({}, async (base) => {
+    const res = await fetch(`${base}/api/definitions/no-such-def/versions/1`)
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.match(body.error, /Unknown definition/)
+  })
+})
+
+test('GET /api/definitions/design/versions/abc rejects non-numeric version with 400', async () => {
+  await withRunningServer({}, async (base) => {
+    const res = await fetch(`${base}/api/definitions/design/versions/abc`)
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.match(body.error, /Invalid version/)
+  })
+})
+
+test('GET /api/definitions/design/versions/0 rejects non-positive version with 400', async () => {
+  await withRunningServer({}, async (base) => {
+    const res = await fetch(`${base}/api/definitions/design/versions/0`)
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.match(body.error, /Invalid version/)
+  })
+})
+
+test('GET /api/definitions/design/versions/99 returns 404 for non-existent version', async () => {
+  await withRunningServer({}, async (base) => {
+    const res = await fetch(`${base}/api/definitions/design/versions/99`)
+    assert.equal(res.status, 404)
+  })
+})

@@ -82,7 +82,7 @@ test('dashboard: titled "Workspaces", master-detail is the default view, and its
         assert.equal(await page.locator('.instance-card .identity-picker').count(), 0)
         assert.ok(await page.getByRole('button', { name: 'Check' }).isVisible())
         assert.equal(await page.locator('.instance-card').getByRole('button', { name: 'Render' }).count(), 0)
-        assert.ok(await page.getByRole('link', { name: 'Edit' }).isVisible())
+        assert.ok(await page.getByRole('link', { name: 'Edit', exact: true }).isVisible())
         assert.equal(await page.locator('.manage-card').count(), 1)
         assert.equal(await page.locator('.manage-card .manage-link').count(), 0)
 
@@ -193,7 +193,7 @@ test('dashboard: selecting a workspace with multiple instances shows every one o
             assert.equal(await page.locator('.instance-card .pr-badge').count(), 1)
             assert.equal(await page.locator('.instance-card .pr-badge').textContent(), 'PR OPEN')
             assert.equal(await page.locator('.instance-card').getByRole('button', { name: 'Render' }).count(), 0)
-            assert.equal(await page.getByRole('link', { name: 'Edit' }).count(), 2)
+            assert.equal(await page.getByRole('link', { name: 'Edit', exact: true }).count(), 2)
             assert.equal(await page.getByRole('link', { name: 'Show files' }).count(), 2)
             for (const link of await page.getByRole('link', { name: 'Show files' }).all()) {
               assert.equal(await link.getAttribute('target'), '_blank')

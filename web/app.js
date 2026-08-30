@@ -19,6 +19,7 @@ import { Dropdown } from './lib/dropdown.js'
 import { apply as applyMarkdownCommand, HEADING_LEVELS, findTable } from './lib/markdownCommands.js'
 import { NewWorkspaceWizardPage } from './pages/new-workspace-wizard.js'
 import { UserGuidePage } from './pages/user-guide.js'
+import { DefinitionViewerPage } from './pages/definition-viewer.js'
 import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, workspaceRepoUrl } from './pages/settings.js'
 // Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79) markdown/split/rendered toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
@@ -3825,6 +3826,7 @@ function DashboardPage() {
         <div class="dashboard-controls">
           ${instances?.length ? html`<${ViewToggle} />` : null}
           <a class="btn small ghost" href="/new-workspace">+ New Workspace</a>
+          <a class="btn small ghost" href="/definitions">Definition Editor</a>
           <a class="btn small ghost" href="/user-guide">User Guide</a>
           <a class="btn small ghost" href=${`/settings?from=${encodeURIComponent('/')}`}>Settings</a>
         </div>
@@ -3913,6 +3915,8 @@ function App() {
         <${Route} path="/new-instance" component=${NewWorkspaceWizardPage} />
         <${Route} path="/assets" component=${AssetLibraryPage} />
         <${Route} path="/user-guide" component=${UserGuidePage} />
+        <${Route} path="/definitions" component=${DefinitionViewerPage} />
+        <${Route} path="/definition-editor" component=${DefinitionViewerPage} />
         <${Route} path="/settings" component=${GlobalSettingsPage} />
         <${Route} path="/settings/workspace" component=${WorkspaceSettingsPage} />
         <${Route} path="/settings/instance" component=${InstanceSettingsPage} />

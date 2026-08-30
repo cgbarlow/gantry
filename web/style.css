@@ -1400,3 +1400,36 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
   white-space: nowrap;
 }
 .settings-menu .menu a:hover { background: var(--bg); }
+
+/* ---------- Definition Viewer (#235) ---------- */
+.defn-viewer { max-width: 1120px; margin: 0 auto; padding: 32px 32px 140px; }
+.defn-viewer-layout { display: grid; grid-template-columns: 320px 1fr; gap: 24px; align-items: start; }
+.defn-viewer-rail { border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg-raised); padding: 16px; }
+.defn-viewer-rail h2 { font-family: var(--font-display); font-weight: 600; font-size: 15px; margin: 0 0 12px; }
+.defn-rail-row { padding: 10px 8px; border-radius: var(--radius); cursor: pointer; border: var(--hairline) solid transparent; margin-bottom: 8px; }
+.defn-rail-row:hover { background: var(--bg); }
+.defn-rail-row.selected { border-color: var(--line-strong); background: var(--bg); }
+.defn-rail-title { font-family: var(--font-display); font-weight: 600; font-size: 13px; }
+.defn-rail-desc { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.defn-rail-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.defn-rail-badges .stamp.small { font-size: 10px; }
+.defn-latest-tag { font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; margin-left: 4px; }
+.defn-viewer-detail { min-width: 0; }
+.defn-version-switcher { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+.defn-version-switcher label { font-family: var(--font-display); font-weight: 600; font-size: 13px; }
+.defn-version-switcher .wizard-input { max-width: 260px; }
+.defn-viewer-header { margin-bottom: 20px; }
+.defn-viewer-header h2 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 0 0 6px; }
+.defn-id { font-family: var(--font-mono); font-weight: 400; font-size: 14px; color: var(--text-muted); }
+.defn-section { margin-bottom: 28px; }
+.defn-section h3 { font-family: var(--font-display); font-weight: 600; font-size: 15px; margin: 0 0 12px; border-bottom: var(--hairline) solid var(--line); padding-bottom: 6px; }
+.defn-card { border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg-raised); padding: 12px 14px; margin-bottom: 10px; }
+.defn-card h4 { font-family: var(--font-display); font-weight: 600; font-size: 13px; margin: 0 0 6px; }
+.defn-meta { font-family: var(--font-mono); font-weight: 400; font-size: 11px; color: var(--text-muted); }
+.defn-modules-list ul, .defn-requires-list ul, .defn-fields-list { list-style: none; margin: 6px 0 0; padding: 0; }
+.defn-modules-list li, .defn-requires-list li { font-family: var(--font-mono); font-size: 12px; margin: 2px 0; }
+.defn-field { padding: 8px 0; border-top: var(--hairline) solid var(--line); }
+.defn-field:first-child { border-top: none; }
+.defn-field-heading { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.defn-required { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+@media (max-width: 700px) { .defn-viewer-layout { grid-template-columns: 1fr; } }
