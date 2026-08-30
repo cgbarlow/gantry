@@ -1,9 +1,8 @@
 id: team-and-estimates
 title: Team and Estimates
 purpose: >
-  Who is involved and roughly how big this is — the information a
-  Business Case Approved decision needs to size and staff the work, without
-  the precision a delivery plan would need later.
+  List the teams involved and the order-of-magnitude sizing for the work. This is a
+  signal for planning, not a commitment.
 
 fields:
   - id: teams-and-contacts

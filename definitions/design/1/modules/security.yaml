@@ -1,20 +1,11 @@
 id: security
 title: Security
 purpose: >
-  The solution's security and privacy posture. Derived from the SAD
-  template's Security View section (Identity & Access Management, Security
-  Roles, Authentication, Security Architecture, Regulations & Standards,
-  Privacy & Confidentiality Concerns) — see
-  docs/research/stages-gates-module-specs.md Section 4.3.
-
-  This module is required at both HLD Definition and Detailed Design — one
-  module, filled in progressively, not two. At `hld-tac-approved` expect the
-  security implications that inform the HLD decision; at
-  `build-ready-checklist` expect the full posture needed to build against.
-
-  Reviewed by the Design Authority before Build Readiness Confirmed, via the
-  instance module file's frontmatter `status`/`owner` convention — see
-  `architecture.yaml` for the same note.
+  Describe the solution's security and privacy posture — how users are authenticated
+  and authorised, the security architecture and the regulations and standards that
+  apply. This is one module used in both high-level design and detailed design — fill it
+  progressively: during high-level design include the security implications that inform
+  that decision; before build readiness include the full posture needed to build against.
 
 fields:
   - id: identity-and-access

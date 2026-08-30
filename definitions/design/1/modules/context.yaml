@@ -1,8 +1,8 @@
 id: context
 title: Context
 purpose: >
-  Why this initiative exists and what it is responding to. Enough for a reader
-  with no prior knowledge to understand the situation in under two minutes.
+  Describe why this initiative exists and what it is responding to. Give a reader with
+  no prior knowledge enough context to understand the situation quickly.
 
 fields:
   - id: driver

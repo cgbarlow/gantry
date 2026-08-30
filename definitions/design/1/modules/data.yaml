@@ -1,17 +1,9 @@
 id: data
 title: Data
 purpose: >
-  The solution's data at build-ready depth — what it holds, how sensitive it
-  is, and what happens to it over time. Derived from the SAD template's
-  Information/Data View section (Logical Data Model, Data Classification,
-  Data Replication, Data Storage/Archiving/Retention, Data Migration,
-  Records Management) — see docs/research/stages-gates-module-specs.md
-  Section 4.3. This module feeds both the `sad` and `ssad` artefacts from
-  the same data, like `architecture` and `integration`.
-
-  Reviewed by the Design Authority before Build Readiness Confirmed, via the
-  instance module file's frontmatter `status`/`owner` convention — see
-  `architecture.yaml` for the same note.
+  Describe the solution's data — what it holds, how sensitive it is, and what happens
+  to it over its lifetime. Cover where it is stored, how long it is kept, and any
+  movement between systems.
 
 fields:
   - id: logical-data-model

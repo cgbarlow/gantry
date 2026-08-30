@@ -12,8 +12,8 @@ stages:
   - id: shape
     title: SOAP
     purpose: >
-      Shape an initiative into a clear business case by capturing its context,
-      proposed solution, team, estimates, and dependencies.
+      Describe the initiative's context, proposed solution, team, estimates and
+      dependencies in enough detail to support a business case decision.
     gate: business-case
     # The editor mounts the union of the two Shape artefacts' modules. Gate
     # passing itself is scoped to each artefact's `requires` list below.
@@ -24,8 +24,8 @@ stages:
   - id: hld-define
     title: High-level Design
     purpose: >
-      Define the proposed solution in enough detail for approval by the
-      Technical Architecture Committee before detailed design begins.
+      Describe the proposed solution in enough detail to be approved before
+      detailed design begins. Cover what is needed to decide whether to proceed.
     gate: hld-tac-approved
     # nfrs, risks, security and dependencies are introduced here in early/light form and carried forward — not re-declared — at detailed-design, where the same module ids are required in fuller form. See each module's guidance.
     modules:
@@ -36,7 +36,7 @@ stages:
     title: Detailed Design
     purpose: >
       Describe the architecture, integration, data, quality, security, risk,
-      dependency, and operational details needed to build the solution.
+      dependency and operational details needed to build the solution.
     gate: build-ready-checklist
     # glossary, introduction, recovery-plan and data-security-controls are shared
     # modules (also required by the `handover` stage / `as-built` artefact). The SAD
@@ -51,9 +51,8 @@ stages:
   - id: handover
     title: Operational Handover
     purpose: >
-      Record the as-built solution and the information needed to hand it over
-      for operation and submission to the Technical Architecture Committee for
-      noting.
+      Record what was built and the information needed to hand it over for
+      operation.
     gate: operational-handover
     # glossary, introduction, recovery-plan and data-security-controls are shared modules
     # (see docs/research/design-definition-reference-reconciliation.md). They carry the
@@ -67,8 +66,8 @@ artefacts:
   - id: soap
     title: Solution on a Page
     purpose: >
-      Summarise the initiative's context, solution, team, and estimates for
-      Business Case Approved.
+      Summarise the initiative's context, solution, team and estimates for the
+      business case decision.
     template: templates/soap.md.tmpl
     gate: business-case
     requires: [context, solution-definition, team-and-estimates]
@@ -76,8 +75,8 @@ artefacts:
   - id: soap-full
     title: Full Solution on a Page
     purpose: >
-      Provide a fuller Solution on a Page with detailed scope, dependencies,
-      sequencing, dates, and delivery questions.
+      Provide a fuller summary with detailed scope, dependencies, sequencing,
+      dates and open questions.
     template: templates/soap-full.md.tmpl
     gate: business-case
     # Field references let this heavier artefact reuse modules without making
@@ -107,8 +106,8 @@ artefacts:
   - id: hld
     title: High Level Design
     purpose: >
-      Present the proposed solution, alternatives, risks, and open questions
-      to the Technical Architecture Committee for approval.
+      Present the proposed solution, alternatives, risks and open questions for
+      approval before detailed design.
     template: templates/hld.md.tmpl
     gate: hld-tac-approved
     requires:
@@ -118,7 +117,7 @@ artefacts:
     title: Solution Architecture Document
     purpose: >
       Describe the complete solution architecture and its requirements,
-      security, dependencies, and support handover readiness for build.
+      security, dependencies and support handover readiness for build.
     template: templates/sad.md.tmpl
     gate: build-ready-checklist
     # SAD renders the complete architecture, requirements, security and
@@ -178,8 +177,8 @@ artefacts:
   - id: ssad
     title: Solution Support Architecture Document
     purpose: >
-      Frame the solution's design and operational readiness for the teams that
-      will support it after build.
+      Describe the solution's design and operational readiness for the teams
+      that will support it after build.
     template: templates/ssad.md.tmpl
     gate: build-ready-checklist
     # SSAD is the support-focused rendering of the same design data. It needs
@@ -225,8 +224,8 @@ artefacts:
   - id: as-built
     title: As-built
     purpose: >
-      Capture what was built and the final handover information for operational
-      use and TAC noting.
+      Record what was built and the final handover information needed for
+      operational use.
     template: templates/as-built.md.tmpl
     gate: operational-handover
     # Section order mirrors the approved ATLAS reference design: Terms & Definitions →

@@ -1,9 +1,9 @@
 id: alternatives-considered
 title: Alternatives Considered
 purpose: >
-  The other options that were on the table and why they weren't chosen —
-  lets TAC verify the proposed solution was actually compared against
-  something, not just asserted.
+  Describe the other options that were on the table and why they were not chosen.
+  Include "do nothing" where it helps show the proposed approach was compared, not just
+  asserted.
 
 fields:
   - id: alternatives

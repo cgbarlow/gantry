@@ -1,13 +1,9 @@
 id: solution-definition
 title: Solution Definition
 purpose: >
-  What the solution actually is at Shape depth — enough for a reader to
-  picture how the change will work end to end without yet committing to the
-  detailed architecture that follows at HLD Definition and Detailed Design.
-  Derived from the real Confluence Epic SOAP structure (Background and
-  context; Solution definition; Teams and estimates; References) rather than
-  README's illustrative `options` module — see
-  docs/research/stages-gates-module-specs.md Section 4.2.
+  Outline what the solution is and how it will work end to end, at a level that shows
+  the shape without committing to the full architecture. Include the key requirements,
+  process flow and who delivers each part.
 
 fields:
   - id: high-level-requirements

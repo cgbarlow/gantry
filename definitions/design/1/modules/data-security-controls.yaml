@@ -1,13 +1,9 @@
 id: data-security-controls
 title: Data Security Controls
 purpose: >
-  The operational security controls that protect the solution's data —
-  encryption in transit and at rest, incident management, network controls,
-  access management — and what those controls inherit from or depend on. A
-  recurring section (the SAD template's "Security View" controls / "Security
-  Concerns", and the approved ATLAS design's "Data Security Controls"), so it
-  is a shared module rather than content re-typed per stage. See
-  docs/research/design-definition-reference-reconciliation.md Section 1.
+  Describe the security controls that protect the solution's data in operation and what
+  they depend on. Cover how data is protected in transit and at rest and how access is
+  managed.
 
   Distinct from the shared `security` module, which carries the design-time
   security posture (identity model, security architecture, regulations); this

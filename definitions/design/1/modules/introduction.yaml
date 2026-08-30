@@ -1,14 +1,8 @@
 id: introduction
 title: Introduction
 purpose: >
-  The framing a design document opens with — what the solution is, why it
-  exists, what it covers, and the constraints/assumptions/principles it was
-  designed under. A recurring opening section across the reference documents
-  (the SAD template's "Introduction" / "Overview" / "Solution Scope", the FV
-  Help Tool SSAD's "Introduction", and the approved ATLAS design's
-  "Introduction"), so it is a shared module rather than content re-typed per
-  stage. See docs/research/design-definition-reference-reconciliation.md
-  Section 1.
+  Introduce the solution — what it is, why it exists, what it covers, and the
+  constraints and principles it was designed under.
 
   Wired into the `handover` stage / `as-built` artefact (WI #227), the
   `detailed-design` stage / `sad` artefact (WI #228) and the `ssad` artefact

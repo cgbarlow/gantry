@@ -1,13 +1,7 @@
 id: glossary
 title: Glossary
 purpose: >
-  The terms, acronyms and abbreviations a reader needs to follow the rest of
-  the document. A recurring section in the reference documents — the SAD
-  template's "Glossary", the FV Help Tool SSAD's "Glossary", and the approved
-  ATLAS design's "Terms & Definitions" all carry the same content — so it is a
-  shared module referenced from the `sad`, `ssad` and `as-built` artefacts
-  rather than re-typed in each. See
-  docs/research/design-definition-reference-reconciliation.md Section 1.
+  Define the terms, acronyms and abbreviations a reader needs to follow this document.
 
 fields:
   - id: terms-and-definitions

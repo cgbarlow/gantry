@@ -1,20 +1,12 @@
 id: nfrs
 title: Non-Functional Requirements
 purpose: >
-  The quality attributes the solution must meet — performance, availability,
-  scalability, capacity, continuity. Derived from the SAD template's
-  Non-Functional Requirements content and the TAC template's NFR section —
-  see docs/research/stages-gates-module-specs.md Sections 4.2–4.3.
-
-  This module is required at both HLD Definition and Detailed Design — it is
-  one module, filled in progressively, not two. At `hld-tac-approved` expect
-  it lightly filled (the NFRs that matter enough to shape the HLD decision).
-  At `build-ready-checklist` expect it complete enough to design and test
+  Describe the quality attributes the solution must meet, such as performance,
+  availability and scalability. State the targets clearly enough to design and test
+  against. This is one module used in both high-level design and detailed design —
+  fill it progressively: during high-level design include only the NFRs that shape that
+  decision; before build readiness it should be complete enough to design and test
   against.
-
-  Reviewed by the Design Authority before Build Readiness Confirmed, via the
-  instance module file's frontmatter `status`/`owner` convention — see
-  `architecture.yaml` for the same note.
 
 fields:
   - id: performance
@@ -32,12 +24,10 @@ fields:
     type: markdown
     required-at: [build-ready-checklist]
     guidance: >
-      Recovery time/point objectives, backup schedule and retention, and the
-      disaster-recovery approach. Light or absent at `hld-tac-approved`;
-      expect this filled in by `build-ready-checklist` — a support team
-      needs concrete RTO/RPO and backup detail before handover, not just an
-      availability target.
-
+      Describe recovery time and point objectives, backup schedule and retention, and the
+      disaster-recovery approach. You can keep this light during high-level design; it
+      should be complete before build readiness — a support team needs concrete recovery
+      targets and backup detail, not just an availability target.
   - id: scalability-and-capacity
     title: Scalability and capacity
     type: markdown
@@ -57,7 +47,7 @@ fields:
     type: markdown
     required-at: [build-ready-checklist]
     guidance: >
-      How the solution's design maps back to the functional and
-      non-functional requirements agreed earlier — enough for a reviewer to
-      check nothing agreed was quietly dropped. Expect this filled in at
-      `build-ready-checklist`, not before.
+      Describe how the design maps back to the agreed functional and non-functional
+      requirements — enough for a reviewer to check nothing was quietly dropped. You can
+      keep this light during high-level design; it should be complete before build
+      readiness.

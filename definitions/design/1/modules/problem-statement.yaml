@@ -1,11 +1,9 @@
 id: problem-statement
 title: Problem Statement
 purpose: >
-  The problem this HLD is solving, stated precisely enough that the
-  Technical Architecture Committee can judge fit without re-deriving it from
-  the proposed solution. Derived from the TAC "High Level Solution Design"
-  template's Problem Statement section — see
-  docs/research/stages-gates-module-specs.md Section 4.2.
+  Describe the problem this work is solving, stated clearly enough that a reviewer can
+  judge the fit of the solution without inferring it. Cover current state, desired
+  future state, scope and how success will be recognised.
 
 fields:
   - id: current-state
@@ -23,9 +21,8 @@ fields:
     type: markdown
     required: true
     guidance: >
-      Be explicit about both. Silence on out-of-scope is the most common
-      cause of TAC papers being sent back with questions.
-
+      Be explicit about what is in scope and what is out of scope. Silence on out-of-scope
+      is the most common cause of papers being sent back with questions.
   - id: success-criteria
     title: Success criteria
     type: markdown

@@ -1,20 +1,11 @@
 id: risks
 title: Risks
 purpose: >
-  The risks specific to delivering and running this solution, and how
-  they're being mitigated. Derived from the SAD template's Architectural
-  Risks / Open Issues content and the TAC template's Risks and mitigations
-  table — see docs/research/stages-gates-module-specs.md Sections 4.2–4.3.
-
-  This module is required at both HLD Definition and Detailed Design — one
-  module, filled in progressively, not two. At `hld-tac-approved` expect the
-  risks material enough to affect the HLD decision; at
-  `build-ready-checklist` expect the fuller risk register needed to build
-  against.
-
-  Reviewed by the Design Authority before Build Readiness Confirmed, via the
-  instance module file's frontmatter `status`/`owner` convention — see
-  `architecture.yaml` for the same note.
+  List the risks to delivering and operating this solution and how each will be
+  mitigated. Include who owns each risk and its likelihood and impact before and after
+  mitigation. This is one module used in both high-level design and detailed design —
+  fill it progressively: during high-level design include the risks that could affect that
+  decision; before build readiness include the fuller register needed to build against.
 
 fields:
   - id: risk-register
@@ -32,5 +23,5 @@ fields:
     type: markdown
     required: false
     guidance: >
-      Unresolved issues that aren't yet risks with a clear mitigation, but
-      need tracking before Build Readiness Confirmed.
+      List unresolved issues that are not yet risks with a clear mitigation but need
+      tracking before the design is approved for build.

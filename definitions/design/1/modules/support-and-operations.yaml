@@ -1,25 +1,8 @@
 id: support-and-operations
 title: Support and Operations
 purpose: >
-  What a support team needs once this solution is built and operational —
-  stakeholders, environments, release procedures and handover readiness.
-  This is the content the plain SAD structure doesn't naturally capture but
-  the SSAD framing emphasises. Derived from a single real, filled SSAD
-  example (the Family Violence Help Tool SSAD) in the explicit absence of a
-  standard SSAD template — treat this module's field list as one data point,
-  not a settled norm, and revisit it if a canonical SSAD template surfaces.
-  See docs/research/stages-gates-module-specs.md Section 4.4.
-
-  Reviewed by the Design Authority before Build Readiness Confirmed, via the
-  instance module file's frontmatter `status`/`owner` convention — see
-  `architecture.yaml` for the same note. That same frontmatter convention
-  (plus this repo's own git history) is also how sign-off and revision
-  history are tracked for this module — there's no separate field for
-  either, so don't add one.
-
-  Disaster recovery, backup and retention detail lives in the shared `nfrs`
-  module (`disaster-recovery-and-backup`), not here — it's a quality
-  attribute of the built solution, not a support-team-specific concern.
+  Describe what a support team needs to operate and hand over this solution — who to
+  contact, where it runs, how it is released and what 'ready to hand over' means.
 
 fields:
   - id: stakeholders

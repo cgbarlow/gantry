@@ -1,20 +1,11 @@
 id: dependencies
 title: Dependencies
 purpose: >
-  What this solution depends on, and what depends on it. Derived from the
-  TAC template's Proposed Solution section and the SAD template's Solution
-  Overview (Dependencies) section — see
-  docs/research/stages-gates-module-specs.md Sections 4.2–4.3.
-
-  This module is required at both HLD Definition and Detailed Design — one
-  module, filled in progressively, not two. At `hld-tac-approved` a
-  narrative overview is enough for TAC to judge the HLD decision; the full
-  structured dependency list isn't expected until `build-ready-checklist`,
-  where a delivery team needs to build against it.
-
-  Reviewed by the Design Authority before Build Readiness Confirmed, via the
-  instance module file's frontmatter `status`/`owner` convention — see
-  `architecture.yaml` for the same note.
+  List what this solution depends on and what depends on it — systems, teams and
+  decisions still in progress. This is one module used in both high-level design and
+  detailed design — fill it progressively: during high-level design a narrative overview
+  is enough to support the decision; the full structured dependency list is needed before
+  build readiness.
 
 fields:
   - id: dependencies-overview
@@ -22,10 +13,9 @@ fields:
     type: markdown
     required-at: [business-case, hld-tac-approved]
     guidance: >
-      What this solution depends on, and what depends on it — other
-      initiatives, platforms, teams, or decisions still in flight. Enough
-      for TAC to judge the HLD decision without a full dependency list yet.
-
+      Describe what this solution depends on and what depends on it — other initiatives,
+      platforms, teams or decisions still in progress. Give enough for a reviewer to judge
+      the proposal without a full dependency list yet.
   - id: dependency-list
     title: Dependency list
     type: list

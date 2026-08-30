@@ -5,11 +5,9 @@
 id: as-built-notes
 title: As-Built Notes
 purpose: >
-  What actually got built, in enough code-level and infrastructure-level
-  detail that an appropriately experienced engineer unfamiliar with Contoso's
-  systems could rebuild it from scratch — distinct from the architectural
-  intent captured in SAD/SSAD, and from what a future support engineer
-  needs to safely operate and change it.
+  Describe what was actually built in enough detail that a skilled engineer could
+  rebuild it. Include how it differs from the approved design and how it was shown to
+  meet its requirements.
 
 fields:
   - id: design-overview
@@ -17,61 +15,44 @@ fields:
     type: markdown
     required: true
     guidance: >
-      The as-built equivalent of the reference design's "Migration
-      Infrastructure Design → Overview": the key architecture and technology
-      as it was actually implemented, and how it aligns to the design that
-      was approved. Reference a diagram if you have one, but describe the
+      Describe the key architecture and technology as actually implemented and how it
+      aligns to the approved design. Reference a diagram if you have one, but describe the
       structure in words too.
-
   - id: architecture-decisions
     title: Architecture decisions
     type: markdown
     required: false
     guidance: >
-      The key design decisions as implemented — for each, the decision, and
-      a note of what it means in practice. The reference design records these
-      as a numbered list (ATLAS "KD01"…). Distinct from the SAD's
-      `architecture.design-decisions` (the decisions as proposed at build
-      readiness) — this is what was actually done, including any that changed.
-
+      List the key design decisions as implemented — for each, what was decided and what it
+      means in practice. Note any that changed from the approved design.
   - id: process-flows
     title: Data migration and process flows
     type: markdown
     required: true
     guidance: >
-      Detailed as-implemented process and data flows, step by step, as the
-      system actually behaves — not the intended flows from design. Covers
-      the "Data Migration Flows" the reference design opens its body with.
-
+      Describe the detailed process and data flows step by step, as the system actually
+      behaves — not the intended flows from design.
   - id: infrastructure-and-configuration
     title: Infrastructure and configuration
     type: markdown
     required: true
     guidance: >
-      Environment and infrastructure detail sufficient to rebuild without
-      any Contoso-specific familiarity — the reference design's "Migration
-      Services": on-premises and cloud services, IP addresses, ports,
-      network configuration, resource names, roles/permissions, and
-      equivalent build-time configuration values.
-
+      Provide environment and infrastructure detail sufficient to rebuild — services, IP
+      addresses, ports, network configuration, resource names, roles and permissions, and
+      equivalent build-time values.
   - id: appendix
     title: Appendix
     type: markdown
     required: false
     guidance: >
-      Supporting reference material that would clutter the body — the
-      reference design's "Appendix A": firewall rule tables, test use cases,
-      and the Security Risk Assessment (SRA) control register with each
-      control's concern, remediation and rationale.
-
+      Include supporting reference material that would clutter the body, such as firewall
+      rules, test cases and the security control register.
   - id: changes-from-design
     title: Changes from the agreed design
     type: markdown
     required: true
     guidance: >
-      Where the built solution diverges from the architecture/integration
-      modules agreed at Build Readiness Confirmed, and why.
-
+      Describe where the built solution diverges from the approved design and why.
   - id: acceptance-criteria
     title: Acceptance criteria
     type: markdown
@@ -95,8 +76,5 @@ fields:
     type: markdown
     required: true
     guidance: >
-      Confirmation that the operational handover has actually happened —
-      who received it, and when. Handover of the document does not
-      transfer responsibility for keeping it updated — that stays with the
-      original owner (senior developer/tech lead, or the Architecture
-      support that authored it).
+      Record who received the handover and when. Note that handover of the document does
+      not transfer responsibility for keeping it updated.

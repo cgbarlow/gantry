@@ -1,16 +1,8 @@
 id: integration
 title: Integration
 purpose: >
-  How this solution connects to everything around it — interfaces, and the
-  technology/deployment surface those connections run over. Dependencies
-  live in the shared `dependencies` module instead of being repeated here —
-  see its guidance for what it covers at this stage. Derived from the SAD
-  template's Technology Architecture View / Deployment View sections — see
-  docs/research/stages-gates-module-specs.md Section 4.3.
-
-  Reviewed by the Design Authority before Build Readiness Confirmed, via the
-  instance module file's frontmatter `status`/`owner` convention — see
-  `architecture.yaml` for the same note.
+  Describe how this solution connects to surrounding systems and the infrastructure
+  those connections run on. Cover interfaces, networks, hosting and environments.
 
 fields:
   - id: interfaces
@@ -26,12 +18,9 @@ fields:
     type: markdown
     required: false
     guidance: >
-      The Technology Architecture View narrative — network architecture,
-      infrastructure architecture, and hosting & sites — that frames how this
-      solution is deployed and reached. Keep Deployment-View specifics
-      (hardware, bandwidth, network devices, protocols, SAN) in the dedicated
-      fields below.
-
+      Describe the network and infrastructure the solution is deployed on and how it is
+      reached. Keep hardware, bandwidth, network devices, protocols and storage details in
+      the dedicated fields below.
   - id: hardware
     title: Hardware
     type: markdown

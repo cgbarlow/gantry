@@ -1,20 +1,8 @@
 id: recovery-plan
 title: Recovery Plan
 purpose: >
-  How the solution recovers from failure — failover behaviour, resiliency
-  patterns, the scenarios tested, and who is responsible for each recovery
-  action. A recurring section across the reference documents (the SAD
-  template's "Failure & Recovery" / "Disaster Recovery", and the approved
-  ATLAS design's "Recovery Plan"), so it is a shared module rather than
-  content re-typed per stage. See
-  docs/research/design-definition-reference-reconciliation.md Section 1.
-
-  Complements the shared `nfrs` module: `nfrs.disaster-recovery-and-backup`
-  carries the RTO/RPO targets and backup schedule summary; this module
-  carries the full failover/resiliency/test/RACI detail. Wired into the
-  `handover` stage and the `as-built` artefact now; wiring it into
-  `detailed-design` / `sad` is a documented follow-up (see the reconciliation
-  doc, Sections 5 and 8).
+  Describe how the solution recovers from failure — how it fails over, how it stays
+  resilient, what has been tested and who is responsible.
 
 fields:
   - id: recovery-approach

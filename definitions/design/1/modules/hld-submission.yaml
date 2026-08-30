@@ -1,13 +1,8 @@
 id: hld-submission
 title: HLD Submission
 purpose: >
-  The cover-page content the Technical Architecture Committee needs to
-  process this paper as a submission, not just read it as a design —
-  what's being asked of them, who was already consulted, and where it goes
-  next. Derived from the TAC template's front matter — see
-  docs/research/stages-gates-module-specs.md Section 4.2. Kept separate
-  from `problem-statement` and `proposed-solution` because it's submission
-  metadata about the paper, not content about the problem or the solution.
+  Provide the cover information for this submission — what is being asked, who has been
+  consulted and what happens next.
 
 fields:
   - id: purpose-statement
@@ -15,48 +10,41 @@ fields:
     type: markdown
     required: true
     guidance: >
-      One sentence: what this document proposes and asks TAC to do about it.
-
+      Summarise in one sentence what this document proposes and what decision is being
+      asked for.
   - id: decision-requested
     title: Decision requested
     type: markdown
     required: true
     guidance: >
-      What TAC is being asked to do — Approve, Endorse, Discuss or Note —
-      and a short summary of the ask.
-
+      State the decision being asked for — Approve, Endorse, Discuss or Note — and a short
+      summary of the ask.
   - id: consultation
     title: Consultation
     type: markdown
     required: true
     guidance: >
-      Who was consulted before this paper reached TAC — which committees or
-      people, and whether they endorsed it or raised disagreement.
-
+      List who was consulted before this submission and whether they endorsed it or raised
+      disagreement.
   - id: next-steps
     title: Next steps
     type: markdown
     required: false
     guidance: >
-      Where this paper goes after TAC, if anywhere — e.g. Design Committee,
-      PEC, or another downstream governance step.
-
+      Describe where this paper goes next, if anywhere — for example, which governance step
+      follows.
   - id: authors-and-contributors
     title: Authors and contributors
     type: list
     required: false
     guidance: >
-      Who wrote or contributed to this paper — name and role (e.g.
-      "J. Smith — Architect"). Optional: this is document content for the
-      rendered artefact itself, distinct from the module instance file's own
-      frontmatter owner/git history, which already track who's editing the
-      file.
-
+      List who wrote or contributed to this paper — name and role (for example, "J. Smith —
+      Architect").
   - id: attachments
     title: Attachments
     type: list
     required: false
     guidance: >
-      Supplementary documents attached to this submission (name and a
-      reference/link), if any — e.g. a diagram export or a spreadsheet TAC
-      needs alongside the paper itself.
+      List any supplementary documents attached to this submission, with a name and
+      reference or link, such as a diagram export or spreadsheet needed alongside the
+      paper.

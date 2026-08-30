@@ -1,9 +1,8 @@
 id: soap-full-details
 title: Full SOAP Details
 purpose: >
-  The metadata, sequencing, and open questions that complete the Full SOAP
-  without introducing a second copy of content owned by the shared Shape
-  modules.
+  Provide the supporting details that complete the fuller summary — dates, sequencing
+  and open questions — without repeating content held elsewhere.
 
 fields:
   - id: epic-project

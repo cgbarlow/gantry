@@ -1,19 +1,9 @@
 id: architecture
 title: Architecture
 purpose: >
-  The solution's structure at build-ready depth — components, layers, and
-  the design decisions behind them. Derived from the SAD template's
-  Business Architecture View, High Level Architectural View and Logical
-  Components View sections — see
-  docs/research/stages-gates-module-specs.md Section 4.3. This module feeds
-  both the `sad` and `ssad` artefacts from the same data; see the `ssad`
-  artefact's note in definitions/design/definition.yaml.
-
-  Reviewed by the Design Authority before Build Readiness Confirmed. Use the
-  instance module file's frontmatter `status` (`draft` / `review` /
-  `agreed`) and an `owner`/`reviewer` field to track that review, per
-  README's "Working with agents" convention — there is no separate gate for
-  this review.
+  Describe the solution's structure in enough detail to build from — components,
+  layers, and the design decisions behind them. Explain what was chosen and why, and
+  how the parts fit together.
 
 fields:
   - id: business-context
@@ -21,9 +11,9 @@ fields:
     type: markdown
     required: false
     guidance: >
-      The business process(es), users and legislative/regulatory context
-      this architecture sits within — the Business Architecture View content
-      that the rest of this module's fields assume as background.
+      Describe the business processes, users and regulatory context this
+      architecture sits within — the background the rest of this section
+      assumes.
 
   - id: standards
     title: Applicable standards
