@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { apiFetch } from '../lib/apiFetch.js'
 import { renderMarkdown } from '../lib/markdown.js'
 
@@ -42,6 +42,9 @@ function GuideNavigation() {
 export function UserGuidePage() {
   const [guide, setGuide] = useState(null)
   const [error, setError] = useState(null)
+  // The screenshot the reader clicked, shown full-size in an overlay. `null` when closed.
+  const [zoomed, setZoomed] = useState(null)
+  const contentRef = useRef(null)
 
   useEffect(() => {
     let active = true
@@ -62,6 +65,34 @@ export function UserGuidePage() {
     }
   }, [])
 
+  // The guide body is injected as raw HTML, so its <img> elements can't carry
+  // preact props — decorate them for keyboard/AT once the markup is in the DOM.
+  useEffect(() => {
+    if (guide === null || !contentRef.current) return
+    for (const img of contentRef.current.querySelectorAll('img')) {
+      img.setAttribute('role', 'button')
+      img.setAttribute('tabindex', '0')
+      if (!img.getAttribute('title')) img.setAttribute('title', 'Click to enlarge')
+    }
+  }, [guide])
+
+  useEffect(() => {
+    if (!zoomed) return
+    function onKey(e) {
+      if (e.key === 'Escape') setZoomed(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [zoomed])
+
+  function activateImage(e) {
+    const img = e.target?.closest?.('img')
+    if (!img || !contentRef.current?.contains(img)) return
+    if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return
+    if (e.type === 'keydown') e.preventDefault()
+    setZoomed({ src: img.currentSrc || img.src, alt: img.alt || '' })
+  }
+
   return html`
     <header class="guide-header">
       <div class="brand">
@@ -77,8 +108,25 @@ export function UserGuidePage() {
           ? html`<p class="load-error">Failed to load: ${error}</p>`
           : guide === null
             ? html`<p class="loading">Loading User Guide…</p>`
-            : html`<div dangerouslySetInnerHTML=${{ __html: guide }} />`}
+            : html`<div
+                ref=${contentRef}
+                onClick=${activateImage}
+                onKeyDown=${activateImage}
+                dangerouslySetInnerHTML=${{ __html: guide }}
+              />`}
       </article>
     </main>
+    ${zoomed
+      ? html`<div
+          class="guide-lightbox"
+          role="dialog"
+          aria-modal="true"
+          aria-label=${zoomed.alt || 'Expanded screenshot'}
+          onClick=${() => setZoomed(null)}
+        >
+          <img src=${zoomed.src} alt=${zoomed.alt} />
+          <button type="button" class="guide-lightbox-close" aria-label="Close" onClick=${() => setZoomed(null)}>×</button>
+        </div>`
+      : null}
   `
 }

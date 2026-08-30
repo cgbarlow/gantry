@@ -47,7 +47,7 @@ Workspaces and instances can be archived — hidden from the dashboard's default
 
 ### Definition versions and the Definition Editor (experimental)
 
-Definitions are versioned. Version 1 of `design` is published and is the default for new instances; newer versions start as `draft`. Each version has its own `definition.yaml`, module specs, templates and `CHANGELOG.md`. Only the latest published version is used when no explicit version is requested; draft versions are opt-in via the wizard's version picker.
+Definitions are versioned. The first version of a definition is published and is the default for new instances; newer versions start as `draft`. Each version has its own `definition.yaml`, module specs, templates and `CHANGELOG.md`. Only the latest published version is used when no explicit version is requested; draft versions are opt-in via the wizard's version picker.
 
 The **Definition Editor** — linked from the Workspaces page header as **Definition Editor** — is an experimental, rudimentary screen for inspecting and editing definitions. It is explicitly experimental and rudimentary: the screen carries a disclaimer to that effect, and the editing experience is not yet at parity with hand-editing the YAML and templates.
 
@@ -67,15 +67,13 @@ A **Gate** is the decision point at the end of a Stage. A gate checks the artefa
 
 For a Workspace-backed Instance the gate is checked as part of the Work Item Detail card's **Check status** action; a local Instance checks it with **Check gate & sync work item**. See *Approval workflow* for the full sequence.
 
-The `design` Definition has these stages:
-
-<!-- GANTRY-DESIGN-STAGES -->
+A definition lists its stages, and the gate each one ends at, in its `definition.yaml`. The `design` definition, for instance, runs from initial shaping through high-level and detailed design to operational handover, each stage ending at its own gate.
 
 ## Modules & Fields
 
-A **Module** is a self-contained area of process content and the source of truth for that content. A Module is made up of **Fields**, which are the individual prompts shown in the editor. The `design` Definition combines those fields into documents later, rather than asking authors to maintain separate copies in each document.
+A **Module** is a self-contained area of process content and the source of truth for that content. A Module is made up of **Fields**, which are the individual prompts shown in the editor. A definition combines those fields into documents later, rather than asking authors to maintain separate copies in each document.
 
-For example, the `context` Module can ask for the initiative's driver, opportunity and scope. The `driver` Field records why the work is needed; it is not a separate document. In the same way, a security Module can capture the solution's security considerations in its own fields. Each field can have guidance and can be required at the gate where it matters.
+For example, one module might capture an initiative's context as separate fields — its driver, the opportunity, what is out of scope — and another might capture security considerations. A field is authored once and reused wherever an artefact needs it, never copied between documents. Each field can carry guidance and can be required only at the gate where it matters.
 
 You normally work through the editor's Module cards and save each Module as you complete it. The available Modules depend on the current Stage, while an artefact's own requirements decide whether that artefact is complete. This lets one set of content support multiple outputs without duplicating authoring work.
 
@@ -97,9 +95,7 @@ An **Artefact** is a rendered output such as a summary, design document or hando
 
 Each artefact declares the module or field content it `requires`. Those requirements determine whether that artefact is complete for its gate. Multiple artefacts can therefore render different views of the same modules without asking authors to duplicate content.
 
-The `design` Definition has these artefacts:
-
-<!-- GANTRY-DESIGN-ARTEFACTS -->
+A definition lists its artefacts in `definition.yaml`, each with the gate it renders at and the module or field content it `requires`. One definition can declare several artefacts over the same modules — a short summary and a fuller specification, say — without duplicating any authored content.
 
 ### Rendering
 

@@ -83,17 +83,10 @@ test('User Guide: loads markdown content, ordered navigation, and definition-bac
       assert.match(await page.locator('.guide-content').textContent(), /Request Approval/)
       assert.match(await page.locator('.guide-content').textContent(), /Workspace Settings/)
       const guideText = await page.locator('.guide-content').textContent()
-      assert.match(guideText, /Describe the initiative's context, proposed solution, team, estimates/)
-      assert.match(guideText, /Describe the proposed solution in enough detail to be approved before detailed design/)
-      assert.match(guideText, /Describe the architecture, integration, data, quality, security, risk/)
-      assert.match(guideText, /Record what was built and the information needed to hand it over for operation/)
-      assert.match(guideText, /Summarise the initiative's context, solution, team and estimates for the business case/)
-      assert.match(guideText, /Provide a fuller summary with detailed scope/)
-      assert.match(guideText, /Present the proposed solution, alternatives, risks and open questions for approval/)
-      assert.match(guideText, /Describe the complete solution architecture and its requirements/)
-      assert.match(guideText, /Describe the solution's design and operational readiness for the teams/)
-      assert.match(guideText, /Record what was built and the final handover information needed for operational use/)
-      assert.match(guideText, /context\.driver/)
+      // The guide describes concepts at a high level and no longer enumerates the
+      // design definition's specific stages, artefacts, modules or fields.
+      assert.doesNotMatch(guideText, /Its exit gate is/)
+      assert.doesNotMatch(guideText, /context\.driver/)
       // New subsections added in WI222 second pass
       const h3Texts = await page.locator('.guide-content h3').allTextContents()
       assert.ok(h3Texts.includes('Choosing a definition version'))
@@ -126,6 +119,41 @@ test('User Guide: loads markdown content, ordered navigation, and definition-bac
         assert.match(ct, /image\/png/, `fetching ${src} should return image/png, got ${ct}`)
       }
       assert.deepEqual(pageErrors, [])
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
+test('User Guide: screenshots fit the content column and open in a click-to-expand lightbox', async () => {
+  await withRunningServer(async (base) => {
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      await page.setViewportSize({ width: 1024, height: 800 })
+      await page.goto(`${base}/user-guide`)
+      await page.waitForSelector('.guide-content img', { timeout: DEFAULT_TIMEOUT })
+
+      // Every screenshot fits inside its content column, and the page never scrolls sideways.
+      const { maxImgWidth, contentWidth } = await page.evaluate(() => {
+        const imgs = [...document.querySelectorAll('.guide-content img')]
+        return {
+          maxImgWidth: Math.max(...imgs.map((img) => img.getBoundingClientRect().width)),
+          contentWidth: document.querySelector('.guide-content').getBoundingClientRect().width,
+        }
+      })
+      assert.ok(maxImgWidth <= contentWidth + 1, `widest image ${maxImgWidth}px should fit content column ${contentWidth}px`)
+      assert.ok(
+        await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1),
+        'the guide page must not scroll horizontally',
+      )
+
+      // Clicking a screenshot opens it in the lightbox; Escape closes it.
+      await page.locator('.guide-content img').first().click()
+      await page.waitForSelector('.guide-lightbox img', { timeout: 5_000 })
+      await page.keyboard.press('Escape')
+      await page.waitForSelector('.guide-lightbox', { state: 'detached', timeout: 5_000 })
     } finally {
       await browser.close()
     }

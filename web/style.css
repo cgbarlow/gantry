@@ -493,6 +493,9 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Stage navigation dropdown (WI232) — inline in ViewModeToolbar to the right of the artefact selector */
 .stage-navigation { margin: 0; display: inline-flex; align-items: center; }
+/* Neutralise .btn's default 0.5rem top/right margin so the trigger sits on the
+   same baseline as the segmented view-mode buttons (which reset it too). */
+.stage-navigation .btn { margin: 0; }
 .stage-navigation-dropdown { position: relative; display: inline-flex; }
 .stage-navigation-dropdown .menu {
   display: none;
@@ -1246,6 +1249,46 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .guide-content ul { margin: 0 0 18px; padding-left: 22px; }
 .guide-content li { margin: 5px 0; }
 .guide-content code { font-family: var(--font-mono); font-size: 0.9em; }
+.guide-content img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 10px 0 22px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  cursor: zoom-in;
+}
+.guide-content img:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+
+.guide-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: rgba(0, 0, 0, 0.82);
+  cursor: zoom-out;
+}
+.guide-lightbox img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--radius);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+}
+.guide-lightbox-close {
+  position: fixed;
+  top: 14px;
+  right: 20px;
+  padding: 6px 10px;
+  font-size: 26px;
+  line-height: 1;
+  color: #fff;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
 
 @media (max-width: 760px) {
   .app-header .brand { flex-wrap: wrap; }
