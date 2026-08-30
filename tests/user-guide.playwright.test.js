@@ -94,6 +94,37 @@ test('User Guide: loads markdown content, ordered navigation, and definition-bac
       assert.match(guideText, /Frame the solution's design and operational readiness/)
       assert.match(guideText, /Capture what was built and the final handover information/)
       assert.match(guideText, /context\.driver/)
+      // New subsections added in WI222 second pass
+      const h3Texts = await page.locator('.guide-content h3').allTextContents()
+      assert.ok(h3Texts.includes('Choosing a definition version'))
+      assert.ok(h3Texts.includes('Dashboard PR status badge'))
+      assert.ok(h3Texts.includes('Archive and restore'))
+      assert.ok(h3Texts.some((t) => t.includes('Definition versions and the Definition Editor')))
+      assert.ok(h3Texts.includes('The editor toolbar'))
+      assert.ok(h3Texts.includes('Rendering'))
+      assert.match(guideText, /Definition Editor/)
+      assert.match(guideText, /experimental/)
+      assert.match(guideText, /Show commit history/)
+      assert.match(guideText, /Navigation/)
+      assert.match(guideText, /PR OPEN/)
+
+      // Every image inside the guide has a non-empty src and serves a PNG
+      const imgCount = await page.locator('.guide-content img').count()
+      assert.ok(imgCount >= 5, `expected at least 5 guide images, got ${imgCount}`)
+      const srcs = await page.locator('.guide-content img').evaluateAll((imgs) => imgs.map((img) => img.getAttribute('src')))
+      for (const src of srcs) {
+        assert.ok(src && src.trim().length > 0, `image src should be non-empty, got ${JSON.stringify(src)}`)
+        assert.ok(src.startsWith('/user-guide-images/'), `image src should be root-relative under /user-guide-images/, got ${src}`)
+        assert.match(src, /\.png$/)
+        const alt = await page.locator(`.guide-content img[src="${src}"]`).getAttribute('alt')
+        assert.ok(alt && alt.trim().length > 0, `image ${src} should have non-empty alt text`)
+      }
+      for (const src of srcs) {
+        const res = await fetch(`${base}${src}`)
+        assert.equal(res.status, 200, `fetching ${src} should return 200, got ${res.status}`)
+        const ct = res.headers.get('content-type') ?? ''
+        assert.match(ct, /image\/png/, `fetching ${src} should return image/png, got ${ct}`)
+      }
       assert.deepEqual(pageErrors, [])
     } finally {
       await browser.close()
