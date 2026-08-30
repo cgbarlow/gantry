@@ -1156,3 +1156,62 @@ test('GET /api/instance/commits rejects a local (non-Workspace-backed) instance 
     rmSync(instancesDir, { recursive: true, force: true })
   }
 })
+
+// ---------- #234: definition changelog endpoint ----------
+
+test('GET /api/definitions/design/versions/1/changelog returns seeded ## v1 text', async () => {
+  await withRunningServer({}, async (base) => {
+    const res = await fetch(`${base}/api/definitions/design/versions/1/changelog`)
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    assert.equal(body.version, 1)
+    assert.equal(typeof body.changelog, 'string')
+    assert.match(body.changelog, /## v1/)
+    assert.match(body.changelog, /Initial published version/)
+  })
+})
+
+test('GET /api/definitions/:id/versions/:n/changelog returns 200 with changelog:null when file is missing', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-changelog-server-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    // Remove seeded changelog to simulate missing file
+    try { rmSync(join(definitionsDir, 'design/1/CHANGELOG.md'), { force: true }) } catch {}
+    await withRunningServer({ definitionsDir }, async (base) => {
+      const res = await fetch(`${base}/api/definitions/design/versions/1/changelog`)
+      assert.equal(res.status, 200)
+      const body = await res.json()
+      assert.equal(body.version, 1)
+      assert.equal(body.changelog, null)
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+  }
+})
+
+test('GET /api/definitions/design/versions/abc/changelog rejects non-numeric version with 400', async () => {
+  await withRunningServer({}, async (base) => {
+    const res = await fetch(`${base}/api/definitions/design/versions/abc/changelog`)
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.match(body.error, /Invalid version/)
+  })
+})
+
+test('GET /api/definitions/design/versions/0/changelog rejects non-positive version with 400', async () => {
+  await withRunningServer({}, async (base) => {
+    const res = await fetch(`${base}/api/definitions/design/versions/0/changelog`)
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.match(body.error, /Invalid version/)
+  })
+})
+
+test('GET /api/definitions/no-such-def/versions/1/changelog rejects unknown definition with 400', async () => {
+  await withRunningServer({}, async (base) => {
+    const res = await fetch(`${base}/api/definitions/no-such-def/versions/1/changelog`)
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.match(body.error, /Unknown definition/)
+  })
+})

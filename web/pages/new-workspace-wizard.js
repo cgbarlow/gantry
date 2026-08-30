@@ -34,6 +34,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal, effect } from '@preact/signals'
 import { apiFetch } from '../lib/apiFetch.js'
+import { renderMarkdown } from '../lib/markdown.js'
 import { TICKETING_SYSTEMS, defaultTicketingSystem } from '../lib/ticketingSystem.js'
 
 // The work item type used when nothing more specific is looked up or
@@ -64,6 +65,8 @@ const step = signal('workspace') // 'workspace' | 'instance' | 'link' | 'done'
 const definitions = signal([])
 const selectedDefinitionId = signal('')
 const selectedVersion = signal('latest')
+const changelog = signal(null) // string|null — the selected version's CHANGELOG.md text (#234), fire-and-forget
+const changelogLoading = signal(false)
 const draftConfirmVisible = signal(false)
 const draftConfirmPending = signal(false)
 const nameField = signal('')
@@ -139,6 +142,8 @@ function resetWizard() {
   step.value = 'workspace'
   selectedDefinitionId.value = definitions.value[0]?.id ?? ''
   selectedVersion.value = 'latest'
+  changelog.value = null
+  changelogLoading.value = false
   draftConfirmVisible.value = false
   draftConfirmPending.value = false
   nameField.value = ''
@@ -236,6 +241,35 @@ function resolvedVersionStatus() {
   const entry = def.versions.find((x) => x.version === v)
   return entry?.status ?? null
 }
+
+// Fire-and-forget fetch of the selected version's changelog (#234) — never blocks instance creation, independent state.
+effect(() => {
+  const def = selectedDefinition()
+  const v = resolvedVersion()
+  if (!def || v == null) {
+    changelog.value = null
+    changelogLoading.value = false
+    return
+  }
+  const id = def.id
+  changelogLoading.value = true
+  changelog.value = null
+  fetch(`/api/definitions/${encodeURIComponent(id)}/versions/${encodeURIComponent(String(v))}/changelog`)
+    .then(async (res) => {
+      if (!res.ok) throw new Error(`changelog fetch failed (${res.status})`)
+      const body = await res.json()
+      return body.changelog
+    })
+    .then((text) => {
+      changelog.value = text
+    })
+    .catch(() => {
+      changelog.value = null
+    })
+    .finally(() => {
+      changelogLoading.value = false
+    })
+})
 
 function continueFromInstanceStep() {
   if (!nameField.value.trim() || !directoryField.value.trim() || !selectedDefinitionId.value) return
@@ -578,6 +612,7 @@ function InstanceStep() {
             >
               <div class="name">${d.title} (${d.id})</div>
               <div class="stages">${d.stages.map((s) => s.title).join(' → ')}</div>
+              ${d.description ? html`<div class="wizard-field-hint">${d.description}</div>` : null}
             </div>
           `
         )}
@@ -603,6 +638,11 @@ function InstanceStep() {
             ${def.versions.map((v) => html`<option value=${String(v.version)}>v${v.version} — ${v.status}</option>`)}
           </select>
           <p class="wizard-field-hint">Draft versions require confirmation before creating an instance.</p>
+          ${(() => {
+            if (changelogLoading.value) return html`<p class="wizard-field-hint">Loading changelog…</p>`
+            if (changelog.value == null) return html`<p class="wizard-field-hint">No changelog for this version.</p>`
+            return html`<div class="wizard-changelog" dangerouslySetInnerHTML=${{ __html: renderMarkdown(changelog.value) }} />`
+          })()}
         </div>
       `
     })()}

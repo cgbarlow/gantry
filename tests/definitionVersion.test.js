@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, cpSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { loadDefinition, listDefinitions, findDefinitionProblems } from '../lib/definition.js'
+import { loadDefinition, listDefinitions, findDefinitionProblems, loadDefinitionChangelog } from '../lib/definition.js'
 import { createInstance, readInstance } from '../lib/instance.js'
 import { getStatus } from '../lib/status.js'
 import { checkGate } from '../lib/check.js'
@@ -108,4 +108,46 @@ test('findDefinitionProblems is version-scoped', () => {
     assert.deepEqual(p1, [])
     assert.deepEqual(p2, [])
   })
+})
+
+test('listDefinitions rows include description from the definition', () => {
+  const defs = listDefinitions()
+  const design = defs.find((d) => d.id === 'design')
+  assert.equal(typeof design.description, 'string')
+  assert.match(design.description, /\S/)
+  // Must match the real definition.yaml description verbatim (non-empty)
+  const rawText = readFileSync('definitions/design/1/definition.yaml', 'utf8')
+  const raw = yaml.parse(rawText)
+  assert.equal(design.description.trim(), raw.description.trim())
+})
+
+test('loadDefinitionChangelog returns seeded ## v1 text and null for missing file, and rejects bad inputs', () => {
+  // Seeded file — real definitions dir
+  const text = loadDefinitionChangelog('design', 1)
+  assert.equal(typeof text, 'string')
+  assert.match(text, /## v1/)
+  assert.match(text, /Initial published version of the Solution Design definition/)
+
+  // Missing file — build a temp fixture with version 1 having no CHANGELOG.md
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-changelog-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    // Remove the seeded changelog to simulate missing file
+    const changelogPath = join(definitionsDir, 'design/1/CHANGELOG.md')
+    try { rmSync(changelogPath, { force: true }) } catch {}
+    // Verify loader returns null, not throw
+    const missing = loadDefinitionChangelog('design', 1, { definitionsDir })
+    assert.equal(missing, null)
+
+    // Unknown definitionId — traversal guard
+    assert.throws(() => loadDefinitionChangelog('../../etc', 1, { definitionsDir }), /Unknown definition/)
+    assert.throws(() => loadDefinitionChangelog('no-such-def', 1, { definitionsDir }), /Unknown definition/)
+
+    // Bad versions — non-positive / non-integer / non-numeric
+    for (const bad of [0, -1, '0', '-1', '1.5', 'abc', '', '   ', null, undefined]) {
+      assert.throws(() => loadDefinitionChangelog('design', bad, { definitionsDir }), /Invalid definition version/, `expected throw for version ${JSON.stringify(bad)}`)
+    }
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+  }
 })
