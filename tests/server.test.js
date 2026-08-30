@@ -1278,3 +1278,82 @@ test('GET /api/definitions/design/versions/99 returns 404 for non-existent versi
     assert.equal(res.status, 404)
   })
 })
+
+test('PUT /api/definitions/:id/versions/:n happy path persists and GET reflects it', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-put-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'inst-put-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    cpSync(join(definitionsDir, 'design/1'), join(definitionsDir, 'design/2'), { recursive: true })
+    let t = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    t = t.replace('version: 1', 'version: 2').replace('status: published', 'status: draft')
+    writeFileSync(join(definitionsDir, 'design/2/definition.yaml'), t)
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      const getRes = await fetch(`${base}/api/definitions/design/versions/2`)
+      assert.equal(getRes.status, 200)
+      const proj = await getRes.json()
+      proj.modules[0].title = 'Updated Title'
+      const putRes = await fetch(`${base}/api/definitions/design/versions/2`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(proj) })
+      assert.equal(putRes.status, 200)
+      const putBody = await putRes.json()
+      assert.equal(putBody.ok, true)
+      assert.equal(putBody.modules.find((m) => m.id === proj.modules[0].id).title, 'Updated Title')
+      const get2 = await (await fetch(`${base}/api/definitions/design/versions/2`)).json()
+      assert.equal(get2.modules.find((m) => m.id === proj.modules[0].id).title, 'Updated Title')
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('PUT /api/definitions/design/versions/1 on published returns 409', async () => {
+  await withRunningServer({}, async (base) => {
+    const getRes = await fetch(`${base}/api/definitions/design/versions/1`)
+    const proj = await getRes.json()
+    const putRes = await fetch(`${base}/api/definitions/design/versions/1`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(proj) })
+    assert.equal(putRes.status, 409)
+  })
+})
+
+test('PUT /api/definitions/design/versions/2 with malformed body returns 400', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-put2-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'inst-put2-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    cpSync(join(definitionsDir, 'design/1'), join(definitionsDir, 'design/2'), { recursive: true })
+    let t = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    t = t.replace('version: 1', 'version: 2').replace('status: published', 'status: draft')
+    writeFileSync(join(definitionsDir, 'design/2/definition.yaml'), t)
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      const putRes = await fetch(`${base}/api/definitions/design/versions/2`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+      assert.equal(putRes.status, 400)
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('PUT /api/definitions/design/versions/2 with structurally broken payload returns 422', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-put3-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'inst-put3-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    cpSync(join(definitionsDir, 'design/1'), join(definitionsDir, 'design/2'), { recursive: true })
+    let t = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    t = t.replace('version: 1', 'version: 2').replace('status: published', 'status: draft')
+    writeFileSync(join(definitionsDir, 'design/2/definition.yaml'), t)
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      const proj = await (await fetch(`${base}/api/definitions/design/versions/2`)).json()
+      proj.artefacts[0].requires.push('missing-module-xyz')
+      const putRes = await fetch(`${base}/api/definitions/design/versions/2`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(proj) })
+      assert.equal(putRes.status, 422)
+      const body = await putRes.json()
+      assert.ok(Array.isArray(body.problems) && body.problems.length > 0)
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})

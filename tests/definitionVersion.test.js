@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, cpSync, rmSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, cpSync, rmSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { loadDefinition, listDefinitions, findDefinitionProblems, loadDefinitionChangelog } from '../lib/definition.js'
+import { loadDefinition, listDefinitions, findDefinitionProblems, loadDefinitionChangelog, writeDefinitionVersion, definitionVersionProjection } from '../lib/definition.js'
 import { createInstance, readInstance } from '../lib/instance.js'
 import { getStatus } from '../lib/status.js'
 import { checkGate } from '../lib/check.js'
@@ -149,5 +149,116 @@ test('loadDefinitionChangelog returns seeded ## v1 text and null for missing fil
     }
   } finally {
     rmSync(definitionsDir, { recursive: true, force: true })
+  }
+})
+
+// WI236 — writeDefinitionVersion
+test('writeDefinitionVersion round-trip with unchanged projection deep-equals original', () => {
+  withVersionedFixture(({ definitionsDir }) => {
+    const def = loadDefinition('design', { definitionsDir, version: 2 })
+    const proj = definitionVersionProjection(def)
+    const result = writeDefinitionVersion('design', 2, proj, { definitionsDir })
+    assert.ok(result && !result.problems)
+    const reloaded = loadDefinition('design', { definitionsDir, version: 2 })
+    const proj2 = definitionVersionProjection(reloaded)
+    assert.deepEqual(proj2, proj)
+  })
+})
+
+test('writeDefinitionVersion add a field to a module persists', () => {
+  withVersionedFixture(({ definitionsDir }) => {
+    const def = loadDefinition('design', { definitionsDir, version: 2 })
+    const proj = definitionVersionProjection(def)
+    const targetMod = proj.modules.find((m) => m.id === 'extra-module')
+    targetMod.fields.push({ id: 'new-field', title: 'New Field', type: 'list', guidance: 'hello' })
+    writeDefinitionVersion('design', 2, proj, { definitionsDir })
+    const reloaded = loadDefinition('design', { definitionsDir, version: 2 })
+    const proj2 = definitionVersionProjection(reloaded)
+    const mod = proj2.modules.find((m) => m.id === 'extra-module')
+    assert.ok(mod.fields.some((f) => f.id === 'new-field'))
+  })
+})
+
+test('writeDefinitionVersion rename a module id updates files and refs', () => {
+  withVersionedFixture(({ definitionsDir }) => {
+    const def = loadDefinition('design', { definitionsDir, version: 2 })
+    const proj = definitionVersionProjection(def)
+    const oldId = 'extra-module'
+    const newId = 'renamed-module'
+    for (const m of proj.modules) if (m.id === oldId) m.id = newId
+    for (const s of proj.stages) s.modules = s.modules.map((mid) => mid === oldId ? newId : mid)
+    for (const a of proj.artefacts) a.requires = a.requires.map((r) => r === oldId ? newId : r.startsWith(oldId + '.') ? newId + r.slice(oldId.length) : r)
+    const result = writeDefinitionVersion('design', 2, proj, { definitionsDir })
+    assert.ok(result && !result.problems)
+    assert.equal(existsSync(join(definitionsDir, 'design/2/modules/extra-module.yaml')), false)
+    assert.equal(existsSync(join(definitionsDir, 'design/2/modules/renamed-module.yaml')), true)
+    const reloaded = loadDefinition('design', { definitionsDir, version: 2 })
+    const proj2 = definitionVersionProjection(reloaded)
+    assert.ok(proj2.modules.some((m) => m.id === newId))
+    assert.ok(proj2.stages.some((s) => s.modules.includes(newId)))
+  })
+})
+
+test('writeDefinitionVersion with missing module reference returns problems and changes no files', () => {
+  withVersionedFixture(({ definitionsDir }) => {
+    const def = loadDefinition('design', { definitionsDir, version: 2 })
+    const proj = definitionVersionProjection(def)
+    proj.artefacts[0].requires.push('missing-module')
+    const beforeDef = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    const beforeMod = readFileSync(join(definitionsDir, 'design/2/modules/context.yaml'), 'utf8')
+    const result = writeDefinitionVersion('design', 2, proj, { definitionsDir })
+    assert.ok(result && Array.isArray(result.problems) && result.problems.length > 0)
+    const afterDef = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    const afterMod = readFileSync(join(definitionsDir, 'design/2/modules/context.yaml'), 'utf8')
+    assert.equal(afterDef, beforeDef)
+    assert.equal(afterMod, beforeMod)
+  })
+})
+
+test('writeDefinitionVersion against published version throws', () => {
+  withVersionedFixture(({ definitionsDir }) => {
+    const def = loadDefinition('design', { definitionsDir, version: 1 })
+    const proj = definitionVersionProjection(def)
+    assert.throws(() => writeDefinitionVersion('design', 1, proj, { definitionsDir }), /not a draft/)
+  })
+})
+
+test('writeDefinitionVersion preserves templates/ and CHANGELOG.md and removes stale module files', () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-preserve-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'inst-preserve-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    cpSync(join(definitionsDir, 'design/1'), join(definitionsDir, 'design/2'), { recursive: true })
+    let yamlText = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    yamlText = yamlText.replace('version: 1', 'version: 2').replace('status: published', 'status: draft')
+    writeFileSync(join(definitionsDir, 'design/2/definition.yaml'), yamlText)
+    writeFileSync(join(definitionsDir, 'design/2/modules/extra-module.yaml'), 'id: extra-module\ntitle: Extra Module\nfields:\n  - id: note\n    title: Note\n    type: markdown\n    required: true\n')
+    let raw = yaml.parse(readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8'))
+    raw.stages[0].modules.push('extra-module')
+    writeFileSync(join(definitionsDir, 'design/2/definition.yaml'), yaml.stringify(raw))
+    // Add templates/ and CHANGELOG.md to draft version
+    mkdirSync(join(definitionsDir, 'design/2/templates'), { recursive: true })
+    writeFileSync(join(definitionsDir, 'design/2/templates/dummy.md.tmpl'), 'dummy template content')
+    writeFileSync(join(definitionsDir, 'design/2/CHANGELOG.md'), '# Changelog v2\ninitial draft')
+    const beforeTemplate = readFileSync(join(definitionsDir, 'design/2/templates/dummy.md.tmpl'), 'utf8')
+    const beforeChangelog = readFileSync(join(definitionsDir, 'design/2/CHANGELOG.md'), 'utf8')
+    const def = loadDefinition('design', { definitionsDir, version: 2 })
+    const proj = definitionVersionProjection(def)
+    // Remove extra-module from structure (should delete its file) and add a field elsewhere
+    proj.modules = proj.modules.filter((m) => m.id !== 'extra-module')
+    for (const s of proj.stages) s.modules = s.modules.filter((mid) => mid !== 'extra-module')
+    for (const a of proj.artefacts) a.requires = a.requires.filter((r) => r !== 'extra-module' && !r.startsWith('extra-module.'))
+    const result = writeDefinitionVersion('design', 2, proj, { definitionsDir })
+    assert.ok(result && !result.problems)
+    // templates/ and CHANGELOG.md must still exist with unchanged contents
+    assert.equal(existsSync(join(definitionsDir, 'design/2/templates/dummy.md.tmpl')), true)
+    assert.equal(readFileSync(join(definitionsDir, 'design/2/templates/dummy.md.tmpl'), 'utf8'), beforeTemplate)
+    assert.equal(existsSync(join(definitionsDir, 'design/2/CHANGELOG.md')), true)
+    assert.equal(readFileSync(join(definitionsDir, 'design/2/CHANGELOG.md'), 'utf8'), beforeChangelog)
+    // stale module file must be gone
+    assert.equal(existsSync(join(definitionsDir, 'design/2/modules/extra-module.yaml')), false)
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
   }
 })
