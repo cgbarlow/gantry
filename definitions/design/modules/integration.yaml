@@ -22,15 +22,62 @@ fields:
       crosses the boundary.
 
   - id: network-and-infrastructure
-    title: Network and infrastructure
+    title: Network and infrastructure architecture
     type: markdown
     required: false
     guidance: >
-      Network architecture, infrastructure architecture, hosting and sites
-      relevant to how this solution is deployed and reached — including,
-      where they apply: application/software licensing, hardware sizing,
-      bandwidth requirements, and the network devices/protocols traffic
-      crosses.
+      The Technology Architecture View narrative — network architecture,
+      infrastructure architecture, and hosting & sites — that frames how this
+      solution is deployed and reached. Keep Deployment-View specifics
+      (hardware, bandwidth, network devices, protocols, SAN) in the dedicated
+      fields below.
+
+  - id: hardware
+    title: Hardware
+    type: markdown
+    required: false
+    guidance: >
+      Whether new hardware is needed and how it is sized — environment, OS /
+      version / 32-64-bit, hypervisor, memory and CPU per guest, virtualization
+      approach, and any licensing tied to cores or memory. Include batch-processing
+      RAM needs where relevant.
+
+  - id: bandwidth
+    title: Bandwidth
+    type: markdown
+    required: false
+    guidance: >
+      Whether the current LAN / WAN / cloud network can handle the new data
+      flows — link capacities, anticipated data volumes, and utilisation over
+      time (e.g. MAN link, ExpressRoute circuit, AzCopy parallelism and wave
+      sizing).
+
+  - id: network-devices
+    title: Network Devices
+    type: markdown
+    required: false
+    guidance: >
+      Network devices the solution depends on or changes — DNS servers, reverse
+      proxies, switches / routers — including IPv6 support where relevant.
+
+  - id: communication-and-network-protocols
+    title: Communication & Network Protocols
+    type: markdown
+    required: false
+    guidance: >
+      New logical communication paths and protocols for the solution — one row
+      per path with environment, protocol, from / to (system or device), port,
+      path direction (unidirectional / bidirectional), and any other comments.
+      Only new or changed protocols, not every existing enabled one.
+
+  - id: san
+    title: SAN (Database, Application Server, Backup, DR)
+    type: markdown
+    required: false
+    guidance: >
+      Storage-area-network and disk requirements — database, application server,
+      backup and DR — per environment and disk-tier type. Refer to service
+      catalogues where relevant.
 
   - id: environments
     title: Environments

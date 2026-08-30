@@ -91,9 +91,37 @@
 
 <%~ it.modules.integration.interfaces %>
 <% if (it.modules.integration['network-and-infrastructure']) { %>
-## Network and infrastructure
+## Network and infrastructure architecture
 
 <%~ it.modules.integration['network-and-infrastructure'] %>
+<% } %>
+<% if (it.modules.integration.hardware || it.modules.integration.bandwidth || it.modules.integration['network-devices'] || it.modules.integration['communication-and-network-protocols'] || it.modules.integration.san) { %>
+## Deployment view
+<% if (it.modules.integration.hardware) { %>
+### Hardware
+
+<%~ it.modules.integration.hardware %>
+<% } %>
+<% if (it.modules.integration.bandwidth) { %>
+### Bandwidth
+
+<%~ it.modules.integration.bandwidth %>
+<% } %>
+<% if (it.modules.integration['network-devices']) { %>
+### Network Devices
+
+<%~ it.modules.integration['network-devices'] %>
+<% } %>
+<% if (it.modules.integration['communication-and-network-protocols']) { %>
+### Communication & Network Protocols
+
+<%~ it.modules.integration['communication-and-network-protocols'] %>
+<% } %>
+<% if (it.modules.integration.san) { %>
+### SAN (Database, Application Server, Backup, DR)
+
+<%~ it.modules.integration.san %>
+<% } %>
 <% } %>
 <% if (it.modules.integration.environments && it.modules.integration.environments.length) { %>
 ## Environments
