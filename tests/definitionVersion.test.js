@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, cpSync, rmSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { loadDefinition, listDefinitions, findDefinitionProblems, loadDefinitionChangelog, writeDefinitionVersion, definitionVersionProjection } from '../lib/definition.js'
+import { loadDefinition, listDefinitions, findDefinitionProblems, loadDefinitionChangelog, writeDefinitionVersion, definitionVersionProjection, createDraftVersion, cloneDefinition, archiveDefinition, restoreDefinition, isDefinitionArchived, publishDefinitionVersion, listVersionNumbers } from '../lib/definition.js'
 import { createInstance, readInstance } from '../lib/instance.js'
 import { getStatus } from '../lib/status.js'
 import { checkGate } from '../lib/check.js'
@@ -260,5 +260,141 @@ test('writeDefinitionVersion preserves templates/ and CHANGELOG.md and removes s
   } finally {
     rmSync(definitionsDir, { recursive: true, force: true })
     rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// WI237 — createDraftVersion, cloneDefinition, archive/restore, publish
+
+test('createDraftVersion creates new <max+1>/ with templates carried, version bumped, status draft, CHANGELOG reset', () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-draft-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    mkdirSync(join(definitionsDir, 'design/1/templates'), { recursive: true })
+    writeFileSync(join(definitionsDir, 'design/1/templates/tmpl.md.tmpl'), 'tmpl')
+    writeFileSync(join(definitionsDir, 'design/1/CHANGELOG.md'), '## v1\n\nInitial\n')
+    const beforeVersions = listVersionNumbers('design', definitionsDir)
+    assert.deepEqual(beforeVersions, [1])
+    const result = createDraftVersion('design', { definitionsDir })
+    assert.deepEqual(result, { version: 2 })
+    assert.equal(existsSync(join(definitionsDir, 'design/2/definition.yaml')), true)
+    assert.equal(existsSync(join(definitionsDir, 'design/2/templates/tmpl.md.tmpl')), true)
+    const raw = yaml.parse(readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8'))
+    assert.equal(raw.version, 2)
+    assert.equal(raw.status, 'draft')
+    assert.equal(raw.id, 'design')
+    // key order preserved: id, version, status first
+    const text = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    const lines = text.split('\n').filter(Boolean)
+    assert.ok(lines[0].startsWith('id:'))
+    assert.ok(lines[1].startsWith('version:'))
+    assert.ok(lines[2].startsWith('status:'))
+    assert.equal(readFileSync(join(definitionsDir, 'design/2/CHANGELOG.md'), 'utf8'), '## v2\n\nDraft.\n')
+    assert.deepEqual(listVersionNumbers('design', definitionsDir), [1, 2])
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+  }
+})
+
+test('cloneDefinition throws for taken id / bad slug / unknown source; on success newId/1 has id:newId, version:1, status:draft and templates present', () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-clone-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    mkdirSync(join(definitionsDir, 'design/1/templates'), { recursive: true })
+    writeFileSync(join(definitionsDir, 'design/1/templates/tmpl.md.tmpl'), 'tmpl')
+    // bad slug
+    assert.throws(() => cloneDefinition('design', 'bad/slug', { definitionsDir }), /Invalid slug/)
+    assert.throws(() => cloneDefinition('design', '..', { definitionsDir }), /Invalid slug/)
+    // unknown source
+    assert.throws(() => cloneDefinition('unknown', 'newid', { definitionsDir }), /Unknown definition/)
+    // happy clone
+    const result = cloneDefinition('design', 'cloned', { definitionsDir })
+    assert.deepEqual(result, { id: 'cloned' })
+    assert.equal(existsSync(join(definitionsDir, 'cloned/1/definition.yaml')), true)
+    const raw = yaml.parse(readFileSync(join(definitionsDir, 'cloned/1/definition.yaml'), 'utf8'))
+    assert.equal(raw.id, 'cloned')
+    assert.equal(raw.version, 1)
+    assert.equal(raw.status, 'draft')
+    assert.equal(existsSync(join(definitionsDir, 'cloned/1/templates/tmpl.md.tmpl')), true)
+    assert.equal(readFileSync(join(definitionsDir, 'cloned/1/CHANGELOG.md'), 'utf8'), '## v1\n\nDraft.\n')
+    // taken id
+    assert.throws(() => cloneDefinition('design', 'cloned', { definitionsDir }), /already exists/)
+    // clone prefers latest published over max draft: create a draft v2 then clone should still copy v1
+    createDraftVersion('design', { definitionsDir })
+    const result2 = cloneDefinition('design', 'cloned2', { definitionsDir })
+    assert.deepEqual(result2, { id: 'cloned2' })
+    // cloned2's modules should match v1 not v2's extra? Since v2 is just copy, same modules, but check id/version
+    const raw2 = yaml.parse(readFileSync(join(definitionsDir, 'cloned2/1/definition.yaml'), 'utf8'))
+    assert.equal(raw2.id, 'cloned2')
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+  }
+})
+
+test('archiveDefinition then listDefinitions omits id; includeArchived includes with archived:true; restore reverses; both idempotent', () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-archive-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    cpSync('definitions/design/1', join(definitionsDir, 'other/1'), { recursive: true })
+    let raw = yaml.parse(readFileSync(join(definitionsDir, 'other/1/definition.yaml'), 'utf8'))
+    raw.id = 'other'
+    writeFileSync(join(definitionsDir, 'other/1/definition.yaml'), yaml.stringify(raw))
+    assert.equal(isDefinitionArchived('design', { definitionsDir }), false)
+    archiveDefinition('design', { definitionsDir })
+    assert.equal(isDefinitionArchived('design', { definitionsDir }), true)
+    assert.equal(listDefinitions({ definitionsDir }).some((d) => d.id === 'design'), false)
+    const withArchived = listDefinitions({ definitionsDir, includeArchived: true })
+    const designRow = withArchived.find((d) => d.id === 'design')
+    assert.ok(designRow)
+    assert.equal(designRow.archived, true)
+    const otherRow = withArchived.find((d) => d.id === 'other')
+    assert.equal(otherRow.archived, false)
+    // idempotent archive
+    archiveDefinition('design', { definitionsDir })
+    assert.equal(isDefinitionArchived('design', { definitionsDir }), true)
+    restoreDefinition('design', { definitionsDir })
+    assert.equal(isDefinitionArchived('design', { definitionsDir }), false)
+    assert.equal(listDefinitions({ definitionsDir }).some((d) => d.id === 'design'), true)
+    // idempotent restore
+    restoreDefinition('design', { definitionsDir })
+    assert.equal(isDefinitionArchived('design', { definitionsDir }), false)
+    // throws for unknown
+    assert.throws(() => archiveDefinition('unknown', { definitionsDir }), /not found/)
+    assert.throws(() => restoreDefinition('unknown', { definitionsDir }), /not found/)
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+  }
+})
+
+test('publishDefinitionVersion flips clean draft to published; returns problems for broken draft and writes nothing; throws for already-published', () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-publish-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    cpSync(join(definitionsDir, 'design/1'), join(definitionsDir, 'design/2'), { recursive: true })
+    let t = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    t = t.replace('version: 1', 'version: 2').replace('status: published', 'status: draft')
+    writeFileSync(join(definitionsDir, 'design/2/definition.yaml'), t)
+    // clean publish should succeed
+    const result = publishDefinitionVersion('design', 2, { definitionsDir })
+    assert.equal(result.version, 2)
+    assert.equal(result.status, 'published')
+    const rawAfter = yaml.parse(readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8'))
+    assert.equal(rawAfter.status, 'published')
+    // already published should throw not a draft
+    assert.throws(() => publishDefinitionVersion('design', 2, { definitionsDir }), /not a draft/)
+    assert.throws(() => publishDefinitionVersion('design', 1, { definitionsDir }), /not a draft/)
+    // broken draft: create new draft v3 with bad module reference
+    const r3 = createDraftVersion('design', { definitionsDir })
+    assert.equal(r3.version, 3)
+    let raw3 = yaml.parse(readFileSync(join(definitionsDir, 'design/3/definition.yaml'), 'utf8'))
+    raw3.stages[0].modules.push('missing-mod')
+    writeFileSync(join(definitionsDir, 'design/3/definition.yaml'), yaml.stringify(raw3))
+    const before = readFileSync(join(definitionsDir, 'design/3/definition.yaml'), 'utf8')
+    const broken = publishDefinitionVersion('design', 3, { definitionsDir })
+    assert.ok(broken.problems && broken.problems.length > 0)
+    const after = readFileSync(join(definitionsDir, 'design/3/definition.yaml'), 'utf8')
+    assert.equal(after, before, 'broken publish should not write')
+    assert.equal(yaml.parse(after).status, 'draft')
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
   }
 })

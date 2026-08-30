@@ -1432,4 +1432,12 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-field:first-child { border-top: none; }
 .defn-field-heading { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
 .defn-required { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.defn-rail-row.archived { opacity: 0.6; border-style: dashed; }
+.defn-rail-actions { margin-top: 6px; display: flex; gap: 6px; }
+.defn-rail-controls { margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px; }
+.defn-show-archived { font-size: 12px; display: flex; align-items: center; gap: 6px; }
+.defn-clone-control { display: flex; flex-direction: column; gap: 6px; }
+.defn-clone-input { display: flex; flex-direction: column; gap: 6px; }
+.defn-clone-actions { display: flex; gap: 6px; }
+.defn-header-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
 @media (max-width: 700px) { .defn-viewer-layout { grid-template-columns: 1fr; } }

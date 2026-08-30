@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, isAbsolute, relative } from 'node:path'
 import { createServer } from '../lib/server.js'
@@ -1351,6 +1351,161 @@ test('PUT /api/definitions/design/versions/2 with structurally broken payload re
       assert.equal(putRes.status, 422)
       const body = await putRes.json()
       assert.ok(Array.isArray(body.problems) && body.problems.length > 0)
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// WI237 — definition lifecycle server routes
+
+test('POST /api/definitions/:id/versions creates new draft version', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-newdraft-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'inst-newdraft-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    writeFileSync(join(definitionsDir, 'design/1/CHANGELOG.md'), '## v1\n\nInitial\n')
+    mkdirSync(join(definitionsDir, 'design/1/templates'), { recursive: true })
+    writeFileSync(join(definitionsDir, 'design/1/templates/tmpl.md.tmpl'), 'tmpl')
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/definitions/design/versions`, { method: 'POST' })
+      assert.equal(res.status, 200)
+      const body = await res.json()
+      assert.equal(body.version, 2)
+      assert.equal(existsSync(join(definitionsDir, 'design/2/definition.yaml')), true)
+      assert.equal(existsSync(join(definitionsDir, 'design/2/templates/tmpl.md.tmpl')), true)
+      const defs = await (await fetch(`${base}/api/definitions`)).json()
+      const design = defs.find((d) => d.id === 'design')
+      assert.ok(design.versions.some((v) => v.version === 2 && v.status === 'draft'))
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('POST /api/definitions clone happy and 400s', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-clone-srv-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'inst-clone-srv-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      const ok = await fetch(`${base}/api/definitions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceId: 'design', newId: 'cloned' }) })
+      assert.equal(ok.status, 201)
+      assert.deepEqual(await ok.json(), { id: 'cloned' })
+      assert.equal(existsSync(join(definitionsDir, 'cloned/1/definition.yaml')), true)
+      const badSlug = await fetch(`${base}/api/definitions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceId: 'design', newId: 'bad/slug' }) })
+      assert.equal(badSlug.status, 400)
+      const taken = await fetch(`${base}/api/definitions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceId: 'design', newId: 'cloned' }) })
+      assert.equal(taken.status, 400)
+      const unknown = await fetch(`${base}/api/definitions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceId: 'unknown', newId: 'newid' }) })
+      assert.equal(unknown.status, 400)
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('GET /api/definitions?archived=1 shows archived def', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-arch-srv-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'inst-arch-srv-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    cpSync('definitions/design/1', join(definitionsDir, 'other/1'), { recursive: true })
+    const raw = readFileSync(join(definitionsDir, 'other/1/definition.yaml'), 'utf8')
+    // patch other id
+    const yaml = await import('yaml')
+    let parsed = yaml.parse(raw)
+    parsed.id = 'other'
+    writeFileSync(join(definitionsDir, 'other/1/definition.yaml'), yaml.stringify(parsed))
+    // archive design via internal marker
+    writeFileSync(join(definitionsDir, 'design/.archived'), '')
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      const without = await (await fetch(`${base}/api/definitions`)).json()
+      assert.equal(without.some((d) => d.id === 'design'), false)
+      assert.equal(without.some((d) => d.id === 'other'), true)
+      const withArchived = await (await fetch(`${base}/api/definitions?archived=1`)).json()
+      const designRow = withArchived.find((d) => d.id === 'design')
+      assert.ok(designRow)
+      assert.equal(designRow.archived, true)
+      const otherRow = withArchived.find((d) => d.id === 'other')
+      assert.equal(otherRow.archived, false)
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('POST /api/definitions/:id/versions/:n/publish happy + 409 + 422', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-pub-srv-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'inst-pub-srv-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    cpSync(join(definitionsDir, 'design/1'), join(definitionsDir, 'design/2'), { recursive: true })
+    let t = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    t = t.replace('version: 1', 'version: 2').replace('status: published', 'status: draft')
+    writeFileSync(join(definitionsDir, 'design/2/definition.yaml'), t)
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      // happy publish v2 draft -> published
+      const ok = await fetch(`${base}/api/definitions/design/versions/2/publish`, { method: 'POST' })
+      assert.equal(ok.status, 200)
+      const body = await ok.json()
+      assert.equal(body.ok, true)
+      assert.equal(body.version, 2)
+      assert.equal(body.status, 'published')
+      // 409 for already published
+      const again = await fetch(`${base}/api/definitions/design/versions/2/publish`, { method: 'POST' })
+      assert.equal(again.status, 409)
+      const pub1 = await fetch(`${base}/api/definitions/design/versions/1/publish`, { method: 'POST' })
+      assert.equal(pub1.status, 409)
+      // create new draft v3 and make broken
+      const newVer = await (await fetch(`${base}/api/definitions/design/versions`, { method: 'POST' })).json()
+      assert.equal(newVer.version, 3)
+      let raw = readFileSync(join(definitionsDir, 'design/3/definition.yaml'), 'utf8')
+      const yaml = await import('yaml')
+      let parsed = yaml.parse(raw)
+      parsed.stages[0].modules.push('missing-xyz')
+      writeFileSync(join(definitionsDir, 'design/3/definition.yaml'), yaml.stringify(parsed))
+      const bad = await fetch(`${base}/api/definitions/design/versions/3/publish`, { method: 'POST' })
+      assert.equal(bad.status, 422)
+      const badBody = await bad.json()
+      assert.ok(Array.isArray(badBody.problems) && badBody.problems.length > 0)
+      // ensure still draft
+      const check = readFileSync(join(definitionsDir, 'design/3/definition.yaml'), 'utf8')
+      assert.match(check, /status: draft/)
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('POST /api/instances with archived definition returns 409', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-inst-arch-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'inst-inst-arch-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    writeFileSync(join(definitionsDir, 'design/.archived'), '')
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instances`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ definition: 'design', slug: 'myinst' }) })
+      assert.equal(res.status, 409)
+      const body = await res.json()
+      assert.match(body.error, /is archived/)
+    })
+    // but instance already pinned still loads (loadDefinition not touched) — create via direct API after restore then archive and verify load
+    rmSync(join(definitionsDir, 'design/.archived'), { force: true })
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instances`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ definition: 'design', slug: 'myinst2' }) })
+      assert.equal(res.status, 201)
+    })
+    // archive again and ensure pinned instance still loads via GET /api/instances listing (still shows)
+    writeFileSync(join(definitionsDir, 'design/.archived'), '')
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      const listing = await (await fetch(`${base}/api/instances`)).json()
+      assert.ok(listing.some((i) => i.slug === 'myinst2'))
     })
   } finally {
     rmSync(definitionsDir, { recursive: true, force: true })

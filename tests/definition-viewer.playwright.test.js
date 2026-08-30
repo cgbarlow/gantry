@@ -61,7 +61,7 @@ test('Definition Editor viewer renders definitions with badges and detail pane i
         const fieldRow = page.locator('.defn-field').first()
         await fieldRow.waitFor({ state: 'visible', timeout: 5_000 })
 
-        const inputCount = await page.locator('.defn-viewer input, .defn-viewer textarea').count()
+        const inputCount = await page.locator('.defn-viewer-detail input, .defn-viewer-detail textarea, .defn-viewer-content input, .defn-viewer-content textarea').count()
         assert.equal(inputCount, 0, 'right pane should have no editable inputs')
 
         assert.deepEqual(pageErrors, [])
@@ -164,6 +164,179 @@ test('Definition Editor edit mode change field title and Save persists', async (
         const persisted = page.locator('.defn-field strong').filter({ hasText: newTitle })
         await persisted.waitFor({ state: 'visible', timeout: 10_000 })
         assert.equal(await persisted.count(), 1)
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('Definition Editor New draft version button adds & selects a version', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-viewer-newdraft-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    cpSync(join(definitionsDir, 'design/1'), join(definitionsDir, 'design/2'), { recursive: true })
+    let t = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    t = t.replace('version: 1', 'version: 2').replace('status: published', 'status: draft')
+    writeFileSync(join(definitionsDir, 'design/2/definition.yaml'), t)
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      const browser = await launchBrowser()
+      try {
+        const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
+        await page.goto(`${base}/definitions`)
+        await page.waitForSelector('.defn-viewer', { timeout: 10_000 })
+        await page.waitForSelector('#defn-version-select', { timeout: 10_000 })
+        // ensure starting at v2
+        await page.locator('#defn-version-select').selectOption('2')
+        await page.waitForSelector('.defn-viewer-content', { timeout: 10_000 })
+        const initialOptions = await page.locator('#defn-version-select option').count()
+        assert.equal(initialOptions, 2)
+        const newDraftBtn = page.getByRole('button', { name: 'New draft version' })
+        await newDraftBtn.waitFor({ state: 'visible', timeout: 10_000 })
+        await newDraftBtn.click()
+        await page.waitForFunction(() => document.querySelectorAll('#defn-version-select option').length === 3, { timeout: 10_000 })
+        const afterCount = await page.locator('#defn-version-select option').count()
+        assert.equal(afterCount, 3)
+        const selected = await page.locator('#defn-version-select').inputValue()
+        assert.equal(selected, '3')
+        // verify badge for v3
+        const badge = page.locator('.defn-viewer-header .stamp').first()
+        await badge.waitFor({ state: 'visible', timeout: 5000 })
+        const badgeText = await badge.textContent()
+        assert.match(badgeText, /v3 draft/)
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('Definition Editor Publish flips draft badge to published and hides Edit', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-viewer-pub-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    cpSync(join(definitionsDir, 'design/1'), join(definitionsDir, 'design/2'), { recursive: true })
+    let t = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    t = t.replace('version: 1', 'version: 2').replace('status: published', 'status: draft')
+    writeFileSync(join(definitionsDir, 'design/2/definition.yaml'), t)
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      const browser = await launchBrowser()
+      try {
+        const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
+        page.on('dialog', async (dialog) => { await dialog.accept() })
+        await page.goto(`${base}/definitions`)
+        await page.waitForSelector('.defn-viewer', { timeout: 10_000 })
+        await page.waitForSelector('#defn-version-select', { timeout: 10_000 })
+        await page.locator('#defn-version-select').selectOption('2')
+        await page.waitForSelector('.defn-viewer-content', { timeout: 10_000 })
+        const editBtn = page.getByRole('button', { name: 'Edit', exact: true })
+        await editBtn.waitFor({ state: 'visible', timeout: 10_000 })
+        const publishBtn = page.getByRole('button', { name: 'Publish', exact: true })
+        await publishBtn.waitFor({ state: 'visible', timeout: 10_000 })
+        await publishBtn.click()
+        // after publish, badge should be published and Edit gone
+        await page.waitForSelector('.stamp.agreed', { timeout: 10_000 })
+        const badge = page.locator('.defn-viewer-header .stamp').first()
+        const badgeText = await badge.textContent()
+        assert.match(badgeText, /v2 published/)
+        assert.equal(await editBtn.count(), 0)
+        assert.equal(await publishBtn.count(), 0)
+        // version select now shows published
+        const opt = page.locator('#defn-version-select option[value="2"]')
+        const optText = await opt.textContent()
+        assert.match(optText, /published/)
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('Definition Editor Archive removes row, Show archived reveals it marked, Restore un-hides it', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-viewer-arch-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    cpSync(join(definitionsDir, 'design/1'), join(definitionsDir, 'design/2'), { recursive: true })
+    let t = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    t = t.replace('version: 1', 'version: 2').replace('status: published', 'status: draft')
+    writeFileSync(join(definitionsDir, 'design/2/definition.yaml'), t)
+    // second def to ensure rail still has something after archiving design? but we just archive design
+    cpSync('definitions/design/1', join(definitionsDir, 'other/1'), { recursive: true })
+    let raw = readFileSync(join(definitionsDir, 'other/1/definition.yaml'), 'utf8')
+    const yamlLocal = await import('yaml')
+    let parsed = yamlLocal.parse(raw)
+    parsed.id = 'other'
+    parsed.title = 'Other Def'
+    writeFileSync(join(definitionsDir, 'other/1/definition.yaml'), yamlLocal.stringify(parsed))
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      const browser = await launchBrowser()
+      try {
+        const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
+        await page.goto(`${base}/definitions`)
+        await page.waitForSelector('.defn-viewer', { timeout: 10_000 })
+        await page.waitForSelector('.defn-rail-row', { timeout: 10_000 })
+        let rows = await page.locator('.defn-rail-row').count()
+        assert.equal(rows, 2)
+        const designRow = page.locator('.defn-rail-row').filter({ hasText: '(design)' }).first()
+        await designRow.waitFor({ state: 'visible', timeout: 5000 })
+        const archiveBtn = designRow.getByRole('button', { name: 'Archive', exact: true })
+        await archiveBtn.waitFor({ state: 'visible', timeout: 5000 })
+        const archiveGetPromise = page.waitForResponse((resp) => resp.url().includes('/api/definitions') && resp.request().method() === 'GET', { timeout: 10000 })
+        await archiveBtn.click()
+        await archiveGetPromise
+        await page.waitForFunction(() => document.querySelectorAll('.defn-rail-row').length === 1, { timeout: 10_000 })
+        rows = await page.locator('.defn-rail-row').count()
+        assert.equal(rows, 1)
+        assert.equal(await page.locator('.defn-rail-row').filter({ hasText: '(design)' }).count(), 0)
+        const showArchived = page.getByRole('checkbox', { name: 'Show archived' })
+        await showArchived.waitFor({ state: 'visible', timeout: 5000 })
+        const showArchivedGetPromise = page.waitForResponse((resp) => resp.url().includes('/api/definitions') && resp.request().method() === 'GET', { timeout: 10000 })
+        await showArchived.check()
+        await showArchivedGetPromise
+        await page.waitForFunction(() => document.querySelectorAll('.defn-rail-row').length === 2, { timeout: 10_000 })
+        const archivedRow = page.locator('.defn-rail-row.archived').filter({ hasText: '(design)' })
+        await archivedRow.waitFor({ state: 'visible', timeout: 5000 })
+        assert.equal(await archivedRow.count(), 1)
+        // stamp or archived class ensures visual mark; check archived class
+        const restoreBtn = archivedRow.getByRole('button', { name: 'Restore', exact: true })
+        await restoreBtn.waitFor({ state: 'visible', timeout: 5000 })
+        const restoreResponsePromise = page.waitForResponse((resp) => resp.url().includes('/api/definitions') && resp.request().method() === 'GET', { timeout: 10000 })
+        await restoreBtn.click()
+        await restoreResponsePromise
+        // wait until design row no longer has archived class and shows Archive button again
+        await page.waitForFunction(() => {
+          const rows = document.querySelectorAll('.defn-rail-row')
+          for (const r of rows) if (r.textContent.includes('(design)') && r.classList.contains('archived')) return false
+          return document.querySelectorAll('.defn-rail-row').length === 2
+        }, { timeout: 10_000 })
+        // give React a tick to re-render
+        await page.waitForTimeout(500)
+        assert.equal(await page.locator('.defn-rail-row.archived').count(), 0)
+        const restoredRow = page.locator('.defn-rail-row').filter({ hasText: '(design)' }).first()
+        await restoredRow.getByRole('button', { name: 'Archive', exact: true }).waitFor({ state: 'visible', timeout: 5000 })
+        // after restore, design row should be back without archived class; still 2 rows with showArchived checked
+        // uncheck Show archived still shows design because it's no longer archived
+        const uncheckPromise = page.waitForResponse((resp) => resp.url().includes('/api/definitions') && resp.request().method() === 'GET', { timeout: 10000 })
+        await showArchived.uncheck()
+        await uncheckPromise
+        await page.waitForFunction(() => document.querySelectorAll('.defn-rail-row').length === 2, { timeout: 10_000 })
+        assert.equal(await page.locator('.defn-rail-row').filter({ hasText: '(design)' }).count(), 1)
+        assert.equal(await page.locator('.defn-rail-row.archived').count(), 0)
       } finally {
         await browser.close()
       }

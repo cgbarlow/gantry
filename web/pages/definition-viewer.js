@@ -22,13 +22,27 @@ export function DefinitionViewerPage() {
   // per-stage new module ref input
   const [newModuleRefs, setNewModuleRefs] = useState({})
   const [newRequires, setNewRequires] = useState({})
+  const [showArchived, setShowArchived] = useState(false)
+  const [cloneId, setCloneId] = useState('')
+  const [cloneError, setCloneError] = useState(null)
+  const [cloning, setCloning] = useState(false)
+  const [showCloneInput, setShowCloneInput] = useState(false)
+  const [newDraftError, setNewDraftError] = useState(null)
+  const [publishing, setPublishing] = useState(false)
+  const [publishProblems, setPublishProblems] = useState([])
+  const [publishError, setPublishError] = useState(null)
 
-  useEffect(() => {
-    fetch('/api/definitions')
+  function fetchDefinitions(showArchivedFlag) {
+    const qs = showArchivedFlag ? '?archived=1' : ''
+    return fetch(`/api/definitions${qs}`)
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to load definitions (${res.status})`)
         return res.json()
       })
+  }
+
+  useEffect(() => {
+    fetchDefinitions(showArchived)
       .then((data) => {
         setDefinitions(data)
         setLoadError(null)
@@ -41,6 +55,19 @@ export function DefinitionViewerPage() {
       })
       .catch((err) => setLoadError(err.message))
   }, [])
+
+  useEffect(() => {
+    fetchDefinitions(showArchived)
+      .then((data) => {
+        setDefinitions(data)
+        setLoadError(null)
+        // if selectedId not in new list and not archived, keep it? But archived rows hidden, keep selection.
+        if (selectedId && !data.some((d) => d.id === selectedId)) {
+          // if archived and showArchived false, keep detail but don't auto-switch
+        }
+      })
+      .catch((err) => setLoadError(err.message))
+  }, [showArchived])
 
   useEffect(() => {
     if (!selectedId || selectedVersion == null) return
@@ -57,6 +84,8 @@ export function DefinitionViewerPage() {
       .then((data) => {
         setDetail(data)
         setDetailError(null)
+        setPublishProblems([])
+        setPublishError(null)
       })
       .catch((err) => {
         setDetail(null)
@@ -73,6 +102,8 @@ export function DefinitionViewerPage() {
     setSaveError(null)
     setNewModuleRefs({})
     setNewRequires({})
+    setPublishProblems([])
+    setPublishError(null)
   }, [selectedId, selectedVersion])
 
   function handleSelectDefinition(def) {
@@ -129,6 +160,126 @@ export function DefinitionViewerPage() {
     }
   }
 
+  async function handleNewDraft() {
+    if (!selectedId) return
+    setNewDraftError(null)
+    try {
+      const res = await fetch(`/api/definitions/${encodeURIComponent(selectedId)}/versions`, { method: 'POST' })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setNewDraftError(body.error ?? `Failed (${res.status})`)
+        return
+      }
+      const defs = await fetchDefinitions(showArchived)
+      setDefinitions(defs)
+      setSelectedVersion(body.version)
+    } catch (err) {
+      setNewDraftError(err.message)
+    }
+  }
+
+  async function handleClone() {
+    if (!selectedId) return
+    if (!cloneId || !isValidSlugClient(cloneId)) {
+      setCloneError('Invalid slug — single segment, no slashes or ".."')
+      return
+    }
+    setCloning(true)
+    setCloneError(null)
+    try {
+      const res = await fetch('/api/definitions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceId: selectedId, newId: cloneId }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setCloneError(body.error ?? `Failed (${res.status})`)
+        setCloning(false)
+        return
+      }
+      const defs = await fetchDefinitions(showArchived)
+      setDefinitions(defs)
+      setSelectedId(body.id)
+      setSelectedVersion(1)
+      setShowCloneInput(false)
+      setCloneId('')
+      setCloneError(null)
+    } catch (err) {
+      setCloneError(err.message)
+    } finally {
+      setCloning(false)
+    }
+  }
+
+  async function handleArchive(id) {
+    try {
+      const res = await fetch(`/api/definitions/${encodeURIComponent(id)}/archive`, { method: 'POST' })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error ?? `Archive failed (${res.status})`)
+      }
+      const defs = await fetchDefinitions(showArchived)
+      setDefinitions(defs)
+      if (selectedId === id && !showArchived) {
+        // if archived currently selected and not showing archived, keep detail but rail will hide
+      }
+    } catch (err) {
+      setLoadError(err.message)
+    }
+  }
+
+  async function handleRestore(id) {
+    try {
+      const res = await fetch(`/api/definitions/${encodeURIComponent(id)}/restore`, { method: 'POST' })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error ?? `Restore failed (${res.status})`)
+      }
+      const defs = await fetchDefinitions(showArchived)
+      setDefinitions(defs)
+    } catch (err) {
+      setLoadError(err.message)
+    }
+  }
+
+  async function handlePublish() {
+    if (!detail || !selectedId || selectedVersion == null) return
+    if (detail.status !== 'draft') return
+    const confirmed = typeof window !== 'undefined' && window.confirm
+      ? window.confirm(`Publish v${detail.version}? This makes it immutable.`)
+      : true
+    if (!confirmed) return
+    setPublishing(true)
+    setPublishProblems([])
+    setPublishError(null)
+    try {
+      const res = await fetch(`/api/definitions/${encodeURIComponent(selectedId)}/versions/${encodeURIComponent(String(selectedVersion))}/publish`, { method: 'POST' })
+      const body = await res.json().catch(() => ({}))
+      if (res.status === 422 && body.problems) {
+        setPublishProblems(body.problems)
+        setPublishing(false)
+        return
+      }
+      if (!res.ok) {
+        setPublishError(body.error ?? `Publish failed (${res.status})`)
+        if (body.problems) setPublishProblems(body.problems)
+        setPublishing(false)
+        return
+      }
+      const defs = await fetchDefinitions(showArchived)
+      setDefinitions(defs)
+      const { ok, ...proj } = body
+      setDetail(proj)
+      setPublishProblems([])
+      setPublishError(null)
+    } catch (err) {
+      setPublishError(err.message)
+    } finally {
+      setPublishing(false)
+    }
+  }
+
   const selectedDef = definitions?.find((d) => d.id === selectedId) ?? null
   const isDraft = detail?.status === 'draft'
 
@@ -154,6 +305,27 @@ export function DefinitionViewerPage() {
       <div class="defn-viewer-layout">
         <aside class="defn-viewer-rail">
           <h2>Definitions</h2>
+          <div class="defn-rail-controls">
+            <label class="defn-show-archived">
+              <input type="checkbox" checked=${showArchived} onChange=${(e) => setShowArchived(e.currentTarget.checked)} />
+              Show archived
+            </label>
+            ${selectedId ? html`
+              <div class="defn-clone-control">
+                ${!showCloneInput ? html`<button class="btn small" onClick=${() => setShowCloneInput(true)}>Clone</button>` : html`
+                  <div class="defn-clone-input">
+                    <input class="wizard-input" placeholder="new id" value=${cloneId} onInput=${(e) => { setCloneId(e.currentTarget.value); setCloneError(null) }} />
+                    ${cloneId && !isValidSlugClient(cloneId) ? html`<p class="inline-error">Invalid slug — single segment, no slashes or ".."</p>` : null}
+                    ${cloneError ? html`<p class="inline-error">${cloneError}</p>` : null}
+                    <div class="defn-clone-actions">
+                      <button class="btn small primary" onClick=${handleClone} disabled=${cloning || !isValidSlugClient(cloneId)}>${cloning ? 'Cloning…' : 'Clone'}</button>
+                      <button class="btn small ghost" onClick=${() => { setShowCloneInput(false); setCloneId(''); setCloneError(null) }}>Cancel</button>
+                    </div>
+                  </div>
+                `}
+              </div>
+            ` : null}
+          </div>
           ${loadError ? html`<p class="load-error">${loadError}</p>` : null}
           ${!definitions ? html`<p class="loading">Loading…</p>` : null}
           ${definitions?.length === 0 ? html`<p class="load-error">No definitions found.</p>` : null}
@@ -161,13 +333,13 @@ export function DefinitionViewerPage() {
             (def) => html`
               <div
                 key=${def.id}
-                class=${'defn-rail-row' + (def.id === selectedId ? ' selected' : '')}
+                class=${'defn-rail-row' + (def.id === selectedId ? ' selected' : '') + (def.archived ? ' archived' : '')}
                 onClick=${() => handleSelectDefinition(def)}
                 role="button"
                 tabindex="0"
                 onKeyDown=${(e) => { if (e.key === 'Enter') handleSelectDefinition(def) }}
               >
-                <div class="defn-rail-title">${def.title} (${def.id})</div>
+                <div class="defn-rail-title">${def.title} (${def.id})${def.archived ? html` <span class="stamp small error">archived</span>` : null}</div>
                 ${def.description ? html`<div class="defn-rail-desc">${def.description}</div>` : null}
                 <div class="defn-rail-badges">
                   ${def.versions.map(
@@ -177,6 +349,11 @@ export function DefinitionViewerPage() {
                       </span>
                     `
                   )}
+                </div>
+                <div class="defn-rail-actions">
+                  ${def.archived
+                    ? html`<button class="btn small ghost" onClick=${(e) => { e.stopPropagation(); handleRestore(def.id) }}>Restore</button>`
+                    : html`<button class="btn small ghost" onClick=${(e) => { e.stopPropagation(); handleArchive(def.id) }}>Archive</button>`}
                 </div>
               </div>
             `
@@ -196,19 +373,33 @@ export function DefinitionViewerPage() {
                   >
                     ${selectedDef.versions.map((v) => html`<option value=${String(v.version)}>v${v.version} — ${v.status}</option>`)}
                   </select>
+                  <button class="btn small" onClick=${handleNewDraft}>New draft version</button>
+                  ${newDraftError ? html`<p class="inline-error">${newDraftError}</p>` : null}
                 </div>
               `
             : null}
           ${detailLoading ? html`<p class="loading">Loading…</p>` : null}
           ${detailError ? html`<p class="load-error">${detailError}</p>` : null}
+          ${publishProblems.length ? html`
+            <div class="load-error">
+              <p><strong>Publish failed:</strong></p>
+              <ul>${publishProblems.map((p) => html`<li>${p.message}</li>`)}</ul>
+            </div>
+          ` : null}
+          ${publishError ? html`<p class="load-error">${publishError}</p>` : null}
           ${detail && !detailLoading && !editing
             ? html`
                 <div class="defn-viewer-content">
                   <header class="defn-viewer-header">
                     <h2>${detail.title} · <span class="defn-id">${detail.id}</span> · <span class="stamp small ${detail.status === 'published' ? 'agreed' : 'draft'}">v${detail.version} ${detail.status}</span></h2>
-                    ${isDraft
-                      ? html`<button class="btn small" onClick=${handleStartEdit}>Edit</button>`
-                      : html`<p class="guidance">Read-only — editing arrives in a later release.</p>`}
+                    <div class="defn-header-actions">
+                      ${isDraft
+                        ? html`
+                          <button class="btn small" onClick=${handleStartEdit}>Edit</button>
+                          <button class="btn small primary" onClick=${handlePublish} disabled=${publishing}>${publishing ? 'Publishing…' : 'Publish'}</button>
+                        `
+                        : html`<p class="guidance">Read-only — editing arrives in a later release.</p>`}
+                    </div>
                     ${detail.description ? html`<p class="lede">${detail.description}</p>` : null}
                   </header>
 
