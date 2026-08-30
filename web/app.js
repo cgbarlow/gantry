@@ -54,10 +54,11 @@ export function headingId(moduleId, headingText) {
 
 export function buildStageHeadings(modules, visibleFieldIds) {
   const headings = []
-  // Defensive: never throw from here — StageNavigation is a sibling of the
-  // work-item panel inside StageScreen, so a throw would blank that panel too
-  // (no error boundary). A transient render where `modules` or `mod.fields`
-  // isn't yet populated must degrade to an empty nav, not a broken screen.
+  // Defensive: never throw from here — StageNavigation now lives in
+  // ViewModeToolbar to the right of the artefact selector, so a throw would
+  // blank that toolbar too (no error boundary). A transient render where
+  // `modules` or `mod.fields` isn't yet populated must degrade to an empty
+  // nav, not a broken screen.
   for (const mod of modules ?? []) {
     if (!mod) continue
     headings.push({ id: headingId(mod.id, mod.title), label: mod.title, level: 2, moduleId: mod.id })
@@ -2652,7 +2653,8 @@ function AdvanceStagePanel({ instance }) {
 // ---------- Stage navigation dropdown (WI232) ----------
 // Uses the shared Dropdown component, lists every module <h2> and every <h3>
 // subsection heading (field title, including custom sections) in document
-// order. Selecting an entry smooth-scrolls the heading and closes the menu.
+// order. Now rendered inside ViewModeToolbar to the right of the artefact
+// selector. Selecting an entry smooth-scrolls the heading and closes the menu.
 // Hidden when the stage has no headings (edge case).
 function StageNavigation({ modules, visibleFieldIds }) {
   const [open, setOpen] = useState(false)
@@ -2692,7 +2694,7 @@ function StageNavigation({ modules, visibleFieldIds }) {
 }
 
 // ---------- The viewed stage's whole screen: modules + work-item panel ----------
-// Keyed by stage id from the parent (see ModuleEditorPage) so switching stages remounts this wholesale — fresh CodeMirror instances, matching the old full-DOM-rebuild behaviour. "Clear all fields" and "Render" now live in the view-toggle bar (see ViewModeToolbar, ModuleEditorPage) rather than here, so the field registry they depend on is owned by ModuleEditorPage instead — `onFieldRegistered` is threaded straight through.
+// Keyed by stage id from the parent (see ModuleEditorPage) so switching stages remounts this wholesale — fresh CodeMirror instances, matching the old full-DOM-rebuild behaviour. "Clear all fields" and "Render" now live in the view-toggle bar (see ViewModeToolbar, ModuleEditorPage) rather than here, so the field registry they depend on is owned by ModuleEditorPage instead — `onFieldRegistered` is threaded straight through. StageNavigation now lives in ViewModeToolbar to the right of the artefact selector, not as a standalone block here.
 function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
   const modules = visibleFieldIds
     ? instance.modules.filter((mod) => mod.fields.some((field) => visibleFieldIds.has(`${mod.id}.${field.id}`)))
@@ -2701,7 +2703,6 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
   return html`
     <main id="modules" data-view-mode=${viewMode.value}>
       <${SyncedFieldsPanel} key=${instance.workItem ? 'linked' : 'unlinked'} instance=${instance} />
-      <${StageNavigation} modules=${modules} visibleFieldIds=${visibleFieldIds} />
       ${modules.map(
         (mod) => html`
           <${ModuleCard}
@@ -2733,6 +2734,7 @@ const VIEW_MODE_HOTKEY = { ctrlKey: true, shiftKey: true, key: 'v' }
 // and briefly highlights it so the author's eye is drawn down.
 function ViewModeToolbar({
   instance,
+  visibleFieldIds,
   onClearAllFields,
   requestApprovalSlug,
   selectedArtefactId,
@@ -2742,6 +2744,9 @@ function ViewModeToolbar({
   const [renderOpen, setRenderOpen] = useState(false)
   const artefacts = sortArtefacts(instance.artefacts)
   const showArtefactSelector = artefactsHaveDifferentRequirements(instance.modules, artefacts)
+  const navModules = visibleFieldIds
+    ? instance.modules.filter((mod) => mod.fields.some((field) => visibleFieldIds.has(`${mod.id}.${field.id}`)))
+    : instance.modules
 
   useEffect(() => {
     function onKeyDown(e) {
@@ -2836,6 +2841,7 @@ function ViewModeToolbar({
               </label>
             `
           : null}
+        <${StageNavigation} modules=${navModules} visibleFieldIds=${visibleFieldIds} />
       </div>
       <div class="toolbar-actions">
         <button type="button" class="btn" onClick=${onClearAllFields}>Clear all fields</button>
@@ -3192,6 +3198,7 @@ function ModuleEditorPage({ slug: routeRef }) {
       : null}
     <${ViewModeToolbar}
       instance=${instance}
+      visibleFieldIds=${visibleFieldIds}
       selectedArtefactId=${selectedArtefact?.id ?? null}
       selectedArtefact=${selectedArtefact}
       onArtefactChange=${changeArtefact}

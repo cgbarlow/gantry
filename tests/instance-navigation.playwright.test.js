@@ -44,16 +44,28 @@ test('Navigation dropdown renders below Work item details card, lists headings i
         await page.waitForSelector('.module', { timeout: 10_000 })
         await page.waitForSelector('.stage-navigation', { timeout: 10_000 })
 
-        // Positioned immediately below Work item details card and left-justified
-        const nav = page.locator('.stage-navigation')
-        const detailsCard = page.locator('#work-item-detail-card')
+        // Positioned inside the view-mode toolbar to the right of the Artefact dropdown
+        const nav = page.locator('.toolbar .toolbar-left .stage-navigation')
         assert.equal(await nav.count(), 1)
-        assert.equal(await detailsCard.count(), 1)
+        const isInsideToolbar = await page.evaluate(() => {
+          const navEl = document.querySelector('.stage-navigation')
+          const toolbarLeft = document.querySelector('.toolbar .toolbar-left')
+          return toolbarLeft ? toolbarLeft.contains(navEl) : false
+        })
+        assert.ok(isInsideToolbar, '.stage-navigation should be a descendant of .toolbar .toolbar-left')
         const navBox = await nav.boundingBox()
-        const cardBox = await detailsCard.boundingBox()
-        assert.ok(navBox.y > cardBox.y + cardBox.height - 5, 'Navigation should be below Work item details card')
-        // Left-justified: nav's x should be near card's x (or page padding)
-        assert.ok(Math.abs(navBox.x - cardBox.x) < 5, 'Navigation should be left-justified under the card')
+        const segmentedBox = await page.locator('.toolbar .toolbar-left .segmented').boundingBox()
+        assert.ok(navBox && segmentedBox, 'Navigation and segmented should have bounding boxes')
+        // Same row as segmented: y overlaps
+        const yOverlaps = navBox.y < segmentedBox.y + segmentedBox.height && navBox.y + navBox.height > segmentedBox.y
+        assert.ok(yOverlaps, 'Navigation should be on the same row as .segmented (y overlaps)')
+        assert.ok(navBox.x > segmentedBox.x, 'Navigation should be to the right of .segmented')
+        const artefactCount = await page.locator('.artefact-selector').count()
+        if (artefactCount > 0) {
+          const artefactBox = await page.locator('.artefact-selector').boundingBox()
+          assert.ok(artefactBox, 'Artefact selector should have bounding box')
+          assert.ok(navBox.x > artefactBox.x, 'Navigation should be to the right of .artefact-selector when present')
+        }
 
         // Uses shared Dropdown component
         const trigger = nav.getByRole('button', { name: 'Navigation' })

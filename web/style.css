@@ -491,8 +491,8 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .field h3.field-heading { font-family: var(--font-display); font-weight: 600; font-size: 13px; display: block; margin: 0 0 6px; }
 .guidance { color: var(--text-muted); font-size: 12px; margin: 0 0 8px; }
 
-/* Stage navigation dropdown (WI232) — left-justified below Work item details card */
-.stage-navigation { margin: -16px 0 20px; }
+/* Stage navigation dropdown (WI232) — inline in ViewModeToolbar to the right of the artefact selector */
+.stage-navigation { margin: 0; display: inline-flex; align-items: center; }
 .stage-navigation-dropdown { position: relative; display: inline-flex; }
 .stage-navigation-dropdown .menu {
   display: none;
