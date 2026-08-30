@@ -38,6 +38,37 @@ function assetFileUrl(assetId, slug) {
   return slug ? `${base}?slug=${encodeURIComponent(slug)}` : base
 }
 
+// ---------- Navigation heading helpers (WI232) ----------
+export function slugify(text) {
+  return String(text ?? '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'section'
+}
+
+export function headingId(moduleId, headingText) {
+  return `${moduleId}--${slugify(headingText)}`
+}
+
+export function buildStageHeadings(modules, visibleFieldIds) {
+  const headings = []
+  // Defensive: never throw from here — StageNavigation is a sibling of the
+  // work-item panel inside StageScreen, so a throw would blank that panel too
+  // (no error boundary). A transient render where `modules` or `mod.fields`
+  // isn't yet populated must degrade to an empty nav, not a broken screen.
+  for (const mod of modules ?? []) {
+    if (!mod) continue
+    headings.push({ id: headingId(mod.id, mod.title), label: mod.title, level: 2, moduleId: mod.id })
+    for (const field of mod.fields ?? []) {
+      if (visibleFieldIds && !visibleFieldIds.has(`${mod.id}.${field.id}`)) continue
+      const label = field.title + (field.required ? ' *' : '')
+      headings.push({ id: headingId(mod.id, field.title), label, level: 3, moduleId: mod.id })
+    }
+  }
+  return headings
+}
+
 // WI200/docs/adr/0024's numeric references: `/instance/:ref` accepts a numeric reference
 // (`w<workspaceNumber>`, `w<workspaceNumber>i<instanceNumber>`, or `w<workspaceNumber>i<instanceNumber>s<stageNumber>`)
 // as well as the pre-existing plain slug — this is the same grammar `lib/numberRegistry.js`'s
@@ -753,7 +784,7 @@ function TableControlStrip({ run }) {
   `
 }
 
-function MarkdownField({ field, onRegister, onRequestImage, onRequestSection, onRequestList }) {
+function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestSection, onRequestList }) {
   const hostRef = useRef(null)
   const previewRef = useRef(null)
   // The editor-control methods registered up to ModuleCard (getValue/setValue/insertAtCursor) are captured here too, so this field's own Insert ▾ items act on its own cursor without round-tripping through the module.
@@ -939,9 +970,12 @@ function MarkdownField({ field, onRegister, onRequestImage, onRequestSection, on
     []
   )
 
+  const headingIdForField = moduleId ? headingId(moduleId, field.title) : null
   return html`
     <div class="field field-markdown" ref=${wrapperRef}>
-      <label>${field.title}${field.required ? ' *' : ''}</label>
+      ${headingIdForField
+        ? html`<h3 id=${headingIdForField} class="field-heading">${field.title}${field.required ? ' *' : ''}</h3><label class="visually-hidden" style="display:none">${field.title}${field.required ? ' *' : ''}</label>`
+        : html`<label>${field.title}${field.required ? ' *' : ''}</label>`}
       ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
       <div class="split">
         <div class="editor-pane">
@@ -992,7 +1026,7 @@ function autosizeTextarea(el) {
   el.style.height = `${el.scrollHeight}px`
 }
 
-function ListField({ field, onRegister, onRemove }) {
+function ListField({ field, moduleId, onRegister, onRemove }) {
   const rowsRef = useRef(field.value?.length ? [...field.value] : [''])
   const [, bump] = useState(0)
   const rerender = () => bump((n) => n + 1)
@@ -1028,9 +1062,12 @@ function ListField({ field, onRegister, onRemove }) {
     rerender()
   }
 
+  const headingIdForField = moduleId ? headingId(moduleId, field.title) : null
   return html`
     <div class="field field-list">
-      <label>${field.title}${field.required ? ' *' : ''}</label>
+      ${headingIdForField
+        ? html`<h3 id=${headingIdForField} class="field-heading">${field.title}${field.required ? ' *' : ''}</h3><label class="visually-hidden" style="display:none">${field.title}${field.required ? ' *' : ''}</label>`
+        : html`<label>${field.title}${field.required ? ' *' : ''}</label>`}
       ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
       <div class="list-rows">
         ${rowsRef.current.map(
@@ -1167,7 +1204,7 @@ function ModuleCard({ mod, stageId, onFieldRegistered, visibleFieldIds }) {
 
   return html`
     <section class="module">
-      <h2>${mod.title}</h2>
+      <h2 id=${headingId(mod.id, mod.title)}>${mod.title}</h2>
       ${mod.purpose ? html`<p class="purpose">${mod.purpose}</p>` : null}
       ${mod.fields.filter((field) => !visibleFieldIds || visibleFieldIds.has(`${mod.id}.${field.id}`)).map((field) => {
         const onRegister = (control) => {
@@ -1179,12 +1216,14 @@ function ModuleCard({ mod, stageId, onFieldRegistered, visibleFieldIds }) {
           ? html`<${ListField}
               key=${field.id}
               field=${field}
+              moduleId=${mod.id}
               onRegister=${onRegister}
               onRemove=${field.custom ? handleRemoveCustomField : undefined}
             />`
           : html`<${MarkdownField}
               key=${field.id}
               field=${field}
+              moduleId=${mod.id}
               onRegister=${onRegister}
               onRequestImage=${() => setImageFieldId(field.id)}
               onRequestSection=${() => setSectionAfterId(field.id)}
@@ -2609,6 +2648,48 @@ function AdvanceStagePanel({ instance }) {
   `
 }
 
+// ---------- Stage navigation dropdown (WI232) ----------
+// Uses the shared Dropdown component, lists every module <h2> and every <h3>
+// subsection heading (field title, including custom sections) in document
+// order. Selecting an entry smooth-scrolls the heading and closes the menu.
+// Hidden when the stage has no headings (edge case).
+function StageNavigation({ modules, visibleFieldIds }) {
+  const [open, setOpen] = useState(false)
+  const headings = buildStageHeadings(modules, visibleFieldIds)
+  if (!headings.length) return null
+  function handleSelect(id) {
+    setOpen(false)
+    const el = document.getElementById(id)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  return html`
+    <div class="stage-navigation">
+      <${Dropdown}
+        className="stage-navigation-dropdown"
+        triggerLabel="Navigation ▾"
+        triggerClass="btn small"
+        triggerAriaLabel="Navigation"
+        menuRole="menu"
+        open=${open}
+        onOpenChange=${setOpen}
+      >
+        ${headings.map(
+          (h) => html`
+            <button
+              type="button"
+              role="menuitem"
+              class=${h.level === 3 ? 'nav-item nav-item-h3' : 'nav-item'}
+              onClick=${() => handleSelect(h.id)}
+            >
+              ${h.label}
+            </button>
+          `
+        )}
+      <//>
+    </div>
+  `
+}
+
 // ---------- The viewed stage's whole screen: modules + work-item panel ----------
 // Keyed by stage id from the parent (see ModuleEditorPage) so switching stages remounts this wholesale — fresh CodeMirror instances, matching the old full-DOM-rebuild behaviour. "Clear all fields" and "Render" now live in the view-toggle bar (see ViewModeToolbar, ModuleEditorPage) rather than here, so the field registry they depend on is owned by ModuleEditorPage instead — `onFieldRegistered` is threaded straight through.
 function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
@@ -2619,6 +2700,7 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
   return html`
     <main id="modules" data-view-mode=${viewMode.value}>
       <${SyncedFieldsPanel} key=${instance.workItem ? 'linked' : 'unlinked'} instance=${instance} />
+      <${StageNavigation} modules=${modules} visibleFieldIds=${visibleFieldIds} />
       ${modules.map(
         (mod) => html`
           <${ModuleCard}
