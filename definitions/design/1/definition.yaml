@@ -1,4 +1,6 @@
 id: design
+version: 1
+status: published
 title: Solution Design
 description: >
   Design content for an initiative, from shaping through HLD approval,

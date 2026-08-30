@@ -47,8 +47,11 @@ program
   .description('Create an instance')
   .option('--owner <owner>', 'owner to record in each module file\'s frontmatter')
   .option('--assignee <assignee>', 'assignee to record on the instance record itself (#97)')
+  .option('--definition-version <version>', 'definition version to pin (default latest published)')
+  .option('--version <version>', 'alias for --definition-version')
   .action((definition, slug, options) => {
-    const result = createInstance(definition, slug, { owner: options.owner, assignee: options.assignee })
+    const version = options.definitionVersion ?? options.version ?? null
+    const result = createInstance(definition, slug, { owner: options.owner, assignee: options.assignee, definitionVersion: version ?? undefined })
     console.log(`Created instance "${result.slug}" (${result.definitionId}, stage: ${result.stage})`)
     console.log(`Modules: ${result.modules.join(', ')}`)
   })
@@ -137,8 +140,11 @@ program
   .command('validate <definition>')
   .description('Validate a definition against the schema')
   .option('--json', 'emit structured JSON output')
+  .option('--version <version>', 'definition version to validate (default latest published)')
+  .option('--definition-version <version>', 'alias for --version')
   .action((definition, options) => {
-    const result = validateDefinition(definition)
+    const version = options.version ?? options.definitionVersion ?? null
+    const result = validateDefinition(definition, { version: version ? Number(version) : undefined })
     if (options.json) {
       console.log(JSON.stringify(result.problems, null, 2))
       if (!result.valid) process.exitCode = 1

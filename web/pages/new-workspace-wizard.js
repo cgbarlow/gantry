@@ -63,6 +63,9 @@ const selectedWorkspace = signal(null)
 const step = signal('workspace') // 'workspace' | 'instance' | 'link' | 'done'
 const definitions = signal([])
 const selectedDefinitionId = signal('')
+const selectedVersion = signal('latest')
+const draftConfirmVisible = signal(false)
+const draftConfirmPending = signal(false)
 const nameField = signal('')
 const directoryField = signal('')
 // Once the architect edits Directory directly, it stops auto-following
@@ -135,6 +138,9 @@ function resetWizard() {
   selectedWorkspace.value = null
   step.value = 'workspace'
   selectedDefinitionId.value = definitions.value[0]?.id ?? ''
+  selectedVersion.value = 'latest'
+  draftConfirmVisible.value = false
+  draftConfirmPending.value = false
   nameField.value = ''
   directoryField.value = ''
   directoryTouched.value = false
@@ -212,8 +218,33 @@ async function registerWorkspace() {
   }
 }
 
+function selectedDefinition() {
+  return definitions.value.find((d) => d.id === selectedDefinitionId.value) ?? null
+}
+
+function resolvedVersion() {
+  const def = selectedDefinition()
+  if (!def) return null
+  if (selectedVersion.value === 'latest') return def.latestPublished
+  return Number(selectedVersion.value)
+}
+
+function resolvedVersionStatus() {
+  const def = selectedDefinition()
+  if (!def) return null
+  const v = resolvedVersion()
+  const entry = def.versions.find((x) => x.version === v)
+  return entry?.status ?? null
+}
+
 function continueFromInstanceStep() {
   if (!nameField.value.trim() || !directoryField.value.trim() || !selectedDefinitionId.value) return
+  if (resolvedVersionStatus() === 'draft' && !draftConfirmPending.value) {
+    draftConfirmVisible.value = true
+    return
+  }
+  draftConfirmPending.value = false
+  draftConfirmVisible.value = false
   if (selectedWorkspace.value?.ticketingSystem) {
     step.value = 'link'
     return
@@ -289,10 +320,17 @@ async function lookUpParentWorkItem() {
 }
 
 async function createInstanceAndMaybeLink() {
+  // If draft selected without prior confirmation, show confirm dialog from link step too
+  if (resolvedVersionStatus() === 'draft' && !draftConfirmPending.value) {
+    draftConfirmVisible.value = true
+    return
+  }
+  draftConfirmVisible.value = false
   createStatus.value = 'creating'
   createError.value = ''
   const ws = selectedWorkspace.value
   const slug = directoryField.value.trim()
+  const versionToSend = resolvedVersion()
   try {
     const res = await apiFetch('/api/instances', {
       method: 'POST',
@@ -301,6 +339,7 @@ async function createInstanceAndMaybeLink() {
         definition: selectedDefinitionId.value,
         slug,
         assignee: assigneeField.value.trim(),
+        definitionVersion: versionToSend,
         azureDevOps: { organization: ws.organization, project: ws.project, repository: ws.repository },
       }),
     }, { workspaceId: ws.id })
@@ -531,7 +570,11 @@ function InstanceStep() {
             <div
               key=${d.id}
               class=${'definition-card' + (selectedDefinitionId.value === d.id ? ' selected' : '')}
-              onClick=${() => (selectedDefinitionId.value = d.id)}
+              onClick=${() => {
+                selectedDefinitionId.value = d.id
+                selectedVersion.value = 'latest'
+                draftConfirmPending.value = false
+              }}
             >
               <div class="name">${d.title} (${d.id})</div>
               <div class="stages">${d.stages.map((s) => s.title).join(' → ')}</div>
@@ -540,6 +583,29 @@ function InstanceStep() {
         )}
       </div>
     </div>
+
+    ${(() => {
+      const def = selectedDefinition()
+      if (!def || !def.versions) return null
+      return html`
+        <div class="wizard-field">
+          <label for="definition-version">Version</label>
+          <select
+            id="definition-version"
+            class="wizard-input"
+            value=${selectedVersion.value}
+            onChange=${(e) => {
+              selectedVersion.value = e.currentTarget.value
+              draftConfirmPending.value = false
+            }}
+          >
+            <option value="latest">Latest (v${def.latestPublished ?? '—'}) — published</option>
+            ${def.versions.map((v) => html`<option value=${String(v.version)}>v${v.version} — ${v.status}</option>`)}
+          </select>
+          <p class="wizard-field-hint">Draft versions require confirmation before creating an instance.</p>
+        </div>
+      `
+    })()}
 
     <div class="wizard-field">
       <label for="instance-name">Name</label>
@@ -594,6 +660,21 @@ function InstanceStep() {
             : 'Create instance'}
       </button>
     </div>
+    ${draftConfirmVisible.value
+      ? html`
+          <div class="wizard-confirm" role="dialog" aria-label="Draft version confirmation">
+            <p>You're creating an instance from an unpublished draft version.</p>
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <button type="button" class="btn primary" onClick=${() => {
+                draftConfirmPending.value = true
+                draftConfirmVisible.value = false
+                continueFromInstanceStep()
+              }}>Confirm</button>
+              <button type="button" class="btn ghost" onClick=${() => (draftConfirmVisible.value = false)}>Cancel</button>
+            </div>
+          </div>
+        `
+      : null}
     ${!ticketingEnabled && createStatus.value === 'failed' ? html`<div class="inline-error">${createError.value}</div>` : null}
   `
 }
@@ -667,6 +748,21 @@ function LinkStep() {
         ${createStatus.value === 'creating' ? 'Creating…' : linkStatus.value === 'linking' ? 'Linking…' : 'Create instance & link'}
       </button>
     </div>
+    ${draftConfirmVisible.value
+      ? html`
+          <div class="wizard-confirm" role="dialog" aria-label="Draft version confirmation">
+            <p>You're creating an instance from an unpublished draft version.</p>
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <button type="button" class="btn primary" onClick=${() => {
+                draftConfirmPending.value = true
+                draftConfirmVisible.value = false
+                createInstanceAndMaybeLink()
+              }}>Confirm</button>
+              <button type="button" class="btn ghost" onClick=${() => (draftConfirmVisible.value = false)}>Cancel</button>
+            </div>
+          </div>
+        `
+      : null}
     ${createStatus.value === 'failed' ? html`<div class="inline-error">${createError.value}</div>` : null}
     ${linkStatus.value === 'failed' ? html`<div class="inline-error">${linkError.value}</div>` : null}
   `

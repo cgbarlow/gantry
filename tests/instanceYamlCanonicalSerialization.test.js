@@ -194,6 +194,7 @@ test('canonical serialization does not change what instance.yaml actually contai
       slug: 'my-initiative',
       stage: 'hld-define',
       assignee: 'c.barlow',
+      definitionVersion: 1,
     })
 
     const reread = readInstance('my-initiative', { instancesDir })
