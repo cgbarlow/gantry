@@ -1446,4 +1446,9 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-drop-target { outline: 2px dashed var(--line-strong); outline-offset: 2px; background: var(--bg); }
 .defn-move-btns { display: inline-flex; gap: 4px; align-items: center; }
 .defn-move-btns .btn { margin: 0; padding: 2px 6px; font-size: 11px; line-height: 1; }
+.defn-template-editor { font-family: var(--font-mono); font-size: 13px; min-height: 240px; white-space: pre; overflow: auto; }
+.defn-template-view { font-family: var(--font-mono); font-size: 13px; white-space: pre-wrap; background: var(--bg-raised); border: var(--hairline) solid var(--line); padding: 8px; max-height: 400px; overflow: auto; }
+.defn-template-editor-block, .defn-template-view-block { margin-top: 10px; }
+.defn-template-error { margin-top: 6px; }
+.defn-template-saved { color: var(--stamp-agreed-bg); font-weight: 600; }
 @media (max-width: 700px) { .defn-viewer-layout { grid-template-columns: 1fr; } }

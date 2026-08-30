@@ -1512,3 +1512,123 @@ test('POST /api/instances with archived definition returns 409', async () => {
     rmSync(instancesDir, { recursive: true, force: true })
   }
 })
+
+// WI239 — template endpoints (draft-only, compile-check, traversal-safe)
+
+test('GET /api/definitions/:id/versions/:n/templates/:name serves existing template source', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-tmpl-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'inst-tmpl-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    cpSync(join(definitionsDir, 'design/1'), join(definitionsDir, 'design/2'), { recursive: true })
+    let t = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    t = t.replace('version: 1', 'version: 2').replace('status: published', 'status: draft')
+    writeFileSync(join(definitionsDir, 'design/2/definition.yaml'), t)
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/definitions/design/versions/2/templates/sad.md.tmpl`)
+      assert.equal(res.status, 200)
+      const body = await res.json()
+      assert.equal(body.name, 'sad.md.tmpl')
+      assert.equal(typeof body.source, 'string')
+      assert.ok(body.source.length > 0)
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('GET /api/definitions/:id/versions/:n/templates/:name 404 for missing file', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-tmpl404-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'inst-tmpl404-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    cpSync(join(definitionsDir, 'design/1'), join(definitionsDir, 'design/2'), { recursive: true })
+    let t = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    t = t.replace('version: 1', 'version: 2').replace('status: published', 'status: draft')
+    writeFileSync(join(definitionsDir, 'design/2/definition.yaml'), t)
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/definitions/design/versions/2/templates/nope.md.tmpl`)
+      assert.equal(res.status, 404)
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('PUT template valid source round-trips via GET; broken source 422; published 409; traversal 400; missing source 400', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-tmpl-put-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'inst-tmpl-put-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    cpSync(join(definitionsDir, 'design/1'), join(definitionsDir, 'design/2'), { recursive: true })
+    let t = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    t = t.replace('version: 1', 'version: 2').replace('status: published', 'status: draft')
+    writeFileSync(join(definitionsDir, 'design/2/definition.yaml'), t)
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      // valid PUT
+      const put = await fetch(`${base}/api/definitions/design/versions/2/templates/sad.md.tmpl`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'hi there' }),
+      })
+      assert.equal(put.status, 200)
+      const putBody = await put.json()
+      assert.equal(putBody.ok, true)
+      assert.equal(putBody.name, 'sad.md.tmpl')
+      const get = await fetch(`${base}/api/definitions/design/versions/2/templates/sad.md.tmpl`)
+      assert.equal(get.status, 200)
+      const getBody = await get.json()
+      assert.equal(getBody.source, 'hi there')
+
+      // broken source 422
+      const bad = await fetch(`${base}/api/definitions/design/versions/2/templates/sad.md.tmpl`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: '<% if (x %>' }),
+      })
+      assert.equal(bad.status, 422)
+      const badBody = await bad.json()
+      assert.ok(typeof badBody.error === 'string' && badBody.error.length > 0)
+      // file unchanged after 422
+      const still = await (await fetch(`${base}/api/definitions/design/versions/2/templates/sad.md.tmpl`)).json()
+      assert.equal(still.source, 'hi there')
+
+      // published 409
+      const pub = await fetch(`${base}/api/definitions/design/versions/1/templates/sad.md.tmpl`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'hi' }),
+      })
+      assert.equal(pub.status, 409)
+
+      // traversal 400
+      const trav = await fetch(`${base}/api/definitions/design/versions/2/templates/..%2F..%2Fx`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'hi' }),
+      })
+      assert.equal(trav.status, 400)
+
+      // missing source 400 (no source field)
+      const noSrc = await fetch(`${base}/api/definitions/design/versions/2/templates/sad.md.tmpl`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      assert.equal(noSrc.status, 400)
+
+      // non-string source 400
+      const badType = await fetch(`${base}/api/definitions/design/versions/2/templates/sad.md.tmpl`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 123 }),
+      })
+      assert.equal(badType.status, 400)
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})

@@ -34,6 +34,8 @@ export function DefinitionViewerPage() {
   const [publishError, setPublishError] = useState(null)
   const [dragSource, setDragSource] = useState(null)
   const [dragOver, setDragOver] = useState(null)
+  const [templateEditors, setTemplateEditors] = useState({})
+  const [viewTemplates, setViewTemplates] = useState({})
 
   function fetchDefinitions(showArchivedFlag) {
     const qs = showArchivedFlag ? '?archived=1' : ''
@@ -107,6 +109,8 @@ export function DefinitionViewerPage() {
     setNewRequires({})
     setPublishProblems([])
     setPublishError(null)
+    setTemplateEditors({})
+    setViewTemplates({})
   }, [selectedId, selectedVersion])
 
   function handleSelectDefinition(def) {
@@ -280,6 +284,90 @@ export function DefinitionViewerPage() {
       setPublishError(err.message)
     } finally {
       setPublishing(false)
+    }
+  }
+
+  function templateBasename(tmpl) {
+    if (!tmpl) return ''
+    const parts = String(tmpl).split('/')
+    return parts[parts.length - 1] || ''
+  }
+
+  async function handleOpenTemplate(tmpl) {
+    const name = templateBasename(tmpl)
+    if (!name) return
+    setTemplateEditors((prev) => ({ ...prev, [name]: { ...(prev[name] ?? {}), open: true, loading: true, error: null, saved: null } }))
+    try {
+      const res = await fetch(`/api/definitions/${encodeURIComponent(selectedId)}/versions/${encodeURIComponent(String(selectedVersion))}/templates/${encodeURIComponent(name)}`)
+      if (res.status === 404) {
+        setTemplateEditors((prev) => ({ ...prev, [name]: { ...(prev[name] ?? {}), open: true, loading: false, source: '', error: null } }))
+        return
+      }
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setTemplateEditors((prev) => ({ ...prev, [name]: { ...(prev[name] ?? {}), open: true, loading: false, error: body.error ?? `Failed (${res.status})`, source: prev[name]?.source ?? '' } }))
+        return
+      }
+      setTemplateEditors((prev) => ({ ...prev, [name]: { ...(prev[name] ?? {}), open: true, loading: false, source: body.source ?? '', error: null } }))
+    } catch (err) {
+      setTemplateEditors((prev) => ({ ...prev, [name]: { ...(prev[name] ?? {}), open: true, loading: false, error: err.message } }))
+    }
+  }
+  function handleCloseTemplate(tmpl) {
+    const name = templateBasename(tmpl)
+    if (!name) return
+    setTemplateEditors((prev) => ({ ...prev, [name]: { ...(prev[name] ?? {}), open: false, error: null, saved: null } }))
+  }
+  async function handleSaveTemplate(tmpl) {
+    const name = templateBasename(tmpl)
+    if (!name) return
+    const ed = templateEditors[name]
+    const source = ed?.source ?? ''
+    setTemplateEditors((prev) => ({ ...prev, [name]: { ...(prev[name] ?? {}), saving: true, error: null, saved: null } }))
+    try {
+      const res = await fetch(`/api/definitions/${encodeURIComponent(selectedId)}/versions/${encodeURIComponent(String(selectedVersion))}/templates/${encodeURIComponent(name)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (res.status === 422) {
+        setTemplateEditors((prev) => ({ ...prev, [name]: { ...(prev[name] ?? {}), saving: false, error: body.error ?? 'Template does not compile' } }))
+        return
+      }
+      if (!res.ok) {
+        setTemplateEditors((prev) => ({ ...prev, [name]: { ...(prev[name] ?? {}), saving: false, error: body.error ?? `Save failed (${res.status})` } }))
+        return
+      }
+      setTemplateEditors((prev) => ({ ...prev, [name]: { ...(prev[name] ?? {}), saving: false, saved: 'Saved ✓', error: null } }))
+      setTimeout(() => setTemplateEditors((prev) => ({ ...prev, [name]: { ...(prev[name] ?? {}), saved: null } })), 2000)
+    } catch (err) {
+      setTemplateEditors((prev) => ({ ...prev, [name]: { ...(prev[name] ?? {}), saving: false, error: err.message } }))
+    }
+  }
+  async function handleToggleViewTemplate(tmpl) {
+    const name = templateBasename(tmpl)
+    if (!name) return
+    const cur = viewTemplates[name]
+    if (cur?.open) {
+      setViewTemplates((prev) => ({ ...prev, [name]: { ...(prev[name] ?? {}), open: false } }))
+      return
+    }
+    setViewTemplates((prev) => ({ ...prev, [name]: { ...(prev[name] ?? {}), open: true, loading: true, error: null } }))
+    try {
+      const res = await fetch(`/api/definitions/${encodeURIComponent(selectedId)}/versions/${encodeURIComponent(String(selectedVersion))}/templates/${encodeURIComponent(name)}`)
+      if (res.status === 404) {
+        setViewTemplates((prev) => ({ ...prev, [name]: { ...(prev[name] ?? {}), loading: false, source: '', error: 'Not found' } }))
+        return
+      }
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setViewTemplates((prev) => ({ ...prev, [name]: { ...(prev[name] ?? {}), loading: false, error: body.error ?? `Failed (${res.status})` } }))
+        return
+      }
+      setViewTemplates((prev) => ({ ...prev, [name]: { ...(prev[name] ?? {}), loading: false, source: body.source ?? '', error: null } }))
+    } catch (err) {
+      setViewTemplates((prev) => ({ ...prev, [name]: { ...(prev[name] ?? {}), loading: false, error: err.message } }))
     }
   }
 
@@ -483,7 +571,9 @@ export function DefinitionViewerPage() {
                   <section class="defn-section">
                     <h3>Artefacts</h3>
                     ${detail.artefacts.map(
-                      (a) => html`
+                      (a) => {
+                        const vt = viewTemplates[templateBasename(a.template)] ?? {}
+                        return html`
                         <div class="defn-card" key=${a.id}>
                           <h4>${a.title} <span class="defn-meta">${a.id} · gate: ${a.gate}</span></h4>
                           ${a.purpose ? html`<p class="guidance">${a.purpose}</p>` : null}
@@ -494,8 +584,17 @@ export function DefinitionViewerPage() {
                               ${a.requires.map((r) => html`<li key=${r}><code>${r}</code></li>`)}
                             </ul>
                           </div>
+                          ${a.template ? html`
+                            <div class="defn-template-view-block">
+                              <button class="btn small ghost defn-template-toggle" onClick=${() => handleToggleViewTemplate(a.template)}>${vt.open ? 'Hide template source' : 'View template source'}</button>
+                              ${vt.open ? html`
+                                ${vt.loading ? html`<p class="loading">Loading…</p>` : vt.error ? html`<p class="inline-error">${vt.error}</p>` : html`<pre class="defn-template-view" style="white-space:pre-wrap; font-family:var(--font-mono); font-size:13px; background:var(--bg-raised); border:var(--hairline) solid var(--line); padding:8px; max-height:400px; overflow:auto;">${vt.source}</pre>`}
+                              ` : null}
+                            </div>
+                          ` : null}
                         </div>
                       `
+                      }
                     )}
                   </section>
 
@@ -637,6 +736,29 @@ export function DefinitionViewerPage() {
                           <input class="wizard-input" value=${a.gate ?? ''} onInput=${(e) => updateDraft((d) => { d.artefacts[ai].gate = e.currentTarget.value })} />
                           <label class="field-label">Template</label>
                           <input class="wizard-input" value=${a.template ?? ''} onInput=${(e) => updateDraft((d) => { d.artefacts[ai].template = e.currentTarget.value })} />
+                          ${(() => {
+                            const tmplName = templateBasename(a.template)
+                            if (!tmplName) return null
+                            const ed = templateEditors[tmplName] ?? {}
+                            return html`
+                              <div class="defn-template-editor-block">
+                                ${!ed.open ? html`<button class="btn small defn-template-toggle" onClick=${() => handleOpenTemplate(a.template)}>Edit template</button>` : html`
+                                  <div class="defn-template-editor-wrap">
+                                    <label class="field-label">Template source — ${tmplName}</label>
+                                    ${ed.loading ? html`<p class="loading">Loading…</p>` : html`
+                                      <textarea class="defn-template-editor wizard-input" rows="16" style="font-family:var(--font-mono); font-size:13px; white-space:pre; overflow:auto;" value=${ed.source ?? ''} onInput=${(e) => setTemplateEditors((prev) => ({ ...prev, [tmplName]: { ...(prev[tmplName] ?? {}), source: e.currentTarget.value, error: null, saved: null } }))}></textarea>
+                                      ${ed.error ? html`<p class="inline-error defn-template-error">${ed.error}</p>` : null}
+                                      ${ed.saved ? html`<p class="save-status defn-template-saved">${ed.saved}</p>` : null}
+                                      <div class="defn-template-actions" style="display:flex; gap:8px; margin-top:8px;">
+                                        <button class="btn small primary" onClick=${() => handleSaveTemplate(a.template)} disabled=${ed.saving}>${ed.saving ? 'Saving…' : 'Save template'}</button>
+                                        <button class="btn small ghost" onClick=${() => handleCloseTemplate(a.template)}>Close</button>
+                                      </div>
+                                    `}
+                                  </div>
+                                `}
+                              </div>
+                            `
+                          })()}
                           <div class="defn-requires-list">
                             <span class="field-label">Requires</span>
                             <ul>

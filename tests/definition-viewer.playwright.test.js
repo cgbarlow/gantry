@@ -507,3 +507,98 @@ test('Definition Editor reorder fields via Move up persists after Save', async (
     rmSync(instancesDir, { recursive: true, force: true })
   }
 })
+
+test('Definition Editor template editing: draft artefact Edit template round-trips', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-tmpl-edit-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    cpSync(join(definitionsDir, 'design/1'), join(definitionsDir, 'design/2'), { recursive: true })
+    let t = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    t = t.replace('version: 1', 'version: 2').replace('status: published', 'status: draft')
+    writeFileSync(join(definitionsDir, 'design/2/definition.yaml'), t)
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      const browser = await launchBrowser()
+      try {
+        const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
+        await page.goto(`${base}/definitions`)
+        await page.waitForSelector('.defn-viewer', { timeout: 10_000 })
+        await page.waitForSelector('#defn-version-select', { timeout: 10_000 })
+        await page.locator('#defn-version-select').selectOption('2')
+        await page.waitForSelector('.defn-viewer-content', { timeout: 10_000 })
+        const editBtn = page.getByRole('button', { name: 'Edit', exact: true })
+        await editBtn.waitFor({ state: 'visible', timeout: 10_000 })
+        await editBtn.click()
+        await page.waitForSelector('.defn-editor', { timeout: 10_000 })
+        // first artefact's Edit template button
+        const editTemplateBtn = page.getByRole('button', { name: 'Edit template' }).first()
+        await editTemplateBtn.waitFor({ state: 'visible', timeout: 10_000 })
+        await editTemplateBtn.click()
+        const textarea = page.locator('.defn-template-editor').first()
+        await textarea.waitFor({ state: 'visible', timeout: 10_000 })
+        const initialSource = await textarea.inputValue()
+        assert.ok(initialSource.length > 0, 'textarea should load current source')
+        const newSource = 'Hello template ' + Date.now() + '\n<%= \"hi\" %>'
+        await textarea.fill(newSource)
+        const saveBtn = page.getByRole('button', { name: 'Save template' }).first()
+        await saveBtn.waitFor({ state: 'visible', timeout: 10_000 })
+        await saveBtn.click()
+        // Saved ✓ confirmation
+        const saved = page.locator('.defn-template-saved').first()
+        await saved.waitFor({ state: 'visible', timeout: 10_000 })
+        assert.match(await saved.textContent(), /Saved/)
+        // Close and reopen -> new source persisted
+        const closeBtn = page.getByRole('button', { name: 'Close' }).first()
+        await closeBtn.click()
+        await page.waitForTimeout(200)
+        // reopen
+        await editTemplateBtn.waitFor({ state: 'visible', timeout: 10_000 })
+        await editTemplateBtn.click()
+        const textarea2 = page.locator('.defn-template-editor').first()
+        await textarea2.waitFor({ state: 'visible', timeout: 10_000 })
+        assert.equal(await textarea2.inputValue(), newSource)
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('Definition Editor published version shows no Save template', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-tmpl-pub-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    cpSync(join(definitionsDir, 'design/1'), join(definitionsDir, 'design/2'), { recursive: true })
+    let t = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    t = t.replace('version: 1', 'version: 2').replace('status: published', 'status: draft')
+    writeFileSync(join(definitionsDir, 'design/2/definition.yaml'), t)
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      const browser = await launchBrowser()
+      try {
+        const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
+        await page.goto(`${base}/definitions`)
+        await page.waitForSelector('.defn-viewer', { timeout: 10_000 })
+        await page.waitForSelector('#defn-version-select', { timeout: 10_000 })
+        await page.locator('#defn-version-select').selectOption('1')
+        await page.waitForSelector('.defn-viewer-content', { timeout: 10_000 })
+        // published has no Edit button, thus no Edit template
+        assert.equal(await page.getByRole('button', { name: 'Edit' }).count(), 0)
+        assert.equal(await page.getByRole('button', { name: 'Save template' }).count(), 0)
+        // View template source may be present but Save should not
+        // ensure no textarea editor visible
+        assert.equal(await page.locator('.defn-template-editor').count(), 0)
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})

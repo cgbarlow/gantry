@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, cpSync, rmSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { loadDefinition, listDefinitions, findDefinitionProblems, loadDefinitionChangelog, writeDefinitionVersion, definitionVersionProjection, createDraftVersion, cloneDefinition, archiveDefinition, restoreDefinition, isDefinitionArchived, publishDefinitionVersion, listVersionNumbers } from '../lib/definition.js'
+import { loadDefinition, listDefinitions, findDefinitionProblems, loadDefinitionChangelog, writeDefinitionVersion, definitionVersionProjection, createDraftVersion, cloneDefinition, archiveDefinition, restoreDefinition, isDefinitionArchived, publishDefinitionVersion, listVersionNumbers, TEMPLATE_NAME_RE, readDefinitionTemplate, writeDefinitionTemplate } from '../lib/definition.js'
 import { createInstance, readInstance } from '../lib/instance.js'
 import { getStatus } from '../lib/status.js'
 import { checkGate } from '../lib/check.js'
@@ -397,4 +397,85 @@ test('publishDefinitionVersion flips clean draft to published; returns problems 
   } finally {
     rmSync(definitionsDir, { recursive: true, force: true })
   }
+})
+
+// WI239 — template read/write helpers (raw .md.tmpl text, draft-only, Eta compile-check)
+
+test('readDefinitionTemplate returns non-empty source for existing template', () => {
+  withVersionedFixture(({ definitionsDir }) => {
+    const src = readDefinitionTemplate('design', 2, 'sad.md.tmpl', { definitionsDir })
+    assert.equal(typeof src, 'string')
+    assert.ok(src.length > 0)
+  })
+})
+
+test('readDefinitionTemplate returns null for missing template file', () => {
+  withVersionedFixture(({ definitionsDir }) => {
+    const src = readDefinitionTemplate('design', 2, 'ghost.md.tmpl', { definitionsDir })
+    assert.equal(src, null)
+  })
+})
+
+test('readDefinitionTemplate throws for traversal or bad template name', () => {
+  withVersionedFixture(({ definitionsDir }) => {
+    assert.throws(() => readDefinitionTemplate('design', 2, '../../x', { definitionsDir }), /Invalid template name/)
+    assert.throws(() => readDefinitionTemplate('design', 2, 'x.txt', { definitionsDir }), /Invalid template name/)
+    assert.throws(() => readDefinitionTemplate('design', 2, 'a/b.md.tmpl', { definitionsDir }), /Invalid template name/)
+    assert.equal(TEMPLATE_NAME_RE.test('sad.md.tmpl'), true)
+    assert.equal(TEMPLATE_NAME_RE.test('../../x'), false)
+    assert.equal(TEMPLATE_NAME_RE.test('x.txt'), false)
+  })
+})
+
+test('writeDefinitionTemplate writes valid source and round-trips via readDefinitionTemplate', () => {
+  withVersionedFixture(({ definitionsDir }) => {
+    const result = writeDefinitionTemplate('design', 2, 'sad.md.tmpl', 'hello valid', { definitionsDir })
+    assert.deepEqual(result, { name: 'sad.md.tmpl' })
+    const src = readDefinitionTemplate('design', 2, 'sad.md.tmpl', { definitionsDir })
+    assert.equal(src, 'hello valid')
+  })
+})
+
+test('writeDefinitionTemplate with broken Eta source throws with compileError and leaves file unchanged', () => {
+  withVersionedFixture(({ definitionsDir }) => {
+    const before = readDefinitionTemplate('design', 2, 'sad.md.tmpl', { definitionsDir })
+    assert.ok(typeof before === 'string' && before.length > 0)
+    let err
+    try {
+      writeDefinitionTemplate('design', 2, 'sad.md.tmpl', '<% if (x %>', { definitionsDir })
+    } catch (e) {
+      err = e
+    }
+    assert.ok(err, 'expected throw')
+    assert.ok(err.compileError, 'expected .compileError')
+    assert.match(err.message, /does not compile/i)
+    const after = readDefinitionTemplate('design', 2, 'sad.md.tmpl', { definitionsDir })
+    assert.equal(after, before, 'file should be unchanged after compile error')
+    // also test absent file stays absent after broken write
+    assert.equal(readDefinitionTemplate('design', 2, 'brand-new.md.tmpl', { definitionsDir }), null)
+    let err2
+    try {
+      writeDefinitionTemplate('design', 2, 'brand-new.md.tmpl', '<% if (x %>', { definitionsDir })
+    } catch (e) {
+      err2 = e
+    }
+    assert.ok(err2?.compileError)
+    assert.equal(readDefinitionTemplate('design', 2, 'brand-new.md.tmpl', { definitionsDir }), null, 'broken new file should remain absent')
+  })
+})
+
+test('writeDefinitionTemplate against published version throws not a draft', () => {
+  withVersionedFixture(({ definitionsDir }) => {
+    assert.throws(() => writeDefinitionTemplate('design', 1, 'sad.md.tmpl', 'hi', { definitionsDir }), /not a draft/)
+  })
+})
+
+test('writeDefinitionTemplate creates a brand-new template file', () => {
+  withVersionedFixture(({ definitionsDir }) => {
+    assert.equal(readDefinitionTemplate('design', 2, 'brand-new.md.tmpl', { definitionsDir }), null)
+    const result = writeDefinitionTemplate('design', 2, 'brand-new.md.tmpl', 'plain text', { definitionsDir })
+    assert.deepEqual(result, { name: 'brand-new.md.tmpl' })
+    assert.equal(readDefinitionTemplate('design', 2, 'brand-new.md.tmpl', { definitionsDir }), 'plain text')
+    assert.equal(existsSync(join(definitionsDir, 'design/2/templates/brand-new.md.tmpl')), true)
+  })
 })
