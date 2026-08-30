@@ -346,3 +346,164 @@ test('Definition Editor Archive removes row, Show archived reveals it marked, Re
     rmSync(instancesDir, { recursive: true, force: true })
   }
 })
+
+test('Definition Editor reorder stages via Move down persists after Save', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-reorder-stage-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    cpSync(join(definitionsDir, 'design/1'), join(definitionsDir, 'design/2'), { recursive: true })
+    let t = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    t = t.replace('version: 1', 'version: 2').replace('status: published', 'status: draft')
+    writeFileSync(join(definitionsDir, 'design/2/definition.yaml'), t)
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      const browser = await launchBrowser()
+      try {
+        const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
+        await page.goto(`${base}/definitions`)
+        await page.waitForSelector('.defn-viewer', { timeout: 10_000 })
+        await page.waitForSelector('#defn-version-select', { timeout: 10_000 })
+        await page.locator('#defn-version-select').selectOption('2')
+        await page.waitForSelector('.defn-viewer-content', { timeout: 10_000 })
+        const editBtn = page.getByRole('button', { name: 'Edit' })
+        await editBtn.waitFor({ state: 'visible', timeout: 10_000 })
+        await editBtn.click()
+        await page.waitForSelector('.defn-editor', { timeout: 10_000 })
+        // Capture initial stage ids from editor (stage id code inside defn-editor-row only)
+        const beforeIds = await page.$$eval('.defn-editor-stages .defn-card', (cards) => cards.map((c) => c.querySelector('.defn-editor-row code').textContent.trim()))
+        assert.ok(beforeIds.length >= 2, 'should have at least 2 stages')
+        // First stage Move down should be enabled, last stage Move down disabled
+        const firstCard = page.locator('.defn-editor-stages .defn-card').first()
+        const firstMoveDown = firstCard.getByRole('button', { name: /Move stage.*down/ })
+        await firstMoveDown.waitFor({ state: 'visible', timeout: 5000 })
+        assert.equal(await firstMoveDown.isDisabled(), false)
+        const firstMoveUp = firstCard.getByRole('button', { name: /Move stage.*up/ })
+        assert.equal(await firstMoveUp.isDisabled(), true)
+        // drag handle exists
+        const handle = firstCard.locator('.defn-drag-handle').first()
+        assert.equal(await handle.count(), 1)
+        await firstMoveDown.click()
+        const afterIds = await page.$$eval('.defn-editor-stages .defn-card', (cards) => cards.map((c) => c.querySelector('.defn-editor-row code').textContent.trim()))
+        assert.deepEqual(afterIds, [beforeIds[1], beforeIds[0], ...beforeIds.slice(2)], 'stage order should have first two swapped in editor')
+        // Save
+        const saveBtn = page.getByRole('button', { name: 'Save' }).first()
+        await saveBtn.click()
+        await page.waitForSelector('.defn-viewer-content:not(.defn-editor)', { timeout: 10_000 })
+        // Read-only pane stage order should reflect saved order
+        const readOnlyIds = await page.$$eval('.defn-viewer-content:not(.defn-editor) .defn-section:nth-of-type(1) .defn-card .defn-meta', (els) => els.map((e) => e.textContent.trim().split('·')[0].trim()))
+        // readOnlyIds should start with afterIds order
+        assert.deepEqual(readOnlyIds.slice(0, afterIds.length), afterIds)
+        // Published pane should have no reorder controls
+        assert.equal(await page.locator('.defn-drag-handle').count(), 0)
+        assert.equal(await page.locator('.defn-move-btns').count(), 0)
+        // Re-enter edit mode after reselect to confirm persistence across reload of draft
+        await page.locator('#defn-version-select').selectOption('2')
+        await page.waitForSelector('.defn-viewer-content', { timeout: 10_000 })
+        const editBtn2 = page.getByRole('button', { name: 'Edit' })
+        await editBtn2.waitFor({ state: 'visible', timeout: 10_000 })
+        await editBtn2.click()
+        await page.waitForSelector('.defn-editor', { timeout: 10_000 })
+        const persistedIds = await page.$$eval('.defn-editor-stages .defn-card', (cards) => cards.map((c) => c.querySelector('.defn-editor-row code').textContent.trim()))
+        assert.deepEqual(persistedIds, afterIds)
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('Definition Editor reorder fields via Move up persists after Save', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-reorder-field-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    cpSync(join(definitionsDir, 'design/1'), join(definitionsDir, 'design/2'), { recursive: true })
+    let t = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    t = t.replace('version: 1', 'version: 2').replace('status: published', 'status: draft')
+    writeFileSync(join(definitionsDir, 'design/2/definition.yaml'), t)
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      const browser = await launchBrowser()
+      try {
+        const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
+        await page.goto(`${base}/definitions`)
+        await page.waitForSelector('.defn-viewer', { timeout: 10_000 })
+        await page.waitForSelector('#defn-version-select', { timeout: 10_000 })
+        await page.locator('#defn-version-select').selectOption('2')
+        await page.waitForSelector('.defn-viewer-content', { timeout: 10_000 })
+        const editBtn = page.getByRole('button', { name: 'Edit' })
+        await editBtn.waitFor({ state: 'visible', timeout: 10_000 })
+        await editBtn.click()
+        await page.waitForSelector('.defn-editor', { timeout: 10_000 })
+        // Find first module card with at least 2 fields
+        const moduleCards = page.locator('.defn-editor-modules .defn-card')
+        const moduleCount = await moduleCards.count()
+        assert.ok(moduleCount >= 1)
+        // locate first module's fields
+        let targetModuleIndex = -1
+        let beforeFieldIds = []
+        for (let mi = 0; mi < moduleCount; mi++) {
+          const ids = await page.$$eval(`.defn-editor-modules .defn-card:nth-of-type(${mi + 1}) .defn-editor-field`, (els) =>
+            els.map((el) => {
+              const inputs = el.querySelectorAll('input')
+              // second input is field id
+              return inputs[1] ? inputs[1].value : ''
+            })
+          )
+          if (ids.length >= 2) {
+            targetModuleIndex = mi
+            beforeFieldIds = ids
+            break
+          }
+        }
+        assert.ok(targetModuleIndex >= 0, 'should find module with >=2 fields')
+        assert.ok(beforeFieldIds.length >= 2)
+        // Second field's Move up should be enabled, first's Move up disabled
+        const secondField = page.locator(`.defn-editor-modules .defn-card:nth-of-type(${targetModuleIndex + 1}) .defn-editor-field`).nth(1)
+        const moveUpSecond = secondField.getByRole('button', { name: /Move field.*up/ })
+        await moveUpSecond.waitFor({ state: 'visible', timeout: 5000 })
+        assert.equal(await moveUpSecond.isDisabled(), false)
+        const firstField = page.locator(`.defn-editor-modules .defn-card:nth-of-type(${targetModuleIndex + 1}) .defn-editor-field`).first()
+        const moveUpFirst = firstField.getByRole('button', { name: /Move field.*up/ })
+        assert.equal(await moveUpFirst.isDisabled(), true)
+        const handle = secondField.locator('.defn-drag-handle').first()
+        assert.equal(await handle.count(), 1)
+        await moveUpSecond.click()
+        const afterFieldIds = await page.$$eval(`.defn-editor-modules .defn-card:nth-of-type(${targetModuleIndex + 1}) .defn-editor-field`, (els) =>
+          els.map((el) => {
+            const inputs = el.querySelectorAll('input')
+            return inputs[1] ? inputs[1].value : ''
+          })
+        )
+        assert.deepEqual(afterFieldIds, [beforeFieldIds[1], beforeFieldIds[0], ...beforeFieldIds.slice(2)])
+        // Save and verify read-only pane field order persisted
+        const saveBtn = page.getByRole('button', { name: 'Save' }).first()
+        await saveBtn.click()
+        await page.waitForSelector('.defn-viewer-content:not(.defn-editor)', { timeout: 10_000 })
+        // Find corresponding read-only module card by title/id and check field order
+        const readOnlyModuleCards = page.locator('.defn-viewer-content:not(.defn-editor) .defn-section:nth-of-type(3) .defn-card')
+        // Get module id from before (need original draft module id)
+        const draftModuleId = beforeFieldIds.length ? await page.evaluate((mi) => {
+          // not available after save; instead re-derive from beforeFieldIds context via DOM after save is not needed; we use the first module's field order
+          return null
+        }, targetModuleIndex) : null
+        // Simpler: check first module's field order in read-only matches afterFieldIds
+        const readOnlyFieldIds = await page.$$eval('.defn-viewer-content:not(.defn-editor) .defn-section:nth-of-type(3) .defn-card', (cards) => {
+          const first = cards[0]
+          if (!first) return []
+          return Array.from(first.querySelectorAll('.defn-field code')).map((c) => c.textContent.trim())
+        })
+        assert.deepEqual(readOnlyFieldIds.slice(0, afterFieldIds.length), afterFieldIds)
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})

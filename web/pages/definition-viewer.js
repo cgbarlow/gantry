@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { renderMarkdown } from '../lib/markdown.js'
+import { reorder } from '../lib/reorder.js'
 
 function isValidSlugClient(slug) {
   return typeof slug === 'string' && slug !== '' && slug !== '.' && slug !== '..' && /^[^\\/]+$/.test(slug)
@@ -31,6 +32,8 @@ export function DefinitionViewerPage() {
   const [publishing, setPublishing] = useState(false)
   const [publishProblems, setPublishProblems] = useState([])
   const [publishError, setPublishError] = useState(null)
+  const [dragSource, setDragSource] = useState(null)
+  const [dragOver, setDragOver] = useState(null)
 
   function fetchDefinitions(showArchivedFlag) {
     const qs = showArchivedFlag ? '?archived=1' : ''
@@ -291,6 +294,62 @@ export function DefinitionViewerPage() {
     })
   }
 
+  function handleDragStart(e, listPath, index) {
+    e.dataTransfer.effectAllowed = 'move'
+    try { e.dataTransfer.setData('text/plain', JSON.stringify({ listPath, index })) } catch {}
+    setDragSource({ listPath, index })
+  }
+  function handleDragOver(e, listPath, index) {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (dragSource && dragSource.listPath !== listPath) return
+    setDragOver({ listPath, index })
+  }
+  function handleDrop(e, listPath, targetIndex) {
+    e.preventDefault()
+    let src = dragSource
+    try {
+      const raw = e.dataTransfer.getData('text/plain')
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (parsed && typeof parsed.listPath === 'string' && typeof parsed.index === 'number') src = parsed
+      }
+    } catch {}
+    if (!src || src.listPath !== listPath) {
+      setDragSource(null)
+      setDragOver(null)
+      return
+    }
+    const from = src.index
+    const to = targetIndex
+    if (from === to) {
+      setDragSource(null)
+      setDragOver(null)
+      return
+    }
+    updateDraft((d) => {
+      if (listPath === 'stages') d.stages = reorder(d.stages, from, to)
+      else if (listPath === 'artefacts') d.artefacts = reorder(d.artefacts, from, to)
+      else if (listPath === 'modules') d.modules = reorder(d.modules, from, to)
+      else if (listPath.startsWith('stage:')) {
+        const si = Number(listPath.split(':')[1])
+        d.stages[si].modules = reorder(d.stages[si].modules, from, to)
+      } else if (listPath.startsWith('artefact:')) {
+        const ai = Number(listPath.split(':')[1])
+        d.artefacts[ai].requires = reorder(d.artefacts[ai].requires, from, to)
+      } else if (listPath.startsWith('module:')) {
+        const mi = Number(listPath.split(':')[1])
+        d.modules[mi].fields = reorder(d.modules[mi].fields, from, to)
+      }
+    })
+    setDragSource(null)
+    setDragOver(null)
+  }
+  function handleDragEnd() {
+    setDragSource(null)
+    setDragOver(null)
+  }
+
   return html`
     <header class="wizard-header">
       <div class="brand">
@@ -499,10 +558,15 @@ export function DefinitionViewerPage() {
                     <h3>Stages</h3>
                     ${draft.stages.map(
                       (s, si) => html`
-                        <div class="defn-card" key=${si}>
-                          <div class="defn-editor-row">
+                        <div class=${'defn-card' + (dragSource?.listPath === 'stages' && dragSource.index === si ? ' defn-dragging' : '') + (dragOver?.listPath === 'stages' && dragOver.index === si ? ' defn-drop-target' : '')} key=${si} onDragOver=${(e) => handleDragOver(e, 'stages', si)} onDragLeave=${() => { if (dragOver?.listPath === 'stages' && dragOver.index === si) setDragOver(null) }} onDrop=${(e) => handleDrop(e, 'stages', si)} onDragEnd=${handleDragEnd}>
+                          <div class="defn-editor-row" style="display:flex;align-items:center;gap:8px">
+                            <span class="defn-drag-handle" draggable="true" onDragStart=${(e) => handleDragStart(e, 'stages', si)} onDragEnd=${handleDragEnd} role="button" aria-label=${`Drag stage "${s.title}"`} title="Drag to reorder">⠿</span>
                             <label class="field-label">Stage id</label>
                             <code>${s.id}</code>
+                            <span class="defn-move-btns">
+                              <button class="btn small ghost" aria-label=${`Move stage "${s.title}" up`} disabled=${si === 0} onClick=${() => updateDraft((d) => { d.stages = reorder(d.stages, si, si - 1) })}>↑</button>
+                              <button class="btn small ghost" aria-label=${`Move stage "${s.title}" down`} disabled=${si === draft.stages.length - 1} onClick=${() => updateDraft((d) => { d.stages = reorder(d.stages, si, si + 1) })}>↓</button>
+                            </span>
                           </div>
                           <label class="field-label">Title</label>
                           <input class="wizard-input" value=${s.title} onInput=${(e) => updateDraft((d) => { d.stages[si].title = e.currentTarget.value })} />
@@ -514,9 +578,20 @@ export function DefinitionViewerPage() {
                             <span class="field-label">Modules</span>
                             <ul>
                               ${s.modules.map(
-                                (mid, mi) => html`
-                                  <li key=${mi}><code>${mid}</code> <button class="btn small ghost" onClick=${() => updateDraft((d) => { d.stages[si].modules.splice(mi, 1) })}>✕</button></li>
+                                (mid, mi) => {
+                                  const mp = `stage:${si}:modules`
+                                  return html`
+                                  <li key=${mi} class=${(dragSource?.listPath === mp && dragSource.index === mi ? 'defn-dragging ' : '') + (dragOver?.listPath === mp && dragOver.index === mi ? 'defn-drop-target' : '')} onDragOver=${(e) => handleDragOver(e, mp, mi)} onDragLeave=${() => { if (dragOver?.listPath === mp && dragOver.index === mi) setDragOver(null) }} onDrop=${(e) => handleDrop(e, mp, mi)} onDragEnd=${handleDragEnd}>
+                                    <span class="defn-drag-handle" draggable="true" onDragStart=${(e) => handleDragStart(e, mp, mi)} onDragEnd=${handleDragEnd} role="button" aria-label=${`Drag module ref "${mid}"`} title="Drag to reorder">⠿</span>
+                                    <code>${mid}</code>
+                                    <span class="defn-move-btns">
+                                      <button class="btn small ghost" aria-label=${`Move module ref "${mid}" up`} disabled=${mi === 0} onClick=${() => updateDraft((d) => { d.stages[si].modules = reorder(d.stages[si].modules, mi, mi - 1) })}>↑</button>
+                                      <button class="btn small ghost" aria-label=${`Move module ref "${mid}" down`} disabled=${mi === s.modules.length - 1} onClick=${() => updateDraft((d) => { d.stages[si].modules = reorder(d.stages[si].modules, mi, mi + 1) })}>↓</button>
+                                    </span>
+                                    <button class="btn small ghost" onClick=${() => updateDraft((d) => { d.stages[si].modules.splice(mi, 1) })}>✕</button>
+                                  </li>
                                 `
+                                }
                               )}
                             </ul>
                             <div class="defn-editor-inline">
@@ -544,10 +619,15 @@ export function DefinitionViewerPage() {
                     <h3>Artefacts</h3>
                     ${draft.artefacts.map(
                       (a, ai) => html`
-                        <div class="defn-card" key=${ai}>
-                          <div class="defn-editor-row">
+                        <div class=${'defn-card' + (dragSource?.listPath === 'artefacts' && dragSource.index === ai ? ' defn-dragging' : '') + (dragOver?.listPath === 'artefacts' && dragOver.index === ai ? ' defn-drop-target' : '')} key=${ai} onDragOver=${(e) => handleDragOver(e, 'artefacts', ai)} onDragLeave=${() => { if (dragOver?.listPath === 'artefacts' && dragOver.index === ai) setDragOver(null) }} onDrop=${(e) => handleDrop(e, 'artefacts', ai)} onDragEnd=${handleDragEnd}>
+                          <div class="defn-editor-row" style="display:flex;align-items:center;gap:8px">
+                            <span class="defn-drag-handle" draggable="true" onDragStart=${(e) => handleDragStart(e, 'artefacts', ai)} onDragEnd=${handleDragEnd} role="button" aria-label=${`Drag artefact "${a.title}"`} title="Drag to reorder">⠿</span>
                             <label class="field-label">Artefact id</label>
                             <code>${a.id}</code>
+                            <span class="defn-move-btns">
+                              <button class="btn small ghost" aria-label=${`Move artefact "${a.title}" up`} disabled=${ai === 0} onClick=${() => updateDraft((d) => { d.artefacts = reorder(d.artefacts, ai, ai - 1) })}>↑</button>
+                              <button class="btn small ghost" aria-label=${`Move artefact "${a.title}" down`} disabled=${ai === draft.artefacts.length - 1} onClick=${() => updateDraft((d) => { d.artefacts = reorder(d.artefacts, ai, ai + 1) })}>↓</button>
+                            </span>
                           </div>
                           <label class="field-label">Title</label>
                           <input class="wizard-input" value=${a.title} onInput=${(e) => updateDraft((d) => { d.artefacts[ai].title = e.currentTarget.value })} />
@@ -561,9 +641,20 @@ export function DefinitionViewerPage() {
                             <span class="field-label">Requires</span>
                             <ul>
                               ${a.requires.map(
-                                (r, ri) => html`
-                                  <li key=${ri}><code>${r}</code> <button class="btn small ghost" onClick=${() => updateDraft((d) => { d.artefacts[ai].requires.splice(ri, 1) })}>✕</button></li>
+                                (r, ri) => {
+                                  const rp = `artefact:${ai}:requires`
+                                  return html`
+                                  <li key=${ri} class=${(dragSource?.listPath === rp && dragSource.index === ri ? 'defn-dragging ' : '') + (dragOver?.listPath === rp && dragOver.index === ri ? 'defn-drop-target' : '')} onDragOver=${(e) => handleDragOver(e, rp, ri)} onDragLeave=${() => { if (dragOver?.listPath === rp && dragOver.index === ri) setDragOver(null) }} onDrop=${(e) => handleDrop(e, rp, ri)} onDragEnd=${handleDragEnd}>
+                                    <span class="defn-drag-handle" draggable="true" onDragStart=${(e) => handleDragStart(e, rp, ri)} onDragEnd=${handleDragEnd} role="button" aria-label=${`Drag requirement "${r}"`} title="Drag to reorder">⠿</span>
+                                    <code>${r}</code>
+                                    <span class="defn-move-btns">
+                                      <button class="btn small ghost" aria-label=${`Move requirement "${r}" up`} disabled=${ri === 0} onClick=${() => updateDraft((d) => { d.artefacts[ai].requires = reorder(d.artefacts[ai].requires, ri, ri - 1) })}>↑</button>
+                                      <button class="btn small ghost" aria-label=${`Move requirement "${r}" down`} disabled=${ri === a.requires.length - 1} onClick=${() => updateDraft((d) => { d.artefacts[ai].requires = reorder(d.artefacts[ai].requires, ri, ri + 1) })}>↓</button>
+                                    </span>
+                                    <button class="btn small ghost" onClick=${() => updateDraft((d) => { d.artefacts[ai].requires.splice(ri, 1) })}>✕</button>
+                                  </li>
                                 `
+                                }
                               )}
                             </ul>
                             <div class="defn-editor-inline">
@@ -587,8 +678,15 @@ export function DefinitionViewerPage() {
                     <h3>Modules</h3>
                     ${draft.modules.map(
                       (m, mi) => html`
-                        <div class="defn-card" key=${mi}>
-                          <label class="field-label">Module id</label>
+                        <div class=${'defn-card' + (dragSource?.listPath === 'modules' && dragSource.index === mi ? ' defn-dragging' : '') + (dragOver?.listPath === 'modules' && dragOver.index === mi ? ' defn-drop-target' : '')} key=${mi} onDragOver=${(e) => handleDragOver(e, 'modules', mi)} onDragLeave=${() => { if (dragOver?.listPath === 'modules' && dragOver.index === mi) setDragOver(null) }} onDrop=${(e) => handleDrop(e, 'modules', mi)} onDragEnd=${handleDragEnd}>
+                          <div style="display:flex;align-items:center;gap:8px">
+                            <span class="defn-drag-handle" draggable="true" onDragStart=${(e) => handleDragStart(e, 'modules', mi)} onDragEnd=${handleDragEnd} role="button" aria-label=${`Drag module "${m.title ?? m.id}"`} title="Drag to reorder">⠿</span>
+                            <label class="field-label" style="margin-bottom:0">Module id</label>
+                            <span class="defn-move-btns">
+                              <button class="btn small ghost" aria-label=${`Move module "${m.title ?? m.id}" up`} disabled=${mi === 0} onClick=${() => updateDraft((d) => { d.modules = reorder(d.modules, mi, mi - 1) })}>↑</button>
+                              <button class="btn small ghost" aria-label=${`Move module "${m.title ?? m.id}" down`} disabled=${mi === draft.modules.length - 1} onClick=${() => updateDraft((d) => { d.modules = reorder(d.modules, mi, mi + 1) })}>↓</button>
+                            </span>
+                          </div>
                           <input class="wizard-input" value=${m.id} onInput=${(e) => updateDraft((d) => { d.modules[mi].id = e.currentTarget.value })} />
                           ${!isValidSlugClient(m.id) ? html`<p class="inline-error">Invalid slug — single segment, no slashes or ".."</p>` : null}
                           <label class="field-label">Title</label>
@@ -598,8 +696,18 @@ export function DefinitionViewerPage() {
                           <div class="defn-fields-list">
                             <span class="field-label">Fields</span>
                             ${m.fields.map(
-                              (f, fi) => html`
-                                <div class="defn-card defn-editor-field" key=${fi}>
+                              (f, fi) => {
+                                const fp = `module:${mi}:fields`
+                                return html`
+                                <div class=${'defn-card defn-editor-field' + (dragSource?.listPath === fp && dragSource.index === fi ? ' defn-dragging' : '') + (dragOver?.listPath === fp && dragOver.index === fi ? ' defn-drop-target' : '')} key=${fi} onDragOver=${(e) => handleDragOver(e, fp, fi)} onDragLeave=${() => { if (dragOver?.listPath === fp && dragOver.index === fi) setDragOver(null) }} onDrop=${(e) => handleDrop(e, fp, fi)} onDragEnd=${handleDragEnd}>
+                                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                                    <span class="defn-drag-handle" draggable="true" onDragStart=${(e) => handleDragStart(e, fp, fi)} onDragEnd=${handleDragEnd} role="button" aria-label=${`Drag field "${f.title ?? f.id}"`} title="Drag to reorder">⠿</span>
+                                    <span class="field-label" style="margin-bottom:0">Field</span>
+                                    <span class="defn-move-btns">
+                                      <button class="btn small ghost" aria-label=${`Move field "${f.title ?? f.id}" up`} disabled=${fi === 0} onClick=${() => updateDraft((d) => { d.modules[mi].fields = reorder(d.modules[mi].fields, fi, fi - 1) })}>↑</button>
+                                      <button class="btn small ghost" aria-label=${`Move field "${f.title ?? f.id}" down`} disabled=${fi === m.fields.length - 1} onClick=${() => updateDraft((d) => { d.modules[mi].fields = reorder(d.modules[mi].fields, fi, fi + 1) })}>↓</button>
+                                    </span>
+                                  </div>
                                   <label class="field-label">Field title</label>
                                   <input class="wizard-input" value=${f.title ?? ''} onInput=${(e) => updateDraft((d) => { d.modules[mi].fields[fi].title = e.currentTarget.value })} />
                                   <label class="field-label">Field id</label>
@@ -637,6 +745,7 @@ export function DefinitionViewerPage() {
                                   <button class="btn small ghost" onClick=${() => updateDraft((d) => { d.modules[mi].fields.splice(fi, 1) })}>Remove field ✕</button>
                                 </div>
                               `
+                              }
                             )}
                             <button class="btn small" onClick=${() => updateDraft((d) => { d.modules[mi].fields.push({ id: `new-field-${d.modules[mi].fields.length + 1}`, title: 'New Field', type: 'markdown', guidance: '' }) })}>Add field</button>
                           </div>

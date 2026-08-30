@@ -1440,4 +1440,10 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-clone-input { display: flex; flex-direction: column; gap: 6px; }
 .defn-clone-actions { display: flex; gap: 6px; }
 .defn-header-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.defn-drag-handle { cursor: grab; user-select: none; padding: 2px 6px; font-size: 14px; color: var(--text-muted); border: var(--hairline) solid transparent; border-radius: var(--radius); }
+.defn-drag-handle:active { cursor: grabbing; }
+.defn-dragging { opacity: 0.5; }
+.defn-drop-target { outline: 2px dashed var(--line-strong); outline-offset: 2px; background: var(--bg); }
+.defn-move-btns { display: inline-flex; gap: 4px; align-items: center; }
+.defn-move-btns .btn { margin: 0; padding: 2px 6px; font-size: 11px; line-height: 1; }
 @media (max-width: 700px) { .defn-viewer-layout { grid-template-columns: 1fr; } }
