@@ -41,7 +41,7 @@ Git is the audit trail. Who changed what, when, and why is a `git log`, not a ve
 
 | Term | What it is |
 |---|---|
-| **Definition** | A reusable process description. Design is one definition. Business case, procurement, incident review and operational handover are others. A Gantry repo can hold as many as you need. |
+| **Definition** | A reusable, versioned process description. Design is one definition. Business case, procurement, incident review and operational handover are others. A Gantry repo can hold as many as you need, each definition carrying numbered versions (`definitions/<id>/<n>/`) with `version:` and `status:` (`draft` \| `published`). |
 | **Stage** | A phase of the process. Stages are ordered, and each has an exit gate. |
 | **Gate** | The decision point a stage feeds. Gates declare which artefacts and which modules must be complete to pass. |
 | **Module** | The atomic unit of content — a single, self-contained piece of the process (context, options, non-functional requirements, security posture). Modules are the source of truth. |
@@ -51,6 +51,10 @@ Git is the audit trail. Who changed what, when, and why is a `git log`, not a ve
 | **Artefact** | A rendered output. A document, a page, a summary. Generated, never hand-edited. Every artefact, `.md` and `.docx`, ends with a footer naming a short commit hash and date it was rendered from — the current local `HEAD` for a local instance, or (for an Azure DevOps-backed one) the commit its content was pushed as, one commit behind the file's own latest history entry, since a commit can't name its own hash — so a document can always be traced back to close to the exact version that produced it. |
 
 The key rule: **artefacts are derived, modules are authored.** If you find yourself editing a rendered artefact, something is wrong with the module spec.
+
+### Definition Editor (experimental)
+
+Definitions are versioned (numbered `definitions/<id>/<n>/` dirs — see "Definition schema" below). An experimental **Definition Editor** screen at `/definitions` — linked from the Workspaces page header as "Definition Editor (experimental)" — shows any definition version read-only and, on a *draft* version, allows editing its structure, modules, fields and `.md.tmpl` templates, reordering stages/modules/fields, and creating a new draft version, cloning a definition, archiving/restoring, and publishing a draft. It is experimental and may change without notice.
 
 ## Principles
 
@@ -79,11 +83,7 @@ Gantry runs anywhere Node.js and Pandoc do, including Windows — you don't need
   curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
   sudo apt-get install -y nodejs
   ```
-- **Windows**:
-  ```powershell
-  winget install OpenJS.NodeJS.LTS
-  ```
-  Restart your terminal afterwards so `node`/`npm` are on PATH. (Or use the installer from [nodejs.org/en/download](https://nodejs.org/en/download).)
+- **Windows**: download the 64-bit **Windows Installer (`.msi`)** from https://nodejs.org/en/download and run it (standard wizard), then restart your terminal so `node`/`npm` are on PATH.
 
 **2. Install Pandoc 3.x** (required at render time — see below)
 
@@ -92,13 +92,27 @@ Gantry runs anywhere Node.js and Pandoc do, including Windows — you don't need
   sudo apt-get install -y pandoc
   ```
   Or grab the latest `.deb` from the [Pandoc releases page](https://github.com/jgm/pandoc/releases/latest) if your distro's version lags.
-- **Windows**:
-  ```powershell
-  winget install --source winget --exact --id JohnMacFarlane.Pandoc
-  ```
-  Or use the MSI installer from the [Pandoc releases page](https://github.com/jgm/pandoc/releases/latest).
+- **Windows**: download `pandoc-<version>-windows-x86_64.msi` from https://github.com/jgm/pandoc/releases/latest and run it.
 
-**3. Clone and install Gantry** (same on both platforms)
+**3. Install Git**
+
+- **Linux (Debian/Ubuntu)**:
+  ```bash
+  sudo apt-get install -y git
+  ```
+- **Windows**: download the 64-bit standalone installer from https://git-scm.com/download/win and run it.
+
+Already have winget? `winget install OpenJS.NodeJS.LTS` and `winget install --exact --id JohnMacFarlane.Pandoc` also work.
+
+> **Corporate proxy / TLS inspection (Windows).** If `npm install` fails with `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` for `registry.npmjs.org`, `github.com`, or both, your network is doing HTTPS inspection (Zscaler, Netskope, a corporate firewall) with a CA that Windows trusts but Node doesn't. Tell Node to use the Windows certificate store:
+>
+> ```powershell
+> setx NODE_USE_SYSTEM_CA 1
+> ```
+>
+> Then open a **new terminal** (`setx` only affects new sessions) and re-run `npm install`. For a single session instead: `set NODE_USE_SYSTEM_CA=1` (cmd) or `$env:NODE_USE_SYSTEM_CA=1` (PowerShell). `NODE_USE_SYSTEM_CA` needs Node 22+ (already required above).
+
+**4. Clone and install Gantry** (same on both platforms)
 
 ```bash
 git clone <repo-url>
@@ -138,15 +152,17 @@ gantry/
 ├── gantry.yaml                   # engine configuration
 ├── definitions/
 │   └── design/                   # the only definition that exists today
-│       ├── definition.yaml       # stages, gates, artefacts
-│       ├── modules/              # module specs
-│       │   ├── context.yaml
-│       │   ├── solution-definition.yaml
-│       │   └── ...
-│       └── templates/            # artefact templates
-│           ├── soap.md.tmpl      # one .md.tmpl per artefact (soap, soap-full, hld, sad, ssad, as-built)
-│           ├── ...
-│           └── reference-*.docx  # pandoc --reference-doc, one per artefact, derived from the real templates
+│       └── 1/                    # numbered version dirs — one per definition version
+│           ├── definition.yaml   # stages, gates, artefacts (with version: and status:)
+│           ├── CHANGELOG.md      # per-version changelog
+│           ├── modules/          # module specs for this version
+│           │   ├── context.yaml
+│           │   ├── solution-definition.yaml
+│           │   └── ...
+│           └── templates/        # artefact templates for this version
+│               ├── soap.md.tmpl  # one .md.tmpl per artefact (soap, soap-full, hld, sad, ssad, as-built)
+│               ├── ...
+│               └── reference-*.docx  # pandoc --reference-doc, one per artefact, derived from the real templates
 ├── instances/
 │   ├── instance-registry.json    # slug -> workspace/location map, gitignored
 │   ├── workspace-registry.json   # Azure DevOps org/project/repo entities, gitignored
@@ -189,10 +205,15 @@ gantry/
     ├── pages/new-workspace-wizard.js # "+ New Workspace" — pick/register a workspace, then instance fields
     ├── pages/settings.js         # /settings, /settings/workspace, /settings/instance — tab-free
     ├── pages/user-guide.js       # /user-guide — the in-product, end-user-facing User Guide (separate surface from this README)
+    ├── pages/definition-viewer.js # /definitions — Definition Editor (experimental)
     ├── lib/credential.js         # client-side PAT storage/prompt, incl. per-workspace overrides
     ├── lib/ticketingSystem.js    # client-side default-ticketing-system setting
     ├── lib/apiFetch.js           # fetch wrapper: attaches the right PAT, retries once on 401
     ├── lib/validateRepo.js       # parses/checks the wizard's Azure DevOps repo URL
+    ├── lib/markdown.js           # markdown-it + DOMPurify rendering
+    ├── lib/dropdown.js           # reusable dropdown (trigger + menu)
+    ├── lib/reorder.js            # pure array reorder helper
+    ├── user-guide-images/        # User Guide screenshots, served statically
     └── style.css
 ```
 
@@ -286,7 +307,7 @@ gantry render my-initiative soap                # produce the artefact
 | `gantry status <slug> [--json]` | Current stage, module completeness, what's outstanding | Implemented |
 | `gantry check <slug> [--gate <id>] [--json]` | Validate an instance against a gate's requirements — any gate, not just the instance's current stage | Implemented |
 | `gantry render <slug> <artefact> [--dry-run]` | Render an artefact to `out/` | Implemented |
-| `gantry serve [slug] [--port <port>]` | Serve the web app (default port 3000): a dashboard of every registered instance at `/`, local or Azure DevOps-backed, and the stage-by-stage form at `/instance/<slug>`. `[slug]` only sets a fallback default for API requests made with no `?slug=<slug>` of their own — it doesn't change what the dashboard shows or require picking one instance up front. `/new-workspace` is the "+ New Workspace" wizard, `/settings` the Settings screens, `/user-guide` the in-product User Guide (see "Backing an instance with Azure DevOps" above) | Implemented |
+| `gantry serve [slug] [--port <port>]` | Serve the web app (default port 3000): a dashboard of every registered instance at `/`, local or Azure DevOps-backed, and the stage-by-stage form at `/instance/<slug>`. `[slug]` only sets a fallback default for API requests made with no `?slug=<slug>` of their own — it doesn't change what the dashboard shows or require picking one instance up front. `/new-workspace` is the "+ New Workspace" wizard, `/settings` the Settings screens, `/user-guide` the in-product User Guide, `/definitions` the Definition Editor (experimental) (see "Backing an instance with Azure DevOps" above) | Implemented |
 | `gantry validate <definition> [--json]` | Report every structural problem with a definition in one pass | Implemented |
 | `gantry backfill-numeric-refs` | One-time (idempotent) backfill of scoped numeric workspace/instance references (ADR-0024) for workspaces/instances that predate the feature | Implemented |
 
@@ -294,10 +315,12 @@ gantry render my-initiative soap                # produce the artefact
 
 ## Definition schema
 
-**`definitions/design/definition.yaml`**
+**`definitions/design/1/definition.yaml`** — `definitions/<id>/<n>/definition.yaml`
 
 ```yaml
 id: design
+version: 1
+status: published
 title: Solution Design
 description: >
   Design content for an initiative, from shaping through HLD approval,
@@ -344,14 +367,16 @@ artefacts:
     requires: [hld-submission, problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies]
 
   # sad and ssad also render at build-ready-checklist, each with its own field-level requires list;
-  # as-built renders at operational-handover. See definitions/design/definition.yaml for the full file.
+  # as-built renders at operational-handover. See definitions/design/1/definition.yaml for the full file.
 ```
+
+Every `definition.yaml` starts with `version:` (integer) and `status:` (`draft` | `published`). Definitions carry numbered versions (`definitions/<id>/<n>/`), each with its own `definition.yaml`, `modules/`, `templates/` and `CHANGELOG.md`. The latest `published` version is the default for new instances; `draft` versions are opt-in via the New Workspace wizard's version picker.
 
 A gate passes when *at least one* of its gate-matching artefacts has its own `requires` complete — not when a stage's whole `modules` list is filled in (`docs/adr/0019-gate-passing-per-artefact-not-per-stage-module-list.md`). `requires` entries can be whole module ids or `module.field` references, so a heavier artefact (`soap-full`, `sad`, `ssad`) can reuse a module without dragging in every field a lighter artefact on the same gate leaves optional (`docs/adr/0020-full-soap-artefact.md`, `docs/adr/0021-sad-ssad-artefact-requirements.md`).
 
 ## Module specs
 
-**`definitions/design/modules/context.yaml`**
+**`definitions/design/1/modules/context.yaml`**
 
 ```yaml
 id: context
@@ -398,7 +423,7 @@ For a field whose requiredness genuinely differs by gate, use `required-at` inst
       or absent at `hld-tac-approved`; required by `build-ready-checklist`.
 ```
 
-Where a field's *content* genuinely changes shape across the gates its module spans — not just gains depth — model it as two fields on the shared module instead of one field with `required-at`. See `definitions/design/modules/dependencies.yaml`: `dependencies-overview` (narrative, required at the earlier gate) and `dependency-list` (structured, required at the later gate) answer the same question in two different shapes, not two depths of one answer.
+Where a field's *content* genuinely changes shape across the gates its module spans — not just gains depth — model it as two fields on the shared module instead of one field with `required-at`. See `definitions/design/1/modules/dependencies.yaml`: `dependencies-overview` (narrative, required at the earlier gate) and `dependency-list` (structured, required at the later gate) answer the same question in two different shapes, not two depths of one answer.
 
 `required` and `required-at` are mutually exclusive on a field — use `required` for a field whose requiredness doesn't vary by gate (including fields in single-gate modules), and `required-at` only where it does. Don't reach for `required-at` by default; most fields don't need it.
 
@@ -497,7 +522,7 @@ npm test               # node --test with no filter — runs every *.test.js, Pl
 To propose one:
 
 1. Open an issue describing the process, its stages and its gates, before writing the YAML. The decomposition is the hard part and it is much cheaper to argue about in prose.
-2. Add `definitions/<id>/` with a definition, module specs and at least one artefact template.
+2. Add `definitions/<id>/1/` with a definition, module specs and at least one artefact template (numbered version dirs — see "Definition schema" above — each version carries its own `definition.yaml`, `modules/`, `templates/` and `CHANGELOG.md`).
 3. Add an example instance so CI can render it.
 4. Run `gantry validate <id>` and `npm test`, then raise a pull request.
 
@@ -536,6 +561,8 @@ podman run -d \
   --env NODE_EXTRA_CA_CERTS=/certs/corporate-ca.pem \
   localhost/gantry serve --port 8080
 ```
+
+For `npm install` TLS failures on Windows itself (not in a container), see the Windows note under Installation above.
 
 ## Run the web UI
 
