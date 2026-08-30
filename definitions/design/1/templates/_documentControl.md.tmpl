@@ -1,0 +1,15 @@
+## Document Control
+
+| Field | Value |
+|---|---|
+| Version | <%~ it.version %> |
+| Date | <%~ it.date %> |
+| Commit | <% if (it.commit && it.commit.url) { %>[`<%~ it.commit.hash %>`](<%~ it.commit.url %>)<% } else if (it.commit && it.commit.hash) { %>`<%~ it.commit.hash %>`<% } %> |
+| Status | <%~ it.gateStatus %> |
+
+## Review & sign-off
+
+| Name | Role / Title | Date | Review process | Status | Reference |
+|---|---|---|---|---|---|
+<% (it.rows || []).forEach(function(row){ %>| <%~ row.name %> | <%~ row.role %> | <%~ row.date %> | <%~ row.process %> | <%~ row.status %> | <% if (row.reference && row.reference.url) { %>[<%~ row.reference.text %>](<%~ row.reference.url %>)<% } else { %><%~ (row.reference && row.reference.text) || '' %><% } %> |
+<% }) %>

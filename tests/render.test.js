@@ -206,30 +206,56 @@ test('an asset:<id> reference (#80) inserted into a module field compiles into a
   }
 })
 
-// --- Rendered-output commit-hash/date footer (#98) ------------------------
+// --- Document Control + Review & sign-off tables (WI233) ----------------
 //
-// Every rendered artefact — md and docx, across every definition, not just "design" — gets a footer naming the short commit hash and date of the source it was rendered from. For a local instance that's this repo's own current git HEAD; for an Azure-DevOps-backed instance it's read off the response Azure DevOps already returns when the artefact is pushed.
+// The old "Rendered from commit ..." footer line is gone; its hash/date now
+// lives in the Document Control table injected right after the title, with a
+// Review & sign-off table beneath it. Every definition gets the Document
+// Control block via the pipeline; design artefacts are verified for both tables.
 
-test('a local render\'s footer names this repo\'s actual current HEAD commit hash and date', () => {
+test('a local render injects a Document Control table immediately after the title with a plain commit hash and a Pending review row, and no footer line', () => {
   const expectedHash = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim()
   const expectedDate = execFileSync('git', ['log', '-1', '--format=%cs'], { encoding: 'utf8' }).trim()
 
   const result = renderArtefact('examples', 'soap', { dryRun: true })
-  assert.match(
-    result.markdown,
-    new RegExp(`Rendered from commit \`${expectedHash}\` \\(${expectedDate}\\)\\.`)
-  )
+  // Block headings appear in order: title -> Document Control -> Review & sign-off -> first content section
+  const titleIdx = result.markdown.indexOf('# examples: Solution on a Page')
+  const docIdx = result.markdown.indexOf('## Document Control')
+  const reviewIdx = result.markdown.indexOf('## Review & sign-off')
+  const contextIdx = result.markdown.indexOf('# Context')
+  assert.ok(titleIdx >= 0 && docIdx > titleIdx, 'Document Control should be after the title')
+  assert.ok(reviewIdx > docIdx, 'Review & sign-off should be after Document Control')
+  assert.ok(contextIdx > reviewIdx, 'Content should be after the two tables')
+
+  assert.match(result.markdown, /## Document Control/)
+  assert.match(result.markdown, /## Review & sign-off/)
+  // Version: design v1 · SOAP (stage title for that gate)
+  assert.match(result.markdown, /\| Version \| design v1 · SOAP \|/)
+  assert.match(result.markdown, new RegExp(`\\| Date \\| ${escapeRegExp(expectedDate)} \\|`))
+  // Local commit: plain code span, not a hyperlink
+  assert.match(result.markdown, new RegExp(`\\| Commit \\| \`${escapeRegExp(expectedHash)}\` \\|`))
+  assert.doesNotMatch(result.markdown, new RegExp(`\\| Commit \\|.*\\(${escapeRegExp(expectedHash)}`))
+  // The old footer line is gone entirely
+  assert.doesNotMatch(result.markdown, /Rendered from commit/)
+  // Review table shows Pending when no review/sign-off data exists
+  assert.match(result.markdown, /\| Pending \|/)
+  // Columns follow the reference layout
+  assert.match(result.markdown, /\| Name \| Role \/ Title \| Date \| Review process \| Status \| Reference \|/)
 })
 
-test('the footer also survives the pandoc conversion into the rendered .docx, not just the intermediate markdown', () => {
+test('the Document Control block also survives the pandoc conversion into the rendered .docx, and the hash remains link-free for local', () => {
   const result = renderArtefact('examples', 'soap')
   const roundTrip = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown', result.docxPath], {
     encoding: 'utf8',
   })
-  assert.match(roundTrip, /Rendered from commit `[0-9a-f]+`/)
+  assert.match(roundTrip, /Document Control/)
+  assert.match(roundTrip, /Review.*sign-off/)
+  // Local hash stays as code, not a hyperlink URL
+  assert.match(roundTrip, /`[0-9a-f]+`/)
+  assert.doesNotMatch(roundTrip, /Rendered from commit/)
 })
 
-test('a definition other than "design" also gets the footer — it is not special-cased to one definition\'s templates', () => {
+test('a definition other than "design" also gets a Document Control block — it is not special-cased to one definition\'s templates', () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   const definitionsDir = mkdtempSync(join(tmpdir(), 'gantry-definitions-'))
   try {
@@ -246,7 +272,11 @@ test('a definition other than "design" also gets the footer — it is not specia
     writeFileSync(instanceYamlPath, instanceYaml)
 
     const result = renderArtefact('other-instance', 'soap', { dryRun: true, instancesDir, definitionsDir })
-    assert.match(result.markdown, /Rendered from commit `[0-9a-f]+` \(\d{4}-\d{2}-\d{2}\)\./)
+    assert.match(result.markdown, /## Document Control/)
+    assert.match(result.markdown, /## Review & sign-off/)
+    assert.match(result.markdown, /\| Commit \| `[0-9a-f]+`/)
+    assert.match(result.markdown, /\| Version \| another-definition v1/)
+    assert.doesNotMatch(result.markdown, /Rendered from commit/)
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
     rmSync(definitionsDir, { recursive: true, force: true })
@@ -258,7 +288,7 @@ test('a local render against a directory with no git checkout fails with one cle
   const notARepoDir = mkdtempSync(join(tmpdir(), 'gantry-not-a-git-repo-'))
   try {
     assert.throws(() => renderArtefact('examples', 'soap', { dryRun: true, repoDir: notARepoDir }), {
-      message: /Cannot determine the local git commit for this render's footer/,
+      message: /Cannot determine the local git commit for this render's Document Control/,
     })
   } finally {
     rmSync(notARepoDir, { recursive: true, force: true })
@@ -284,37 +314,38 @@ function seedExamplesAzureDevOpsFiles() {
   }
 }
 
-test('a render against Azure DevOps links the short footer hash to the full push commit, and the same footer ends up in what is actually stored there', async () => {
+test('a render against Azure DevOps puts a hyperlinked commit in the Document Control table, and the same block ends up in what is actually stored there', async () => {
   await withFakeAzureDevOpsServer(
     { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: seedExamplesAzureDevOpsFiles() },
     async (baseUrl) => {
       const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl }
       const result = await renderArtefact('examples', 'soap', { azureDevOps })
 
-      // The function's own return value reports the commit its footer names — a real (fake-server-assigned) commit hash/date, not a placeholder.
+      // The function's own return value reports the commit its Document Control names — a real (fake-server-assigned) commit hash/date, not a placeholder.
       assert.match(result.commit.hash, /^[0-9a-f]{7}$/)
       assert.match(result.commit.fullHash, /^[0-9a-f]{40}$/)
       assert.match(result.commit.date, /^\d{4}-\d{2}-\d{2}$/)
       const commitLink = '[`' + result.commit.hash + '`](' + baseUrl + `/fake-org/fake-project/_git/fake-repo/commit/${result.commit.fullHash})`
-      assert.match(
-        result.markdown,
-        new RegExp(`Rendered from commit ${escapeRegExp(commitLink)} \\(${escapeRegExp(result.commit.date)}\\)\\.`)
-      )
+      assert.match(result.markdown, /## Document Control/)
+      assert.match(result.markdown, new RegExp(`\\| Commit \\| ${escapeRegExp(commitLink)} \\|`))
+      assert.match(result.markdown, new RegExp(`\\| Date \\| ${escapeRegExp(result.commit.date)} \\|`))
+      assert.doesNotMatch(result.markdown, /Rendered from commit/)
 
-      // What is actually sitting in the (fake) Azure DevOps repo at out/soap.docx right now — not just the local scratch copy — also carries that exact same footer.
+      // What is actually sitting in the (fake) Azure DevOps repo at out/soap.docx right now — not just the local scratch copy — also carries that exact same Document Control block.
       const client = createAzureDevOpsClient(azureDevOps)
       const pushedContent = await client.getFileContent(result.azureDevOpsPath)
       const pushedMarkdown = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown'], {
         input: Buffer.from(pushedContent, 'base64'),
         encoding: 'utf8',
       })
-      assert.match(pushedMarkdown, new RegExp(`Rendered from commit\\s+\\[[^\\]]+\\]\\([^)]*${escapeRegExp(result.commit.fullHash)}\\)\\s+\\(${escapeRegExp(result.commit.date)}\\)\\.`))
+      assert.match(pushedMarkdown, /Document Control/)
+      assert.match(pushedMarkdown, new RegExp(`\\[[^\\]]+\\]\\([^)]*${escapeRegExp(result.commit.fullHash)}\\)`))
       assert.match(pushedMarkdown, /Solution on a Page/)
     }
   )
 })
 
-test('a dry run against Azure DevOps pushes nothing and has no commit-hash footer — there is no push response to source one from', async () => {
+test('a dry run against Azure DevOps pushes nothing and has no commit hash in the Document Control — there is no push response to source one from, but the block still appears with Pending', async () => {
   await withFakeAzureDevOpsServer(
     { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: seedExamplesAzureDevOpsFiles() },
     async (baseUrl) => {
@@ -324,12 +355,17 @@ test('a dry run against Azure DevOps pushes nothing and has no commit-hash foote
       assert.equal(result.dryRun, true)
       assert.equal(result.commit, undefined)
       assert.doesNotMatch(result.markdown, /Rendered from commit/)
+      assert.match(result.markdown, /## Document Control/)
+      assert.match(result.markdown, /## Review & sign-off/)
+      assert.match(result.markdown, /\| Pending \|/)
+      // No hyperlinked hash present for a dry run
+      assert.doesNotMatch(result.markdown, /\/commit\//)
     }
   )
 })
 
-// Regression test for a review finding: the ADO-backed render path pushes twice (a footer-less "draft", then the footer-carrying final version) — see renderArtefactFromAzureDevOps's doc comment for why. If the second push fails, the render must surface a clear error naming the commit the (footer-less) first push already landed as, not a bare network error that leaves a reader thinking nothing was written at all.
-test('if the follow-up push that adds the footer fails, the error names the commit the footer-less content already landed as', async () => {
+// Regression test for a review finding: the ADO-backed render path pushes twice (a draft, then the Document-Control-carrying final version) — see renderArtefactFromAzureDevOps's doc comment for why. If the second push fails, the render must surface a clear error naming the commit the first push already landed as, not a bare network error that leaves a reader thinking nothing was written at all.
+test('if the follow-up push that adds the Document Control fails, the error names the commit the first-pushed content already landed as', async () => {
   await withFakeAzureDevOpsServer(
     {
       organization: ORGANIZATION,
@@ -337,13 +373,13 @@ test('if the follow-up push that adds the footer fails, the error names the comm
       repository: REPOSITORY,
       validPat: VALID_PAT,
       files: seedExamplesAzureDevOpsFiles(),
-      // The first (draft) push succeeds; the second (footer) push is the one that then fails.
+      // The first (draft) push succeeds; the second (Document Control) push is the one that then fails.
       failAfterPushes: 1,
     },
     async (baseUrl) => {
       const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl }
       await assert.rejects(() => renderArtefact('examples', 'soap', { azureDevOps }), {
-        message: /pushed it to Azure DevOps as commit [0-9a-f]{7}, but the follow-up push that adds the commit-hash\/date footer failed/,
+        message: /pushed it to Azure DevOps as commit [0-9a-f]{7}, but the follow-up push that adds the commit-hash\/date Document Control failed/,
       })
     }
   )
@@ -382,6 +418,96 @@ test('a render against Azure DevOps reads instance/module data from, and pushes 
       await assert.rejects(() => client.getFileContent(result.azureDevOpsPath), AzureDevOpsNotFoundError)
     }
   )
+})
+
+// --- WI233: Review & sign-off populated + gate isolation + no footer anywhere ---
+
+test('a populated reviewSummary renders one review row and one sign-off row with Name/Date/Status/Reference filled, Role/Title and Review process blank when not captured', () => {
+  const reviewSummary = {
+    version: 'design v1 · Detailed Design',
+    stageTitle: 'Detailed Design',
+    date: '2024-04-01',
+    commit: { hash: 'abc1234', url: undefined, date: '2024-04-01' },
+    gateStatus: 'In review',
+    rows: [
+      {
+        name: 'Lisa Haselton',
+        role: '',
+        date: '2024-04-01',
+        process: '',
+        status: 'In review',
+        reference: { text: '#123', url: 'https://dev.azure.com/fake-org/fake-project/_workitems/edit/123' },
+      },
+      {
+        name: 'Grant Hughson',
+        role: '',
+        date: '2024-04-02',
+        process: '',
+        status: 'Approved',
+        reference: { text: 'PR #456', url: 'https://dev.azure.com/fake-org/fake-project/_git/fake-repo/pullrequest/456' },
+      },
+    ],
+  }
+  const result = renderArtefact('examples', 'sad', { dryRun: true, reviewSummary })
+  assert.match(result.markdown, /## Review & sign-off/)
+  // First row: review
+  assert.match(result.markdown, /\| Lisa Haselton \| *\| 2024-04-01 \| *\| In review \| \[#123\]\(https:\/\/dev\.azure\.com\/fake-org\/fake-project\/_workitems\/edit\/123\) \|/)
+  // Second row: sign-off
+  assert.match(result.markdown, /\| Grant Hughson \| *\| 2024-04-02 \| *\| Approved \| \[PR #456\]\(https:\/\/dev\.azure\.com\/fake-org\/fake-project\/_git\/fake-repo\/pullrequest\/456\) \|/)
+  // Role / Title and Review process columns are blank (|| with optional spaces)
+  // Document Control Status reflects the summary's gateStatus
+  assert.match(result.markdown, /\| Status \| In review \|/)
+  assert.doesNotMatch(result.markdown, /Rendered from commit/)
+})
+
+test('a draft render with no review/sign-off data still shows a Pending row and no footer — the block is never omitted', () => {
+  const result = renderArtefact('examples', 'hld', { dryRun: true })
+  assert.match(result.markdown, /## Document Control/)
+  assert.match(result.markdown, /## Review & sign-off/)
+  assert.match(result.markdown, /\| Pending \|/)
+  assert.doesNotMatch(result.markdown, /Rendered from commit/)
+  const docxRoundTrip = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown', renderArtefact('examples', 'hld').docxPath], { encoding: 'utf8' })
+  assert.match(docxRoundTrip, /Document Control/)
+  assert.match(docxRoundTrip, /Pending/)
+  assert.doesNotMatch(docxRoundTrip, /Rendered from commit/)
+})
+
+test('review rows reflect only the artefact\'s own gate — a business-case review does not leak into the HLD artefact', () => {
+  const businessCaseSummary = {
+    version: 'design v1 · SOAP',
+    stageTitle: 'SOAP',
+    date: '2024-04-01',
+    commit: { hash: 'aaaaaaa', date: '2024-04-01' },
+    gateStatus: 'In review',
+    rows: [{ name: 'Alice', role: '', date: '', process: '', status: 'In review', reference: { text: '#100', url: 'https://example.com/100' } }],
+  }
+  const soapResult = renderArtefact('examples', 'soap', { dryRun: true, reviewSummary: businessCaseSummary })
+  assert.match(soapResult.markdown, /Alice/)
+  assert.match(soapResult.markdown, /#100/)
+
+  // HLD artefact for same slug but different gate — given no summary, it gets
+  // its own Pending row, not the business-case review above.
+  const hldResult = renderArtefact('examples', 'hld', { dryRun: true })
+  assert.doesNotMatch(hldResult.markdown, /Alice/)
+  assert.match(hldResult.markdown, /\| Pending \|/)
+})
+
+test('compileArtefact stays pure — it does not import reviewStatus, stageReview or stageApproval', () => {
+  const renderSource = readFileSync('lib/render.js', 'utf8')
+  // No import of those modules — data arrives via options.reviewSummary
+  assert.doesNotMatch(renderSource, /from ['"]\.\/reviewStatus/)
+  assert.doesNotMatch(renderSource, /from ['"]\.\/stageReview/)
+  assert.doesNotMatch(renderSource, /from ['"]\.\/stageApproval/)
+  assert.doesNotMatch(renderSource, /Rendered from commit/)
+})
+
+test('every design artefact (soap, hld, sad, ssad, as-built) renders a Document Control table immediately after its title', () => {
+  for (const artefactId of ['soap', 'hld', 'sad', 'ssad', 'as-built']) {
+    const result = renderArtefact('examples', artefactId, { dryRun: true })
+    assert.match(result.markdown, /## Document Control/, `expected ${artefactId} to have Document Control`)
+    assert.match(result.markdown, /## Review & sign-off/, `expected ${artefactId} to have Review & sign-off`)
+    assert.doesNotMatch(result.markdown, /Rendered from commit/, `expected ${artefactId} to have no footer`)
+  }
 })
 
 // ---------- renderStageArtefacts (#123): render-to-branch on every save ----------
