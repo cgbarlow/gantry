@@ -109,7 +109,7 @@ test('User Guide: landing and instance headers place the link before Settings', 
       page.setDefaultTimeout(DEFAULT_TIMEOUT)
       await page.goto(base)
       await page.waitForSelector('.dashboard-topbar')
-      assert.deepEqual(await page.locator('.dashboard-controls a').allTextContents(), ['+ New Workspace', 'Definition Editor', 'User Guide', 'Settings'])
+      assert.deepEqual(await page.locator('.dashboard-controls a').allTextContents(), ['+ New Workspace', 'Definition Editor (experimental)', 'User Guide', 'Settings'])
 
       await page.goto(`${base}/instance/examples`)
       await page.waitForSelector('.instance-switcher')

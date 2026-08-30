@@ -449,6 +449,9 @@ export function DefinitionViewerPage() {
       <a class="btn small ghost" href="/">← Workspaces</a>
     </header>
     <main class="defn-viewer">
+      <p class="defn-experimental-note" role="note">
+        Definition editor functionality is currently in development and as such is only rudimentary at this stage.
+      </p>
       <div class="defn-viewer-layout">
         <aside class="defn-viewer-rail">
           <h2>Definitions</h2>

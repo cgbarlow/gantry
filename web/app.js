@@ -3833,7 +3833,7 @@ function DashboardPage() {
         <div class="dashboard-controls">
           ${instances?.length ? html`<${ViewToggle} />` : null}
           <a class="btn small ghost" href="/new-workspace">+ New Workspace</a>
-          <a class="btn small ghost" href="/definitions">Definition Editor</a>
+          <a class="btn small ghost" href="/definitions">Definition Editor (experimental)</a>
           <a class="btn small ghost" href="/user-guide">User Guide</a>
           <a class="btn small ghost" href=${`/settings?from=${encodeURIComponent('/')}`}>Settings</a>
         </div>

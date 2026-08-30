@@ -1403,6 +1403,7 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 
 /* ---------- Definition Viewer (#235) ---------- */
 .defn-viewer { max-width: 1120px; margin: 0 auto; padding: 32px 32px 140px; }
+.defn-experimental-note { margin: 0 0 20px; padding: 10px 14px; border: var(--hairline) solid var(--line); border-left: 3px solid var(--stamp-draft-bg); border-radius: var(--radius); background: var(--bg-raised); color: var(--text-muted); font-size: 12px; }
 .defn-viewer-layout { display: grid; grid-template-columns: 320px 1fr; gap: 24px; align-items: start; }
 .defn-viewer-rail { border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg-raised); padding: 16px; }
 .defn-viewer-rail h2 { font-family: var(--font-display); font-weight: 600; font-size: 15px; margin: 0 0 12px; }
