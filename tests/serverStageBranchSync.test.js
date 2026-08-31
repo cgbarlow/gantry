@@ -350,3 +350,97 @@ test('POST /api/instance/stage-branch/sync requires PAT (401 when missing)', asy
     rmSync(instancesDir, { recursive: true, force: true })
   }
 })
+
+test('WI262: completed stage with leftover divergent branch — GET behind:false and POST already complete', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-sync-'))
+  try {
+    await withFakeAzureDevOpsServer(
+      {
+        organization: ORGANIZATION,
+        project: PROJECT,
+        repository: REPOSITORY,
+        validPat: VALID_PAT,
+        files: {
+          '/gantry-workspace/my-slug/instance.yaml': 'definition: design\nslug: my-slug\nstage: hld-define\n',
+          '/gantry-workspace/my-slug/modules/context.md': moduleContent('old'),
+        },
+      },
+      async (adoBaseUrl) => {
+        registerInstance('my-slug', { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl }, { instancesDir })
+        const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
+        await client.createBranch('gantry-workspace/my-slug/shape')
+        // Diverge: main moves ahead (would make behind:true) and shape branch also diverges (would make ahead:true + conflict on sync)
+        await client.writeFile('/gantry-workspace/my-slug/modules/context.md', moduleContent('main updated for hld'), { branch: 'main' })
+        await client.writeFile('/gantry-workspace/my-slug/modules/extra.md', moduleContent('extra main'), { branch: 'main' })
+        // Also write instance.yaml advancement already on main (shape -> hld-define), so shape branch is left behind
+        await client.writeFile('/gantry-workspace/my-slug/instance.yaml', 'definition: design\nslug: my-slug\nstage: hld-define\n', { branch: 'main' })
+        await client.writeFile('/gantry-workspace/my-slug/modules/context.md', moduleContent('stale shape branch version'), { branch: 'gantry-workspace/my-slug/shape' })
+        const shapeHeadBefore = await client.getBranchObjectId('gantry-workspace/my-slug/shape')
+
+        await withServer(instancesDir, adoBaseUrl, async (base) => {
+          // GET for the completed stage must NOT report behind, even though main has diverged
+          const res = await fetch(`${base}/api/instance?slug=my-slug&stage=shape`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })
+          assert.equal(res.status, 200)
+          const body = await res.json()
+          assert.deepEqual(body.stageSync, { behind: false, behindFiles: [], ahead: false })
+
+          // POST for the completed stage must return already-complete, not a merge or 409 conflict
+          const syncRes = await fetch(`${base}/api/instance/stage-branch/sync?slug=my-slug&stage=shape`, { method: 'POST', headers: { Authorization: basicAuthHeader(VALID_PAT) } })
+          assert.equal(syncRes.status, 409)
+          const syncBody = await syncRes.json()
+          assert.match(syncBody.error, /already complete/i)
+          assert.match(syncBody.error, /shape/i)
+
+          // Branch must be untouched
+          const shapeHeadAfter = await client.getBranchObjectId('gantry-workspace/my-slug/shape')
+          assert.equal(shapeHeadAfter, shapeHeadBefore)
+        })
+      }
+    )
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('WI262 regression: current stage still reports behind and syncs (happy path unchanged)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-sync-'))
+  try {
+    await withFakeAzureDevOpsServer(
+      {
+        organization: ORGANIZATION,
+        project: PROJECT,
+        repository: REPOSITORY,
+        validPat: VALID_PAT,
+        files: {
+          '/gantry-workspace/my-slug/instance.yaml': 'definition: design\nslug: my-slug\nstage: hld-define\n',
+          '/gantry-workspace/my-slug/modules/context.md': moduleContent('old'),
+        },
+      },
+      async (adoBaseUrl) => {
+        registerInstance('my-slug', { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl }, { instancesDir })
+        const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
+        await client.createBranch('gantry-workspace/my-slug/hld-define')
+        await client.writeFile('/gantry-workspace/my-slug/modules/context.md', moduleContent('main updated for current'), { branch: 'main' })
+        await client.writeFile('/gantry-workspace/my-slug/modules/extra.md', moduleContent('extra main current'), { branch: 'main' })
+
+        await withServer(instancesDir, adoBaseUrl, async (base) => {
+          const before = await (await fetch(`${base}/api/instance?slug=my-slug&stage=hld-define`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })).json()
+          assert.equal(before.stageSync.behind, true)
+          assert.deepEqual(before.stageSync.behindFiles, ['/gantry-workspace/my-slug/modules/context.md', '/gantry-workspace/my-slug/modules/extra.md'])
+
+          const syncRes = await fetch(`${base}/api/instance/stage-branch/sync?slug=my-slug&stage=hld-define`, { method: 'POST', headers: { Authorization: basicAuthHeader(VALID_PAT) } })
+          assert.equal(syncRes.status, 200)
+          const syncBody = await syncRes.json()
+          assert.equal(syncBody.branch, 'gantry-workspace/my-slug/hld-define')
+          assert.equal(syncBody.fastForward, true)
+
+          const after = await (await fetch(`${base}/api/instance?slug=my-slug&stage=hld-define`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })).json()
+          assert.equal(after.stageSync.behind, false)
+          assert.deepEqual(after.stageSync.behindFiles, [])
+        })
+      }
+    )
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
