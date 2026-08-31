@@ -118,7 +118,7 @@ test('requestStageApproval verifies and links every rendered artefact for a mult
   })
 })
 
-test('requestStageApproval refuses to open a Pull Request when a required rendered artefact is missing', async () => {
+test('requestStageApproval auto-renders missing required artefacts and opens PR (WI257)', async () => {
   await withServer({ files: seedInstanceYaml() }, async (baseUrl) => {
     const azureDevOps = locationFor(baseUrl)
     const branch = await resolveStageBranch(azureDevOps, definition, SLUG, SHAPE.id)
@@ -128,12 +128,20 @@ test('requestStageApproval refuses to open a Pull Request when a required render
       await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
     }
 
-    await assert.rejects(
-      () => requestStageApproval(SLUG, { azureDevOps }),
-      /Cannot request approval: required rendered artefact "Solution on a Page".*out\/MY Initiative - Solution on a Page\.docx.*missing.*shape/
-    )
+    // No rendered artefact on branch yet — WI257 auto-renders before opening PR
+    assert.equal(await client.fileExists(outDocxRepoPath('soap'), branch), false)
 
-    await assert.rejects(() => createAzureDevOpsPullRequestsClient(azureDevOps).getPullRequest(1), /Azure DevOps found no item/)
+    const result = await requestStageApproval(SLUG, { azureDevOps })
+    assert.equal(typeof result.pullRequestId, 'number')
+    assert.equal(result.stage.id, 'shape')
+
+    // The rendered .docx was committed to the stage branch before the PR opened
+    const content = await client.getFileContent(outDocxRepoPath('soap'), { branch })
+    const bytes = Buffer.from(content, 'base64')
+    assert.equal(bytes.subarray(0, 2).toString(), 'PK', 'auto-rendered artefact should be a real docx')
+
+    const pr = await createAzureDevOpsPullRequestsClient(azureDevOps).getPullRequest(result.pullRequestId)
+    assert.equal(pr.sourceRefName, `refs/heads/${branch}`)
   })
 })
 
@@ -194,5 +202,62 @@ test('requestStageApproval propagates a rejected PAT as AzureDevOpsAuthenticatio
         throw err
       }
     })
+  })
+})
+
+test('requestStageApproval still aborts with render error when artefact rendering genuinely fails (WI257)', async () => {
+  // Seed the branch with module content via branchFiles so pushesMade starts at 0,
+  // then fail every subsequent push — the module writes are already present, so gate passes,
+  // but auto-render's pushes will fail and must propagate as a render error, not a missing-artefact error.
+  const branch = `gantry-workspace/${SLUG}/shape`
+  const shapeModules = {
+    [`/gantry-workspace/${SLUG}/instance.yaml`]: `definition: design\nslug: ${SLUG}\nstage: ${SHAPE.id}\n`,
+  }
+  for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
+    shapeModules[`/gantry-workspace/${SLUG}/modules/${moduleId}.md`] = readFileSync(
+      join('instances', 'examples', 'modules', `${moduleId}.md`),
+      'utf8'
+    )
+  }
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      files: seedInstanceYaml(),
+      branchFiles: { [branch]: shapeModules },
+      failAfterPushes: 0,
+    },
+    async (baseUrl) => {
+      const azureDevOps = locationFor(baseUrl)
+      // Branch already exists via seed; ensure it resolves
+      const resolved = await resolveStageBranch(azureDevOps, definition, SLUG, SHAPE.id)
+      assert.equal(resolved, branch)
+
+      await assert.rejects(() => requestStageApproval(SLUG, { azureDevOps }), /Azure DevOps|render/i)
+
+      await assert.rejects(() => createAzureDevOpsPullRequestsClient(azureDevOps).getPullRequest(1), /Azure DevOps found no item/)
+    }
+  )
+})
+
+test('requestStageApproval does not block when required artefacts are already rendered (WI257)', async () => {
+  await withServer({ files: seedInstanceYaml() }, async (baseUrl) => {
+    const azureDevOps = locationFor(baseUrl)
+    const branch = await resolveStageBranch(azureDevOps, definition, SLUG, SHAPE.id)
+    await fillShapeStage(azureDevOps, branch)
+
+    // Pre-rendered artefact already on branch — request should still open PR (re-render or skip both fine)
+    const client = createAzureDevOpsClient(azureDevOps)
+    assert.equal(await client.fileExists(outDocxRepoPath('soap'), branch), true)
+
+    const result = await requestStageApproval(SLUG, { azureDevOps })
+    assert.equal(typeof result.pullRequestId, 'number')
+
+    // Committed file still exists and PR carries it
+    assert.equal(await client.fileExists(outDocxRepoPath('soap'), branch), true)
+    const pr = await createAzureDevOpsPullRequestsClient(azureDevOps).getPullRequest(result.pullRequestId)
+    assert.match(pr.description, /Solution on a Page/)
   })
 })
