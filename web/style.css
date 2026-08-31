@@ -1013,25 +1013,34 @@ main.dashboard {
 /* The size grid (#134) hangs off the same anchor as Insert ▾ itself: the
  * wrapper is the positioned ancestor both menus share, so the grid opens
  * directly under the trigger that summoned it. */
-.insert-area { position: relative; display: inline-flex; margin-top: 10px; }
 /*
- * Top-of-page Insert bar (WI259) — a page-level affordance above the first
- * module, visually distinct from the per-field Insert ▾ that lives attached
- * to each markdown field. Slim, left-aligned, dashed so it reads as an
- * insertion point rather than another field heading.
+ * Shared insertion-point bar (WI263) — generalises WI259's dashed-bar look
+ * so every per-field Insert ▾ uses the same visual language as the
+ * top-of-page bar. Slim, left-aligned, dashed so it reads as an insertion
+ * point rather than another field heading. Vertical margin is tight so a
+ * column of field → bar → field → bar doesn't look noisy; the page-level
+ * top bar keeps a slightly larger top margin to separate from the stage chrome.
  */
+.insert-bar,
 .top-insert-bar {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 16px 0 4px;
   padding: 8px 12px;
   border: 1px dashed var(--line);
   border-radius: var(--radius);
   background: var(--bg-raised);
+  position: relative;
 }
+.insert-bar { margin: 8px 0 6px; }
+.top-insert-bar { margin: 16px 0 4px; }
+.insert-bar .insert-dropdown,
 .top-insert-bar .insert-dropdown { margin-top: 0; }
+.insert-bar[hidden],
 .top-insert-bar[hidden] { display: none; }
+/* Deprecated: per-field wrapper before WI263 — kept for backwards compat if
+ * any cached markup still references it; new code should use .insert-bar. */
+.insert-area { position: relative; display: inline-flex; margin-top: 10px; }
 .md-toolbar .table-picker { position: relative; display: inline-flex; }
 .table-picker .menu {
   display: none;

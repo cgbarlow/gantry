@@ -868,7 +868,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
       </div>
       ${viewMode.value !== 'rendered' && !expanded
         ? html`
-            <div class="insert-area">
+            <div class="insert-bar">
               <${InsertDropdown}
                 onSection=${() => onRequestSection?.()}
                 onList=${() => onRequestList?.()}
@@ -2621,7 +2621,7 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
     <main id="modules" data-view-mode=${viewMode.value}>
       <${SyncedFieldsPanel} key=${instance.workItem ? 'linked' : 'unlinked'} instance=${instance} />
       ${modules.length > 0
-        ? html`<div class="top-insert-bar" data-testid="top-insert" hidden=${viewMode.value === 'rendered'}>
+        ? html`<div class="insert-bar top-insert-bar" data-testid="top-insert" hidden=${viewMode.value === 'rendered'}>
             <${InsertDropdown} onSection=${() => setTopSectionOpen(true)} onList=${() => setTopListOpen(true)} />
           </div>`
         : null}

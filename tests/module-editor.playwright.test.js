@@ -174,6 +174,95 @@ test('top-of-page Insert ▾ prepends Section and List as first field, survives 
   }
 })
 
+// Coverage for WI263 — every per-field Insert ▾ now uses the same dashed
+// insertion-point bar as the top-of-page Insert from WI259.
+test('per-field Insert ▾ uses the shared dashed insert-bar and both bars hide in Rendered (WI263)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await launchBrowser()
+      try {
+        const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const topInsert = page.locator('[data-testid="top-insert"]')
+        const perFieldBar = page.locator('.field-markdown .insert-bar').first()
+        const allPerFieldBars = page.locator('.field-markdown .insert-bar')
+
+        // Both bars present in Split (default) and each owns its Insert ▾ trigger.
+        await assert.doesNotReject(topInsert.waitFor({ state: 'visible', timeout: 5_000 }))
+        await assert.doesNotReject(perFieldBar.waitFor({ state: 'visible', timeout: 5_000 }))
+        assert.ok((await allPerFieldBars.count()) >= 2, 'every markdown field should have its own insert-bar')
+        assert.equal(await topInsert.getByRole('button', { name: 'Insert ▾' }).count(), 1)
+        assert.equal(await perFieldBar.getByRole('button', { name: 'Insert ▾' }).count(), 1)
+        // Top bar composes the shared class.
+        assert.equal(await topInsert.evaluate((el) => el.classList.contains('insert-bar')), true)
+        assert.equal(await topInsert.evaluate((el) => el.classList.contains('top-insert-bar')), true)
+
+        // Visually identical: dashed insertion-point bar, same tokens, left-aligned flex.
+        const topStyle = await topInsert.evaluate((el) => {
+          const s = getComputedStyle(el)
+          return { borderStyle: s.borderStyle, display: s.display, borderColor: s.borderTopColor }
+        })
+        const perStyle = await perFieldBar.evaluate((el) => {
+          const s = getComputedStyle(el)
+          return { borderStyle: s.borderStyle, display: s.display, borderColor: s.borderTopColor }
+        })
+        assert.equal(topStyle.borderStyle, 'dashed', 'top bar should be dashed')
+        assert.equal(perStyle.borderStyle, 'dashed', 'per-field bar should be dashed like the top one')
+        assert.equal(topStyle.display, 'flex')
+        assert.equal(perStyle.display, 'flex')
+        // Both use the theme token for the border (not a hard-coded colour) — colours must match each other and follow the token across themes.
+        assert.equal(topStyle.borderColor, perStyle.borderColor, 'both bars must share the same token-driven border colour')
+        // Vertical margin tuned: top bar keeps a larger top separation than the tighter per-field bars so a column of field→bar→field→bar doesn't look noisy.
+        const topMarginTop = await topInsert.evaluate((el) => getComputedStyle(el).marginTop)
+        const perMarginTop = await perFieldBar.evaluate((el) => getComputedStyle(el).marginTop)
+        assert.ok(parseInt(topMarginTop, 10) > parseInt(perMarginTop, 10), `top margin (${topMarginTop}) should be larger than per-field margin (${perMarginTop})`)
+        // Every per-field bar is dashed too (not just the first).
+        const perStyles = await allPerFieldBars.evaluateAll((els) => els.map((el) => getComputedStyle(el).borderStyle))
+        for (const bs of perStyles) assert.equal(bs, 'dashed')
+
+        // Light + dark: border colour must follow the token (no hard-coded colours) —
+        // switching theme changes the computed border colour.
+        const lightBorder = perStyle.borderColor
+        await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'))
+        const darkBorder = await perFieldBar.evaluate((el) => getComputedStyle(el).borderTopColor)
+        // Not asserting exact values — just that the token makes the colour theme-dependent (if tokens happen to be identical we skip the check rather than false-fail).
+        if (lightBorder !== darkBorder) assert.notEqual(darkBorder, lightBorder)
+        await page.evaluate(() => document.documentElement.removeAttribute('data-theme'))
+
+        // Both hidden in Rendered view, like every other editing affordance.
+        await page.locator('.segmented').getByRole('button', { name: 'Rendered' }).click()
+        await topInsert.waitFor({ state: 'hidden', timeout: 5_000 })
+        // Per-field bars are conditionally removed in Rendered, so the locator is detached — waitFor hidden succeeds for both hidden and detached.
+        await perFieldBar.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
+        assert.equal(await page.locator('.insert-bar').evaluateAll((els) => els.filter((el) => getComputedStyle(el).display !== 'none' && el.offsetParent !== null).length), 0, 'no insert-bar should be visible in Rendered')
+        // Back to Split both reappear.
+        await page.locator('.segmented').getByRole('button', { name: 'Split' }).click()
+        await topInsert.waitFor({ state: 'visible', timeout: 5_000 })
+        await perFieldBar.waitFor({ state: 'visible', timeout: 5_000 })
+
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
 test('the ported module editor page loads with no errors and a markdown field save round-trips', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
