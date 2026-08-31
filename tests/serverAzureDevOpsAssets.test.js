@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { createServer } from '../lib/server.js'
+import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { registerWorkspace } from '../lib/workspaceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
@@ -400,6 +401,140 @@ test('workspace-backed assets API: POST blocked, file 404, file fallback to main
             }
           }
         )
+      } finally {
+        rmSync(instancesDir, { recursive: true, force: true })
+      }
+    }
+  )
+})
+
+// WI264: an instance advanced to a later stage (hld-define) still has a stale leftover branch
+// for the completed `shape` stage. The merged shape PR put figure-1.png on `main`; the stale
+// `shape` branch never got it (carries an older copy plus a shape-only asset main never had).
+// Free-browsing the completed stage must read content AND assets from `main`, never the stale
+// branch — while browsing the *current* stage still resolves that stage's own (legit) branch.
+test('WI264: completed-stage free-browse reads assets + content from main, not the stale stage branch', async () => {
+  const slug = 'repo-assets-completed-stage'
+  const pngBytes = Buffer.from(ONE_PX_PNG_BASE64, 'base64')
+  // A visibly different byte set standing in for the stale branch's older copy of the same file.
+  const STALE_PNG_BASE64 =
+    'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR42mP8z8BQz0AEYBxVSF8FAGDeAe0Zb6zAAAAAElFTkSuQmCC'
+  const staleBytes = Buffer.from(STALE_PNG_BASE64, 'base64')
+
+  const ctx = readFileSync('instances/examples/modules/context.md', 'utf8')
+  const contextWith = (marker) => ctx.replace('## Problem statement', `## Problem statement\n\n${marker}`)
+
+  const files = {
+    // instance.yaml on main has ALREADY advanced to hld-define — `shape` is a completed stage
+    [`/gantry-workspace/${slug}/instance.yaml`]: `definition: design\nslug: ${slug}\nstage: hld-define\n`,
+    [`/gantry-workspace/${slug}/modules/context.md`]: contextWith('MARKER_FROM_MAIN'),
+    // figure-1.png committed on main, as it would be after the shape PR merged
+    [`/gantry-workspace/${slug}/assets/figure-1.png`]: ONE_PX_PNG_BASE64,
+  }
+
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files },
+    async (baseUrl) => {
+      const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+      try {
+        registerInstance(
+          slug,
+          { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl },
+          { instancesDir }
+        )
+        registerWorkspace(
+          { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl, owner: '' },
+          { instancesDir }
+        )
+
+        const client = createAzureDevOpsClient({
+          organization: ORGANIZATION,
+          project: PROJECT,
+          repository: REPOSITORY,
+          pat: VALID_PAT,
+          baseUrl,
+        })
+
+        // Stale leftover branch for the completed `shape` stage: an OLD copy of figure-1.png and a
+        // shape-only asset that main never had; plus stale module content.
+        const shapeBranch = `gantry-workspace/${slug}/shape`
+        await client.createBranch(shapeBranch)
+        await client.writeFile(`/gantry-workspace/${slug}/assets/figure-1.png`, STALE_PNG_BASE64, { branch: shapeBranch })
+        await client.writeFile(`/gantry-workspace/${slug}/assets/stale-only.png`, STALE_PNG_BASE64, { branch: shapeBranch })
+        await client.writeFile(
+          `/gantry-workspace/${slug}/modules/context.md`,
+          contextWith('MARKER_FROM_STALE_SHAPE_BRANCH'),
+          { branch: shapeBranch }
+        )
+
+        // Legit branch for the CURRENT stage (hld-define) with an asset that lives only there.
+        const hldBranch = `gantry-workspace/${slug}/hld-define`
+        await client.createBranch(hldBranch)
+        await client.writeFile(`/gantry-workspace/${slug}/assets/hld-only.png`, ONE_PX_PNG_BASE64, { branch: hldBranch })
+
+        await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+          const auth = basicAuthHeader(VALID_PAT)
+
+          // --- Completed stage (shape): assets resolve from main, not the stale branch ---
+          const listRes = await fetch(`${base}/api/instance/assets?slug=${slug}&stage=shape`, {
+            headers: { Authorization: auth },
+          })
+          assert.equal(listRes.status, 200)
+          const list = await listRes.json()
+          assert.ok(
+            list.find((a) => a.filename === 'figure-1.png'),
+            'figure-1.png (from main) should be listed for the completed stage'
+          )
+          assert.ok(
+            !list.find((a) => a.filename === 'stale-only.png'),
+            'the stale shape-branch-only asset must NOT leak into the completed-stage listing'
+          )
+
+          const fileRes = await fetch(`${base}/api/instance/assets/figure-1.png/file?slug=${slug}&stage=shape`, {
+            headers: { Authorization: auth },
+          })
+          assert.equal(fileRes.status, 200)
+          assert.equal(fileRes.headers.get('content-type'), 'image/png')
+          const bytes = Buffer.from(await fileRes.arrayBuffer())
+          assert.deepEqual(bytes, pngBytes, "completed-stage asset bytes must be main's copy")
+          assert.notDeepEqual(bytes, staleBytes, 'completed-stage asset must not be served from the stale branch')
+
+          // --- Completed stage (shape): module content also comes from main ---
+          const instRes = await fetch(`${base}/api/instance?slug=${slug}&stage=shape`, {
+            headers: { Authorization: auth },
+          })
+          assert.equal(instRes.status, 200)
+          const inst = await instRes.json()
+          assert.equal(inst.stage.id, 'shape')
+          const instBlob = JSON.stringify(inst)
+          assert.ok(instBlob.includes('MARKER_FROM_MAIN'), 'completed-stage module content should come from main')
+          assert.ok(
+            !instBlob.includes('MARKER_FROM_STALE_SHAPE_BRANCH'),
+            'stale shape-branch module content must not be served for the completed stage'
+          )
+
+          // --- Current stage (hld-define): its own (legit) branch still resolves ---
+          const currentFileRes = await fetch(
+            `${base}/api/instance/assets/hld-only.png/file?slug=${slug}&stage=hld-define`,
+            { headers: { Authorization: auth } }
+          )
+          assert.equal(
+            currentFileRes.status,
+            200,
+            'current-stage asset must resolve from the current stage branch, not be forced to main'
+          )
+          assert.equal(currentFileRes.headers.get('content-type'), 'image/png')
+
+          const currentListRes = await fetch(`${base}/api/instance/assets?slug=${slug}&stage=hld-define`, {
+            headers: { Authorization: auth },
+          })
+          assert.equal(currentListRes.status, 200)
+          const currentList = await currentListRes.json()
+          assert.ok(
+            currentList.find((a) => a.filename === 'hld-only.png'),
+            'the current stage branch asset should be listed when browsing the current stage'
+          )
+        })
       } finally {
         rmSync(instancesDir, { recursive: true, force: true })
       }
