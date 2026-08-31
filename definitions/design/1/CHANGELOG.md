@@ -2,6 +2,32 @@
 
 Initial published version of the Solution Design definition.
 
+### `soap` artefact trimmed to a field-level `requires` list (WI #276, in place — see docs/adr/0027)
+
+Now that the engine supports an optional field-ref suffix (`module.field?` —
+a field that is in the artefact's scope but only blocks the gate when its own
+`required` / `required-at` makes it mandatory), `soap.requires` moves from the
+whole-module list `[context, solution-definition, team-and-estimates]` to the
+exact fields `soap.md.tmpl` renders, in template section order:
+
+```
+context.driver, context.affected-domains, context.out-of-scope?,
+solution-definition.process-flow, solution-definition.high-level-solution-overview,
+solution-definition.assumptions-and-considerations?, solution-definition.feature-breakdown,
+team-and-estimates.teams-required, team-and-estimates.estimates, team-and-estimates.references?
+```
+
+- The three never-rendered fields (`context.opportunity`, `context.in-scope`,
+  `solution-definition.high-level-requirements`) are dropped — they are Full
+  SOAP concepts.
+- The three conditionally-rendered fields (`context.out-of-scope`,
+  `solution-definition.assumptions-and-considerations`,
+  `team-and-estimates.references` — all `required: false`) carry `?`, so the
+  `business-case` gate is exactly as strict as under the whole-module list.
+- `soap-full` is unchanged (its own `requires` list is independent).
+- No instance data migration; rendered SOAP output is byte-identical. Both
+  fixtures still pass `check --gate business-case`.
+
 ### Field id / title reconciliation round 2 (WI #274, in place — see docs/adr/0027)
 
 **Part 1 — id contradictions.** Two field `id:` values renamed so the id no
@@ -35,7 +61,8 @@ the titles are unchanged).
 Fixture instance module-file `##`/`#` headings for `examples` and
 `atlas-reference-design` were updated to match the new titles.
 
-**Part 3 — drop 3 dead `soap` fields: not implemented.** The SOAP report's
+**Part 3 — drop 3 dead `soap` fields: not implemented in WI #274; applied
+later by WI #276** (see the section at the top of this file). The SOAP report's
 recommendation to scope the `soap` artefact to a field-level `requires` list
 (omitting the never-rendered `context.opportunity`, `context.in-scope`,
 `solution-definition.high-level-requirements`) was **not applied**: gantry's

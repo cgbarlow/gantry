@@ -36,7 +36,22 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
     assert.equal(body.definition, 'design')
     assert.deepEqual(body.stage, { id: 'shape', title: 'SOAP', gate: 'business-case', number: 1 })
     assert.deepEqual(body.artefacts, [
-      { id: 'soap', title: 'Solution on a Page', requires: ['context', 'solution-definition', 'team-and-estimates'] },
+      {
+        id: 'soap',
+        title: 'Solution on a Page',
+        requires: [
+          'context.driver',
+          'context.affected-domains',
+          'context.out-of-scope?',
+          'solution-definition.process-flow',
+          'solution-definition.high-level-solution-overview',
+          'solution-definition.assumptions-and-considerations?',
+          'solution-definition.feature-breakdown',
+          'team-and-estimates.teams-required',
+          'team-and-estimates.estimates',
+          'team-and-estimates.references?',
+        ],
+      },
       {
         id: 'soap-full',
         title: 'Full Solution on a Page',

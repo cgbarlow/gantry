@@ -712,8 +712,11 @@ test("Image is a direct formatting-toolbar action and Insert offers only Section
 
         // The old single affordance is gone; each markdown field has its own generic dropdown instead.
         assert.equal(await page.getByRole('button', { name: '+ Insert asset' }).count(), 0)
+        // `soap`'s field-level `requires` (WI #276) scopes context to the two
+        // markdown fields driver / out-of-scope (plus the affected-domains list),
+        // so two per-field Insert ▾ triggers.
         const triggers = contextModule.getByRole('button', { name: 'Insert ▾' })
-        assert.equal(await triggers.count(), 4)
+        assert.equal(await triggers.count(), 2)
         const firstTrigger = triggers.nth(0)
         const firstField = contextModule.locator('.field-markdown').nth(0)
         const secondField = contextModule.locator('.field-markdown').nth(1)
@@ -808,7 +811,9 @@ test("Image is a direct formatting-toolbar action and Insert offers only Section
     const definition = loadDefinition('design')
     const data = readModule(definition, 'examples', 'context', { instancesDir })
     assert.match(data.fields.driver, /asset:/)
-    assert.match(data.fields.opportunity, /asset:/)
+    // Second markdown field of the `soap`-scoped context module (WI #276): driver,
+    // then out-of-scope. The "Choose existing" / hand-typed inserts target it.
+    assert.match(data.fields['out-of-scope'], /asset:/)
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }
@@ -1204,12 +1209,15 @@ test('Insert ▾ → Section adds a titled custom field below the requesting fie
         await dialog.waitFor({ state: 'hidden', timeout: 5_000 })
 
         // The new editable block appears directly below Problem statement (before the list and out-of-scope fields), with its own Insert ▾ beneath it.
+        // The `soap` artefact's field-level `requires` (WI #276) scopes the context
+        // module to driver / affected-domains / out-of-scope; the author-inserted
+        // custom section stays visible alongside them.
         const titles = await contextModule.locator('.field > label').allTextContents()
         assert.deepEqual(
           titles.map((t) => t.replace(/ \*$/, '')),
-          ['Problem statement', 'Risks we carry', 'Affected domains', 'Opportunity', 'In scope', 'Out of scope']
+          ['Problem statement', 'Risks we carry', 'Affected domains', 'Out of scope']
         )
-        assert.equal(await contextModule.getByRole('button', { name: 'Insert ▾' }).count(), 5)
+        assert.equal(await contextModule.getByRole('button', { name: 'Insert ▾' }).count(), 3)
 
         // Type into the new block, then save everything to disk.
         const newField = contextModule.locator('.field-markdown').nth(1)

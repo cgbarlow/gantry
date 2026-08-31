@@ -70,16 +70,29 @@ artefacts:
       business case decision.
     template: templates/soap.md.tmpl
     gate: business-case
-    # WI #268 / ADR-0027: the SOAP reconciliation report recommends dropping the
-    # three unused fields context.opportunity, context.in-scope and
-    # solution-definition.high-level-requirements from this artefact. That is left
-    # for the design grill, not applied here: the only in-place mechanism is a
-    # field-level `requires`, which also scopes the lightweight-SOAP module editor
-    # to just the listed fields — hiding the template's conditional sections and
-    # author-inserted custom sections — and, because a field-level entry gates
-    # regardless of the field's own `required` flag, tightens the business-case
-    # gate. None of that is the display-title-only change this ticket covers.
-    requires: [context, solution-definition, team-and-estimates]
+    # WI #276 / ADR-0027 Part 3: field-level `requires` naming exactly the fields
+    # `soap.md.tmpl` renders, in the template's section order. The three fields
+    # the SOAP reconciliation report flagged as dead — context.opportunity,
+    # context.in-scope, solution-definition.high-level-requirements — are Full
+    # SOAP concepts this template never renders, so they are omitted. The three
+    # fields the template renders only conditionally (all `required: false` in
+    # their module YAML) carry the `?` optional suffix: they are in scope for the
+    # lightweight-SOAP editor but do not block `business-case` unless a field's
+    # own `required` / `required-at` makes them mandatory — so gate strictness is
+    # unchanged from the previous whole-module list.
+    requires:
+      [
+        context.driver,
+        context.affected-domains,
+        context.out-of-scope?,
+        solution-definition.process-flow,
+        solution-definition.high-level-solution-overview,
+        solution-definition.assumptions-and-considerations?,
+        solution-definition.feature-breakdown,
+        team-and-estimates.teams-required,
+        team-and-estimates.estimates,
+        team-and-estimates.references?,
+      ]
 
   - id: soap-full
     title: Full Solution on a Page

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { loadDefinition } from '../lib/definition.js'
+import { loadDefinition, splitArtefactRequirement } from '../lib/definition.js'
 
 test('loads the real design definition', () => {
   const design = loadDefinition('design')
@@ -18,7 +18,23 @@ test('loads the real design definition', () => {
 
   const soap = design.artefacts.find((artefact) => artefact.id === 'soap')
   assert.match(soap.purpose, /summarise/i)
-  assert.deepEqual(soap.requires, ['context', 'solution-definition', 'team-and-estimates'])
+  // WI #276: field-level list of exactly what soap.md.tmpl renders; the three
+  // conditionally-rendered `required: false` fields carry the optional `?` suffix.
+  assert.deepEqual(soap.requires, [
+    'context.driver',
+    'context.affected-domains',
+    'context.out-of-scope?',
+    'solution-definition.process-flow',
+    'solution-definition.high-level-solution-overview',
+    'solution-definition.assumptions-and-considerations?',
+    'solution-definition.feature-breakdown',
+    'team-and-estimates.teams-required',
+    'team-and-estimates.estimates',
+    'team-and-estimates.references?',
+  ])
+  assert.ok(!soap.requires.includes('context.opportunity'))
+  assert.ok(!soap.requires.includes('context.in-scope'))
+  assert.ok(!soap.requires.includes('solution-definition.high-level-requirements'))
 
   const soapFull = design.artefacts.find((artefact) => artefact.id === 'soap-full')
   assert.equal(soapFull.template, 'templates/soap-full.md.tmpl')
@@ -48,6 +64,14 @@ test('loads the real design definition', () => {
 
   assert.ok(design.stages.every((stage) => stage.purpose))
   assert.ok(design.artefacts.every((artefact) => artefact.purpose))
+})
+
+test('splitArtefactRequirement parses whole modules, field refs and the optional `?` suffix', () => {
+  assert.deepEqual(splitArtefactRequirement('context'), { moduleId: 'context', fieldId: undefined, optional: false })
+  assert.deepEqual(splitArtefactRequirement('context.driver'), { moduleId: 'context', fieldId: 'driver', optional: false })
+  assert.deepEqual(splitArtefactRequirement('context.out-of-scope?'), { moduleId: 'context', fieldId: 'out-of-scope', optional: true })
+  // `?` on a whole module still parses (validation rejects it separately)
+  assert.deepEqual(splitArtefactRequirement('context?'), { moduleId: 'context', fieldId: undefined, optional: true })
 })
 
 function withScratchDefinition(fn) {

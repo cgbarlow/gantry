@@ -388,3 +388,103 @@ test('a parser anomaly in a module file fails hard, via strict parseModuleFile, 
     assert.throws(() => checkGate('my-initiative', { instancesDir }), /duplicate heading/)
   })
 })
+
+// --- WI #276: optional field refs (`module.field?`) -----------------------
+//
+// A bare `module.field` always gates. A `module.field?` is in the artefact's
+// scope but only gates when the field is independently required at that gate
+// via its own `required` / `required-at`.
+
+function withOptionalRefDefinition(requires, fn) {
+  const root = mkdtempSync(join(tmpdir(), 'gantry-definition-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  const definitionsDir = join(root, 'definitions')
+  const definitionDir = join(definitionsDir, 'optref')
+  const modulesDir = join(definitionDir, 'modules')
+  mkdirSync(modulesDir, { recursive: true })
+  writeFileSync(
+    join(definitionDir, 'definition.yaml'),
+    [
+      'id: optref',
+      'title: Opt Ref',
+      'stages:',
+      '  - id: stage',
+      '    title: Stage',
+      '    gate: gate',
+      '    modules: [ctx]',
+      'artefacts:',
+      '  - id: doc',
+      '    title: Doc',
+      '    template: doc.md.tmpl',
+      '    gate: gate',
+      `    requires: [${requires.join(', ')}]`,
+    ].join('\n')
+  )
+  writeFileSync(
+    join(modulesDir, 'ctx.yaml'),
+    [
+      'id: ctx',
+      'title: Ctx',
+      'fields:',
+      '  - id: driver',
+      '    title: Driver',
+      '    type: markdown',
+      '    required: true',
+      '  - id: extra',
+      '    title: Extra',
+      '    type: markdown',
+      '    required: false',
+      '  - id: late',
+      '    title: Late',
+      '    type: markdown',
+      '    required-at: [gate]',
+    ].join('\n')
+  )
+  try {
+    createInstance('optref', 'my-initiative', { instancesDir, definitionsDir })
+    return fn({ instancesDir, definitionsDir })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+}
+
+function writeCtx(definitionsDir, instancesDir, fields) {
+  const definition = loadDefinition('optref', { definitionsDir })
+  writeModule(definition, 'my-initiative', 'ctx', { status: 'agreed', owner: '', fields }, { instancesDir })
+}
+
+test('an optional field ref does not fail the gate when the field is blank and not independently required', () => {
+  withOptionalRefDefinition(['ctx.driver', 'ctx.extra?'], ({ instancesDir, definitionsDir }) => {
+    writeCtx(definitionsDir, instancesDir, { driver: 'Present.' })
+    const result = checkGate('my-initiative', { instancesDir, definitionsDir })
+    assert.equal(result.pass, true)
+    assert.deepEqual(result.artefacts[0].outstanding, [])
+  })
+})
+
+test('a bare field ref still fails the gate when that field is blank', () => {
+  withOptionalRefDefinition(['ctx.driver', 'ctx.extra'], ({ instancesDir, definitionsDir }) => {
+    writeCtx(definitionsDir, instancesDir, { driver: 'Present.' })
+    const result = checkGate('my-initiative', { instancesDir, definitionsDir })
+    assert.equal(result.pass, false)
+    assert.deepEqual(result.artefacts[0].outstanding, ['ctx.extra'])
+  })
+})
+
+test('an optional field ref DOES fail the gate when the field is required there via required-at', () => {
+  withOptionalRefDefinition(['ctx.driver', 'ctx.late?'], ({ instancesDir, definitionsDir }) => {
+    writeCtx(definitionsDir, instancesDir, { driver: 'Present.' })
+    const result = checkGate('my-initiative', { instancesDir, definitionsDir })
+    assert.equal(result.pass, false)
+    assert.deepEqual(result.artefacts[0].outstanding, ['ctx.late'])
+  })
+})
+
+test('an optional field ref passes once its required-at field is filled in', () => {
+  withOptionalRefDefinition(['ctx.driver', 'ctx.late?'], ({ instancesDir, definitionsDir }) => {
+    writeCtx(definitionsDir, instancesDir, { driver: 'Present.', late: 'Also present.' })
+    const result = checkGate('my-initiative', { instancesDir, definitionsDir })
+    assert.equal(result.pass, true)
+  })
+})

@@ -27,6 +27,25 @@ test('whole-module and field requirements expand to the visible field ids', () =
   )
 })
 
+test('an optional `module.field?` ref is scoped into the editor exactly like a bare field ref', () => {
+  assert.deepEqual(
+    [...artefactFieldIds(modules, { requires: ['context.driver', 'details.summary?'] })].sort(),
+    ['context.driver', 'details.summary']
+  )
+})
+
+test('author-inserted custom fields stay visible under a field-level requires list', () => {
+  const withCustom = [
+    { id: 'context', fields: [{ id: 'driver' }, { id: 'custom:abc', custom: true }, { id: 'affected-domains' }] },
+    { id: 'details', fields: [{ id: 'summary' }, { id: 'custom:xyz', custom: true }] },
+  ]
+  // `details` is not in scope, so its custom field is not pulled in.
+  assert.deepEqual(
+    [...artefactFieldIds(withCustom, { requires: ['context.driver'] })].sort(),
+    ['context.custom:abc', 'context.driver']
+  )
+})
+
 test('requirement comparison only asks for a selector when the visible field sets differ', () => {
   const same = [{ requires: ['context'] }, { requires: ['context'] }]
   const different = [{ requires: ['context'] }, { requires: ['context.driver'] }]

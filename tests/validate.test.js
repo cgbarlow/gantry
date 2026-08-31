@@ -77,6 +77,61 @@ test('reports a required/required-at mutual-exclusivity violation', () => {
   })
 })
 
+function writeOptRefDefinition(root, requires) {
+  const defDir = join(root, 'definitions', 'optref')
+  mkdirSync(join(defDir, 'modules'), { recursive: true })
+  writeFileSync(
+    join(defDir, 'definition.yaml'),
+    [
+      'id: optref',
+      'title: Opt Ref',
+      'stages:',
+      '  - id: only',
+      '    title: Only',
+      '    gate: g',
+      '    modules: [thing]',
+      'artefacts:',
+      '  - id: art',
+      '    title: Art',
+      '    template: t.md.tmpl',
+      '    gate: g',
+      `    requires: [${requires.join(', ')}]`,
+    ].join('\n')
+  )
+  writeFileSync(
+    join(defDir, 'modules', 'thing.yaml'),
+    'id: thing\ntitle: Thing\nfields:\n  - id: whatsit\n    title: Whatsit\n    type: markdown\n    required: false\n'
+  )
+}
+
+test('accepts an optional `module.field?` requires entry', () => {
+  withScratchDefinition((root) => {
+    writeOptRefDefinition(root, ['thing.whatsit?'])
+    const problems = findDefinitionProblems('optref', { definitionsDir: join(root, 'definitions') })
+    assert.deepEqual(problems, [])
+  })
+})
+
+test('rejects `?` on a whole-module requires entry', () => {
+  withScratchDefinition((root) => {
+    writeOptRefDefinition(root, ['thing?'])
+    const problems = findDefinitionProblems('optref', { definitionsDir: join(root, 'definitions') })
+    assert.equal(problems.length, 1)
+    assert.equal(problems[0].type, 'optional-whole-module')
+    assert.match(problems[0].message, /only valid on a field reference/)
+  })
+})
+
+test('rejects `?` on an unknown field', () => {
+  withScratchDefinition((root) => {
+    writeOptRefDefinition(root, ['thing.nope?'])
+    const problems = findDefinitionProblems('optref', { definitionsDir: join(root, 'definitions') })
+    assert.equal(problems.length, 1)
+    assert.equal(problems[0].type, 'missing-field')
+    assert.match(problems[0].message, /requires field "thing.nope\?"/)
+  })
+})
+
 test('reports every problem in one pass, not just the first', () => {
   withScratchDefinition((root) => {
     const defDir = join(root, 'definitions', 'very-broken')

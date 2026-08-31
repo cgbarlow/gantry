@@ -49,16 +49,34 @@ export function artefactFieldIds(modules = [], artefact) {
   const ids = new Set()
   if (!artefact) return ids
 
+  const scopedModuleIds = new Set()
+
   for (const requirement of artefact.requires ?? []) {
-    const separator = requirement.indexOf('.')
-    const moduleId = separator === -1 ? requirement : requirement.slice(0, separator)
-    const fieldId = separator === -1 ? null : requirement.slice(separator + 1)
+    // A trailing `?` (WI #276) marks a field ref optional for gate-blocking only;
+    // for editor scope an optional ref is identical to a bare one, so strip it.
+    const ref = requirement.endsWith('?') ? requirement.slice(0, -1) : requirement
+    const separator = ref.indexOf('.')
+    const moduleId = separator === -1 ? ref : ref.slice(0, separator)
+    const fieldId = separator === -1 ? null : ref.slice(separator + 1)
     const module = modules.find((candidate) => candidate.id === moduleId)
 
+    scopedModuleIds.add(moduleId)
     if (fieldId) {
       ids.add(`${moduleId}.${fieldId}`)
     } else if (module) {
       for (const field of module.fields) ids.add(`${moduleId}.${field.id}`)
+    }
+  }
+
+  // Author-inserted custom sections (`field.custom`, client-side ids) belong to
+  // no artefact's `requires`, but a field-level `requires` list must not make
+  // them vanish from the editor. Keep every custom field on a module the
+  // artefact already scopes. Whole-module refs already cover these via the loop
+  // above; this only matters for field-level refs.
+  for (const module of modules) {
+    if (!scopedModuleIds.has(module.id)) continue
+    for (const field of module.fields ?? []) {
+      if (field.custom) ids.add(`${module.id}.${field.id}`)
     }
   }
 
