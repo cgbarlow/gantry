@@ -36,9 +36,13 @@ import {
   sortArtefacts,
 } from './lib/artefactSelection.js'
 
-function assetFileUrl(assetId, slug) {
+function assetFileUrl(assetId, slug, stageId) {
+  const params = new URLSearchParams()
+  if (slug) params.set('slug', slug)
+  if (stageId) params.set('stage', stageId)
+  const qs = params.toString()
   const base = `/api/instance/assets/${encodeURIComponent(assetId)}/file`
-  return slug ? `${base}?slug=${encodeURIComponent(slug)}` : base
+  return qs ? `${base}?${qs}` : base
 }
 
 // ---------- Navigation heading helpers (WI232) ----------
@@ -105,9 +109,13 @@ async function loadInstance(slug, stageId) {
   return res.json()
 }
 
-async function fetchAssets(slug) {
-  const qs = slug ? `?slug=${encodeURIComponent(slug)}` : ''
-  const res = await apiFetchForInstance(slug, `/api/instance/assets${qs}`)
+async function fetchAssets(slug, stageId) {
+  const params = new URLSearchParams()
+  if (slug) params.set('slug', slug)
+  if (stageId) params.set('stage', stageId)
+  const qs = params.toString()
+  const path = qs ? `/api/instance/assets?${qs}` : '/api/instance/assets'
+  const res = await apiFetchForInstance(slug, path)
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new Error(body.message ?? body.error ?? `Failed to load images (${res.status})`)
@@ -140,18 +148,20 @@ function readFileAsBase64(file) {
 
 // `asset:<id>` references are resolved to the real, fetchable asset-file URL before markdown-it ever sees the text — the *stored* markdown source keeps the portable `asset:<id>` convention (see web/lib/assetRefs.js), only the live preview's rendered HTML points at a real URL.
 // WI260 also resolves `../assets/<name>` / `assets/<name>` for workspace-backed instances so a bare relative path (the repo-as-asset-store convention) shows in the preview.
+// WI264: stage-aware — when free-browsing a completed stage, the preview's asset URLs pin to that stage's ref so the server reads both modules and assets from the same ref (main for a completed stage, the stage branch for the current stage).
 function renderPreview(node, text) {
   if (!node) return
   const slug = currentSlug.value
+  const stageId = viewedStage.value ?? instanceData.value?.stage?.id ?? null
   const sources = assetSources.value
   let withSources = resolveAssetRefs(
     text ?? '',
-    (id) => assetFileUrl(id, slug),
+    (id) => assetFileUrl(id, slug, stageId),
     (id) => sources[id] ?? null
   )
   // WI260 repo-as-asset-store: for workspace-backed instances also rewrite relative repo-asset refs to the fetchable file endpoint, the same way `asset:<id>` is rewritten.
   if (instanceData.value?.workspaceBacked) {
-    withSources = resolveRepoAssetRefs(withSources, (filename) => assetFileUrl(filename, slug))
+    withSources = resolveRepoAssetRefs(withSources, (filename) => assetFileUrl(filename, slug, stageId))
   }
   node.innerHTML = renderMarkdown(withSources)
   // Caption-styling hook: the citation renders as <p><em>Source: …</em></p>; mark that paragraph so the stylesheet can make it visually subordinate (caption) rather than body text.
@@ -188,11 +198,12 @@ const assetSources = signal({})
 
 effect(() => {
   const slug = currentSlug.value
+  const stageId = viewedStage.value ?? null
   if (!slug) {
     assetSources.value = {}
     return
   }
-  fetchAssets(slug)
+  fetchAssets(slug, stageId)
     .then((list) => {
       const map = {}
       for (const a of list) if (a.source) map[a.id] = a.source
@@ -2557,6 +2568,77 @@ function StageNavigation({ modules, visibleFieldIds }) {
   `
 }
 
+// ---------- Re-open a signed-off stage (WI265, docs/adr/0026) ----------
+function ReopenStagePanel({ instance }) {
+  const viewedIdx = instance.stages.findIndex((s) => s.id === instance.stage.id)
+  const currentIdx = instance.stages.findIndex((s) => s.id === instance.currentStageId)
+  const isCompleted = viewedIdx !== -1 && currentIdx !== -1 && viewedIdx < currentIdx
+  const show = instance.workspaceBacked && isCompleted && viewMode.value !== 'rendered'
+  const [confirming, setConfirming] = useState(false)
+  const [status, setStatus] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  // Track viewMode signal so we hide in Rendered view live
+  const _mode = viewMode.value
+
+  if (!show) return null
+
+  async function handleConfirm() {
+    setLoading(true)
+    setStatus('Re-opening…')
+    try {
+      const params = new URLSearchParams({ slug: instance.slug, stage: instance.stage.id })
+      const res = await apiFetchForInstance(instance.slug, `/api/instance/stage/reopen?${params}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage: instance.stage.id }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.message ?? body.error ?? `Re-open failed (${res.status})`)
+      setStatus('Re-opened — refreshing…')
+      setConfirming(false)
+      setStatus('')
+      // Transition into the re-opened editing session: the instance's stage
+      // pointer is now back to this stage, so resetting viewedStage to null
+      // lets the default (current-stage) resolution show it as the current
+      // stage. The shared instance-loading effect will reload once.
+      const effectWillReload = viewedStage.value !== null
+      viewedStage.value = null
+      if (!effectWillReload) {
+        instanceData.value = await loadInstance(instance.slug, null)
+      }
+    } catch (err) {
+      setStatus(`Re-open failed: ${err.message}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return html`
+    <div class="reopen-stage-panel" data-testid="reopen-stage-panel">
+      <p class="guidance">This stage is complete. Re-open it to make late edits — a new branch will be created from main.</p>
+      <button type="button" class="btn" onClick=${() => setConfirming(true)} data-testid="reopen-stage-button">Re-open stage</button>
+      ${status ? html`<span class="save-status">${status}</span>` : null}
+      ${confirming
+        ? html`
+            <div class="modal-backdrop" role="presentation">
+              <div class="modal" role="dialog" aria-modal="true" aria-label="Confirm re-open stage">
+                <h3>Re-open stage "${instance.stage.title}"?</h3>
+                <p class="guidance">
+                  This will recreate the stage branch from main and move the instance back to this stage for further editing.
+                </p>
+                <div class="modal-actions">
+                  <button type="button" class="btn ghost" onClick=${() => setConfirming(false)}>Cancel</button>
+                  <button type="button" class="btn primary" disabled=${loading} onClick=${handleConfirm}>Confirm & re-open</button>
+                </div>
+              </div>
+            </div>
+          `
+        : null}
+    </div>
+  `
+}
+
 // ---------- The viewed stage's whole screen: modules + work-item panel ----------
 // Keyed by stage id from the parent (see ModuleEditorPage) so switching stages remounts this wholesale — fresh CodeMirror instances, matching the old full-DOM-rebuild behaviour. "Clear all fields" and "Render" now live in the view-toggle bar (see ViewModeToolbar, ModuleEditorPage) rather than here, so the field registry they depend on is owned by ModuleEditorPage instead — `onFieldRegistered` is threaded straight through. StageNavigation now lives in ViewModeToolbar to the right of the artefact selector, not as a standalone block here.
 function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
@@ -2619,6 +2701,7 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
 
   return html`
     <main id="modules" data-view-mode=${viewMode.value}>
+      <${ReopenStagePanel} instance=${instance} />
       <${SyncedFieldsPanel} key=${instance.workItem ? 'linked' : 'unlinked'} instance=${instance} />
       ${modules.length > 0
         ? html`<div class="insert-bar top-insert-bar" data-testid="top-insert" hidden=${viewMode.value === 'rendered'}>
