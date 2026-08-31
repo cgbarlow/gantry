@@ -32,6 +32,148 @@ function withRunningServer(options, fn) {
   })
 }
 
+// Coverage for WI259 — top-of-page Insert control that prepends a first section/list.
+test('top-of-page Insert ▾ prepends Section and List as first field, survives Save + reload, hidden in Rendered (WI259)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await launchBrowser()
+      try {
+        const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const contextModule = page.locator('.module').first()
+        const topInsert = page.locator('[data-testid="top-insert"]')
+        const topTrigger = topInsert.getByRole('button', { name: 'Insert ▾' })
+
+        // Present in edit mode, inside the main #modules and before the first module.
+        await assert.doesNotReject(topInsert.waitFor({ state: 'visible', timeout: 5_000 }))
+        const topBox = await topInsert.boundingBox()
+        const firstModuleBox = await contextModule.boundingBox()
+        assert.ok(topBox.y < firstModuleBox.y, 'top Insert must sit above the first module')
+        // Visually distinct as a page-level bar, not attached to the first heading.
+        const topStyle = await topInsert.evaluate((el) => {
+          const s = getComputedStyle(el)
+          return { borderStyle: s.borderStyle, background: s.backgroundColor, display: s.display }
+        })
+        assert.equal(topStyle.borderStyle, 'dashed', 'top bar should be dashed to read as insertion point')
+        assert.equal(topStyle.display, 'flex')
+        // Trigger reuses InsertDropdown's Section + List menu.
+        await topTrigger.click()
+        const topMenu = topInsert.locator('.menu')
+        await topMenu.waitFor({ state: 'visible', timeout: 5_000 })
+        assert.deepEqual(await topMenu.getByRole('menuitem').allTextContents(), ['Section', 'List'])
+        await topTrigger.click()
+        await topMenu.waitFor({ state: 'hidden', timeout: 5_000 })
+
+        // Hidden in Rendered view, like the per-field Insert.
+        await page.locator('.segmented').getByRole('button', { name: 'Rendered' }).click()
+        await topInsert.waitFor({ state: 'hidden', timeout: 5_000 })
+        assert.equal(await page.locator('[data-testid="top-insert"]').count(), 1, 'bar stays in DOM but hidden')
+        // Per-field inserts also hidden there.
+        const anyPerFieldInsert = page.locator('.field-markdown .insert-dropdown').first()
+        await anyPerFieldInsert.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
+        await page.locator('.segmented').getByRole('button', { name: 'Split' }).click()
+        await topInsert.waitFor({ state: 'visible', timeout: 5_000 })
+
+        // Choosing Section prepends before the previously-first field.
+        const beforeTitles = await contextModule.locator('.field > label').allTextContents()
+        assert.ok(beforeTitles.length >= 2, 'seeded context module should have fields')
+        const previouslyFirst = beforeTitles[0].replace(/ \*$/, '')
+        await topTrigger.click()
+        await topMenu.waitFor({ state: 'visible', timeout: 5_000 })
+        await topMenu.getByRole('menuitem', { name: 'Section' }).click()
+        const sectionDialog = page.locator('.modal[aria-label="New section"]')
+        await sectionDialog.waitFor({ state: 'visible', timeout: 5_000 })
+        await sectionDialog.locator('input[type=text]').fill('Prepended Section')
+        await sectionDialog.getByRole('button', { name: 'Insert section' }).click()
+        await sectionDialog.waitFor({ state: 'hidden', timeout: 5_000 })
+
+        const afterSectionTitles = await contextModule.locator('.field > label').allTextContents()
+        assert.equal(afterSectionTitles[0].replace(/ \*$/, ''), 'Prepended Section')
+        assert.equal(afterSectionTitles[1].replace(/ \*$/, ''), previouslyFirst)
+
+        // Type into the newly prepended section and save.
+        const newSectionField = contextModule.locator('.field-markdown').first()
+        await newSectionField.locator('.cm-content').click()
+        await page.keyboard.type('Top section content.')
+        await contextModule.getByRole('button', { name: 'Save Context' }).click()
+        await page.waitForSelector('text=Saved', { timeout: 5_000 })
+
+        // Survives reload in that position.
+        await page.reload()
+        await page.waitForSelector('.module', { timeout: 10_000 })
+        const reloadedAfterSection = await page.locator('.module').first().locator('.field > label').allTextContents()
+        assert.equal(reloadedAfterSection[0].replace(/ \*$/, ''), 'Prepended Section')
+        assert.equal(reloadedAfterSection[1].replace(/ \*$/, ''), previouslyFirst)
+
+        // Choosing List does the same for a list field — becomes the new first field.
+        const topInsert2 = page.locator('[data-testid="top-insert"]')
+        const topTrigger2 = topInsert2.getByRole('button', { name: 'Insert ▾' })
+        await topTrigger2.click()
+        await topInsert2.locator('.menu').waitFor({ state: 'visible', timeout: 5_000 })
+        await topInsert2.locator('.menu').getByRole('menuitem', { name: 'List' }).click()
+        const listDialog = page.locator('.modal[aria-label="New list"]')
+        await listDialog.waitFor({ state: 'visible', timeout: 5_000 })
+        await listDialog.locator('input[type=text]').fill('Prepended List')
+        await listDialog.getByRole('button', { name: 'Insert list' }).click()
+        await listDialog.waitFor({ state: 'hidden', timeout: 5_000 })
+
+        const afterListTitles = await page.locator('.module').first().locator('.field > label').allTextContents()
+        assert.equal(afterListTitles[0].replace(/ \*$/, ''), 'Prepended List')
+        assert.equal(afterListTitles[1].replace(/ \*$/, ''), 'Prepended Section')
+        // The new first field is a list-type rows editor.
+        const firstField = page.locator('.module').first().locator('.field').first()
+        assert.ok(await firstField.locator('.list-rows').isVisible(), 'prepended List should render as list field')
+        // Add an item so the list has content before saving.
+        await firstField.locator('textarea').first().fill('First list item')
+        await page.locator('.module').first().getByRole('button', { name: 'Save Context' }).click()
+        await page.waitForSelector('text=Saved', { timeout: 5_000 })
+
+        await page.reload()
+        await page.waitForSelector('.module', { timeout: 10_000 })
+        const reloadedAfterList = await page.locator('.module').first().locator('.field > label').allTextContents()
+        assert.equal(reloadedAfterList[0].replace(/ \*$/, ''), 'Prepended List')
+        assert.equal(reloadedAfterList[1].replace(/ \*$/, ''), 'Prepended Section')
+        assert.equal(reloadedAfterList[2].replace(/ \*$/, ''), previouslyFirst)
+
+        // Still hidden in Rendered after reload.
+        await page.locator('.segmented').getByRole('button', { name: 'Rendered' }).click()
+        await page.locator('[data-testid="top-insert"]').waitFor({ state: 'hidden', timeout: 5_000 })
+        await page.locator('.segmented').getByRole('button', { name: 'Split' }).click()
+
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+
+    const definition = loadDefinition('design')
+    const data = readModule(definition, 'examples', 'context', { instancesDir })
+    // Both custom fields persisted in layout order, prepended first.
+    const layoutIds = data.layout.map((entry) => (entry.custom ? entry.custom.title : entry.field))
+    assert.equal(layoutIds[0], 'Prepended List')
+    assert.equal(layoutIds[1], 'Prepended Section')
+    assert.ok(data.customFields.some((f) => f.title === 'Prepended Section' && f.value === 'Top section content.'))
+    const listField = data.customFields.find((f) => f.title === 'Prepended List')
+    assert.ok(listField, 'list custom field should be persisted')
+    assert.deepEqual(listField.value, ['First list item'])
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
 test('the ported module editor page loads with no errors and a markdown field save round-trips', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {

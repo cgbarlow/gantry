@@ -1014,6 +1014,24 @@ main.dashboard {
  * wrapper is the positioned ancestor both menus share, so the grid opens
  * directly under the trigger that summoned it. */
 .insert-area { position: relative; display: inline-flex; margin-top: 10px; }
+/*
+ * Top-of-page Insert bar (WI259) — a page-level affordance above the first
+ * module, visually distinct from the per-field Insert ▾ that lives attached
+ * to each markdown field. Slim, left-aligned, dashed so it reads as an
+ * insertion point rather than another field heading.
+ */
+.top-insert-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 4px;
+  padding: 8px 12px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+.top-insert-bar .insert-dropdown { margin-top: 0; }
+.top-insert-bar[hidden] { display: none; }
 .md-toolbar .table-picker { position: relative; display: inline-flex; }
 .table-picker .menu {
   display: none;

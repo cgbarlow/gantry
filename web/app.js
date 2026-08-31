@@ -984,7 +984,9 @@ function ModuleCard({ mod, stageId, onFieldRegistered, visibleFieldIds }) {
         ? controlsRef.current[field.id]?.getValue() ?? field.value
         : field.value
       fields[field.id] = value
-      layout.push(field.custom ? { custom: { id: field.id, title: field.title, value } } : { field: field.id })
+      layout.push(
+        field.custom ? { custom: { id: field.id, title: field.title, type: field.type, value } } : { field: field.id }
+      )
     })
     setStatus('Saving…')
     // `slug` is required here (not just `stage`) now that a server can host any number of instances at once with no fixed default (#88/#92) — without it, this PUT only ever resolved against whichever slug (if any) the server happened to be started with, silently 400ing for every other instance a multi-instance deployment serves. Surfaced by #94's own "Open instance ... allows editing end-to-end" acceptance criterion once a freshly adopted/created instance had no such server-pinned default to fall back on.
@@ -2558,13 +2560,71 @@ function StageNavigation({ modules, visibleFieldIds }) {
 // ---------- The viewed stage's whole screen: modules + work-item panel ----------
 // Keyed by stage id from the parent (see ModuleEditorPage) so switching stages remounts this wholesale — fresh CodeMirror instances, matching the old full-DOM-rebuild behaviour. "Clear all fields" and "Render" now live in the view-toggle bar (see ViewModeToolbar, ModuleEditorPage) rather than here, so the field registry they depend on is owned by ModuleEditorPage instead — `onFieldRegistered` is threaded straight through. StageNavigation now lives in ViewModeToolbar to the right of the artefact selector, not as a standalone block here.
 function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
+  const [topSectionOpen, setTopSectionOpen] = useState(false)
+  const [topListOpen, setTopListOpen] = useState(false)
   const modules = visibleFieldIds
     ? instance.modules.filter((mod) => mod.fields.some((field) => visibleFieldIds.has(`${mod.id}.${field.id}`)))
     : instance.modules
 
+  function handleTopInsertSection(title) {
+    const targetModuleId = modules[0]?.id ?? instance.modules[0]?.id
+    if (!targetModuleId) return
+    const newField = {
+      id: uniqueCustomFieldClientId(),
+      title: title.trim() ? title.trim() : 'Untitled section',
+      type: 'markdown',
+      required: false,
+      guidance: null,
+      value: '',
+      example: null,
+      custom: true,
+    }
+    const current = instanceData.value
+    if (!current) return
+    const updatedModules = current.modules.map((m) => {
+      if (m.id !== targetModuleId) return m
+      const fields = [...m.fields]
+      // Prepend as first field — `fields.splice(0, 0, newField)` — mirrors ModuleCard's handleInsertSection/List where findIndex returns -1 when the after-id is unset.
+      fields.splice(0, 0, newField)
+      return { ...m, fields }
+    })
+    instanceData.value = { ...current, modules: updatedModules }
+    setTopSectionOpen(false)
+  }
+
+  function handleTopInsertList(title) {
+    const targetModuleId = modules[0]?.id ?? instance.modules[0]?.id
+    if (!targetModuleId) return
+    const newField = {
+      id: uniqueCustomFieldClientId(),
+      title: title.trim() ? title.trim() : 'Untitled list',
+      type: 'list',
+      required: false,
+      guidance: null,
+      value: [],
+      example: null,
+      custom: true,
+    }
+    const current = instanceData.value
+    if (!current) return
+    const updatedModules = current.modules.map((m) => {
+      if (m.id !== targetModuleId) return m
+      const fields = [...m.fields]
+      fields.splice(0, 0, newField)
+      return { ...m, fields }
+    })
+    instanceData.value = { ...current, modules: updatedModules }
+    setTopListOpen(false)
+  }
+
   return html`
     <main id="modules" data-view-mode=${viewMode.value}>
       <${SyncedFieldsPanel} key=${instance.workItem ? 'linked' : 'unlinked'} instance=${instance} />
+      ${modules.length > 0
+        ? html`<div class="top-insert-bar" data-testid="top-insert" hidden=${viewMode.value === 'rendered'}>
+            <${InsertDropdown} onSection=${() => setTopSectionOpen(true)} onList=${() => setTopListOpen(true)} />
+          </div>`
+        : null}
       ${modules.map(
         (mod) => html`
           <${ModuleCard}
@@ -2577,6 +2637,8 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
         `
       )}
       <${AdvanceStagePanel} instance=${instance} />
+      ${topSectionOpen ? html`<${SectionDialog} onConfirm=${handleTopInsertSection} onClose=${() => setTopSectionOpen(false)} />` : null}
+      ${topListOpen ? html`<${ListDialog} onConfirm=${handleTopInsertList} onClose=${() => setTopListOpen(false)} />` : null}
     </main>
   `
 }
