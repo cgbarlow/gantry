@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { realpathSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { Command } from 'commander'
 import { renderArtefact } from '../lib/render.js'
 import { getStatus } from '../lib/status.js'
@@ -198,6 +200,14 @@ program
     )
   })
 
-if (process.argv[1] && process.argv[1].endsWith('gantry.js')) {
+const invokedDirectly = (() => {
+  if (!process.argv[1]) return false
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+})()
+if (invokedDirectly) {
   program.parseAsync(process.argv)
 }

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, symlinkSync, rmSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, symlinkSync, rmSync, existsSync, readFileSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parse as parseYAML } from 'yaml'
@@ -47,4 +47,30 @@ test('gantry new --assignee records the instance record\'s own assignee, indepen
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }
+})
+
+// Regression: WI #277 — when gantry is invoked through a shim/symlink whose name
+// does not end in `gantry.js` (as `npm install -g` / `npm link` / PATH shims do),
+// the old `endsWith('gantry.js')` entry guard was false and the CLI silently did
+// nothing (no output, exit 0). The realpath-based guard must run the program
+// regardless of the invocation name.
+test('gantry invoked via a non-.js symlink still runs the CLI', () => {
+  const linkDir = mkdtempSync(join(tmpdir(), 'gantry-cli-link-'))
+  const link = join(linkDir, 'gantry-shim')
+  try {
+    symlinkSync(resolve('bin/gantry.js'), link)
+    const output = execFileSync('node', [link, '--help'], { encoding: 'utf8' })
+    assert.match(output, /Usage:/)
+  } finally {
+    try { unlinkSync(link) } catch {}
+    rmSync(linkDir, { recursive: true, force: true })
+  }
+})
+
+// Importing the CLI module must NOT execute a command — `program` is defined and
+// no parse is triggered on import.
+test('importing bin/gantry.js does not execute a command', async () => {
+  const mod = await import('../bin/gantry.js')
+  assert.ok(mod.program, 'program export should be defined')
+  assert.equal(typeof mod.program.parseAsync, 'function')
 })

@@ -620,6 +620,8 @@ docker run gantry validate design
 
 For a long-running deployment, run the published image from the registry built by `azure-pipelines.release.yml` rather than rebuilding from source on the server.
 
+If you do run from a source checkout on the host, once the repo is there and dependencies are installed, `npm link` (or adding `bin/` to `PATH`) makes `gantry <command>` work directly, and `node bin/gantry.js <command>` always works regardless.
+
 ### Published image and tags
 
 `azure-pipelines.release.yml` builds `ContainerFile --target runtime` and pushes three tags on every push to `main`:
