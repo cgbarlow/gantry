@@ -1,11 +1,21 @@
 # <%~ it.instance.slug %>: As-built
 
 <%
+  /* Intentional consolidation (WI #269): this template deliberately collapses the
+     ATLAS reference deep Data Migration Flows and Migration Services hierarchies
+     (~70 headings) into a few generic as-built fields — it is NOT a 1:1 heading map
+     to the reference, and that is by design. See
+     docs/research/design-definition-reference-reconciliation.md section 4 and section 9,
+     grounded in docs/reconciliation/as-built-reconciliation.md (rows P3-P10, section 2.D, W1-W5). */
   const intro = it.modules.introduction || {}
   const glossary = it.modules.glossary || {}
   const notes = it.modules['as-built-notes'] || {}
   const recovery = it.modules['recovery-plan'] || {}
   const dsc = it.modules['data-security-controls'] || {}
+  // Cross-cutting blank-field guard (WI #269): render the heading with a literal
+  // "— n/a —" line when a required field is blank/absent, rather than an empty
+  // section. Non-blank output is byte-identical.
+  const na = (v) => (typeof v === 'string' && v.trim() !== '') ? v : '— n/a —'
 %>
 <% if (glossary['terms-and-definitions']) { %>
 # Terms & Definitions
@@ -16,15 +26,15 @@
 
 ## Overview
 
-<%~ intro.overview %>
+<%~ na(intro.overview) %>
 
 ## Purpose
 
-<%~ intro.purpose %>
+<%~ na(intro.purpose) %>
 
 ## Scope
 
-<%~ intro.scope %>
+<%~ na(intro.scope) %>
 <% if (intro.constraints) { %>
 ## Constraints
 
@@ -54,7 +64,7 @@
 
 ## Overview
 
-<%~ notes['design-overview'] %>
+<%~ na(notes['design-overview']) %>
 <% if (notes['architecture-decisions']) { %>
 ## Architecture decisions
 
@@ -62,15 +72,15 @@
 <% } %>
 ## Data migration and process flows
 
-<%~ notes['process-flows'] %>
+<%~ na(notes['process-flows']) %>
 
 # Infrastructure and configuration
 
-<%~ notes['infrastructure-and-configuration'] %>
+<%~ na(notes['infrastructure-and-configuration']) %>
 
 # Recovery plan
 
-<%~ recovery['recovery-approach'] %>
+<%~ na(recovery['recovery-approach']) %>
 <% if (recovery.resiliency) { %>
 ## Resiliency
 
@@ -88,7 +98,7 @@
 <% } %>
 # Data security controls
 
-<%~ dsc.controls %>
+<%~ na(dsc.controls) %>
 <% if (dsc['inheritance-and-dependencies']) { %>
 ## Inheritance and dependencies
 
@@ -101,11 +111,11 @@
 <% } %>
 # Changes from the agreed design
 
-<%~ notes['changes-from-design'] %>
+<%~ na(notes['changes-from-design']) %>
 
 # Acceptance criteria
 
-<%~ notes['acceptance-criteria'] %>
+<%~ na(notes['acceptance-criteria']) %>
 <% if (notes['operational-notes']) { %>
 # Operational notes
 
@@ -113,4 +123,4 @@
 <% } %>
 # Handover confirmation
 
-<%~ notes['handover-confirmation'] %>
+<%~ na(notes['handover-confirmation']) %>

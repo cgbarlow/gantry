@@ -1,9 +1,18 @@
 # <%~ it.instance.slug %>: Solution Architecture Document
 <%
+  /* Intentional consolidation (WI #269): this template deliberately merges several
+     "SAD Template.docx" viewpoint sections into fewer gantry modules/fields — it is
+     NOT a 1:1 heading map to the reference, and that is by design. See
+     docs/research/design-definition-reference-reconciliation.md §5 and §9, grounded
+     in docs/reconciliation/sad-reconciliation.md (rows W1–W13, P1–P16, R-W1–R-O6). */
   const intro = it.modules.introduction || {}
   const recovery = it.modules['recovery-plan'] || {}
   const dsc = it.modules['data-security-controls'] || {}
   const glossary = it.modules.glossary || {}
+  // Cross-cutting blank-field guard (WI #269): render the heading with a literal
+  // "— n/a —" line when a required field is blank/absent, rather than an empty
+  // section. Non-blank output is byte-identical.
+  const na = (v) => (typeof v === 'string' && v.trim() !== '') ? v : '— n/a —'
 %>
 <% if (intro.overview || intro.purpose || intro.scope) { %>
 # Introduction
@@ -58,11 +67,11 @@
 
 ## Design decisions
 
-<%~ it.modules.architecture['design-decisions'] %>
+<%~ na(it.modules.architecture['design-decisions']) %>
 
 ## Solution description
 
-<%~ it.modules.architecture['solution-description'] %>
+<%~ na(it.modules.architecture['solution-description']) %>
 
 ## Logical components
 
@@ -89,7 +98,7 @@
 
 ## Interfaces
 
-<%~ it.modules.integration.interfaces %>
+<%~ na(it.modules.integration.interfaces) %>
 <% if (it.modules.integration['network-and-infrastructure']) { %>
 ## Network and infrastructure architecture
 
@@ -134,7 +143,7 @@
 
 ## Recovery approach
 
-<%~ recovery['recovery-approach'] %>
+<%~ na(recovery['recovery-approach']) %>
 <% if (recovery.resiliency) { %>
 ## Resiliency
 
@@ -153,21 +162,21 @@
 
 ## Backup and archiving policy
 
-<%~ it.modules.nfrs['disaster-recovery-and-backup'] %>
+<%~ na(it.modules.nfrs['disaster-recovery-and-backup']) %>
 
 # Data
 
 ## Logical data model
 
-<%~ it.modules.data['logical-data-model'] %>
+<%~ na(it.modules.data['logical-data-model']) %>
 
 ## Data classification
 
-<%~ it.modules.data['data-classification'] %>
+<%~ na(it.modules.data['data-classification']) %>
 
 ## Data retention, archiving and records management
 
-<%~ it.modules.data['data-retention-and-archiving'] %>
+<%~ na(it.modules.data['data-retention-and-archiving']) %>
 <% if (it.modules.data['data-migration']) { %>
 ## Data migration
 
@@ -183,11 +192,11 @@
 
 ## Identity and access management
 
-<%~ it.modules.security['identity-and-access'] %>
+<%~ na(it.modules.security['identity-and-access']) %>
 
 ## Security architecture
 
-<%~ it.modules.security['security-architecture'] %>
+<%~ na(it.modules.security['security-architecture']) %>
 
 ## Regulations and standards
 
@@ -196,7 +205,7 @@
 
 ## Privacy and confidentiality concerns
 
-<%~ it.modules.security['privacy-and-confidentiality'] %>
+<%~ na(it.modules.security['privacy-and-confidentiality']) %>
 <% if (dsc.controls) { %>
 ## Security concerns
 
@@ -212,15 +221,15 @@
 
 ## Performance
 
-<%~ it.modules.nfrs.performance %>
+<%~ na(it.modules.nfrs.performance) %>
 
 ## Availability and continuity
 
-<%~ it.modules.nfrs['availability-and-continuity'] %>
+<%~ na(it.modules.nfrs['availability-and-continuity']) %>
 
 ## Scalability and capacity
 
-<%~ it.modules.nfrs['scalability-and-capacity'] %>
+<%~ na(it.modules.nfrs['scalability-and-capacity']) %>
 <% if (it.modules.nfrs['other-nfrs']) { %>
 ## Other non-functional requirements
 
@@ -229,13 +238,13 @@
 
 ## Requirements traceability
 
-<%~ it.modules.nfrs['requirements-traceability'] %>
+<%~ na(it.modules.nfrs['requirements-traceability']) %>
 
 # Risks
 
 ## Risks and mitigations
 
-<%~ it.modules.risks['risk-register'] %>
+<%~ na(it.modules.risks['risk-register']) %>
 <% if (it.modules.risks['open-issues']) { %>
 ## Open issues
 
@@ -256,7 +265,7 @@
 
 # Operational readiness
 
-<%~ it.modules['support-and-operations']['support-handover-readiness'] %>
+<%~ na(it.modules['support-and-operations']['support-handover-readiness']) %>
 
 _Full support and operations detail is maintained in this solution's SSAD._
 <% if (glossary['terms-and-definitions']) { %>

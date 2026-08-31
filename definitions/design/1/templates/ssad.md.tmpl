@@ -1,6 +1,16 @@
 # <%~ it.instance.slug %>: Solution Support Architecture Document
 <%
+  /* Intentional consolidation (WI #269): this template deliberately abstracts the
+     reference SSAD product-scattered Solution Overview deep-dive into a small set
+     of generic support-architecture modules/fields — it is NOT a 1:1 heading map
+     to the reference, and that is by design. See
+     docs/research/design-definition-reference-reconciliation.md section 6 and section 9,
+     grounded in docs/reconciliation/ssad-reconciliation.md (rows P3-P8, R-W1/W2, R-P3, R-P6). */
   const intro = it.modules.introduction || {}
+  // Cross-cutting blank-field guard (WI #269): render the heading with a literal
+  // "— n/a —" line when a required field is blank/absent, rather than an empty
+  // section. Non-blank output is byte-identical.
+  const na = (v) => (typeof v === 'string' && v.trim() !== '') ? v : '— n/a —'
 %>
 <% if (intro.purpose || intro.scope || intro['content-standards']) { %>
 # Introduction
@@ -23,7 +33,7 @@
 
 # Solution overview
 
-<%~ it.modules.architecture['solution-description'] %>
+<%~ na(it.modules.architecture['solution-description']) %>
 
 ## Logical components
 
@@ -32,15 +42,15 @@
 
 ## Interfaces
 
-<%~ it.modules.integration.interfaces %>
+<%~ na(it.modules.integration.interfaces) %>
 
 ## Data classification
 
-<%~ it.modules.data['data-classification'] %>
+<%~ na(it.modules.data['data-classification']) %>
 
 # Architectural risks
 
-<%~ it.modules.risks['risk-register'] %>
+<%~ na(it.modules.risks['risk-register']) %>
 <% if (it.modules.architecture['architectural-risks']) { %>
 <%~ it.modules.architecture['architectural-risks'] %>
 <% } %>
@@ -67,7 +77,7 @@
 
 # Support handover readiness
 
-<%~ it.modules['support-and-operations']['support-handover-readiness'] %>
+<%~ na(it.modules['support-and-operations']['support-handover-readiness']) %>
 <% if (it.modules['support-and-operations']['operational-accounts-and-licenses'] && it.modules['support-and-operations']['operational-accounts-and-licenses'].length) { %>
 # Operational accounts and licenses
 
@@ -89,23 +99,23 @@
 
 ## Availability and continuity
 
-<%~ it.modules.nfrs['availability-and-continuity'] %>
+<%~ na(it.modules.nfrs['availability-and-continuity']) %>
 
 ## Disaster recovery and backup
 
-<%~ it.modules.nfrs['disaster-recovery-and-backup'] %>
+<%~ na(it.modules.nfrs['disaster-recovery-and-backup']) %>
 
 ## Scalability and capacity
 
-<%~ it.modules.nfrs['scalability-and-capacity'] %>
+<%~ na(it.modules.nfrs['scalability-and-capacity']) %>
 
 ## Identity and access management
 
-<%~ it.modules.security['identity-and-access'] %>
+<%~ na(it.modules.security['identity-and-access']) %>
 
 ## Privacy and confidentiality concerns
 
-<%~ it.modules.security['privacy-and-confidentiality'] %>
+<%~ na(it.modules.security['privacy-and-confidentiality']) %>
 
 # Dependencies
 

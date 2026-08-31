@@ -1,16 +1,22 @@
 # <%~ it.instance.slug %>: High Level Design
-
+<%
+  /* Cross-cutting blank-field guard (WI #269): render the heading with a literal
+     em-dash n/a marker line when a required field is blank or absent, rather than
+     an empty section. Mirrors the reference templates rule to keep every section
+     and put n/a when not relevant. Non-blank output is byte-identical. */
+  const na = (v) => (typeof v === 'string' && v.trim() !== '') ? v : '— n/a —'
+%>
 # Submission
 
-<%~ it.modules['hld-submission']['purpose-statement'] %>
+<%~ na(it.modules['hld-submission']['purpose-statement']) %>
 
 ## Decision requested
 
-<%~ it.modules['hld-submission']['decision-requested'] %>
+<%~ na(it.modules['hld-submission']['decision-requested']) %>
 
 ## Consultation
 
-<%~ it.modules['hld-submission']['consultation'] %>
+<%~ na(it.modules['hld-submission']['consultation']) %>
 <% if (it.modules['hld-submission']['next-steps']) { %>
 ## Next steps
 
@@ -26,19 +32,19 @@
 
 ## Current state
 
-<%~ it.modules['problem-statement']['current-state'] %>
+<%~ na(it.modules['problem-statement']['current-state']) %>
 
 ## Desired future state
 
-<%~ it.modules['problem-statement']['desired-future-state'] %>
+<%~ na(it.modules['problem-statement']['desired-future-state']) %>
 
 ## In scope / out of scope
 
-<%~ it.modules['problem-statement'].scope %>
+<%~ na(it.modules['problem-statement'].scope) %>
 
 ## Success criteria
 
-<%~ it.modules['problem-statement']['success-criteria'] %>
+<%~ na(it.modules['problem-statement']['success-criteria']) %>
 <%
   const nfrs = it.modules.nfrs || {}
   const nfrParts = [
@@ -58,15 +64,15 @@
 
 # Proposed solution
 
-<%~ it.modules['proposed-solution'].guardrails %>
+<%~ na(it.modules['proposed-solution'].guardrails) %>
 
 ## Alignment with strategy
 
-<%~ it.modules['proposed-solution']['strategy-alignment'] %>
+<%~ na(it.modules['proposed-solution']['strategy-alignment']) %>
 
 ## Dependencies
 
-<%~ it.modules.dependencies['dependencies-overview'] %>
+<%~ na(it.modules.dependencies['dependencies-overview']) %>
 <% if (it.modules['proposed-solution'].implications) { %>
 ## Implications
 
@@ -75,11 +81,11 @@
 
 ## Trade-offs
 
-<%~ it.modules['proposed-solution']['trade-offs'] %>
+<%~ na(it.modules['proposed-solution']['trade-offs']) %>
 
 ## Risks and mitigations
 
-<%~ it.modules.risks['risk-register'] %>
+<%~ na(it.modules.risks['risk-register']) %>
 <% if (it.modules.risks['open-issues']) { %>
 
 <%~ it.modules.risks['open-issues'] %>
@@ -104,15 +110,15 @@
 
 ## Cost-benefit analysis
 
-<%~ it.modules['proposed-solution']['cost-benefit'] %>
+<%~ na(it.modules['proposed-solution']['cost-benefit']) %>
 
 ## Delivery approach and indicative timeline
 
-<%~ it.modules['proposed-solution']['delivery-approach'] %>
+<%~ na(it.modules['proposed-solution']['delivery-approach']) %>
 
 # Alternatives considered
 
-<%~ it.modules['alternatives-considered'].alternatives %>
+<%~ na(it.modules['alternatives-considered'].alternatives) %>
 <% if (it.modules['open-questions'].questions) { %>
 
 # Open questions
