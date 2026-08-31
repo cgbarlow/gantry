@@ -1,0 +1,24 @@
+<%
+  /* Shared partial (WI #273 / R2 + R3, finding F8): the data-security-controls block.
+     Before this it was copy-pasted between sad.md.tmpl and as-built.md.tmpl and had
+     DRIFTED in both wording and heading level:
+       - sad:      `## Security concerns` (under `# Security`) + `## Security control
+                   inheritance and dependencies`, controls behind a bare `<% if %>`.
+       - as-built: `# Data security controls` (own top-level section) + `## Inheritance
+                   and dependencies`, controls already via `na()`.
+     The heading *text* and *level* genuinely differ because the parent context differs
+     (sad nests it inside its Security view; as-built gives it its own section), and
+     unifying them would change the populated render — which WI #273's hard constraint
+     forbids. So the caller passes the two heading strings; the partial owns the shared
+     structure. R3: `controls` is a required field in both artefacts' `requires`, so its
+     heading now always renders via `na()`, never a bare `<% if %>`.
+     Caller passes { dsc, controlsHeading, inheritanceHeading }. */
+%>
+<%~ it.controlsHeading %>
+
+<%~ na(it.dsc.controls) %>
+<% if (it.dsc['inheritance-and-dependencies']) { %>
+<%~ it.inheritanceHeading %>
+
+<%~ it.dsc['inheritance-and-dependencies'] %>
+<% } %>

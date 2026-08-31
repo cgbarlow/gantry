@@ -1,10 +1,16 @@
 # <%~ it.instance.slug %>: Solution on a Page
-
+<%
+  /* Blank-field guard `na()` (WI #269, extended to the SOAP family by WI #272) is
+     injected once as an Eta functionHeader by lib/render.js (WI #273 / R2). It renders
+     the heading with a literal "— n/a —" line when an unconditional required field is
+     blank/absent, rather than an empty section; non-blank output is byte-identical.
+     Conditional `<% if (field) %>` sections below deliberately suppress when blank. */
+%>
 # Background and context
 
 ## Business driver
 
-<%~ it.modules.context.driver %>
+<%~ na(it.modules.context.driver) %>
 
 ## Affected domains
 
@@ -20,11 +26,11 @@
 
 ## Process flow
 
-<%~ it.modules['solution-definition']['process-flow'] %>
+<%~ na(it.modules['solution-definition']['process-flow']) %>
 
 ## High-level solution design
 
-<%~ it.modules['solution-definition']['high-level-solution-design'] %>
+<%~ na(it.modules['solution-definition']['high-level-solution-design']) %>
 <% if (it.modules['solution-definition']['assumptions-and-considerations']) { %>
 ## Assumptions and considerations
 
@@ -33,7 +39,7 @@
 
 ## Feature breakdown and involved teams
 
-<%~ it.modules['solution-definition']['feature-breakdown'] %>
+<%~ na(it.modules['solution-definition']['feature-breakdown']) %>
 
 # Teams, contact persons, and high-level estimates
 
@@ -44,7 +50,7 @@
 
 ## High-level estimates
 
-<%~ it.modules['team-and-estimates'].estimates %>
+<%~ na(it.modules['team-and-estimates'].estimates) %>
 <% if (it.modules['team-and-estimates'].references && it.modules['team-and-estimates'].references.length) { %>
 ## References
 

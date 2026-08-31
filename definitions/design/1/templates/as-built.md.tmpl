@@ -12,10 +12,8 @@
   const notes = it.modules['as-built-notes'] || {}
   const recovery = it.modules['recovery-plan'] || {}
   const dsc = it.modules['data-security-controls'] || {}
-  // Cross-cutting blank-field guard (WI #269): render the heading with a literal
-  // "— n/a —" line when a required field is blank/absent, rather than an empty
-  // section. Non-blank output is byte-identical.
-  const na = (v) => (typeof v === 'string' && v.trim() !== '') ? v : '— n/a —'
+  // Blank-field guard `na()` (WI #269) is injected once as an Eta functionHeader by
+  // lib/render.js (WI #273 / R2) — no longer redefined per template.
 %>
 <% if (glossary['terms-and-definitions']) { %>
 # Terms & Definitions
@@ -35,31 +33,7 @@
 ## Scope
 
 <%~ na(intro.scope) %>
-<% if (intro.constraints) { %>
-## Constraints
-
-<%~ intro.constraints %>
-<% } %>
-<% if (intro.assumptions) { %>
-## Assumptions
-
-<%~ intro.assumptions %>
-<% } %>
-<% if (intro.caveats) { %>
-## Caveats
-
-<%~ intro.caveats %>
-<% } %>
-<% if (intro['design-principles']) { %>
-## Design principles
-
-<%~ intro['design-principles'] %>
-<% } %>
-<% if (intro['outcomes-and-deliverables']) { %>
-## Outcomes and deliverables
-
-<%~ intro['outcomes-and-deliverables'] %>
-<% } %>
+<%~ include('templates/_introductionOptional.md.tmpl', { intro }) %>
 # As-built design
 
 ## Overview
@@ -81,29 +55,8 @@
 # Recovery plan
 
 <%~ na(recovery['recovery-approach']) %>
-<% if (recovery.resiliency) { %>
-## Resiliency
-
-<%~ recovery.resiliency %>
-<% } %>
-<% if (recovery['test-scenarios']) { %>
-## Test scenarios
-
-<%~ recovery['test-scenarios'] %>
-<% } %>
-<% if (recovery.raci) { %>
-## RACI
-
-<%~ recovery.raci %>
-<% } %>
-# Data security controls
-
-<%~ na(dsc.controls) %>
-<% if (dsc['inheritance-and-dependencies']) { %>
-## Inheritance and dependencies
-
-<%~ dsc['inheritance-and-dependencies'] %>
-<% } %>
+<%~ include('templates/_recoveryPlanDetail.md.tmpl', { recovery }) %>
+<%~ include('templates/_dataSecurityControls.md.tmpl', { dsc, controlsHeading: '# Data security controls', inheritanceHeading: '## Inheritance and dependencies' }) %>
 <% if (notes.appendix) { %>
 # Appendix
 

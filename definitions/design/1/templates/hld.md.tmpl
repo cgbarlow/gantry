@@ -1,10 +1,9 @@
 # <%~ it.instance.slug %>: High Level Design
 <%
-  /* Cross-cutting blank-field guard (WI #269): render the heading with a literal
-     em-dash n/a marker line when a required field is blank or absent, rather than
-     an empty section. Mirrors the reference templates rule to keep every section
-     and put n/a when not relevant. Non-blank output is byte-identical. */
-  const na = (v) => (typeof v === 'string' && v.trim() !== '') ? v : '— n/a —'
+  /* Blank-field guard `na()` (WI #269) is injected once as an Eta functionHeader
+     by lib/render.js (WI #273 / R2) — no longer redefined per template. It renders
+     the heading with a literal em-dash n/a marker when a required field is blank or
+     absent, rather than an empty section. Non-blank output is byte-identical. */
 %>
 # Submission
 

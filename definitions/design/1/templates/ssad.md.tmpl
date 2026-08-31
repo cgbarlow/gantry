@@ -7,28 +7,22 @@
      docs/research/design-definition-reference-reconciliation.md section 6 and section 9,
      grounded in docs/reconciliation/ssad-reconciliation.md (rows P3-P8, R-W1/W2, R-P3, R-P6). */
   const intro = it.modules.introduction || {}
-  // Cross-cutting blank-field guard (WI #269): render the heading with a literal
-  // "— n/a —" line when a required field is blank/absent, rather than an empty
-  // section. Non-blank output is byte-identical.
-  const na = (v) => (typeof v === 'string' && v.trim() !== '') ? v : '— n/a —'
+  // Blank-field guard `na()` (WI #269) is injected once as an Eta functionHeader by
+  // lib/render.js (WI #273 / R2) — no longer redefined per template.
 %>
-<% if (intro.purpose || intro.scope || intro['content-standards']) { %>
 # Introduction
-<% if (intro.purpose) { %>
+
 ## Purpose
 
-<%~ intro.purpose %>
-<% } %>
-<% if (intro.scope) { %>
+<%~ na(intro.purpose) %>
+
 ## Scope
 
-<%~ intro.scope %>
-<% } %>
+<%~ na(intro.scope) %>
 <% if (intro['content-standards']) { %>
 ## Content standards
 
 <%~ intro['content-standards'] %>
-<% } %>
 <% } %>
 
 # Solution overview

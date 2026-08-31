@@ -1,5 +1,10 @@
 # <%~ it.instance.slug %>: Full Solution on a Page
-
+<%
+  /* Blank-field guard `na()` (WI #269, extended to the SOAP family by WI #272) is
+     injected once as an Eta functionHeader by lib/render.js (WI #273 / R2). It renders
+     the heading with a literal "— n/a —" line when an unconditional required field is
+     blank/absent, rather than an empty section; non-blank output is byte-identical. */
+%>
 ## Metadata
 
 | Field | Value |
@@ -14,27 +19,27 @@
 
 ## Problem statement
 
-<%~ it.modules.context.driver %>
+<%~ na(it.modules.context.driver) %>
 
 # Opportunity
 
-<%~ it.modules.context.opportunity %>
+<%~ na(it.modules.context.opportunity) %>
 
 # In Scope
 
-<%~ it.modules.context['in-scope'] %>
+<%~ na(it.modules.context['in-scope']) %>
 
 # Out of Scope
 
-<%~ it.modules.context['out-of-scope'] %>
+<%~ na(it.modules.context['out-of-scope']) %>
 
 # High Level Requirements
 
-<%~ it.modules['solution-definition']['high-level-requirements'] %>
+<%~ na(it.modules['solution-definition']['high-level-requirements']) %>
 
 # High level solution overview
 
-<%~ it.modules['solution-definition']['high-level-solution-design'] %>
+<%~ na(it.modules['solution-definition']['high-level-solution-design']) %>
 
 # Teams required
 
@@ -43,29 +48,29 @@
 
 # Dependencies
 
-<%~ it.modules.dependencies['dependencies-overview'] %>
+<%~ na(it.modules.dependencies['dependencies-overview']) %>
 
 # Assumptions
 
-<%~ it.modules['solution-definition']['assumptions-and-considerations'] %>
+<%~ na(it.modules['solution-definition']['assumptions-and-considerations']) %>
 
 # Estimates
 
-<%~ it.modules['team-and-estimates'].estimates %>
+<%~ na(it.modules['team-and-estimates'].estimates) %>
 
 # Sequencing
 
 _Note: sequencing is a possible example based on timeframes estimated for each piece of this work. It does not represent capacity available to do this work and will need to be re-planned prior to development beginning._
 
-<%~ it.modules['soap-full-details'].sequencing %>
+<%~ na(it.modules['soap-full-details'].sequencing) %>
 
 # Questions
 
-<%~ it.modules['soap-full-details'].questions %>
+<%~ na(it.modules['soap-full-details'].questions) %>
 
 # Caveats
 
-<%~ it.modules['soap-full-details'].caveats %>
+<%~ na(it.modules['soap-full-details'].caveats) %>
 
 # References
 

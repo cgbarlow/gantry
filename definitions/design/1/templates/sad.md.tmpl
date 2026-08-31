@@ -9,54 +9,23 @@
   const recovery = it.modules['recovery-plan'] || {}
   const dsc = it.modules['data-security-controls'] || {}
   const glossary = it.modules.glossary || {}
-  // Cross-cutting blank-field guard (WI #269): render the heading with a literal
-  // "— n/a —" line when a required field is blank/absent, rather than an empty
-  // section. Non-blank output is byte-identical.
-  const na = (v) => (typeof v === 'string' && v.trim() !== '') ? v : '— n/a —'
+  // Blank-field guard `na()` (WI #269) is injected once as an Eta functionHeader by
+  // lib/render.js (WI #273 / R2) — no longer redefined per template.
 %>
-<% if (intro.overview || intro.purpose || intro.scope) { %>
 # Introduction
-<% if (intro.overview) { %>
+
 ## Overview
 
-<%~ intro.overview %>
-<% } %>
-<% if (intro.purpose) { %>
+<%~ na(intro.overview) %>
+
 ## Purpose
 
-<%~ intro.purpose %>
-<% } %>
-<% if (intro.scope) { %>
+<%~ na(intro.purpose) %>
+
 ## Scope
 
-<%~ intro.scope %>
-<% } %>
-<% if (intro.constraints) { %>
-## Constraints
-
-<%~ intro.constraints %>
-<% } %>
-<% if (intro.assumptions) { %>
-## Assumptions
-
-<%~ intro.assumptions %>
-<% } %>
-<% if (intro.caveats) { %>
-## Caveats
-
-<%~ intro.caveats %>
-<% } %>
-<% if (intro['design-principles']) { %>
-## Design principles
-
-<%~ intro['design-principles'] %>
-<% } %>
-<% if (intro['outcomes-and-deliverables']) { %>
-## Outcomes and deliverables
-
-<%~ intro['outcomes-and-deliverables'] %>
-<% } %>
-<% } %>
+<%~ na(intro.scope) %>
+<%~ include('templates/_introductionOptional.md.tmpl', { intro }) %>
 
 # Architecture
 <% if (it.modules.architecture['business-context']) { %>
@@ -144,21 +113,7 @@
 ## Recovery approach
 
 <%~ na(recovery['recovery-approach']) %>
-<% if (recovery.resiliency) { %>
-## Resiliency
-
-<%~ recovery.resiliency %>
-<% } %>
-<% if (recovery['test-scenarios']) { %>
-## Test scenarios
-
-<%~ recovery['test-scenarios'] %>
-<% } %>
-<% if (recovery.raci) { %>
-## RACI
-
-<%~ recovery.raci %>
-<% } %>
+<%~ include('templates/_recoveryPlanDetail.md.tmpl', { recovery }) %>
 
 ## Backup and archiving policy
 
@@ -206,16 +161,7 @@
 ## Privacy and confidentiality concerns
 
 <%~ na(it.modules.security['privacy-and-confidentiality']) %>
-<% if (dsc.controls) { %>
-## Security concerns
-
-<%~ dsc.controls %>
-<% } %>
-<% if (dsc['inheritance-and-dependencies']) { %>
-## Security control inheritance and dependencies
-
-<%~ dsc['inheritance-and-dependencies'] %>
-<% } %>
+<%~ include('templates/_dataSecurityControls.md.tmpl', { dsc, controlsHeading: '## Security concerns', inheritanceHeading: '## Security control inheritance and dependencies' }) %>
 
 # Non-functional requirements
 
@@ -252,11 +198,10 @@
 <% } %>
 
 # Dependencies
-<% if (it.modules.dependencies['dependencies-overview']) { %>
+
 ## Dependencies overview
 
-<%~ it.modules.dependencies['dependencies-overview'] %>
-<% } %>
+<%~ na(it.modules.dependencies['dependencies-overview']) %>
 
 ## Dependency list
 
