@@ -115,7 +115,32 @@ function installBaseUrlRoutes(page, adoBaseUrl) {
     await route.continue({ postData: JSON.stringify(body) })
   })
 
-  return Promise.all([routeWorkspaces, routeInstances, routeWorkItemTypes, routeWorkItemLookup, routeWorkItemsLink])
+  const routeIdentities = page.route('**/api/identities*', async (route) => {
+    const url = new URL(route.request().url())
+    url.searchParams.set('baseUrl', adoBaseUrl)
+    await route.continue({ url: url.toString() })
+  })
+
+  const routeRepoCheck = page.route('**/api/azure-devops/repo-check*', async (route) => {
+    const url = new URL(route.request().url())
+    url.searchParams.set('baseUrl', adoBaseUrl)
+    await route.continue({ url: url.toString() })
+  })
+
+  const routeAdopt = page.route('**/api/instances/adopt', async (route) => {
+    const body = JSON.parse(route.request().postData() ?? '{}')
+    if (body.azureDevOps) body.azureDevOps.baseUrl = adoBaseUrl
+    await route.continue({ postData: JSON.stringify(body) })
+  })
+
+  const routeWorkItemsCreate = page.route('**/api/azure-devops/work-items', async (route) => {
+    if (route.request().method() !== 'POST') { await route.continue(); return }
+    const body = JSON.parse(route.request().postData() ?? '{}')
+    body.baseUrl = adoBaseUrl
+    await route.continue({ postData: JSON.stringify(body) })
+  })
+
+  return Promise.all([routeWorkspaces, routeInstances, routeWorkItemTypes, routeWorkItemLookup, routeWorkItemsLink, routeIdentities, routeRepoCheck, routeAdopt, routeWorkItemsCreate])
 }
 
 test('the "+ New Workspace" wizard registers a workspace, creates an instance, and links it to a real parent work item (#126\'s ticketing-enabled step)', async () => {
@@ -159,6 +184,7 @@ test('the "+ New Workspace" wizard registers a workspace, creates an instance, a
       await page.getByRole('button', { name: 'Next: link a work item' }).click()
 
       // ---------- Step 3: parent-work-item link (#126) ----------
+      await page.getByRole('button', { name: 'Link an existing parent work item' }).click()
       await page.waitForSelector('#parent-work-item-id', { timeout: 10_000 })
       assert.equal(await page.locator('#link-organization').inputValue(), ORGANIZATION)
       assert.equal(await page.locator('#link-project').inputValue(), PROJECT)
@@ -225,6 +251,7 @@ test('the "+ New Workspace" wizard\'s pick-existing-workspace path adds a second
       await page.locator('.definition-card').first().click()
       await page.locator('#instance-name').fill('First Instance')
       await page.getByRole('button', { name: 'Next: link a work item' }).click()
+      await page.getByRole('button', { name: 'Link an existing parent work item' }).click()
       await page.waitForSelector('#parent-work-item-id', { timeout: 10_000 })
       await page.waitForSelector('#work-item-type option', { state: 'attached', timeout: 10_000 })
       await page.locator('#parent-work-item-id').fill(String(parentA.id))
@@ -246,6 +273,7 @@ test('the "+ New Workspace" wizard\'s pick-existing-workspace path adds a second
       await page.locator('.definition-card').first().click()
       await page.locator('#instance-name').fill('Second Instance')
       await page.getByRole('button', { name: 'Next: link a work item' }).click()
+      await page.getByRole('button', { name: 'Link an existing parent work item' }).click()
       await page.waitForSelector('#parent-work-item-id', { timeout: 10_000 })
       await page.waitForSelector('#work-item-type option', { state: 'attached', timeout: 10_000 })
       await page.locator('#parent-work-item-id').fill(String(parentB.id))
@@ -364,6 +392,7 @@ test('#137: Back from Link step returns to Instance step with values intact', as
       await page.locator('.definition-card').first().click()
       await page.locator('#instance-name').fill('Back Test')
       await page.getByRole('button', { name: 'Next: link a work item' }).click()
+      await page.getByRole('button', { name: 'Link an existing parent work item' }).click()
 
       // Arrived at Link step.
       await page.waitForSelector('#parent-work-item-id', { timeout: 10_000 })

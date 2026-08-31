@@ -24,7 +24,9 @@ import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, worksp
 // Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79) markdown/split/rendered toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
+import { wrap } from './lib/editorWrap.js'
 import { assetReference, resolveAssetRefs } from './lib/assetRefs.js'
+import { IdentityPicker } from './lib/identityPicker.js'
 import {
   artefactFieldIds,
   artefactsHaveDifferentRequirements,
@@ -152,158 +154,6 @@ function renderPreview(node, text) {
     const em = p.querySelector('em')
     if (em && em.textContent.startsWith('Source:')) p.classList.add('asset-source')
   })
-}
-
-// ---------- Identity picker (#145 Part 2) ----------
-// A combobox-style input that searches Azure DevOps identities as the user
-// types, presenting matches in a pick-list. Used in place of every plain
-// text input for people fields (workspace Owner, per-instance required-
-// reviewer override, instance Assignee). The underlying value is a
-// `uniqueName`; the display is the `displayName`. A clear button (×) lets
-// the user blank the field. Debounced to avoid hammering the server on
-// every keystroke.
-function IdentityPicker({ value, onChange, placeholder, slug, className }) {
-  const [query, setQuery] = useState(value ?? '')
-  const [results, setResults] = useState([])
-  const [open, setOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [searchError, setSearchError] = useState('')
-  const debounceRef = useRef(null)
-  const inputRef = useRef(null)
-  const wrapperRef = useRef(null)
-
-  // Sync display value when the external value changes (e.g. on load from server)
-  useEffect(() => {
-    setQuery(value ?? '')
-  }, [value])
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    function handleClickOutside(e) {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
-
-  async function search(q) {
-    if (!q.trim()) {
-      setResults([])
-      setOpen(false)
-      return
-    }
-    setLoading(true)
-    setSearchError('')
-    try {
-      const params = new URLSearchParams({ q })
-      if (slug) params.set('slug', slug)
-      const res = await apiFetchForInstance(slug, `/api/identities?${params}`)
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setResults([])
-        setSearchError(data.message ?? data.error ?? `Identity search failed (${res.status})`)
-        setOpen(true)
-        return
-      }
-      setResults(Array.isArray(data) ? data : [])
-      setOpen(true)
-    } catch (err) {
-      setResults([])
-      setSearchError(err.message)
-      setOpen(true)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  function handleInput(e) {
-    const val = e.currentTarget.value
-    setQuery(val)
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => search(val), 250)
-  }
-
-  function handleSelect(identity) {
-    setQuery(identity.displayName)
-    setOpen(false)
-    onChange?.(identity.uniqueName, identity)
-  }
-
-  function handleClear() {
-    setQuery('')
-    setResults([])
-    setOpen(false)
-    onChange?.('', null)
-    inputRef.current?.focus()
-  }
-
-  function handleKeyDown(e) {
-    if (e.key === 'Escape') {
-      setOpen(false)
-    } else if (e.key === 'Enter') {
-      // Commit the currently typed value as-is (without requiring a dropdown
-      // selection) — allows keyboard-only workflows and preserves backwards
-      // compatibility with Playwright tests that type + Enter.
-      e.preventDefault()
-      const trimmed = query.trim()
-      setOpen(false)
-      onChange?.(trimmed, trimmed ? { uniqueName: trimmed, displayName: trimmed } : null)
-    }
-  }
-
-  const hasValue = Boolean(query.trim())
-
-  return html`
-    <div class=${'identity-picker' + (className ? ' ' + className : '')} ref=${wrapperRef}>
-      <input
-        ref=${inputRef}
-        type="text"
-        value=${query}
-        placeholder=${placeholder ?? 'Search by name\u2026'}
-        onInput=${handleInput}
-        onFocus=${() => { if (query.trim() && results.length) setOpen(true) }}
-        onBlur=${() => {
-          // Commit the current typed value on blur (matches the old text input's
-          // save-on-blur behaviour). Playwright's `.fill()` + `.blur()` pattern
-          // relies on this — `.fill()` bypasses Preact's onInput, so the draft
-          // state doesn't update until blur fires.
-          const trimmed = query.trim()
-          if (trimmed !== (value ?? '').trim()) {
-            onChange?.(trimmed, trimmed ? { uniqueName: trimmed, displayName: trimmed } : null)
-          }
-          setOpen(false)
-        }}
-        onKeyDown=${handleKeyDown}
-      />
-      ${hasValue
-        ? html`<button type="button" class="clear-btn" onClick=${handleClear} aria-label="Clear">x</button>`
-        : null}
-      <div class=${'identity-dropdown' + (open ? ' open' : '')}>
-        ${searchError ? html`<div class="no-results">${searchError}</div>` : null}
-        ${!searchError && loading ? html`<div class="no-results">Searching…</div>` : null}
-        ${!searchError && !loading && results.length === 0 && query.trim()
-          ? html`<div class="no-results">No identities found for "${query}".</div>`
-          : null}
-        ${results.map(
-          (identity) => html`
-            <button
-              type="button"
-              class="identity-option"
-              key=${identity.uniqueName}
-              onClick=${() => handleSelect(identity)}
-            >
-              <span class="name">${identity.displayName}</span>
-              ${identity.emailAddress
-                ? html`<span class="email">${identity.emailAddress}</span>`
-                : null}
-            </button>
-          `
-        )}
-      </div>
-    </div>
-  `
 }
 
 // ---------- Instance-scoped state ----------
@@ -851,6 +701,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
 
   useEffect(() => {
     const editableCompartment = new Compartment()
+    const wrapCompartment = new Compartment()
     const state = EditorState.create({
       doc: field.value ?? '',
       extensions: [
@@ -860,6 +711,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
         basicSetup,
         markdown(),
         editableCompartment.of(editableExtension(viewMode.value)),
+        wrapCompartment.of(wrap.value ? EditorView.lineWrapping : []),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) renderPreview(previewRef.current, update.state.doc.toString())
           // Selection moves count too — Tab-walking cells must flip the strip
@@ -877,6 +729,10 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
     // Track the global view-mode signal for as long as this editor is mounted, so switching into/out of Rendered toggles read-only live — the ticket requires it enforced immediately, not just on next mount.
     const stopViewModeSync = effect(() => {
       view.dispatch({ effects: editableCompartment.reconfigure(editableExtension(viewMode.value)) })
+    })
+
+    const stopWrapSync = effect(() => {
+      view.dispatch({ effects: wrapCompartment.reconfigure(wrap.value ? EditorView.lineWrapping : []) })
     })
 
     // Re-render when the asset source map becomes available (initial async load) — citations depend on it, but the preview was already rendered once without them (#147).
@@ -937,6 +793,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
       clearTimeout(hideToolbarTimer)
       viewRef.current = null
       stopViewModeSync()
+      stopWrapSync()
       stopAssetSourceSync()
       view.destroy()
     }
@@ -2844,6 +2701,7 @@ function ViewModeToolbar({
         <${StageNavigation} modules=${navModules} visibleFieldIds=${visibleFieldIds} />
       </div>
       <div class="toolbar-actions">
+        <button type="button" class=${'btn small' + (wrap.value ? ' active' : '')} aria-pressed=${wrap.value} onClick=${() => (wrap.value = !wrap.value)}>Wrap</button>
         <button type="button" class="btn" onClick=${onClearAllFields}>Clear all fields</button>
         <button type="button" class="btn primary" onClick=${() => setRenderOpen(true)}>Render</button>
         ${requestApprovalSlug

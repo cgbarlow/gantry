@@ -36,6 +36,7 @@ import { signal, effect } from '@preact/signals'
 import { apiFetch } from '../lib/apiFetch.js'
 import { renderMarkdown } from '../lib/markdown.js'
 import { TICKETING_SYSTEMS, defaultTicketingSystem } from '../lib/ticketingSystem.js'
+import { IdentityPicker } from '../lib/identityPicker.js'
 
 // The work item type used when nothing more specific is looked up or
 // chosen — mirrors lib/workItemLink.js's own `DEFAULT_WORK_ITEM_TYPE`
@@ -51,10 +52,11 @@ const workspaces = signal(null) // fetched GET /api/workspaces list, null while 
 const workspacesLoadError = signal('')
 const pickedWorkspaceId = signal('')
 
-const registerForm = signal({ organization: '', project: '', repository: '', owner: '' })
+const registerForm = signal({ organization: 'Contoso-Production', project: 'Default', repository: '', owner: '' })
 const registerTicketingSystem = signal(defaultTicketingSystem.value)
 const registerStatus = signal('idle') // idle | registering | failed
 const registerError = signal('')
+const registerNotice = signal('')
 
 // The Workspace this wizard is now creating an instance in — set once step
 // 1 completes, either from the picked entry or the newly registered one.
@@ -90,9 +92,14 @@ const lookupResult = signal(null) // { id, title, workItemType, state }
 // ---------- Final create/link ----------
 const createStatus = signal('idle') // idle | creating | failed
 const createError = signal('')
+const createNotice = signal('')
 const linkStatus = signal('idle') // idle | linking | failed
 const linkError = signal('')
 const createdSlug = signal('')
+const linkMode = signal('create') // 'create' | 'existing'
+const newWorkItemTitle = signal('')
+const newWorkItemCreateStatus = signal('idle') // idle | creating | failed
+const newWorkItemCreateError = signal('')
 
 function slugify(name) {
   return (name ?? '')
@@ -134,10 +141,11 @@ function resetWizard() {
   workspaces.value = null
   workspacesLoadError.value = ''
   pickedWorkspaceId.value = ''
-  registerForm.value = { organization: '', project: '', repository: '', owner: '' }
+  registerForm.value = { organization: 'Contoso-Production', project: 'Default', repository: '', owner: '' }
   registerTicketingSystem.value = defaultTicketingSystem.value
   registerStatus.value = 'idle'
   registerError.value = ''
+  registerNotice.value = ''
   selectedWorkspace.value = null
   step.value = 'workspace'
   selectedDefinitionId.value = definitions.value[0]?.id ?? ''
@@ -159,9 +167,11 @@ function resetWizard() {
   lookupResult.value = null
   createStatus.value = 'idle'
   createError.value = ''
+  createNotice.value = ''
   linkStatus.value = 'idle'
   linkError.value = ''
   createdSlug.value = ''
+  linkMode.value = 'create'
 }
 
 async function loadWorkspaces() {
@@ -189,6 +199,7 @@ function pickWorkspace() {
 async function registerWorkspace() {
   registerStatus.value = 'registering'
   registerError.value = ''
+  registerNotice.value = ''
   const { organization, project, repository, owner } = registerForm.value
   try {
     // A brand-new Workspace registration has no workspaceId yet — this
@@ -210,10 +221,18 @@ async function registerWorkspace() {
     const body = await res.json().catch(() => ({}))
     if (!res.ok) {
       registerStatus.value = 'failed'
-      registerError.value = body.message ?? body.error ?? `Failed to register workspace (${res.status})`
+      const raw = body.message ?? body.error ?? `Failed to register workspace (${res.status})`
+      if (/does not exist/i.test(raw) || /not visible/i.test(raw) || /not found/i.test(raw)) {
+        registerError.value = 'Repository not found or not visible — Create the repository in Azure DevOps (or your Git host) first — gantry links to an existing repository, it does not create one.'
+      } else {
+        registerError.value = raw
+      }
       return
     }
     registerStatus.value = 'idle'
+    if (body.reused) {
+      registerNotice.value = 'Using the workspace already registered for this repository'
+    }
     selectedWorkspace.value = body
     workspaces.value = null
     step.value = 'instance'
@@ -362,32 +381,78 @@ async function createInstanceAndMaybeLink() {
   draftConfirmVisible.value = false
   createStatus.value = 'creating'
   createError.value = ''
+  createNotice.value = ''
+  linkError.value = ''
+  newWorkItemCreateError.value = ''
   const ws = selectedWorkspace.value
   const slug = directoryField.value.trim()
   const versionToSend = resolvedVersion()
+
+  // C4 — check whether this repo already holds instance data for this slug
+  let shouldAdopt = false
   try {
-    const res = await apiFetch('/api/instances', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        definition: selectedDefinitionId.value,
-        slug,
-        assignee: assigneeField.value.trim(),
-        definitionVersion: versionToSend,
-        azureDevOps: { organization: ws.organization, project: ws.project, repository: ws.repository },
-      }),
-    }, { workspaceId: ws.id })
-    const body = await res.json().catch(() => ({}))
-    if (!res.ok) {
+    const qs = new URLSearchParams({ organization: ws.organization, project: ws.project, repository: ws.repository })
+    if (ws.baseUrl) qs.set('baseUrl', ws.baseUrl)
+    const checkRes = await apiFetch(`/api/azure-devops/repo-check?${qs}`, {}, { workspaceId: ws.id })
+    const checkBody = await checkRes.json().catch(() => ({}))
+    if (checkRes.ok) {
+      if (checkBody.result === 'found' && checkBody.slug === slug) shouldAdopt = true
+      else if (checkBody.result === 'multiple' && Array.isArray(checkBody.slugs) && checkBody.slugs.includes(slug)) shouldAdopt = true
+    }
+  } catch (_) {
+    // ignore — fall through to create path
+  }
+
+  let actualSlug = slug
+  if (shouldAdopt) {
+    try {
+      const res = await apiFetch('/api/instances/adopt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          azureDevOps: { organization: ws.organization, project: ws.project, repository: ws.repository, ...(ws.baseUrl ? { baseUrl: ws.baseUrl } : {}) },
+        }),
+      }, { workspaceId: ws.id })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        createStatus.value = 'failed'
+        createError.value = body.message ?? body.error ?? `Failed to adopt instance (${res.status})`
+        return
+      }
+      createNotice.value = 'An instance already exists in this repository — linking to it'
+      actualSlug = body.slug ?? slug
+      createdSlug.value = actualSlug
+    } catch (err) {
       createStatus.value = 'failed'
-      createError.value = body.message ?? body.error ?? `Failed to create instance (${res.status})`
+      createError.value = err.message
       return
     }
-    createdSlug.value = slug
-  } catch (err) {
-    createStatus.value = 'failed'
-    createError.value = err.message
-    return
+  } else {
+    try {
+      const res = await apiFetch('/api/instances', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          definition: selectedDefinitionId.value,
+          slug,
+          assignee: assigneeField.value.trim(),
+          definitionVersion: versionToSend,
+          azureDevOps: { organization: ws.organization, project: ws.project, repository: ws.repository, ...(ws.baseUrl ? { baseUrl: ws.baseUrl } : {}) },
+        }),
+      }, { workspaceId: ws.id })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        createStatus.value = 'failed'
+        createError.value = body.message ?? body.error ?? `Failed to create instance (${res.status})`
+        return
+      }
+      createdSlug.value = slug
+      actualSlug = slug
+    } catch (err) {
+      createStatus.value = 'failed'
+      createError.value = err.message
+      return
+    }
   }
 
   // The parent-work-item link is mandatory for a ticketing-enabled
@@ -396,16 +461,50 @@ async function createInstanceAndMaybeLink() {
   // fires immediately after a successful create when step 'link' was
   // actually reached — never a separate, skippable action.
   if (step.value === 'link') {
+    let parentIdToLink = null
+    if (linkMode.value === 'create') {
+      newWorkItemCreateStatus.value = 'creating'
+      newWorkItemCreateError.value = ''
+      try {
+        const res = await apiFetch('/api/azure-devops/work-items', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            organization: ws.organization,
+            project: ws.project,
+            workItemType: workItemTypeField.value,
+            title: newWorkItemTitle.value.trim(),
+            ...(ws.baseUrl ? { baseUrl: ws.baseUrl } : {}),
+          }),
+        }, { workspaceId: ws.id })
+        const body = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          newWorkItemCreateStatus.value = 'failed'
+          newWorkItemCreateError.value = body.message ?? body.error ?? `Failed to create work item (${res.status})`
+          createStatus.value = 'failed'
+          return
+        }
+        newWorkItemCreateStatus.value = 'idle'
+        parentIdToLink = body.id
+      } catch (err) {
+        newWorkItemCreateStatus.value = 'failed'
+        newWorkItemCreateError.value = err.message
+        createStatus.value = 'failed'
+        return
+      }
+    } else {
+      parentIdToLink = Number(parentIdField.value.trim())
+    }
     linkStatus.value = 'linking'
     linkError.value = ''
     try {
-      const res = await apiFetch(`/api/instance/work-items/link?slug=${encodeURIComponent(slug)}`, {
+      const res = await apiFetch(`/api/instance/work-items/link?slug=${encodeURIComponent(actualSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           organization: ws.organization,
           project: ws.project,
-          parentId: Number(parentIdField.value.trim()),
+          parentId: parentIdToLink,
           workItemType: workItemTypeField.value,
         }),
       }, { workspaceId: ws.id })
@@ -534,15 +633,17 @@ function WorkspaceStep() {
               value=${registerForm.value.repository}
               onInput=${(e) => (registerForm.value = { ...registerForm.value, repository: e.currentTarget.value })}
             />
+            <p class="wizard-field-hint">Create the repository in Azure DevOps (or your Git host) first — gantry links to an existing repository, it does not create one.</p>
           </div>
           <div class="wizard-field">
             <label for="ws-owner">Owner</label>
-            <input
-              class="wizard-input"
+            <${IdentityPicker}
               id="ws-owner"
-              type="text"
               value=${registerForm.value.owner}
-              onInput=${(e) => (registerForm.value = { ...registerForm.value, owner: e.currentTarget.value })}
+              onChange=${(uniqueName) => (registerForm.value = { ...registerForm.value, owner: uniqueName })}
+              placeholder="Search by name…"
+              organization=${registerForm.value.organization}
+              project=${registerForm.value.project}
             />
           </div>
           <div class="wizard-field">
@@ -578,6 +679,7 @@ function WorkspaceStep() {
             >
               ${registerStatus.value === 'registering' ? 'Registering…' : 'Register workspace'}
             </button>
+            ${registerNotice.value ? html`<div class="wizard-field-hint">${registerNotice.value}</div>` : null}
             ${registerStatus.value === 'failed' ? html`<div class="inline-error">${registerError.value}</div>` : null}
           </div>
         `}
@@ -675,13 +777,13 @@ function InstanceStep() {
 
     <div class="wizard-field">
       <label for="instance-assignee">Assignee</label>
-      <input
-        class="wizard-input"
+      <${IdentityPicker}
         id="instance-assignee"
-        type="text"
-        placeholder="Unassigned"
         value=${assigneeField.value}
-        onInput=${(e) => (assigneeField.value = e.currentTarget.value)}
+        onChange=${(uniqueName) => (assigneeField.value = uniqueName)}
+        placeholder="Unassigned"
+        organization=${ws?.organization}
+        project=${ws?.project}
       />
     </div>
 
@@ -715,7 +817,8 @@ function InstanceStep() {
           </div>
         `
       : null}
-    ${!ticketingEnabled && createStatus.value === 'failed' ? html`<div class="inline-error">${createError.value}</div>` : null}
+    ${createNotice.value ? html`<div class="wizard-field-hint">${createNotice.value}</div>` : null}
+    ${createStatus.value === 'failed' ? html`<div class="inline-error">${createError.value}</div>` : null}
   `
 }
 
@@ -727,13 +830,25 @@ function LinkStep() {
     // eslint-disable-next-line
   }, [])
 
-  const canSubmit =
+  const canSubmitCreate =
+    Boolean(newWorkItemTitle.value.trim()) &&
+    Boolean(workItemTypeField.value) &&
+    createStatus.value !== 'creating' &&
+    linkStatus.value !== 'linking' &&
+    newWorkItemCreateStatus.value !== 'creating'
+  const canSubmitExisting =
     lookupStatus.value === 'found' &&
     Boolean(workItemTypeField.value) &&
     createStatus.value !== 'creating' &&
     linkStatus.value !== 'linking'
+  const canSubmit = linkMode.value === 'create' ? canSubmitCreate : canSubmitExisting
 
   return html`
+    <div class="wizard-field" role="group" aria-label="Link mode">
+      <button type="button" class=${'btn small' + (linkMode.value === 'create' ? ' active' : '')} onClick=${() => (linkMode.value = 'create')}>Create a new parent work item</button>
+      <button type="button" class=${'btn small' + (linkMode.value === 'existing' ? ' active' : '')} onClick=${() => (linkMode.value = 'existing')}>Link an existing parent work item</button>
+    </div>
+
     <div class="wizard-field">
       <label for="link-organization">Organization</label>
       <input class="wizard-input" id="link-organization" type="text" value=${ws.organization} disabled />
@@ -743,31 +858,46 @@ function LinkStep() {
       <input class="wizard-input" id="link-project" type="text" value=${ws.project} disabled />
     </div>
 
-    <div class="wizard-field">
-      <label for="parent-work-item-id">Parent work item id</label>
-      <div class="workspace-field-row">
-        <input
-          class="wizard-input"
-          id="parent-work-item-id"
-          type="text"
-          value=${parentIdField.value}
-          onInput=${(e) => onParentIdInput(e.currentTarget.value)}
-        />
-        <button
-          type="button"
-          class="btn small"
-          disabled=${!parentIdField.value.trim() || lookupStatus.value === 'looking-up'}
-          onClick=${lookUpParentWorkItem}
-        >
-          ${lookupStatus.value === 'looking-up' ? 'Looking up…' : 'Look up'}
-        </button>
-      </div>
-      ${lookupStatus.value === 'found'
-        ? html`<p class="wizard-field-hint">Found: #${lookupResult.value.id} "${lookupResult.value.title}" (${lookupResult.value.workItemType}, ${lookupResult.value.state})</p>`
-        : null}
-      ${lookupStatus.value === 'not-found' ? html`<div class="inline-error">No work item #${parentIdField.value} found in ${ws.organization}/${ws.project}.</div>` : null}
-      ${lookupStatus.value === 'error' ? html`<div class="inline-error">${lookupError.value}</div>` : null}
-    </div>
+    ${linkMode.value === 'create'
+      ? html`
+          <div class="wizard-field">
+            <label for="new-work-item-title">Title</label>
+            <input
+              class="wizard-input"
+              id="new-work-item-title"
+              type="text"
+              value=${newWorkItemTitle.value}
+              onInput=${(e) => (newWorkItemTitle.value = e.currentTarget.value)}
+            />
+          </div>
+        `
+      : html`
+          <div class="wizard-field">
+            <label for="parent-work-item-id">Parent work item id</label>
+            <div class="workspace-field-row">
+              <input
+                class="wizard-input"
+                id="parent-work-item-id"
+                type="text"
+                value=${parentIdField.value}
+                onInput=${(e) => onParentIdInput(e.currentTarget.value)}
+              />
+              <button
+                type="button"
+                class="btn small"
+                disabled=${!parentIdField.value.trim() || lookupStatus.value === 'looking-up'}
+                onClick=${lookUpParentWorkItem}
+              >
+                ${lookupStatus.value === 'looking-up' ? 'Looking up…' : 'Look up'}
+              </button>
+            </div>
+            ${lookupStatus.value === 'found'
+              ? html`<p class="wizard-field-hint">Found: #${lookupResult.value.id} "${lookupResult.value.title}" (${lookupResult.value.workItemType}, ${lookupResult.value.state})</p>`
+              : null}
+            ${lookupStatus.value === 'not-found' ? html`<div class="inline-error">No work item #${parentIdField.value} found in ${ws.organization}/${ws.project}.</div>` : null}
+            ${lookupStatus.value === 'error' ? html`<div class="inline-error">${lookupError.value}</div>` : null}
+          </div>
+        `}
 
     <div class="wizard-field">
       <label for="work-item-type">Work item type</label>
@@ -785,7 +915,7 @@ function LinkStep() {
     <div class="wizard-field" style="display:flex;gap:8px">
       <button type="button" class="btn ghost" onClick=${() => (step.value = 'instance')}>← Back</button>
       <button type="button" class="btn primary" disabled=${!canSubmit} onClick=${createInstanceAndMaybeLink}>
-        ${createStatus.value === 'creating' ? 'Creating…' : linkStatus.value === 'linking' ? 'Linking…' : 'Create instance & link'}
+        ${createStatus.value === 'creating' ? 'Creating…' : linkStatus.value === 'linking' ? 'Linking…' : newWorkItemCreateStatus.value === 'creating' ? 'Creating work item…' : 'Create instance & link'}
       </button>
     </div>
     ${draftConfirmVisible.value
@@ -803,8 +933,10 @@ function LinkStep() {
           </div>
         `
       : null}
+    ${createNotice.value ? html`<div class="wizard-field-hint">${createNotice.value}</div>` : null}
     ${createStatus.value === 'failed' ? html`<div class="inline-error">${createError.value}</div>` : null}
     ${linkStatus.value === 'failed' ? html`<div class="inline-error">${linkError.value}</div>` : null}
+    ${newWorkItemCreateStatus.value === 'failed' ? html`<div class="inline-error">${newWorkItemCreateError.value}</div>` : null}
   `
 }
 
