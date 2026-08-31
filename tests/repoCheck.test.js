@@ -36,7 +36,7 @@ const CONTEXT_MODULE = [
   '',
   '- Payments',
   '',
-  '## Out of Scope',
+  '## Out of scope',
   '',
   'Nothing yet.',
   '',

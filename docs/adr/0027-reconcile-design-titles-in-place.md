@@ -12,14 +12,18 @@ Rationale:
 - **No instance data migration.** No field is added to or removed from any instance's stored values; no `id` moves. The in-repo fixture instances (`examples`, `atlas-reference-design`) have their module-file `##`/`#` headings updated in lockstep because the instance parser matches sections to fields by `title` — but that is a mechanical heading-text edit, not a data migration, and live instances pick up the new editor labels immediately on next load (their next save rewrites the module file headings to the new titles automatically).
 - **Reversible and low risk.** A `design/2` would force every existing instance onto a new definition version for what is a label correction. Editing in place keeps one published version and is trivially revertible by restoring the prior `title:` strings.
 
-### Dead `soap` fields — deferred, not applied
+### Dead `soap` fields — still open after the WI #274 grill (Part 3 NOT implemented)
 
-The SOAP report (R-P1/R-P2/R-P3) recommends removing `context.opportunity`, `context.in-scope` and `solution-definition.high-level-requirements` from the `soap` artefact — they are Full-SOAP concepts that `soap.md.tmpl` never renders. **This is deferred to the design grill and NOT applied in this ticket.** The only in-place mechanism is converting `soap`'s `requires` from the module-level list `[context, solution-definition, team-and-estimates]` to an explicit `module.field` list. That conversion has effects well beyond a label fix:
+The SOAP report (R-P1/R-P2/R-P3) recommends removing `context.opportunity`, `context.in-scope` and `solution-definition.high-level-requirements` from the `soap` artefact — they are Full-SOAP concepts that `soap.md.tmpl` never renders. The WI #274 grill asked whether the in-place mechanism (converting `soap`'s `requires` from the module-level list `[context, solution-definition, team-and-estimates]` to an explicit `module.field` list) could be applied without tightening the `business-case` gate. **It cannot, and Part 3 was not implemented.**
 
-- the lightweight-SOAP module editor scopes its visible fields to the selected artefact's `requires` (`web/lib/artefactSelection.js`), so a field-level list would also hide the template's conditionally-rendered sections (`out-of-scope`, `assumptions-and-considerations`, `references`) and any author-inserted custom sections whenever `soap` is the selected artefact;
-- a `module.field` entry gates regardless of the field's own `required` flag, so `context.out-of-scope`, `solution-definition.assumptions-and-considerations` and `team-and-estimates.references` — currently optional — would become mandatory to pass the `business-case` gate.
+Findings:
 
-Neither is a display-title-only change. The PO should decide in the grill between (a) accepting that editor/gate trade-off, (b) rendering the three fields in `soap.md.tmpl` and updating the reference sample, or (c) cutting `design/2`.
+- **No optional-entry syntax exists.** A field-level `requires` entry is a plain `module.field` string. `splitArtefactRequirement` (`lib/definition.js`) just splits on the first `.`; there is no `{ field: x.y, required: false }` object form and no `?` suffix. `lib/status.js`'s `artefactRequirements` pushes every `module.field` entry straight into the gated-fields set **without consulting `isFieldRequired`** — so a field-level entry gates regardless of the field's own `required:` flag or `required-at`. `README.md` documents only "whole module ids or `module.field` references". `required-at` is a field-schema property (a list of gate ids), not a `requires`-entry modifier, and the field-level `requires` branch never reads it.
+- **What a field-level list would force mandatory.** Built from the fields `soap.md.tmpl` actually renders (and omitting the three dead ones, which the template never renders anyway): `context.driver`, `context.affected-domains`, `context.out-of-scope`, `solution-definition.process-flow`, `solution-definition.high-level-solution-overview`, `solution-definition.assumptions-and-considerations`, `solution-definition.feature-breakdown`, `team-and-estimates.teams-required`, `team-and-estimates.estimates`, `team-and-estimates.references`. That makes `context.out-of-scope`, `solution-definition.assumptions-and-considerations` and `team-and-estimates.references` — all currently `required: false` — mandatory at `business-case`.
+- **Editor scope.** `web/lib/artefactSelection.js` `artefactFieldIds` scopes the lightweight-SOAP editor's visible fields to the selected artefact's `requires`; a field-level list would also narrow the editor to exactly those fields whenever `soap` is selected, hiding any field not listed and any author-inserted custom section.
+- **Fixture impact.** Both in-repo fixtures (`examples`, `atlas-reference-design`) already fill all three optional fields, so `node bin/gantry.js check <slug> --gate business-case` would **still pass** for them. The gate-tightening bites only real instances that leave those fields blank.
+
+The PO's options remain: (a) accept the editor/gate trade-off; (b) render the three dead fields in `soap.md.tmpl` and update the reference sample, keeping the whole-module `requires`; (c) add an optional-entry syntax to the `requires` schema (an engine change, not a definition edit); or (d) cut `design/2`. `soap.requires` is unchanged: `[context, solution-definition, team-and-estimates]`.
 
 The `soap-full` artefact gains a `caveats` field (`soap-full-details.caveats`, defaulting to the eight caveat bullets previously hard-coded in the template) so the one reference section with no authoring home now has one, and its `requires` list is reordered to follow the reference document's section order.
 
@@ -29,6 +33,15 @@ The `soap-full` artefact gains a `caveats` field (`soap-full-details.caveats`, d
 - **Template-level heading overrides instead of module `title:` renames.** Rejected: the module-editor label is the thing the reports say is wrong; overriding only the rendered heading would leave the editor still showing the mismatched wording.
 - **Convert `soap` to a field-level `requires` now to drop the three dead fields.** Rejected for this ticket (see "Dead `soap` fields" above): it changes editor scope and gate semantics, which is out of scope for a title reconciliation. Left for the grill.
 
+## WI #274 — reconciliation round 2 (in place)
+
+The design grill returned a second round of in-place edits to `definitions/design/1/`:
+
+- **Two id contradictions fixed.** `solution-definition.high-level-solution-design` → `high-level-solution-overview` and `team-and-estimates.teams-and-contacts` → `teams-required`, so each id matches its title. Ids are referenced by `id` from the templates and the `soap-full` `module.field` `requires` list; those and every fixture/test reference moved in lockstep. Titles unchanged, so no instance data migration and no rendered-output change.
+- **Four display-title nits.** `context.in-scope` → "In scope", `context.out-of-scope` → "Out of scope", `solution-definition.high-level-requirements` → "High-level requirements", `alternatives-considered` module → "Alternatives considered". Fixture instance headings and heading-hard-coding tests updated to match.
+- **`soap-full.md.tmpl` `## Metadata` heading dropped** (F12/F13 in `docs/reconciliation/template-consistency.md`): the five metadata fields now open the document as a bare table like the rest of the template.
+- **Part 3 (drop the three dead `soap` fields) not implemented** — see the revised "Dead `soap` fields" section above for the findings. `soap.requires` is unchanged.
+
 ## Status
 
-Accepted. The PO may revisit the individual wording choices in the design grill; because the change is title-only and in place, any revision is a further `title:` edit, not a version cut.
+Accepted; extended by WI #274 (above). The PO may revisit the individual wording choices in the design grill; because the changes are title/id-only and in place, any revision is a further edit, not a version cut. The dead-`soap`-fields question is still open.

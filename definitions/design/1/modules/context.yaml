@@ -30,7 +30,7 @@ fields:
       pursuing.
 
   - id: in-scope
-    title: In Scope
+    title: In scope
     type: markdown
     required: false
     guidance: >
@@ -38,6 +38,6 @@ fields:
       boundaries of this solution and estimate.
 
   - id: out-of-scope
-    title: Out of Scope
+    title: Out of scope
     type: markdown
     required: false

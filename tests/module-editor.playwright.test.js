@@ -1207,7 +1207,7 @@ test('Insert ▾ → Section adds a titled custom field below the requesting fie
         const titles = await contextModule.locator('.field > label').allTextContents()
         assert.deepEqual(
           titles.map((t) => t.replace(/ \*$/, '')),
-          ['Problem statement', 'Risks we carry', 'Affected domains', 'Opportunity', 'In Scope', 'Out of Scope']
+          ['Problem statement', 'Risks we carry', 'Affected domains', 'Opportunity', 'In scope', 'Out of scope']
         )
         assert.equal(await contextModule.getByRole('button', { name: 'Insert ▾' }).count(), 5)
 

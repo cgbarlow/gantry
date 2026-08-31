@@ -5,8 +5,6 @@
      the heading with a literal "— n/a —" line when an unconditional required field is
      blank/absent, rather than an empty section; non-blank output is byte-identical. */
 %>
-## Metadata
-
 | Field | Value |
 | --- | --- |
 | Epic/Project | <%~ it.modules['soap-full-details']['epic-project'] %> |
@@ -39,11 +37,11 @@
 
 # High level solution overview
 
-<%~ na(it.modules['solution-definition']['high-level-solution-design']) %>
+<%~ na(it.modules['solution-definition']['high-level-solution-overview']) %>
 
 # Teams required
 
-<% it.modules['team-and-estimates']['teams-and-contacts'].forEach(function(item) { %>- <%~ item %>
+<% it.modules['team-and-estimates']['teams-required'].forEach(function(item) { %>- <%~ item %>
 <% }) %>
 
 # Dependencies

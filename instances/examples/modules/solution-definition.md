@@ -5,7 +5,7 @@ owner: c.barlow
 ---
 # Solution Definition
 
-## High Level Requirements
+## High-level requirements
 
 | Section | Requirement |
 | --- | --- |

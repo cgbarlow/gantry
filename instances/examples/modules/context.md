@@ -30,13 +30,13 @@ Clients can receive a phone and ongoing connectivity through the same trusted
 channel they already use for other hardship assistance, reducing barriers to
 accessing Contoso services and employment support.
 
-## In Scope
+## In scope
 
 The first release covers the ContosoSelfService entry point, application intake and review,
 carrier provisioning, payment, notifications, reporting, and annual review of
 the Mobile Phone Assistance benefit.
 
-## Out of Scope
+## Out of scope
 
 Selecting or negotiating the mobile carrier partnership itself is out of
 scope for this initiative — that commercial arrangement is assumed to exist

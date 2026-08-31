@@ -7,7 +7,7 @@ purpose: >
 
 fields:
   - id: high-level-requirements
-    title: High Level Requirements
+    title: High-level requirements
     type: markdown
     required: false
     guidance: >
@@ -25,7 +25,7 @@ fields:
       walk-through is fine; a diagram reference is fine too, but describe
       what the diagram shows in words as well.
 
-  - id: high-level-solution-design
+  - id: high-level-solution-overview
     title: High level solution overview
     type: markdown
     required: true

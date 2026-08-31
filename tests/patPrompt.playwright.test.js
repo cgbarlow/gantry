@@ -34,7 +34,7 @@ const SEED_FILES = {
     '',
     '- Payments',
     '',
-    '## Out of Scope',
+    '## Out of scope',
     '',
     'Nothing yet.',
     '',

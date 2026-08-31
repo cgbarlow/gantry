@@ -51,8 +51,8 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
           'context.in-scope',
           'context.out-of-scope',
           'solution-definition.high-level-requirements',
-          'solution-definition.high-level-solution-design',
-          'team-and-estimates.teams-and-contacts',
+          'solution-definition.high-level-solution-overview',
+          'team-and-estimates.teams-required',
           'dependencies.dependencies-overview',
           'solution-definition.assumptions-and-considerations',
           'team-and-estimates.estimates',
@@ -70,7 +70,7 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
     assert.match(driver.value, /\S/)
 
     const teamAndEstimates = body.modules.find((m) => m.id === 'team-and-estimates')
-    const teams = teamAndEstimates.fields.find((f) => f.id === 'teams-and-contacts')
+    const teams = teamAndEstimates.fields.find((f) => f.id === 'teams-required')
     assert.equal(teams.type, 'list')
     assert.ok(Array.isArray(teams.value))
     assert.ok(teams.value.length > 0)

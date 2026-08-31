@@ -5,7 +5,7 @@ purpose: >
   signal for planning, not a commitment.
 
 fields:
-  - id: teams-and-contacts
+  - id: teams-required
     title: Teams required
     type: list
     required: true

@@ -202,14 +202,14 @@ test('passes Business Case Approved with only the lightweight SOAP fields', () =
     writeModule(definition, 'light-soap', 'solution-definition', {
       fields: {
         'process-flow': source['solution-definition']['process-flow'],
-        'high-level-solution-design': source['solution-definition']['high-level-solution-design'],
+        'high-level-solution-overview': source['solution-definition']['high-level-solution-overview'],
         'assumptions-and-considerations': source['solution-definition']['assumptions-and-considerations'],
         'feature-breakdown': source['solution-definition']['feature-breakdown'],
       },
     }, { instancesDir })
     writeModule(definition, 'light-soap', 'team-and-estimates', {
       fields: {
-        'teams-and-contacts': source['team-and-estimates']['teams-and-contacts'],
+        'teams-required': source['team-and-estimates']['teams-required'],
         estimates: source['team-and-estimates'].estimates,
       },
     }, { instancesDir })
@@ -237,13 +237,13 @@ test('passes Business Case Approved with only the Full SOAP fields, without proc
     writeModule(definition, 'full-soap', 'solution-definition', {
       fields: {
         'high-level-requirements': '| Section | Requirement |\n| --- | --- |\n| Service | Provide the new service flow. |',
-        'high-level-solution-design': 'The service uses the existing intake and workflow platforms.',
+        'high-level-solution-overview': 'The service uses the existing intake and workflow platforms.',
         'assumptions-and-considerations': 'The existing platforms can support the new service flow.',
       },
     }, { instancesDir })
     writeModule(definition, 'full-soap', 'team-and-estimates', {
       fields: {
-        'teams-and-contacts': ['Delivery team — A. Person'],
+        'teams-required': ['Delivery team — A. Person'],
         estimates: 'Delivery: M',
         references: ['Source brief'],
       },

@@ -43,7 +43,7 @@ test('a module with no file on disk is reported missing, with all required field
     const teamAndEstimates = status.modules.find((m) => m.id === 'team-and-estimates')
     assert.equal(teamAndEstimates.exists, false)
     assert.equal(teamAndEstimates.complete, false)
-    assert.deepEqual(teamAndEstimates.outstanding, ['teams-and-contacts', 'estimates'])
+    assert.deepEqual(teamAndEstimates.outstanding, ['teams-required', 'estimates'])
   })
 })
 
@@ -113,7 +113,7 @@ test('getStatus against Azure DevOps reports the same shape as the local path, w
       // "team-and-estimates" has no file at all in the fake repo.
       const teamAndEstimates = status.modules.find((m) => m.id === 'team-and-estimates')
       assert.equal(teamAndEstimates.exists, false)
-      assert.deepEqual(teamAndEstimates.outstanding, ['teams-and-contacts', 'estimates'])
+      assert.deepEqual(teamAndEstimates.outstanding, ['teams-required', 'estimates'])
     }
   )
 })

@@ -266,7 +266,7 @@ test('adopting an instance at an Azure DevOps location already backing a registe
       '',
       '- Payments',
       '',
-      '## Out of Scope',
+      '## Out of scope',
       '',
       'Nothing yet.',
       '',

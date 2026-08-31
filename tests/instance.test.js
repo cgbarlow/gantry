@@ -51,7 +51,7 @@ test('creates a design instance with blank Shape-stage module files', () => {
     assert.match(raw, /^# Background and context$/m)
     assert.match(raw, /^## Problem statement$/m)
     assert.match(raw, /^## Affected domains$/m)
-    assert.match(raw, /^## Out of Scope$/m)
+    assert.match(raw, /^## Out of scope$/m)
   })
 })
 
@@ -219,7 +219,7 @@ test('reads a hand-filled module file back into field-keyed data', () => {
         '- Payments',
         '- Client Record',
         '',
-        '## Out of Scope',
+        '## Out of scope',
         '',
         'Nothing yet.',
         '',
@@ -334,7 +334,7 @@ test('writeModule without a layout still emits defined-field sections in definit
     const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
     assert.deepEqual(
       [...stored.matchAll(/^## (.+)$/gm)].map((m) => m[1]),
-      ['Problem statement', 'Affected domains', 'Opportunity', 'In Scope', 'Out of Scope']
+      ['Problem statement', 'Affected domains', 'Opportunity', 'In scope', 'Out of scope']
     )
   })
 })
@@ -1073,7 +1073,7 @@ const OLD_SCALE_CONTEXT = [
   '- Payments',
   '- Client Record',
   '',
-  '## Out of Scope',
+  '## Out of scope',
   '',
   'Nothing yet.',
   '',
@@ -1100,7 +1100,7 @@ const OLD_SCALE_WITH_AUTHOR_HEADINGS = [
   '- Payments',
   '- Client Record',
   '',
-  '## Out of Scope',
+  '## Out of scope',
   '',
   '# A level-one author heading also collides now',
   '',
@@ -1121,7 +1121,7 @@ test('reading an old-scale module file bumps it to the new heading scale and wri
     assert.match(raw, /^# Background and context$/m)
     assert.match(raw, /^## Problem statement$/m)
     assert.match(raw, /^## Affected domains$/m)
-    assert.match(raw, /^## Out of Scope$/m)
+    assert.match(raw, /^## Out of scope$/m)
   })
 })
 
@@ -1155,7 +1155,7 @@ test('migration folds author sub-headings into field content at ### instead of l
     // The stray `##` that used to be an unknown-section warning is now author content inside Problem statement.
     assert.match(raw, /A new law requires this by June\.\n\n### An author heading the old scale allowed to collide\n/)
     assert.doesNotMatch(raw, /^## An author heading/m)
-    // Same for a stray level-one author heading inside Out of Scope.
+    // Same for a stray level-one author heading inside Out of scope.
     assert.match(raw, /### A level-one author heading also collides now\n/)
   })
 })
