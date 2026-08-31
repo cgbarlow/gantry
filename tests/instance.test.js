@@ -48,10 +48,10 @@ test('creates a design instance with blank Shape-stage module files', () => {
     assert.match(raw, /^---\n/)
     assert.match(raw, /owner: c\.barlow/)
     // New document heading scale (ADR-0016): module title at `#`, field headings at `##`.
-    assert.match(raw, /^# Context$/m)
-    assert.match(raw, /^## Business driver$/m)
+    assert.match(raw, /^# Background and context$/m)
+    assert.match(raw, /^## Problem statement$/m)
     assert.match(raw, /^## Affected domains$/m)
-    assert.match(raw, /^## Explicitly out of scope$/m)
+    assert.match(raw, /^## Out of Scope$/m)
   })
 })
 
@@ -210,7 +210,7 @@ test('reads a hand-filled module file back into field-keyed data', () => {
         'owner: c.barlow',
         '---',
         '',
-        '## Business driver',
+        '## Problem statement',
         '',
         'A new law requires this by June.',
         '',
@@ -219,7 +219,7 @@ test('reads a hand-filled module file back into field-keyed data', () => {
         '- Payments',
         '- Client Record',
         '',
-        '## Explicitly out of scope',
+        '## Out of Scope',
         '',
         'Nothing yet.',
         '',
@@ -296,9 +296,9 @@ test('writeModule replays a supplied layout exactly, preserving a custom Section
       { instancesDir }
     )
 
-    // On disk: the custom block sits between Business driver and Affected domains, exactly where it was inserted.
+    // On disk: the custom block sits between Problem statement and Affected domains, exactly where it was inserted.
     const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
-    assert.ok(stored.indexOf('## Risks we carry') > stored.indexOf('## Business driver'))
+    assert.ok(stored.indexOf('## Risks we carry') > stored.indexOf('## Problem statement'))
     assert.ok(stored.indexOf('## Risks we carry') < stored.indexOf('## Affected domains'))
 
     // And reading it back yields the same interleaved layout — the round-trip is stable.
@@ -334,7 +334,7 @@ test('writeModule without a layout still emits defined-field sections in definit
     const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
     assert.deepEqual(
       [...stored.matchAll(/^## (.+)$/gm)].map((m) => m[1]),
-      ['Business driver', 'Affected domains', 'Opportunity', 'In scope', 'Explicitly out of scope']
+      ['Problem statement', 'Affected domains', 'Opportunity', 'In Scope', 'Out of Scope']
     )
   })
 })
@@ -369,7 +369,7 @@ test('leaves a field out of the result when its heading is missing', () => {
   const definition = loadDefinition('design')
   const moduleSpec = definition.modules.get('context')
   const data = parseModuleFile(
-    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Business driver\n\nSome text.\n',
+    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Problem statement\n\nSome text.\n',
     moduleSpec
   )
   assert.equal(data.fields.driver, 'Some text.')
@@ -380,7 +380,7 @@ test('matches a markdown-formatted heading against its field\'s plain-text title
   const definition = loadDefinition('design')
   const moduleSpec = definition.modules.get('context')
   const data = parseModuleFile(
-    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## **Business driver**\n\nSome text.\n',
+    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## **Problem statement**\n\nSome text.\n',
     moduleSpec
   )
   assert.equal(data.fields.driver, 'Some text.')
@@ -392,7 +392,7 @@ test('preserves a heading that matches no field as a custom field instead of war
   const definition = loadDefinition('design')
   const moduleSpec = definition.modules.get('context')
   const data = parseModuleFile(
-    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Business driver\n\nSome text.\n\n## Risks we carry\n\nThe June deadline.\n',
+    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Problem statement\n\nSome text.\n\n## Risks we carry\n\nThe June deadline.\n',
     moduleSpec
   )
   assert.equal(data.fields.driver, 'Some text.')
@@ -438,7 +438,7 @@ test('layout records the interleaved order of defined and custom sections', () =
   const definition = loadDefinition('design')
   const moduleSpec = definition.modules.get('context')
   const data = parseModuleFile(
-    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Business driver\n\nText.\n\n## Extra notes\n\nNotes.\n\n## Affected domains\n\n- Payments\n',
+    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Problem statement\n\nText.\n\n## Extra notes\n\nNotes.\n\n## Affected domains\n\n- Payments\n',
     moduleSpec
   )
   assert.deepEqual(data.layout, [
@@ -460,7 +460,7 @@ test('parses an all-bullets custom section as a list-typed custom field', () => 
       'owner:',
       '---',
       '',
-      '## Business driver',
+      '## Problem statement',
       '',
       'Some text.',
       '',
@@ -552,9 +552,9 @@ test('list-typed custom field round-trips through write/read with values intact'
       { instancesDir }
     )
 
-    // On disk: the custom block sits between Business driver and Affected domains, written as bullets.
+    // On disk: the custom block sits between Problem statement and Affected domains, written as bullets.
     const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
-    assert.ok(stored.indexOf('## Stakeholders') > stored.indexOf('## Business driver'))
+    assert.ok(stored.indexOf('## Stakeholders') > stored.indexOf('## Problem statement'))
     assert.ok(stored.indexOf('## Stakeholders') < stored.indexOf('## Affected domains'))
     assert.ok(stored.includes('- Alice'))
     assert.ok(stored.includes('- Bob'))
@@ -619,7 +619,7 @@ test('layout records the interleaved order of defined and list-typed custom sect
       'owner:',
       '---',
       '',
-      '## Business driver',
+      '## Problem statement',
       '',
       'Text.',
       '',
@@ -839,7 +839,7 @@ test('warns (non-strict) on a duplicate heading, identifying which occurrence wi
   const definition = loadDefinition('design')
   const moduleSpec = definition.modules.get('context')
   const data = parseModuleFile(
-    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Business driver\n\nFirst.\n\n## Business driver\n\nSecond.\n',
+    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Problem statement\n\nFirst.\n\n## Problem statement\n\nSecond.\n',
     moduleSpec
   )
   assert.equal(data.fields.driver, 'Second.')
@@ -853,7 +853,7 @@ test('strict mode throws instead of warning on a duplicate heading', () => {
   assert.throws(
     () =>
       parseModuleFile(
-        '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Business driver\n\nFirst.\n\n## Business driver\n\nSecond.\n',
+        '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Problem statement\n\nFirst.\n\n## Problem statement\n\nSecond.\n',
         moduleSpec,
         { strict: true }
       ),
@@ -1064,7 +1064,7 @@ const OLD_SCALE_CONTEXT = [
   'owner: c.barlow',
   '---',
   '',
-  '## Business driver',
+  '## Problem statement',
   '',
   'A new law requires this by June.',
   '',
@@ -1073,7 +1073,7 @@ const OLD_SCALE_CONTEXT = [
   '- Payments',
   '- Client Record',
   '',
-  '## Explicitly out of scope',
+  '## Out of Scope',
   '',
   'Nothing yet.',
   '',
@@ -1087,7 +1087,7 @@ const OLD_SCALE_WITH_AUTHOR_HEADINGS = [
   'owner: c.barlow',
   '---',
   '',
-  '## Business driver',
+  '## Problem statement',
   '',
   'A new law requires this by June.',
   '',
@@ -1100,7 +1100,7 @@ const OLD_SCALE_WITH_AUTHOR_HEADINGS = [
   '- Payments',
   '- Client Record',
   '',
-  '## Explicitly out of scope',
+  '## Out of Scope',
   '',
   '# A level-one author heading also collides now',
   '',
@@ -1118,10 +1118,10 @@ test('reading an old-scale module file bumps it to the new heading scale and wri
     readModule(definition, 'my-initiative', 'context', { instancesDir })
 
     const raw = readFileSync(contextPath, 'utf8')
-    assert.match(raw, /^# Context$/m)
-    assert.match(raw, /^## Business driver$/m)
+    assert.match(raw, /^# Background and context$/m)
+    assert.match(raw, /^## Problem statement$/m)
     assert.match(raw, /^## Affected domains$/m)
-    assert.match(raw, /^## Explicitly out of scope$/m)
+    assert.match(raw, /^## Out of Scope$/m)
   })
 })
 
@@ -1152,10 +1152,10 @@ test('migration folds author sub-headings into field content at ### instead of l
     readModule(definition, 'my-initiative', 'context', { instancesDir })
 
     const raw = readFileSync(contextPath, 'utf8')
-    // The stray `##` that used to be an unknown-section warning is now author content inside Business driver.
+    // The stray `##` that used to be an unknown-section warning is now author content inside Problem statement.
     assert.match(raw, /A new law requires this by June\.\n\n### An author heading the old scale allowed to collide\n/)
     assert.doesNotMatch(raw, /^## An author heading/m)
-    // Same for a stray level-one author heading inside Explicitly out of scope.
+    // Same for a stray level-one author heading inside Out of Scope.
     assert.match(raw, /### A level-one author heading also collides now\n/)
   })
 })
@@ -1187,14 +1187,14 @@ test('readModule against Azure DevOps performs the same lazy migration, pushing 
       const definition = loadDefinition('design')
 
       const data = await readModule(definition, 'my-initiative', 'context', { azureDevOps })
-      // The author sub-heading folded into Business driver comes along as content, not as a phantom section.
+      // The author sub-heading folded into Problem statement comes along as content, not as a phantom section.
       assert.match(data.fields.driver, /^A new law requires this by June\.\n\n### An author heading/)
       assert.deepEqual(data.fields['affected-domains'], ['Payments', 'Client Record'])
 
       const client = createAzureDevOpsClient(azureDevOps)
       const stored = await client.getFileContent('gantry-workspace/my-initiative/modules/context.md')
-      assert.match(stored, /^# Context$/m)
-      assert.match(stored, /^## Business driver$/m)
+      assert.match(stored, /^# Background and context$/m)
+      assert.match(stored, /^## Problem statement$/m)
       assert.match(stored, /### An author heading the old scale allowed to collide\n/)
     }
   )
@@ -1203,7 +1203,7 @@ test('readModule against Azure DevOps performs the same lazy migration, pushing 
 test('readModule forwards options.strict to parseModuleFile on both the local and Azure DevOps-backed paths', async () => {
   // A duplicate defined-field heading is the anomaly strict mode exists to catch (#132 made unknown headings legal custom fields, so they can no longer play this role).
   const badModuleText =
-    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n# Context\n\n## Business driver\n\nFirst.\n\n## Business driver\n\nSecond.\n'
+    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n# Background and context\n\n## Problem statement\n\nFirst.\n\n## Problem statement\n\nSecond.\n'
   const definition = loadDefinition('design')
 
   withScratchInstances((instancesDir) => {

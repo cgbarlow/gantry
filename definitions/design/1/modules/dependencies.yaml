@@ -9,7 +9,7 @@ purpose: >
 
 fields:
   - id: dependencies-overview
-    title: Dependencies overview
+    title: Dependencies
     type: markdown
     required-at: [business-case, hld-tac-approved]
     guidance: >

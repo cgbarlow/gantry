@@ -139,6 +139,6 @@ test('slugify and headingId are deterministic (unit check for WI232 helper)', as
     return `${moduleId}--${slugify(headingText)}`
   }
   assert.equal(headingId('architecture', 'Design decisions'), 'architecture--design-decisions')
-  assert.equal(headingId('context', 'Business driver *'), 'context--business-driver')
+  assert.equal(headingId('context', 'Problem statement *'), 'context--problem-statement')
   assert.equal(slugify('  Hello World!  '), 'hello-world')
 })

@@ -94,7 +94,7 @@ test('getStatus against Azure DevOps reports the same shape as the local path, w
       validPat: VALID_PAT,
       files: {
         '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-        '/gantry-workspace/my-initiative/modules/context.md': '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Business driver\n\nDone.\n',
+        '/gantry-workspace/my-initiative/modules/context.md': '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Problem statement\n\nDone.\n',
       },
     },
     async (baseUrl) => {
@@ -137,7 +137,7 @@ test('evaluateStage in strict mode over Azure DevOps throws on a parser anomaly,
       files: {
         '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
         '/gantry-workspace/my-initiative/modules/context.md':
-          '---\nmodule: context\nstatus: draft\nowner:\n---\n\n# Context\n\n## Business driver\n\nFirst.\n\n## Business driver\n\nSecond.\n',
+          '---\nmodule: context\nstatus: draft\nowner:\n---\n\n# Background and context\n\n## Problem statement\n\nFirst.\n\n## Problem statement\n\nSecond.\n',
       },
     },
     async (baseUrl) => {

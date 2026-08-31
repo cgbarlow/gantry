@@ -39,3 +39,14 @@ Requested by Client Support; led by the Delivery Lead
 - Which carrier catalogue and provisioning API will be used for the first release?
 - What evidence is required before a Mobile Phone Assistance application can be approved?
 - Which team owns the annual review policy after launch?
+
+## Caveats
+
+- This is high level estimate based on the information and requirements collated above
+- The requirements may not have been sufficient to do more accurate estimates
+- The actual effort will differ once the IT requirements are elaborated
+- Timeframes are dependent on PI prioritisation and detailed requirements
+- Some of the changes may be able to be done incrementally
+- Architectural council recommendations may impact the options and their costings
+- Resource allocation depends on PEC prioritisation, PI planning and resource availability
+- Cost is based on full AST team allocation (unless using a story point estimate)

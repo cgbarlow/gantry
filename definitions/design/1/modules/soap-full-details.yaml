@@ -60,3 +60,13 @@ fields:
     guidance: >
       Questions that need answers to progress the design or clarify the
       requirements and estimates.
+
+  - id: caveats
+    title: Caveats
+    type: markdown
+    required: false
+    guidance: >
+      The standing caveats that qualify a high-level estimate — what the
+      figures do and do not account for. Defaults to the JEDI Full SOAP
+      template's eight caveat bullets; edit only if an initiative needs to
+      add or vary one.

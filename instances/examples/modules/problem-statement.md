@@ -13,7 +13,7 @@ Providers currently submit Disability Allowance certificates by fax or post to a
 
 Providers submit a certificate directly through a self-service portal, referencing the client's application via a one-time reference code; the certificate attaches to the correct EOS application automatically, with no manual scanning or attribution step.
 
-## In and out of scope
+## In scope / out of scope
 
 In scope: a new provider-facing submission portal, one-time reference code issuance and validation, automated attachment to the client's existing EOS application.
 

@@ -36,7 +36,7 @@ test('loads the real design definition', () => {
   assert.ok(!ssad.requires.includes('architecture.design-decisions'))
 
   const context = design.modules.get('context')
-  assert.equal(context.title, 'Context')
+  assert.equal(context.title, 'Background and context')
   const driver = context.fields.find((field) => field.id === 'driver')
   assert.equal(driver.type, 'markdown')
   assert.equal(driver.required, true)

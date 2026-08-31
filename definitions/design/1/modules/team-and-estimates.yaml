@@ -1,12 +1,12 @@
 id: team-and-estimates
-title: Team and Estimates
+title: Teams, contact persons, and high-level estimates
 purpose: >
   List the teams involved and the order-of-magnitude sizing for the work. This is a
   signal for planning, not a commitment.
 
 fields:
   - id: teams-and-contacts
-    title: Teams and contact persons
+    title: Teams required
     type: list
     required: true
     guidance: >
@@ -14,7 +14,7 @@ fields:
       not just the obvious delivery team.
 
   - id: estimates
-    title: High-level estimates
+    title: Estimates
     type: markdown
     required: true
     guidance: >

@@ -278,7 +278,7 @@ test('an asset referenced via the asset:<id> convention from a module\'s markdow
       const listRes = await fetch(`${base}/api/instance/assets`)
       const list = await listRes.json()
       const asset = list.find((a) => a.id === created.id)
-      assert.deepEqual(asset.usedIn, ['Context'])
+      assert.deepEqual(asset.usedIn, ['Background and context'])
     })
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })

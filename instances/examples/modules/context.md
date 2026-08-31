@@ -3,9 +3,9 @@ module: context
 status: agreed
 owner: c.barlow
 ---
-# Context
+# Background and context
 
-## Business driver
+## Problem statement
 
 Contoso wants to extend financial hardship assistance to cover mobile phone
 devices and ongoing mobile subscription costs, applied for through ContosoSelfService.
@@ -30,13 +30,13 @@ Clients can receive a phone and ongoing connectivity through the same trusted
 channel they already use for other hardship assistance, reducing barriers to
 accessing Contoso services and employment support.
 
-## In scope
+## In Scope
 
 The first release covers the ContosoSelfService entry point, application intake and review,
 carrier provisioning, payment, notifications, reporting, and annual review of
 the Mobile Phone Assistance benefit.
 
-## Explicitly out of scope
+## Out of Scope
 
 Selecting or negotiating the mobile carrier partnership itself is out of
 scope for this initiative — that commercial arrangement is assumed to exist

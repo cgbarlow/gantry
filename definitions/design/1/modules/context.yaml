@@ -1,12 +1,12 @@
 id: context
-title: Context
+title: Background and context
 purpose: >
   Describe why this initiative exists and what it is responding to. Give a reader with
   no prior knowledge enough context to understand the situation quickly.
 
 fields:
   - id: driver
-    title: Business driver
+    title: Problem statement
     type: markdown
     required: true
     guidance: >
@@ -30,7 +30,7 @@ fields:
       pursuing.
 
   - id: in-scope
-    title: In scope
+    title: In Scope
     type: markdown
     required: false
     guidance: >
@@ -38,6 +38,6 @@ fields:
       boundaries of this solution and estimate.
 
   - id: out-of-scope
-    title: Explicitly out of scope
+    title: Out of Scope
     type: markdown
     required: false

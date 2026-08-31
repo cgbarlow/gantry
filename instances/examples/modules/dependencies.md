@@ -5,7 +5,7 @@ owner: c.barlow
 ---
 # Dependencies
 
-## Dependencies overview
+## Dependencies
 
 Depends on the carrier providing its catalogue and provisioning API in time for
 launch, and on the existing intake, workflow, and payments teams having

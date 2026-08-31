@@ -43,8 +43,8 @@ function withRunningServer(options, fn) {
 test('workspace-backed repo assets: listing, file streaming, and render embedding', async () => {
   const pngBytes = Buffer.from(ONE_PX_PNG_BASE64, 'base64')
   const ctxWithImage = readFileSync('instances/examples/modules/context.md', 'utf8').replace(
-    '## Business driver',
-    '## Business driver\n\n![My Img](../assets/foo.png)'
+    '## Problem statement',
+    '## Problem statement\n\n![My Img](../assets/foo.png)'
   )
   const files = {
     '/gantry-workspace/repo-assets-test/instance.yaml': 'definition: design\nslug: repo-assets-test\nstage: shape\n',
@@ -129,8 +129,8 @@ test('workspace-backed repo assets: listing, file streaming, and render embeddin
 test('workspace-backed repo assets: assets/foo.png variant also embeds', async () => {
   const pngBytes = Buffer.from(ONE_PX_PNG_BASE64, 'base64')
   const ctxWithImage = readFileSync('instances/examples/modules/context.md', 'utf8').replace(
-    '## Business driver',
-    '## Business driver\n\n![My Img](assets/foo.png)'
+    '## Problem statement',
+    '## Problem statement\n\n![My Img](assets/foo.png)'
   )
   const files = {
     '/gantry-workspace/repo-assets-test2/instance.yaml': 'definition: design\nslug: repo-assets-test2\nstage: shape\n',
@@ -329,8 +329,8 @@ test('workspace-backed assets API: POST blocked, file 404, file fallback to main
 
         // Render from stage branch where asset lives only on main — fallback should embed via union fetch
         const ctxWithMainAsset = readFileSync('instances/examples/modules/context.md', 'utf8').replace(
-          '## Business driver',
-          '## Business driver\n\n![Img](../assets/from-main.png)'
+          '## Problem statement',
+          '## Problem statement\n\n![Img](../assets/from-main.png)'
         )
         // Overwrite the branch's context module to reference the main-only asset (simulate user referencing main asset from stage branch)
         // We need to push that change to the branch via the fake server's API: easiest is to seed branchFiles with updated context plus asset on main already
@@ -346,8 +346,8 @@ test('workspace-backed assets API: POST blocked, file 404, file fallback to main
           [`gantry-workspace/${fallbackSlug}/shape`]: {
             [`/gantry-workspace/${fallbackSlug}/instance.yaml`]: `definition: design\nslug: ${fallbackSlug}\nstage: shape\n`,
             [`/gantry-workspace/${fallbackSlug}/modules/context.md`]: readFileSync('instances/examples/modules/context.md', 'utf8').replace(
-              '## Business driver',
-              '## Business driver\n\n![Fall](../assets/fallback.png)'
+              '## Problem statement',
+              '## Problem statement\n\n![Fall](../assets/fallback.png)'
             ),
             [`/gantry-workspace/${fallbackSlug}/modules/solution-definition.md`]: readFileSync(
               'instances/examples/modules/solution-definition.md',

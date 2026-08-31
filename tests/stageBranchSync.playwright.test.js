@@ -15,7 +15,7 @@ const REPOSITORY = 'fake-repo'
 const VALID_PAT = 'valid-test-pat'
 
 function moduleContent(text) {
-  return `---\nmodule: context\nstatus: draft\nowner: \n---\n\n# Context\n\n## Business driver\n\n${text}\n`
+  return `---\nmodule: context\nstatus: draft\nowner: \n---\n\n# Background and context\n\n## Problem statement\n\n${text}\n`
 }
 
 function withRunningServer(options, fn) {

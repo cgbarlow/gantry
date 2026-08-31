@@ -3,9 +3,9 @@ module: team-and-estimates
 status: agreed
 owner: c.barlow
 ---
-# Team and Estimates
+# Teams, contact persons, and high-level estimates
 
-## Teams and contact persons
+## Teams required
 
 - Delivery lead (business representative) — N. Fury
 - Business analyst — M. Hill
@@ -19,7 +19,7 @@ owner: c.barlow
 - Payments (SWIFTT) team — B. Banner
 - Carrier API contact — S. Lee
 
-## High-level estimates
+## Estimates
 
 - ContosoSelfService: M
 - Case management (CMS, EOS): S

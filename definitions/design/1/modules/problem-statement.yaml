@@ -17,7 +17,7 @@ fields:
     required: true
 
   - id: scope
-    title: In and out of scope
+    title: In scope / out of scope
     type: markdown
     required: true
     guidance: >

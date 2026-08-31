@@ -5,7 +5,7 @@ owner: c.barlow
 ---
 # Solution Definition
 
-## High-level requirements
+## High Level Requirements
 
 | Section | Requirement |
 | --- | --- |
@@ -28,7 +28,7 @@ task so a staff member can confirm the benefit is still needed twelve months
 later; if it isn't, CMS notifies payments to stop and calls the carrier's
 API to end or downgrade the subscription.
 
-## High-level solution design
+## High level solution overview
 
 The solution links ContosoSelfService to a carrier-hosted device and plan catalogue,
 routes applications through the existing intake and workflow tooling (the
@@ -39,7 +39,7 @@ existing payments system rather than a new one. No new case management or
 workflow product is introduced — MPA is a new application type layered onto
 tooling that already exists.
 
-## Assumptions and considerations
+## Assumptions
 
 The carrier will provide a portal that can be linked from ContosoSelfService to browse
 available phones and plans, and an API for provisioning and terminating a

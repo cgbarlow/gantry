@@ -108,7 +108,7 @@ test('top-of-page Insert ▾ prepends Section and List as first field, survives 
         const newSectionField = contextModule.locator('.field-markdown').first()
         await newSectionField.locator('.cm-content').click()
         await page.keyboard.type('Top section content.')
-        await contextModule.getByRole('button', { name: 'Save Context' }).click()
+        await contextModule.getByRole('button', { name: 'Save Background and context' }).click()
         await page.waitForSelector('text=Saved', { timeout: 5_000 })
 
         // Survives reload in that position.
@@ -138,7 +138,7 @@ test('top-of-page Insert ▾ prepends Section and List as first field, survives 
         assert.ok(await firstField.locator('.list-rows').isVisible(), 'prepended List should render as list field')
         // Add an item so the list has content before saving.
         await firstField.locator('textarea').first().fill('First list item')
-        await page.locator('.module').first().getByRole('button', { name: 'Save Context' }).click()
+        await page.locator('.module').first().getByRole('button', { name: 'Save Background and context' }).click()
         await page.waitForSelector('text=Saved', { timeout: 5_000 })
 
         await page.reload()
@@ -286,12 +286,12 @@ test('the ported module editor page loads with no errors and a markdown field sa
         assert.equal(await page.locator('header h1').textContent(), 'examples — design')
         assert.deepEqual(pageErrors, [])
 
-        // Edit the Context module's "Business driver" markdown field via its real CodeMirror 6 editor, then save.
+        // Edit the Context module's "Problem statement" markdown field via its real CodeMirror 6 editor, then save.
         const newText = 'Edited by the Playwright smoke test.'
         await page.locator('.field-markdown .cm-content').first().click()
         await page.keyboard.press('ControlOrMeta+a')
         await page.keyboard.type(newText)
-        await page.getByRole('button', { name: 'Save Context' }).click()
+        await page.getByRole('button', { name: 'Save Background and context' }).click()
         await page.waitForSelector('text=Saved', { timeout: 5_000 })
 
         assert.deepEqual(pageErrors, [])
@@ -447,7 +447,7 @@ test('artefact selector filters Shape and Detailed Design fields, persists per s
         assert.equal(await page.locator('.module h2', { hasText: 'Dependencies' }).count(), 0)
         assert.equal(await page.locator('.module h2', { hasText: 'Full SOAP Details' }).count(), 0)
         assert.equal(await page.locator('.field label', { hasText: 'Affected domains' }).count(), 1)
-        assert.equal(await page.locator('.field label', { hasText: 'Business driver *' }).count(), 1)
+        assert.equal(await page.locator('.field label', { hasText: 'Problem statement *' }).count(), 1)
 
         await selector.selectOption('soap-full')
         assert.equal(await page.locator('.module h2', { hasText: 'Dependencies' }).count(), 1)
@@ -456,7 +456,7 @@ test('artefact selector filters Shape and Detailed Design fields, persists per s
         assert.equal(await page.locator('.field label', { hasText: 'Process flow' }).count(), 0)
         assert.equal(await page.locator('.field label', { hasText: 'Feature breakdown and involved teams' }).count(), 0)
         assert.equal(await page.locator('.field label', { hasText: 'Dependency list' }).count(), 0)
-        assert.equal(await page.locator('.field label', { hasText: 'Business driver *' }).count(), 1)
+        assert.equal(await page.locator('.field label', { hasText: 'Problem statement *' }).count(), 1)
 
         // A reload restores the selected artefact for this instance/stage.
         await page.reload()
@@ -788,7 +788,7 @@ test("Image is a direct formatting-toolbar action and Insert offers only Section
         assert.deepEqual(pageErrors, [])
 
         // Usage is computed from the saved module file on disk, so save before checking the library reflects it as used.
-        await contextModule.getByRole('button', { name: 'Save Context' }).click()
+        await contextModule.getByRole('button', { name: 'Save Background and context' }).click()
         await page.waitForSelector('text=Saved', { timeout: 5_000 })
 
         // Asset library screen: the inserted asset shows USED IN >= 1; uploading one more, never referenced, shows UNUSED. Navigated to directly — the toolbar's "View asset library" link was removed as redundant once assets are insertable inline from the editor.
@@ -901,7 +901,7 @@ test('toolbar Table opens a size grid whose pick inserts a live table with the c
         await assert.doesNotReject(firstField.locator('.table-toolbar').waitFor({ state: 'visible', timeout: 5_000 }))
 
         // Round-trip: save, then read the module file back off disk.
-        await contextModule.getByRole('button', { name: 'Save Context' }).click()
+        await contextModule.getByRole('button', { name: 'Save Background and context' }).click()
         await page.waitForSelector('text=Saved', { timeout: 5_000 })
         assert.deepEqual(pageErrors, [])
       } finally {
@@ -1203,11 +1203,11 @@ test('Insert ▾ → Section adds a titled custom field below the requesting fie
         await dialog.getByRole('button', { name: 'Insert section' }).click()
         await dialog.waitFor({ state: 'hidden', timeout: 5_000 })
 
-        // The new editable block appears directly below Business driver (before the list and out-of-scope fields), with its own Insert ▾ beneath it.
+        // The new editable block appears directly below Problem statement (before the list and out-of-scope fields), with its own Insert ▾ beneath it.
         const titles = await contextModule.locator('.field > label').allTextContents()
         assert.deepEqual(
           titles.map((t) => t.replace(/ \*$/, '')),
-          ['Business driver', 'Risks we carry', 'Affected domains', 'Opportunity', 'In scope', 'Explicitly out of scope']
+          ['Problem statement', 'Risks we carry', 'Affected domains', 'Opportunity', 'In Scope', 'Out of Scope']
         )
         assert.equal(await contextModule.getByRole('button', { name: 'Insert ▾' }).count(), 5)
 
@@ -1215,11 +1215,11 @@ test('Insert ▾ → Section adds a titled custom field below the requesting fie
         const newField = contextModule.locator('.field-markdown').nth(1)
         await newField.locator('.cm-content').click()
         await page.keyboard.type('The June deadline.')
-        await contextModule.getByRole('button', { name: 'Save Context' }).click()
+        await contextModule.getByRole('button', { name: 'Save Background and context' }).click()
         await page.waitForSelector('text=Saved', { timeout: 5_000 })
         assert.deepEqual(pageErrors, [])
 
-        // Fresh page load: the custom section comes back below Business driver, exactly where it was inserted.
+        // Fresh page load: the custom section comes back below Problem statement, exactly where it was inserted.
         await page.reload()
         await page.waitForSelector('.module', { timeout: 10_000 })
         const reloadedTitles = await contextModule.locator('.field > label').allTextContents()
@@ -1503,7 +1503,7 @@ test('task list, blockquote, and horizontal rule write real markdown to disk (#1
         await page.keyboard.press('ControlOrMeta+End')
         await toolbar.getByRole('button', { name: 'Horizontal rule', exact: true }).click()
 
-        await page.locator('.module').first().getByRole('button', { name: 'Save Context' }).click()
+        await page.locator('.module').first().getByRole('button', { name: 'Save Background and context' }).click()
         await page.waitForSelector('text=Saved', { timeout: 5_000 })
         assert.deepEqual(pageErrors, [])
       } finally {

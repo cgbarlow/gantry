@@ -41,8 +41,8 @@ function withRunningServer(options, fn) {
 // and a module referencing ../assets/foo.png, the module-editor preview renders an <img> with naturalWidth >0
 test('workspace-backed repo asset renders in preview (WI #260)', async () => {
   const ctxWithImage = readFileSync('instances/examples/modules/context.md', 'utf8').replace(
-    '## Business driver',
-    '## Business driver\n\n![Preview Img](../assets/foo.png)'
+    '## Problem statement',
+    '## Problem statement\n\n![Preview Img](../assets/foo.png)'
   )
 
   const files = {

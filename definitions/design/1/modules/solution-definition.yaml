@@ -7,7 +7,7 @@ purpose: >
 
 fields:
   - id: high-level-requirements
-    title: High-level requirements
+    title: High Level Requirements
     type: markdown
     required: false
     guidance: >
@@ -26,7 +26,7 @@ fields:
       what the diagram shows in words as well.
 
   - id: high-level-solution-design
-    title: High-level solution design
+    title: High level solution overview
     type: markdown
     required: true
     guidance: >
@@ -35,7 +35,7 @@ fields:
       `architecture` module; go only as deep as a Shape-stage reader needs.
 
   - id: assumptions-and-considerations
-    title: Assumptions and considerations
+    title: Assumptions
     type: markdown
     required: false
     guidance: >

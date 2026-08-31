@@ -70,6 +70,15 @@ artefacts:
       business case decision.
     template: templates/soap.md.tmpl
     gate: business-case
+    # WI #268 / ADR-0027: the SOAP reconciliation report recommends dropping the
+    # three unused fields context.opportunity, context.in-scope and
+    # solution-definition.high-level-requirements from this artefact. That is left
+    # for the design grill, not applied here: the only in-place mechanism is a
+    # field-level `requires`, which also scopes the lightweight-SOAP module editor
+    # to just the listed fields — hiding the template's conditional sections and
+    # author-inserted custom sections — and, because a field-level entry gates
+    # regardless of the field's own `required` flag, tightens the business-case
+    # gate. None of that is the display-title-only change this ticket covers.
     requires: [context, solution-definition, team-and-estimates]
 
   - id: soap-full
@@ -80,27 +89,33 @@ artefacts:
     template: templates/soap-full.md.tmpl
     gate: business-case
     # Field references let this heavier artefact reuse modules without making
-    # the lightweight SOAP's unrelated fields mandatory.
+    # the lightweight SOAP's unrelated fields mandatory. Ordered to follow the
+    # JEDI Full SOAP reference document's section order (WI #268 / ADR-0027):
+    # front-matter metadata block first, then the body sections in reference
+    # order, ending with Caveats and References. The soap-full-details fields are
+    # rendered non-contiguously by the template (metadata at the top,
+    # sequencing/questions/caveats in the body).
     requires:
       [
+        soap-full-details.epic-project,
+        soap-full-details.requested-lead-by,
+        soap-full-details.request-date,
+        soap-full-details.draft-agreed-date,
+        soap-full-details.delivered-date,
         context.driver,
         context.opportunity,
         context.in-scope,
         context.out-of-scope,
         solution-definition.high-level-requirements,
         solution-definition.high-level-solution-design,
-        solution-definition.assumptions-and-considerations,
         team-and-estimates.teams-and-contacts,
-        team-and-estimates.estimates,
-        team-and-estimates.references,
         dependencies.dependencies-overview,
-        soap-full-details.epic-project,
-        soap-full-details.requested-lead-by,
-        soap-full-details.request-date,
-        soap-full-details.draft-agreed-date,
-        soap-full-details.delivered-date,
+        solution-definition.assumptions-and-considerations,
+        team-and-estimates.estimates,
         soap-full-details.sequencing,
         soap-full-details.questions,
+        soap-full-details.caveats,
+        team-and-estimates.references,
       ]
 
   - id: hld

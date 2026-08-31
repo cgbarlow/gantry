@@ -222,7 +222,7 @@ test('a local render injects a Document Control table immediately after the titl
   const titleIdx = result.markdown.indexOf('# examples: Solution on a Page')
   const docIdx = result.markdown.indexOf('## Document Control')
   const reviewIdx = result.markdown.indexOf('## Review & sign-off')
-  const contextIdx = result.markdown.indexOf('# Context')
+  const contextIdx = result.markdown.indexOf('# Background and context')
   assert.ok(titleIdx >= 0 && docIdx > titleIdx, 'Document Control should be after the title')
   assert.ok(reviewIdx > docIdx, 'Review & sign-off should be after Document Control')
   assert.ok(contextIdx > reviewIdx, 'Content should be after the two tables')
