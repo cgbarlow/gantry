@@ -470,6 +470,9 @@ test('a post-approval commit changes the panel to Request approval again, and re
         await commitHistorySection.getByRole('button', { name: 'Show commit history' }).click()
         const historyModal = page.locator('.modal[aria-label="Commit history"]')
         await historyModal.waitFor({ state: 'visible', timeout: 5_000 })
+        await historyModal.locator('.request-approval-commits')
+          .getByText('Post-approval browser edit', { exact: true }).first()
+          .waitFor({ state: 'visible', timeout: 15_000 })
         assert.equal(await historyModal.locator('.request-approval-commits').getByText('Post-approval browser edit', { exact: true }).count(), 1)
         const scrollState = await historyModal.evaluate((element) => ({
           scrollable: element.scrollHeight > element.clientHeight,
