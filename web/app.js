@@ -2973,6 +2973,8 @@ function ModuleEditorPage({ slug: routeRef }) {
   const instance = instanceData.value
   const error = loadError.value
   const [selectedArtefactId, setSelectedArtefactId] = useState(null)
+  const [syncStatus, setSyncStatus] = useState('')
+  const [syncing, setSyncing] = useState(false)
 
   // The field registry backing "Clear all fields" (#114 moved this button,
   // and hence this registry, up from StageScreen into this parent — the
@@ -3037,6 +3039,34 @@ function ModuleEditorPage({ slug: routeRef }) {
     setSelectedArtefactId(artefactId)
   }
 
+  async function handleSyncFromMain() {
+    if (!instance || syncing) return
+    setSyncing(true)
+    setSyncStatus('Syncing…')
+    try {
+      const params = new URLSearchParams({ slug: instance.slug, stage: instance.stage.id })
+      const res = await apiFetchForInstance(instance.slug, `/api/instance/stage-branch/sync?${params}`, { method: 'POST' })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        if (res.status === 409) {
+          const conflicts = body.conflicts?.join(', ') || 'files'
+          setSyncStatus(`Sync failed: conflict on ${conflicts}`)
+        } else {
+          setSyncStatus(`Sync failed: ${body.error ?? body.message ?? res.status}`)
+        }
+        return
+      }
+      setSyncStatus('Synced — refreshing…')
+      const data = await loadInstance(instance.slug, instance.stage.id)
+      instanceData.value = data
+      setSyncStatus('')
+    } catch (err) {
+      setSyncStatus(`Sync failed: ${err.message}`)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   if (error) return html`<p class="load-error">Failed to load: ${error}</p>`
   // Compared against `currentSlug` (the real slug the route's own ref/slug already resolved to),
   // not the raw `routeRef` prop — a numeric reference (WI200) never equals `instance.slug` itself.
@@ -3045,6 +3075,8 @@ function ModuleEditorPage({ slug: routeRef }) {
   const selectedArtefact = instance.artefacts.find((artefact) => artefact.id === selectedArtefactId) ??
     instance.artefacts.find((artefact) => artefact.id === defaultArtefactId(instance.artefacts)) ?? null
   const visibleFieldIds = selectedArtefact ? artefactFieldIds(instance.modules, selectedArtefact) : null
+  const stageSync = instance.stageSync
+  const showStageSyncBanner = Boolean(stageSync?.behind)
   return html`
     <${AppHeader} instance=${instance} />
     ${instance.archived
@@ -3052,6 +3084,15 @@ function ModuleEditorPage({ slug: routeRef }) {
           This instance is <strong>archived</strong> and hidden from the dashboard. Restore it from
           <a href=${`/settings/instance?slug=${encodeURIComponent(instance.slug)}&from=${encodeURIComponent('/instance/' + instance.slug)}`}>Instance Settings</a>
           to make changes.
+        </div>`
+      : null}
+    ${showStageSyncBanner
+      ? html`<div class="archived-banner" role="status" data-testid="stage-sync-banner">
+          This stage's working branch is behind main on ${stageSync.behindFiles.length} file(s). Sync to pull the latest.
+          <button type="button" class="btn small" disabled=${syncing} onClick=${handleSyncFromMain} data-testid="sync-from-main">
+            ${syncing ? 'Syncing…' : 'Sync from main'}
+          </button>
+          ${syncStatus ? html`<span class="save-status">${syncStatus}</span>` : null}
         </div>`
       : null}
     <${ViewModeToolbar}

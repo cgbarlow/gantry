@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import { createHash } from 'node:crypto'
 
 // n's hex digits, zero-padded to a *fixed* width (7) and placed at the *front* of the 40-character id, followed by a fixed run of zeroes — not simply end-padded ("n.toString(16).padEnd(40, '0')"), which is not actually collision-free: end-padding drops any distinction between how many significant hex digits n has, so e.g. objectIdFor(1) ("1" + 39 zeroes) and objectIdFor(16) ("10" + 38 zeroes) produce the exact same 40-character string. Fixing the width of the leading hex digits before the zero-fill avoids that collision for any n below 16^7 — far more pushes than any test here performs — while still keeping distinct commit numbers distinguishable in their first few characters (e.g. objectIdFor(1) -> "0000001...", objectIdFor(16) -> "0000010..."), which tests asserting on a render footer's short (first-N-character) commit hash (#98) need.
 function objectIdFor(n) {
@@ -85,6 +86,8 @@ export function createFakeAzureDevOpsServer({
       store,
       objectId,
       commits: [{ commitId: objectId, comment: 'Initial repository content', author: { name: 'Fake Seeder', date: now }, committer: { name: 'Fake Seeder', date: now } }],
+      baseStore: new Map(store),
+      baseObjectId: objectId,
     })
   }
   seedBranch('main', files)
@@ -204,8 +207,38 @@ export function createFakeAzureDevOpsServer({
       const scopePath = url.searchParams.get('scopePath')
       // A `scopePath` (+`recursionLevel`, always `OneLevel` for this fake's one real caller, lib/azureDevOpsClient.js's `listFolder`) requests a folder listing instead of a single file's content — the fake repo's flat `store` has no real notion of folders, so a folder's existence/children are derived from whatever file paths happen to start with `${scopePath}/`: the first remaining path segment is an immediate child, a folder itself if more segments follow it, a file otherwise. 404s (matching a real not-found path) if nothing in the store starts with that prefix, mirroring how a single-file `path` lookup 404s below.
       if (scopePath !== null) {
+        const recursionLevel = url.searchParams.get('recursionLevel') ?? 'OneLevel'
+        const includeContentMetadata = url.searchParams.get('includeContentMetadata') === 'true'
         const normalizedScope = scopePath === '/' ? '' : scopePath.replace(/\/+$/, '')
         const prefix = `${normalizedScope}/`
+        if (recursionLevel === 'Full') {
+          const hasAny = [...store.keys()].some((k) => k === normalizedScope || k.startsWith(prefix))
+          if (!hasAny) {
+            return json(404, { message: `TF401174: Item ${scopePath} not found (fake server).` })
+          }
+          const value = [{ path: normalizedScope || '/', isFolder: true }]
+          const folders = new Set()
+          for (const [path, content] of store.entries()) {
+            if (!path.startsWith(prefix)) continue
+            const entry = { path, isFolder: false }
+            if (includeContentMetadata) {
+              const hash = createHash('sha1').update(content, 'utf8').digest('hex')
+              entry.gitObjectId = hash
+              entry.objectId = hash
+            }
+            value.push(entry)
+            const rest = path.slice(prefix.length)
+            const parts = rest.split('/')
+            let cur = normalizedScope
+            for (let i = 0; i < parts.length - 1; i++) {
+              cur = `${cur}/${parts[i]}`
+              folders.add(cur)
+            }
+          }
+          for (const f of folders) value.push({ path: f, isFolder: true })
+          value.sort((a, b) => a.path.localeCompare(b.path))
+          return json(200, { count: value.length, value })
+        }
         const children = new Map() // name -> isFolder
         for (const key of store.keys()) {
           if (!key.startsWith(prefix)) continue
@@ -307,7 +340,7 @@ export function createFakeAzureDevOpsServer({
           const sourceBranch = [...branches.values()].find((b) => b.objectId === update.newObjectId)
           const store = sourceBranch ? new Map(sourceBranch.store) : new Map()
           const commits = sourceBranch ? [...(sourceBranch.commits ?? [])] : []
-          branches.set(branchName, { store, objectId: update.newObjectId, commits })
+          branches.set(branchName, { store, objectId: update.newObjectId, commits, baseStore: new Map(store), baseObjectId: update.newObjectId })
         }
 
         return {
@@ -371,7 +404,9 @@ export function createFakeAzureDevOpsServer({
           committer: { name: 'Fake Pusher', date: now },
         })),
       )
-      branches.set(branchName, { store, objectId: newObjectId, commits })
+      const baseStore = existingBranch?.baseStore ?? new Map()
+      const baseObjectId = existingBranch?.baseObjectId ?? (existingBranch ? existingBranch.objectId : objectIdFor(0))
+      branches.set(branchName, { store, objectId: newObjectId, commits, baseStore, baseObjectId })
       // A real push response's `commits[]` entries carry full commit metadata (author/committer name+date, not just the commitId) — this is what lib/render.js's Azure-DevOps-backed render path (#98) reads its footer's commit hash/date from, rather than a separate call, so the fake mirrors that shape rather than the bare `{ commitId }` a caller uninterested in it might expect.
       return json(201, {
         pushId: globalCommitCount,
@@ -514,12 +549,75 @@ export function createFakeAzureDevOpsServer({
               message: `TF401027: The pull request has been updated since last read (fake server, lastMergeSourceCommit mismatch).`,
             })
           }
+          // WI256: actually merge source into target for main→stage sync PRs
+          const sourceBranchName = pr.sourceRefName.replace(/^refs\/heads\//, '')
+          const targetBranchName = pr.targetRefName.replace(/^refs\/heads\//, '')
+          const sourceBranch = branches.get(sourceBranchName)
+          const targetBranch = branches.get(targetBranchName)
+          if (sourceBranch && targetBranch && sourceBranch.objectId !== targetBranch.objectId) {
+            const sourceCommitsSet = new Set((sourceBranch.commits ?? []).map((c) => c.commitId))
+            sourceCommitsSet.add(sourceBranch.objectId)
+            if (sourceCommitsSet.has(targetBranch.objectId)) {
+              // Fast-forward
+              const newStore = new Map(sourceBranch.store)
+              const newCommits = [...(sourceBranch.commits ?? [])]
+              branches.set(targetBranchName, { store: newStore, objectId: sourceBranch.objectId, commits: newCommits, baseStore: targetBranch.baseStore ?? new Map(), baseObjectId: targetBranch.baseObjectId ?? targetBranch.objectId })
+              pr.mergeStatus = 'succeeded'
+              pr.lastMergeTargetCommit = { commitId: sourceBranch.objectId }
+            } else {
+              // Divergent: check for conflicts scoped to gantry-workspace/<slug>/
+              let scopePrefix = '/'
+              const wsMatch = targetBranchName.match(/^gantry-workspace\/([^/]+)\//)
+              if (wsMatch) scopePrefix = `/gantry-workspace/${wsMatch[1]}/`
+              else if (sourceBranchName.match(/^gantry-workspace\/([^/]+)\//)) scopePrefix = `/gantry-workspace/${sourceBranchName.match(/^gantry-workspace\/([^/]+)\//)[1]}/`
+              const baseStore = targetBranch.baseStore ?? new Map()
+              const conflicts = []
+              const allPaths = new Set()
+              for (const k of sourceBranch.store.keys()) if (k.startsWith(scopePrefix)) allPaths.add(k)
+              for (const k of targetBranch.store.keys()) if (k.startsWith(scopePrefix)) allPaths.add(k)
+              for (const k of baseStore.keys()) if (k.startsWith(scopePrefix)) allPaths.add(k)
+              for (const path of allPaths) {
+                const base = baseStore.get(path)
+                const src = sourceBranch.store.get(path)
+                const tgt = targetBranch.store.get(path)
+                if (src !== base && tgt !== base && src !== tgt) conflicts.push(path)
+              }
+              if (conflicts.length > 0) {
+                conflicts.sort()
+                pr.mergeStatus = 'conflicts'
+                return json(409, { message: `TF401034: Merge conflicts in ${conflicts.join(', ')} (fake server)`, mergeStatus: 'conflicts', conflicts })
+              }
+              globalCommitCount += 1
+              const newObjectId = objectIdFor(globalCommitCount)
+              const now = new Date().toISOString()
+              const newStore = new Map(targetBranch.store)
+              for (const path of allPaths) {
+                const base = baseStore.get(path)
+                const src = sourceBranch.store.get(path)
+                if (src !== base) {
+                  if (src === undefined) newStore.delete(path)
+                  else newStore.set(path, src)
+                }
+              }
+              const targetCommitsSet = new Set((targetBranch.commits ?? []).map((c) => c.commitId))
+              const sourceUniqueCommits = (sourceBranch.commits ?? []).filter((c) => !targetCommitsSet.has(c.commitId))
+              const newCommits = [...(targetBranch.commits ?? []), ...sourceUniqueCommits, { commitId: newObjectId, comment: `Merge ${sourceBranchName} into ${targetBranchName}`, author: { name: 'Fake Merger', date: now }, committer: { name: 'Fake Merger', date: now } }]
+              branches.set(targetBranchName, { store: newStore, objectId: newObjectId, commits: newCommits, baseStore: targetBranch.baseStore ?? new Map(), baseObjectId: targetBranch.baseObjectId ?? targetBranch.objectId })
+              pr.mergeStatus = 'succeeded'
+              pr.lastMergeTargetCommit = { commitId: newObjectId }
+            }
+          } else if (sourceBranch && targetBranch) {
+            pr.mergeStatus = 'succeeded'
+          }
         }
         if (patch.status !== undefined) pr.status = patch.status
         if (patch.completionOptions !== undefined) pr.completionOptions = patch.completionOptions
         if (patch.title !== undefined) pr.title = patch.title
         if (patch.description !== undefined) pr.description = patch.description
-        if (patch.status === 'completed') pr.closedDate = new Date().toISOString()
+        if (patch.status === 'completed' && pr.mergeStatus !== 'conflicts') pr.closedDate = new Date().toISOString()
+        if (pr.mergeStatus === 'conflicts') {
+          return json(409, { message: 'TF401034: Merge conflicts', mergeStatus: 'conflicts' })
+        }
         return json(200, pullRequestResponseBody(pr))
       }
 
