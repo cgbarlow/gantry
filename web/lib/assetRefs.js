@@ -3,6 +3,9 @@
 // Keep this regex in sync with lib/assets.js's server-side copy — same intentional duplication as web/lib/theme.js vs. web/index.html's bootstrap script (a browser-facing module can't import server code, and vice versa).
 export const ASSET_REF_RE = /!\[([^\]]*)\]\(asset:([\w-]+)\)/g
 
+// WI260 repo-as-asset-store: the relative-path convention for workspace-backed assets — `![alt](../assets/<name>)` or `![alt](assets/<name>)`, sibling of `modules/`. Keep in sync with lib/assets.js's REPO_ASSET_REF_RE.
+export const REPO_ASSET_REF_RE = /!\[([^\]]*)\]\((?:\.\.\/)?assets\/([^)\s"']+)\)/g
+
 /** Builds the hand-typeable/insertable markdown reference for an asset. */
 export function assetReference(asset) {
   return `![${asset.name}](asset:${asset.id})`
@@ -21,5 +24,15 @@ export function resolveAssetRefs(markdown, resolveUrl, resolveSource) {
     if (!source) return base
     const label = source.replaceAll(']', '\\]')
     return `${base}\n\n*Source: [${label}](<${source}>)*`
+  })
+}
+
+/**
+ * WI260 repo-as-asset-store: rewrites every `![alt](../assets/<name>)` or `![alt](assets/<name>)` reference in `markdown` to `![alt](<resolveUrl(filename)>)`, so the browser preview sees a fetchable URL. No citation is emitted for repo assets.
+ */
+export function resolveRepoAssetRefs(markdown, resolveUrl) {
+  return markdown.replace(REPO_ASSET_REF_RE, (match, alt, filename) => {
+    const url = resolveUrl(filename)
+    return `![${alt}](${url})`
   })
 }

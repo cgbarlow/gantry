@@ -25,7 +25,7 @@ import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, worksp
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
 import { wrap } from './lib/editorWrap.js'
-import { assetReference, resolveAssetRefs } from './lib/assetRefs.js'
+import { assetReference, resolveAssetRefs, resolveRepoAssetRefs } from './lib/assetRefs.js'
 import { IdentityPicker } from './lib/identityPicker.js'
 import {
   artefactFieldIds,
@@ -139,15 +139,20 @@ function readFileAsBase64(file) {
 }
 
 // `asset:<id>` references are resolved to the real, fetchable asset-file URL before markdown-it ever sees the text — the *stored* markdown source keeps the portable `asset:<id>` convention (see web/lib/assetRefs.js), only the live preview's rendered HTML points at a real URL.
+// WI260 also resolves `../assets/<name>` / `assets/<name>` for workspace-backed instances so a bare relative path (the repo-as-asset-store convention) shows in the preview.
 function renderPreview(node, text) {
   if (!node) return
   const slug = currentSlug.value
   const sources = assetSources.value
-  const withSources = resolveAssetRefs(
+  let withSources = resolveAssetRefs(
     text ?? '',
     (id) => assetFileUrl(id, slug),
     (id) => sources[id] ?? null
   )
+  // WI260 repo-as-asset-store: for workspace-backed instances also rewrite relative repo-asset refs to the fetchable file endpoint, the same way `asset:<id>` is rewritten.
+  if (instanceData.value?.workspaceBacked) {
+    withSources = resolveRepoAssetRefs(withSources, (filename) => assetFileUrl(filename, slug))
+  }
   node.innerHTML = renderMarkdown(withSources)
   // Caption-styling hook: the citation renders as <p><em>Source: …</em></p>; mark that paragraph so the stylesheet can make it visually subordinate (caption) rather than body text.
   node.querySelectorAll('p').forEach((p) => {

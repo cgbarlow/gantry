@@ -172,6 +172,7 @@ gantry/
 │       ├── modules/              # its own repo instead (see below), never here
 │       │   ├── context.md
 │       │   └── solution-definition.md
+│       ├── assets/               # (WI260) local asset store — for a workspace-backed instance the same dir lives as gantry-workspace/<slug>/assets/ in the Azure DevOps repo, sibling of modules/ and out/
 │       └── out/                  # rendered artefacts (gitignored by default)
 ├── lib/                          # the engine: definition/instance loading, render, status, the web server
 │   ├── server.js                 # HTTP routes, incl. the work-item, workspace, stage-advancement/approval,
