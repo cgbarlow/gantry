@@ -538,40 +538,44 @@ Conventions:
 
 # Container demo
 
-A multi-stage `ContainerFile` at the repo root builds a minimal runtime image (`node:24-slim` base) with Node.js 24, Pandoc, and Git — everything needed to serve the web UI and render artefacts.
+A multi-stage `ContainerFile` at the repo root builds a minimal runtime image (`node:24-slim` base) with Node.js 24, Pandoc, Git and unzip — everything needed to serve the web UI and render artefacts. Verification stages (`test`, `test-e2e`, `render`) run inside the same `ContainerFile`; the `runtime` stage is the only one shipped.
 
 ## Build the image
 
 ```bash
 docker build -f ContainerFile -t gantry .
-podman rm -f gantry
+```
+
+To build behind a TLS-intercepting proxy, pass the CA at build time (see also [Corporate proxy / custom CA certificates](#corporate-proxy--custom-ca-certificates)):
+
+```bash
 podman build --file ContainerFile \
   --volume /etc/ssl/certs/ca-certificates.crt:/certs/corporate-ca.pem:ro \
   --env NODE_EXTRA_CA_CERTS=/certs/corporate-ca.pem -t gantry .
 ```
+
+## Run locally
+
+```bash
+docker run -p 3000:3000 gantry
+```
+
+Open http://localhost:3000 in a browser. The dashboard lists the instances shipped with the repo (`examples`, a fixture with content for every stage, and `atlas-reference-design`, a worked reference instance). Click any instance to view its stages, modules, and completeness. This one-liner uses the bundled `instances/` baked into the image — no volume mounts, no env vars.
 
 ## Corporate proxy / custom CA certificates
 
 If running behind a TLS-intercepting proxy (e.g. Zscaler), mount your certificate chain into the container and tell Node.js to trust it via `NODE_EXTRA_CA_CERTS`:
 
 ```bash
-podman run -d \
+docker run -d \
   --name gantry \
-  --publish 8080:8080 \
+  --publish 3000:3000 \
   --volume /etc/ssl/certs/ca-certificates.crt:/certs/corporate-ca.pem:ro \
   --env NODE_EXTRA_CA_CERTS=/certs/corporate-ca.pem \
-  localhost/gantry serve --port 8080
+  gantry serve
 ```
 
 For `npm install` TLS failures on Windows itself (not in a container), see the Windows note under Installation above.
-
-## Run the web UI
-
-```bash
-docker run -p 3000:3000 gantry
-```
-
-Open http://localhost:3000 in a browser. The dashboard lists the instances shipped with the repo (`examples`, a fixture with content for every stage, and `atlas-reference-design`, a worked reference instance). Click any instance to view its stages, modules, and completeness.
 
 ## Render an artefact
 
@@ -606,10 +610,126 @@ docker run gantry validate design
 
 | Override | How |
 |---|---|
-| Port | `docker run -p 8080:8080 gantry serve --port 8080` |
+| Port | `docker run -p 3000:3000 gantry serve --port 3000` or `-e PORT=3000 -p 3000:3000 gantry serve` (see Port below) |
+| Instances directory | `-e GANTRY_INSTANCES_DIR=/data -v gantry-data:/data` (see Persistence below) |
 | Your own definitions/instances | Mount a volume: `-v /path/to/your/repo:/app` |
 | Custom CA certs | `-v /etc/pki/tls/certs/ca-bundle.crt:/certs/ca-bundle.crt:ro -e NODE_EXTRA_CA_CERTS=/certs/ca-bundle.crt` |
 | Shell into the container | `docker run -it --entrypoint sh gantry` |
+
+## Deploying to a server (UAT / production)
+
+For a long-running deployment, run the published image from the registry built by `azure-pipelines.release.yml` rather than rebuilding from source on the server.
+
+### Published image and tags
+
+`azure-pipelines.release.yml` builds `ContainerFile --target runtime` and pushes three tags on every push to `main`:
+
+- `gantry:<version>` — the `version` from `package.json` (e.g. `0.0.1`)
+- `gantry:<short-sha>` — the first 8 characters of `$(Build.SourceVersion)` (the commit that triggered the build)
+- `gantry:latest` — always the most recent `main` build
+
+Pull whichever tag matches your promotion model. For a pinned UAT, use the version or short SHA; for "latest UAT", use `latest`. The first release will be `0.0.1`; later releases bump `package.json` and get a new version tag automatically.
+
+### Access control
+
+Gantry has no built-in authentication — this is intentional. Each user supplies their own Azure DevOps PAT in the browser: the web UI stores it in `localStorage` and forwards it as HTTP Basic on every API request that needs it (instance reads/writes, work-item linking). There is no server-side session or shared credential.
+
+Gate access at the network layer (VPN, private network, reverse proxy with SSO, firewall rules) rather than inside the app. Treat Gantry as an internal tool that assumes the network has already authenticated the caller.
+
+### Persistence
+
+The container's filesystem is ephemeral — use a persistent volume for instance data:
+
+```bash
+docker run -d \
+  --name gantry \
+  -p 3000:3000 \
+  -e GANTRY_INSTANCES_DIR=/data \
+  -v gantry-data:/data \
+  --restart unless-stopped \
+  gantry
+```
+
+Or with Compose (see `compose.yaml` at the repo root):
+
+```bash
+GANTRY_IMAGE=gantry:0.0.1 docker compose up -d
+```
+
+- `GANTRY_INSTANCES_DIR` tells the server (and the `new`/`status`/`check`/`render`/`instances` CLI commands) where to read/write `instance.yaml` and `modules/*.md`. The image's `instances/` baked into `/app/instances` is still there, but when `GANTRY_INSTANCES_DIR` points elsewhere (e.g. `/data`) that directory is used instead.
+- The bundled `examples` and `atlas-reference-design` fixtures ship inside the image at `/app/instances`. When you switch the data dir to `/data`, they will not appear on the dashboard — this is expected. Seed the volume once (copy them in, or create a fresh instance with `docker exec gantry node bin/gantry.js new design my-instance --instances-dir /data`).
+- The runtime image runs as `USER node` (uid 1000) and does `mkdir -p instances && chown -R node:node /app` at build time, so the baked-in `instances/` is writable by `node`. For a **named volume** (`gantry-data:/data`), Docker initialises ownership correctly — no extra steps.
+- For a **bind mount** (`-v "$PWD/my-data:/data"`), the host directory must be writable by uid 1000: `mkdir -p my-data && chown 1000:1000 my-data` (or `chmod 777 my-data` if `chown` is not possible). Without this, writes from `USER node` will fail with `EACCES`.
+
+### Port
+
+Inside the container Gantry always listens on `3000` (`EXPOSE 3000`, `CMD ["serve", "--port", "3000"]`). Map it to any host port with `-p`:
+
+```bash
+docker run -p 3000:3000 gantry          # host 3000 → container 3000
+docker run -p 8080:3000 gantry          # host 8080 → container 3000
+```
+
+To change the in-container port, set `PORT` or pass `--port` — the server resolves it as `--port` flag > `PORT` env > `3000` (and `--instances-dir` as `--instances-dir` flag > `GANTRY_INSTANCES_DIR` env > `instances`):
+
+```bash
+docker run -e PORT=4000 -p 4000:4000 gantry serve
+docker run -p 4000:4000 gantry serve --port 4000
+```
+
+`compose.yaml` maps `3000:3000` by default; change the left side to expose a different host port.
+
+### Outbound network
+
+When instances are backed by Azure DevOps (workspaces), the server (and CLI) makes outbound HTTPS calls to `https://dev.azure.com` (or your on-premises Azure DevOps Server if configured). The host running the container must allow egress to that host.
+
+If that egress goes through a TLS-intercepting proxy, mount the corporate CA and set `NODE_EXTRA_CA_CERTS` as shown in [Corporate proxy / custom CA certificates](#corporate-proxy--custom-ca-certificates) and in the commented block inside `compose.yaml`:
+
+```yaml
+# in compose.yaml, uncomment inside the gantry service:
+# environment:
+#   - NODE_EXTRA_CA_CERTS=/certs/corporate-ca.pem
+# volumes:
+#   - /etc/ssl/certs/ca-certificates.crt:/certs/corporate-ca.pem:ro
+```
+
+### Health and restart
+
+The `runtime` stage declares a `HEALTHCHECK`:
+
+```
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["node","-e","fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+```
+
+Docker (or an orchestrator) will mark the container `healthy` once `GET /` returns 200. Use `--restart unless-stopped` (or `restart: unless-stopped` in Compose) so the container comes back after a reboot. Check health with:
+
+```bash
+docker inspect --format '{{.State.Health.Status}}' gantry
+```
+
+### Upgrade
+
+To upgrade without losing data:
+
+```bash
+docker pull gantry:0.0.2          # or gantry:latest / gantry:<short-sha>
+docker rm -f gantry
+docker run -d --name gantry \
+  -p 3000:3000 \
+  -e GANTRY_INSTANCES_DIR=/data \
+  -v gantry-data:/data \
+  --restart unless-stopped \
+  gantry:0.0.2
+```
+
+Or with Compose:
+
+```bash
+GANTRY_IMAGE=gantry:0.0.2 docker compose up -d
+```
+
+Recreating the container against the same named volume preserves all instances. No migration is needed — instance data is plain files under the volume.
 
 ## Issues
 

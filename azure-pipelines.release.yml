@@ -1,0 +1,49 @@
+# Release pipeline — publishes the gantry runtime image.
+#
+# OPERATOR SETUP REQUIRED (YAML alone does not create the pipeline):
+# 1. Create a Docker Registry service connection in Azure DevOps (Project Settings → Service connections → Docker Registry)
+#    pointing at your container registry (e.g. Azure Container Registry, Docker Hub, GHCR via generic registry).
+# 2. Set the variables below (or via a variable group linked to this pipeline):
+#    - dockerRegistryServiceConnection: name of the service connection created in step 1
+#    - imageRepository: repository name to push to (e.g. myregistry.azurecr.io/gantry)
+# 3. Register this YAML as a new pipeline in Azure DevOps (Pipelines → New pipeline → Existing Azure Pipelines YAML file
+#    → select azure-pipelines.release.yml) and enable it. The trigger below will then run on pushes to main.
+#
+# Placeholders are set below so the file parses without customization; replace them before enabling the pipeline.
+
+trigger:
+  branches:
+    include:
+      - main
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  dockerRegistryServiceConnection: '<set-me>'
+  imageRepository: 'gantry'
+
+steps:
+  - script: |
+      version=$(node -p "require('./package.json').version")
+      shortSha=$(echo "$(Build.SourceVersion)" | cut -c1-8)
+      echo "Resolved version: $version"
+      echo "Resolved short SHA: $shortSha"
+      echo "##vso[task.setvariable variable=imageVersion]$version"
+      echo "##vso[task.setvariable variable=shortSha]$shortSha"
+    displayName: 'Resolve image tags'
+
+  - task: Docker@2
+    displayName: 'Build and push runtime image'
+    inputs:
+      command: buildAndPush
+      Dockerfile: ContainerFile
+      buildContext: .
+      repository: $(imageRepository)
+      containerRegistry: $(dockerRegistryServiceConnection)
+      tags: |
+        $(imageVersion)
+        $(shortSha)
+        latest
+      arguments: '--target runtime'

@@ -8,7 +8,15 @@ import { createServer } from '../lib/server.js'
 import { createInstance, listInstances } from '../lib/instance.js'
 import { backfillNumberRegistry } from '../lib/numberRegistry.js'
 
-const program = new Command()
+export function resolveInstancesDir(cliInstancesDir) {
+  return cliInstancesDir ?? process.env.GANTRY_INSTANCES_DIR ?? 'instances'
+}
+
+export function resolvePort(cliPort) {
+  return Number(cliPort ?? process.env.PORT ?? '3000')
+}
+
+export const program = new Command()
 
 program
   .name('gantry')
@@ -25,8 +33,10 @@ program
   .command('instances')
   .description('List instances available in this repo')
   .option('--json', 'emit structured JSON output')
+  .option('--instances-dir <path>', 'instances directory (default: instances)')
   .action((options) => {
-    const instances = listInstances()
+    const instancesDir = resolveInstancesDir(options.instancesDir)
+    const instances = listInstances({ instancesDir })
     if (options.json) {
       console.log(JSON.stringify(instances, null, 2))
       return
@@ -49,9 +59,11 @@ program
   .option('--assignee <assignee>', 'assignee to record on the instance record itself (#97)')
   .option('--definition-version <version>', 'definition version to pin (default latest published)')
   .option('--version <version>', 'alias for --definition-version')
+  .option('--instances-dir <path>', 'instances directory (default: instances)')
   .action((definition, slug, options) => {
     const version = options.definitionVersion ?? options.version ?? null
-    const result = createInstance(definition, slug, { owner: options.owner, assignee: options.assignee, definitionVersion: version ?? undefined })
+    const instancesDir = resolveInstancesDir(options.instancesDir)
+    const result = createInstance(definition, slug, { instancesDir, owner: options.owner, assignee: options.assignee, definitionVersion: version ?? undefined })
     console.log(`Created instance "${result.slug}" (${result.definitionId}, stage: ${result.stage})`)
     console.log(`Modules: ${result.modules.join(', ')}`)
   })
@@ -60,8 +72,10 @@ program
   .command('status <slug>')
   .description("Current stage, module completeness, what's outstanding")
   .option('--json', 'emit structured JSON output')
+  .option('--instances-dir <path>', 'instances directory (default: instances)')
   .action((slug, options) => {
-    const status = getStatus(slug)
+    const instancesDir = resolveInstancesDir(options.instancesDir)
+    const status = getStatus(slug, { instancesDir })
     if (options.json) {
       console.log(JSON.stringify(status, null, 2))
       return
@@ -84,8 +98,10 @@ program
   .description("Validate an instance against a gate's requirements")
   .option('--gate <id>', 'the gate to check against')
   .option('--json', 'emit structured JSON output')
+  .option('--instances-dir <path>', 'instances directory (default: instances)')
   .action((slug, options) => {
-    const result = checkGate(slug, { gate: options.gate })
+    const instancesDir = resolveInstancesDir(options.instancesDir)
+    const result = checkGate(slug, { gate: options.gate, instancesDir })
     if (options.json) {
       console.log(JSON.stringify(result, null, 2))
       if (!result.pass) process.exitCode = 1
@@ -109,8 +125,10 @@ program
   .command('render <slug> <artefact>')
   .description('Render an artefact to out/')
   .option('--dry-run', 'resolve the template without writing')
+  .option('--instances-dir <path>', 'instances directory (default: instances)')
   .action((slug, artefact, options) => {
-    const result = renderArtefact(slug, artefact, { dryRun: options.dryRun })
+    const instancesDir = resolveInstancesDir(options.instancesDir)
+    const result = renderArtefact(slug, artefact, { dryRun: options.dryRun, instancesDir })
     if (result.dryRun) {
       console.log(result.markdown)
     } else {
@@ -124,12 +142,16 @@ program
     'Serve the web app: an instance dashboard at / (every registered instance, via GET ' +
       '/api/instances) and the stage-by-stage form at /instance/<slug>. [slug] only sets a ' +
       'fallback default for API requests made with no ?slug=<slug> of their own — it does not ' +
-      'change what the dashboard shows or require picking one instance up front'
+      'change what the dashboard shows or require picking one instance up front. ' +
+      'Instances directory resolves as --instances-dir flag > GANTRY_INSTANCES_DIR env > instances; ' +
+      'port resolves as --port flag > PORT env > 3000.'
   )
-  .option('--port <port>', 'port to listen on', '3000')
+  .option('--port <port>', 'port to listen on')
+  .option('--instances-dir <path>', 'instances directory (default: instances; or GANTRY_INSTANCES_DIR env)')
   .action((slug, options) => {
-    const server = createServer({ slug })
-    const port = Number(options.port)
+    const instancesDir = resolveInstancesDir(options.instancesDir)
+    const port = resolvePort(options.port)
+    const server = createServer({ slug, instancesDir })
     server.listen(port, () => {
       const label = slug ? `default instance for slug-less API requests: ${slug}` : 'no default instance'
       console.log(`gantry serve: http://localhost:${port} (${label})`)
@@ -176,4 +198,6 @@ program
     )
   })
 
-program.parseAsync(process.argv)
+if (process.argv[1] && process.argv[1].endsWith('gantry.js')) {
+  program.parseAsync(process.argv)
+}

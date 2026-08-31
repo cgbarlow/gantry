@@ -1,0 +1,17 @@
+services:
+  gantry:
+    image: ${GANTRY_IMAGE:-gantry:latest}
+    ports:
+      - "3000:3000"
+    environment:
+      - GANTRY_INSTANCES_DIR=/data
+      # For TLS-inspecting proxies (e.g. Zscaler), uncomment to trust corporate CA:
+      # - NODE_EXTRA_CA_CERTS=/certs/corporate-ca.pem
+    volumes:
+      - gantry-data:/data
+      # For TLS-inspecting proxies, mount your corporate CA chain (add alongside the data volume):
+      # - /etc/ssl/certs/ca-certificates.crt:/certs/corporate-ca.pem:ro
+    restart: unless-stopped
+
+volumes:
+  gantry-data:
