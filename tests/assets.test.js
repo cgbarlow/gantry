@@ -223,6 +223,27 @@ test('GET /api/instance/assets/:id/file 404s for an unknown asset id', async () 
   }
 })
 
+// WI #304: `GET /api/instance/assets` for a slug the server has no
+// server-side record of at all — a local-workspace instance's shape
+// (ADR-0029: no `instancesDir` entry, no Azure DevOps registry entry) — must
+// return a clean 400, not a 500. A local-workspace instance's assets are
+// served entirely client-side (web/app.js's fetchAssets); this route should
+// never be reached for one, but this guard is defense-in-depth for whatever
+// path still reaches it.
+test('GET /api/instance/assets returns a clean 400 (not a 500) for a slug the server has no record of', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withRunningServer({ instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instance/assets?slug=some-local-workspace-slug`)
+      assert.equal(res.status, 400)
+      const body = await res.json()
+      assert.match(body.error, /has no server-side record/)
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
 test('an asset referenced via the asset:<id> convention from a module\'s markdown is reported USED IN that module', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {

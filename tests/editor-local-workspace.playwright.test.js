@@ -221,3 +221,51 @@ test('local-workspace instance: offline degradation — /api/local/check unreach
     }
   })
 })
+
+// WI #304 — opening a local-workspace instance's editor must never reach the
+// server-side `GET /api/instance/assets` route: assets live entirely
+// client-side (`gantry-workspace/<slug>/assets/`, read via `fetchAssets`'s
+// `instance?.isLocalWorkspace` branch). That branch reads `instanceData.value`,
+// which is still `null` the instant `currentSlug`/`viewedStage` are pinned
+// (ModuleEditorPage's mount effect batches `localWorkspaceParam`/`currentSlug`
+// together, but `instanceData` itself is only set later, once the async
+// `loadLocalInstance()` promise resolves) — a race the module-level
+// `assetSources` effect (fires on every `currentSlug` change, to prime
+// citation text) loses on the very first paint, falling through to the
+// server route for a slug the server has never heard of and getting a 500
+// back (caught silently, so no page error — see the reproduction below for
+// why the existing test above doesn't already catch this).
+test('local-workspace instance: opening the editor never calls the server-side asset route', async () => {
+  await withRunningServer({}, async (base) => {
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+
+      const assetRequests = []
+      page.on('response', (response) => {
+        const url = new URL(response.url())
+        if (url.pathname === '/api/instance/assets') {
+          assetRequests.push({ status: response.status(), url: response.url() })
+        }
+      })
+
+      const slug = 'local-assets-race'
+      await page.goto(`${base}/`)
+      const workspaceId = await seedLocalWorkspace(page, slug)
+
+      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}&slug=${slug}`)
+      await page.waitForSelector('.module', { timeout: 10_000 })
+      // Give the module-level assetSources effect (fires immediately on slug pin) a moment to settle.
+      await page.waitForTimeout(500)
+
+      assert.deepEqual(
+        assetRequests,
+        [],
+        `expected no server-side /api/instance/assets calls for a local-workspace instance, got: ${JSON.stringify(assetRequests)}`
+      )
+    } finally {
+      await browser.close()
+    }
+  })
+})

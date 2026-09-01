@@ -97,6 +97,22 @@ function localModuleFilesPath(slug, moduleId) {
   return `gantry-workspace/${slug}/modules/${moduleId}.md`
 }
 
+// WI #304 — whether `slug` is the local-workspace instance currently pinned.
+// Deliberately reads `localWorkspaceParam` (set synchronously, in the same
+// `batch()` as `currentSlug`, the instant a local-workspace route is pinned
+// — see ModuleEditorPage's mount effect) rather than `instanceData` (only
+// populated later, once the async `loadLocalInstance()` call resolves).
+// `assetFileUrl`/`fetchAssets`/`uploadAsset` below used to branch on
+// `instanceData.value?.isLocalWorkspace`, which raced the module-level
+// `assetSources` effect: on the very first run — fired in the same tick
+// `currentSlug` is pinned — `instanceData.value` was still `null`, so that
+// check fell through to the server-side `/api/instance/assets` route for a
+// slug the server has never heard of (a local-workspace instance has no
+// server-side registry entry at all, ADR-0029) and got a 500 back.
+function isLocalWorkspaceSlug(slug) {
+  return localWorkspaceParam.value?.slug === slug
+}
+
 async function ensureLocalAssetUrl(slug, assetId, key) {
   if (localAssetUrlPending.has(key) || localAssetUrls.value[key]) return
   const handle = localDirHandle.value
@@ -114,8 +130,7 @@ async function ensureLocalAssetUrl(slug, assetId, key) {
 }
 
 function assetFileUrl(assetId, slug, stageId) {
-  const instance = instanceData.value
-  if (instance?.isLocalWorkspace && instance.slug === slug) {
+  if (isLocalWorkspaceSlug(slug)) {
     const key = `${slug}/${assetId}`
     const cached = localAssetUrls.value[key]
     if (cached) return cached
@@ -343,8 +358,7 @@ async function loadInstance(slug, stageId) {
 }
 
 async function fetchAssets(slug, stageId) {
-  const instance = instanceData.value
-  if (instance?.isLocalWorkspace && instance.slug === slug) {
+  if (isLocalWorkspaceSlug(slug)) {
     const handle = localDirHandle.value
     if (!handle) return []
     const entries = await listLocalDir(handle, `gantry-workspace/${slug}/assets`).catch(() => [])
@@ -371,8 +385,7 @@ async function fetchAssets(slug, stageId) {
 // — scoped down from the server-local path's generated ids, since a local
 // workspace has no server-side registry to hand one out from.
 async function uploadAsset({ slug, filename, dataBase64, name, source, uploadedBy }) {
-  const instance = instanceData.value
-  if (instance?.isLocalWorkspace && instance.slug === slug) {
+  if (isLocalWorkspaceSlug(slug)) {
     const handle = localDirHandle.value
     if (!handle) throw new Error('Local workspace folder is not open.')
     const bytes = Uint8Array.from(atob(dataBase64 ?? ''), (c) => c.charCodeAt(0))
