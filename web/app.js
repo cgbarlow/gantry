@@ -3417,7 +3417,7 @@ function InstanceSwitcher({ slug, open, onOpenChange }) {
       ${instances !== null && !crossWorkspace
         ? html`
             <div class="switcher-section">
-              <div class="switcher-heading">${isWorkspaceGroup(currentGroup) ? currentGroup.title : 'Local instance'}</div>
+              <div class="switcher-heading">${isWorkspaceGroup(currentGroup) ? currentGroup.title : 'Server instance'}</div>
               ${siblings.length > 0
                 ? siblings.map(renderInstanceLink)
                 : isWorkspaceGroup(currentGroup)
@@ -3911,7 +3911,7 @@ function groupInstancesByWorkspace(instances) {
       groups.set(key, {
         key,
         title: inst.workspace ? inst.workspace.repository : inst.slug,
-        subtitle: inst.workspace ? `${inst.workspace.organization}/${inst.workspace.project}` : 'Local instance',
+        subtitle: inst.workspace ? `${inst.workspace.organization}/${inst.workspace.project}` : 'Server instance',
         instances: [],
       })
     }
@@ -3920,27 +3920,226 @@ function groupInstancesByWorkspace(instances) {
   return [...groups.values()].sort((a, b) => a.title.localeCompare(b.title))
 }
 
-// The list-pane row's secondary line — deliberately the same shape whether the group holds one instance or several (count · distinct definitions), rather than branching into a one-off "single instance" format, so a single-instance workspace is never visually singled out from a multi-instance one (the ticket's own "no special-casing visible to the user" acceptance criterion).
+// The list-pane row's secondary line — deliberately the same shape whether the group holds one instance or several (count · distinct definitions), rather than branching into a one-off "single instance" format, so a single-instance workspace is never visually singled out from a multi-instance one (the ticket's own "no special-casing visible to the user" acceptance criterion). A local-workspace group (see useLocalGroups below) carries no `definition` per instance and has its own recovery states, so it gets its own, simpler summary text instead.
 function groupSummaryText(group) {
+  if (group.kind === 'local') {
+    if (group.state === 'loading') return 'Opening…'
+    if (group.state !== 'granted') return 'Needs permission'
+    const count = group.instances.length
+    return `${count} instance${count === 1 ? '' : 's'}`
+  }
   const definitions = [...new Set(group.instances.map((inst) => inst.definition))]
   const count = group.instances.length
   return `${count} instance${count === 1 ? '' : 's'} · ${definitions.join(', ')}`
 }
 
-// A group's dot in the list pane reflects every one of its instances being complete, not just the first — a multi-instance workspace with even one outstanding instance is "in progress" as a whole.
+// A group's dot in the list pane reflects every one of its instances being complete, not just the first — a multi-instance workspace with even one outstanding instance is "in progress" as a whole. A local-workspace group has no per-instance `status` at all (ADR-0029) — its dot instead reflects whether its folder permission is currently granted.
 function groupStatusClass(group) {
+  if (group.kind === 'local') return group.state === 'granted' ? 'agreed' : 'draft'
   return group.instances.every((inst) => inst.status === 'complete') ? 'agreed' : 'draft'
 }
 
+// ---------- Local workspaces, blended into the master-detail list (#296/A5, reworked by #306) ----------
+// WI #306: the dashboard used to render remembered local workspaces
+// (web/lib/localWorkspace.js, IndexedDB) as their own "Local workspaces"
+// card, entirely separate from groupInstancesByWorkspace's per-workspace
+// grouping. The maintainer asked for these blended into the *same* list
+// instead — local groups sorted to the top, no separate section/heading, no
+// per-row "Local" badge (the top-of-list position plus the subtitle text
+// below is enough). A local workspace is never in `GET /api/instances` at
+// all (ADR-0029), so it can't just be another row `groupInstancesByWorkspace`
+// produces from that response — each one needs its own client-side folder
+// read (handle + permission + `gantry-workspace/` listing), exactly the read
+// `LocalWorkspaceRow` used to perform for its own standalone section.
+//
+// `useLocalGroups` owns that: it loads `recentLocalWorkspaces()` once, then
+// mounts one invisible `LocalGroupResolver` per remembered workspace, each
+// running its own resolve() independently and reporting its result back up.
+// That keeps every local workspace's (potentially slow) folder read from
+// blocking any other row — including the server-hosted ones, which render
+// immediately from the one already-loaded `instances` list — matching the
+// "pop in asynchronously, don't block the page" requirement.
+function LocalGroupResolver({ entry, onChange, onRemoved }) {
+  const [state, setState] = useState('loading') // 'loading' | 'granted' | 'prompt' | 'denied' | 'missing'
+  const [instances, setInstances] = useState([])
+  const [busy, setBusy] = useState(false)
+
+  // Mirrors the old LocalWorkspaceRow's own resolve() exactly: same states,
+  // same recovery rules — only the destination (onChange, not this
+  // component's own render) changed.
+  async function resolve() {
+    setState('loading')
+    let handle
+    try {
+      handle = await getWorkspaceHandle(entry.id)
+    } catch {
+      setState('missing')
+      return
+    }
+    if (!handle) {
+      setState('missing')
+      return
+    }
+    let permission
+    try {
+      permission = await ensurePermission(handle)
+    } catch {
+      setState('missing')
+      return
+    }
+    if (permission === 'prompt') {
+      setState('prompt')
+      return
+    }
+    if (permission !== 'granted') {
+      setState('denied')
+      return
+    }
+    try {
+      const subdirs = await listDir(handle, 'gantry-workspace')
+      const found = []
+      for (const child of subdirs) {
+        if (child.kind !== 'directory') continue
+        try {
+          await readTextFile(handle, `gantry-workspace/${child.name}/instance.yaml`)
+          found.push({ slug: child.name })
+        } catch {
+          // A subdirectory with no instance.yaml is not an instance — skip it.
+        }
+      }
+      setInstances(found)
+      setState('granted')
+    } catch {
+      // The folder was picked before but its gantry-workspace/ is gone now.
+      setState('missing')
+    }
+  }
+
+  useEffect(() => {
+    resolve()
+    // eslint-disable-next-line
+  }, [entry.id])
+
+  // The "Reconnect" affordance (WI #306 — renamed from the recovery state's
+  // prior "Click to open"/"Reopen" wording, which read as a first-time grant
+  // rather than the repeat confirmation it actually is): re-runs the same
+  // user-gesture-backed permission prompt `ensurePermission` needs to
+  // (re-)grant a handle restored from IndexedDB, then re-resolves.
+  async function reconnect() {
+    setBusy(true)
+    try {
+      const h = await getWorkspaceHandle(entry.id)
+      if (!h) {
+        setState('missing')
+        return
+      }
+      await ensurePermission(h)
+      await resolve()
+    } catch {
+      setState('missing')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function remove() {
+    setBusy(true)
+    try {
+      await forgetWorkspace(entry.id)
+      onRemoved(entry.id)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    onChange(entry.id, {
+      // Distinct prefix from groupInstancesByWorkspace's own `local:<slug>`
+      // key (the unrelated legacy server-side "local instance" concept,
+      // ADR-0029/#306 item 4) — these two group shapes are concatenated
+      // into one array below, so their keys must never collide.
+      key: `local-workspace:${entry.id}`,
+      kind: 'local',
+      title: entry.name,
+      subtitle: 'Local workspace',
+      entry,
+      state,
+      instances,
+      busy,
+      reconnect,
+      remove,
+    })
+    // eslint-disable-next-line
+  }, [state, instances, busy])
+
+  return null
+}
+
+// Owns the list of remembered local workspaces plus every entry's resolved
+// group data, keyed by IndexedDB id. `groups` is built by mapping over
+// `entries` (already sorted most-recently-opened-first by
+// `recentLocalWorkspaces()`) rather than iterating `dataByKey` directly, so
+// local groups keep a stable, recency-based relative order as each one pops
+// in — never reordering once two have both resolved.
+function useLocalGroups() {
+  const [entries, setEntries] = useState(null)
+  const [dataByKey, setDataByKey] = useState({})
+
+  useEffect(() => {
+    let alive = true
+    recentLocalWorkspaces()
+      .then((list) => {
+        if (alive) setEntries(list)
+      })
+      .catch(() => {
+        if (alive) setEntries([])
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  function handleChange(id, data) {
+    setDataByKey((prev) => ({ ...prev, [id]: data }))
+  }
+
+  function handleRemoved(id) {
+    setEntries((prev) => (prev ?? []).filter((e) => e.id !== id))
+    setDataByKey((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+  }
+
+  const groups = (entries ?? []).map((entry) => dataByKey[entry.id]).filter(Boolean)
+
+  return { entries: entries ?? [], groups, handleChange, handleRemoved }
+}
+
+function localInstanceHref(workspaceId, slug) {
+  return `/instance/${encodeURIComponent(slug)}?local=${encodeURIComponent(workspaceId)}&slug=${encodeURIComponent(slug)}`
+}
+
 // ---------- Master-detail view ----------
-// The Workspaces landing page's default view (#102, superseding #77's flat per-instance listing): the list pane shows one row per workspace (groupInstancesByWorkspace above); selecting one shows every instance it holds in the detail pane, each its own card with definition/assignee/status, Check, Edit, and conditional management links. Assignee is displayed here but edited only from Instance Settings.
-function MasterDetailView({ instances }) {
+// The Workspaces landing page's default view (#102, superseding #77's flat per-instance listing): the list pane shows one row per workspace (groupInstancesByWorkspace above); selecting one shows every instance it holds in the detail pane, each its own card with definition/assignee/status, Check, Edit, and conditional management links. Assignee is displayed here but edited only from Instance Settings. WI #306 blends remembered local workspaces (useLocalGroups above) into this same list, sorted ahead of every server-hosted group — not a separate section — since their own folder reads resolve on their own schedule.
+// `localGroups` is owned by DashboardPage (useLocalGroups, above) rather than
+// fetched again in here — DashboardPage also needs to know how many local
+// workspaces exist (and as they resolve) to decide whether to show the empty
+// state or this view at all, before MasterDetailView itself ever mounts (a
+// dashboard with zero server-hosted instances but one remembered local
+// workspace must still reach this view, not the empty state) — see
+// DashboardPage's own doc comment.
+function MasterDetailView({ instances, localGroups }) {
   const [filter, setFilter] = useState('')
   const [selectedKey, setSelectedKey] = useState(null)
   // Keyed by instance slug (not the single shared string the old flat list used) — several instances can be in flight for the *same* selected workspace at once (one Check or one Render), and each must report its own status independently.
   const [actionStatus, setActionStatus] = useState({})
 
-  const groups = groupInstancesByWorkspace(instances)
+  // Local groups lead the list (WI #306's resolved design: position, not a
+  // badge, is what marks them as local) — never interleaved alphabetically
+  // with the server-hosted groups that follow.
+  const groups = [...localGroups, ...groupInstancesByWorkspace(instances)]
 
   const needle = filter.trim().toLowerCase()
   const filtered = needle
@@ -3949,7 +4148,7 @@ function MasterDetailView({ instances }) {
           group.title.toLowerCase().includes(needle) ||
           group.subtitle.toLowerCase().includes(needle) ||
           group.instances.some(
-            (inst) => inst.slug.toLowerCase().includes(needle) || inst.assignee.toLowerCase().includes(needle)
+            (inst) => inst.slug.toLowerCase().includes(needle) || (inst.assignee ?? '').toLowerCase().includes(needle)
           )
       )
     : groups
@@ -4006,7 +4205,55 @@ function MasterDetailView({ instances }) {
       <div class="detail-pane">
         ${!selectedGroup
           ? html`<div class="placeholder">Select a workspace to see its instances.</div>`
-          : html`
+          : selectedGroup.kind === 'local'
+            ? html`
+                <h2>${selectedGroup.title}</h2>
+                <p class="workspace-subtitle">${selectedGroup.subtitle}</p>
+                ${selectedGroup.state === 'loading' ? html`<p class="loading">Opening…</p>` : null}
+                ${selectedGroup.state === 'prompt'
+                  ? html`
+                      <div class="local-workspace-recovery">
+                        <p>This local workspace needs permission again in this browser.</p>
+                        <div class="detail-actions">
+                          <button type="button" class="btn primary" disabled=${selectedGroup.busy} onClick=${selectedGroup.reconnect}>
+                            Reconnect
+                          </button>
+                        </div>
+                      </div>
+                    `
+                  : null}
+                ${selectedGroup.state === 'denied' || selectedGroup.state === 'missing'
+                  ? html`
+                      <div class="local-workspace-recovery">
+                        <p>Can't find this folder — reconnect or remove.</p>
+                        <div class="detail-actions">
+                          <button type="button" class="btn primary" disabled=${selectedGroup.busy} onClick=${selectedGroup.reconnect}>
+                            Reconnect
+                          </button>
+                          <button type="button" class="btn ghost" disabled=${selectedGroup.busy} onClick=${selectedGroup.remove}>
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    `
+                  : null}
+                ${selectedGroup.state === 'granted'
+                  ? html`
+                      <div class="local-instance-list">
+                        ${selectedGroup.instances.length === 0
+                          ? html`<p class="loading">No instances in this workspace yet.</p>`
+                          : selectedGroup.instances.map(
+                              (inst) => html`
+                                <a class="local-instance-row" key=${inst.slug} href=${localInstanceHref(selectedGroup.entry.id, inst.slug)}>
+                                  <span class="name">${inst.slug}</span>
+                                </a>
+                              `
+                            )}
+                      </div>
+                    `
+                  : null}
+              `
+            : html`
               <h2>${selectedGroup.title}</h2>
               <p class="workspace-subtitle">${selectedGroup.subtitle}</p>
               ${(() => {
@@ -4344,205 +4591,20 @@ function ArchivedWorkspacesPanel({ onRestored }) {
   `
 }
 
-// ---------- Local workspaces (#296, Feature #290 / A5) ----------
-// Client-side merge of the browser's own "recent local workspaces"
-// (web/lib/localWorkspace.js, IndexedDB) into the landing page. The gantry
-// server holds no record of these (ADR-0029), so this is resolved entirely
-// in the browser and never blocks the server-row render: the section mounts
-// empty, reads IndexedDB, then fills a row in per remembered workspace as its
-// directory handle + permission resolve. Local rows carry no workspace
-// number (ADR-0024 is server-side only) and are always shown regardless of
-// advanced mode — a local workspace is never Azure-DevOps-backed.
-
-// One remembered local workspace. Owns its own handle/permission lifecycle so
-// a `'prompt'` handle can be re-granted (user gesture) and a missing/denied
-// one can be removed without disturbing sibling rows or the server listing.
-function LocalWorkspaceRow({ entry, onRemove }) {
-  // 'loading' | 'granted' | 'prompt' | 'denied' | 'missing'
-  const [state, setState] = useState('loading')
-  const [instances, setInstances] = useState([])
-  const [busy, setBusy] = useState(false)
-
-  async function resolve() {
-    setState('loading')
-    let handle
-    try {
-      handle = await getWorkspaceHandle(entry.id)
-    } catch {
-      setState('missing')
-      return
-    }
-    if (!handle) {
-      setState('missing')
-      return
-    }
-    let permission
-    try {
-      permission = await ensurePermission(handle)
-    } catch {
-      setState('missing')
-      return
-    }
-    if (permission === 'prompt') {
-      setState('prompt')
-      return
-    }
-    if (permission !== 'granted') {
-      setState('denied')
-      return
-    }
-    try {
-      const subdirs = await listDir(handle, 'gantry-workspace')
-      const found = []
-      for (const child of subdirs) {
-        if (child.kind !== 'directory') continue
-        try {
-          await readTextFile(handle, `gantry-workspace/${child.name}/instance.yaml`)
-          found.push({ slug: child.name })
-        } catch {
-          // A subdirectory with no instance.yaml is not an instance — skip it.
-        }
-      }
-      setInstances(found)
-      setState('granted')
-    } catch {
-      // The folder was picked before but its gantry-workspace/ is gone now.
-      setState('missing')
-    }
-  }
-
-  useEffect(() => {
-    resolve()
-    // eslint-disable-next-line
-  }, [entry.id])
-
-  async function clickToOpen() {
-    setBusy(true)
-    try {
-      const handle = await getWorkspaceHandle(entry.id)
-      if (!handle) {
-        setState('missing')
-        return
-      }
-      // This click is the user gesture the File System Access API needs to
-      // (re-)prompt for permission on a handle restored from IndexedDB.
-      await ensurePermission(handle)
-      await resolve()
-    } catch {
-      setState('missing')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function remove() {
-    setBusy(true)
-    try {
-      await forgetWorkspace(entry.id)
-      onRemove()
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const instanceHrefFor = (slug) =>
-    `/instance/${encodeURIComponent(slug)}?local=${encodeURIComponent(entry.id)}&slug=${encodeURIComponent(slug)}`
-
-  return html`
-    <div class="local-workspace-row" data-state=${state}>
-      <div class="local-workspace-head">
-        <span class="name">${entry.name}</span>
-        <span class="local-badge">Local</span>
-      </div>
-      <p class="workspace-subtitle">Local workspace</p>
-      ${state === 'loading' ? html`<p class="loading">Opening…</p>` : null}
-      ${state === 'prompt'
-        ? html`
-            <button type="button" class="btn small" disabled=${busy} onClick=${clickToOpen}>
-              Click to open
-            </button>
-          `
-        : null}
-      ${state === 'granted'
-        ? html`
-            <div class="local-instance-list">
-              ${instances.length === 0
-                ? html`<p class="loading">No instances in this workspace yet.</p>`
-                : instances.map(
-                    (inst) => html`
-                      <a class="local-instance-row" key=${inst.slug} href=${instanceHrefFor(inst.slug)}>
-                        <span class="name">${inst.slug}</span>
-                      </a>
-                    `
-                  )}
-            </div>
-          `
-        : null}
-      ${state === 'denied' || state === 'missing'
-        ? html`
-            <div class="local-workspace-recovery">
-              <p>Can't find this folder — reopen or remove.</p>
-              <div class="detail-actions">
-                <button type="button" class="btn small" disabled=${busy} onClick=${clickToOpen}>Reopen</button>
-                <button type="button" class="btn small ghost" disabled=${busy} onClick=${remove}>Remove</button>
-              </div>
-            </div>
-          `
-        : null}
-    </div>
-  `
-}
-
-// The dashboard's Local-workspaces block. Renders nothing until IndexedDB has
-// been read, and nothing at all when there are no remembered workspaces — so
-// a browser that has never opened one sees the dashboard exactly as before.
-function LocalWorkspacesSection({ onCountChange }) {
-  const [entries, setEntries] = useState(null)
-
-  useEffect(() => {
-    let alive = true
-    recentLocalWorkspaces()
-      .then((list) => {
-        if (alive) setEntries(list)
-      })
-      .catch(() => {
-        if (alive) setEntries([])
-      })
-    return () => {
-      alive = false
-    }
-  }, [])
-
-  useEffect(() => {
-    onCountChange?.(entries ? entries.length : 0)
-    // eslint-disable-next-line
-  }, [entries])
-
-  function removeEntry(id) {
-    setEntries((prev) => (prev ?? []).filter((e) => e.id !== id))
-  }
-
-  if (!entries || entries.length === 0) return null
-
-  return html`
-    <section class="local-workspaces">
-      <h2 class="local-workspaces-heading">Local workspaces</h2>
-      <div class="local-workspaces-list">
-        ${entries.map(
-          (entry) => html`
-            <${LocalWorkspaceRow} key=${entry.id} entry=${entry} onRemove=${() => removeEntry(entry.id)} />
-          `
-        )}
-      </div>
-    </section>
-  `
-}
-
 // ---------- Dashboard page ----------
+// WI #306: `useLocalGroups` (and mounting its `LocalGroupResolver`s) lives up
+// here, not inside MasterDetailView, so this page knows how many local
+// workspaces are remembered — and can react as each one's folder read pops
+// in — independently of which server-hosted view is (or isn't) mounted. A
+// dashboard with zero server-hosted instances but one remembered local
+// workspace must still reach MasterDetailView rather than the empty state,
+// which requires that count to be available before MasterDetailView itself
+// ever renders.
 function DashboardPage() {
   const [instances, setInstances] = useState(null)
   const [error, setError] = useState(null)
-  const [localCount, setLocalCount] = useState(0)
+  const { entries: localEntries, groups: localGroups, handleChange: onLocalChange, handleRemoved: onLocalRemoved } = useLocalGroups()
+  const localCount = localEntries.length
 
   function reloadInstances() {
     loadInstances()
@@ -4565,6 +4627,11 @@ function DashboardPage() {
 
   return html`
     <main class="dashboard">
+      ${localEntries.map(
+        (entry) => html`
+          <${LocalGroupResolver} key=${entry.id} entry=${entry} onChange=${onLocalChange} onRemoved=${onLocalRemoved} />
+        `
+      )}
       <div class="dashboard-topbar">
         <div class="dashboard-heading">
           <${GantryBrandIcon} />
@@ -4578,18 +4645,21 @@ function DashboardPage() {
           <a class="btn small ghost" href=${`/settings?from=${encodeURIComponent('/')}`}>Settings</a>
         </div>
       </div>
-      <${LocalWorkspacesSection} onCountChange=${setLocalCount} />
       ${error
         ? html`<p class="load-error">Failed to load: ${error}</p>`
         : !instances
           ? html`<p class="loading">Loading…</p>`
-          : visibleInstances.length === 0
-            ? localCount > 0
-              ? null
-              : html`<${EmptyState} />`
-            : dashboardViewMode.value === 'swimlanes'
+          : visibleInstances.length === 0 && localCount === 0
+            ? html`<${EmptyState} />`
+            : // WI #306: remembered local workspaces are blended into
+              // MasterDetailView's own list now (no separate section) — swimlane
+              // view still groups only server-hosted instances by definition/stage
+              // (groupInstancesByWorkspace never drove that view), so it's only
+              // chosen once there's at least one server-hosted instance to show;
+              // master-detail is what renders local-only dashboards.
+              dashboardViewMode.value === 'swimlanes' && visibleInstances.length > 0
               ? html`<${SwimlaneView} instances=${visibleInstances} />`
-              : html`<${MasterDetailView} instances=${visibleInstances} />`}
+              : html`<${MasterDetailView} instances=${visibleInstances} localGroups=${localGroups} />`}
       ${instances ? html`<${ArchivedInstancesPanel} onRestored=${reloadInstances} />` : null}
       ${instances ? html`<${ArchivedWorkspacesPanel} onRestored=${reloadInstances} />` : null}
     </main>

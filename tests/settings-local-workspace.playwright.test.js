@@ -10,8 +10,8 @@ import { withRunningServer } from './helpers/lifecycle.js'
 // each screen (option (b) from the ticket): read straight from the picked
 // folder's own `workspace.json` / `instance.yaml` through the remembered
 // `FileSystemDirectoryHandle`, exactly the way the dashboard's own recovery
-// UI (web/app.js's LocalWorkspaceRow, #296/A5) and the editor's local-save
-// path (#297/A6) already do — never a broken fetch.
+// UI (web/app.js's LocalGroupResolver, #296/A5, reworked by #306) and the
+// editor's local-save path (#297/A6) already do — never a broken fetch.
 //
 // The File System Access API is not driveable from a headless test browser
 // (see tests/wizard-local-workspace.playwright.test.js's own doc comment),

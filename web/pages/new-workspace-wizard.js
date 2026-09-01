@@ -155,6 +155,26 @@ const importForgotten = signal(false)
 
 // ---------- Step 1: pick or register a Workspace ----------
 const workspaceMode = signal('pick') // 'pick' | 'register'
+
+// WI #306 item 1: a first-time local-workspace user has nothing to pick
+// yet — Server-hosted's own empty-state nudge on the Pick screen already
+// assumes exactly this ("No workspaces registered yet — switch to
+// Register"), so Local mode should start there instead of making the
+// architect discover "Register" themselves. Mirrors the
+// workspaceLocation-forcing effect above, and is deliberately symmetric —
+// switching *back* to Server-hosted resets to 'pick', its own unchanged
+// default — rather than only forcing 'register' on the way into Local and
+// leaving that choice to leak into Server-hosted on the way back out
+// (which would violate "Server-hosted's existing Pick-first/Pick-default
+// behaviour must not change"). Only fires on an actual workspaceLocation
+// change (effects re-run on their dependencies changing, not on every
+// render), so a deliberate in-place choice of "Register new workspace"
+// while already on Server-hosted is left alone unless the architect
+// round-trips through Local and back.
+effect(() => {
+  workspaceMode.value = workspaceLocation.value === 'local' ? 'register' : 'pick'
+})
+
 const workspaces = signal(null) // fetched GET /api/workspaces list, null while loading
 const workspacesLoadError = signal('')
 const pickedWorkspaceId = signal('')
@@ -273,7 +293,14 @@ function resetWizard() {
   importPayload.value = null
   importForgetResolved.value = false
   importForgotten.value = false
-  workspaceMode.value = 'pick'
+  // WI #306 item 1: a reset wizard that lands back in Local mode (the
+  // default when advanced mode is off) should still open on Register, not
+  // Pick — same as a first-ever visit. When `workspaceLocation` above is
+  // already 'local' before this line runs (e.g. advanced mode off, so the
+  // assignment above was a no-op signal write), the effect that otherwise
+  // drives this default never re-fires — so this has to set it explicitly
+  // rather than rely on that effect alone.
+  workspaceMode.value = workspaceLocation.value === 'local' ? 'register' : 'pick'
   workspaces.value = null
   workspacesLoadError.value = ''
   pickedWorkspaceId.value = ''
@@ -1367,7 +1394,7 @@ function LocalWorkspacePanel() {
                                     class="btn small"
                                     onClick=${() => useRecentLocalWorkspace(entry.id)}
                                   >
-                                    Grant access
+                                    Reconnect
                                   </button>
                                 `
                               : html`
@@ -1701,20 +1728,33 @@ function WorkspaceStep() {
 
     <div class="wizard-field">
       <div class="wizard-mode-toggle" role="group" aria-label="Workspace source">
-        <button
-          type="button"
-          class=${'btn small' + (workspaceMode.value === 'pick' ? ' active' : '')}
-          onClick=${() => (workspaceMode.value = 'pick')}
-        >
-          ${workspaceLocation.value === 'local' ? 'Pick existing local workspace' : 'Pick existing workspace'}
-        </button>
-        <button
-          type="button"
-          class=${'btn small' + (workspaceMode.value === 'register' ? ' active' : '')}
-          onClick=${() => (workspaceMode.value = 'register')}
-        >
-          ${workspaceLocation.value === 'local' ? 'Register new local workspace' : 'Register new workspace'}
-        </button>
+        ${(() => {
+          const isLocal = workspaceLocation.value === 'local'
+          const pickButton = html`
+            <button
+              type="button"
+              class=${'btn small' + (workspaceMode.value === 'pick' ? ' active' : '')}
+              onClick=${() => (workspaceMode.value = 'pick')}
+            >
+              ${isLocal ? 'Pick existing local workspace' : 'Pick existing workspace'}
+            </button>
+          `
+          const registerButton = html`
+            <button
+              type="button"
+              class=${'btn small' + (workspaceMode.value === 'register' ? ' active' : '')}
+              onClick=${() => (workspaceMode.value = 'register')}
+            >
+              ${isLocal ? 'Register new local workspace' : 'Register new workspace'}
+            </button>
+          `
+          // WI #306 item 1: Local mode only — Register renders first (and
+          // defaults selected, via the workspaceLocation effect above),
+          // matching a first-time local-workspace user having nothing to
+          // pick yet. Server-hosted keeps its existing Pick-first order and
+          // default unchanged.
+          return isLocal ? html`${registerButton}${pickButton}` : html`${pickButton}${registerButton}`
+        })()}
       </div>
     </div>
 
@@ -1919,6 +1959,16 @@ function WorkspaceStep() {
   `
 }
 
+// This step is shared by both the Server-hosted and Local flows — see the
+// Assignee field below for WI #306 item 2's local-flow-specific branch: a
+// plain text input there, not <${IdentityPicker}>, since a local workspace
+// has no Azure DevOps organization/project (`ws.organization`/`ws.project`
+// are both undefined) for IdentityPicker's search() to scope its
+// `/api/identities` lookup to — it would otherwise still fire that request
+// against whatever org/project the server falls back to, a real Azure
+// DevOps identity search with no local-workspace meaning at all. Mirrors
+// `LocalInstanceSettingsPage` in web/pages/settings.js (#303), which made
+// the same call for the *Instance Settings* screen's own Assignee field.
 function InstanceStep() {
   const ws = selectedWorkspace.value
   const ticketingEnabled = Boolean(ws?.ticketingSystem)
@@ -2012,14 +2062,27 @@ function InstanceStep() {
 
     <div class="wizard-field">
       <label for="instance-assignee">Assignee</label>
-      <${IdentityPicker}
-        id="instance-assignee"
-        value=${assigneeField.value}
-        onChange=${(uniqueName) => (assigneeField.value = uniqueName)}
-        placeholder="Unassigned"
-        organization=${ws?.organization}
-        project=${ws?.project}
-      />
+      ${ws.isLocal
+        ? html`
+            <input
+              class="wizard-input"
+              id="instance-assignee"
+              type="text"
+              value=${assigneeField.value}
+              placeholder="Unassigned"
+              onInput=${(e) => (assigneeField.value = e.currentTarget.value)}
+            />
+          `
+        : html`
+            <${IdentityPicker}
+              id="instance-assignee"
+              value=${assigneeField.value}
+              onChange=${(uniqueName) => (assigneeField.value = uniqueName)}
+              placeholder="Unassigned"
+              organization=${ws?.organization}
+              project=${ws?.project}
+            />
+          `}
     </div>
 
     <div class="wizard-field" style="display:flex;gap:8px">

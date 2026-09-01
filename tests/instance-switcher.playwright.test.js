@@ -115,7 +115,7 @@ test('instance switcher: defaults to the current workspace\'s other instances, a
   )
 })
 
-test('instance switcher: a local instance (no workspace) says so without claiming a workspace, and clicking outside the panel closes it', async () => {
+test('instance switcher: a server-side instance (no workspace) says so without claiming a workspace, and clicking outside the panel closes it', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     createInstance('design', 'alpha-initiative', { instancesDir })
@@ -131,10 +131,12 @@ test('instance switcher: a local instance (no workspace) says so without claimin
         const menu = page.locator('.instance-switcher .menu')
         await menu.waitFor({ state: 'visible', timeout: 5_000 })
 
-        // A local instance has no workspace siblings of its own — and the
-        // empty-state copy must not claim "workspace" for it (Workspace is
-        // a reserved, Azure-DevOps-repo-only entity, docs/adr/0009).
-        assert.equal(await menu.locator('.switcher-heading').first().textContent(), 'Local instance')
+        // A server-side instance (the legacy, unrelated-to-local-workspaces
+        // concept, ADR-0029 — labelled "Server instance", WI #306 item 4)
+        // has no workspace siblings of its own — and the empty-state copy
+        // must not claim "workspace" for it (Workspace is a reserved,
+        // Azure-DevOps-repo-only entity, docs/adr/0009).
+        assert.equal(await menu.locator('.switcher-heading').first().textContent(), 'Server instance')
         assert.match(await menu.locator('.switcher-empty').textContent(), /not part of a workspace/)
         // But zebra-initiative's own (separate, local) group is still
         // reachable via the escape hatch — worded generically ("Browse
@@ -162,7 +164,7 @@ test('instance switcher: a local instance (no workspace) says so without claimin
 // scenario #104 exists for) would have every one of its rows — including
 // the very instance whose own page is asking — silently fail to
 // authenticate and drop out of the response, leaving the switcher
-// incorrectly reporting "Local instance"/no siblings for a real,
+// incorrectly reporting "Server instance"/no siblings for a real,
 // multi-instance workspace. Here the global default is deliberately left
 // unset (and, if it were used, would be be rejected outright) — only a
 // workspace-specific override is seeded — so this only passes if the
@@ -202,7 +204,7 @@ test('instance switcher: still shows the current workspace\'s real siblings when
             await menu.waitFor({ state: 'visible', timeout: 5_000 })
 
             // Correctly identified as the real workspace (not misreported
-            // as "Local instance"), with its real sibling listed.
+            // as "Server instance"), with its real sibling listed.
             assert.equal(await menu.locator('.switcher-heading').first().textContent(), REPOSITORY)
             assert.equal(await menu.locator('.switcher-item').count(), 1)
             assert.equal(await menu.locator('.switcher-item .name').textContent(), 'instance-two')

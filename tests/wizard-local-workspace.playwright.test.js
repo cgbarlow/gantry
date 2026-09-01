@@ -92,6 +92,101 @@ function withServer(fn) {
   })
 }
 
+// ---------------------------------------------------------------------------
+// WI #306 item 1 — Local mode only: Register renders first and is selected
+// by default (Server-hosted's own Pick-first/Pick-default behaviour must
+// not change).
+// ---------------------------------------------------------------------------
+
+test('WI #306 item 1: switching to Local defaults to and leads with "Register new local workspace"; Server-hosted keeps Pick-first/Pick-default', async () => {
+  await withServer(async ({ gantryBase }) => {
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
+      await page.addInitScript(FS_MOCK_INIT)
+
+      await page.goto(`${gantryBase}/new-workspace`)
+      await page.waitForSelector('h2:has-text("New Workspace")')
+
+      // Server-hosted (the wizard's initial location): Pick first, Pick
+      // selected by default — unchanged.
+      const sourceButtons = page.locator('.wizard-mode-toggle[aria-label="Workspace source"] button')
+      assert.deepEqual(await sourceButtons.allTextContents(), ['Pick existing workspace', 'Register new workspace'])
+      assert.match(await sourceButtons.first().getAttribute('class'), /active/)
+
+      // Local: Register leads, and is the one already selected — no click
+      // on the Pick/Register toggle itself required.
+      await page.getByRole('button', { name: 'Local', exact: true }).click()
+      assert.deepEqual(await sourceButtons.allTextContents(), [
+        'Register new local workspace',
+        'Pick existing local workspace',
+      ])
+      assert.match(await sourceButtons.first().getAttribute('class'), /active/)
+      await page.waitForSelector('#local-register-pick')
+
+      // Back to Server-hosted: still Pick-first/Pick-default, never
+      // clobbered by the Local-only default.
+      await page.getByRole('button', { name: 'Server-hosted', exact: true }).click()
+      assert.deepEqual(await sourceButtons.allTextContents(), ['Pick existing workspace', 'Register new workspace'])
+      assert.match(await sourceButtons.first().getAttribute('class'), /active/)
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// WI #306 item 2 — the Instance step's Assignee field is a plain text input
+// for a local-flow instance, not <${IdentityPicker}>: no /api/identities
+// network call should fire.
+// ---------------------------------------------------------------------------
+
+test('WI #306 item 2: a local-flow instance\'s Assignee field is plain text — no /api/identities request fires', async () => {
+  await withServer(async ({ gantryBase }) => {
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
+      await page.addInitScript(FS_MOCK_INIT)
+      const identityRequests = []
+      page.on('request', (req) => {
+        if (req.url().includes('/api/identities')) identityRequests.push(req.url())
+      })
+
+      await page.goto(`${gantryBase}/new-workspace`)
+      await page.waitForSelector('h2:has-text("New Workspace")')
+      await page.getByRole('button', { name: 'Local', exact: true }).click()
+      await page.getByRole('button', { name: 'Register new local workspace', exact: true }).click()
+
+      await page.locator('#local-register-pick').click()
+      await page.waitForSelector('#local-ws-name')
+      await page.locator('#local-ws-name').fill('Plain Assignee WS')
+      await page.locator('#local-register-create').click()
+
+      await page.waitForSelector('#instance-name')
+      // A plain <input>, not the IdentityPicker's own wrapper/dropdown.
+      assert.equal(await page.locator('.identity-picker').count(), 0)
+      const assignee = page.locator('#instance-assignee')
+      assert.equal(await assignee.evaluate((el) => el.tagName), 'INPUT')
+
+      await page.locator('.definition-card').first().click()
+      await page.locator('#instance-name').fill('Plain Assignee Instance')
+      // Typing triggers IdentityPicker's own debounced search() if this were
+      // still that component — give it a real chance to fire before
+      // asserting it didn't.
+      await assignee.fill('a.architect')
+      await page.waitForTimeout(400)
+
+      assert.deepEqual(identityRequests, [])
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
 test('Local + Register: writes workspace.json, instance.yaml and blank module files, then navigates to the editor with ?local=', async () => {
   await withServer(async ({ gantryBase }) => {
     const browser = await launchBrowser()
@@ -485,13 +580,15 @@ test('B3: advanced mode off (default) — opens straight into the Local flow, no
       assert.equal(await page.locator('label', { hasText: 'Workspace location' }).count(), 0)
 
       // The Local Pick/Register sub-toggle is already showing — same wizard
-      // step, straight to the Local flow's own toggle (defaulting to "Pick
-      // existing", same as the sub-toggle's own default).
+      // step, straight to the Local flow's own toggle, defaulting to
+      // "Register new local workspace" (WI #306 item 1 — a first-time
+      // local-workspace user has nothing to pick yet).
       await page.waitForSelector('button:has-text("Register new local workspace")')
       assert.equal(await page.locator('#adopt-repo-url').count(), 0, 'no Azure DevOps URL field reachable')
 
       // Full round-trip through the Local + Register flow works exactly as
-      // A4 built it, unchanged.
+      // A4 built it, unchanged — Register is already selected by default,
+      // this click is a no-op confirmation of that.
       await page.getByRole('button', { name: 'Register new local workspace', exact: true }).click()
       await page.locator('#local-register-pick').click()
       await page.waitForSelector('#local-ws-name')

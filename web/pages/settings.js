@@ -435,10 +435,11 @@ function WorkspaceArchiveSection({ workspace, onChanged }) {
 // id (`local=`, threaded on by web/app.js's SettingsMenu) instead. What's
 // genuinely configurable today: the `workspace.json` fields the wizard wrote
 // at creation (name/owner/createdAt, read-only — nothing writes them back
-// after creation) and the dashboard's own "Remove"/"Grant access" recovery
-// affordances (web/app.js's LocalWorkspaceRow), reused here rather than
-// reinvented — never a PAT or ticketing-system override, which don't apply
-// to a workspace with no Azure DevOps repo behind it at all.
+// after creation) and the dashboard's own "Remove"/"Reconnect" recovery
+// affordances (web/app.js's LocalGroupResolver, reworked by #306 — still the
+// same resolve/reconnect/remove lifecycle #296/A5 first wrote), reused here
+// rather than reinvented — never a PAT or ticketing-system override, which
+// don't apply to a workspace with no Azure DevOps repo behind it at all.
 function LocalWorkspaceSettingsPage({ query, workspaceId }) {
   const [state, setState] = useState('loading') // 'loading' | 'missing' | 'grant-needed' | 'ready' | 'error'
   const [handle, setHandle] = useState(null)
