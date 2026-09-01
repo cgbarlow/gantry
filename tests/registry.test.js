@@ -81,7 +81,7 @@ test('listRegistry uses the newest local instance or module mtime for updatedAt'
     for (const moduleId of definition.stages[0].modules) {
       utimesSync(join(instancesDir, 'my-initiative', 'modules', `${moduleId}.md`), older, older)
     }
-    utimesSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), newer, newer)
+    utimesSync(join(instancesDir, 'my-initiative', 'modules', 'background.md'), newer, newer)
 
     assert.equal(listRegistry({ instancesDir })[0].updatedAt, newer.toISOString())
   })
@@ -92,11 +92,11 @@ test('listRegistry reports "complete" once every required field for the current 
     createInstance('design', 'my-initiative', { instancesDir, assignee: 'c.barlow' })
     const definition = loadDefinition('design')
 
-    for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
+    for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
       const moduleSpec = definition.modules.get(moduleId)
       const fields = {}
       for (const field of moduleSpec.fields) {
-        if (field.required) fields[field.id] = field.type === 'list' ? ['Filled in.'] : 'Filled in.'
+        if (field.required || field.requiredAt) fields[field.id] = field.type === 'list' ? ['Filled in.'] : 'Filled in.'
       }
       writeModule(definition, 'my-initiative', moduleId, { status: 'agreed', owner: '', fields }, { instancesDir })
     }
@@ -116,7 +116,7 @@ test('listRegistry falls back to \'\' for assignee when the instance record has 
     writeModule(
       definition,
       'my-initiative',
-      'context',
+      'background',
       { status: 'draft', owner: 'c.barlow', fields: {} },
       { instancesDir }
     )

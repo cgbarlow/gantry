@@ -22,9 +22,13 @@
 
 <%~ na(intro.purpose) %>
 
-## Scope
+## In scope
 
-<%~ na(intro.scope) %>
+<%~ na(intro['in-scope']) %>
+
+## Out of scope
+
+<%~ na(intro['out-of-scope']) %>
 <%~ include('templates/_introductionOptional.md.tmpl', { intro }) %>
 
 # Architecture
@@ -57,10 +61,10 @@
 
 <%~ it.modules.architecture['architectural-risks'] %>
 <% } %>
-<% if (it.modules.architecture['constraints-and-assumptions']) { %>
-## Goals, constraints and assumptions
+<% if (it.modules.architecture.constraints) { %>
+## Constraints and goals
 
-<%~ it.modules.architecture['constraints-and-assumptions'] %>
+<%~ it.modules.architecture.constraints %>
 <% } %>
 
 # Integration

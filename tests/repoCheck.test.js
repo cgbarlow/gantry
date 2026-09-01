@@ -23,7 +23,7 @@ function locationFor(baseUrl) {
 
 const CONTEXT_MODULE = [
   '---',
-  'module: context',
+  'module: background',
   'status: draft',
   'owner: c.barlow',
   '---',
@@ -36,14 +36,14 @@ const CONTEXT_MODULE = [
   '',
   '- Payments',
   '',
-  '## Out of scope',
+  '## Success criteria',
   '',
   'Nothing yet.',
   '',
 ].join('\n')
 
 // checkAzureDevOpsRepo evaluates stage status through evaluateStage → readModule, and readModule lazily migrates an old-scale file's headings to the new scale (ADR-0016) as part of the same access — so any module content that has passed through a check lands new-scale. Tests asserting byte-equality against CONTEXT_MODULE after a check compare against this migrated form instead.
-const MIGRATED_CONTEXT_MODULE = migrateModuleHeadingScale(CONTEXT_MODULE, loadDefinition('design').modules.get('context'))
+const MIGRATED_CONTEXT_MODULE = migrateModuleHeadingScale(CONTEXT_MODULE, loadDefinition('design').modules.get('background'))
 
 test('checkAzureDevOpsRepo reports "empty" for a repo with no instance data anywhere', async () => {
   await withFakeRepo({}, async (baseUrl) => {
@@ -57,7 +57,7 @@ test('checkAzureDevOpsRepo migrates a legacy repo-root instance to gantry-worksp
   await withFakeRepo(
     {
       '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-      '/modules/context.md': CONTEXT_MODULE,
+      '/modules/background.md': CONTEXT_MODULE,
     },
     async (baseUrl) => {
       const result = await checkAzureDevOpsRepo({ ...locationFor(baseUrl) })
@@ -75,12 +75,12 @@ test('checkAzureDevOpsRepo migrates a legacy repo-root instance to gantry-worksp
       // The new location has the migrated data.
       const migratedInstance = await client.getFileContent('gantry-workspace/my-initiative/instance.yaml')
       assert.match(migratedInstance, /slug: my-initiative/)
-      const migratedModule = await client.getFileContent('gantry-workspace/my-initiative/modules/context.md')
+      const migratedModule = await client.getFileContent('gantry-workspace/my-initiative/modules/background.md')
       assert.equal(migratedModule, MIGRATED_CONTEXT_MODULE)
 
       // No repo is left with instance data at both root and subdirectory simultaneously (#100's acceptance criteria) — the legacy copies are gone.
       await assert.rejects(() => client.getFileContent('instance.yaml'), AzureDevOpsNotFoundError)
-      await assert.rejects(() => client.getFileContent('modules/context.md'), AzureDevOpsNotFoundError)
+      await assert.rejects(() => client.getFileContent('modules/background.md'), AzureDevOpsNotFoundError)
     }
   )
 })
@@ -89,7 +89,7 @@ test('checkAzureDevOpsRepo discovers an already-migrated instance (no legacy roo
   await withFakeRepo(
     {
       '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-      '/gantry-workspace/my-initiative/modules/context.md': CONTEXT_MODULE,
+      '/gantry-workspace/my-initiative/modules/background.md': CONTEXT_MODULE,
     },
     async (baseUrl) => {
       const result = await checkAzureDevOpsRepo(locationFor(baseUrl))
@@ -110,7 +110,7 @@ test('checkAzureDevOpsRepo is safe to call again on an already-migrated repo', a
   await withFakeRepo(
     {
       '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-      '/modules/context.md': CONTEXT_MODULE,
+      '/modules/background.md': CONTEXT_MODULE,
     },
     async (baseUrl) => {
       const first = await checkAzureDevOpsRepo(locationFor(baseUrl))
@@ -162,12 +162,12 @@ test('checkAzureDevOpsRepo reports "found" with the raw malformed slug for a leg
 test('an interrupted migration leaves the legacy root instance.yaml in place (not deleted) so it can still be detected and retried', async () => {
   const files = {
     '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-    '/modules/context.md': CONTEXT_MODULE,
+    '/modules/background.md': CONTEXT_MODULE,
     '/modules/solution-definition.md':
       '---\nmodule: solution-definition\nstatus: complete\nowner: real.owner\n---\n\n## Solution\n\nReal, already-saved content.\n',
   }
 
-  // Push 1: write the new instance.yaml. Push 2: write "context" (the first module, per listFolder's alphabetical order) to its new location. Failing after 2 pushes interrupts the very next step — deleting "context"'s legacy copy — before "solution-definition" (the second module) is ever touched.
+  // Push 1: write the new instance.yaml. Push 2: write "background" (the first module, per listFolder's alphabetical order) to its new location. Failing after 2 pushes interrupts the very next step — deleting "background"'s legacy copy — before "solution-definition" (the second module) is ever touched.
   await withFakeAzureDevOpsServer(
     { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files, failAfterPushes: 2 },
     async (baseUrl) => {
@@ -190,7 +190,7 @@ test('checkAzureDevOpsRepo resumes and completes a previously-interrupted migrat
     {
       '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
       '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-      '/gantry-workspace/my-initiative/modules/context.md': CONTEXT_MODULE,
+      '/gantry-workspace/my-initiative/modules/background.md': CONTEXT_MODULE,
       '/modules/solution-definition.md':
         '---\nmodule: solution-definition\nstatus: complete\nowner: real.owner\n---\n\n## Solution\n\nReal, already-saved content.\n',
     },
@@ -203,7 +203,7 @@ test('checkAzureDevOpsRepo resumes and completes a previously-interrupted migrat
       const client = createAzureDevOpsClient(locationFor(baseUrl))
 
       // The already-migrated module is untouched/uncorrupted (its content, having been read for the status rollup, is new-scale per ADR-0016's lazy migration)...
-      assert.equal(await client.getFileContent('gantry-workspace/my-initiative/modules/context.md'), MIGRATED_CONTEXT_MODULE)
+      assert.equal(await client.getFileContent('gantry-workspace/my-initiative/modules/background.md'), MIGRATED_CONTEXT_MODULE)
       // ...and the previously-stranded one is now migrated too, with its real content intact.
       const migratedSolutionDefinition = await client.getFileContent('gantry-workspace/my-initiative/modules/solution-definition.md')
       assert.match(migratedSolutionDefinition, /Real, already-saved content\./)
@@ -219,7 +219,7 @@ test('migrateLegacyAzureDevOpsInstance moves instance.yaml and every module file
   await withFakeRepo(
     {
       '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-      '/modules/context.md': CONTEXT_MODULE,
+      '/modules/background.md': CONTEXT_MODULE,
       '/modules/solution-definition.md': '# Solution\n',
     },
     async (baseUrl) => {
@@ -229,10 +229,10 @@ test('migrateLegacyAzureDevOpsInstance moves instance.yaml and every module file
       await migrateLegacyAzureDevOpsInstance(client, 'my-initiative', instanceYamlText)
 
       assert.equal(await client.getFileContent('gantry-workspace/my-initiative/instance.yaml'), instanceYamlText)
-      assert.equal(await client.getFileContent('gantry-workspace/my-initiative/modules/context.md'), CONTEXT_MODULE)
+      assert.equal(await client.getFileContent('gantry-workspace/my-initiative/modules/background.md'), CONTEXT_MODULE)
       assert.equal(await client.getFileContent('gantry-workspace/my-initiative/modules/solution-definition.md'), '# Solution\n')
       await assert.rejects(() => client.getFileContent('instance.yaml'), AzureDevOpsNotFoundError)
-      await assert.rejects(() => client.getFileContent('modules/context.md'), AzureDevOpsNotFoundError)
+      await assert.rejects(() => client.getFileContent('modules/background.md'), AzureDevOpsNotFoundError)
       await assert.rejects(() => client.getFileContent('modules/solution-definition.md'), AzureDevOpsNotFoundError)
 
       // Re-running against the same (now legacy-empty) content is a safe no-op re-write of the already-migrated files — used as the "explicit migration routine" entry point on its own, independent of checkAzureDevOpsRepo's own lazy call.
@@ -253,7 +253,7 @@ test('migrateLegacyAzureDevOpsInstance moves a legacy instance on a non-default 
     const branch = 'stage/hld-definition'
     const instanceYamlText = 'definition: design\nslug: my-initiative\nstage: shape\n'
     await client.writeFile('instance.yaml', instanceYamlText, { branch })
-    await client.writeFile('modules/context.md', CONTEXT_MODULE, { branch })
+    await client.writeFile('modules/background.md', CONTEXT_MODULE, { branch })
 
     await migrateLegacyAzureDevOpsInstance(client, 'my-initiative', instanceYamlText, branch)
 
@@ -261,7 +261,7 @@ test('migrateLegacyAzureDevOpsInstance moves a legacy instance on a non-default 
       await client.getFileContent('gantry-workspace/my-initiative/instance.yaml', { branch }),
       instanceYamlText
     )
-    assert.equal(await client.getFileContent('gantry-workspace/my-initiative/modules/context.md', { branch }), CONTEXT_MODULE)
+    assert.equal(await client.getFileContent('gantry-workspace/my-initiative/modules/background.md', { branch }), CONTEXT_MODULE)
     await assert.rejects(() => client.getFileContent('instance.yaml', { branch }), AzureDevOpsNotFoundError)
 
     // 'main' was never touched by any of the above — it has no ref at all.
@@ -282,7 +282,7 @@ test('checkAzureDevOpsRepo reads/migrates/evaluates against the caller-supplied 
       branchFiles: {
         [branch]: {
           '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-          '/modules/context.md': CONTEXT_MODULE,
+          '/modules/background.md': CONTEXT_MODULE,
         },
       },
     },

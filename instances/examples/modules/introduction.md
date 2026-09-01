@@ -20,9 +20,13 @@ engineer or a future delivery team — unfamiliar with this system — to operat
 it, change it safely, or rebuild it. It is also the evidence base for the
 Certification and Accreditation (C&A) sign-off obtained before go-live.
 
-## Scope
+## In scope
 
-### In scope
+The first release covers the ContosoSelfService entry point, application intake and review,
+carrier provisioning, payment, notifications, reporting, and annual review of
+the Mobile Phone Assistance benefit. For the provider-certificate workstream:
+a new provider-facing submission portal, one-time reference code issuance and
+validation, and automated attachment to the client's existing EOS application.
 
 - A public web portal for provider-authenticated certificate submission.
 - An internal Intake API that validates the one-time reference code, validates
@@ -32,7 +36,16 @@ Certification and Accreditation (C&A) sign-off obtained before go-live.
 - AWS infrastructure for the portal, the API, the session store and the
   certificates bucket, all in the existing Contoso landing zone.
 
-### Out of scope
+## Out of scope
+
+Selecting or negotiating the mobile carrier partnership itself is out of
+scope for this initiative — that commercial arrangement is assumed to exist
+by the time this solution is built. Support for multiple concurrent carriers
+is also out of scope for the first release; the solution is scoped to a
+single carrier integration. No change is made to how Disability Allowance
+applications are created or assessed, and there is no provider
+self-registration capability (providers must already hold
+provider-authentication service credentials).
 
 - Provider registration and provider identity — handled entirely by the
   external provider-authentication service.
@@ -59,6 +72,11 @@ Certification and Accreditation (C&A) sign-off obtained before go-live.
   `reference_codes` table within the `eos-sync` interval (nominally 5 minutes).
 - The existing shared Postgres instance has capacity for the additional
   `intake` schema.
+- The carrier will provide a portal that can be linked from ContosoSelfService to browse
+  available phones and plans, and an API for provisioning and terminating a
+  subscription once an application is approved. The carrier handles physical
+  delivery of the device through its own existing channels (courier or
+  in-branch pickup) — Contoso does not take on any device logistics.
 
 ## Caveats
 

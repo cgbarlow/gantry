@@ -13,7 +13,8 @@ fields:
     guidance: >
       Describe the business processes, users and regulatory context this
       architecture sits within — the background the rest of this section
-      assumes.
+      assumes. Already approved at earlier stages — see `background` and the
+      HLD's `proposed-solution`; do not re-derive, summarise for builders.
 
   - id: standards
     title: Applicable standards
@@ -30,7 +31,9 @@ fields:
     required: true
     guidance: >
       The decisions that shaped this architecture and why — not just what
-      was decided, but what else was on the table.
+      was decided, but what else was on the table. Deepen the
+      `solution-definition.high-level-solution-overview` sketch to build-ready
+      depth rather than starting over.
 
   - id: solution-description
     title: Solution description
@@ -38,7 +41,9 @@ fields:
     required: true
     guidance: >
       The components and how they fit together. Reference a diagram if you
-      have one, but describe the structure in words too.
+      have one, but describe the structure in words too. Expands the
+      `solution-definition` `high-level-solution-overview` / `process-flow`
+      sketch — the original stays at `modules/solution-definition.md`.
 
   - id: logical-components
     title: Logical components
@@ -57,7 +62,13 @@ fields:
       belongs in the `risks` module — this is for risk that's a direct
       consequence of a structural choice made here.
 
-  - id: constraints-and-assumptions
-    title: Goals, constraints and assumptions
+  - id: constraints
+    title: Constraints and goals
     type: markdown
     required: false
+    guidance: >
+      Architecture-specific constraints and goals only — the boundaries and
+      objectives that shaped this structure (e.g. a fixed platform, a latency
+      budget, a "reuse existing services" goal). Solution-wide assumptions
+      belong in `introduction.assumptions`; list here only what is particular
+      to the architecture and cross-reference that field.

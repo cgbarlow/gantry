@@ -10,3 +10,5 @@ fields:
     required: false
     guidance: >
       List each open question, who needs to resolve it and when it needs resolving.
+      Questions that mature into risks migrate to `risks` (`open-issues` ->
+      `risk-register`) at detailed design.

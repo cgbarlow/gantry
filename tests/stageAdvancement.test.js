@@ -31,7 +31,7 @@ function fillStageModules(instancesDir, slug, moduleIds) {
   }
 }
 
-const SHAPE_MODULES = ['context', 'solution-definition', 'team-and-estimates']
+const SHAPE_MODULES = ['background', 'introduction', 'solution-definition', 'team-and-estimates']
 
 test('throws, and writes nothing, when the current stage\'s gate has not passed', () => {
   withScratchInstances((instancesDir) => {
@@ -81,7 +81,7 @@ test('throws, and writes nothing, once the instance is already at its definition
 
     fillStageModules(instancesDir, 'my-initiative', [
       'hld-submission',
-      'problem-statement',
+      'background',
       'proposed-solution',
       'alternatives-considered',
       'open-questions',
@@ -89,6 +89,7 @@ test('throws, and writes nothing, once the instance is already at its definition
       'risks',
       'security',
       'dependencies',
+      'introduction',
     ])
     advanceStage('my-initiative', { instancesDir }) // hld-define -> detailed-design
 

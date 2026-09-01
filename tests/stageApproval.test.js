@@ -50,7 +50,7 @@ function withServer(overrides, fn) {
 // checkGate's "business-case" gate genuinely passes there.
 async function fillShapeStage(azureDevOps, branch) {
   const client = createAzureDevOpsClient(azureDevOps)
-  for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
+  for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
     const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
     await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
   }
@@ -123,7 +123,7 @@ test('requestStageApproval auto-renders missing required artefacts and opens PR 
     const azureDevOps = locationFor(baseUrl)
     const branch = await resolveStageBranch(azureDevOps, definition, SLUG, SHAPE.id)
     const client = createAzureDevOpsClient(azureDevOps)
-    for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
+    for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
       const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
       await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
     }
@@ -213,7 +213,7 @@ test('requestStageApproval still aborts with render error when artefact renderin
   const shapeModules = {
     [`/gantry-workspace/${SLUG}/instance.yaml`]: `definition: design\nslug: ${SLUG}\nstage: ${SHAPE.id}\n`,
   }
-  for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
+  for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
     shapeModules[`/gantry-workspace/${SLUG}/modules/${moduleId}.md`] = readFileSync(
       join('instances', 'examples', 'modules', `${moduleId}.md`),
       'utf8'

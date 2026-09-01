@@ -151,17 +151,17 @@ test('an asset:<id> reference (#80) inserted into a module field compiles into a
     )
 
     const definition = loadDefinition('design')
-    const context = readModule(definition, 'examples', 'context', { instancesDir })
+    const background = readModule(definition, 'examples', 'background', { instancesDir })
     writeModule(
       definition,
       'examples',
-      'context',
+      'background',
       {
-        status: context.status,
-        owner: context.owner,
+        status: background.status,
+        owner: background.owner,
         fields: {
-          ...context.fields,
-          driver: `${context.fields.driver}\n\n![Eligibility flow](asset:${asset.id})\n`,
+          ...background.fields,
+          problem: `${background.fields.problem}\n\n![Eligibility flow](asset:${asset.id})\n`,
         },
       },
       { instancesDir }
@@ -308,7 +308,8 @@ function escapeRegExp(value) {
 function seedExamplesAzureDevOpsFiles() {
   return {
     '/gantry-workspace/examples/instance.yaml': readFileSync('instances/examples/instance.yaml', 'utf8'),
-    '/gantry-workspace/examples/modules/context.md': readFileSync('instances/examples/modules/context.md', 'utf8'),
+    '/gantry-workspace/examples/modules/background.md': readFileSync('instances/examples/modules/background.md', 'utf8'),
+    '/gantry-workspace/examples/modules/introduction.md': readFileSync('instances/examples/modules/introduction.md', 'utf8'),
     '/gantry-workspace/examples/modules/solution-definition.md': readFileSync('instances/examples/modules/solution-definition.md', 'utf8'),
     '/gantry-workspace/examples/modules/team-and-estimates.md': readFileSync('instances/examples/modules/team-and-estimates.md', 'utf8'),
   }
@@ -585,11 +586,11 @@ test('renderStageArtefacts reports an artefact as skipped, not failed, when its 
       repository: REPOSITORY,
       validPat: VALID_PAT,
       files: {},
-      // Only "context" has been saved so far — "soap" also requires solution-definition and team-and-estimates, neither of which exist yet, exactly the state a stage is in after its very first module save.
+      // Only "background" has been saved so far — "soap" also requires solution-definition and team-and-estimates, neither of which exist yet, exactly the state a stage is in after its very first module save.
       branchFiles: {
         [branch]: {
           '/gantry-workspace/examples/instance.yaml': 'definition: design\nslug: examples\nstage: shape\n',
-          '/gantry-workspace/examples/modules/context.md': readFileSync('instances/examples/modules/context.md', 'utf8'),
+          '/gantry-workspace/examples/modules/background.md': readFileSync('instances/examples/modules/background.md', 'utf8'),
         },
       },
     },

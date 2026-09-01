@@ -1,5 +1,5 @@
 ---
-module: context
+module: background
 status: agreed
 owner: c.barlow
 ---
@@ -16,6 +16,13 @@ and job-seeking tools. This initiative introduces a Mobile Phone Assistance
 clients can apply for, receive, and retain a phone and plan through existing
 Contoso channels.
 
+For the provider-certificate workstream specifically, providers currently
+submit Disability Allowance certificates by fax or post to a National Office
+processing team, who manually scan and attach each certificate to the client's
+EOS application. This creates multi-day processing delays and a manual
+data-entry step prone to misattribution when a certificate arrives without a
+clear client reference.
+
 ## Affected domains
 
 - Client-facing self-service (ContosoSelfService)
@@ -30,16 +37,13 @@ Clients can receive a phone and ongoing connectivity through the same trusted
 channel they already use for other hardship assistance, reducing barriers to
 accessing Contoso services and employment support.
 
-## In scope
+Providers submit a certificate directly through a self-service portal,
+referencing the client's application via a one-time reference code; the
+certificate attaches to the correct EOS application automatically, with no
+manual scanning or attribution step.
 
-The first release covers the ContosoSelfService entry point, application intake and review,
-carrier provisioning, payment, notifications, reporting, and annual review of
-the Mobile Phone Assistance benefit.
+## Success criteria
 
-## Out of scope
-
-Selecting or negotiating the mobile carrier partnership itself is out of
-scope for this initiative — that commercial arrangement is assumed to exist
-by the time this solution is built. Support for multiple concurrent carriers
-is also out of scope for the first release; the solution is scoped to a
-single carrier integration.
+At least 80% of new Disability Allowance certificates arrive via the portal
+(not fax/post) within 3 months of launch; median certificate-to-EOS-attachment
+time drops from more than 2 days to under 5 minutes.

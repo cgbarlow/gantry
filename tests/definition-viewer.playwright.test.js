@@ -495,7 +495,9 @@ test('Definition Editor reorder fields via Move up persists after Save', async (
         const readOnlyFieldIds = await page.$$eval('.defn-viewer-content:not(.defn-editor) .defn-section:nth-of-type(3) .defn-card', (cards) => {
           const first = cards[0]
           if (!first) return []
-          return Array.from(first.querySelectorAll('.defn-field code')).map((c) => c.textContent.trim())
+          // The field id `<code>` sits in `.defn-field-heading`; a field's rendered
+          // guidance markdown can also contain `<code>` spans, so scope to the heading.
+          return Array.from(first.querySelectorAll('.defn-field > .defn-field-heading > code')).map((c) => c.textContent.trim())
         })
         assert.deepEqual(readOnlyFieldIds.slice(0, afterFieldIds.length), afterFieldIds)
       } finally {

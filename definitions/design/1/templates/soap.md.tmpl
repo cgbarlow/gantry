@@ -10,17 +10,19 @@
 
 ## Business driver
 
-<%~ na(it.modules.context.driver) %>
+<%~ na(it.modules.background.problem) %>
 
 ## Affected domains
 
-<% it.modules.context['affected-domains'].forEach(function(item) { %>- <%~ item %>
+<% it.modules.background['affected-domains'].forEach(function(item) { %>- <%~ item %>
 <% }) %>
-<% if (it.modules.context['out-of-scope']) { %>
-## Explicitly out of scope
+## In scope
 
-<%~ it.modules.context['out-of-scope'] %>
-<% } %>
+<%~ na(it.modules.introduction['in-scope']) %>
+
+## Out of scope
+
+<%~ na(it.modules.introduction['out-of-scope']) %>
 
 # Solution definition
 
@@ -31,11 +33,10 @@
 ## High-level solution design
 
 <%~ na(it.modules['solution-definition']['high-level-solution-overview']) %>
-<% if (it.modules['solution-definition']['assumptions-and-considerations']) { %>
-## Assumptions and considerations
 
-<%~ it.modules['solution-definition']['assumptions-and-considerations'] %>
-<% } %>
+## High-level requirements
+
+<%~ na(it.modules['solution-definition']['high-level-requirements']) %>
 
 ## Feature breakdown and involved teams
 

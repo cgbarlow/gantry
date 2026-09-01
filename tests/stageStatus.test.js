@@ -43,7 +43,7 @@ function withScratchInstances(fn) {
 
 async function fillShapeStage(azureDevOps, branch) {
   const client = createAzureDevOpsClient(azureDevOps)
-  for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
+  for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
     const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
     await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
   }
@@ -239,8 +239,8 @@ test('a commit after approval invalidates auto-merge, persists the state, and ca
     await waitForTimestampToAdvance()
 
     const client = createAzureDevOpsClient(azureDevOps)
-    const current = readFileSync(join('instances', 'examples', 'modules', 'context.md'), 'utf8')
-    await client.writeFile(`gantry-workspace/${SLUG}/modules/context.md`, `${current}\nPost-approval edit.\n`, {
+    const current = readFileSync(join('instances', 'examples', 'modules', 'background.md'), 'utf8')
+    await client.writeFile(`gantry-workspace/${SLUG}/modules/background.md`, `${current}\nPost-approval edit.\n`, {
       branch,
       message: 'Post-approval edit',
     })
@@ -276,8 +276,8 @@ test('request approval again posts a fallback comment when Azure DevOps denies r
       await castVote(azureDevOps.baseUrl, pullRequestId, 10)
       await waitForTimestampToAdvance()
       const client = createAzureDevOpsClient(azureDevOps)
-      const current = readFileSync(join('instances', 'examples', 'modules', 'context.md'), 'utf8')
-      await client.writeFile(`gantry-workspace/${SLUG}/modules/context.md`, `${current}\nAnother edit.\n`, { branch })
+      const current = readFileSync(join('instances', 'examples', 'modules', 'background.md'), 'utf8')
+      await client.writeFile(`gantry-workspace/${SLUG}/modules/background.md`, `${current}\nAnother edit.\n`, { branch })
       await checkStageApprovalStatus(SLUG, { azureDevOps })
 
       const result = await requestStageApproval(SLUG, { azureDevOps })

@@ -40,12 +40,13 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
         id: 'soap',
         title: 'Solution on a Page',
         requires: [
-          'context.driver',
-          'context.affected-domains',
-          'context.out-of-scope?',
+          'background.problem',
+          'background.affected-domains',
+          'introduction.in-scope',
+          'introduction.out-of-scope',
           'solution-definition.process-flow',
           'solution-definition.high-level-solution-overview',
-          'solution-definition.assumptions-and-considerations?',
+          'solution-definition.high-level-requirements',
           'solution-definition.feature-breakdown',
           'team-and-estimates.teams-required',
           'team-and-estimates.estimates',
@@ -61,15 +62,18 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
           'soap-full-details.request-date',
           'soap-full-details.draft-agreed-date',
           'soap-full-details.delivered-date',
-          'context.driver',
-          'context.opportunity',
-          'context.in-scope',
-          'context.out-of-scope',
+          'background.problem',
+          'background.opportunity',
+          'introduction.in-scope',
+          'introduction.out-of-scope',
           'solution-definition.high-level-requirements',
           'solution-definition.high-level-solution-overview',
+          'solution-definition.alternatives-sketch?',
           'team-and-estimates.teams-required',
           'dependencies.dependencies-overview',
-          'solution-definition.assumptions-and-considerations',
+          'introduction.assumptions?',
+          'introduction.constraints?',
+          'introduction.caveats?',
           'team-and-estimates.estimates',
           'soap-full-details.sequencing',
           'soap-full-details.questions',
@@ -79,10 +83,9 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
       },
     ])
 
-    const context = body.modules.find((m) => m.id === 'context')
-    const driver = context.fields.find((f) => f.id === 'driver')
-    assert.equal(driver.required, true)
-    assert.match(driver.value, /\S/)
+    const background = body.modules.find((m) => m.id === 'background')
+    const problem = background.fields.find((f) => f.id === 'problem')
+    assert.match(problem.value, /\S/)
 
     const teamAndEstimates = body.modules.find((m) => m.id === 'team-and-estimates')
     const teams = teamAndEstimates.fields.find((f) => f.id === 'teams-required')
@@ -99,7 +102,7 @@ test('GET /api/instance?stage=<id> browses a different stage\'s modules without 
     const body = await res.json()
     assert.deepEqual(body.stage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-tac-approved', number: 2 })
     assert.equal(body.currentStageId, 'shape')
-    assert.deepEqual(body.artefacts, [{ id: 'hld', title: 'High Level Design', requires: ['hld-submission', 'problem-statement', 'proposed-solution', 'alternatives-considered', 'open-questions', 'nfrs', 'risks', 'security', 'dependencies'] }])
+    assert.deepEqual(body.artefacts, [{ id: 'hld', title: 'High Level Design', requires: ['hld-submission', 'background', 'proposed-solution', 'alternatives-considered', 'open-questions', 'nfrs', 'risks', 'security', 'dependencies', 'introduction.in-scope', 'introduction.out-of-scope', 'introduction.assumptions?', 'introduction.constraints?', 'introduction.caveats?'] }])
     assert.ok(body.modules.some((m) => m.id === 'hld-submission'))
 
     const instance = readInstance('examples')
@@ -146,29 +149,29 @@ test('PUT /api/instance/modules/:id writes the same file format the CLI reads, a
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
-      const res = await fetch(`${base}/api/instance/modules/context`, {
+      const res = await fetch(`${base}/api/instance/modules/background`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           status: 'agreed',
           owner: 'c.barlow',
           fields: {
-            driver: 'Updated via the web form.',
+            problem: 'Updated via the web form.',
             'affected-domains': ['Payments'],
-            'out-of-scope': '',
+            opportunity: '',
           },
         }),
       })
       assert.equal(res.status, 200)
       const status = await res.json()
-      const context = status.modules.find((m) => m.id === 'context')
-      assert.equal(context.complete, true)
+      const background = status.modules.find((m) => m.id === 'background')
+      assert.equal(background.complete, true)
     })
 
     const definition = loadDefinition('design')
-    const data = readModule(definition, 'examples', 'context', { instancesDir })
+    const data = readModule(definition, 'examples', 'background', { instancesDir })
     assert.equal(data.status, 'agreed')
-    assert.equal(data.fields.driver, 'Updated via the web form.')
+    assert.equal(data.fields.problem, 'Updated via the web form.')
     assert.deepEqual(data.fields['affected-domains'], ['Payments'])
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
@@ -523,16 +526,16 @@ test('PUT /api/instance/modules/:id?slug=<traversal> is rejected with 400, never
     assert.ok(traversalSlug.includes('/'), 'test setup sanity check: traversal slug must span directories')
 
     await withRunningServer({ instancesDir }, async (base) => {
-      const res = await fetch(`${base}/api/instance/modules/context?slug=${encodeURIComponent(traversalSlug)}`, {
+      const res = await fetch(`${base}/api/instance/modules/background?slug=${encodeURIComponent(traversalSlug)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'agreed', owner: 'attacker', fields: { driver: 'should never be written' } }),
+        body: JSON.stringify({ status: 'agreed', owner: 'attacker', fields: { problem: 'should never be written' } }),
       })
       assert.equal(res.status, 400)
     })
 
-    const contextPath = join(outsideDir, 'planted', 'modules', 'context.md')
-    const raw = readFileSync(contextPath, 'utf8')
+    const backgroundPath = join(outsideDir, 'planted', 'modules', 'background.md')
+    const raw = readFileSync(backgroundPath, 'utf8')
     assert.doesNotMatch(raw, /should never be written/)
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
@@ -1251,8 +1254,8 @@ test('GET /api/definitions/design/versions/1 returns full read-only projection',
     assert.ok(soap, 'soap artefact present')
     assert.ok(Array.isArray(soap.requires) && soap.requires.length > 0)
     assert.ok(Array.isArray(body.modules))
-    const ctx = body.modules.find((m) => m.id === 'context')
-    assert.ok(ctx, 'context module present')
+    const ctx = body.modules.find((m) => m.id === 'background')
+    assert.ok(ctx, 'background module present')
     assert.ok(Array.isArray(ctx.fields) && ctx.fields.length > 0)
     const field = ctx.fields[0]
     assert.ok('id' in field && 'title' in field && 'type' in field)

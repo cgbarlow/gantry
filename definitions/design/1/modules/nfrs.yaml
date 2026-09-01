@@ -8,6 +8,10 @@ purpose: >
   decision; before build readiness it should be complete enough to design and test
   against.
 
+  For concrete operational controls (encryption, networking, incident
+  management) see `data-security-controls.controls` — this module carries the
+  targets, not the control set.
+
 fields:
   - id: performance
     title: Performance

@@ -67,7 +67,7 @@ function withLinkableInstanceServer(fn) {
     const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
     try {
       createInstance('design', 'my-initiative', { instancesDir })
-      for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
+      for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
         cpSync(
           join('instances', 'examples', 'modules', `${moduleId}.md`),
           join(instancesDir, 'my-initiative', 'modules', `${moduleId}.md`)

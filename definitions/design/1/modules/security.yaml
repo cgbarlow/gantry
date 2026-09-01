@@ -7,6 +7,10 @@ purpose: >
   progressively: during high-level design include the security implications that inform
   that decision; before build readiness include the full posture needed to build against.
 
+  Design-time claims (who can do what, threat model, regulations). For the
+  concrete controls the built solution runs under (encryption, networking,
+  incident management) use `data-security-controls.controls`.
+
 fields:
   - id: identity-and-access
     title: Identity and access management

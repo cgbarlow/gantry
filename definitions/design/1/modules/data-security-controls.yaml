@@ -10,15 +10,14 @@ purpose: >
   module is the concrete control set the built solution runs under. The
   Security Risk Assessment (SRA) control register itself is evidence about
   the built system and lives with the as-built `appendix` field. Wired into
-  the `handover` stage and the `as-built` artefact now; wiring it into
-  `detailed-design` / `sad` is a documented follow-up (see the reconciliation
-  doc, Sections 5 and 8).
+  the `detailed-design` / `sad` and `handover` / `as-built` artefacts;
+  `controls` is required at both gates (see the reconciliation doc §5).
 
 fields:
   - id: controls
     title: Controls
     type: markdown
-    required-at: [operational-handover]
+    required-at: [build-ready-checklist, operational-handover]
     guidance: >
       The security controls in force, grouped (e.g. Encryption, Incident
       management, Networking, Virtual machines, Availability, Access

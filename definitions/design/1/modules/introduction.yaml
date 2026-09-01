@@ -6,34 +6,50 @@ purpose: >
 
   Wired into the `handover` stage / `as-built` artefact (WI #227), the
   `detailed-design` stage / `sad` artefact (WI #228) and the `ssad` artefact
-  (WI #229). See the reconciliation doc, Sections 5, 6 and 8.
+  (WI #229). WI #280 makes `in-scope` / `out-of-scope` (and the optional
+  `assumptions` / `constraints` / `caveats`) the cross-stage backbone for
+  scope and assumptions, wired from Shape onward. See the reconciliation doc
+  §5 and docs/reconciliation/cross-stage-reuse.md §6 (R2/R3).
 
 fields:
   - id: overview
     title: Overview
     type: markdown
-    required-at: [operational-handover]
+    required-at: [build-ready-checklist, operational-handover]
     guidance: >
       A short plain-language description of the solution and the change it
       delivers — enough for a reader with no prior knowledge to understand
       what this document is about.
 
+      The HLD's `background` framing and this SAD `introduction` framing are
+      intentionally separate (TAC vs Design Authority audiences) — do not
+      expect this to pre-fill from `background.problem`. See the reconciliation
+      doc §5.
+
   - id: purpose
     title: Purpose
     type: markdown
-    required-at: [operational-handover]
+    required-at: [build-ready-checklist, operational-handover]
     guidance: >
       What this document is for and who is expected to use it (e.g.
       security teams for C&A sign-off, engineers to build or rebuild from).
 
-  - id: scope
-    title: Scope
+  - id: in-scope
+    title: In scope
     type: markdown
-    required-at: [operational-handover]
+    required-at: [build-ready-checklist, operational-handover]
     guidance: >
-      What the design covers and what it explicitly does not. Use "In scope"
-      and "Out of scope" sub-headings. Silence on out-of-scope is the most
-      common cause of a design being sent back with questions.
+      The features, functionality, and deliverables inside the boundaries of
+      this design. This is the canonical scope statement — it re-opens and is
+      refined at every later stage.
+
+  - id: out-of-scope
+    title: Out of scope
+    type: markdown
+    required-at: [build-ready-checklist, operational-handover]
+    guidance: >
+      What this design explicitly does not cover. Silence on out-of-scope is
+      the most common cause of a design being sent back with questions.
 
   - id: constraints
     title: Constraints
@@ -42,7 +58,8 @@ fields:
     guidance: >
       Fixed limits the design had to work within — deployment tooling,
       pre-existing infrastructure it cannot change, other in-flight work it
-      is bound by.
+      is bound by. Capture from Shape onward — this file re-opens at every
+      later stage.
 
   - id: assumptions
     title: Assumptions
@@ -50,7 +67,8 @@ fields:
     required: false
     guidance: >
       What was taken as given for the design to hold. Things that would
-      change the shape of the solution if they turned out false.
+      change the shape of the solution if they turned out false. Capture from
+      Shape onward — this file re-opens at every later stage.
 
   - id: caveats
     title: Caveats
@@ -59,7 +77,8 @@ fields:
     guidance: >
       Qualifications a reader should carry into the rest of the document —
       e.g. a short-lived workload, a known-incomplete area, a time-bound
-      exception.
+      exception. Capture from Shape onward — this file re-opens at every
+      later stage.
 
   - id: design-principles
     title: Design principles

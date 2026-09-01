@@ -13,20 +13,22 @@ test('loads the real design definition', () => {
 
   const shape = design.stages.find((stage) => stage.id === 'shape')
   assert.match(shape.purpose, /business case/i)
-  assert.deepEqual(shape.modules, ['context', 'solution-definition', 'team-and-estimates', 'dependencies', 'soap-full-details'])
+  assert.deepEqual(shape.modules, ['background', 'solution-definition', 'team-and-estimates', 'dependencies', 'soap-full-details', 'introduction'])
   assert.equal(shape.example, 'examples')
 
   const soap = design.artefacts.find((artefact) => artefact.id === 'soap')
   assert.match(soap.purpose, /summarise/i)
-  // WI #276: field-level list of exactly what soap.md.tmpl renders; the three
-  // conditionally-rendered `required: false` fields carry the optional `?` suffix.
+  // WI #276: field-level list of exactly what soap.md.tmpl renders. WI #280
+  // merges context -> background, moves scope to introduction, and promotes
+  // solution-definition.high-level-requirements to a bare gated entry.
   assert.deepEqual(soap.requires, [
-    'context.driver',
-    'context.affected-domains',
-    'context.out-of-scope?',
+    'background.problem',
+    'background.affected-domains',
+    'introduction.in-scope',
+    'introduction.out-of-scope',
     'solution-definition.process-flow',
     'solution-definition.high-level-solution-overview',
-    'solution-definition.assumptions-and-considerations?',
+    'solution-definition.high-level-requirements',
     'solution-definition.feature-breakdown',
     'team-and-estimates.teams-required',
     'team-and-estimates.estimates',
@@ -34,12 +36,12 @@ test('loads the real design definition', () => {
   ])
   assert.ok(!soap.requires.includes('context.opportunity'))
   assert.ok(!soap.requires.includes('context.in-scope'))
-  assert.ok(!soap.requires.includes('solution-definition.high-level-requirements'))
 
   const soapFull = design.artefacts.find((artefact) => artefact.id === 'soap-full')
   assert.equal(soapFull.template, 'templates/soap-full.md.tmpl')
-  assert.ok(soapFull.requires.includes('context.opportunity'))
+  assert.ok(soapFull.requires.includes('background.opportunity'))
   assert.ok(soapFull.requires.includes('solution-definition.high-level-requirements'))
+  assert.ok(soapFull.requires.includes('solution-definition.alternatives-sketch?'))
   assert.ok(soapFull.requires.includes('soap-full-details.sequencing'))
 
   const sad = design.artefacts.find((artefact) => artefact.id === 'sad')
@@ -51,11 +53,11 @@ test('loads the real design definition', () => {
   assert.ok(ssad.requires.includes('nfrs.availability-and-continuity'))
   assert.ok(!ssad.requires.includes('architecture.design-decisions'))
 
-  const context = design.modules.get('context')
-  assert.equal(context.title, 'Background and context')
-  const driver = context.fields.find((field) => field.id === 'driver')
-  assert.equal(driver.type, 'markdown')
-  assert.equal(driver.required, true)
+  const background = design.modules.get('background')
+  assert.equal(background.title, 'Background and context')
+  const problem = background.fields.find((field) => field.id === 'problem')
+  assert.equal(problem.type, 'markdown')
+  assert.deepEqual(problem.requiredAt, ['business-case', 'hld-tac-approved'])
 
   // dependencies uses required-at, not required, at the field level
   const dependencies = design.modules.get('dependencies')

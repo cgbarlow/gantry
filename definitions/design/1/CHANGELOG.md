@@ -2,6 +2,53 @@
 
 Initial published version of the Solution Design definition.
 
+### Cross-stage reuse: `background` + `introduction` backbone (WI #280, in place — see docs/adr/0028)
+
+A structural change to reduce Shape↔HLD duplication and give scope and
+assumptions a single home that carries from Shape to handover. Applied to
+`definitions/design/1/` in place (no `design/2`), with the `examples` and
+`atlas-reference-design` fixtures migrated in lockstep. Every gate still
+passes; `render:examples` loses no author content (headings move/rename and
+scope splits into two sub-sections).
+
+- **`context` module renamed to `background`** (`modules/context.yaml` →
+  `modules/background.yaml`). `problem-statement` merged in and deleted.
+  Final fields: `problem` (current state; from `context.driver` +
+  `problem-statement.current-state`; required-at business-case + HLD),
+  `affected-domains` (unchanged), `opportunity` (desired future state; from
+  `context.opportunity` + `problem-statement.desired-future-state`;
+  required-at HLD), `success-criteria` (from `problem-statement`; required-at
+  HLD).
+- **Scope backbone.** `introduction.scope` split into `introduction.in-scope`
+  and `introduction.out-of-scope` (markdown). `introduction` is now mounted
+  from the `shape` stage onward; the two scope fields are the canonical
+  cross-stage scope statement, wired into `soap` / `soap-full` / `hld` /
+  `sad` / `ssad` / `as-built` `requires`. `context.in-scope` /
+  `context.out-of-scope` and `problem-statement.scope` are gone.
+- **Assumptions backbone.** `solution-definition.assumptions-and-considerations`
+  deleted; `introduction.assumptions` / `.constraints` / `.caveats` now carry
+  from Shape onward and are scoped into `soap-full` / `hld` (`?` optional).
+  `architecture.constraints-and-assumptions` renamed to
+  `architecture.constraints` ("Constraints and goals"), for
+  architecture-specific constraints/goals only.
+- **Shape traceability.** `solution-definition.high-level-requirements` is now
+  `required: true` and rendered by `soap.md.tmpl` (it is the agreed set
+  `nfrs.requirements-traceability` maps back to). New optional
+  `solution-definition.alternatives-sketch` seeds `alternatives-considered`
+  for TAC.
+- **`required-at` truthfulness.** `introduction.overview` / `.purpose` /
+  `.in-scope` / `.out-of-scope`, `recovery-plan.recovery-approach` and
+  `data-security-controls.controls` now declare
+  `required-at: [build-ready-checklist, operational-handover]`, matching the
+  `sad` artefact's field-level `requires` (no gate-behaviour change).
+- **Guidance cross-references** added across `proposed-solution`,
+  `architecture`, `solution-definition`, `nfrs`, `security`, `open-questions`
+  and a reciprocal "HLD `background` vs SAD `introduction` framings are
+  intentionally separate" note on `background.problem` and
+  `introduction.overview`.
+- Templates `soap` / `soap-full` / `hld` / `sad` / `ssad` / `as-built`
+  updated for every moved/renamed/split/deleted field.
+
 ### `soap` artefact trimmed to a field-level `requires` list (WI #276, in place — see docs/adr/0027)
 
 Now that the engine supports an optional field-ref suffix (`module.field?` —

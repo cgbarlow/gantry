@@ -31,19 +31,23 @@
 
 ## Current state
 
-<%~ na(it.modules['problem-statement']['current-state']) %>
+<%~ na(it.modules.background.problem) %>
 
 ## Desired future state
 
-<%~ na(it.modules['problem-statement']['desired-future-state']) %>
+<%~ na(it.modules.background.opportunity) %>
 
-## In scope / out of scope
+## In scope
 
-<%~ na(it.modules['problem-statement'].scope) %>
+<%~ na(it.modules.introduction['in-scope']) %>
+
+## Out of scope
+
+<%~ na(it.modules.introduction['out-of-scope']) %>
 
 ## Success criteria
 
-<%~ na(it.modules['problem-statement']['success-criteria']) %>
+<%~ na(it.modules.background['success-criteria']) %>
 <%
   const nfrs = it.modules.nfrs || {}
   const nfrParts = [

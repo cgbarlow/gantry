@@ -17,11 +17,11 @@ test('gantry new creates an instance with blank Shape-stage module files', () =>
       { cwd, encoding: 'utf8' }
     )
     assert.match(output, /Created instance "cli-test"/)
-    assert.match(output, /context, solution-definition, team-and-estimates/)
+    assert.match(output, /background, solution-definition, team-and-estimates/)
 
-    const contextPath = join(cwd, 'instances', 'cli-test', 'modules', 'context.md')
-    assert.ok(existsSync(contextPath))
-    assert.match(readFileSync(contextPath, 'utf8'), /owner: c\.barlow/)
+    const backgroundPath = join(cwd, 'instances', 'cli-test', 'modules', 'background.md')
+    assert.ok(existsSync(backgroundPath))
+    assert.match(readFileSync(backgroundPath, 'utf8'), /owner: c\.barlow/)
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }
@@ -42,8 +42,8 @@ test('gantry new --assignee records the instance record\'s own assignee, indepen
     const instance = parseYAML(instanceYaml)
     assert.equal(instance.assignee, 'j.smith')
 
-    const contextPath = join(cwd, 'instances', 'cli-test', 'modules', 'context.md')
-    assert.match(readFileSync(contextPath, 'utf8'), /owner: c\.barlow/)
+    const backgroundPath = join(cwd, 'instances', 'cli-test', 'modules', 'background.md')
+    assert.match(readFileSync(backgroundPath, 'utf8'), /owner: c\.barlow/)
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }

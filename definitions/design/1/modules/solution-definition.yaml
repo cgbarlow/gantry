@@ -9,12 +9,14 @@ fields:
   - id: high-level-requirements
     title: High-level requirements
     type: markdown
-    required: false
+    required: true
     guidance: >
       The high-level requirements this solution must address. Use a markdown
       table with `Section` and `Requirement` columns when the work has several
       requirement groups; keep each requirement brief but specific enough to
-      define the expected functionality and its scope.
+      define the expected functionality and its scope. This is the agreed set
+      that `nfrs.requirements-traceability` maps back to at detailed design —
+      capture it here so nothing agreed can be quietly dropped.
 
   - id: process-flow
     title: Process flow
@@ -23,7 +25,8 @@ fields:
     guidance: >
       How work or data moves through the solution, step by step. A narrative
       walk-through is fine; a diagram reference is fine too, but describe
-      what the diagram shows in words as well.
+      what the diagram shows in words as well. Reused and deepened at
+      `architecture.solution-description` — write the Shape-level flow once.
 
   - id: high-level-solution-overview
     title: High level solution overview
@@ -34,14 +37,6 @@ fields:
       they relate. This is a sketch, not the Detailed Design stage's
       `architecture` module; go only as deep as a Shape-stage reader needs.
 
-  - id: assumptions-and-considerations
-    title: Assumptions
-    type: markdown
-    required: false
-    guidance: >
-      What you're taking as given for this solution to make sense — things
-      that would change the shape of the answer if they turned out false.
-
   - id: feature-breakdown
     title: Feature breakdown and involved teams
     type: markdown
@@ -49,3 +44,12 @@ fields:
     guidance: >
       The solution broken into the features or workstreams that deliver it,
       and which teams are involved in each.
+
+  - id: alternatives-sketch
+    title: Alternatives sketch
+    type: markdown
+    required: false
+    guidance: >
+      Brief alternative(s) considered at Shape, including "do nothing" —
+      expanded at `modules/alternatives-considered.md` for TAC; do not
+      re-derive there.

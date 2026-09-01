@@ -43,7 +43,7 @@ function withScratchInstances(fn) {
 }
 
 function fillShapeStage(instancesDir, slug) {
-  for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
+  for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
     cpSync(join('instances', 'examples', 'modules', `${moduleId}.md`), join(instancesDir, slug, 'modules', `${moduleId}.md`))
   }
 }

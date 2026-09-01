@@ -15,7 +15,7 @@ const REPOSITORY = 'fake-repo'
 const VALID_PAT = 'valid-test-pat'
 
 function moduleContent(text) {
-  return `---\nmodule: context\nstatus: draft\nowner: \n---\n\n# Background and context\n\n## Problem statement\n\n${text}\n`
+  return `---\nmodule: background\nstatus: draft\nowner: \n---\n\n# Background and context\n\n## Problem statement\n\n${text}\n`
 }
 
 function withRunningServer(options, fn) {
@@ -44,7 +44,7 @@ test('stage sync banner appears when behind and disappears after Sync from main'
       validPat: VALID_PAT,
       files: {
         '/gantry-workspace/my-slug/instance.yaml': 'definition: design\nslug: my-slug\nstage: shape\n',
-        '/gantry-workspace/my-slug/modules/context.md': moduleContent('old'),
+        '/gantry-workspace/my-slug/modules/background.md': moduleContent('old'),
       },
     },
     async (adoBaseUrl) => {
@@ -54,7 +54,7 @@ test('stage sync banner appears when behind and disappears after Sync from main'
         const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
         await client.createBranch('gantry-workspace/my-slug/shape')
         // Stage branch stays at old, main moves ahead with two files
-        await client.writeFile('/gantry-workspace/my-slug/modules/context.md', moduleContent('main updated'), { branch: 'main' })
+        await client.writeFile('/gantry-workspace/my-slug/modules/background.md', moduleContent('main updated'), { branch: 'main' })
         await client.writeFile('/gantry-workspace/my-slug/modules/extra.md', moduleContent('extra main'), { branch: 'main' })
 
         await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true, allowedAzureDevOpsBaseUrls: [adoBaseUrl] }, async (gantryBase) => {

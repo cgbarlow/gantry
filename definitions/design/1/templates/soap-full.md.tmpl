@@ -17,19 +17,19 @@
 
 ## Problem statement
 
-<%~ na(it.modules.context.driver) %>
+<%~ na(it.modules.background.problem) %>
 
 # Opportunity
 
-<%~ na(it.modules.context.opportunity) %>
+<%~ na(it.modules.background.opportunity) %>
 
 # In Scope
 
-<%~ na(it.modules.context['in-scope']) %>
+<%~ na(it.modules.introduction['in-scope']) %>
 
 # Out of Scope
 
-<%~ na(it.modules.context['out-of-scope']) %>
+<%~ na(it.modules.introduction['out-of-scope']) %>
 
 # High Level Requirements
 
@@ -50,7 +50,17 @@
 
 # Assumptions
 
-<%~ na(it.modules['solution-definition']['assumptions-and-considerations']) %>
+<%~ na(it.modules.introduction.assumptions) %>
+<% if (it.modules.introduction.constraints) { %>
+# Constraints
+
+<%~ it.modules.introduction.constraints %>
+<% } %>
+<% if (it.modules.introduction.caveats) { %>
+# Caveats
+
+<%~ it.modules.introduction.caveats %>
+<% } %>
 
 # Estimates
 

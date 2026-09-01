@@ -37,21 +37,21 @@ test('creates a design instance with blank Shape-stage module files', () => {
   withScratchInstances((instancesDir) => {
     const result = createInstance('design', 'my-initiative', { instancesDir, owner: 'c.barlow' })
     assert.equal(result.stage, 'shape')
-    assert.deepEqual(result.modules, ['context', 'solution-definition', 'team-and-estimates', 'dependencies', 'soap-full-details'])
+    assert.deepEqual(result.modules, ['background', 'solution-definition', 'team-and-estimates', 'dependencies', 'soap-full-details', 'introduction'])
 
     const instance = readInstance('my-initiative', { instancesDir })
     assert.equal(instance.definition, 'design')
     assert.equal(instance.stage, 'shape')
 
-    const contextPath = join(instancesDir, 'my-initiative', 'modules', 'context.md')
-    const raw = readFileSync(contextPath, 'utf8')
+    const backgroundPath = join(instancesDir, 'my-initiative', 'modules', 'background.md')
+    const raw = readFileSync(backgroundPath, 'utf8')
     assert.match(raw, /^---\n/)
     assert.match(raw, /owner: c\.barlow/)
     // New document heading scale (ADR-0016): module title at `#`, field headings at `##`.
     assert.match(raw, /^# Background and context$/m)
     assert.match(raw, /^## Problem statement$/m)
     assert.match(raw, /^## Affected domains$/m)
-    assert.match(raw, /^## Out of scope$/m)
+    assert.match(raw, /^## Success criteria$/m)
   })
 })
 
@@ -73,8 +73,8 @@ test('createInstance records an explicitly given assignee on the instance record
     const instance = readInstance('my-initiative', { instancesDir })
     assert.equal(instance.assignee, 'c.barlow')
 
-    const contextPath = join(instancesDir, 'my-initiative', 'modules', 'context.md')
-    assert.match(readFileSync(contextPath, 'utf8'), /owner: a-different-module-owner/)
+    const backgroundPath = join(instancesDir, 'my-initiative', 'modules', 'background.md')
+    assert.match(readFileSync(backgroundPath, 'utf8'), /owner: a-different-module-owner/)
   })
 })
 
@@ -200,12 +200,12 @@ test('reads a hand-filled module file back into field-keyed data', () => {
     createInstance('design', 'my-initiative', { instancesDir })
     const definition = loadDefinition('design')
 
-    const contextPath = join(instancesDir, 'my-initiative', 'modules', 'context.md')
+    const backgroundPath = join(instancesDir, 'my-initiative', 'modules', 'background.md')
     writeFileSync(
-      contextPath,
+      backgroundPath,
       [
         '---',
-        'module: context',
+        'module: background',
         'status: review',
         'owner: c.barlow',
         '---',
@@ -219,19 +219,19 @@ test('reads a hand-filled module file back into field-keyed data', () => {
         '- Payments',
         '- Client Record',
         '',
-        '## Out of scope',
+        '## Success criteria',
         '',
         'Nothing yet.',
         '',
       ].join('\n')
     )
 
-    const data = readModule(definition, 'my-initiative', 'context', { instancesDir })
+    const data = readModule(definition, 'my-initiative', 'background', { instancesDir })
     assert.equal(data.status, 'review')
     assert.equal(data.owner, 'c.barlow')
-    assert.equal(data.fields.driver, 'A new law requires this by June.')
+    assert.equal(data.fields.problem, 'A new law requires this by June.')
     assert.deepEqual(data.fields['affected-domains'], ['Payments', 'Client Record'])
-    assert.equal(data.fields['out-of-scope'], 'Nothing yet.')
+    assert.equal(data.fields['success-criteria'], 'Nothing yet.')
   })
 })
 
@@ -243,25 +243,77 @@ test('writeModule is the exact inverse of readModule', () => {
     writeModule(
       definition,
       'my-initiative',
-      'context',
+      'background',
       {
         status: 'review',
         owner: 'c.barlow',
         fields: {
-          driver: 'A new law requires this by June.',
+          problem: 'A new law requires this by June.',
           'affected-domains': ['Payments', 'Client Record'],
-          'out-of-scope': '',
+          'success-criteria': '',
         },
       },
       { instancesDir }
     )
 
-    const data = readModule(definition, 'my-initiative', 'context', { instancesDir })
+    const data = readModule(definition, 'my-initiative', 'background', { instancesDir })
     assert.equal(data.status, 'review')
     assert.equal(data.owner, 'c.barlow')
-    assert.equal(data.fields.driver, 'A new law requires this by June.')
+    assert.equal(data.fields.problem, 'A new law requires this by June.')
     assert.deepEqual(data.fields['affected-domains'], ['Payments', 'Client Record'])
-    assert.equal(data.fields['out-of-scope'], '')
+    assert.equal(data.fields['success-criteria'], '')
+  })
+})
+
+// WI #280: the merged `background` module and the Shape-mounted `introduction`
+// module round-trip through write/read with a mix of filled, empty and
+// omitted `required-at` fields and the `affected-domains` list.
+test('background + introduction round-trip through writeModule/readModule (WI #280)', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    const definition = loadDefinition('design')
+
+    writeModule(
+      definition,
+      'my-initiative',
+      'background',
+      {
+        status: 'agreed',
+        owner: '',
+        fields: {
+          problem: 'Objective is on-premises and must be decommissioned.',
+          'affected-domains': ['EDRMS', 'SharePoint Online'],
+          opportunity: '',
+          'success-criteria': 'End-to-end test wave reconciles with zero discrepancies.',
+        },
+      },
+      { instancesDir }
+    )
+    writeModule(
+      definition,
+      'my-initiative',
+      'introduction',
+      {
+        status: 'draft',
+        owner: '',
+        fields: {
+          'in-scope': 'The migration infrastructure and its network wiring.',
+          'out-of-scope': 'The SharePoint information architecture.',
+          assumptions: 'The private link is already provisioned.',
+        },
+      },
+      { instancesDir }
+    )
+
+    const bg = readModule(definition, 'my-initiative', 'background', { instancesDir })
+    assert.deepEqual(bg.fields['affected-domains'], ['EDRMS', 'SharePoint Online'])
+    assert.equal(bg.fields.opportunity, '')
+    assert.match(bg.fields['success-criteria'], /zero discrepancies/)
+
+    const intro = readModule(definition, 'my-initiative', 'introduction', { instancesDir })
+    assert.match(intro.fields['in-scope'], /network wiring/)
+    assert.match(intro.fields['out-of-scope'], /information architecture/)
+    assert.match(intro.fields.assumptions, /private link/)
   })
 })
 
@@ -277,42 +329,41 @@ test('writeModule replays a supplied layout exactly, preserving a custom Section
     writeModule(
       definition,
       'my-initiative',
-      'context',
+      'background',
       {
         status: 'draft',
         owner: '',
         fields: {
-          driver: 'A new law requires this by June.',
+          problem: 'A new law requires this by June.',
           'affected-domains': ['Payments'],
-          'out-of-scope': 'Nothing yet.',
+          'success-criteria': 'Nothing yet.',
         },
         layout: [
-          { field: 'driver' },
+          { field: 'problem' },
           { custom: { id: 'custom:risks-we-carry', title: 'Risks we carry', value: 'The June deadline.' } },
           { field: 'affected-domains' },
-          { field: 'out-of-scope' },
+          { field: 'success-criteria' },
         ],
       },
       { instancesDir }
     )
 
     // On disk: the custom block sits between Problem statement and Affected domains, exactly where it was inserted.
-    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
+    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'background.md'), 'utf8')
     assert.ok(stored.indexOf('## Risks we carry') > stored.indexOf('## Problem statement'))
     assert.ok(stored.indexOf('## Risks we carry') < stored.indexOf('## Affected domains'))
 
     // And reading it back yields the same interleaved layout — the round-trip is stable.
-    const data = readModule(definition, 'my-initiative', 'context', { instancesDir })
+    const data = readModule(definition, 'my-initiative', 'background', { instancesDir })
     assert.deepEqual(data.customFields, [
       { id: 'custom:risks-we-carry', title: 'Risks we carry', value: 'The June deadline.' },
     ])
     assert.deepEqual(data.layout, [
-      { field: 'driver' },
+      { field: 'problem' },
       { custom: { id: 'custom:risks-we-carry', title: 'Risks we carry', value: 'The June deadline.' } },
       { field: 'affected-domains' },
-      { field: 'out-of-scope' },
+      { field: 'success-criteria' },
       { field: 'opportunity' },
-      { field: 'in-scope' },
     ])
   })
 })
@@ -326,26 +377,26 @@ test('writeModule without a layout still emits defined-field sections in definit
     writeModule(
       definition,
       'my-initiative',
-      'context',
-      { status: 'review', owner: '', fields: { driver: 'Because.', 'affected-domains': [], 'out-of-scope': '' } },
+      'background',
+      { status: 'review', owner: '', fields: { problem: 'Because.', 'affected-domains': [], 'success-criteria': '' } },
       { instancesDir }
     )
 
-    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
+    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'background.md'), 'utf8')
     assert.deepEqual(
       [...stored.matchAll(/^## (.+)$/gm)].map((m) => m[1]),
-      ['Problem statement', 'Affected domains', 'Opportunity', 'In scope', 'Out of scope']
+      ['Problem statement', 'Affected domains', 'Opportunity', 'Success criteria']
     )
   })
 })
 
 test('folds a wrapped list-item continuation line onto the item it follows, instead of dropping it', () => {
   const definition = loadDefinition('design')
-  const moduleSpec = definition.modules.get('context')
+  const moduleSpec = definition.modules.get('background')
   const data = parseModuleFile(
     [
       '---',
-      'module: context',
+      'module: background',
       'status: draft',
       'owner:',
       '---',
@@ -367,39 +418,39 @@ test('folds a wrapped list-item continuation line onto the item it follows, inst
 
 test('leaves a field out of the result when its heading is missing', () => {
   const definition = loadDefinition('design')
-  const moduleSpec = definition.modules.get('context')
+  const moduleSpec = definition.modules.get('background')
   const data = parseModuleFile(
-    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Problem statement\n\nSome text.\n',
+    '---\nmodule: background\nstatus: draft\nowner:\n---\n\n## Problem statement\n\nSome text.\n',
     moduleSpec
   )
-  assert.equal(data.fields.driver, 'Some text.')
+  assert.equal(data.fields.problem, 'Some text.')
   assert.ok(!('affected-domains' in data.fields))
 })
 
 test('matches a markdown-formatted heading against its field\'s plain-text title', () => {
   const definition = loadDefinition('design')
-  const moduleSpec = definition.modules.get('context')
+  const moduleSpec = definition.modules.get('background')
   const data = parseModuleFile(
-    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## **Problem statement**\n\nSome text.\n',
+    '---\nmodule: background\nstatus: draft\nowner:\n---\n\n## **Problem statement**\n\nSome text.\n',
     moduleSpec
   )
-  assert.equal(data.fields.driver, 'Some text.')
+  assert.equal(data.fields.problem, 'Some text.')
   assert.deepEqual(data.warnings, [])
 })
 
 // A `##` heading matching no defined field is no longer an anomaly (#132): Insert ▾ → Section makes such blocks first-class custom fields, preserved verbatim in `customFields` and positioned by `layout`, so warning (let alone throwing) would fail every instance that ever used the feature.
 test('preserves a heading that matches no field as a custom field instead of warning', () => {
   const definition = loadDefinition('design')
-  const moduleSpec = definition.modules.get('context')
+  const moduleSpec = definition.modules.get('background')
   const data = parseModuleFile(
-    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Problem statement\n\nSome text.\n\n## Risks we carry\n\nThe June deadline.\n',
+    '---\nmodule: background\nstatus: draft\nowner:\n---\n\n## Problem statement\n\nSome text.\n\n## Risks we carry\n\nThe June deadline.\n',
     moduleSpec
   )
-  assert.equal(data.fields.driver, 'Some text.')
+  assert.equal(data.fields.problem, 'Some text.')
   assert.deepEqual(data.warnings, [])
   assert.deepEqual(data.customFields, [{ id: 'custom:risks-we-carry', title: 'Risks we carry', value: 'The June deadline.' }])
   assert.deepEqual(data.layout, [
-    { field: 'driver' },
+    { field: 'problem' },
     { custom: { id: 'custom:risks-we-carry', title: 'Risks we carry', value: 'The June deadline.' } },
   ])
 })
@@ -407,9 +458,9 @@ test('preserves a heading that matches no field as a custom field instead of war
 // Untitled sections are exactly what Insert ▾ → Section inserts when the author skips the optional title prompt (#132): the heading is still preserved as structure, with a deterministic fallback id rather than an empty-slug one.
 test('preserves an untitled custom section with a fallback id', () => {
   const definition = loadDefinition('design')
-  const moduleSpec = definition.modules.get('context')
+  const moduleSpec = definition.modules.get('background')
   const data = parseModuleFile(
-    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## \n\nBody of an untitled block.\n',
+    '---\nmodule: background\nstatus: draft\nowner:\n---\n\n## \n\nBody of an untitled block.\n',
     moduleSpec
   )
   assert.deepEqual(data.customFields, [
@@ -420,9 +471,9 @@ test('preserves an untitled custom section with a fallback id', () => {
 // Same-slug headings must not collide into one custom field — the second gets a numeric suffix, deterministically, so round-trips stay stable.
 test('suffixes colliding custom-field ids instead of merging the sections', () => {
   const definition = loadDefinition('design')
-  const moduleSpec = definition.modules.get('context')
+  const moduleSpec = definition.modules.get('background')
   const data = parseModuleFile(
-    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Risks\n\nOne.\n\n## Risks\n\nTwo.\n\n## Risks\n\nThree.\n',
+    '---\nmodule: background\nstatus: draft\nowner:\n---\n\n## Risks\n\nOne.\n\n## Risks\n\nTwo.\n\n## Risks\n\nThree.\n',
     moduleSpec
   )
   assert.deepEqual(
@@ -436,13 +487,13 @@ test('suffixes colliding custom-field ids instead of merging the sections', () =
 // The layout is the full document sequence — defined and custom entries interleaved exactly as written — which is what lets writeModule replay a Section inserted between two defined fields (#132).
 test('layout records the interleaved order of defined and custom sections', () => {
   const definition = loadDefinition('design')
-  const moduleSpec = definition.modules.get('context')
+  const moduleSpec = definition.modules.get('background')
   const data = parseModuleFile(
-    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Problem statement\n\nText.\n\n## Extra notes\n\nNotes.\n\n## Affected domains\n\n- Payments\n',
+    '---\nmodule: background\nstatus: draft\nowner:\n---\n\n## Problem statement\n\nText.\n\n## Extra notes\n\nNotes.\n\n## Affected domains\n\n- Payments\n',
     moduleSpec
   )
   assert.deepEqual(data.layout, [
-    { field: 'driver' },
+    { field: 'problem' },
     { custom: { id: 'custom:extra-notes', title: 'Extra notes', value: 'Notes.' } },
     { field: 'affected-domains' },
   ])
@@ -451,11 +502,11 @@ test('layout records the interleaved order of defined and custom sections', () =
 // A custom section whose body is entirely bullet items is a list-typed field (#144): the parser classifies it as type: 'list' with a string[] value, and the layout entry carries that type so the writer can replay it as bullets.
 test('parses an all-bullets custom section as a list-typed custom field', () => {
   const definition = loadDefinition('design')
-  const moduleSpec = definition.modules.get('context')
+  const moduleSpec = definition.modules.get('background')
   const data = parseModuleFile(
     [
       '---',
-      'module: context',
+      'module: background',
       'status: draft',
       'owner:',
       '---',
@@ -473,12 +524,12 @@ test('parses an all-bullets custom section as a list-typed custom field', () => 
     ].join('\n'),
     moduleSpec
   )
-  assert.equal(data.fields.driver, 'Some text.')
+  assert.equal(data.fields.problem, 'Some text.')
   assert.deepEqual(data.customFields, [
     { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: ['Alice', 'Bob', 'Carol'] },
   ])
   assert.deepEqual(data.layout, [
-    { field: 'driver' },
+    { field: 'problem' },
     { custom: { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: ['Alice', 'Bob', 'Carol'] } },
   ])
   assert.deepEqual(data.warnings, [])
@@ -487,11 +538,11 @@ test('parses an all-bullets custom section as a list-typed custom field', () => 
 // Mixed content (some prose, some bullets) stays a plain markdown custom section — the list classification requires every non-empty line to be a bullet.
 test('a custom section with mixed prose and bullets stays a plain markdown section', () => {
   const definition = loadDefinition('design')
-  const moduleSpec = definition.modules.get('context')
+  const moduleSpec = definition.modules.get('background')
   const data = parseModuleFile(
     [
       '---',
-      'module: context',
+      'module: background',
       'status: draft',
       'owner:',
       '---',
@@ -516,9 +567,9 @@ test('a custom section with mixed prose and bullets stays a plain markdown secti
 // An empty custom section is compatible with being an empty list (a list inserted before any items were added), so it preserves type: 'list' through the round-trip — the rows UI reappears on reload rather than being permanently lost.
 test('an empty custom section preserves list type through the round-trip', () => {
   const definition = loadDefinition('design')
-  const moduleSpec = definition.modules.get('context')
+  const moduleSpec = definition.modules.get('background')
   const data = parseModuleFile(
-    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Empty section\n\n\n',
+    '---\nmodule: background\nstatus: draft\nowner:\n---\n\n## Empty section\n\n\n',
     moduleSpec
   )
   assert.deepEqual(data.customFields, [{ id: 'custom:empty-section', title: 'Empty section', type: 'list', value: [] }])
@@ -533,44 +584,43 @@ test('list-typed custom field round-trips through write/read with values intact'
     writeModule(
       definition,
       'my-initiative',
-      'context',
+      'background',
       {
         status: 'draft',
         owner: '',
         fields: {
-          driver: 'Because.',
+          problem: 'Because.',
           'affected-domains': [],
-          'out-of-scope': '',
+          'success-criteria': '',
         },
         layout: [
-          { field: 'driver' },
+          { field: 'problem' },
           { custom: { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: ['Alice', 'Bob'] } },
           { field: 'affected-domains' },
-          { field: 'out-of-scope' },
+          { field: 'success-criteria' },
         ],
       },
       { instancesDir }
     )
 
     // On disk: the custom block sits between Problem statement and Affected domains, written as bullets.
-    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
+    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'background.md'), 'utf8')
     assert.ok(stored.indexOf('## Stakeholders') > stored.indexOf('## Problem statement'))
     assert.ok(stored.indexOf('## Stakeholders') < stored.indexOf('## Affected domains'))
     assert.ok(stored.includes('- Alice'))
     assert.ok(stored.includes('- Bob'))
 
     // Reading it back yields the same interleaved layout with type: 'list'.
-    const data = readModule(definition, 'my-initiative', 'context', { instancesDir })
+    const data = readModule(definition, 'my-initiative', 'background', { instancesDir })
     assert.deepEqual(data.customFields, [
       { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: ['Alice', 'Bob'] },
     ])
     assert.deepEqual(data.layout, [
-      { field: 'driver' },
+      { field: 'problem' },
       { custom: { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: ['Alice', 'Bob'] } },
       { field: 'affected-domains' },
-      { field: 'out-of-scope' },
+      { field: 'success-criteria' },
       { field: 'opportunity' },
-      { field: 'in-scope' },
     ])
   })
 })
@@ -578,11 +628,11 @@ test('list-typed custom field round-trips through write/read with values intact'
 // Collision suffixes apply to list-typed custom fields too — two list sections with the same title get -2, -3 suffixes, deterministically.
 test('suffixes colliding list-typed custom-field ids', () => {
   const definition = loadDefinition('design')
-  const moduleSpec = definition.modules.get('context')
+  const moduleSpec = definition.modules.get('background')
   const data = parseModuleFile(
     [
       '---',
-      'module: context',
+      'module: background',
       'status: draft',
       'owner:',
       '---',
@@ -610,11 +660,11 @@ test('suffixes colliding list-typed custom-field ids', () => {
 // A list-typed custom section interleaved between defined fields records its position in layout.
 test('layout records the interleaved order of defined and list-typed custom sections', () => {
   const definition = loadDefinition('design')
-  const moduleSpec = definition.modules.get('context')
+  const moduleSpec = definition.modules.get('background')
   const data = parseModuleFile(
     [
       '---',
-      'module: context',
+      'module: background',
       'status: draft',
       'owner:',
       '---',
@@ -636,7 +686,7 @@ test('layout records the interleaved order of defined and list-typed custom sect
     moduleSpec
   )
   assert.deepEqual(data.layout, [
-    { field: 'driver' },
+    { field: 'problem' },
     { custom: { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: ['Alice', 'Bob'] } },
     { field: 'affected-domains' },
   ])
@@ -653,37 +703,36 @@ test('an empty custom list is omitted from the written file (WI 149)', () => {
     writeModule(
       definition,
       'my-initiative',
-      'context',
+      'background',
       {
         status: 'draft',
         owner: '',
         fields: {
-          driver: 'Because.',
+          problem: 'Because.',
           'affected-domains': [],
-          'out-of-scope': '',
+          'success-criteria': '',
         },
         layout: [
-          { field: 'driver' },
+          { field: 'problem' },
           { custom: { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: [] } },
           { field: 'affected-domains' },
-          { field: 'out-of-scope' },
+          { field: 'success-criteria' },
         ],
       },
       { instancesDir }
     )
 
-    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
+    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'background.md'), 'utf8')
     assert.ok(!stored.includes('## Stakeholders'), 'empty custom list heading must be omitted')
 
     // Round-trip: the emptied custom list does not reappear after reload.
-    const data = readModule(definition, 'my-initiative', 'context', { instancesDir })
+    const data = readModule(definition, 'my-initiative', 'background', { instancesDir })
     assert.deepEqual(data.customFields, [])
     assert.deepEqual(data.layout, [
-      { field: 'driver' },
+      { field: 'problem' },
       { field: 'affected-domains' },
-      { field: 'out-of-scope' },
+      { field: 'success-criteria' },
       { field: 'opportunity' },
-      { field: 'in-scope' },
     ])
   })
 })
@@ -698,21 +747,21 @@ test('a custom list with one item emptied to zero removes its segment on the nex
     writeModule(
       definition,
       'my-initiative',
-      'context',
+      'background',
       {
         status: 'draft',
         owner: '',
-        fields: { driver: 'Because.', 'affected-domains': [], 'out-of-scope': '' },
+        fields: { problem: 'Because.', 'affected-domains': [], 'success-criteria': '' },
         layout: [
-          { field: 'driver' },
+          { field: 'problem' },
           { custom: { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: ['Alice'] } },
           { field: 'affected-domains' },
-          { field: 'out-of-scope' },
+          { field: 'success-criteria' },
         ],
       },
       { instancesDir }
     )
-    let data = readModule(definition, 'my-initiative', 'context', { instancesDir })
+    let data = readModule(definition, 'my-initiative', 'background', { instancesDir })
     assert.deepEqual(data.customFields, [
       { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: ['Alice'] },
     ])
@@ -721,25 +770,25 @@ test('a custom list with one item emptied to zero removes its segment on the nex
     writeModule(
       definition,
       'my-initiative',
-      'context',
+      'background',
       {
         status: 'draft',
         owner: '',
-        fields: { driver: 'Because.', 'affected-domains': [], 'out-of-scope': '' },
+        fields: { problem: 'Because.', 'affected-domains': [], 'success-criteria': '' },
         layout: [
-          { field: 'driver' },
+          { field: 'problem' },
           { custom: { id: 'custom:stakeholders', title: 'Stakeholders', type: 'list', value: [] } },
           { field: 'affected-domains' },
-          { field: 'out-of-scope' },
+          { field: 'success-criteria' },
         ],
       },
       { instancesDir }
     )
 
-    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
+    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'background.md'), 'utf8')
     assert.ok(!stored.includes('## Stakeholders'))
 
-    data = readModule(definition, 'my-initiative', 'context', { instancesDir })
+    data = readModule(definition, 'my-initiative', 'background', { instancesDir })
     assert.deepEqual(data.customFields, [])
   })
 })
@@ -753,44 +802,44 @@ test('schema-defined type:list heading is preserved even when its value is empty
     writeModule(
       definition,
       'my-initiative',
-      'context',
+      'background',
       {
         status: 'draft',
         owner: '',
         fields: {
-          driver: 'Because.',
+          problem: 'Because.',
           'affected-domains': [],
-          'out-of-scope': '',
+          'success-criteria': '',
         },
         // No custom layout entries — defined fields are emitted in definition order when not in layout.
-        layout: [{ field: 'driver' }, { field: 'affected-domains' }, { field: 'out-of-scope' }],
+        layout: [{ field: 'problem' }, { field: 'affected-domains' }, { field: 'success-criteria' }],
       },
       { instancesDir }
     )
 
-    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
+    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'background.md'), 'utf8')
     assert.ok(stored.includes('## Affected domains'), 'schema-defined list heading must remain even when empty')
 
     // Clearing a custom list must not affect an adjacent schema-defined empty list.
     writeModule(
       definition,
       'my-initiative',
-      'context',
+      'background',
       {
         status: 'draft',
         owner: '',
-        fields: { driver: 'Because.', 'affected-domains': [], 'out-of-scope': '' },
+        fields: { problem: 'Because.', 'affected-domains': [], 'success-criteria': '' },
         layout: [
-          { field: 'driver' },
+          { field: 'problem' },
           { custom: { id: 'custom:extra', title: 'Extra list', type: 'list', value: [] } },
           { field: 'affected-domains' },
-          { field: 'out-of-scope' },
+          { field: 'success-criteria' },
         ],
       },
       { instancesDir }
     )
 
-    const stored2 = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
+    const stored2 = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'background.md'), 'utf8')
     assert.ok(!stored2.includes('## Extra list'))
     assert.ok(stored2.includes('## Affected domains'))
   })
@@ -805,28 +854,28 @@ test('only the emptied custom list is removed; sibling custom lists remain', () 
     writeModule(
       definition,
       'my-initiative',
-      'context',
+      'background',
       {
         status: 'draft',
         owner: '',
-        fields: { driver: 'Because.', 'affected-domains': [], 'out-of-scope': '' },
+        fields: { problem: 'Because.', 'affected-domains': [], 'success-criteria': '' },
         layout: [
-          { field: 'driver' },
+          { field: 'problem' },
           { custom: { id: 'custom:first', title: 'First list', type: 'list', value: ['Alice'] } },
           { custom: { id: 'custom:second', title: 'Second list', type: 'list', value: [] } },
           { field: 'affected-domains' },
-          { field: 'out-of-scope' },
+          { field: 'success-criteria' },
         ],
       },
       { instancesDir }
     )
 
-    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), 'utf8')
+    const stored = readFileSync(join(instancesDir, 'my-initiative', 'modules', 'background.md'), 'utf8')
     assert.ok(stored.includes('## First list'))
     assert.ok(!stored.includes('## Second list'))
     assert.ok(stored.includes('- Alice'))
 
-    const data = readModule(definition, 'my-initiative', 'context', { instancesDir })
+    const data = readModule(definition, 'my-initiative', 'background', { instancesDir })
     assert.deepEqual(
       data.customFields.map((f) => f.title),
       ['First list']
@@ -837,23 +886,23 @@ test('only the emptied custom list is removed; sibling custom lists remain', () 
 // Mixed prose and bullets in a custom section stays plain — proving the parser doesn't falsely classify it.
 test('warns (non-strict) on a duplicate heading, identifying which occurrence wins', () => {
   const definition = loadDefinition('design')
-  const moduleSpec = definition.modules.get('context')
+  const moduleSpec = definition.modules.get('background')
   const data = parseModuleFile(
-    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Problem statement\n\nFirst.\n\n## Problem statement\n\nSecond.\n',
+    '---\nmodule: background\nstatus: draft\nowner:\n---\n\n## Problem statement\n\nFirst.\n\n## Problem statement\n\nSecond.\n',
     moduleSpec
   )
-  assert.equal(data.fields.driver, 'Second.')
+  assert.equal(data.fields.problem, 'Second.')
   assert.equal(data.warnings.length, 1)
   assert.match(data.warnings[0], /duplicate heading/)
 })
 
 test('strict mode throws instead of warning on a duplicate heading', () => {
   const definition = loadDefinition('design')
-  const moduleSpec = definition.modules.get('context')
+  const moduleSpec = definition.modules.get('background')
   assert.throws(
     () =>
       parseModuleFile(
-        '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Problem statement\n\nFirst.\n\n## Problem statement\n\nSecond.\n',
+        '---\nmodule: background\nstatus: draft\nowner:\n---\n\n## Problem statement\n\nFirst.\n\n## Problem statement\n\nSecond.\n',
         moduleSpec,
         { strict: true }
       ),
@@ -885,7 +934,7 @@ test('createInstance writes instance.yaml and blank module files to Azure DevOps
     const azureDevOps = azureDevOpsOptions(baseUrl)
     const result = await createInstance('design', 'my-initiative', { azureDevOps, owner: 'c.barlow' })
     assert.equal(result.stage, 'shape')
-    assert.deepEqual(result.modules, ['context', 'solution-definition', 'team-and-estimates', 'dependencies', 'soap-full-details'])
+    assert.deepEqual(result.modules, ['background', 'solution-definition', 'team-and-estimates', 'dependencies', 'soap-full-details', 'introduction'])
 
     const instance = await readInstance('my-initiative', { azureDevOps })
     assert.equal(instance.definition, 'design')
@@ -893,7 +942,7 @@ test('createInstance writes instance.yaml and blank module files to Azure DevOps
     assert.deepEqual(instance.azureDevOps, { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY })
 
     const definition = loadDefinition('design')
-    const data = await readModule(definition, 'my-initiative', 'context', { azureDevOps })
+    const data = await readModule(definition, 'my-initiative', 'background', { azureDevOps })
     assert.equal(data.owner, 'c.barlow')
     assert.equal(data.status, 'draft')
   })
@@ -908,11 +957,11 @@ test('createInstance writes an Azure-DevOps-backed instance under gantry-workspa
     const client = createAzureDevOpsClient(azureDevOps)
     const instanceYaml = await client.getFileContent('gantry-workspace/my-initiative/instance.yaml')
     assert.match(instanceYaml, /slug: my-initiative/)
-    await client.getFileContent('gantry-workspace/my-initiative/modules/context.md')
+    await client.getFileContent('gantry-workspace/my-initiative/modules/background.md')
 
     // Nothing at all at the legacy repo-root paths.
     await assert.rejects(() => client.getFileContent('instance.yaml'), AzureDevOpsNotFoundError)
-    await assert.rejects(() => client.getFileContent('modules/context.md'), AzureDevOpsNotFoundError)
+    await assert.rejects(() => client.getFileContent('modules/background.md'), AzureDevOpsNotFoundError)
   })
 })
 
@@ -929,8 +978,8 @@ test('a second instance can be created in the same Azure DevOps repo as an exist
     assert.equal(secondInstance.slug, 'second-initiative')
 
     const definition = loadDefinition('design')
-    const firstContext = await readModule(definition, 'first-initiative', 'context', { azureDevOps })
-    const secondContext = await readModule(definition, 'second-initiative', 'context', { azureDevOps })
+    const firstContext = await readModule(definition, 'first-initiative', 'background', { azureDevOps })
+    const secondContext = await readModule(definition, 'second-initiative', 'background', { azureDevOps })
     assert.equal(firstContext.owner, 'first-owner')
     assert.equal(secondContext.owner, 'second-owner')
 
@@ -938,11 +987,11 @@ test('a second instance can be created in the same Azure DevOps repo as an exist
     await writeModule(
       definition,
       'first-initiative',
-      'context',
-      { status: 'review', owner: 'first-owner', fields: { driver: 'First initiative driver.' } },
+      'background',
+      { status: 'review', owner: 'first-owner', fields: { problem: 'First initiative driver.' } },
       { azureDevOps }
     )
-    const secondContextAfter = await readModule(definition, 'second-initiative', 'context', { azureDevOps })
+    const secondContextAfter = await readModule(definition, 'second-initiative', 'background', { azureDevOps })
     assert.equal(secondContextAfter.status, 'draft')
     assert.equal(secondContextAfter.owner, 'second-owner')
 
@@ -961,11 +1010,11 @@ test('createInstance/readInstance/writeModule/readModule against Azure DevOps re
     await assert.rejects(() => createInstance('design', '../evil', { azureDevOps }), /Invalid instance slug|invalid instance slug/i)
     await assert.rejects(() => readInstance('../evil', { azureDevOps }), /Invalid instance slug|invalid instance slug/i)
     await assert.rejects(
-      () => readModule(definition, '../evil', 'context', { azureDevOps }),
+      () => readModule(definition, '../evil', 'background', { azureDevOps }),
       /Invalid instance slug|invalid instance slug/i
     )
     await assert.rejects(
-      () => writeModule(definition, '../evil', 'context', { fields: {} }, { azureDevOps }),
+      () => writeModule(definition, '../evil', 'background', { fields: {} }, { azureDevOps }),
       /Invalid instance slug|invalid instance slug/i
     )
 
@@ -985,25 +1034,25 @@ test('writeModule/readModule against Azure DevOps are the exact inverse of each 
     await writeModule(
       definition,
       'my-initiative',
-      'context',
+      'background',
       {
         status: 'review',
         owner: 'c.barlow',
         fields: {
-          driver: 'A new law requires this by June.',
+          problem: 'A new law requires this by June.',
           'affected-domains': ['Payments', 'Client Record'],
-          'out-of-scope': '',
+          'success-criteria': '',
         },
       },
       { azureDevOps }
     )
 
-    const data = await readModule(definition, 'my-initiative', 'context', { azureDevOps })
+    const data = await readModule(definition, 'my-initiative', 'background', { azureDevOps })
     assert.equal(data.status, 'review')
     assert.equal(data.owner, 'c.barlow')
-    assert.equal(data.fields.driver, 'A new law requires this by June.')
+    assert.equal(data.fields.problem, 'A new law requires this by June.')
     assert.deepEqual(data.fields['affected-domains'], ['Payments', 'Client Record'])
-    assert.equal(data.fields['out-of-scope'], '')
+    assert.equal(data.fields['success-criteria'], '')
   })
 })
 
@@ -1016,14 +1065,14 @@ test('createInstance against Azure DevOps refuses to overwrite an instance that 
 })
 
 test('createInstance against Azure DevOps reports exactly what was written and what remains if it fails partway through, instead of a bare network error', async () => {
-  // instance.yaml is the 1st push; each first-stage module is one push after that. failAfterPushes: 2 lets instance.yaml + "context" through, then fails the very next push ("solution-definition") with a simulated outage — independent of exactly how many GETs the client makes per push, so this isn't coupled to that implementation detail.
+  // instance.yaml is the 1st push; each first-stage module is one push after that. failAfterPushes: 2 lets instance.yaml + "background" through, then fails the very next push ("solution-definition") with a simulated outage — independent of exactly how many GETs the client makes per push, so this isn't coupled to that implementation detail.
   await withFakeAzureDevOpsServer(
     { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {}, failAfterPushes: 2 },
     async (baseUrl) => {
       const azureDevOps = azureDevOpsOptions(baseUrl)
       await assert.rejects(
         () => createInstance('design', 'my-initiative', { azureDevOps }),
-        /partially created.*module\(s\) context were written, but module "solution-definition" failed.*writeModule directly for the remaining module\(s\) \(\s*solution-definition, team-and-estimates, dependencies, soap-full-details\)/s
+        /partially created.*module\(s\) background were written, but module "solution-definition" failed.*writeModule directly for the remaining module\(s\) \(\s*solution-definition, team-and-estimates, dependencies, soap-full-details, introduction\)/s
       )
     }
   )
@@ -1057,9 +1106,9 @@ test('readModule against Azure DevOps reports a missing module the same way the 
 //
 // The new document heading scale: module titles at `#`, field headings at `##`, author content starting at `###`. Pre-existing files were written with bare `##` field headings and no module title; reading one migrates it in place (ADR-0010's migrate-on-read pattern) so no manual step is ever needed.
 
-const OLD_SCALE_CONTEXT = [
+const OLD_SCALE_BACKGROUND = [
   '---',
-  'module: context',
+  'module: background',
   'status: review',
   'owner: c.barlow',
   '---',
@@ -1073,7 +1122,7 @@ const OLD_SCALE_CONTEXT = [
   '- Payments',
   '- Client Record',
   '',
-  '## Out of scope',
+  '## Success criteria',
   '',
   'Nothing yet.',
   '',
@@ -1082,7 +1131,7 @@ const OLD_SCALE_CONTEXT = [
 // The same old-scale file plus two author headings the old scale allowed to collide with the structural one — a `##` that isn't any field's title (which the old parser treated as an unknown phantom section and warned about) and a bare `#`.
 const OLD_SCALE_WITH_AUTHOR_HEADINGS = [
   '---',
-  'module: context',
+  'module: background',
   'status: review',
   'owner: c.barlow',
   '---',
@@ -1100,7 +1149,7 @@ const OLD_SCALE_WITH_AUTHOR_HEADINGS = [
   '- Payments',
   '- Client Record',
   '',
-  '## Out of scope',
+  '## Success criteria',
   '',
   '# A level-one author heading also collides now',
   '',
@@ -1112,16 +1161,16 @@ test('reading an old-scale module file bumps it to the new heading scale and wri
   withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const definition = loadDefinition('design')
-    const contextPath = join(instancesDir, 'my-initiative', 'modules', 'context.md')
-    writeFileSync(contextPath, OLD_SCALE_CONTEXT)
+    const backgroundPath = join(instancesDir, 'my-initiative', 'modules', 'background.md')
+    writeFileSync(backgroundPath, OLD_SCALE_BACKGROUND)
 
-    readModule(definition, 'my-initiative', 'context', { instancesDir })
+    readModule(definition, 'my-initiative', 'background', { instancesDir })
 
-    const raw = readFileSync(contextPath, 'utf8')
+    const raw = readFileSync(backgroundPath, 'utf8')
     assert.match(raw, /^# Background and context$/m)
     assert.match(raw, /^## Problem statement$/m)
     assert.match(raw, /^## Affected domains$/m)
-    assert.match(raw, /^## Out of scope$/m)
+    assert.match(raw, /^## Success criteria$/m)
   })
 })
 
@@ -1129,15 +1178,15 @@ test('migration preserves every field\'s parsed content through the round-trip',
   withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const definition = loadDefinition('design')
-    const moduleSpec = definition.modules.get('context')
-    writeFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), OLD_SCALE_CONTEXT)
+    const moduleSpec = definition.modules.get('background')
+    writeFileSync(join(instancesDir, 'my-initiative', 'modules', 'background.md'), OLD_SCALE_BACKGROUND)
 
-    const before = parseModuleFile(OLD_SCALE_CONTEXT, moduleSpec).fields
-    const after = readModule(definition, 'my-initiative', 'context', { instancesDir }).fields
+    const before = parseModuleFile(OLD_SCALE_BACKGROUND, moduleSpec).fields
+    const after = readModule(definition, 'my-initiative', 'background', { instancesDir }).fields
     assert.deepEqual(after, before)
 
     // And a fresh read/write cycle on the migrated file is still the exact inverse.
-    const reread = readModule(definition, 'my-initiative', 'context', { instancesDir }).fields
+    const reread = readModule(definition, 'my-initiative', 'background', { instancesDir }).fields
     assert.deepEqual(reread, before)
   })
 })
@@ -1146,16 +1195,16 @@ test('migration folds author sub-headings into field content at ### instead of l
   withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const definition = loadDefinition('design')
-    const contextPath = join(instancesDir, 'my-initiative', 'modules', 'context.md')
-    writeFileSync(contextPath, OLD_SCALE_WITH_AUTHOR_HEADINGS)
+    const backgroundPath = join(instancesDir, 'my-initiative', 'modules', 'background.md')
+    writeFileSync(backgroundPath, OLD_SCALE_WITH_AUTHOR_HEADINGS)
 
-    readModule(definition, 'my-initiative', 'context', { instancesDir })
+    readModule(definition, 'my-initiative', 'background', { instancesDir })
 
-    const raw = readFileSync(contextPath, 'utf8')
+    const raw = readFileSync(backgroundPath, 'utf8')
     // The stray `##` that used to be an unknown-section warning is now author content inside Problem statement.
     assert.match(raw, /A new law requires this by June\.\n\n### An author heading the old scale allowed to collide\n/)
     assert.doesNotMatch(raw, /^## An author heading/m)
-    // Same for a stray level-one author heading inside Out of scope.
+    // Same for a stray level-one author heading inside Success criteria.
     assert.match(raw, /### A level-one author heading also collides now\n/)
   })
 })
@@ -1164,15 +1213,15 @@ test('a new-scale file reads back byte-identical — migration never rewrites wh
   withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const definition = loadDefinition('design')
-    const moduleSpec = definition.modules.get('context')
-    const contextPath = join(instancesDir, 'my-initiative', 'modules', 'context.md')
+    const moduleSpec = definition.modules.get('background')
+    const backgroundPath = join(instancesDir, 'my-initiative', 'modules', 'background.md')
 
-    const newText = readFileSync(contextPath, 'utf8')
+    const newText = readFileSync(backgroundPath, 'utf8')
     assert.equal(migrateModuleHeadingScale(newText, moduleSpec), newText)
 
-    const mtimeBefore = readFileSync(contextPath, 'utf8')
-    readModule(definition, 'my-initiative', 'context', { instancesDir })
-    assert.equal(readFileSync(contextPath, 'utf8'), mtimeBefore)
+    const mtimeBefore = readFileSync(backgroundPath, 'utf8')
+    readModule(definition, 'my-initiative', 'background', { instancesDir })
+    assert.equal(readFileSync(backgroundPath, 'utf8'), mtimeBefore)
   })
 })
 
@@ -1180,19 +1229,19 @@ test('readModule against Azure DevOps performs the same lazy migration, pushing 
   await withFakeRepo(
     {
       '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-      '/gantry-workspace/my-initiative/modules/context.md': OLD_SCALE_WITH_AUTHOR_HEADINGS,
+      '/gantry-workspace/my-initiative/modules/background.md': OLD_SCALE_WITH_AUTHOR_HEADINGS,
     },
     async (baseUrl) => {
       const azureDevOps = azureDevOpsOptions(baseUrl)
       const definition = loadDefinition('design')
 
-      const data = await readModule(definition, 'my-initiative', 'context', { azureDevOps })
+      const data = await readModule(definition, 'my-initiative', 'background', { azureDevOps })
       // The author sub-heading folded into Problem statement comes along as content, not as a phantom section.
-      assert.match(data.fields.driver, /^A new law requires this by June\.\n\n### An author heading/)
+      assert.match(data.fields.problem, /^A new law requires this by June\.\n\n### An author heading/)
       assert.deepEqual(data.fields['affected-domains'], ['Payments', 'Client Record'])
 
       const client = createAzureDevOpsClient(azureDevOps)
-      const stored = await client.getFileContent('gantry-workspace/my-initiative/modules/context.md')
+      const stored = await client.getFileContent('gantry-workspace/my-initiative/modules/background.md')
       assert.match(stored, /^# Background and context$/m)
       assert.match(stored, /^## Problem statement$/m)
       assert.match(stored, /### An author heading the old scale allowed to collide\n/)
@@ -1203,33 +1252,33 @@ test('readModule against Azure DevOps performs the same lazy migration, pushing 
 test('readModule forwards options.strict to parseModuleFile on both the local and Azure DevOps-backed paths', async () => {
   // A duplicate defined-field heading is the anomaly strict mode exists to catch (#132 made unknown headings legal custom fields, so they can no longer play this role).
   const badModuleText =
-    '---\nmodule: context\nstatus: draft\nowner:\n---\n\n# Background and context\n\n## Problem statement\n\nFirst.\n\n## Problem statement\n\nSecond.\n'
+    '---\nmodule: background\nstatus: draft\nowner:\n---\n\n# Background and context\n\n## Problem statement\n\nFirst.\n\n## Problem statement\n\nSecond.\n'
   const definition = loadDefinition('design')
 
   withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
-    writeFileSync(join(instancesDir, 'my-initiative', 'modules', 'context.md'), badModuleText)
+    writeFileSync(join(instancesDir, 'my-initiative', 'modules', 'background.md'), badModuleText)
     assert.throws(
-      () => readModule(definition, 'my-initiative', 'context', { instancesDir, strict: true }),
+      () => readModule(definition, 'my-initiative', 'background', { instancesDir, strict: true }),
       /duplicate heading/
     )
     // Without strict, the same anomaly warns instead of throwing.
-    const data = readModule(definition, 'my-initiative', 'context', { instancesDir })
+    const data = readModule(definition, 'my-initiative', 'background', { instancesDir })
     assert.equal(data.warnings.length, 1)
   })
 
   await withFakeRepo(
     {
       '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-      '/gantry-workspace/my-initiative/modules/context.md': badModuleText,
+      '/gantry-workspace/my-initiative/modules/background.md': badModuleText,
     },
     async (baseUrl) => {
       const azureDevOps = azureDevOpsOptions(baseUrl)
       await assert.rejects(
-        () => readModule(definition, 'my-initiative', 'context', { azureDevOps, strict: true }),
+        () => readModule(definition, 'my-initiative', 'background', { azureDevOps, strict: true }),
         /duplicate heading/
       )
-      const data = await readModule(definition, 'my-initiative', 'context', { azureDevOps })
+      const data = await readModule(definition, 'my-initiative', 'background', { azureDevOps })
       assert.equal(data.warnings.length, 1)
     }
   )
@@ -1244,11 +1293,11 @@ test('a PAT the (fake) Azure DevOps server rejects surfaces from readInstance/re
 
       await assert.rejects(() => readInstance('my-initiative', { azureDevOps: badAzureDevOps }), AzureDevOpsAuthenticationError)
       await assert.rejects(
-        () => readModule(definition, 'my-initiative', 'context', { azureDevOps: badAzureDevOps }),
+        () => readModule(definition, 'my-initiative', 'background', { azureDevOps: badAzureDevOps }),
         AzureDevOpsAuthenticationError
       )
       await assert.rejects(
-        () => writeModule(definition, 'my-initiative', 'context', { fields: {} }, { azureDevOps: badAzureDevOps }),
+        () => writeModule(definition, 'my-initiative', 'background', { fields: {} }, { azureDevOps: badAzureDevOps }),
         AzureDevOpsAuthenticationError
       )
       await assert.rejects(
@@ -1289,17 +1338,17 @@ test('createInstance/readInstance/readModule/writeModule all write to and read f
     await writeModule(
       definition,
       'my-initiative',
-      'context',
-      { status: 'in-review', owner: 'c.barlow', fields: { driver: 'Because.' } },
+      'background',
+      { status: 'in-review', owner: 'c.barlow', fields: { problem: 'Because.' } },
       { azureDevOps }
     )
-    const data = await readModule(definition, 'my-initiative', 'context', { azureDevOps })
+    const data = await readModule(definition, 'my-initiative', 'background', { azureDevOps })
     assert.equal(data.status, 'in-review')
-    assert.equal(data.fields.driver, 'Because.')
+    assert.equal(data.fields.problem, 'Because.')
 
     // The module write above never touched `main` either.
     await assert.rejects(
-      () => client.getFileContent('/gantry-workspace/my-initiative/modules/context.md'),
+      () => client.getFileContent('/gantry-workspace/my-initiative/modules/background.md'),
       AzureDevOpsNotFoundError
     )
   })
@@ -1336,7 +1385,7 @@ test('a module missing on the requested branch is reported as "no saved data", e
 
     const definition = loadDefinition('design')
     await assert.rejects(
-      () => readModule(definition, 'my-initiative', 'context', { azureDevOps: { ...azureDevOps, branch: 'stage/hld-definition' } }),
+      () => readModule(definition, 'my-initiative', 'background', { azureDevOps: { ...azureDevOps, branch: 'stage/hld-definition' } }),
       /has no saved data/
     )
   })
@@ -1351,13 +1400,13 @@ test('createInstance/readInstance/readModule/writeModule stay fully synchronous 
     assert.equal(instance instanceof Promise, false)
 
     const definition = loadDefinition('design')
-    const data = readModule(definition, 'my-initiative', 'context', { instancesDir })
+    const data = readModule(definition, 'my-initiative', 'background', { instancesDir })
     assert.equal(data instanceof Promise, false)
 
     const written = writeModule(
       definition,
       'my-initiative',
-      'context',
+      'background',
       { status: 'draft', owner: '', fields: {} },
       { instancesDir }
     )

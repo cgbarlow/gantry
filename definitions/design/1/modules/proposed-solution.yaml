@@ -9,6 +9,10 @@ fields:
     title: Alignment with strategy
     type: markdown
     required: true
+    guidance: >
+      Builds on the Shape sketch — see `solution-definition`
+      (`high-level-solution-overview`, `feature-breakdown`). Do not re-derive;
+      show how that shape aligns with strategy for TAC.
 
   - id: implications
     title: Implications
@@ -21,12 +25,16 @@ fields:
     required: true
     guidance: >
       What you're giving up by choosing this solution over the alternatives
-      recorded in `alternatives-considered`.
+      recorded in `alternatives-considered` (seeded by
+      `solution-definition.alternatives-sketch` at Shape).
 
   - id: delivery-approach
     title: Delivery approach and indicative timeline
     type: markdown
     required: true
+    guidance: >
+      Traceable to `team-and-estimates.estimates` — refine the Shape T-shirt
+      sizes into an indicative timeline rather than re-deriving them.
 
   - id: guardrails
     title: Guardrails
@@ -42,4 +50,5 @@ fields:
     guidance: >
       Cost versus benefit, including recurring costs and non-monetary
       comparisons (e.g. person-hours saved) where a dollar figure isn't
-      meaningful.
+      meaningful. Start from `team-and-estimates.estimates` — refine, don't
+      restate.

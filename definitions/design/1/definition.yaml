@@ -17,7 +17,10 @@ stages:
     gate: business-case
     # The editor mounts the union of the two Shape artefacts' modules. Gate
     # passing itself is scoped to each artefact's `requires` list below.
-    modules: [context, solution-definition, team-and-estimates, dependencies, soap-full-details]
+    # `introduction` is mounted from Shape onward (WI #280): `in-scope` /
+    # `out-of-scope` are the canonical cross-stage scope statement, and
+    # `assumptions` / `constraints` / `caveats` accumulate from here.
+    modules: [background, solution-definition, team-and-estimates, dependencies, soap-full-details, introduction]
     # The instance the web form's "Populate example text" button reads from for this stage's fields — one shared instance covering every stage, so `gantry serve examples` shows every gate screen populated.
     example: examples
 
@@ -29,7 +32,7 @@ stages:
     gate: hld-tac-approved
     # nfrs, risks, security and dependencies are introduced here in early/light form and carried forward — not re-declared — at detailed-design, where the same module ids are required in fuller form. See each module's guidance.
     modules:
-      [hld-submission, problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies]
+      [hld-submission, background, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies, introduction]
     example: examples
 
   - id: detailed-design
@@ -71,23 +74,23 @@ artefacts:
     template: templates/soap.md.tmpl
     gate: business-case
     # WI #276 / ADR-0027 Part 3: field-level `requires` naming exactly the fields
-    # `soap.md.tmpl` renders, in the template's section order. The three fields
-    # the SOAP reconciliation report flagged as dead — context.opportunity,
-    # context.in-scope, solution-definition.high-level-requirements — are Full
-    # SOAP concepts this template never renders, so they are omitted. The three
-    # fields the template renders only conditionally (all `required: false` in
-    # their module YAML) carry the `?` optional suffix: they are in scope for the
-    # lightweight-SOAP editor but do not block `business-case` unless a field's
-    # own `required` / `required-at` makes them mandatory — so gate strictness is
-    # unchanged from the previous whole-module list.
+    # `soap.md.tmpl` renders, in the template's section order. WI #280 promotes
+    # `solution-definition.high-level-requirements` to a bare, gated entry (it is
+    # now `required: true` and rendered by `soap.md.tmpl`) — the agreed-requirements
+    # set `nfrs.requirements-traceability` maps back to (report §5 G5). Scope is now
+    # `introduction.in-scope` / `introduction.out-of-scope` (the cross-stage
+    # backbone). `team-and-estimates.references?` still carries the `?` optional
+    # suffix: in scope for the lightweight-SOAP editor but not blocking
+    # `business-case` unless the field's own `required` / `required-at` makes it so.
     requires:
       [
-        context.driver,
-        context.affected-domains,
-        context.out-of-scope?,
+        background.problem,
+        background.affected-domains,
+        introduction.in-scope,
+        introduction.out-of-scope,
         solution-definition.process-flow,
         solution-definition.high-level-solution-overview,
-        solution-definition.assumptions-and-considerations?,
+        solution-definition.high-level-requirements,
         solution-definition.feature-breakdown,
         team-and-estimates.teams-required,
         team-and-estimates.estimates,
@@ -115,15 +118,18 @@ artefacts:
         soap-full-details.request-date,
         soap-full-details.draft-agreed-date,
         soap-full-details.delivered-date,
-        context.driver,
-        context.opportunity,
-        context.in-scope,
-        context.out-of-scope,
+        background.problem,
+        background.opportunity,
+        introduction.in-scope,
+        introduction.out-of-scope,
         solution-definition.high-level-requirements,
         solution-definition.high-level-solution-overview,
+        solution-definition.alternatives-sketch?,
         team-and-estimates.teams-required,
         dependencies.dependencies-overview,
-        solution-definition.assumptions-and-considerations,
+        introduction.assumptions?,
+        introduction.constraints?,
+        introduction.caveats?,
         team-and-estimates.estimates,
         soap-full-details.sequencing,
         soap-full-details.questions,
@@ -139,7 +145,22 @@ artefacts:
     template: templates/hld.md.tmpl
     gate: hld-tac-approved
     requires:
-      [hld-submission, problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies]
+      [
+        hld-submission,
+        background,
+        proposed-solution,
+        alternatives-considered,
+        open-questions,
+        nfrs,
+        risks,
+        security,
+        dependencies,
+        introduction.in-scope,
+        introduction.out-of-scope,
+        introduction.assumptions?,
+        introduction.constraints?,
+        introduction.caveats?,
+      ]
 
   - id: sad
     title: Solution Architecture Document
@@ -166,14 +187,15 @@ artefacts:
       [
         introduction.overview,
         introduction.purpose,
-        introduction.scope,
+        introduction.in-scope,
+        introduction.out-of-scope,
         architecture.business-context,
         architecture.design-decisions,
         architecture.solution-description,
         architecture.logical-components,
         architecture.standards,
         architecture.architectural-risks,
-        architecture.constraints-and-assumptions,
+        architecture.constraints,
         integration.interfaces,
         integration.network-and-infrastructure,
         integration.environments,
@@ -225,7 +247,8 @@ artefacts:
     requires:
       [
         introduction.purpose,
-        introduction.scope,
+        introduction.in-scope,
+        introduction.out-of-scope,
         support-and-operations.stakeholders,
         support-and-operations.environments-and-domains,
         support-and-operations.release-procedures,
@@ -270,7 +293,8 @@ artefacts:
         glossary.terms-and-definitions,
         introduction.overview,
         introduction.purpose,
-        introduction.scope,
+        introduction.in-scope,
+        introduction.out-of-scope,
         as-built-notes.design-overview,
         as-built-notes.process-flows,
         as-built-notes.infrastructure-and-configuration,

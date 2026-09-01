@@ -50,7 +50,7 @@ test('the synced-fields panel shows the link prompt when unlinked, then the dist
       const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
       try {
         createInstance('design', 'my-initiative', { instancesDir, assignee: 'Ada Lovelace' })
-        for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
+        for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
           cpSync(
             join('instances', 'examples', 'modules', `${moduleId}.md`),
             join(instancesDir, 'my-initiative', 'modules', `${moduleId}.md`)

@@ -57,7 +57,7 @@ function withScratchInstances(fn) {
 
 async function fillShapeStage(azureDevOps, branch) {
   const client = createAzureDevOpsClient(azureDevOps)
-  for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
+  for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
     const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
     await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
   }
@@ -437,14 +437,14 @@ test('a post-approval commit changes the panel to Request approval again, and re
         await castVote(adoBaseUrl, prId, 10)
         await new Promise((resolve) => setTimeout(resolve, 10))
         await createAzureDevOpsClient(azureDevOps).writeFile(
-          `gantry-workspace/${SLUG}/modules/context.md`,
-          `${readFileSync(join('instances', 'examples', 'modules', 'context.md'), 'utf8')}\nPost-approval browser edit.\n`,
+          `gantry-workspace/${SLUG}/modules/background.md`,
+          `${readFileSync(join('instances', 'examples', 'modules', 'background.md'), 'utf8')}\nPost-approval browser edit.\n`,
           { branch, message: 'Post-approval browser edit' },
         )
         for (let i = 1; i <= 40; i += 1) {
           await createAzureDevOpsClient(azureDevOps).writeFile(
-            `gantry-workspace/${SLUG}/modules/context.md`,
-            `${readFileSync(join('instances', 'examples', 'modules', 'context.md'), 'utf8')}\nPost-approval browser edit ${i}.\n`,
+            `gantry-workspace/${SLUG}/modules/background.md`,
+            `${readFileSync(join('instances', 'examples', 'modules', 'background.md'), 'utf8')}\nPost-approval browser edit ${i}.\n`,
             { branch, message: `Post-approval browser edit ${i}` },
           )
         }

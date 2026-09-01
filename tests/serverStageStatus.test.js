@@ -53,7 +53,7 @@ function withScratchInstances(fn) {
 
 async function fillShapeStage(azureDevOps, branch) {
   const client = createAzureDevOpsClient(azureDevOps)
-  for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
+  for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
     const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
     await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
   }

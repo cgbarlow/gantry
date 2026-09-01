@@ -53,9 +53,9 @@ function repoCheckUrl(gantryBase, adoBaseUrl) {
 
 const SEED_FILES = {
   '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\nassignee: c.barlow\n',
-  '/modules/context.md': [
+  '/modules/background.md': [
     '---',
-    'module: context',
+    'module: background',
     'status: draft',
     'owner: c.barlow',
     '---',
@@ -68,7 +68,7 @@ const SEED_FILES = {
     '',
     '- Payments',
     '',
-    '## Out of scope',
+    '## Success criteria',
     '',
     'Nothing yet.',
     '',
@@ -125,6 +125,7 @@ test('GET /api/azure-devops/repo-check with a valid PAT against a repo that alre
 test('GET /api/azure-devops/repo-check reports "complete" once every module required at the current stage is present and filled in', async () => {
   const fullFiles = {
     ...SEED_FILES,
+    '/modules/introduction.md': readFileSync('instances/examples/modules/introduction.md', 'utf8'),
     '/modules/solution-definition.md': readFileSync('instances/examples/modules/solution-definition.md', 'utf8'),
     '/modules/team-and-estimates.md': readFileSync('instances/examples/modules/team-and-estimates.md', 'utf8'),
   }

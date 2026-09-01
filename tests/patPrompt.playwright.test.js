@@ -19,9 +19,9 @@ const VALID_PAT_2 = `${VALID_PAT}-2`
 
 const SEED_FILES = {
   '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-  '/gantry-workspace/my-initiative/modules/context.md': [
+  '/gantry-workspace/my-initiative/modules/background.md': [
     '---',
-    'module: context',
+    'module: background',
     'status: draft',
     'owner: c.barlow',
     '---',
@@ -34,7 +34,7 @@ const SEED_FILES = {
     '',
     '- Payments',
     '',
-    '## Out of scope',
+    '## Success criteria',
     '',
     'Nothing yet.',
     '',

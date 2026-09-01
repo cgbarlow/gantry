@@ -160,7 +160,7 @@ test('top-of-page Insert ▾ prepends Section and List as first field, survives 
     })
 
     const definition = loadDefinition('design')
-    const data = readModule(definition, 'examples', 'context', { instancesDir })
+    const data = readModule(definition, 'examples', 'background', { instancesDir })
     // Both custom fields persisted in layout order, prepended first.
     const layoutIds = data.layout.map((entry) => (entry.custom ? entry.custom.title : entry.field))
     assert.equal(layoutIds[0], 'Prepended List')
@@ -301,8 +301,8 @@ test('the ported module editor page loads with no errors and a markdown field sa
     })
 
     const definition = loadDefinition('design')
-    const data = readModule(definition, 'examples', 'context', { instancesDir })
-    assert.equal(data.fields.driver, 'Edited by the Playwright smoke test.')
+    const data = readModule(definition, 'examples', 'background', { instancesDir })
+    assert.equal(data.fields.problem, 'Edited by the Playwright smoke test.')
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }
@@ -706,15 +706,17 @@ test("Image is a direct formatting-toolbar action and Insert offers only Section
         await page.goto(`${base}/instance/examples`)
         await page.waitForSelector('.module', { timeout: 10_000 })
 
-        // The Shape stage's first module (per definitions/design/definition.yaml).
-        const contextModule = page.locator('.module').first()
-        await assert.doesNotReject(contextModule.locator('h2', { hasText: 'Context' }).waitFor({ timeout: 2_000 }))
+        // The `soap`-scoped `introduction` module: its two markdown fields
+        // in-scope / out-of-scope (WI #280) are the only two fields it
+        // contributes to the lightweight SOAP editor.
+        const contextModule = page.locator('.module').filter({ has: page.locator('h2', { hasText: 'Introduction' }) })
+        await assert.doesNotReject(contextModule.locator('h2', { hasText: 'Introduction' }).waitFor({ timeout: 2_000 }))
 
         // The old single affordance is gone; each markdown field has its own generic dropdown instead.
         assert.equal(await page.getByRole('button', { name: '+ Insert asset' }).count(), 0)
-        // `soap`'s field-level `requires` (WI #276) scopes context to the two
-        // markdown fields driver / out-of-scope (plus the affected-domains list),
-        // so two per-field Insert ▾ triggers.
+        // `soap`'s field-level `requires` (WI #276/#280) scopes introduction to
+        // the two markdown fields in-scope / out-of-scope, so two per-field
+        // Insert ▾ triggers.
         const triggers = contextModule.getByRole('button', { name: 'Insert ▾' })
         assert.equal(await triggers.count(), 2)
         const firstTrigger = triggers.nth(0)
@@ -791,7 +793,7 @@ test("Image is a direct formatting-toolbar action and Insert offers only Section
         assert.deepEqual(pageErrors, [])
 
         // Usage is computed from the saved module file on disk, so save before checking the library reflects it as used.
-        await contextModule.getByRole('button', { name: 'Save Background and context' }).click()
+        await contextModule.getByRole('button', { name: 'Save Introduction' }).click()
         await page.waitForSelector('text=Saved', { timeout: 5_000 })
 
         // Asset library screen: the inserted asset shows USED IN >= 1; uploading one more, never referenced, shows UNUSED. Navigated to directly — the toolbar's "View asset library" link was removed as redundant once assets are insertable inline from the editor.
@@ -809,10 +811,10 @@ test("Image is a direct formatting-toolbar action and Insert offers only Section
     })
 
     const definition = loadDefinition('design')
-    const data = readModule(definition, 'examples', 'context', { instancesDir })
-    assert.match(data.fields.driver, /asset:/)
-    // Second markdown field of the `soap`-scoped context module (WI #276): driver,
-    // then out-of-scope. The "Choose existing" / hand-typed inserts target it.
+    const data = readModule(definition, 'examples', 'introduction', { instancesDir })
+    assert.match(data.fields['in-scope'], /asset:/)
+    // Second markdown field of the `soap`-scoped introduction module (WI #280):
+    // in-scope, then out-of-scope. The "Choose existing" / hand-typed inserts target it.
     assert.match(data.fields['out-of-scope'], /asset:/)
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
@@ -915,11 +917,11 @@ test('toolbar Table opens a size grid whose pick inserts a live table with the c
     })
 
     const definition = loadDefinition('design')
-    const data = readModule(definition, 'examples', 'context', { instancesDir })
+    const data = readModule(definition, 'examples', 'background', { instancesDir })
     // Blank-line hygiene kept the lead-in separated, and the fresh table is
     // padded to the header's width.
     assert.match(
-      data.fields.driver,
+      data.fields.problem,
       /^Key decisions:\n\n\| Header 1 \| Header 2 \| Header 3 \|\n\| -{8} \| -{8} \| -{8} \|\n\| {10}\| {10}\| {10}\|$/
     )
   } finally {
@@ -1208,16 +1210,16 @@ test('Insert ▾ → Section adds a titled custom field below the requesting fie
         await dialog.getByRole('button', { name: 'Insert section' }).click()
         await dialog.waitFor({ state: 'hidden', timeout: 5_000 })
 
-        // The new editable block appears directly below Problem statement (before the list and out-of-scope fields), with its own Insert ▾ beneath it.
-        // The `soap` artefact's field-level `requires` (WI #276) scopes the context
-        // module to driver / affected-domains / out-of-scope; the author-inserted
+        // The new editable block appears directly below Problem statement (before the affected-domains list), with its own Insert ▾ beneath it.
+        // The `soap` artefact's field-level `requires` (WI #276/#280) scopes the
+        // background module to problem / affected-domains; the author-inserted
         // custom section stays visible alongside them.
         const titles = await contextModule.locator('.field > label').allTextContents()
         assert.deepEqual(
           titles.map((t) => t.replace(/ \*$/, '')),
-          ['Problem statement', 'Risks we carry', 'Affected domains', 'Out of scope']
+          ['Problem statement', 'Risks we carry', 'Affected domains']
         )
-        assert.equal(await contextModule.getByRole('button', { name: 'Insert ▾' }).count(), 3)
+        assert.equal(await contextModule.getByRole('button', { name: 'Insert ▾' }).count(), 2)
 
         // Type into the new block, then save everything to disk.
         const newField = contextModule.locator('.field-markdown').nth(1)
@@ -1238,17 +1240,16 @@ test('Insert ▾ → Section adds a titled custom field below the requesting fie
     })
 
     const definition = loadDefinition('design')
-    const data = readModule(definition, 'examples', 'context', { instancesDir })
+    const data = readModule(definition, 'examples', 'background', { instancesDir })
     assert.deepEqual(data.customFields, [
       { id: 'custom:risks-we-carry', title: 'Risks we carry', value: 'The June deadline.' },
     ])
     assert.deepEqual(data.layout, [
-      { field: 'driver' },
+      { field: 'problem' },
       { custom: { id: 'custom:risks-we-carry', title: 'Risks we carry', value: 'The June deadline.' } },
       { field: 'affected-domains' },
       { field: 'opportunity' },
-      { field: 'in-scope' },
-      { field: 'out-of-scope' },
+      { field: 'success-criteria' },
     ])
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
@@ -1520,8 +1521,8 @@ test('task list, blockquote, and horizontal rule write real markdown to disk (#1
     })
 
     const definition = loadDefinition('design')
-    const data = readModule(definition, 'examples', 'context', { instancesDir })
-    assert.equal(data.fields.driver, '> - [ ] first\n> - [ ] second\n\n---')
+    const data = readModule(definition, 'examples', 'background', { instancesDir })
+    assert.equal(data.fields.problem, '> - [ ] first\n> - [ ] second\n\n---')
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }

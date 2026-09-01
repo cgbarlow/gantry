@@ -33,6 +33,9 @@ The Provider Portal is a new public-facing web application fronted by the API Ga
 
 The one-time reference code is the sole link between a submission and a client's application; if a provider mistypes it, the certificate could attach to the wrong case. Mitigated by a checksum digit and a confirmation step showing the client's masked name before submission.
 
-## Goals, constraints and assumptions
+## Constraints and goals
 
-Assumes providers already hold credentials with the external provider-authentication service. Constrained to certificate upload only in this release — no two-way messaging with providers.
+Constrained to certificate upload only in this release — no two-way messaging
+with providers. Goal: reuse the existing intake and workflow tooling rather
+than introduce a new case-management product. (Provider credentialing
+assumptions are recorded in `introduction.assumptions`.)

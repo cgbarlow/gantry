@@ -8,7 +8,7 @@ fields:
   - id: recovery-approach
     title: Recovery approach
     type: markdown
-    required-at: [operational-handover]
+    required-at: [build-ready-checklist, operational-handover]
     guidance: >
       The failover model for each layer of the solution (platform,
       workloads) — active-active vs active-passive, the availability tier and

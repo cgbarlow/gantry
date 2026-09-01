@@ -67,9 +67,10 @@ function withAzureDevOpsBackedServer(files, serverOptions, fn) {
 
 const SEED_FILES = {
   '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-  '/gantry-workspace/my-initiative/modules/context.md': [
+  '/gantry-workspace/my-initiative/modules/introduction.md': readFileSync('instances/examples/modules/introduction.md', 'utf8'),
+  '/gantry-workspace/my-initiative/modules/background.md': [
     '---',
-    'module: context',
+    'module: background',
     'status: draft',
     'owner: c.barlow',
     '---',
@@ -82,7 +83,7 @@ const SEED_FILES = {
     '',
     '- Payments',
     '',
-    '## Out of scope',
+    '## Success criteria',
     '',
     'Nothing yet.',
     '',
@@ -125,8 +126,8 @@ test('GET /api/instance against an Azure-DevOps-backed instance with a valid PAT
     assert.equal(body.definition, 'design')
     assert.deepEqual(body.stage, { id: 'shape', title: 'SOAP', gate: 'business-case', number: 1 })
 
-    const context = body.modules.find((m) => m.id === 'context')
-    const driver = context.fields.find((f) => f.id === 'driver')
+    const context = body.modules.find((m) => m.id === 'background')
+    const driver = context.fields.find((f) => f.id === 'problem')
     assert.equal(driver.value, 'Seeded from the fake Azure DevOps repo.')
     const domains = context.fields.find((f) => f.id === 'affected-domains')
     assert.deepEqual(domains.value, ['Payments'])
@@ -164,7 +165,7 @@ test('GET /api/instance surfaces a genuine Azure DevOps read failure (a 500, not
           objectId: '1'.padStart(40, '0'),
         })
       }
-      if (path === '/gantry-workspace/my-initiative/modules/context.md') {
+      if (path === '/gantry-workspace/my-initiative/modules/background.md') {
         // A genuine Azure DevOps-side failure — an outage, not a missing file.
         return json(500, { message: 'TF999999: simulated internal server error (fake, for this regression test)' })
       }
@@ -213,10 +214,10 @@ test('GET /api/instance surfaces a genuine Azure DevOps read failure (a 500, not
 
 test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance with no PAT returns the structured "authentication required" response, and writes nothing', async () => {
   await withAzureDevOpsBackedServer(SEED_FILES, {}, async (base) => {
-    const res = await fetch(`${base}/api/instance/modules/context`, {
+    const res = await fetch(`${base}/api/instance/modules/background`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'agreed', owner: 'attacker', fields: { driver: 'should never be written' } }),
+      body: JSON.stringify({ status: 'agreed', owner: 'attacker', fields: { problem: 'should never be written' } }),
     })
     assert.equal(res.status, 401)
     const body = await res.json()
@@ -226,10 +227,10 @@ test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance with
 
 test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance with a PAT the fake server rejects returns the same structured response', async () => {
   await withAzureDevOpsBackedServer(SEED_FILES, {}, async (base) => {
-    const res = await fetch(`${base}/api/instance/modules/context`, {
+    const res = await fetch(`${base}/api/instance/modules/background`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader('not-a-valid-pat') },
-      body: JSON.stringify({ status: 'agreed', owner: 'attacker', fields: { driver: 'should never be written' } }),
+      body: JSON.stringify({ status: 'agreed', owner: 'attacker', fields: { problem: 'should never be written' } }),
     })
     assert.equal(res.status, 401)
     const body = await res.json()
@@ -239,29 +240,29 @@ test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance with
 
 test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance with a valid PAT writes through and reports updated status', async () => {
   await withAzureDevOpsBackedServer(SEED_FILES, {}, async (base) => {
-    const res = await fetch(`${base}/api/instance/modules/context`, {
+    const res = await fetch(`${base}/api/instance/modules/background`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
       body: JSON.stringify({
         status: 'agreed',
         owner: 'c.barlow',
         fields: {
-          driver: 'Updated via Azure DevOps.',
+          problem: 'Updated via Azure DevOps.',
           'affected-domains': ['Payments', 'Client Record'],
-          'out-of-scope': '',
+          opportunity: '',
         },
       }),
     })
     assert.equal(res.status, 200)
     const status = await res.json()
-    const context = status.modules.find((m) => m.id === 'context')
+    const context = status.modules.find((m) => m.id === 'background')
     assert.equal(context.complete, true)
 
     // Reading it back (also with a valid PAT) proves the write actually landed in the fake Azure DevOps repo, not just in the response.
     const readRes = await fetch(`${base}/api/instance`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })
     const readBody = await readRes.json()
-    const readContext = readBody.modules.find((m) => m.id === 'context')
-    const driver = readContext.fields.find((f) => f.id === 'driver')
+    const readContext = readBody.modules.find((m) => m.id === 'background')
+    const driver = readContext.fields.find((f) => f.id === 'problem')
     assert.equal(driver.value, 'Updated via Azure DevOps.')
   })
 })
@@ -273,13 +274,13 @@ test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance also
     '/gantry-workspace/my-initiative/modules/team-and-estimates.md': readFileSync('instances/examples/modules/team-and-estimates.md', 'utf8'),
   }
   await withAzureDevOpsBackedServer(fullFiles, {}, async (base, adoBaseUrl) => {
-    const res = await fetch(`${base}/api/instance/modules/context`, {
+    const res = await fetch(`${base}/api/instance/modules/background`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
       body: JSON.stringify({
         status: 'agreed',
         owner: 'c.barlow',
-        fields: { driver: 'Updated via Azure DevOps.', 'affected-domains': ['Payments'], 'out-of-scope': '' },
+        fields: { problem: 'Updated via Azure DevOps.', 'affected-domains': ['Payments'], opportunity: '' },
       }),
     })
     assert.equal(res.status, 200)
@@ -303,15 +304,15 @@ test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance also
 test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance still saves and reports success even when the stage\'s artefact(s) can\'t be rendered yet', async () => {
   // SEED_FILES seeds only "context" — "soap" also requires solution-definition and team-and-estimates, so this save's own follow-up render has nothing complete enough to render.
   await withAzureDevOpsBackedServer(SEED_FILES, {}, async (base) => {
-    const res = await fetch(`${base}/api/instance/modules/context`, {
+    const res = await fetch(`${base}/api/instance/modules/background`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
-      body: JSON.stringify({ status: 'agreed', owner: 'c.barlow', fields: { driver: 'Still just getting started.' } }),
+      body: JSON.stringify({ status: 'agreed', owner: 'c.barlow', fields: { problem: 'Still just getting started.' } }),
     })
     assert.equal(res.status, 200)
     const body = await res.json()
     // The save itself still succeeded and is reported as such (this is not a save-failure test) — only the follow-up render is what's incomplete.
-    assert.ok(body.modules.find((m) => m.id === 'context'))
+    assert.ok(body.modules.find((m) => m.id === 'background'))
     assert.deepEqual(
       body.rendered.map((r) => r.artefactId),
       ['soap', 'soap-full']
@@ -373,7 +374,7 @@ test('PUT /api/instance/assignee against an Azure-DevOps-backed instance with a 
 
     const readRes = await fetch(`${base}/api/instance`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })
     const readBody = await readRes.json()
-    const context = readBody.modules.find((m) => m.id === 'context')
+    const context = readBody.modules.find((m) => m.id === 'background')
     // The module's own frontmatter owner ("c.barlow", seeded by SEED_FILES) is a separate, untouched field — not overwritten by the assignee update.
     assert.equal(context.owner, 'c.barlow')
 

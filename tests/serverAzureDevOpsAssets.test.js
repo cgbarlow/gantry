@@ -43,13 +43,14 @@ function withRunningServer(options, fn) {
 // WI260 repo-as-asset-store: workspace-backed instance whose repo has gantry-workspace/<slug>/assets/foo.png — GET lists it; GET file streams it with image Content-Type; and a module that references ../assets/foo.png renders a .docx that embeds the image.
 test('workspace-backed repo assets: listing, file streaming, and render embedding', async () => {
   const pngBytes = Buffer.from(ONE_PX_PNG_BASE64, 'base64')
-  const ctxWithImage = readFileSync('instances/examples/modules/context.md', 'utf8').replace(
+  const ctxWithImage = readFileSync('instances/examples/modules/background.md', 'utf8').replace(
     '## Problem statement',
     '## Problem statement\n\n![My Img](../assets/foo.png)'
   )
   const files = {
     '/gantry-workspace/repo-assets-test/instance.yaml': 'definition: design\nslug: repo-assets-test\nstage: shape\n',
-    '/gantry-workspace/repo-assets-test/modules/context.md': ctxWithImage,
+    '/gantry-workspace/repo-assets-test/modules/background.md': ctxWithImage,
+    '/gantry-workspace/repo-assets-test/modules/introduction.md': readFileSync('instances/examples/modules/introduction.md', 'utf8'),
     '/gantry-workspace/repo-assets-test/modules/solution-definition.md': readFileSync(
       'instances/examples/modules/solution-definition.md',
       'utf8'
@@ -129,13 +130,14 @@ test('workspace-backed repo assets: listing, file streaming, and render embeddin
 
 test('workspace-backed repo assets: assets/foo.png variant also embeds', async () => {
   const pngBytes = Buffer.from(ONE_PX_PNG_BASE64, 'base64')
-  const ctxWithImage = readFileSync('instances/examples/modules/context.md', 'utf8').replace(
+  const ctxWithImage = readFileSync('instances/examples/modules/background.md', 'utf8').replace(
     '## Problem statement',
     '## Problem statement\n\n![My Img](assets/foo.png)'
   )
   const files = {
     '/gantry-workspace/repo-assets-test2/instance.yaml': 'definition: design\nslug: repo-assets-test2\nstage: shape\n',
-    '/gantry-workspace/repo-assets-test2/modules/context.md': ctxWithImage,
+    '/gantry-workspace/repo-assets-test2/modules/background.md': ctxWithImage,
+    '/gantry-workspace/repo-assets-test2/modules/introduction.md': readFileSync('instances/examples/modules/introduction.md', 'utf8'),
     '/gantry-workspace/repo-assets-test2/modules/solution-definition.md': readFileSync(
       'instances/examples/modules/solution-definition.md',
       'utf8'
@@ -175,7 +177,8 @@ test('workspace-backed repo assets: assets/foo.png variant also embeds', async (
 test('workspace-backed repo assets: empty assets folder still renders without media', async () => {
   const files = {
     '/gantry-workspace/empty-assets-test/instance.yaml': 'definition: design\nslug: empty-assets-test\nstage: shape\n',
-    '/gantry-workspace/empty-assets-test/modules/context.md': readFileSync('instances/examples/modules/context.md', 'utf8'),
+    '/gantry-workspace/empty-assets-test/modules/background.md': readFileSync('instances/examples/modules/background.md', 'utf8'),
+    '/gantry-workspace/empty-assets-test/modules/introduction.md': readFileSync('instances/examples/modules/introduction.md', 'utf8'),
     '/gantry-workspace/empty-assets-test/modules/solution-definition.md': readFileSync(
       'instances/examples/modules/solution-definition.md',
       'utf8'
@@ -242,11 +245,12 @@ test('resolveRepoAsset helpers rewrite both ../assets/ and assets/ forms', async
 test('workspace-backed assets API: POST blocked, file 404, file fallback to main, listing union with stage branch', async () => {
   const branchSlug = 'repo-assets-branch-test'
   const branchName = `gantry-workspace/${branchSlug}/shape`
-  const ctx = readFileSync('instances/examples/modules/context.md', 'utf8')
+  const ctx = readFileSync('instances/examples/modules/background.md', 'utf8')
   const files = {
     // instance on main
     [`/gantry-workspace/${branchSlug}/instance.yaml`]: `definition: design\nslug: ${branchSlug}\nstage: shape\n`,
-    [`/gantry-workspace/${branchSlug}/modules/context.md`]: ctx,
+    [`/gantry-workspace/${branchSlug}/modules/background.md`]: ctx,
+    [`/gantry-workspace/${branchSlug}/modules/introduction.md`]: readFileSync('instances/examples/modules/introduction.md', 'utf8'),
     [`/gantry-workspace/${branchSlug}/modules/solution-definition.md`]: readFileSync(
       'instances/examples/modules/solution-definition.md',
       'utf8'
@@ -261,7 +265,7 @@ test('workspace-backed assets API: POST blocked, file 404, file fallback to main
   const branchFiles = {
     [branchName]: {
       [`/gantry-workspace/${branchSlug}/instance.yaml`]: `definition: design\nslug: ${branchSlug}\nstage: shape\n`,
-      [`/gantry-workspace/${branchSlug}/modules/context.md`]: ctx,
+      [`/gantry-workspace/${branchSlug}/modules/background.md`]: ctx,
       // branch-only asset
       [`/gantry-workspace/${branchSlug}/assets/from-branch.png`]: ONE_PX_PNG_BASE64,
     },
@@ -329,7 +333,7 @@ test('workspace-backed assets API: POST blocked, file 404, file fallback to main
         })
 
         // Render from stage branch where asset lives only on main — fallback should embed via union fetch
-        const ctxWithMainAsset = readFileSync('instances/examples/modules/context.md', 'utf8').replace(
+        const ctxWithMainAsset = readFileSync('instances/examples/modules/background.md', 'utf8').replace(
           '## Problem statement',
           '## Problem statement\n\n![Img](../assets/from-main.png)'
         )
@@ -346,10 +350,11 @@ test('workspace-backed assets API: POST blocked, file 404, file fallback to main
         const fallbackBranchFiles = {
           [`gantry-workspace/${fallbackSlug}/shape`]: {
             [`/gantry-workspace/${fallbackSlug}/instance.yaml`]: `definition: design\nslug: ${fallbackSlug}\nstage: shape\n`,
-            [`/gantry-workspace/${fallbackSlug}/modules/context.md`]: readFileSync('instances/examples/modules/context.md', 'utf8').replace(
+            [`/gantry-workspace/${fallbackSlug}/modules/background.md`]: readFileSync('instances/examples/modules/background.md', 'utf8').replace(
               '## Problem statement',
               '## Problem statement\n\n![Fall](../assets/fallback.png)'
             ),
+            [`/gantry-workspace/${fallbackSlug}/modules/introduction.md`]: readFileSync('instances/examples/modules/introduction.md', 'utf8'),
             [`/gantry-workspace/${fallbackSlug}/modules/solution-definition.md`]: readFileSync(
               'instances/examples/modules/solution-definition.md',
               'utf8'
@@ -421,13 +426,13 @@ test('WI264: completed-stage free-browse reads assets + content from main, not t
     'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR42mP8z8BQz0AEYBxVSF8FAGDeAe0Zb6zAAAAAElFTkSuQmCC'
   const staleBytes = Buffer.from(STALE_PNG_BASE64, 'base64')
 
-  const ctx = readFileSync('instances/examples/modules/context.md', 'utf8')
+  const ctx = readFileSync('instances/examples/modules/background.md', 'utf8')
   const contextWith = (marker) => ctx.replace('## Problem statement', `## Problem statement\n\n${marker}`)
 
   const files = {
     // instance.yaml on main has ALREADY advanced to hld-define — `shape` is a completed stage
     [`/gantry-workspace/${slug}/instance.yaml`]: `definition: design\nslug: ${slug}\nstage: hld-define\n`,
-    [`/gantry-workspace/${slug}/modules/context.md`]: contextWith('MARKER_FROM_MAIN'),
+    [`/gantry-workspace/${slug}/modules/background.md`]: contextWith('MARKER_FROM_MAIN'),
     // figure-1.png committed on main, as it would be after the shape PR merged
     [`/gantry-workspace/${slug}/assets/figure-1.png`]: ONE_PX_PNG_BASE64,
   }
@@ -462,7 +467,7 @@ test('WI264: completed-stage free-browse reads assets + content from main, not t
         await client.writeFile(`/gantry-workspace/${slug}/assets/figure-1.png`, STALE_PNG_BASE64, { branch: shapeBranch })
         await client.writeFile(`/gantry-workspace/${slug}/assets/stale-only.png`, STALE_PNG_BASE64, { branch: shapeBranch })
         await client.writeFile(
-          `/gantry-workspace/${slug}/modules/context.md`,
+          `/gantry-workspace/${slug}/modules/background.md`,
           contextWith('MARKER_FROM_STALE_SHAPE_BRANCH'),
           { branch: shapeBranch }
         )

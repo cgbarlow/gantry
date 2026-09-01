@@ -158,8 +158,8 @@ test('fails a freshly-created instance against its current stage, with every req
     assert.equal(result.gate, 'business-case')
     assert.deepEqual(result.stage, { id: 'shape', title: 'SOAP', gate: 'business-case' })
 
-    const context = result.modules.find((m) => m.id === 'context')
-    assert.deepEqual(context.outstanding, ['driver', 'affected-domains'])
+    const background = result.modules.find((m) => m.id === 'background')
+    assert.deepEqual(background.outstanding, ['problem', 'affected-domains'])
   })
 })
 
@@ -188,22 +188,28 @@ test('passes Business Case Approved with only the lightweight SOAP fields', () =
     createInstance('design', 'light-soap', { instancesDir })
 
     const source = {
-      context: readModule(definition, 'examples', 'context').fields,
+      background: readModule(definition, 'examples', 'background').fields,
+      introduction: readModule(definition, 'examples', 'introduction').fields,
       'solution-definition': readModule(definition, 'examples', 'solution-definition').fields,
       'team-and-estimates': readModule(definition, 'examples', 'team-and-estimates').fields,
     }
-    writeModule(definition, 'light-soap', 'context', {
+    writeModule(definition, 'light-soap', 'background', {
       fields: {
-        driver: source.context.driver,
-        'affected-domains': source.context['affected-domains'],
-        'out-of-scope': source.context['out-of-scope'],
+        problem: source.background.problem,
+        'affected-domains': source.background['affected-domains'],
+      },
+    }, { instancesDir })
+    writeModule(definition, 'light-soap', 'introduction', {
+      fields: {
+        'in-scope': source.introduction['in-scope'],
+        'out-of-scope': source.introduction['out-of-scope'],
       },
     }, { instancesDir })
     writeModule(definition, 'light-soap', 'solution-definition', {
       fields: {
         'process-flow': source['solution-definition']['process-flow'],
         'high-level-solution-overview': source['solution-definition']['high-level-solution-overview'],
-        'assumptions-and-considerations': source['solution-definition']['assumptions-and-considerations'],
+        'high-level-requirements': source['solution-definition']['high-level-requirements'],
         'feature-breakdown': source['solution-definition']['feature-breakdown'],
       },
     }, { instancesDir })
@@ -226,10 +232,14 @@ test('passes Business Case Approved with only the Full SOAP fields, without proc
     const definition = loadDefinition('design')
     createInstance('design', 'full-soap', { instancesDir })
 
-    writeModule(definition, 'full-soap', 'context', {
+    writeModule(definition, 'full-soap', 'background', {
       fields: {
-        driver: 'The current service creates an avoidable barrier.',
+        problem: 'The current service creates an avoidable barrier.',
         opportunity: 'The initiative creates a simpler path for clients.',
+      },
+    }, { instancesDir })
+    writeModule(definition, 'full-soap', 'introduction', {
+      fields: {
         'in-scope': 'The new service flow and its supporting integrations.',
         'out-of-scope': 'Unrelated service changes.',
       },
@@ -238,7 +248,6 @@ test('passes Business Case Approved with only the Full SOAP fields, without proc
       fields: {
         'high-level-requirements': '| Section | Requirement |\n| --- | --- |\n| Service | Provide the new service flow. |',
         'high-level-solution-overview': 'The service uses the existing intake and workflow platforms.',
-        'assumptions-and-considerations': 'The existing platforms can support the new service flow.',
       },
     }, { instancesDir })
     writeModule(definition, 'full-soap', 'team-and-estimates', {
@@ -312,7 +321,7 @@ test('checkGate against Azure DevOps fails a freshly-created instance the same w
 
 test('checkGate against Azure DevOps passes once the Shape-stage modules are filled in, the same content that passes locally', async () => {
   const seedFiles = { '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n' }
-  for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
+  for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
     seedFiles[`/gantry-workspace/my-initiative/modules/${moduleId}.md`] = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
   }
 
@@ -337,7 +346,7 @@ test('checkGate against Azure DevOps honours --gate, resolving a stage other tha
 test('checkGate against Azure DevOps fails hard on a parser anomaly, via strict parsing, exactly as the local path does', async () => {
   const badModuleText = [
     '---',
-    'module: context',
+    'module: background',
     'status: draft',
     'owner:',
     '---',
@@ -353,7 +362,7 @@ test('checkGate against Azure DevOps fails hard on a parser anomaly, via strict 
   ].join('\n')
   const seedFiles = {
     '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-    '/gantry-workspace/my-initiative/modules/context.md': badModuleText,
+    '/gantry-workspace/my-initiative/modules/background.md': badModuleText,
   }
   await withFakeRepo(seedFiles, async (baseUrl) => {
     const azureDevOps = azureDevOpsOptions(baseUrl)
@@ -364,12 +373,12 @@ test('checkGate against Azure DevOps fails hard on a parser anomaly, via strict 
 test('a parser anomaly in a module file fails hard, via strict parseModuleFile, rather than passing silently', () => {
   withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
-    const contextPath = join(instancesDir, 'my-initiative', 'modules', 'context.md')
+    const backgroundPath = join(instancesDir, 'my-initiative', 'modules', 'background.md')
     writeFileSync(
-      contextPath,
+      backgroundPath,
       [
         '---',
-        'module: context',
+        'module: background',
         'status: review',
         'owner: c.barlow',
         '---',

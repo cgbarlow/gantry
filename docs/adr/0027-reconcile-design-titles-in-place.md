@@ -14,6 +14,15 @@ Rationale:
 
 ### Dead `soap` fields — APPLIED by WI #276 (optional field refs)
 
+**Update (WI #280).** `solution-definition.high-level-requirements` is no longer
+a dead field. WI #280 (cross-stage reuse) makes it `required: true`, adds a render
+site in `soap.md.tmpl`, and lists it as a bare, gated entry in `soap`'s `requires`
+— it is the agreed high-level-requirements set that `nfrs.requirements-traceability`
+maps back to at detailed design (cross-stage-reuse report §5 G5). The other two
+fields the SOAP report called dead (`context.opportunity`, `context.in-scope`) were
+absorbed into the `background` / `introduction` merge in the same WI and no longer
+exist under those ids. The historical analysis below is retained as written.
+
 **Update (WI #276).** Part 3 is now done. WI #276 added an engine-level optional
 field-ref syntax — a trailing `?` on a `requires:` `module.field` entry (`README.md`,
 "gate passes when…" section) — that scopes the field into the artefact (rendered,

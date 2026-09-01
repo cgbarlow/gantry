@@ -47,7 +47,7 @@ async function createParentWorkItem(baseUrl) {
 
 // Fills in the Shape stage's three modules with the same content the `examples` fixture already carries, so `checkGate`'s "business-case" gate genuinely passes — reused by every gate-pass-sync test below rather than hand-writing each field.
 function fillShapeStage(instancesDir, slug) {
-  for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
+  for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
     cpSync(join('instances', 'examples', 'modules', `${moduleId}.md`), join(instancesDir, slug, 'modules', `${moduleId}.md`))
   }
 }
@@ -416,7 +416,7 @@ test('syncGatePassToWorkItem works against an Azure-DevOps-backed instance\'s da
 
         // Seed the three Shape-stage modules straight into the fake git repo, reusing the same examples-fixture content fillShapeStage copies for the local path.
         const gitClient = createAzureDevOpsClient(azureDevOps)
-        for (const moduleId of ['context', 'solution-definition', 'team-and-estimates']) {
+        for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
           const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
           await gitClient.writeFile(`gantry-workspace/my-initiative/modules/${moduleId}.md`, text)
         }

@@ -27,10 +27,10 @@ test('a freshly-created instance is incomplete, with every required field outsta
     assert.deepEqual(status.stage, { id: 'shape', title: 'SOAP', gate: 'business-case' })
     assert.equal(status.complete, false)
 
-    const context = status.modules.find((m) => m.id === 'context')
-    assert.equal(context.exists, true)
-    assert.equal(context.complete, false)
-    assert.deepEqual(context.outstanding, ['driver', 'affected-domains'])
+    const background = status.modules.find((m) => m.id === 'background')
+    assert.equal(background.exists, true)
+    assert.equal(background.complete, false)
+    assert.deepEqual(background.outstanding, ['problem', 'affected-domains'])
   })
 })
 
@@ -94,7 +94,7 @@ test('getStatus against Azure DevOps reports the same shape as the local path, w
       validPat: VALID_PAT,
       files: {
         '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-        '/gantry-workspace/my-initiative/modules/context.md': '---\nmodule: context\nstatus: draft\nowner:\n---\n\n## Problem statement\n\nDone.\n',
+        '/gantry-workspace/my-initiative/modules/background.md': '---\nmodule: background\nstatus: draft\nowner:\n---\n\n## Problem statement\n\nDone.\n',
       },
     },
     async (baseUrl) => {
@@ -106,9 +106,9 @@ test('getStatus against Azure DevOps reports the same shape as the local path, w
       assert.deepEqual(status.stage, { id: 'shape', title: 'SOAP', gate: 'business-case' })
       assert.equal(status.complete, false)
 
-      const context = status.modules.find((m) => m.id === 'context')
-      assert.equal(context.exists, true)
-      assert.deepEqual(context.outstanding, ['affected-domains'])
+      const background = status.modules.find((m) => m.id === 'background')
+      assert.equal(background.exists, true)
+      assert.deepEqual(background.outstanding, ['affected-domains'])
 
       // "team-and-estimates" has no file at all in the fake repo.
       const teamAndEstimates = status.modules.find((m) => m.id === 'team-and-estimates')
@@ -136,8 +136,8 @@ test('evaluateStage in strict mode over Azure DevOps throws on a parser anomaly,
       validPat: VALID_PAT,
       files: {
         '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-        '/gantry-workspace/my-initiative/modules/context.md':
-          '---\nmodule: context\nstatus: draft\nowner:\n---\n\n# Background and context\n\n## Problem statement\n\nFirst.\n\n## Problem statement\n\nSecond.\n',
+        '/gantry-workspace/my-initiative/modules/background.md':
+          '---\nmodule: background\nstatus: draft\nowner:\n---\n\n# Background and context\n\n## Problem statement\n\nFirst.\n\n## Problem statement\n\nSecond.\n',
       },
     },
     async (baseUrl) => {

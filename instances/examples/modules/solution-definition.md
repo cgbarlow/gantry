@@ -39,14 +39,6 @@ existing payments system rather than a new one. No new case management or
 workflow product is introduced — MPA is a new application type layered onto
 tooling that already exists.
 
-## Assumptions
-
-The carrier will provide a portal that can be linked from ContosoSelfService to browse
-available phones and plans, and an API for provisioning and terminating a
-subscription once an application is approved. The carrier is assumed to
-handle physical delivery of the device through its own existing channels
-(courier or in-branch pickup) — Contoso does not take on any device logistics.
-
 ## Feature breakdown and involved teams
 
 - **Present available phones and plans**: link from ContosoSelfService to the carrier's

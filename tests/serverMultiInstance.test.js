@@ -37,9 +37,9 @@ function withRunningServer(options, fn) {
 
 const SEED_FILES = {
   '/gantry-workspace/remote-initiative/instance.yaml': 'definition: design\nslug: remote-initiative\nstage: shape\n',
-  '/gantry-workspace/remote-initiative/modules/context.md': [
+  '/gantry-workspace/remote-initiative/modules/background.md': [
     '---',
-    'module: context',
+    'module: background',
     'status: draft',
     'owner: c.barlow',
     '---',
@@ -52,7 +52,7 @@ const SEED_FILES = {
     '',
     '- Payments',
     '',
-    '## Out of scope',
+    '## Success criteria',
     '',
     'Nothing yet.',
     '',
@@ -98,8 +98,8 @@ test('one running server, with no fixed Azure DevOps location, correctly serves 
           const remoteBody = await remoteRes.json()
           assert.equal(remoteBody.slug, 'remote-initiative')
           assert.equal(remoteBody.definition, 'design')
-          const context = remoteBody.modules.find((m) => m.id === 'context')
-          const driver = context.fields.find((f) => f.id === 'driver')
+          const context = remoteBody.modules.find((m) => m.id === 'background')
+          const driver = context.fields.find((f) => f.id === 'problem')
           assert.equal(driver.value, 'Seeded from the fake Azure DevOps repo.')
 
           // Both instances now show up in the shared dashboard listing — the registry is the single source of truth for both.
@@ -128,13 +128,13 @@ test('writing a module on the Azure-DevOps-backed instance never touches the loc
         )
 
         await withRunningServer({ instancesDir }, async (base) => {
-          const res = await fetch(`${base}/api/instance/modules/context?slug=remote-initiative`, {
+          const res = await fetch(`${base}/api/instance/modules/background?slug=remote-initiative`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
             body: JSON.stringify({
               status: 'agreed',
               owner: 'c.barlow',
-              fields: { driver: 'Written to the remote instance only.', 'affected-domains': ['Payments'], 'out-of-scope': '' },
+              fields: { problem: 'Written to the remote instance only.', 'affected-domains': ['Payments'], opportunity: '' },
             }),
           })
           assert.equal(res.status, 200)
@@ -142,8 +142,8 @@ test('writing a module on the Azure-DevOps-backed instance never touches the loc
           // The local instance's own context module is untouched by a write against the remote instance sharing the same server.
           const localRes = await fetch(`${base}/api/instance?slug=local-initiative`)
           const localBody = await localRes.json()
-          const localContext = localBody.modules.find((m) => m.id === 'context')
-          const localDriver = localContext.fields.find((f) => f.id === 'driver')
+          const localContext = localBody.modules.find((m) => m.id === 'background')
+          const localDriver = localContext.fields.find((f) => f.id === 'problem')
           assert.notEqual(localDriver.value, 'Written to the remote instance only.')
         })
       } finally {

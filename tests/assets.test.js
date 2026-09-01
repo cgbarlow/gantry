@@ -260,16 +260,16 @@ test('an asset referenced via the asset:<id> convention from a module\'s markdow
       created = await uploadRes.json()
 
       // Hand-typing the reference convention directly into a module's markdown (rather than going through the insert modal) must be picked up by the usage computation identically.
-      const putRes = await fetch(`${base}/api/instance/modules/context`, {
+      const putRes = await fetch(`${base}/api/instance/modules/background`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           status: 'agreed',
           owner: 'c.barlow',
           fields: {
-            driver: `Some narrative.\n\n![Eligibility flow](asset:${created.id})\n`,
+            problem: `Some narrative.\n\n![Eligibility flow](asset:${created.id})\n`,
             'affected-domains': ['Payments'],
-            'out-of-scope': '',
+            opportunity: '',
           },
         }),
       })
