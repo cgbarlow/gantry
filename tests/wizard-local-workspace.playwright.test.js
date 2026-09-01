@@ -245,6 +245,173 @@ test('Local + Pick: lists the instances found in the folder and navigates with ?
   })
 })
 
+// ---------------------------------------------------------------------------
+// WI #307 — "+ New instance" inside an already-opened local workspace
+// (openLocalWorkspace previously left `localRegHandle`/`isLocalWorkspace`
+// unset and never offered a way back to the Instance step, so a second
+// instance in an already-registered local workspace was unreachable).
+// ---------------------------------------------------------------------------
+
+test('Local + Pick: "+ New instance" creates a second instance in an already-opened workspace, leaving the first untouched', async () => {
+  await withServer(async ({ gantryBase }) => {
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      const pageErrors = []
+      page.on('pageerror', (err) => pageErrors.push(err.message))
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
+      await page.addInitScript(FS_MOCK_INIT)
+
+      await page.goto(`${gantryBase}/new-workspace`)
+      await page.waitForSelector('h2:has-text("New Workspace")')
+      await page.getByRole('button', { name: 'Local', exact: true }).click()
+      await page.getByRole('button', { name: 'Pick existing local workspace', exact: true }).click()
+
+      await page.evaluate(() => {
+        window.__nextPickFiles = {
+          'gantry-workspace/workspace.json':
+            '{"name":"Seeded WS","owner":"o","kind":"local","createdAt":"2026-08-31T12:00:00.000Z"}',
+          'gantry-workspace/alpha/instance.yaml': 'definition: d\nslug: alpha\nstage: s\n',
+        }
+      })
+      await page.locator('#local-pick-open').click()
+
+      await page.waitForSelector('#local-new-instance')
+      const slugsBefore = await page.locator('#local-instance-picker .definition-card .name').allTextContents()
+      assert.deepEqual(slugsBefore, ['alpha'])
+
+      // The new-instance affordance sits alongside the existing-instances
+      // list, not just in the empty state.
+      await page.locator('#local-new-instance').click()
+
+      // Reaches the Instance step in-page (no navigation yet).
+      await page.waitForSelector('#instance-name')
+      await page.locator('.definition-card').first().click()
+      await page.locator('#instance-name').fill('Beta Claims')
+      assert.equal(await page.locator('#instance-directory').inputValue(), 'beta-claims')
+      await page.locator('#instance-assignee').fill('a.architect')
+
+      await Promise.all([
+        page.waitForNavigation(),
+        page.getByRole('button', { name: 'Create instance', exact: true }).click(),
+      ])
+      const url = new URL(page.url())
+      assert.equal(url.pathname, '/instance/beta-claims')
+      assert.ok(url.searchParams.get('local'), 'the ?local=<id> param is present')
+
+      // Written into the already-opened workspace's gantry-workspace/, and
+      // the pre-existing "alpha" instance is untouched.
+      const tree = await readPickedTree(page)
+      assert.match(tree['gantry-workspace/beta-claims/instance.yaml'], /slug: beta-claims/)
+      assert.equal(tree['gantry-workspace/alpha/instance.yaml'], 'definition: d\nslug: alpha\nstage: s\n')
+
+      assert.deepEqual(pageErrors, [])
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
+test('Local + Pick: an already-opened workspace with zero instances offers "+ New instance" instead of a dead end', async () => {
+  await withServer(async ({ gantryBase }) => {
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
+      await page.addInitScript(FS_MOCK_INIT)
+
+      await page.goto(`${gantryBase}/new-workspace`)
+      await page.waitForSelector('h2:has-text("New Workspace")')
+      await page.getByRole('button', { name: 'Local', exact: true }).click()
+      await page.getByRole('button', { name: 'Pick existing local workspace', exact: true }).click()
+
+      await page.evaluate(() => {
+        window.__nextPickFiles = {
+          'gantry-workspace/workspace.json':
+            '{"name":"Empty WS","kind":"local","createdAt":"2026-08-31T12:00:00.000Z"}',
+        }
+      })
+      await page.locator('#local-pick-open').click()
+
+      await page.waitForSelector('#local-new-instance')
+      assert.equal(await page.locator('#local-instance-picker').count(), 0)
+      assert.match(
+        await page.locator('.wizard-field-hint', { hasText: /no instances yet/ }).textContent(),
+        /create the first one below/
+      )
+
+      await page.locator('#local-new-instance').click()
+      await page.waitForSelector('#instance-name')
+      await page.locator('.definition-card').first().click()
+      await page.locator('#instance-name').fill('First Instance')
+
+      await Promise.all([
+        page.waitForNavigation(),
+        page.getByRole('button', { name: 'Create instance', exact: true }).click(),
+      ])
+      const url = new URL(page.url())
+      assert.equal(url.pathname, '/instance/first-instance')
+
+      const tree = await readPickedTree(page)
+      assert.ok(tree['gantry-workspace/first-instance/instance.yaml'], 'the first instance was written')
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
+test('Local + Pick: "+ New instance" rejects a slug colliding with an existing instance instead of overwriting it', async () => {
+  await withServer(async ({ gantryBase }) => {
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
+      await page.addInitScript(FS_MOCK_INIT)
+
+      await page.goto(`${gantryBase}/new-workspace`)
+      await page.waitForSelector('h2:has-text("New Workspace")')
+      await page.getByRole('button', { name: 'Local', exact: true }).click()
+      await page.getByRole('button', { name: 'Pick existing local workspace', exact: true }).click()
+
+      await page.evaluate(() => {
+        window.__nextPickFiles = {
+          'gantry-workspace/workspace.json':
+            '{"name":"Seeded WS","kind":"local","createdAt":"2026-08-31T12:00:00.000Z"}',
+          'gantry-workspace/alpha/instance.yaml': 'definition: d\nslug: alpha\nstage: s\n',
+        }
+      })
+      await page.locator('#local-pick-open').click()
+      await page.waitForSelector('#local-new-instance')
+      await page.locator('#local-new-instance').click()
+
+      await page.waitForSelector('#instance-name')
+      await page.locator('.definition-card').first().click()
+      await page.locator('#instance-name').fill('Alpha Again')
+      // Override the auto-slugified Directory to collide with "alpha".
+      await page.locator('#instance-directory').fill('alpha')
+
+      await page.getByRole('button', { name: 'Create instance', exact: true }).click()
+
+      await page.waitForSelector('.inline-error')
+      assert.match(
+        await page.locator('.inline-error').textContent(),
+        /"alpha" already exists in this workspace folder/
+      )
+      // No navigation happened — still on the wizard.
+      assert.equal(new URL(page.url()).pathname, '/new-workspace')
+
+      // The pre-existing instance was not overwritten.
+      const tree = await readPickedTree(page)
+      assert.equal(tree['gantry-workspace/alpha/instance.yaml'], 'definition: d\nslug: alpha\nstage: s\n')
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
 test('Unsupported browser: the Local option is present but disabled with a message; Server-hosted still works', async () => {
   await withServer(async ({ gantryBase }) => {
     const browser = await launchBrowser()

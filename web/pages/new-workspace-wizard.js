@@ -611,6 +611,14 @@ async function openLocalWorkspace(handle, existingId) {
   const id = await rememberWorkspace({ id: existingId, handle, name: record.name })
   localWorkspaceId.value = id
   selectedWorkspace.value = { isLocal: true, name: record.name }
+  // Mirrors confirmLocalRegister()'s tail (WI #307): the Instance step's
+  // local-write path (createLocalInstance) reads localRegHandle.value for
+  // the folder to write into and isLocalWorkspace.value to route Create
+  // through it instead of POST /api/instances — both must be set here too
+  // so "+ New instance" (below) can reach the Instance step from an
+  // already-opened workspace, not just from a brand-new Register.
+  localRegHandle.value = handle
+  isLocalWorkspace.value = true
 
   const entries = await listDir(handle, 'gantry-workspace').catch(() => [])
   const found = []
@@ -1385,7 +1393,7 @@ function LocalWorkspacePanel() {
                   <div class="wizard-field" style="margin-top:16px">
                     <label>Instances in ${selectedWorkspace.value?.name ?? 'this workspace'}</label>
                     ${localPickInstances.value.length === 0
-                      ? html`<p class="wizard-field-hint">This workspace has no instances yet.</p>`
+                      ? html`<p class="wizard-field-hint">This workspace has no instances yet — create the first one below.</p>`
                       : html`
                           <div id="local-instance-picker">
                             ${localPickInstances.value.map(
@@ -1401,6 +1409,15 @@ function LocalWorkspacePanel() {
                             )}
                           </div>
                         `}
+                    <button
+                      type="button"
+                      class="btn primary"
+                      id="local-new-instance"
+                      style="margin-top:8px"
+                      onClick=${() => (step.value = 'instance')}
+                    >
+                      + New instance
+                    </button>
                   </div>
                 `
               : null}
