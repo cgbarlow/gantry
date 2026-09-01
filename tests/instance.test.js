@@ -1001,6 +1001,79 @@ test('a second instance can be created in the same Azure DevOps repo as an exist
   })
 })
 
+// WI288: creating a workspace-backed instance into an empty repo seeds a
+// filled-in repo-root README.md following the standard Azure DevOps README
+// template's section structure.
+test('createInstance against Azure DevOps writes a filled-in repo-root README.md into an empty workspace repo', async () => {
+  await withFakeRepo({}, async (baseUrl) => {
+    const azureDevOps = azureDevOpsOptions(baseUrl)
+    await createInstance('design', 'my-initiative', { azureDevOps })
+
+    const client = createAzureDevOpsClient(azureDevOps)
+    const readme = await client.getFileContent('README.md')
+
+    for (const heading of ['# Introduction', '# Getting Started', '# Build and Test', '# Contribute']) {
+      assert.ok(readme.includes(heading), `README is missing "${heading}"`)
+    }
+    // Interpolated instance display title + slug + definition title, no TODO placeholders.
+    // Display title comes from the codebase's own titleCaseSlug helper (short words upper-cased).
+    assert.match(readme, /\*\*MY Initiative\*\* \(`my-initiative`\)/)
+    assert.match(readme, /\*\*Solution Design\*\* definition/)
+    assert.ok(!/TODO:/.test(readme), 'README still contains a TODO: placeholder')
+  })
+})
+
+// WI288 guard: a workspace repo hosts many instances — creating a second
+// instance must not clobber the README the first one (or a human) put there.
+test('createInstance against Azure DevOps leaves an existing repo-root README.md untouched', async () => {
+  const marker = '<!-- DISTINCTIVE-MARKER-DO-NOT-CLOBBER -->'
+  await withFakeRepo({ 'README.md': `# Pre-existing\n\n${marker}\n` }, async (baseUrl) => {
+    const azureDevOps = azureDevOpsOptions(baseUrl)
+    await createInstance('design', 'first-initiative', { azureDevOps })
+    await createInstance('design', 'second-initiative', { azureDevOps })
+
+    const client = createAzureDevOpsClient(azureDevOps)
+    const readme = await client.getFileContent('README.md')
+    assert.ok(readme.includes(marker), 'the pre-existing README was overwritten')
+    assert.ok(!readme.includes('# Getting Started'), 'the pre-existing README was replaced with the workspace template')
+  })
+})
+
+// WI288: a README write failure is best-effort — it is logged and skipped, not
+// allowed to fail instance creation. failAfterPushes: 1 lets instance.yaml
+// (push 1) through, then fails the README push (push 2); creation carries on to
+// the module loop, whose own failure is what surfaces — never a README error.
+test('createInstance against Azure DevOps does not fail instance creation when the README write fails', async () => {
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {}, failAfterPushes: 1 },
+    async (baseUrl) => {
+      const azureDevOps = azureDevOpsOptions(baseUrl)
+      await assert.rejects(
+        () => createInstance('design', 'my-initiative', { azureDevOps }),
+        (err) => {
+          assert.match(err.message, /partially created/)
+          assert.doesNotMatch(err.message, /README/)
+          return true
+        }
+      )
+      // instance.yaml landed; README never did (its push was the one that failed).
+      const client = createAzureDevOpsClient(azureDevOps)
+      await client.getFileContent('gantry-workspace/my-initiative/instance.yaml')
+      await assert.rejects(() => client.getFileContent('README.md'), AzureDevOpsNotFoundError)
+    }
+  )
+})
+
+// WI288: the local (non-Azure-DevOps) createInstance path is unchanged — it
+// writes no README.md anywhere under instancesDir.
+test('local createInstance writes no README.md (behaviour unchanged)', () => {
+  withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    assert.throws(() => readFileSync(join(instancesDir, 'my-initiative', 'README.md')), /ENOENT/)
+    assert.throws(() => readFileSync(join(instancesDir, 'README.md')), /ENOENT/)
+  })
+})
+
 // Defense-in-depth regression test: every real caller of the Azure-DevOps-backed functions below already validates `slug` before reaching them (lib/server.js's isValidSlug for request input, lib/repoCheck.js's own check for a slug discovered from a remote repo) — but these functions must also refuse a path-traversal-shaped slug themselves, rather than silently building a `gantry-workspace/../evil/...` path, in case a future or overlooked caller ever reaches them without validating first.
 test('createInstance/readInstance/writeModule/readModule against Azure DevOps reject a path-traversal-shaped slug outright, rather than building a path from it', async () => {
   await withFakeRepo({}, async (baseUrl) => {
@@ -1065,9 +1138,9 @@ test('createInstance against Azure DevOps refuses to overwrite an instance that 
 })
 
 test('createInstance against Azure DevOps reports exactly what was written and what remains if it fails partway through, instead of a bare network error', async () => {
-  // instance.yaml is the 1st push; each first-stage module is one push after that. failAfterPushes: 2 lets instance.yaml + "background" through, then fails the very next push ("solution-definition") with a simulated outage — independent of exactly how many GETs the client makes per push, so this isn't coupled to that implementation detail.
+  // instance.yaml is the 1st push; the filled-in repo-root README.md (WI288) is the 2nd; each first-stage module is one push after that. failAfterPushes: 3 lets instance.yaml + README + "background" through, then fails the very next push ("solution-definition") with a simulated outage — independent of exactly how many GETs the client makes per push, so this isn't coupled to that implementation detail.
   await withFakeAzureDevOpsServer(
-    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {}, failAfterPushes: 2 },
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {}, failAfterPushes: 3 },
     async (baseUrl) => {
       const azureDevOps = azureDevOpsOptions(baseUrl)
       await assert.rejects(
