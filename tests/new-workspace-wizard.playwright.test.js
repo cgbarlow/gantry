@@ -289,7 +289,7 @@ test('#137: empty pick-mode offers a control to switch to Register', async () =>
       // Pick mode is the default; with zero registered workspaces the list
       // is empty after load completes.
       await page.waitForSelector('#workspace-picker', { state: 'detached', timeout: 10_000 })
-      const hint = page.locator('.wizard-field-hint')
+      const hint = page.locator('.wizard-field-hint', { hasText: 'No workspaces registered yet' })
       await hint.waitFor({ timeout: 10_000 })
       const linkBtn = hint.locator('.btn-link')
       assert.equal(await linkBtn.count(), 1, 'empty state contains a clickable control')

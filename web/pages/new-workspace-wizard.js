@@ -37,6 +37,21 @@ import { apiFetch } from '../lib/apiFetch.js'
 import { renderMarkdown } from '../lib/markdown.js'
 import { TICKETING_SYSTEMS, defaultTicketingSystem } from '../lib/ticketingSystem.js'
 import { IdentityPicker } from '../lib/identityPicker.js'
+import { parseRepoUrl } from '../lib/validateRepo.js'
+import {
+  isSupported as localWorkspaceSupported,
+  pickWorkspaceDirectory,
+  parseWorkspaceJson,
+  serializeWorkspaceJson,
+  rememberWorkspace,
+  recentLocalWorkspaces,
+  getWorkspaceHandle,
+  ensurePermission,
+  readTextFile,
+  writeTextFile,
+  listDir,
+} from '../lib/localWorkspace.js'
+import { renderInstanceYaml, renderModuleFile as renderLocalModuleFile } from '../lib/localInstanceFiles.js'
 
 // The work item type used when nothing more specific is looked up or
 // chosen — mirrors lib/workItemLink.js's own `DEFAULT_WORK_ITEM_TYPE`
@@ -45,6 +60,42 @@ import { IdentityPicker } from '../lib/identityPicker.js'
 // imported: that module is server-only (it shells real Azure DevOps client
 // calls), with no browser-safe entry point of its own.
 const DEFAULT_WORK_ITEM_TYPE = 'Task'
+
+// ---------- Step 1: Workspace location (ADR-0029) ----------
+// The axis rendered ABOVE "Pick existing | Register new": where an
+// instance's data lives — on the gantry server / an Azure DevOps repo it
+// can reach ('server'), or a folder on this browser user's own machine
+// reached through the File System Access API ('local', Chromium-only).
+const workspaceLocation = signal('server') // 'server' | 'local'
+
+// Server-hosted + Pick: adopt an existing Azure DevOps repo by URL. Runs
+// the same GET /api/azure-devops/repo-check the final create step already
+// uses (see createInstanceAndMaybeLink's C4 block) to report whether that
+// location already holds instance data.
+const adoptRepoUrl = signal('')
+const adoptCheckStatus = signal('idle') // idle | checking | present | absent | error
+const adoptCheckMessage = signal('')
+
+// Local workspace — shared across both sub-modes.
+const localError = signal('')
+const localBusy = signal(false)
+// The IndexedDB id of the remembered local workspace, threaded to the
+// editor route as `?local=<id>` so A6's editor can pick the handle back up.
+const localWorkspaceId = signal('')
+// Routes the instance-fields step's "Create" to the local-filesystem
+// writer (createLocalInstance) instead of POST /api/instances.
+const isLocalWorkspace = signal(false)
+
+// Local + Register.
+const localRegHandle = signal(null) // FileSystemDirectoryHandle for the picked folder
+const localRegStage = signal('pick') // 'pick' | 'details'
+const localRegName = signal('')
+const localRegOwner = signal('')
+
+// Local + Pick.
+const localPickInstances = signal(null) // [{ slug }] | null (null = nothing opened yet)
+const localRecent = signal([]) // recentLocalWorkspaces()
+const localGrantId = signal('') // a recent-workspace id whose permission needs a re-grant
 
 // ---------- Step 1: pick or register a Workspace ----------
 const workspaceMode = signal('pick') // 'pick' | 'register'
@@ -137,6 +188,21 @@ effect(() => {
 
 function resetWizard() {
   preselectedWorkspaceId.value = null
+  workspaceLocation.value = 'server'
+  adoptRepoUrl.value = ''
+  adoptCheckStatus.value = 'idle'
+  adoptCheckMessage.value = ''
+  localError.value = ''
+  localBusy.value = false
+  localWorkspaceId.value = ''
+  isLocalWorkspace.value = false
+  localRegHandle.value = null
+  localRegStage.value = 'pick'
+  localRegName.value = ''
+  localRegOwner.value = ''
+  localPickInstances.value = null
+  localRecent.value = []
+  localGrantId.value = ''
   workspaceMode.value = 'pick'
   workspaces.value = null
   workspacesLoadError.value = ''
@@ -242,6 +308,301 @@ async function registerWorkspace() {
   }
 }
 
+// ---------- Server-hosted + Pick: adopt an existing repo by URL ----------
+
+function onAdoptRepoUrlInput(value) {
+  adoptRepoUrl.value = value
+  if (adoptCheckStatus.value !== 'idle') {
+    adoptCheckStatus.value = 'idle'
+    adoptCheckMessage.value = ''
+  }
+}
+
+async function checkAdoptRepo() {
+  const loc = parseRepoUrl(adoptRepoUrl.value)
+  if (!loc) {
+    adoptCheckStatus.value = 'error'
+    adoptCheckMessage.value =
+      'Enter a URL like https://dev.azure.com/{organization}/{project}/_git/{repository}'
+    return
+  }
+  adoptCheckStatus.value = 'checking'
+  adoptCheckMessage.value = ''
+  try {
+    const qs = new URLSearchParams({ organization: loc.organization, project: loc.project, repository: loc.repository })
+    const res = await apiFetch(`/api/azure-devops/repo-check?${qs}`)
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      adoptCheckStatus.value = 'error'
+      adoptCheckMessage.value = body.message ?? body.error ?? `Repo check failed (${res.status})`
+      return
+    }
+    if (body.result === 'found') {
+      adoptCheckStatus.value = 'present'
+      adoptCheckMessage.value = `Instance data found: "${body.slug}"${body.definition ? ` (${body.definition})` : ''}.`
+    } else if (body.result === 'multiple') {
+      adoptCheckStatus.value = 'present'
+      adoptCheckMessage.value = `This repository already holds multiple instances: ${(body.slugs ?? []).join(', ')}.`
+    } else {
+      adoptCheckStatus.value = 'absent'
+      adoptCheckMessage.value = body.message ?? 'No instance data found at this repository yet.'
+    }
+  } catch (err) {
+    adoptCheckStatus.value = 'error'
+    adoptCheckMessage.value = err.message
+  }
+}
+
+// On a positive repo-check, register/adopt that location as a workspace
+// (POST /api/workspaces proves repo access and reuses an already-registered
+// workspace for the same repo) and continue to the instance step. The final
+// create step's own C4 block then detects the existing instance data and
+// routes through POST /api/instances/adopt automatically.
+async function adoptCheckedRepo() {
+  const loc = parseRepoUrl(adoptRepoUrl.value)
+  if (!loc) return
+  registerStatus.value = 'registering'
+  registerError.value = ''
+  registerNotice.value = ''
+  try {
+    const res = await apiFetch('/api/workspaces', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        organization: loc.organization,
+        project: loc.project,
+        repository: loc.repository,
+        owner: '',
+        ticketingSystem: registerTicketingSystem.value,
+      }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      registerStatus.value = 'failed'
+      registerError.value = body.message ?? body.error ?? `Failed to adopt repository (${res.status})`
+      return
+    }
+    registerStatus.value = 'idle'
+    registerNotice.value = body.reused
+      ? 'Using the workspace already registered for this repository'
+      : 'Adopted the existing repository as a workspace'
+    selectedWorkspace.value = body
+    workspaces.value = null
+    step.value = 'instance'
+  } catch (err) {
+    registerStatus.value = 'failed'
+    registerError.value = err.message
+  }
+}
+
+// ---------- Local + Register ----------
+
+async function pickLocalRegisterDir() {
+  localError.value = ''
+  localBusy.value = true
+  try {
+    const handle = await pickWorkspaceDirectory()
+    const top = await listDir(handle, '.')
+    if (top.some((entry) => entry.name === 'gantry-workspace')) {
+      localError.value =
+        'That folder already contains a gantry-workspace/ — a new local workspace needs an empty or new folder. Use "Pick existing local workspace" to open it instead.'
+      return
+    }
+    localRegHandle.value = handle
+    localRegName.value = handle.name ?? ''
+    localRegOwner.value = ''
+    localRegStage.value = 'details'
+  } catch (err) {
+    // The user dismissing the picker rejects with AbortError — not an error to show.
+    if (err && err.name !== 'AbortError') localError.value = err.message
+  } finally {
+    localBusy.value = false
+  }
+}
+
+async function confirmLocalRegister() {
+  localError.value = ''
+  const name = localRegName.value.trim()
+  const owner = localRegOwner.value.trim()
+  if (!name) {
+    localError.value = 'Name is required.'
+    return
+  }
+  const handle = localRegHandle.value
+  if (!handle) {
+    localError.value = 'Pick a folder first.'
+    return
+  }
+  localBusy.value = true
+  try {
+    const record = { name, kind: 'local', createdAt: new Date().toISOString() }
+    if (owner) record.owner = owner
+    await writeTextFile(handle, 'gantry-workspace/workspace.json', serializeWorkspaceJson(record))
+    const id = await rememberWorkspace({ handle, name })
+    localWorkspaceId.value = id
+    isLocalWorkspace.value = true
+    selectedWorkspace.value = { isLocal: true, name }
+    step.value = 'instance'
+  } catch (err) {
+    localError.value = err.message
+  } finally {
+    localBusy.value = false
+  }
+}
+
+// Writes a brand-new instance's files straight through the directory handle
+// — the browser-side equivalent of createInstance's local path — then
+// navigates to the editor route with `?local=<id>` so A6 can reattach the
+// handle. No work-item link step for a local workspace (ADR-0029: local
+// instances have no ticketing).
+async function createLocalInstance() {
+  createStatus.value = 'creating'
+  createError.value = ''
+  createNotice.value = ''
+  const slug = directoryField.value.trim()
+  const defId = selectedDefinitionId.value
+  const version = resolvedVersion() ?? 1
+  const handle = localRegHandle.value
+  try {
+    if (!handle) throw new Error('No local workspace folder is open.')
+    const res = await fetch(
+      `/api/definitions/${encodeURIComponent(defId)}/versions/${encodeURIComponent(String(version))}`
+    )
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.error ?? body.message ?? `Failed to load definition structure (${res.status})`)
+    }
+    const structure = await res.json()
+    const firstStage = structure.stages?.[0]
+    if (!firstStage) throw new Error(`Definition "${defId}" has no stages`)
+    const modulesById = new Map((structure.modules ?? []).map((m) => [m.id, m]))
+
+    const existing = await listDir(handle, 'gantry-workspace').catch(() => [])
+    if (existing.some((entry) => entry.name === slug && entry.kind === 'directory')) {
+      throw new Error(`"${slug}" already exists in this workspace folder — choose a different Directory.`)
+    }
+
+    await writeTextFile(
+      handle,
+      `gantry-workspace/${slug}/instance.yaml`,
+      renderInstanceYaml({
+        definition: defId,
+        slug,
+        stage: firstStage.id,
+        assignee: assigneeField.value.trim(),
+        definitionVersion: version,
+      })
+    )
+    for (const moduleId of firstStage.modules ?? []) {
+      const moduleSpec = modulesById.get(moduleId)
+      if (!moduleSpec) continue
+      await writeTextFile(
+        handle,
+        `gantry-workspace/${slug}/modules/${moduleId}.md`,
+        renderLocalModuleFile(moduleSpec, {})
+      )
+    }
+    createdSlug.value = slug
+    createStatus.value = 'idle'
+    window.location.assign(
+      `/instance/${encodeURIComponent(slug)}?local=${encodeURIComponent(localWorkspaceId.value)}`
+    )
+  } catch (err) {
+    createStatus.value = 'failed'
+    createError.value = err.message
+  }
+}
+
+// ---------- Local + Pick ----------
+
+async function refreshLocalRecent() {
+  try {
+    localRecent.value = await recentLocalWorkspaces()
+  } catch {
+    localRecent.value = []
+  }
+}
+
+async function openLocalWorkspace(handle, existingId) {
+  let text
+  try {
+    text = await readTextFile(handle, 'gantry-workspace/workspace.json')
+  } catch {
+    localError.value = 'No gantry-workspace/workspace.json in that folder — it is not a local workspace.'
+    return
+  }
+  let record
+  try {
+    record = parseWorkspaceJson(text)
+  } catch (err) {
+    localError.value = err.message
+    return
+  }
+  const id = await rememberWorkspace({ id: existingId, handle, name: record.name })
+  localWorkspaceId.value = id
+  selectedWorkspace.value = { isLocal: true, name: record.name }
+
+  const entries = await listDir(handle, 'gantry-workspace').catch(() => [])
+  const found = []
+  for (const entry of entries) {
+    if (entry.kind !== 'directory') continue
+    try {
+      await readTextFile(handle, `gantry-workspace/${entry.name}/instance.yaml`)
+      found.push({ slug: entry.name })
+    } catch {
+      // A subdirectory with no instance.yaml is not an instance — skip it.
+    }
+  }
+  localPickInstances.value = found
+  await refreshLocalRecent()
+}
+
+async function pickLocalExistingDir() {
+  localError.value = ''
+  localPickInstances.value = null
+  localGrantId.value = ''
+  localBusy.value = true
+  try {
+    const handle = await pickWorkspaceDirectory()
+    await openLocalWorkspace(handle)
+  } catch (err) {
+    if (err && err.name !== 'AbortError') localError.value = err.message
+  } finally {
+    localBusy.value = false
+  }
+}
+
+async function useRecentLocalWorkspace(id) {
+  localError.value = ''
+  localGrantId.value = ''
+  localPickInstances.value = null
+  localBusy.value = true
+  try {
+    const handle = await getWorkspaceHandle(id)
+    if (!handle) {
+      localError.value = 'That workspace is no longer cached in this browser.'
+      await refreshLocalRecent()
+      return
+    }
+    const permission = await ensurePermission(handle)
+    if (permission !== 'granted') {
+      localGrantId.value = id
+      return
+    }
+    await openLocalWorkspace(handle, id)
+  } catch (err) {
+    localError.value = err.message
+  } finally {
+    localBusy.value = false
+  }
+}
+
+function openLocalInstance(slug) {
+  window.location.assign(
+    `/instance/${encodeURIComponent(slug)}?local=${encodeURIComponent(localWorkspaceId.value)}&slug=${encodeURIComponent(slug)}`
+  )
+}
+
 function selectedDefinition() {
   return definitions.value.find((d) => d.id === selectedDefinitionId.value) ?? null
 }
@@ -298,6 +659,10 @@ function continueFromInstanceStep() {
   }
   draftConfirmPending.value = false
   draftConfirmVisible.value = false
+  if (isLocalWorkspace.value) {
+    createLocalInstance()
+    return
+  }
   if (selectedWorkspace.value?.ticketingSystem) {
     step.value = 'link'
     return
@@ -545,12 +910,212 @@ function WizardHeader() {
   `
 }
 
-function WorkspaceStep() {
+function WorkspaceLocationToggle() {
+  return html`
+    <div class="wizard-field">
+      <label>Workspace location</label>
+      <div class="wizard-mode-toggle" role="group" aria-label="Workspace location">
+        <button
+          type="button"
+          class=${'btn small' + (workspaceLocation.value === 'server' ? ' active' : '')}
+          onClick=${() => (workspaceLocation.value = 'server')}
+        >
+          Server-hosted
+        </button>
+        <button
+          type="button"
+          class=${'btn small' + (workspaceLocation.value === 'local' ? ' active' : '')}
+          onClick=${() => (workspaceLocation.value = 'local')}
+        >
+          Local
+        </button>
+      </div>
+      ${workspaceLocation.value === 'local'
+        ? html`<p class="wizard-field-hint">A local workspace keeps this instance's data in a folder on your own machine — never sent to the gantry server.</p>`
+        : null}
+    </div>
+  `
+}
+
+function LocalWorkspacePanel() {
   useEffect(() => {
-    if (workspaceMode.value === 'pick' && workspaces.value === null) loadWorkspaces()
-  }, [workspaceMode.value])
+    refreshLocalRecent()
+  }, [])
+
+  if (!localWorkspaceSupported) {
+    return html`
+      <div class="wizard-field">
+        <p class="inline-error" id="local-unsupported">Local workspaces need Chrome or Edge.</p>
+        <p class="wizard-field-hint">
+          This browser does not support the File System Access API. Switch to "Server-hosted" above to
+          continue, or reopen gantry in Chrome or Edge.
+        </p>
+        <button type="button" class="btn primary" disabled>
+          ${workspaceMode.value === 'register' ? 'Create local workspace' : 'Open local workspace'}
+        </button>
+      </div>
+    `
+  }
 
   return html`
+    <div class="wizard-field">
+      ${workspaceMode.value === 'register'
+        ? html`
+            ${localRegStage.value === 'pick'
+              ? html`
+                  <p class="wizard-field-hint">
+                    Pick a new or empty folder — gantry writes <code>gantry-workspace/</code> inside it.
+                  </p>
+                  <button
+                    type="button"
+                    class="btn primary"
+                    id="local-register-pick"
+                    disabled=${localBusy.value}
+                    onClick=${pickLocalRegisterDir}
+                  >
+                    ${localBusy.value ? 'Waiting for folder…' : 'Choose folder'}
+                  </button>
+                `
+              : html`
+                  <div class="wizard-field">
+                    <label for="local-ws-name">Name</label>
+                    <input
+                      class="wizard-input"
+                      id="local-ws-name"
+                      type="text"
+                      value=${localRegName.value}
+                      onInput=${(e) => (localRegName.value = e.currentTarget.value)}
+                    />
+                  </div>
+                  <div class="wizard-field">
+                    <label for="local-ws-owner">Owner</label>
+                    <input
+                      class="wizard-input"
+                      id="local-ws-owner"
+                      type="text"
+                      value=${localRegOwner.value}
+                      placeholder="Optional"
+                      onInput=${(e) => (localRegOwner.value = e.currentTarget.value)}
+                    />
+                  </div>
+                  <div class="wizard-field" style="display:flex;gap:8px">
+                    <button
+                      type="button"
+                      class="btn ghost"
+                      onClick=${() => {
+                        localRegStage.value = 'pick'
+                        localRegHandle.value = null
+                      }}
+                    >
+                      ← Choose a different folder
+                    </button>
+                    <button
+                      type="button"
+                      class="btn primary"
+                      id="local-register-create"
+                      disabled=${localBusy.value || !localRegName.value.trim()}
+                      onClick=${confirmLocalRegister}
+                    >
+                      ${localBusy.value ? 'Creating…' : 'Create local workspace'}
+                    </button>
+                  </div>
+                `}
+          `
+        : html`
+            <p class="wizard-field-hint">
+              Open a folder that already contains a <code>gantry-workspace/workspace.json</code>.
+            </p>
+            <button
+              type="button"
+              class="btn primary"
+              id="local-pick-open"
+              disabled=${localBusy.value}
+              onClick=${pickLocalExistingDir}
+            >
+              ${localBusy.value ? 'Waiting for folder…' : 'Open folder'}
+            </button>
+
+            ${localRecent.value.length
+              ? html`
+                  <div class="wizard-field" style="margin-top:16px">
+                    <label>Recent local workspaces</label>
+                    <div id="local-recent">
+                      ${localRecent.value.map(
+                        (entry) => html`
+                          <div key=${entry.id} class="definition-card">
+                            <div class="name">${entry.name}</div>
+                            <div class="stages">last opened ${entry.lastOpened}</div>
+                            ${localGrantId.value === entry.id
+                              ? html`
+                                  <button
+                                    type="button"
+                                    class="btn small"
+                                    onClick=${() => useRecentLocalWorkspace(entry.id)}
+                                  >
+                                    Grant access
+                                  </button>
+                                `
+                              : html`
+                                  <button
+                                    type="button"
+                                    class="btn small"
+                                    disabled=${localBusy.value}
+                                    onClick=${() => useRecentLocalWorkspace(entry.id)}
+                                  >
+                                    Open
+                                  </button>
+                                `}
+                          </div>
+                        `
+                      )}
+                    </div>
+                  </div>
+                `
+              : null}
+
+            ${localPickInstances.value !== null
+              ? html`
+                  <div class="wizard-field" style="margin-top:16px">
+                    <label>Instances in ${selectedWorkspace.value?.name ?? 'this workspace'}</label>
+                    ${localPickInstances.value.length === 0
+                      ? html`<p class="wizard-field-hint">This workspace has no instances yet.</p>`
+                      : html`
+                          <div id="local-instance-picker">
+                            ${localPickInstances.value.map(
+                              (inst) => html`
+                                <div
+                                  key=${inst.slug}
+                                  class="definition-card"
+                                  onClick=${() => openLocalInstance(inst.slug)}
+                                >
+                                  <div class="name">${inst.slug}</div>
+                                </div>
+                              `
+                            )}
+                          </div>
+                        `}
+                  </div>
+                `
+              : null}
+          `}
+      ${localError.value ? html`<div class="inline-error" id="local-error">${localError.value}</div>` : null}
+    </div>
+  `
+}
+
+function WorkspaceStep() {
+  useEffect(() => {
+    if (
+      workspaceLocation.value === 'server' &&
+      workspaceMode.value === 'pick' &&
+      workspaces.value === null
+    )
+      loadWorkspaces()
+  }, [workspaceMode.value, workspaceLocation.value])
+
+  return html`
+    <${WorkspaceLocationToggle} />
+
     <div class="wizard-field">
       <div class="wizard-mode-toggle" role="group" aria-label="Workspace source">
         <button
@@ -558,19 +1123,21 @@ function WorkspaceStep() {
           class=${'btn small' + (workspaceMode.value === 'pick' ? ' active' : '')}
           onClick=${() => (workspaceMode.value = 'pick')}
         >
-          Pick existing workspace
+          ${workspaceLocation.value === 'local' ? 'Pick existing local workspace' : 'Pick existing workspace'}
         </button>
         <button
           type="button"
           class=${'btn small' + (workspaceMode.value === 'register' ? ' active' : '')}
           onClick=${() => (workspaceMode.value = 'register')}
         >
-          Register new workspace
+          ${workspaceLocation.value === 'local' ? 'Register new local workspace' : 'Register new workspace'}
         </button>
       </div>
     </div>
 
-    ${workspaceMode.value === 'pick'
+    ${workspaceLocation.value === 'local' ? html`<${LocalWorkspacePanel} />` : null}
+
+    ${workspaceLocation.value === 'server' && workspaceMode.value === 'pick'
       ? html`
           <div class="wizard-field">
             ${workspacesLoadError.value ? html`<p class="load-error">${workspacesLoadError.value}</p>` : null}
@@ -601,9 +1168,62 @@ function WorkspaceStep() {
                   </div>
                 `
               : null}
+
+            <div class="wizard-field" style="margin-top:16px">
+              <label for="adopt-repo-url">Azure DevOps repo URL</label>
+              <div class="workspace-field-row">
+                <input
+                  class="wizard-input"
+                  id="adopt-repo-url"
+                  type="text"
+                  placeholder="https://dev.azure.com/{organization}/{project}/_git/{repository}"
+                  value=${adoptRepoUrl.value}
+                  onInput=${(e) => onAdoptRepoUrlInput(e.currentTarget.value)}
+                />
+                <button
+                  type="button"
+                  class="btn small"
+                  disabled=${!adoptRepoUrl.value.trim() || adoptCheckStatus.value === 'checking'}
+                  onClick=${checkAdoptRepo}
+                >
+                  ${adoptCheckStatus.value === 'checking' ? 'Checking…' : 'Check repo'}
+                </button>
+              </div>
+              <p class="wizard-field-hint">
+                Point at a repo that already holds a gantry workspace — gantry checks it and adopts the
+                existing instance data.
+              </p>
+              ${adoptCheckStatus.value === 'present'
+                ? html`<p class="wizard-field-hint" id="adopt-check-result">${adoptCheckMessage.value}</p>`
+                : null}
+              ${adoptCheckStatus.value === 'absent'
+                ? html`<div class="inline-error" id="adopt-check-result">${adoptCheckMessage.value}</div>`
+                : null}
+              ${adoptCheckStatus.value === 'error'
+                ? html`<div class="inline-error" id="adopt-check-result">${adoptCheckMessage.value}</div>`
+                : null}
+              ${adoptCheckStatus.value === 'present'
+                ? html`
+                    <div style="margin-top:8px">
+                      <button
+                        type="button"
+                        class="btn primary"
+                        disabled=${registerStatus.value === 'registering'}
+                        onClick=${adoptCheckedRepo}
+                      >
+                        ${registerStatus.value === 'registering' ? 'Adopting…' : 'Use this repository'}
+                      </button>
+                      ${registerStatus.value === 'failed' ? html`<div class="inline-error">${registerError.value}</div>` : null}
+                    </div>
+                  `
+                : null}
+            </div>
           </div>
         `
-      : html`
+      : null}
+
+    ${workspaceLocation.value === 'server' && workspaceMode.value === 'register'
+      ? html`
           <div class="wizard-field">
             <label for="ws-organization">Organization</label>
             <input
@@ -682,7 +1302,8 @@ function WorkspaceStep() {
             ${registerNotice.value ? html`<div class="wizard-field-hint">${registerNotice.value}</div>` : null}
             ${registerStatus.value === 'failed' ? html`<div class="inline-error">${registerError.value}</div>` : null}
           </div>
-        `}
+        `
+      : null}
   `
 }
 
@@ -693,7 +1314,9 @@ function InstanceStep() {
   return html`
     <div class="result-card">
       <h3><span class="stamp agreed">Workspace</span></h3>
-      <div class="result-row"><span class="k">Organization/Project/Repository</span><span class="v">${ws.organization}/${ws.project}/${ws.repository}</span></div>
+      ${ws.isLocal
+        ? html`<div class="result-row"><span class="k">Local workspace</span><span class="v">${ws.name}</span></div>`
+        : html`<div class="result-row"><span class="k">Organization/Project/Repository</span><span class="v">${ws.organization}/${ws.project}/${ws.repository}</span></div>`}
     </div>
 
     <h3>New Instance</h3>
