@@ -489,15 +489,29 @@ effect(() => {
     assetSources.value = {}
     return
   }
+  // WI #308 — mirrors the synced-fields-loading effect's `cancelled` guard
+  // (the Work Item Details card's own useEffect, further below in this file):
+  // without it, a `fetchAssets()` call still in flight
+  // when this effect re-runs (e.g. Back-navigating off a local-workspace
+  // instance, then into a different one) resolves after the fact and
+  // overwrites `assetSources` with data for a slug that's no longer current
+  // — or, worse, was mid-flight against the local branch when the instance
+  // it belonged to went away, so acting on it at all is meaningless.
+  let cancelled = false
   fetchAssets(slug, stageId)
     .then((list) => {
+      if (cancelled) return
       const map = {}
       for (const a of list) if (a.source) map[a.id] = a.source
       assetSources.value = map
     })
     .catch(() => {
+      if (cancelled) return
       assetSources.value = {}
     })
+  return () => {
+    cancelled = true
+  }
 })
 
 // A Rendered-mode editor must be genuinely read-only (#79's acceptance criteria: "no edits possible, none saved"), not just visually hidden by CSS — `EditorState.readOnly` rejects direct-edit transactions and `EditorView.editable` drops `contenteditable`, so neither typing nor paste nor drag-drop can land a change while Rendered is active.
@@ -3542,7 +3556,21 @@ function ModuleEditorPage({ slug: routeRef }) {
       })
       return
     }
-    localWorkspaceParam.value = null
+    // WI #308 — this used to be a standalone `localWorkspaceParam.value = null`
+    // write here, ahead of both branches below. That's the exact hazard the
+    // `batch()` calls elsewhere in this effect already guard against (see this
+    // function's own doc comment): a lone write fires every subscriber synchronously,
+    // on the spot — including the module-level `assetSources`/instance-loading
+    // effects, which read `localWorkspaceParam` (the assetSources one only
+    // transitively, via `fetchAssets`'s own `isLocalWorkspaceSlug` check) — before
+    // `currentSlug` itself catches up to the new (non-local) route on the next
+    // line. A Back-navigation off a local-workspace instance straight onto another
+    // one hits exactly this: `currentSlug` is still the just-left local slug when
+    // that lone write lands, so the local check now reads `false` for it and a
+    // stale local slug falls through to the server-side routes (a slug the server
+    // has no record of, ADR-0029). Folding the clear into the same batch as the
+    // slug it accompanies — same pattern as the local branch above — keeps the two
+    // signals in lockstep so no subscriber ever observes one without the other.
 
     // A numeric reference (WI200, docs/adr/0024) resolves through the server first — the one
     // source of truth for what it means — then pins `currentSlug`/`viewedStage` to the *real*
@@ -3556,6 +3584,7 @@ function ModuleEditorPage({ slug: routeRef }) {
       resolveInstanceRef(routeRef)
         .then((data) => {
           batch(() => {
+            localWorkspaceParam.value = null
             currentSlug.value = data.slug
             viewedStage.value = data.stage.id
             instanceData.value = data
@@ -3569,6 +3598,7 @@ function ModuleEditorPage({ slug: routeRef }) {
     }
 
     batch(() => {
+      localWorkspaceParam.value = null
       currentSlug.value = routeRef
       viewedStage.value = null
     })

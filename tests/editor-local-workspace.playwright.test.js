@@ -1,9 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { withRunningServer } from './helpers/lifecycle.js'
+import { createInstance } from '../lib/instance.js'
 
 // Browser tests for WI #297 (ADR-0029, Feature #290 / A6) — the module
 // editor loading, saving, gate-checking, advancing and rendering a
@@ -268,4 +270,97 @@ test('local-workspace instance: opening the editor never calls the server-side a
       await browser.close()
     }
   })
+})
+
+// WI #308 — the mirror-image race of WI #304's mount-time one, at teardown
+// instead: `ModuleEditorPage`'s own mount effect (web/app.js) re-pins
+// `currentSlug`/`localWorkspaceParam`/`viewedStage` on every route-slug
+// change, and for a *non*-local route it used to clear `localWorkspaceParam`
+// with its own standalone write, ahead of (not batched with) the
+// `currentSlug` write that follows. A lone signal write fires every
+// subscriber synchronously, on the spot — so for the one instant between
+// those two statements, `localWorkspaceParam` already reflects the new
+// (non-local) route while `currentSlug` still holds the *previous* route's
+// slug. The module-level `assetSources` effect (primes citation text,
+// fires on every `currentSlug` change) is subscribed to both — transitively
+// to `localWorkspaceParam`, via `fetchAssets`'s own `isLocalWorkspaceSlug`
+// check, which that effect calls synchronously — so it can catch this exact
+// instant and re-run its `fetchAssets()` call for the *previous* slug now
+// reading `isLocalWorkspaceSlug` as `false`. For a local-workspace instance
+// (ADR-0029: no server-side registry entry at all) that sends the stale slug
+// down the server-side `GET /api/instance/assets` route, which has never
+// heard of it — a 500 pre-WI #304, a clean-but-still-wrong 400 post-WI #304.
+//
+// Reliably landing on that instant needs two things this test sets up
+// deliberately: (1) two *different* instance routes adjacent in the same
+// browser-history stack — one real (server-tracked), one local, so a single
+// Back pops straight from one to the other with no dashboard visit between
+// them to reset anything — and (2) the transition being driven by the
+// browser's own native Back button rather than an in-app click: a `history
+// .back()`-triggered `popstate` runs `ModuleEditorPage`'s mount effect
+// outside whatever implicit batching wraps a same-page click's own state
+// updates, so the two signal writes land as two genuinely separate,
+// independently-observable steps instead of one. There's no in-app link from
+// a real instance straight to a local one to click through for step (1), so
+// this seeds that history adjacency the same way this suite already seeds
+// what a headless browser can't otherwise drive (OPFS instead of a real
+// `showDirectoryPicker` — see this file's own top comment): a plain injected
+// `<a>` click, which preact-iso's router intercepts exactly like a real one.
+test('local-workspace instance: Back-navigating off the editor never surfaces a stale fetchAssets() network error', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'sibling-instance', { instancesDir })
+
+    await withRunningServer({ instancesDir }, async (base) => {
+      const browser = await launchBrowser()
+      try {
+        const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
+
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        const badApiResponses = []
+        page.on('response', (response) => {
+          const url = new URL(response.url())
+          if (url.pathname.startsWith('/api/') && response.status() >= 400) {
+            badApiResponses.push({ status: response.status(), url: response.url() })
+          }
+        })
+
+        const slug = 'local-goback'
+
+        // ---- History entry 1: a real, server-tracked instance ----
+        await page.goto(`${base}/instance/sibling-instance`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const workspaceId = await seedLocalWorkspace(page, slug)
+
+        // ---- History entry 2: the local-workspace instance, reached by a client-side pushState (see doc comment above for why) ----
+        await page.evaluate((href) => {
+          const a = document.createElement('a')
+          a.href = href
+          document.body.appendChild(a)
+          a.click()
+        }, `/instance/${slug}?local=${encodeURIComponent(workspaceId)}&slug=${slug}`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        // ---- Leave the local instance via the browser's own Back button, not an in-app link ----
+        await page.goBack()
+        await page.waitForSelector('.module', { timeout: 10_000 })
+        // Give any effect re-run's stale fetchAssets() response a moment to land.
+        await page.waitForTimeout(1_000)
+
+        assert.deepEqual(
+          badApiResponses,
+          [],
+          `expected no /api error responses after Back-navigating off the local instance, got: ${JSON.stringify(badApiResponses)}`
+        )
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
 })
