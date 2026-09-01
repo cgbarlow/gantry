@@ -1033,6 +1033,245 @@ test('POST /api/instances with an Azure DevOps location whose repository does no
   }
 })
 
+// ---------- WI305: POST /api/instances/import — real content, not a blank template ----------
+
+test('POST /api/instances/import writes the caller-supplied stage/assignee/definitionVersion + real module and asset content verbatim, registers it, and the instance then appears in GET /api/instances', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT }, async (adoBaseUrl) => {
+      await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+        const definition = loadDefinition('design')
+        const targetStage = definition.stages[1]?.id ?? definition.stages[0].id
+        const moduleId = definition.stages[0].modules[0]
+        const res = await fetch(`${base}/api/instances/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+          body: JSON.stringify({
+            definition: 'design',
+            slug: 'imported-initiative',
+            stage: targetStage,
+            assignee: 'imported-assignee',
+            modules: [{ id: moduleId, text: `---\ntitle: real content\n---\n\nThis came from a local workspace, not a blank template.\n` }],
+            assets: [{ filename: 'diagram.png', base64: Buffer.from('fake-png-bytes').toString('base64') }],
+            azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          }),
+        })
+        assert.equal(res.status, 201)
+        const created = await res.json()
+        assert.equal(created.slug, 'imported-initiative')
+        assert.equal(created.definition, 'design')
+        assert.equal(created.stage, targetStage)
+        assert.equal(created.assignee, 'imported-assignee')
+        assert.equal(created.workspace.repository, REPOSITORY)
+
+        const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
+        const instanceYaml = await client.getFileContent('gantry-workspace/imported-initiative/instance.yaml')
+        assert.match(instanceYaml, new RegExp(`stage: ${targetStage}`))
+        assert.match(instanceYaml, /assignee: imported-assignee/)
+
+        // The real content, not a blank first-stage template.
+        const moduleText = await client.getFileContent(`gantry-workspace/imported-initiative/modules/${moduleId}.md`)
+        assert.match(moduleText, /This came from a local workspace, not a blank template\./)
+        // The fake server stores/returns pushed content verbatim (it doesn't
+        // decode base64 on write) — so the round-tripped content is the same
+        // base64 string this test pushed, not the decoded original bytes.
+        const assetBytes = await client.getFileContent('gantry-workspace/imported-initiative/assets/diagram.png')
+        assert.equal(assetBytes, Buffer.from('fake-png-bytes').toString('base64'))
+
+        const listing = await (await fetch(`${base}/api/instances`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })).json()
+        const listedRow = listing.find((i) => i.slug === 'imported-initiative')
+        assert.equal(listedRow.stage, targetStage)
+        assert.equal(listedRow.assignee, 'imported-assignee')
+      })
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('POST /api/instances/import with a stage id the destination definition does not have falls back to the definition\'s first stage', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT }, async (adoBaseUrl) => {
+      await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+        const definition = loadDefinition('design')
+        const res = await fetch(`${base}/api/instances/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+          body: JSON.stringify({
+            definition: 'design',
+            slug: 'stale-stage-initiative',
+            stage: 'no-such-stage-in-this-definition',
+            modules: [],
+            azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          }),
+        })
+        assert.equal(res.status, 201)
+        const created = await res.json()
+        assert.equal(created.stage, definition.stages[0].id)
+      })
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('POST /api/instances/import with a slug already used at the destination reports 409, not 500', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    const seedFiles = {
+      '/gantry-workspace/already-there/instance.yaml': 'definition: design\nslug: already-there\nstage: shape\n',
+    }
+    await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: seedFiles }, async (adoBaseUrl) => {
+      await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+        const res = await fetch(`${base}/api/instances/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+          body: JSON.stringify({
+            definition: 'design',
+            slug: 'already-there',
+            modules: [],
+            azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          }),
+        })
+        assert.equal(res.status, 409)
+        assert.match((await res.json()).error, /already exists/)
+      })
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('POST /api/instances/import reusing a slug that already exists locally reports 409, and does not overwrite the registry entry', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'local-initiative', { instancesDir, assignee: 'local-assignee' })
+    await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT }, async (adoBaseUrl) => {
+      await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+        const res = await fetch(`${base}/api/instances/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+          body: JSON.stringify({
+            definition: 'design',
+            slug: 'local-initiative',
+            modules: [],
+            azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          }),
+        })
+        assert.equal(res.status, 409)
+        assert.match((await res.json()).error, /already exists/)
+        const listing = await (await fetch(`${base}/api/instances`)).json()
+        assert.equal(listing.find((i) => i.slug === 'local-initiative').assignee, 'local-assignee')
+      })
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('POST /api/instances/import against a repository that does not exist returns 400 with a human-readable message, and writes nothing', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {}, repoExists: false }, async (adoBaseUrl) => {
+      await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+        const res = await fetch(`${base}/api/instances/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+          body: JSON.stringify({
+            definition: 'design',
+            slug: 'no-repo-initiative',
+            modules: [],
+            azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          }),
+        })
+        assert.equal(res.status, 400)
+        const body = await res.json()
+        assert.match(body.error, /does not exist/)
+        assert.match(body.error, /create it in Azure DevOps first/)
+        const listing = await (await fetch(`${base}/api/instances`)).json()
+        assert.equal(listing.length, 0)
+      })
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('POST /api/instances/import validates its request body before ever reaching Azure DevOps', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT }, async (adoBaseUrl) => {
+      await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+        const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl }
+        const post = (body) =>
+          fetch(`${base}/api/instances/import`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+            body: JSON.stringify(body),
+          })
+
+        const invalidSlug = await post({ definition: 'design', slug: '../evil', modules: [], azureDevOps })
+        assert.equal(invalidSlug.status, 400)
+        assert.match((await invalidSlug.json()).error, /Invalid instance slug/)
+
+        const unknownDefinition = await post({ definition: 'no-such-definition', slug: 'x', modules: [], azureDevOps })
+        assert.equal(unknownDefinition.status, 400)
+        assert.match((await unknownDefinition.json()).error, /Unknown definition/)
+
+        const badVersion = await post({ definition: 'design', slug: 'x', definitionVersion: 'not-a-number', modules: [], azureDevOps })
+        assert.equal(badVersion.status, 400)
+        assert.match((await badVersion.json()).error, /Invalid definitionVersion/)
+
+        const missingAzureDevOps = await post({ definition: 'design', slug: 'x', modules: [] })
+        assert.equal(missingAzureDevOps.status, 400)
+        assert.match((await missingAzureDevOps.json()).error, /azureDevOps must be an object/)
+
+        const missingFields = await post({ definition: 'design', slug: 'x', modules: [], azureDevOps: { organization: ORGANIZATION } })
+        assert.equal(missingFields.status, 400)
+        assert.match((await missingFields.json()).error, /azureDevOps location is missing/)
+
+        const badModules = await post({ definition: 'design', slug: 'x', modules: [{ id: 'only-an-id' }], azureDevOps })
+        assert.equal(badModules.status, 400)
+        assert.match((await badModules.json()).error, /modules must be an array/)
+
+        const badAssets = await post({ definition: 'design', slug: 'x', modules: [], assets: [{ filename: 'only-a-name' }], azureDevOps })
+        assert.equal(badAssets.status, 400)
+        assert.match((await badAssets.json()).error, /assets must be an array/)
+
+        const listing = await (await fetch(`${base}/api/instances`)).json()
+        assert.equal(listing.length, 0, 'none of the invalid requests above wrote anything')
+      })
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('POST /api/instances/import with no PAT returns the structured "authentication required" response, and writes nothing', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT }, async (adoBaseUrl) => {
+      await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+        const res = await fetch(`${base}/api/instances/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            definition: 'design',
+            slug: 'unauthed-initiative',
+            modules: [],
+            azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          }),
+        })
+        assert.equal(res.status, 401)
+        assert.equal((await res.json()).error, 'authentication_required')
+      })
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
 // ---------- WI198: pre-Pull-Request commit history for a stage branch ----------
 
 test('GET /api/instance/commits returns an empty list when the stage branch does not exist yet, and the branch-scoped commits once it does', async () => {

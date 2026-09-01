@@ -48,11 +48,13 @@ import {
   recentLocalWorkspaces,
   getWorkspaceHandle,
   ensurePermission,
+  forgetWorkspace,
   readTextFile,
+  readBinaryFile,
   writeTextFile,
   listDir,
 } from '../lib/localWorkspace.js'
-import { renderInstanceYaml, renderModuleFile as renderLocalModuleFile } from '../lib/localInstanceFiles.js'
+import { renderInstanceYaml, renderModuleFile as renderLocalModuleFile, parseInstanceYaml } from '../lib/localInstanceFiles.js'
 
 // The work item type used when nothing more specific is looked up or
 // chosen — mirrors lib/workItemLink.js's own `DEFAULT_WORK_ITEM_TYPE`
@@ -110,6 +112,46 @@ const localRegOwner = signal('')
 const localPickInstances = signal(null) // [{ slug }] | null (null = nothing opened yet)
 const localRecent = signal([]) // recentLocalWorkspaces()
 const localGrantId = signal('') // a recent-workspace id whose permission needs a re-grant
+
+// ---------- Server-hosted + Register: import from local workspace (#305) ----------
+// A data-source toggle *inside* the Register panel (not a new top-level
+// mode, per #305's design): "Start blank" is today's unchanged
+// org/project/repository form; "Import from local workspace" reuses the
+// Local+Pick building blocks above (recentLocalWorkspaces/ensurePermission/
+// workspace.json+instance.yaml discovery) to pick a *source* local instance,
+// then either the existing Register form or the existing Pick-workspace list
+// to choose a *destination* Server-hosted workspace, before rejoining the
+// normal Instance step — pre-filled from the source instance's own content
+// instead of blank.
+const registerDataSource = signal('blank') // 'blank' | 'import'
+const importStage = signal('source') // 'source' | 'destination' — only meaningful while registerDataSource === 'import'
+const importDestMode = signal('new') // 'new' | 'existing' — mirrors workspaceMode's own 'register'/'pick' distinction, scoped to the import destination step
+
+// Import source picker — same shape as the Local+Pick signals above, kept
+// separate so opening a source folder here never disturbs the top-level
+// Local flow's own state (both can be mid-flow in the same wizard session
+// across a Back navigation).
+const importRecent = signal([]) // recentLocalWorkspaces()
+const importGrantId = signal('') // a recent-workspace id whose permission needs a re-grant
+const importBusy = signal(false)
+const importError = signal('')
+const importHandle = signal(null) // FileSystemDirectoryHandle of the opened source local workspace
+const importSourceWorkspaceId = signal('') // IndexedDB id of the opened source local workspace, for the post-import forget prompt
+const importWorkspaceName = signal('') // the source local workspace's own workspace.json name
+const importInstances = signal(null) // [{ slug }] | null (null = nothing opened yet)
+
+// The loaded import payload: `null` until a source instance has been read.
+// `{ slug, instanceYaml, stage, modules: [{ id, text }], assets: [{ filename, base64 }] }`.
+// Its presence is what routes the final Instance-step submit through
+// POST /api/instances/import (real content) instead of POST /api/instances
+// (blank template) — see createInstanceAndMaybeLink.
+const importPayload = signal(null)
+
+// The opt-in, post-success "forget this local workspace?" prompt (#305's
+// last acceptance criterion) — shown once on the Done step for an import,
+// resolved (either branch) exactly once.
+const importForgetResolved = signal(false)
+const importForgotten = signal(false)
 
 // ---------- Step 1: pick or register a Workspace ----------
 const workspaceMode = signal('pick') // 'pick' | 'register'
@@ -217,6 +259,20 @@ function resetWizard() {
   localPickInstances.value = null
   localRecent.value = []
   localGrantId.value = ''
+  registerDataSource.value = 'blank'
+  importStage.value = 'source'
+  importDestMode.value = 'new'
+  importRecent.value = []
+  importGrantId.value = ''
+  importBusy.value = false
+  importError.value = ''
+  importHandle.value = null
+  importSourceWorkspaceId.value = ''
+  importWorkspaceName.value = ''
+  importInstances.value = null
+  importPayload.value = null
+  importForgetResolved.value = false
+  importForgotten.value = false
   workspaceMode.value = 'pick'
   workspaces.value = null
   workspacesLoadError.value = ''
@@ -617,6 +673,199 @@ function openLocalInstance(slug) {
   )
 }
 
+// ---------- Server-hosted + Register + Import: source picker (#305) ----------
+// Mirrors the Local+Pick functions above (refreshLocalRecent/
+// pickLocalExistingDir/useRecentLocalWorkspace/openLocalWorkspace) exactly —
+// same building blocks, kept as separate functions/signals so opening an
+// import source never disturbs the top-level Local flow's own state.
+
+async function refreshImportRecent() {
+  try {
+    importRecent.value = await recentLocalWorkspaces()
+  } catch {
+    importRecent.value = []
+  }
+}
+
+async function openImportSourceWorkspace(handle, existingId) {
+  let text
+  try {
+    text = await readTextFile(handle, 'gantry-workspace/workspace.json')
+  } catch {
+    importError.value = 'No gantry-workspace/workspace.json in that folder — it is not a local workspace.'
+    return
+  }
+  let record
+  try {
+    record = parseWorkspaceJson(text)
+  } catch (err) {
+    importError.value = err.message
+    return
+  }
+  const id = await rememberWorkspace({ id: existingId, handle, name: record.name })
+  importSourceWorkspaceId.value = id
+  importHandle.value = handle
+  importWorkspaceName.value = record.name
+
+  const entries = await listDir(handle, 'gantry-workspace').catch(() => [])
+  const found = []
+  for (const entry of entries) {
+    if (entry.kind !== 'directory') continue
+    try {
+      await readTextFile(handle, `gantry-workspace/${entry.name}/instance.yaml`)
+      found.push({ slug: entry.name })
+    } catch {
+      // A subdirectory with no instance.yaml is not an instance — skip it.
+    }
+  }
+  importInstances.value = found
+  await refreshImportRecent()
+}
+
+async function pickImportSourceDir() {
+  importError.value = ''
+  importInstances.value = null
+  importGrantId.value = ''
+  importBusy.value = true
+  try {
+    const handle = await pickWorkspaceDirectory()
+    await openImportSourceWorkspace(handle)
+  } catch (err) {
+    if (err && err.name !== 'AbortError') importError.value = err.message
+  } finally {
+    importBusy.value = false
+  }
+}
+
+async function useRecentImportWorkspace(id) {
+  importError.value = ''
+  importGrantId.value = ''
+  importInstances.value = null
+  importBusy.value = true
+  try {
+    const handle = await getWorkspaceHandle(id)
+    if (!handle) {
+      importError.value = 'That workspace is no longer cached in this browser.'
+      await refreshImportRecent()
+      return
+    }
+    const permission = await ensurePermission(handle)
+    if (permission !== 'granted') {
+      importGrantId.value = id
+      return
+    }
+    await openImportSourceWorkspace(handle, id)
+  } catch (err) {
+    importError.value = err.message
+  } finally {
+    importBusy.value = false
+  }
+}
+
+// btoa over a Uint8Array, chunked so a large asset never blows the call
+// stack on String.fromCharCode's own argument-spreading.
+function bytesToBase64(bytes) {
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
+  }
+  return btoa(binary)
+}
+
+// Reads the full content of one local instance — instance.yaml, every
+// modules/*.md file's raw text, every assets/* file's raw bytes — into
+// `importPayload`. Deliberately never reads anything under out/ (#305:
+// "explicitly NOT out/" — previously rendered artefacts are regenerable and
+// would just be dead weight in the destination repo), and never re-parses
+// or re-renders a module file: the text read here is pushed to the
+// destination byte-for-byte (see importInstanceToAzureDevOps), since it is
+// already valid gantry module-file text.
+async function loadImportSource(slug) {
+  importError.value = ''
+  importBusy.value = true
+  try {
+    const handle = importHandle.value
+    const yamlText = await readTextFile(handle, `gantry-workspace/${slug}/instance.yaml`)
+    const instanceYaml = parseInstanceYaml(yamlText)
+
+    const moduleEntries = await listDir(handle, `gantry-workspace/${slug}/modules`).catch(() => [])
+    const modules = []
+    for (const entry of moduleEntries) {
+      if (entry.kind !== 'file' || !entry.name.endsWith('.md')) continue
+      const text = await readTextFile(handle, `gantry-workspace/${slug}/modules/${entry.name}`)
+      modules.push({ id: entry.name.slice(0, -'.md'.length), text })
+    }
+
+    const assetEntries = await listDir(handle, `gantry-workspace/${slug}/assets`).catch(() => [])
+    const assets = []
+    for (const entry of assetEntries) {
+      if (entry.kind !== 'file') continue
+      const bytes = await readBinaryFile(handle, `gantry-workspace/${slug}/assets/${entry.name}`)
+      assets.push({ filename: entry.name, base64: bytesToBase64(bytes) })
+    }
+
+    importPayload.value = { slug, instanceYaml, stage: instanceYaml.stage, modules, assets }
+    importStage.value = 'destination'
+  } catch (err) {
+    importError.value = err.message
+  } finally {
+    importBusy.value = false
+  }
+}
+
+// Pre-fills the Instance step from the loaded import payload's own
+// instance.yaml, once a destination workspace has been chosen — "land on a
+// populated Instance step (not blank)" (#305's own acceptance criterion).
+// The wizard's Name field has no server-side counterpart (POST /api/instances
+// and POST /api/instances/import both ignore it — it only ever seeds
+// Directory's own slugify default), so it's simply pre-filled with the
+// source slug; Directory follows it via the existing auto-slugify effect.
+function applyImportPrefill() {
+  const payload = importPayload.value
+  if (!payload) return
+  const y = payload.instanceYaml ?? {}
+  if (y.definition) selectedDefinitionId.value = y.definition
+  selectedVersion.value = y.definitionVersion != null ? String(y.definitionVersion) : 'latest'
+  directoryTouched.value = false
+  nameField.value = payload.slug
+  assigneeField.value = y.assignee ?? ''
+}
+
+// Wrap the existing registerWorkspace()/pickWorkspace() destination actions
+// (used unchanged by "Start blank") so the Import path applies the source
+// instance's own content to the Instance step the moment a destination
+// workspace is actually chosen, rather than leaving it blank.
+async function continueImportToNewWorkspace() {
+  await registerWorkspace()
+  if (selectedWorkspace.value) applyImportPrefill()
+}
+
+function continueImportToExistingWorkspace() {
+  pickWorkspace()
+  if (selectedWorkspace.value) applyImportPrefill()
+}
+
+// The opt-in, post-success "Remove from this browser's local workspaces?"
+// prompt's accept branch (#305) — forgetWorkspace only ever clears this
+// browser's own IndexedDB "remembered workspace" entry; nothing on disk is
+// touched either way, which is why both this and declining are safe no-ops
+// against the folder itself.
+async function confirmForgetImportSource() {
+  try {
+    await forgetWorkspace(importSourceWorkspaceId.value)
+    importForgotten.value = true
+  } catch {
+    // Best-effort — the source folder and its files are untouched regardless.
+  } finally {
+    importForgetResolved.value = true
+  }
+}
+
+function declineForgetImportSource() {
+  importForgetResolved.value = true
+}
+
 function selectedDefinition() {
   return definitions.value.find((d) => d.id === selectedDefinitionId.value) ?? null
 }
@@ -767,48 +1016,16 @@ async function createInstanceAndMaybeLink() {
   const slug = directoryField.value.trim()
   const versionToSend = resolvedVersion()
 
-  // C4 — check whether this repo already holds instance data for this slug
-  let shouldAdopt = false
-  try {
-    const qs = new URLSearchParams({ organization: ws.organization, project: ws.project, repository: ws.repository })
-    if (ws.baseUrl) qs.set('baseUrl', ws.baseUrl)
-    const checkRes = await apiFetch(`/api/azure-devops/repo-check?${qs}`, {}, { workspaceId: ws.id })
-    const checkBody = await checkRes.json().catch(() => ({}))
-    if (checkRes.ok) {
-      if (checkBody.result === 'found' && checkBody.slug === slug) shouldAdopt = true
-      else if (checkBody.result === 'multiple' && Array.isArray(checkBody.slugs) && checkBody.slugs.includes(slug)) shouldAdopt = true
-    }
-  } catch (_) {
-    // ignore — fall through to create path
-  }
-
   let actualSlug = slug
-  if (shouldAdopt) {
+  if (importPayload.value) {
+    // #305 — import: write the source local instance's real content (not a
+    // blank template) via POST /api/instances/import. No C4 adopt-check
+    // here — an import always creates a brand-new destination instance at
+    // this slug; a slug already in use there is rejected with the same
+    // 409/message the blank-create path already gives (reused server-side
+    // by the same resolveInstanceLocation() guard), never silently adopted.
     try {
-      const res = await apiFetch('/api/instances/adopt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          azureDevOps: { organization: ws.organization, project: ws.project, repository: ws.repository, ...(ws.baseUrl ? { baseUrl: ws.baseUrl } : {}) },
-        }),
-      }, { workspaceId: ws.id })
-      const body = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        createStatus.value = 'failed'
-        createError.value = body.message ?? body.error ?? `Failed to adopt instance (${res.status})`
-        return
-      }
-      createNotice.value = 'An instance already exists in this repository — linking to it'
-      actualSlug = body.slug ?? slug
-      createdSlug.value = actualSlug
-    } catch (err) {
-      createStatus.value = 'failed'
-      createError.value = err.message
-      return
-    }
-  } else {
-    try {
-      const res = await apiFetch('/api/instances', {
+      const res = await apiFetch('/api/instances/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -817,12 +1034,15 @@ async function createInstanceAndMaybeLink() {
           assignee: assigneeField.value.trim(),
           definitionVersion: versionToSend,
           azureDevOps: { organization: ws.organization, project: ws.project, repository: ws.repository, ...(ws.baseUrl ? { baseUrl: ws.baseUrl } : {}) },
+          stage: importPayload.value.stage,
+          modules: importPayload.value.modules,
+          assets: importPayload.value.assets,
         }),
       }, { workspaceId: ws.id })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) {
         createStatus.value = 'failed'
-        createError.value = body.message ?? body.error ?? `Failed to create instance (${res.status})`
+        createError.value = body.message ?? body.error ?? `Failed to import instance (${res.status})`
         return
       }
       createdSlug.value = slug
@@ -831,6 +1051,72 @@ async function createInstanceAndMaybeLink() {
       createStatus.value = 'failed'
       createError.value = err.message
       return
+    }
+  } else {
+    // C4 — check whether this repo already holds instance data for this slug
+    let shouldAdopt = false
+    try {
+      const qs = new URLSearchParams({ organization: ws.organization, project: ws.project, repository: ws.repository })
+      if (ws.baseUrl) qs.set('baseUrl', ws.baseUrl)
+      const checkRes = await apiFetch(`/api/azure-devops/repo-check?${qs}`, {}, { workspaceId: ws.id })
+      const checkBody = await checkRes.json().catch(() => ({}))
+      if (checkRes.ok) {
+        if (checkBody.result === 'found' && checkBody.slug === slug) shouldAdopt = true
+        else if (checkBody.result === 'multiple' && Array.isArray(checkBody.slugs) && checkBody.slugs.includes(slug)) shouldAdopt = true
+      }
+    } catch (_) {
+      // ignore — fall through to create path
+    }
+
+    if (shouldAdopt) {
+      try {
+        const res = await apiFetch('/api/instances/adopt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            azureDevOps: { organization: ws.organization, project: ws.project, repository: ws.repository, ...(ws.baseUrl ? { baseUrl: ws.baseUrl } : {}) },
+          }),
+        }, { workspaceId: ws.id })
+        const body = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          createStatus.value = 'failed'
+          createError.value = body.message ?? body.error ?? `Failed to adopt instance (${res.status})`
+          return
+        }
+        createNotice.value = 'An instance already exists in this repository — linking to it'
+        actualSlug = body.slug ?? slug
+        createdSlug.value = actualSlug
+      } catch (err) {
+        createStatus.value = 'failed'
+        createError.value = err.message
+        return
+      }
+    } else {
+      try {
+        const res = await apiFetch('/api/instances', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            definition: selectedDefinitionId.value,
+            slug,
+            assignee: assigneeField.value.trim(),
+            definitionVersion: versionToSend,
+            azureDevOps: { organization: ws.organization, project: ws.project, repository: ws.repository, ...(ws.baseUrl ? { baseUrl: ws.baseUrl } : {}) },
+          }),
+        }, { workspaceId: ws.id })
+        const body = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          createStatus.value = 'failed'
+          createError.value = body.message ?? body.error ?? `Failed to create instance (${res.status})`
+          return
+        }
+        createdSlug.value = slug
+        actualSlug = slug
+      } catch (err) {
+        createStatus.value = 'failed'
+        createError.value = err.message
+        return
+      }
     }
   }
 
@@ -1124,6 +1410,265 @@ function LocalWorkspacePanel() {
   `
 }
 
+// ---------- Server-hosted + Register + Import: source picker (#305) ----------
+// Same shape as LocalWorkspacePanel's own "Pick existing" branch — a "recent
+// local workspaces" list (with a "Grant access" affordance for a lapsed
+// handle) plus "Open folder", then the source workspace's own instance list.
+function ImportSourcePanel() {
+  useEffect(() => {
+    refreshImportRecent()
+  }, [])
+
+  if (!localWorkspaceSupported) {
+    return html`
+      <div class="wizard-field">
+        <p class="inline-error" id="import-unsupported">Importing from a local workspace needs Chrome or Edge.</p>
+        <p class="wizard-field-hint">This browser does not support the File System Access API — use "Start blank" above instead.</p>
+      </div>
+    `
+  }
+
+  return html`
+    <div class="wizard-field">
+      <p class="wizard-field-hint">Open the local workspace that holds the instance you want to import.</p>
+      <button
+        type="button"
+        class="btn primary"
+        id="import-pick-open"
+        disabled=${importBusy.value}
+        onClick=${pickImportSourceDir}
+      >
+        ${importBusy.value ? 'Waiting for folder…' : 'Open folder'}
+      </button>
+
+      ${importRecent.value.length
+        ? html`
+            <div class="wizard-field" style="margin-top:16px">
+              <label>Recent local workspaces</label>
+              <div id="import-recent">
+                ${importRecent.value.map(
+                  (entry) => html`
+                    <div key=${entry.id} class="definition-card">
+                      <div class="name">${entry.name}</div>
+                      <div class="stages">last opened ${entry.lastOpened}</div>
+                      ${importGrantId.value === entry.id
+                        ? html`
+                            <button type="button" class="btn small" onClick=${() => useRecentImportWorkspace(entry.id)}>
+                              Grant access
+                            </button>
+                          `
+                        : html`
+                            <button
+                              type="button"
+                              class="btn small"
+                              disabled=${importBusy.value}
+                              onClick=${() => useRecentImportWorkspace(entry.id)}
+                            >
+                              Open
+                            </button>
+                          `}
+                    </div>
+                  `
+                )}
+              </div>
+            </div>
+          `
+        : null}
+
+      ${importInstances.value !== null
+        ? html`
+            <div class="wizard-field" style="margin-top:16px">
+              <label>Instances in ${importWorkspaceName.value || 'this workspace'}</label>
+              ${importInstances.value.length === 0
+                ? html`<p class="wizard-field-hint">This workspace has no instances yet.</p>`
+                : html`
+                    <div id="import-instance-picker">
+                      ${importInstances.value.map(
+                        (inst) => html`
+                          <div key=${inst.slug} class="definition-card" onClick=${() => loadImportSource(inst.slug)}>
+                            <div class="name">${inst.slug}</div>
+                          </div>
+                        `
+                      )}
+                    </div>
+                  `}
+            </div>
+          `
+        : null}
+      ${importError.value ? html`<div class="inline-error" id="import-error">${importError.value}</div>` : null}
+    </div>
+  `
+}
+
+// ---------- Server-hosted + Register + Import: destination picker (#305) ----------
+// "New server workspace" reuses the exact same org/project/repository/owner/
+// ticketing form as the "Start blank" Register panel (registerForm/
+// registerTicketingSystem/registerWorkspace); "An already-registered server
+// workspace" reuses the exact same list as the top-level "Pick existing
+// workspace" mode (workspaces/pickedWorkspaceId/pickWorkspace) — #305 calls
+// for the same picker, not a new one.
+function ImportDestinationPanel() {
+  useEffect(() => {
+    if (importDestMode.value === 'existing' && workspaces.value === null) loadWorkspaces()
+  }, [importDestMode.value])
+
+  return html`
+    <div class="wizard-field">
+      <p class="wizard-field-hint">
+        Importing "${importPayload.value?.slug}" from "${importWorkspaceName.value}" — choose where it goes.
+      </p>
+      <div class="wizard-mode-toggle" role="group" aria-label="Import destination">
+        <button
+          type="button"
+          class=${'btn small' + (importDestMode.value === 'new' ? ' active' : '')}
+          onClick=${() => (importDestMode.value = 'new')}
+        >
+          New server workspace
+        </button>
+        <button
+          type="button"
+          class=${'btn small' + (importDestMode.value === 'existing' ? ' active' : '')}
+          onClick=${() => (importDestMode.value = 'existing')}
+        >
+          An already-registered server workspace
+        </button>
+      </div>
+    </div>
+
+    ${importDestMode.value === 'new'
+      ? html`
+          <div class="wizard-field">
+            <label for="import-ws-organization">Organization</label>
+            <input
+              class="wizard-input"
+              id="import-ws-organization"
+              type="text"
+              value=${registerForm.value.organization}
+              onInput=${(e) => (registerForm.value = { ...registerForm.value, organization: e.currentTarget.value })}
+            />
+          </div>
+          <div class="wizard-field">
+            <label for="import-ws-project">Project</label>
+            <input
+              class="wizard-input"
+              id="import-ws-project"
+              type="text"
+              value=${registerForm.value.project}
+              onInput=${(e) => (registerForm.value = { ...registerForm.value, project: e.currentTarget.value })}
+            />
+          </div>
+          <div class="wizard-field">
+            <label for="import-ws-repository">Repository</label>
+            <input
+              class="wizard-input"
+              id="import-ws-repository"
+              type="text"
+              value=${registerForm.value.repository}
+              onInput=${(e) => (registerForm.value = { ...registerForm.value, repository: e.currentTarget.value })}
+            />
+            <p class="wizard-field-hint">Create the repository in Azure DevOps (or your Git host) first — gantry links to an existing repository, it does not create one.</p>
+          </div>
+          <div class="wizard-field">
+            <label for="import-ws-owner">Owner</label>
+            <${IdentityPicker}
+              id="import-ws-owner"
+              value=${registerForm.value.owner}
+              onChange=${(uniqueName) => (registerForm.value = { ...registerForm.value, owner: uniqueName })}
+              placeholder="Search by name…"
+              organization=${registerForm.value.organization}
+              project=${registerForm.value.project}
+            />
+          </div>
+          <div class="wizard-field">
+            <label>Ticketing system</label>
+            <div class="settings-radio-group" role="radiogroup" aria-label="Ticketing system">
+              ${TICKETING_SYSTEMS.map(
+                (system) => html`
+                  <label key=${system.id} class=${'settings-radio' + (system.disabled ? ' disabled' : '')}>
+                    <input
+                      type="radio"
+                      name="import-ws-ticketing-system"
+                      value=${system.id}
+                      checked=${registerTicketingSystem.value === system.id}
+                      disabled=${system.disabled}
+                      onChange=${() => (registerTicketingSystem.value = system.id)}
+                    />
+                    ${system.label}
+                    ${system.disabled ? html`<span class="stamp review">${system.disabledReason}</span>` : null}
+                  </label>
+                `
+              )}
+            </div>
+          </div>
+          <div class="wizard-field">
+            <button
+              type="button"
+              class="btn primary"
+              id="import-register-workspace"
+              disabled=${registerStatus.value === 'registering' ||
+              !registerForm.value.organization.trim() ||
+              !registerForm.value.project.trim() ||
+              !registerForm.value.repository.trim()}
+              onClick=${continueImportToNewWorkspace}
+            >
+              ${registerStatus.value === 'registering' ? 'Registering…' : 'Register & continue'}
+            </button>
+            ${registerNotice.value ? html`<div class="wizard-field-hint">${registerNotice.value}</div>` : null}
+            ${registerStatus.value === 'failed' ? html`<div class="inline-error">${registerError.value}</div>` : null}
+          </div>
+        `
+      : html`
+          <div class="wizard-field">
+            ${workspacesLoadError.value ? html`<p class="load-error">${workspacesLoadError.value}</p>` : null}
+            ${workspaces.value === null && !workspacesLoadError.value ? html`<p class="loading">Loading…</p>` : null}
+            ${workspaces.value?.length === 0 ? html`<p class="wizard-field-hint">No workspaces registered yet — use "New server workspace" instead.</p>` : null}
+            ${workspaces.value?.length
+              ? html`
+                  <div id="import-workspace-picker">
+                    ${workspaces.value.map(
+                      (w) => html`
+                        <div
+                          key=${w.id}
+                          class=${'definition-card' + (pickedWorkspaceId.value === w.id ? ' selected' : '')}
+                          onClick=${() => (pickedWorkspaceId.value = w.id)}
+                        >
+                          <div class="name">${w.organization}/${w.project}/${w.repository}</div>
+                          <div class="stages">owner: ${w.owner || '—'} · ticketing: ${w.ticketingSystem || 'none'}</div>
+                        </div>
+                      `
+                    )}
+                  </div>
+                  <div class="wizard-field" style="margin-top:16px">
+                    <button
+                      type="button"
+                      class="btn primary"
+                      id="import-pick-workspace-continue"
+                      disabled=${!pickedWorkspaceId.value}
+                      onClick=${continueImportToExistingWorkspace}
+                    >
+                      Continue
+                    </button>
+                  </div>
+                `
+              : null}
+          </div>
+        `}
+
+    <div class="wizard-field">
+      <button
+        type="button"
+        class="btn ghost"
+        onClick=${() => {
+          importStage.value = 'source'
+          importPayload.value = null
+        }}
+      >
+        ← Choose a different instance
+      </button>
+    </div>
+  `
+}
+
 function WorkspaceStep() {
   useEffect(() => {
     if (
@@ -1244,6 +1789,35 @@ function WorkspaceStep() {
       : null}
 
     ${workspaceLocation.value === 'server' && workspaceMode.value === 'register'
+      ? html`
+          <div class="wizard-field">
+            <div class="wizard-mode-toggle" role="group" aria-label="Register data source">
+              <button
+                type="button"
+                class=${'btn small' + (registerDataSource.value === 'blank' ? ' active' : '')}
+                onClick=${() => (registerDataSource.value = 'blank')}
+              >
+                Start blank
+              </button>
+              <button
+                type="button"
+                class=${'btn small' + (registerDataSource.value === 'import' ? ' active' : '')}
+                onClick=${() => (registerDataSource.value = 'import')}
+              >
+                Import from local workspace
+              </button>
+            </div>
+          </div>
+        `
+      : null}
+
+    ${workspaceLocation.value === 'server' && workspaceMode.value === 'register' && registerDataSource.value === 'import'
+      ? importStage.value === 'source'
+        ? html`<${ImportSourcePanel} />`
+        : html`<${ImportDestinationPanel} />`
+      : null}
+
+    ${workspaceLocation.value === 'server' && workspaceMode.value === 'register' && registerDataSource.value === 'blank'
       ? html`
           <div class="wizard-field">
             <label for="ws-organization">Organization</label>
@@ -1591,6 +2165,37 @@ function DoneStep() {
       <p class="result-note">"${createdSlug.value}" is registered and appears in gantry's instance listing.</p>
       <button type="button" class="btn primary" onClick=${() => openInstance(createdSlug.value)}>Open instance</button>
       <button type="button" class="btn ghost" onClick=${resetWizard}>Create another</button>
+      ${importPayload.value ? html`<${ImportForgetPrompt} />` : null}
+    </div>
+  `
+}
+
+// The opt-in "Remove from this browser's local workspaces?" prompt (#305) —
+// shown once, on a successful import, resolved either branch exactly once.
+// forgetWorkspace only ever clears this browser's own IndexedDB
+// "remembered workspace" entry; nothing on disk is touched either way, which
+// this states plainly so declining is a genuinely safe default.
+function ImportForgetPrompt() {
+  if (importForgetResolved.value) {
+    return importForgotten.value
+      ? html`<p class="wizard-field-hint" id="import-forgotten-notice">Removed "${importWorkspaceName.value}" from this browser's local workspaces. The folder on disk — and every file in it — is untouched.</p>`
+      : null
+  }
+  return html`
+    <div class="wizard-field" id="import-forget-prompt" style="margin-top:16px">
+      <p class="wizard-field-hint">
+        Remove "${importWorkspaceName.value}" from this browser's local workspaces? Nothing on disk is deleted
+        either way — this only clears this browser's own remembered-workspace entry; the folder and every file in
+        it stay exactly as they are.
+      </p>
+      <div style="display:flex;gap:8px">
+        <button type="button" class="btn" id="import-forget-yes" onClick=${confirmForgetImportSource}>
+          Remove from this browser
+        </button>
+        <button type="button" class="btn ghost" id="import-forget-no" onClick=${declineForgetImportSource}>
+          Keep it remembered
+        </button>
+      </div>
     </div>
   `
 }
