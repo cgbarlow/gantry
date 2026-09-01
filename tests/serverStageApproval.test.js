@@ -1,9 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { createServer } from '../lib/server.js'
 import { createInstance } from '../lib/instance.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { loadDefinition } from '../lib/definition.js'
@@ -11,6 +9,7 @@ import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { resolveStageBranch } from '../lib/stageBranch.js'
 import { createAzureDevOpsPullRequestsClient } from '../lib/azureDevOpsPullRequestsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withRunningServer, withScratchInstances, basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
 // HTTP-boundary tests for #124's new route: POST /api/instance/request-approval
 // (the Assignee's "Request approval" action for a Workspace-backed instance,
@@ -20,40 +19,13 @@ import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 // tests/serverStageAdvancement.test.js's/tests/serverWorkItems.test.js's own
 // conventions.
 
-const ORGANIZATION = 'fake-org'
-const PROJECT = 'fake-project'
-const REPOSITORY = 'fake-repo'
-const VALID_PAT = 'valid-test-pat'
 const SLUG = 'remote-initiative'
 
 const definition = loadDefinition('design')
 const [SHAPE] = definition.stages
 
-function basicAuthHeader(pat) {
-  return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
-}
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
-function withScratchInstances(fn) {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  return (async () => fn(instancesDir))().finally(() => rmSync(instancesDir, { recursive: true, force: true }))
-}
 
 async function fillShapeStage(azureDevOps, branch) {
   const client = createAzureDevOpsClient(azureDevOps)

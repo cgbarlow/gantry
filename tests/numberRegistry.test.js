@@ -1,7 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, mkdirSync, utimesSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { registerWorkspace } from '../lib/workspaceRegistry.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
@@ -23,15 +22,8 @@ import {
   stageIdForNumber,
   backfillNumberRegistry,
 } from '../lib/numberRegistry.js'
+import { withScratchInstances } from './helpers/lifecycle.js'
 
-function withScratchInstances(fn) {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  try {
-    fn(instancesDir)
-  } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
-  }
-}
 
 function makeLocalInstance(instancesDir, slug) {
   mkdirSync(join(instancesDir, slug), { recursive: true })
@@ -39,8 +31,8 @@ function makeLocalInstance(instancesDir, slug) {
 
 // ---------- workspace numbers ----------
 
-test('getOrAssignWorkspaceNumber assigns 1, 2, 3... in call order, and is idempotent', () => {
-  withScratchInstances((instancesDir) => {
+test('getOrAssignWorkspaceNumber assigns 1, 2, 3... in call order, and is idempotent', async () => {
+  await withScratchInstances((instancesDir) => {
     const a = getOrAssignWorkspaceNumber('ws-a', { instancesDir })
     const b = getOrAssignWorkspaceNumber('ws-b', { instancesDir })
     const aAgain = getOrAssignWorkspaceNumber('ws-a', { instancesDir })
@@ -50,8 +42,8 @@ test('getOrAssignWorkspaceNumber assigns 1, 2, 3... in call order, and is idempo
   })
 })
 
-test('resolveWorkspaceNumber/resolveWorkspaceIdByNumber round-trip, undefined when unknown', () => {
-  withScratchInstances((instancesDir) => {
+test('resolveWorkspaceNumber/resolveWorkspaceIdByNumber round-trip, undefined when unknown', async () => {
+  await withScratchInstances((instancesDir) => {
     assert.equal(resolveWorkspaceNumber('nope', { instancesDir }), undefined)
     const n = getOrAssignWorkspaceNumber('ws-a', { instancesDir })
     assert.equal(resolveWorkspaceNumber('ws-a', { instancesDir }), n)
@@ -62,8 +54,8 @@ test('resolveWorkspaceNumber/resolveWorkspaceIdByNumber round-trip, undefined wh
 
 // ---------- instance numbers (scoped) ----------
 
-test('instance numbering restarts at 1 within each scope', () => {
-  withScratchInstances((instancesDir) => {
+test('instance numbering restarts at 1 within each scope', async () => {
+  await withScratchInstances((instancesDir) => {
     const a1 = getOrAssignInstanceNumber('workspace-1', 'alpha', { instancesDir })
     const a2 = getOrAssignInstanceNumber('workspace-1', 'beta', { instancesDir })
     const b1 = getOrAssignInstanceNumber('workspace-2', 'gamma', { instancesDir })
@@ -73,16 +65,16 @@ test('instance numbering restarts at 1 within each scope', () => {
   })
 })
 
-test('getOrAssignInstanceNumber is idempotent per slug within a scope', () => {
-  withScratchInstances((instancesDir) => {
+test('getOrAssignInstanceNumber is idempotent per slug within a scope', async () => {
+  await withScratchInstances((instancesDir) => {
     const first = getOrAssignInstanceNumber(LOCAL_SCOPE, 'demo', { instancesDir })
     const second = getOrAssignInstanceNumber(LOCAL_SCOPE, 'demo', { instancesDir })
     assert.equal(first, second)
   })
 })
 
-test('resolveInstanceNumber/resolveSlugByNumber round-trip, undefined when unknown', () => {
-  withScratchInstances((instancesDir) => {
+test('resolveInstanceNumber/resolveSlugByNumber round-trip, undefined when unknown', async () => {
+  await withScratchInstances((instancesDir) => {
     assert.equal(resolveInstanceNumber(LOCAL_SCOPE, 'demo', { instancesDir }), undefined)
     const n = getOrAssignInstanceNumber(LOCAL_SCOPE, 'demo', { instancesDir })
     assert.equal(resolveInstanceNumber(LOCAL_SCOPE, 'demo', { instancesDir }), n)
@@ -91,8 +83,8 @@ test('resolveInstanceNumber/resolveSlugByNumber round-trip, undefined when unkno
   })
 })
 
-test('scopeKeyForSlug returns LOCAL_SCOPE for a local instance and the workspace id for an azureDevOps one', () => {
-  withScratchInstances((instancesDir) => {
+test('scopeKeyForSlug returns LOCAL_SCOPE for a local instance and the workspace id for an azureDevOps one', async () => {
+  await withScratchInstances((instancesDir) => {
     makeLocalInstance(instancesDir, 'local-one')
     registerInstance('local-one', { kind: 'local' }, { instancesDir })
     assert.equal(scopeKeyForSlug('local-one', { instancesDir }), LOCAL_SCOPE)
@@ -108,16 +100,16 @@ test('scopeKeyForSlug returns LOCAL_SCOPE for a local instance and the workspace
   })
 })
 
-test('scopeKeyForSlug treats a never-registered slug as local', () => {
-  withScratchInstances((instancesDir) => {
+test('scopeKeyForSlug treats a never-registered slug as local', async () => {
+  await withScratchInstances((instancesDir) => {
     assert.equal(scopeKeyForSlug('never-heard-of-it', { instancesDir }), LOCAL_SCOPE)
   })
 })
 
 // ---------- instanceNumbersFor / ref format ----------
 
-test('instanceNumbersFor gives a local instance workspaceNumber = LOCAL_WORKSPACE_NUMBER', () => {
-  withScratchInstances((instancesDir) => {
+test('instanceNumbersFor gives a local instance workspaceNumber = LOCAL_WORKSPACE_NUMBER', async () => {
+  await withScratchInstances((instancesDir) => {
     makeLocalInstance(instancesDir, 'demo')
     registerInstance('demo', { kind: 'local' }, { instancesDir })
     const { workspaceNumber, instanceNumber } = instanceNumbersFor('demo', { instancesDir })
@@ -126,8 +118,8 @@ test('instanceNumbersFor gives a local instance workspaceNumber = LOCAL_WORKSPAC
   })
 })
 
-test('instanceNumbersFor gives an azureDevOps instance its real workspace number', () => {
-  withScratchInstances((instancesDir) => {
+test('instanceNumbersFor gives an azureDevOps instance its real workspace number', async () => {
+  await withScratchInstances((instancesDir) => {
     registerInstance(
       'remote-one',
       { kind: 'azureDevOps', organization: 'org', project: 'proj', repository: 'repo' },
@@ -151,8 +143,8 @@ test('formatInstanceRef/parseInstanceRef round-trip, and parseInstanceRef reject
   assert.equal(parseInstanceRef(''), null)
 })
 
-test('resolveSlugForRef resolves a fully-qualified ref, and defaults a workspace-only ref to instance 1', () => {
-  withScratchInstances((instancesDir) => {
+test('resolveSlugForRef resolves a fully-qualified ref, and defaults a workspace-only ref to instance 1', async () => {
+  await withScratchInstances((instancesDir) => {
     makeLocalInstance(instancesDir, 'first')
     makeLocalInstance(instancesDir, 'second')
     registerInstance('first', { kind: 'local' }, { instancesDir })
@@ -167,8 +159,8 @@ test('resolveSlugForRef resolves a fully-qualified ref, and defaults a workspace
   })
 })
 
-test('resolveSlugForRef returns undefined for an unknown workspace/instance number or a non-numeric ref', () => {
-  withScratchInstances((instancesDir) => {
+test('resolveSlugForRef returns undefined for an unknown workspace/instance number or a non-numeric ref', async () => {
+  await withScratchInstances((instancesDir) => {
     assert.equal(resolveSlugForRef('w99', { instancesDir }), undefined)
     assert.equal(resolveSlugForRef('not-a-ref', { instancesDir }), undefined)
   })
@@ -189,8 +181,8 @@ test('stageNumberForStageId/stageIdForNumber are 1-based positions in definition
 
 // ---------- backfill ----------
 
-test('backfillNumberRegistry assigns numbers to pre-existing workspaces/instances', () => {
-  withScratchInstances((instancesDir) => {
+test('backfillNumberRegistry assigns numbers to pre-existing workspaces/instances', async () => {
+  await withScratchInstances((instancesDir) => {
     const ws = registerWorkspace({ organization: 'org', project: 'proj', repository: 'repo' }, { instancesDir })
     registerInstance('remote-one', { kind: 'azureDevOps', workspaceId: ws.id }, { instancesDir })
     makeLocalInstance(instancesDir, 'local-one')
@@ -206,8 +198,8 @@ test('backfillNumberRegistry assigns numbers to pre-existing workspaces/instance
   })
 })
 
-test('backfillNumberRegistry orders pre-existing local instances by directory creation-time proxy, not alphabetically', () => {
-  withScratchInstances((instancesDir) => {
+test('backfillNumberRegistry orders pre-existing local instances by directory creation-time proxy, not alphabetically', async () => {
+  await withScratchInstances((instancesDir) => {
     // Deliberately created/registered in reverse-alphabetical order, with 'zeta' given
     // an *older* mtime than 'alpha' — the backfill should number by that timestamp
     // proxy, not by name.
@@ -227,8 +219,8 @@ test('backfillNumberRegistry orders pre-existing local instances by directory cr
   })
 })
 
-test('backfillNumberRegistry is idempotent — a second call assigns nothing new and keeps existing numbers', () => {
-  withScratchInstances((instancesDir) => {
+test('backfillNumberRegistry is idempotent — a second call assigns nothing new and keeps existing numbers', async () => {
+  await withScratchInstances((instancesDir) => {
     registerWorkspace({ organization: 'org', project: 'proj', repository: 'repo' }, { instancesDir })
     makeLocalInstance(instancesDir, 'demo')
     registerInstance('demo', { kind: 'local' }, { instancesDir })

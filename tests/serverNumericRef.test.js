@@ -3,37 +3,10 @@
 // pre-existing `?slug=`/`?stage=` params, which must keep resolving unchanged (ADR-0024 decision #3).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { createServer } from '../lib/server.js'
 import { createInstance, writeInstanceStage } from '../lib/instance.js'
+import { withRunningServer, withScratchInstances } from './helpers/lifecycle.js'
 
-async function withScratchInstances(fn) {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  try {
-    await fn(instancesDir)
-  } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
-  }
-}
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 test('GET /api/instance?ref=w0i1 resolves the same instance as ?slug= for a local instance', async () => {
   await withScratchInstances(async (instancesDir) => {

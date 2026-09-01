@@ -9,34 +9,12 @@ import { registerInstance } from '../lib/instanceRegistry.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { stageBranchName } from '../lib/stageBranch.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withRunningServer, basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
 // Server-level credential gating (#86), now driven by per-request resolution against the instance registry (#89/#92) rather than a fixed `createServer({ azureDevOps })` location: a slug the registry says is Azure-DevOps-backed marks that one request's single-instance routes (GET /api/instance, PUT /api/instance/modules/:id, POST /api/instance/render/:artefact) as such. These tests exercise that gating with real HTTP requests against a running gantry server (mirroring tests/server.test.js's existing `withRunningServer` pattern), backed by the same fake in-process Azure DevOps server tests/instance.test.js and tests/azureDevOpsClient.test.js use — never the real dev.azure.com.
 
-const ORGANIZATION = 'fake-org'
-const PROJECT = 'fake-project'
-const REPOSITORY = 'fake-repo'
-const VALID_PAT = 'valid-test-pat'
 
-function basicAuthHeader(pat) {
-  return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
-}
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 // Seeds a fake Azure DevOps repo with a real "my-initiative" design instance at the "shape" stage — the same shape createInstance's own Azure DevOps path (#85) writes — registers that slug in the instance registry (#89) as Azure-DevOps-backed (the only thing that now marks a slug as such, per #92), then runs `fn(baseUrl)` with a gantry server started against a scratch `instancesDir` with no fixed location of its own at all.
 function withAzureDevOpsBackedServer(files, serverOptions, fn) {

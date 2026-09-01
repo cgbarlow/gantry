@@ -13,6 +13,7 @@ import {
 } from '../lib/instance.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withScratchInstances, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
 // WI 201 — instance.yaml serialization must be canonical (a fixed, stable key
 // order regardless of which fields a given write actually changed) so that
@@ -24,19 +25,7 @@ import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 // with any real value disagreement (confirmed live: mergeStatus: 2 on a
 // stacked-stage PR from exactly this).
 
-const ORGANIZATION = 'fake-org'
-const PROJECT = 'fake-project'
-const REPOSITORY = 'fake-repo'
-const VALID_PAT = 'valid-test-pat'
 
-function withScratchInstances(fn) {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  try {
-    fn(instancesDir)
-  } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
-  }
-}
 
 function withFakeRepo(files, fn) {
   return withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files }, fn)
@@ -73,9 +62,9 @@ function threeWayMerge(base, ours, theirs) {
   }
 }
 
-test('two writers changing disjoint fields from the same base produce identical serialized text for every unchanged field', () => {
-  withScratchInstances((instancesDirA) => {
-    withScratchInstances((instancesDirB) => {
+test('two writers changing disjoint fields from the same base produce identical serialized text for every unchanged field', async () => {
+  await withScratchInstances(async (instancesDirA) => {
+    await withScratchInstances((instancesDirB) => {
       createInstance('design', 'my-initiative', { instancesDir: instancesDirA })
       createInstance('design', 'my-initiative', { instancesDir: instancesDirB })
 
@@ -185,8 +174,8 @@ test('a genuine two-sided conflict (both branches setting the same field to diff
   })
 })
 
-test('canonical serialization does not change what instance.yaml actually contains — only its byte-level key order', () => {
-  withScratchInstances((instancesDir) => {
+test('canonical serialization does not change what instance.yaml actually contains — only its byte-level key order', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir, assignee: 'c.barlow' })
     const updated = writeInstanceStage('my-initiative', 'hld-define', { instancesDir })
     assert.deepEqual(updated, {

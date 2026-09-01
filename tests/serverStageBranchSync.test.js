@@ -7,15 +7,9 @@ import { createServer } from '../lib/server.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
-const ORGANIZATION = 'fake-org'
-const PROJECT = 'fake-project'
-const REPOSITORY = 'fake-repo'
-const VALID_PAT = 'valid-test-pat'
 
-function basicAuthHeader(pat) {
-  return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
-}
 
 function moduleContent(text) {
   return `---\nmodule: context\nstatus: draft\nowner: \n---\n\n# Background and context\n\n## Problem statement\n\n${text}\n`

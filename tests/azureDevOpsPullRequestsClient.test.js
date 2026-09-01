@@ -10,11 +10,8 @@ import {
 } from '../lib/azureDevOpsPullRequestsClient.js'
 import { basicAuthHeader } from '../lib/azureDevOpsClient.js'
 import { withFakeAzureDevOpsServer as withFakeServer } from './helpers/fakeAzureDevOpsServer.js'
+import { ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
-const ORGANIZATION = 'fake-org'
-const PROJECT = 'fake-project'
-const REPOSITORY = 'fake-repo'
-const VALID_PAT = 'valid-test-pat'
 
 // Mirrors the equivalent wrapper in tests/azureDevOpsClient.test.js and
 // tests/azureDevOpsWorkItemsClient.test.js: pins this file's fixed

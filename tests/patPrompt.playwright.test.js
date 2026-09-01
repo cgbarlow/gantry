@@ -4,16 +4,12 @@ import { cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
-import { createServer } from '../lib/server.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withRunningServer, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
 // Frontend PAT entry & storage (#87): the web form recognizes the "authentication required" response (from #86) on any API call, prompts the architect for an Azure DevOps PAT, stores it, attaches it as the Authorization header on every subsequent request, and offers a way to clear/replace it. Exercised here through a real browser and a real running gantry server backed by the fake in-process Azure DevOps server (never the real dev.azure.com), mirroring tests/module-editor.playwright.test.js's own pattern.
 
-const ORGANIZATION = 'fake-org'
-const PROJECT = 'fake-project'
-const REPOSITORY = 'fake-repo'
-const VALID_PAT = 'valid-test-pat'
 // A second accepted PAT, distinct from VALID_PAT — used by the "Replace PAT" test to prove overwriting with a genuinely different credential works.
 const VALID_PAT_2 = `${VALID_PAT}-2`
 
@@ -41,22 +37,6 @@ const SEED_FILES = {
   ].join('\n'),
 }
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 // Registers "my-initiative" in the instance registry (#89) as Azure-DevOps-backed — the only thing that now marks a slug as such (#92) — against a scratch instancesDir, rather than pinning the whole server to one fixed location at startup.
 function withAzureDevOpsBackedServer(fn) {

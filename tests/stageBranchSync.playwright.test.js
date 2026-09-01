@@ -4,36 +4,16 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
-import { createServer } from '../lib/server.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withRunningServer, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
-const ORGANIZATION = 'fake-org'
-const PROJECT = 'fake-project'
-const REPOSITORY = 'fake-repo'
-const VALID_PAT = 'valid-test-pat'
 
 function moduleContent(text) {
   return `---\nmodule: background\nstatus: draft\nowner: \n---\n\n# Background and context\n\n## Problem statement\n\n${text}\n`
 }
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 test('stage sync banner appears when behind and disappears after Sync from main', async () => {
   await withFakeAzureDevOpsServer(

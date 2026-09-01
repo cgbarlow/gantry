@@ -1,14 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { getCredential } from '../lib/credential.js'
+import { basicAuthHeader } from './helpers/lifecycle.js'
 
 function reqWithAuthHeader(value) {
   return { headers: value === undefined ? {} : { authorization: value } }
 }
 
-function basicAuthHeader(pat) {
-  return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
-}
 
 test('extracts the PAT from a well-formed Basic auth header (empty username, PAT as password)', () => {
   assert.equal(getCredential(reqWithAuthHeader(basicAuthHeader('my-real-pat'))), 'my-real-pat')

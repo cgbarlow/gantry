@@ -4,10 +4,10 @@ import { cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
-import { createServer } from '../lib/server.js'
 import { createInstance, readInstance } from '../lib/instance.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withRunningServer, basicAuthHeader, VALID_PAT } from './helpers/lifecycle.js'
 
 // Browser smoke test for #111's Work item details panel (web/app.js's
 // SyncedFieldsPanel): the unlinked "Link to a work item" prompt taking the
@@ -20,28 +20,8 @@ import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 
 const WI_ORGANIZATION = 'wi-org'
 const WI_PROJECT = 'wi-project'
-const VALID_PAT = 'valid-test-pat'
 
-function basicAuthHeader(pat) {
-  return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
-}
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 test('the synced-fields panel shows the link prompt when unlinked, then the distinct fields once linked', async () => {
   await withFakeAzureDevOpsServer(

@@ -4,11 +4,8 @@ import { createAzureDevOpsClient, AzureDevOpsNotFoundError } from '../lib/azureD
 import { loadDefinition } from '../lib/definition.js'
 import { stageBranchName, findStageBranch, resolveStageBranch } from '../lib/stageBranch.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
-const ORGANIZATION = 'fake-org'
-const PROJECT = 'fake-project'
-const REPOSITORY = 'fake-repo'
-const VALID_PAT = 'valid-test-pat'
 const SLUG = 'my-initiative'
 
 function locationFor(baseUrl, overrides = {}) {

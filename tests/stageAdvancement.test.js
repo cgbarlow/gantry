@@ -1,10 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync, mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { cpSync } from 'node:fs'
 import { join } from 'node:path'
 import { createInstance, readInstance, updateInstanceAssignee } from '../lib/instance.js'
 import { advanceStage } from '../lib/stageAdvancement.js'
+import { withScratchInstances } from './helpers/lifecycle.js'
 
 // #115 (ADR-0012's local-instance self-serve mode): "Advance to next
 // stage" moves a *local* instance's own persisted `stage` pointer forward
@@ -13,14 +13,6 @@ import { advanceStage } from '../lib/stageAdvancement.js'
 // Plain lib-function tests against `advanceStage` directly, per this
 // ticket's own testing decisions (prefer the lib-function seam).
 
-function withScratchInstances(fn) {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  try {
-    return fn(instancesDir)
-  } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
-  }
-}
 
 // Fills a stage's modules with the `examples` fixture's own real content,
 // so that stage's gate genuinely passes — mirrors
@@ -33,8 +25,8 @@ function fillStageModules(instancesDir, slug, moduleIds) {
 
 const SHAPE_MODULES = ['background', 'introduction', 'solution-definition', 'team-and-estimates']
 
-test('throws, and writes nothing, when the current stage\'s gate has not passed', () => {
-  withScratchInstances((instancesDir) => {
+test('throws, and writes nothing, when the current stage\'s gate has not passed', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
 
     assert.throws(() => advanceStage('my-initiative', { instancesDir }), /has not passed/)
@@ -45,16 +37,16 @@ test('throws, and writes nothing, when the current stage\'s gate has not passed'
   })
 })
 
-test('the thrown error names the outstanding modules', () => {
-  withScratchInstances((instancesDir) => {
+test('the thrown error names the outstanding modules', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
 
     assert.throws(() => advanceStage('my-initiative', { instancesDir }), /outstanding:/)
   })
 })
 
-test('moves the instance to the next stage once the current gate has passed, preserving every other instance.yaml field', () => {
-  withScratchInstances((instancesDir) => {
+test('moves the instance to the next stage once the current gate has passed, preserving every other instance.yaml field', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     updateInstanceAssignee('my-initiative', 'c.barlow', { instancesDir })
     fillStageModules(instancesDir, 'my-initiative', SHAPE_MODULES)
@@ -73,8 +65,8 @@ test('moves the instance to the next stage once the current gate has passed, pre
   })
 })
 
-test('throws, and writes nothing, once the instance is already at its definition\'s final stage', () => {
-  withScratchInstances((instancesDir) => {
+test('throws, and writes nothing, once the instance is already at its definition\'s final stage', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     fillStageModules(instancesDir, 'my-initiative', SHAPE_MODULES)
     advanceStage('my-initiative', { instancesDir }) // shape -> hld-define

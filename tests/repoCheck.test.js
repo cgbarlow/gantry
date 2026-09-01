@@ -5,13 +5,10 @@ import { createAzureDevOpsClient, AzureDevOpsNotFoundError, AzureDevOpsRepoNotFo
 import { loadDefinition } from '../lib/definition.js'
 import { migrateModuleHeadingScale } from '../lib/instance.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
 // checkAzureDevOpsRepo/migrateLegacyAzureDevOpsInstance (#100): moving Azure-DevOps-backed instance storage from repo root to a per-slug gantry-workspace/<slug>/ subdirectory, so one repo ("workspace") can host more than one instance, plus the one-time migration routine that brings a pre-#100 repo-root instance into that new layout.
 
-const ORGANIZATION = 'fake-org'
-const PROJECT = 'fake-project'
-const REPOSITORY = 'fake-repo'
-const VALID_PAT = 'valid-test-pat'
 
 function withFakeRepo(files, fn) {
   return withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files }, fn)

@@ -7,20 +7,9 @@ import { createInstance, readModule, writeModule } from '../lib/instance.js'
 import { loadDefinition } from '../lib/definition.js'
 import { checkGate, formatGateOutstanding } from '../lib/check.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withScratchInstances, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
-function withScratchInstances(fn) {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  try {
-    fn(instancesDir)
-  } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
-  }
-}
 
-const ORGANIZATION = 'fake-org'
-const PROJECT = 'fake-project'
-const REPOSITORY = 'fake-repo'
-const VALID_PAT = 'valid-test-pat'
 
 function azureDevOpsOptions(baseUrl, overrides = {}) {
   return { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl, ...overrides }
@@ -148,8 +137,8 @@ test('identical SAD and SSAD requirements still fail together when their shared 
   }
 })
 
-test('fails a freshly-created instance against its current stage, with every required field outstanding', () => {
-  withScratchInstances((instancesDir) => {
+test('fails a freshly-created instance against its current stage, with every required field outstanding', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const result = checkGate('my-initiative', { instancesDir })
 
@@ -163,8 +152,8 @@ test('fails a freshly-created instance against its current stage, with every req
   })
 })
 
-test('a module with no file on disk fails the gate, with all its required fields outstanding', () => {
-  withScratchInstances((instancesDir) => {
+test('a module with no file on disk fails the gate, with all its required fields outstanding', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     unlinkSync(join(instancesDir, 'my-initiative', 'modules', 'team-and-estimates.md'))
 
@@ -182,8 +171,8 @@ test('passes the examples fixture against its current stage', () => {
   assert.equal(result.gate, 'business-case')
 })
 
-test('passes Business Case Approved with only the lightweight SOAP fields', () => {
-  withScratchInstances((instancesDir) => {
+test('passes Business Case Approved with only the lightweight SOAP fields', async () => {
+  await withScratchInstances((instancesDir) => {
     const definition = loadDefinition('design')
     createInstance('design', 'light-soap', { instancesDir })
 
@@ -227,8 +216,8 @@ test('passes Business Case Approved with only the lightweight SOAP fields', () =
   })
 })
 
-test('passes Business Case Approved with only the Full SOAP fields, without process-flow or feature-breakdown', () => {
-  withScratchInstances((instancesDir) => {
+test('passes Business Case Approved with only the Full SOAP fields, without process-flow or feature-breakdown', async () => {
+  await withScratchInstances((instancesDir) => {
     const definition = loadDefinition('design')
     createInstance('design', 'full-soap', { instancesDir })
 
@@ -280,8 +269,8 @@ test('passes Business Case Approved with only the Full SOAP fields, without proc
   })
 })
 
-test('--gate resolves the stage owning that gate, even when it is not the instance\'s current stage', () => {
-  withScratchInstances((instancesDir) => {
+test('--gate resolves the stage owning that gate, even when it is not the instance\'s current stage', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const result = checkGate('my-initiative', { instancesDir, gate: 'hld-tac-approved' })
 
@@ -294,8 +283,8 @@ test('--gate resolves the stage owning that gate, even when it is not the instan
   })
 })
 
-test('an unknown --gate throws', () => {
-  withScratchInstances((instancesDir) => {
+test('an unknown --gate throws', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     assert.throws(
       () => checkGate('my-initiative', { instancesDir, gate: 'not-a-real-gate' }),
@@ -370,8 +359,8 @@ test('checkGate against Azure DevOps fails hard on a parser anomaly, via strict 
   })
 })
 
-test('a parser anomaly in a module file fails hard, via strict parseModuleFile, rather than passing silently', () => {
-  withScratchInstances((instancesDir) => {
+test('a parser anomaly in a module file fails hard, via strict parseModuleFile, rather than passing silently', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const backgroundPath = join(instancesDir, 'my-initiative', 'modules', 'background.md')
     writeFileSync(

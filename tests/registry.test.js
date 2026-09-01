@@ -8,18 +8,11 @@ import { loadDefinition } from '../lib/definition.js'
 import { listRegistry } from '../lib/registry.js'
 import { registerInstance, archiveInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withScratchInstances } from './helpers/lifecycle.js'
 
-function withScratchInstances(fn) {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  try {
-    fn(instancesDir)
-  } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
-  }
-}
 
-test('listRegistry lists every instance, sorted by slug, with definition, current stage, status and assignee', () => {
-  withScratchInstances((instancesDir) => {
+test('listRegistry lists every instance, sorted by slug, with definition, current stage, status and assignee', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'zebra-initiative', { instancesDir })
     createInstance('design', 'alpha-initiative', { instancesDir, assignee: 'c.barlow' })
 
@@ -68,8 +61,8 @@ test('listRegistry lists every instance, sorted by slug, with definition, curren
   })
 })
 
-test('listRegistry uses the newest local instance or module mtime for updatedAt', () => {
-  withScratchInstances((instancesDir) => {
+test('listRegistry uses the newest local instance or module mtime for updatedAt', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     // Let any one-time module heading migration finish before making the timestamps deterministic for this assertion.
     listRegistry({ instancesDir })
@@ -87,8 +80,8 @@ test('listRegistry uses the newest local instance or module mtime for updatedAt'
   })
 })
 
-test('listRegistry reports "complete" once every required field for the current stage is filled in, independently of assignee', () => {
-  withScratchInstances((instancesDir) => {
+test('listRegistry reports "complete" once every required field for the current stage is filled in, independently of assignee', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir, assignee: 'c.barlow' })
     const definition = loadDefinition('design')
 
@@ -109,8 +102,8 @@ test('listRegistry reports "complete" once every required field for the current 
 })
 
 // The instance-level assignee (#97) is a plain field on the instance record, not derived by scanning any module's frontmatter `owner` — even though every module below has one set, it must not leak into this row.
-test('listRegistry falls back to \'\' for assignee when the instance record has none set, regardless of module frontmatter owner', () => {
-  withScratchInstances((instancesDir) => {
+test('listRegistry falls back to \'\' for assignee when the instance record has none set, regardless of module frontmatter owner', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const definition = loadDefinition('design')
     writeModule(
@@ -126,14 +119,14 @@ test('listRegistry falls back to \'\' for assignee when the instance record has 
   })
 })
 
-test('listRegistry returns an empty array when instancesDir has no instances', () => {
-  withScratchInstances((instancesDir) => {
+test('listRegistry returns an empty array when instancesDir has no instances', async () => {
+  await withScratchInstances((instancesDir) => {
     assert.deepEqual(listRegistry({ instancesDir }), [])
   })
 })
 
-test('listRegistry excludes an archived instance by default, and includes it (with archived: true) on includeArchived (#223)', () => {
-  withScratchInstances((instancesDir) => {
+test('listRegistry excludes an archived instance by default, and includes it (with archived: true) on includeArchived (#223)', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'alpha-initiative', { instancesDir })
     createInstance('design', 'zebra-initiative', { instancesDir })
     // Backfill both, then archive one.
@@ -158,8 +151,8 @@ test('listRegistry excludes an archived instance by default, and includes it (wi
   })
 })
 
-test('listRegistry skips a stale registry entry (instance deleted from disk after being registered), without failing the whole listing', () => {
-  withScratchInstances((instancesDir) => {
+test('listRegistry skips a stale registry entry (instance deleted from disk after being registered), without failing the whole listing', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'alpha-initiative', { instancesDir })
     createInstance('design', 'zebra-initiative', { instancesDir })
     // Backfills both slugs into the registry file.
@@ -176,8 +169,8 @@ test('listRegistry skips a stale registry entry (instance deleted from disk afte
   })
 })
 
-test('listRegistry still throws on a genuine read failure, rather than silently skipping it the way a stale/missing entry is', () => {
-  withScratchInstances((instancesDir) => {
+test('listRegistry still throws on a genuine read failure, rather than silently skipping it the way a stale/missing entry is', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'broken-initiative', { instancesDir })
     // Unlike a *missing* instance.yaml (readInstance's "No instance ..." error, which listRegistry deliberately skips), a present-but-unparseable instance.yaml is a real problem that must still surface — it isn't the "instance was deleted after being registered" case the stale-entry skip above exists for.
     writeFileSync(join(instancesDir, 'broken-initiative', 'instance.yaml'), ': not: valid: yaml: [')
@@ -210,8 +203,8 @@ const SEED_FILES = {
   '/gantry-workspace/instance-two/instance.yaml': 'definition: design\nstage: shape\nassignee: c.barlow\n',
 }
 
-test('listRegistry has no `workspace` field on a local row — Workspace is an Azure-DevOps-repo concept only', () => {
-  withScratchInstances((instancesDir) => {
+test('listRegistry has no `workspace` field on a local row — Workspace is an Azure-DevOps-repo concept only', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const registry = listRegistry({ instancesDir })
     assert.equal('workspace' in registry[0], false)

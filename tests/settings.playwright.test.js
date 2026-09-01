@@ -4,28 +4,12 @@ import { cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
-import { createServer } from '../lib/server.js'
 import { createInstance, readInstance, recordInstanceWorkItemLink } from '../lib/instance.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { registerWorkspace } from '../lib/workspaceRegistry.js'
+import { withRunningServer } from './helpers/lifecycle.js'
 
 // Browser smoke tests for the reworked Settings screens (#107): three separate, tab-free top-level routes — `/settings` (Global Settings), `/settings/workspace` (Workspace Settings, scoped to one instance's own workspace) and `/settings/instance` (Instance Settings) — replacing #101/#104's single tabbed `/settings` shell entirely. Mirrors tests/dashboard.playwright.test.js's pattern: a real server, a real Chromium page, asserting no console/page errors alongside the ticket's acceptance criteria.
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 function withPage(fn) {
   return async (base) => {

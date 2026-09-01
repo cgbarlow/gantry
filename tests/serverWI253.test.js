@@ -1,33 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createServer } from '../lib/server.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withRunningServer, basicAuthHeader, VALID_PAT } from './helpers/lifecycle.js'
 
 const ORGANIZATION = 'wi253-org'
 const PROJECT = 'wi253-project'
-const VALID_PAT = 'valid-test-pat'
 
-function basicAuthHeader(pat) {
-  return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
-}
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 function withFakeAndGantryServer(options, fn) {
   return withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, validPat: VALID_PAT, ...options }, async (adoBaseUrl) => {

@@ -4,10 +4,10 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
-import { createServer } from '../lib/server.js'
 import { createInstance } from '../lib/instance.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withRunningServer, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
 // Browser smoke test for the module editor's instance switcher (#112) — a
 // workspace-scoped switcher in AppHeader letting an author jump straight
@@ -18,22 +18,6 @@ import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 // auto-created workspace, per #96) alongside a separate local instance
 // (Workspace is an Azure-DevOps-repo concept only, #96 — a local instance
 // groups on its own, per lib/registry.js/web/app.js's groupInstancesByWorkspace).
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 function withPage(fn) {
   return async (base) => {
@@ -54,10 +38,6 @@ function withPage(fn) {
   }
 }
 
-const ORGANIZATION = 'fake-org'
-const PROJECT = 'fake-project'
-const REPOSITORY = 'fake-repo'
-const VALID_PAT = 'valid-test-pat'
 const SEED_FILES = {
   '/gantry-workspace/instance-one/instance.yaml': 'definition: design\nstage: shape\n',
   '/gantry-workspace/instance-two/instance.yaml': 'definition: design\nstage: shape\n',

@@ -4,36 +4,14 @@ import { readFileSync } from 'node:fs'
 import { createServer as createHttpServer } from 'node:http'
 import { createServer } from '../lib/server.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withRunningServer, basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
 // GET /api/azure-devops/repo-check (#90, under #88): given an Azure DevOps location (organization/project/repository, as query params — never a gantry slug) and the caller's own PAT, reports whether that location already holds instance data. Read-only; never touches instancesDir or lib/registry.js. Backed by the same fake in-process Azure DevOps server tests/serverAzureDevOpsAuth.test.js and tests/instance.test.js use — never the real dev.azure.com.
 //
 // `baseUrl` is also accepted as a query param, but only honoured when it exactly matches an entry in the server's own `allowedAzureDevOpsBaseUrls` allow-list — empty by default (what `gantry serve` uses), so a real deployment can't be directed to make an outbound request to an arbitrary caller-chosen host. Every test below that needs to point at the fake Azure DevOps server allow-lists that fake server's own baseUrl explicitly; the "baseUrl override is allow-listed, not a blanket switch" section covers the default-off and scoped-allow-list behaviour itself.
 
-const ORGANIZATION = 'fake-org'
-const PROJECT = 'fake-project'
-const REPOSITORY = 'fake-repo'
-const VALID_PAT = 'valid-test-pat'
 
-function basicAuthHeader(pat) {
-  return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
-}
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 // Unlike tests/serverAzureDevOpsAuth.test.js's `withAzureDevOpsBackedServer`, this route takes its Azure DevOps location as per-request query params rather than from server-startup options — so the gantry server here is started with no `options.azureDevOps` at all, only pointed (via the query string each test builds) at the fake Azure DevOps server's baseUrl. `allowedAzureDevOpsBaseUrls: [adoBaseUrl]` is what makes that possible: real `gantry serve` never sets it, so a real deployment can never be directed to an arbitrary caller-chosen host this way (see the dedicated tests below covering that default-empty, exact-match-only behaviour) — it's only ever populated here, with this one fake server's own baseUrl, to let this suite point at the fake in-process server instead of the real dev.azure.com.
 function withFakeAzureDevOpsAndGantryServer(files, fn) {

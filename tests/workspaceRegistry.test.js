@@ -1,7 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   registerWorkspace,
@@ -17,22 +16,15 @@ import {
   TICKETING_SYSTEMS,
   DEFAULT_TICKETING_SYSTEM,
 } from '../lib/workspaceRegistry.js'
+import { withScratchInstances } from './helpers/lifecycle.js'
 
-function withScratchInstances(fn) {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  try {
-    fn(instancesDir)
-  } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
-  }
-}
 
 const LOCATION = { organization: 'fake-org', project: 'fake-project', repository: 'fake-repo' }
 
 // ---------- registerWorkspace ----------
 
-test('registerWorkspace persists organization/project/repository/owner/ticketingSystem, and generates an id', () => {
-  withScratchInstances((instancesDir) => {
+test('registerWorkspace persists organization/project/repository/owner/ticketingSystem, and generates an id', async () => {
+  await withScratchInstances((instancesDir) => {
     const workspace = registerWorkspace({ ...LOCATION, owner: 'c.barlow' }, { instancesDir })
     assert.equal(typeof workspace.id, 'string')
     assert.ok(workspace.id.length > 0)
@@ -44,23 +36,23 @@ test('registerWorkspace persists organization/project/repository/owner/ticketing
   })
 })
 
-test('registerWorkspace defaults owner to \'\' and ticketingSystem to \'azure-devops\' when omitted', () => {
-  withScratchInstances((instancesDir) => {
+test('registerWorkspace defaults owner to \'\' and ticketingSystem to \'azure-devops\' when omitted', async () => {
+  await withScratchInstances((instancesDir) => {
     const workspace = registerWorkspace(LOCATION, { instancesDir })
     assert.equal(workspace.owner, '')
     assert.equal(workspace.ticketingSystem, 'azure-devops')
   })
 })
 
-test('registerWorkspace persists an optional baseUrl', () => {
-  withScratchInstances((instancesDir) => {
+test('registerWorkspace persists an optional baseUrl', async () => {
+  await withScratchInstances((instancesDir) => {
     const workspace = registerWorkspace({ ...LOCATION, baseUrl: 'https://ado.example.internal' }, { instancesDir })
     assert.equal(workspace.baseUrl, 'https://ado.example.internal')
   })
 })
 
-test('registerWorkspace rejects a location missing organization/project/repository', () => {
-  withScratchInstances((instancesDir) => {
+test('registerWorkspace rejects a location missing organization/project/repository', async () => {
+  await withScratchInstances((instancesDir) => {
     assert.throws(
       () => registerWorkspace({ organization: 'org' }, { instancesDir }),
       /missing: project, repository/
@@ -68,8 +60,8 @@ test('registerWorkspace rejects a location missing organization/project/reposito
   })
 })
 
-test('registerWorkspace rejects ticketingSystem "jira" — modeled, but not accepted yet', () => {
-  withScratchInstances((instancesDir) => {
+test('registerWorkspace rejects ticketingSystem "jira" — modeled, but not accepted yet', async () => {
+  await withScratchInstances((instancesDir) => {
     assert.throws(
       () => registerWorkspace({ ...LOCATION, ticketingSystem: 'jira' }, { instancesDir }),
       /not supported yet/
@@ -77,8 +69,8 @@ test('registerWorkspace rejects ticketingSystem "jira" — modeled, but not acce
   })
 })
 
-test('registerWorkspace rejects a completely unknown ticketingSystem value', () => {
-  withScratchInstances((instancesDir) => {
+test('registerWorkspace rejects a completely unknown ticketingSystem value', async () => {
+  await withScratchInstances((instancesDir) => {
     assert.throws(
       () => registerWorkspace({ ...LOCATION, ticketingSystem: 'trello' }, { instancesDir }),
       /Unknown ticketing system/
@@ -86,8 +78,8 @@ test('registerWorkspace rejects a completely unknown ticketingSystem value', () 
   })
 })
 
-test('registerWorkspace always creates a fresh id, even for a repeated organization/project/repository tuple', () => {
-  withScratchInstances((instancesDir) => {
+test('registerWorkspace always creates a fresh id, even for a repeated organization/project/repository tuple', async () => {
+  await withScratchInstances((instancesDir) => {
     const first = registerWorkspace(LOCATION, { instancesDir })
     const second = registerWorkspace(LOCATION, { instancesDir })
     assert.notEqual(first.id, second.id)
@@ -97,27 +89,27 @@ test('registerWorkspace always creates a fresh id, even for a repeated organizat
 
 // ---------- resolveWorkspace / listWorkspaces ----------
 
-test('resolveWorkspace round-trips a registered workspace by id', () => {
-  withScratchInstances((instancesDir) => {
+test('resolveWorkspace round-trips a registered workspace by id', async () => {
+  await withScratchInstances((instancesDir) => {
     const created = registerWorkspace(LOCATION, { instancesDir })
     assert.deepEqual(resolveWorkspace(created.id, { instancesDir }), created)
   })
 })
 
-test('resolveWorkspace returns undefined for an unknown id', () => {
-  withScratchInstances((instancesDir) => {
+test('resolveWorkspace returns undefined for an unknown id', async () => {
+  await withScratchInstances((instancesDir) => {
     assert.equal(resolveWorkspace('nowhere', { instancesDir }), undefined)
   })
 })
 
-test('listWorkspaces returns an empty array when nothing is registered', () => {
-  withScratchInstances((instancesDir) => {
+test('listWorkspaces returns an empty array when nothing is registered', async () => {
+  await withScratchInstances((instancesDir) => {
     assert.deepEqual(listWorkspaces({ instancesDir }), [])
   })
 })
 
-test('listWorkspaces lists every workspace, sorted by id', () => {
-  withScratchInstances((instancesDir) => {
+test('listWorkspaces lists every workspace, sorted by id', async () => {
+  await withScratchInstances((instancesDir) => {
     const a = registerWorkspace(LOCATION, { instancesDir })
     const b = registerWorkspace({ organization: 'other-org', project: 'p', repository: 'r' }, { instancesDir })
     const ids = listWorkspaces({ instancesDir }).map((w) => w.id)
@@ -125,8 +117,8 @@ test('listWorkspaces lists every workspace, sorted by id', () => {
   })
 })
 
-test('the workspace registry survives across separate calls (a fresh call sees a previous call\'s registration)', () => {
-  withScratchInstances((instancesDir) => {
+test('the workspace registry survives across separate calls (a fresh call sees a previous call\'s registration)', async () => {
+  await withScratchInstances((instancesDir) => {
     const created = registerWorkspace(LOCATION, { instancesDir })
     // Each of these calls re-reads the registry file from scratch — no shared in-memory state — so this only passes if persistence is real.
     assert.deepEqual(resolveWorkspace(created.id, { instancesDir }), created)
@@ -134,8 +126,8 @@ test('the workspace registry survives across separate calls (a fresh call sees a
   })
 })
 
-test('the registered workspace is actually written to disk as JSON, keyed by id', () => {
-  withScratchInstances((instancesDir) => {
+test('the registered workspace is actually written to disk as JSON, keyed by id', async () => {
+  await withScratchInstances((instancesDir) => {
     const created = registerWorkspace(LOCATION, { instancesDir })
     const registryPath = join(instancesDir, 'workspace-registry.json')
     const persisted = JSON.parse(readFileSync(registryPath, 'utf8'))
@@ -151,15 +143,15 @@ test('the registered workspace is actually written to disk as JSON, keyed by id'
 
 // ---------- findWorkspaceByLocation / getOrCreateWorkspace ----------
 
-test('findWorkspaceByLocation finds an existing workspace by its exact organization/project/repository tuple', () => {
-  withScratchInstances((instancesDir) => {
+test('findWorkspaceByLocation finds an existing workspace by its exact organization/project/repository tuple', async () => {
+  await withScratchInstances((instancesDir) => {
     const created = registerWorkspace(LOCATION, { instancesDir })
     assert.deepEqual(findWorkspaceByLocation(LOCATION, { instancesDir }), created)
   })
 })
 
-test('findWorkspaceByLocation returns undefined when no workspace matches', () => {
-  withScratchInstances((instancesDir) => {
+test('findWorkspaceByLocation returns undefined when no workspace matches', async () => {
+  await withScratchInstances((instancesDir) => {
     registerWorkspace(LOCATION, { instancesDir })
     assert.equal(
       findWorkspaceByLocation({ organization: 'other-org', project: 'p', repository: 'r' }, { instancesDir }),
@@ -168,8 +160,8 @@ test('findWorkspaceByLocation returns undefined when no workspace matches', () =
   })
 })
 
-test('findWorkspaceByLocation treats baseUrl as part of the match — same org/project/repo but a different baseUrl is a different workspace', () => {
-  withScratchInstances((instancesDir) => {
+test('findWorkspaceByLocation treats baseUrl as part of the match — same org/project/repo but a different baseUrl is a different workspace', async () => {
+  await withScratchInstances((instancesDir) => {
     registerWorkspace(LOCATION, { instancesDir })
     assert.equal(
       findWorkspaceByLocation({ ...LOCATION, baseUrl: 'https://ado.example.internal' }, { instancesDir }),
@@ -178,8 +170,8 @@ test('findWorkspaceByLocation treats baseUrl as part of the match — same org/p
   })
 })
 
-test('getOrCreateWorkspace reuses an existing workspace for the same tuple rather than creating a duplicate', () => {
-  withScratchInstances((instancesDir) => {
+test('getOrCreateWorkspace reuses an existing workspace for the same tuple rather than creating a duplicate', async () => {
+  await withScratchInstances((instancesDir) => {
     const first = getOrCreateWorkspace(LOCATION, { instancesDir })
     const second = getOrCreateWorkspace(LOCATION, { instancesDir })
     assert.equal(first.id, second.id)
@@ -187,8 +179,8 @@ test('getOrCreateWorkspace reuses an existing workspace for the same tuple rathe
   })
 })
 
-test('getOrCreateWorkspace creates a new workspace when nothing matches yet', () => {
-  withScratchInstances((instancesDir) => {
+test('getOrCreateWorkspace creates a new workspace when nothing matches yet', async () => {
+  await withScratchInstances((instancesDir) => {
     const workspace = getOrCreateWorkspace(LOCATION, { instancesDir })
     assert.deepEqual(resolveWorkspace(workspace.id, { instancesDir }), workspace)
   })
@@ -196,8 +188,8 @@ test('getOrCreateWorkspace creates a new workspace when nothing matches yet', ()
 
 // ---------- updateWorkspace ----------
 
-test('updateWorkspace updates owner and re-persists it', () => {
-  withScratchInstances((instancesDir) => {
+test('updateWorkspace updates owner and re-persists it', async () => {
+  await withScratchInstances((instancesDir) => {
     const created = registerWorkspace(LOCATION, { instancesDir })
     const updated = updateWorkspace(created.id, { owner: 'c.barlow' }, { instancesDir })
     assert.equal(updated.owner, 'c.barlow')
@@ -205,8 +197,8 @@ test('updateWorkspace updates owner and re-persists it', () => {
   })
 })
 
-test('updateWorkspace rejects setting ticketingSystem to "jira"', () => {
-  withScratchInstances((instancesDir) => {
+test('updateWorkspace rejects setting ticketingSystem to "jira"', async () => {
+  await withScratchInstances((instancesDir) => {
     const created = registerWorkspace(LOCATION, { instancesDir })
     assert.throws(
       () => updateWorkspace(created.id, { ticketingSystem: 'jira' }, { instancesDir }),
@@ -217,23 +209,23 @@ test('updateWorkspace rejects setting ticketingSystem to "jira"', () => {
   })
 })
 
-test('updateWorkspace throws for an unknown workspace id', () => {
-  withScratchInstances((instancesDir) => {
+test('updateWorkspace throws for an unknown workspace id', async () => {
+  await withScratchInstances((instancesDir) => {
     assert.throws(() => updateWorkspace('nowhere', { owner: 'x' }, { instancesDir }), /Unknown workspace/)
   })
 })
 
 // ---------- id lookups must never match an inherited property ----------
 
-test('resolveWorkspace returns undefined for "__proto__" — an inherited property, never a real registry entry', () => {
-  withScratchInstances((instancesDir) => {
+test('resolveWorkspace returns undefined for "__proto__" — an inherited property, never a real registry entry', async () => {
+  await withScratchInstances((instancesDir) => {
     registerWorkspace(LOCATION, { instancesDir })
     assert.equal(resolveWorkspace('__proto__', { instancesDir }), undefined)
   })
 })
 
-test('updateWorkspace throws "Unknown workspace" for "__proto__" rather than treating it as an existing entry', () => {
-  withScratchInstances((instancesDir) => {
+test('updateWorkspace throws "Unknown workspace" for "__proto__" rather than treating it as an existing entry', async () => {
+  await withScratchInstances((instancesDir) => {
     registerWorkspace(LOCATION, { instancesDir })
     assert.throws(() => updateWorkspace('__proto__', { owner: 'x' }, { instancesDir }), /Unknown workspace/)
   })
@@ -253,8 +245,8 @@ test('assertValidTicketingSystem accepts "azure-devops" and rejects "jira" and a
 
 // ---------- #223: archive / restore ----------
 
-test('archiveWorkspace sets archived: true; restoreWorkspace removes the flag entirely (exact prior state)', () => {
-  withScratchInstances((instancesDir) => {
+test('archiveWorkspace sets archived: true; restoreWorkspace removes the flag entirely (exact prior state)', async () => {
+  await withScratchInstances((instancesDir) => {
     const created = registerWorkspace({ ...LOCATION, owner: 'c.barlow' }, { instancesDir })
 
     const archived = archiveWorkspace(created.id, { instancesDir })
@@ -269,8 +261,8 @@ test('archiveWorkspace sets archived: true; restoreWorkspace removes the flag en
   })
 })
 
-test('archiveWorkspace writes canonical JSON with archived last, and restore rewrites without it', () => {
-  withScratchInstances((instancesDir) => {
+test('archiveWorkspace writes canonical JSON with archived last, and restore rewrites without it', async () => {
+  await withScratchInstances((instancesDir) => {
     const created = registerWorkspace({ ...LOCATION, baseUrl: 'https://ado.example.internal' }, { instancesDir })
     const registryPath = join(instancesDir, 'workspace-registry.json')
 
@@ -291,8 +283,8 @@ test('archiveWorkspace writes canonical JSON with archived last, and restore rew
   })
 })
 
-test('listWorkspaces excludes archived by default, includes them with includeArchived', () => {
-  withScratchInstances((instancesDir) => {
+test('listWorkspaces excludes archived by default, includes them with includeArchived', async () => {
+  await withScratchInstances((instancesDir) => {
     const a = registerWorkspace(LOCATION, { instancesDir })
     const b = registerWorkspace({ organization: 'other-org', project: 'p', repository: 'r' }, { instancesDir })
     archiveWorkspace(b.id, { instancesDir })
@@ -310,8 +302,8 @@ test('listWorkspaces excludes archived by default, includes them with includeArc
   })
 })
 
-test('archiveWorkspace / restoreWorkspace are idempotent, and throw for an unknown id', () => {
-  withScratchInstances((instancesDir) => {
+test('archiveWorkspace / restoreWorkspace are idempotent, and throw for an unknown id', async () => {
+  await withScratchInstances((instancesDir) => {
     const created = registerWorkspace(LOCATION, { instancesDir })
     archiveWorkspace(created.id, { instancesDir })
     assert.doesNotThrow(() => archiveWorkspace(created.id, { instancesDir }))
@@ -323,8 +315,8 @@ test('archiveWorkspace / restoreWorkspace are idempotent, and throw for an unkno
   })
 })
 
-test('updateWorkspace preserves an archived flag through an unrelated owner edit', () => {
-  withScratchInstances((instancesDir) => {
+test('updateWorkspace preserves an archived flag through an unrelated owner edit', async () => {
+  await withScratchInstances((instancesDir) => {
     const created = registerWorkspace(LOCATION, { instancesDir })
     archiveWorkspace(created.id, { instancesDir })
 

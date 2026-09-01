@@ -4,7 +4,6 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser } from './helpers/launchBrowser.js'
-import { createServer } from '../lib/server.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import { requestStageReview, checkStageReviewStatus } from '../lib/stageReview.js'
@@ -12,6 +11,7 @@ import { REVIEW_STATUS_FIELD } from '../lib/reviewStatus.js'
 import { linkInstanceToWorkItem } from '../lib/workItemLink.js'
 import { recordInstanceReviewRequest } from '../lib/instance.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withRunningServer, basicAuthHeader } from './helpers/lifecycle.js'
 
 const ORGANIZATION = 'review-org'
 const PROJECT = 'review-project'
@@ -19,26 +19,7 @@ const REPOSITORY = 'review-repo'
 const PAT = 'valid-test-pat'
 const SLUG = 'review-initiative'
 
-function authHeader(pat) {
-  return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
-}
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 test('Request Review creates independently tracked related Tasks and checks native status on demand', async () => {
   await withFakeAzureDevOpsServer(
@@ -66,13 +47,13 @@ test('Request Review creates independently tracked related Tasks and checks nati
         await withRunningServer({ instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
           const link = await fetch(`${base}/api/instance/work-items/link?slug=${SLUG}`, {
             method: 'POST',
-            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ organization: ORGANIZATION, project: PROJECT, parentId: parent.id, baseUrl: adoBaseUrl }),
           }).then((res) => res.json())
 
           const request = await fetch(`${base}/api/instance/request-review?slug=${SLUG}`, {
             method: 'POST',
-            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ stage: 'shape', reviewer: 'testuser@example.com' }),
           })
           assert.equal(request.status, 200)
@@ -100,7 +81,7 @@ test('Request Review creates independently tracked related Tasks and checks nati
           await client.updateWorkItem(requested.review.workItemId, { [REVIEW_STATUS_FIELD]: 'Changes requested' })
           const status = await fetch(`${base}/api/instance/review-status?slug=${SLUG}`, {
             method: 'POST',
-            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ stage: 'shape', reviewId: requested.review.workItemId }),
           })
           assert.equal(status.status, 200)
@@ -109,7 +90,7 @@ test('Request Review creates independently tracked related Tasks and checks nati
           const stateAfterDecision = await client.getWorkItem(requested.review.workItemId)
           assert.equal(stateAfterDecision.fields['System.State'], 'New')
 
-          const instance = await fetch(`${base}/api/instance?slug=${SLUG}`, { headers: { Authorization: authHeader(PAT) } }).then((res) => res.json())
+          const instance = await fetch(`${base}/api/instance?slug=${SLUG}`, { headers: { Authorization: basicAuthHeader(PAT) } }).then((res) => res.json())
           assert.equal(instance.reviews.length, 1)
           assert.equal(instance.reviews[0].status, 'Changes requested')
           assert.equal(instance.reviewRequests.shape[0].workItemId, requested.review.workItemId)
@@ -225,7 +206,7 @@ test('Request Review reports an unresolvable reviewer without creating a Task, a
         await withRunningServer({ instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
           await fetch(`${base}/api/instance/work-items/link?slug=${SLUG}`, {
             method: 'POST',
-            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ organization: ORGANIZATION, project: PROJECT, parentId: parent.id, baseUrl: adoBaseUrl }),
           })
 
@@ -234,7 +215,7 @@ test('Request Review reports an unresolvable reviewer without creating a Task, a
           // scope, distinct from a reviewer that simply doesn't resolve.
           const response = await fetch(`${base}/api/instance/request-review?slug=${SLUG}`, {
             method: 'POST',
-            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ stage: 'shape', reviewer: 'testuser@example.com' }),
           })
           assert.equal(response.status, 401)
@@ -272,19 +253,19 @@ test('Request Review rejects a reviewer that does not resolve to any known ident
         await withRunningServer({ instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
           await fetch(`${base}/api/instance/work-items/link?slug=${SLUG}`, {
             method: 'POST',
-            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ organization: ORGANIZATION, project: PROJECT, parentId: parent.id, baseUrl: adoBaseUrl }),
           })
 
           const response = await fetch(`${base}/api/instance/request-review?slug=${SLUG}`, {
             method: 'POST',
-            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ stage: 'shape', reviewer: 'nobody-matches-this-query' }),
           })
           assert.equal(response.status, 400)
           assert.match((await response.json()).error, /could not be resolved to a known Azure DevOps identity/)
 
-          const instance = await fetch(`${base}/api/instance?slug=${SLUG}`, { headers: { Authorization: authHeader(PAT) } }).then((res) => res.json())
+          const instance = await fetch(`${base}/api/instance?slug=${SLUG}`, { headers: { Authorization: basicAuthHeader(PAT) } }).then((res) => res.json())
           assert.equal(instance.reviews.length, 0)
         })
       } finally {
@@ -314,7 +295,7 @@ test('Request Review requires a reviewer and rejects a stage that has no linked 
         await withRunningServer({ instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
           const missingReviewer = await fetch(`${base}/api/instance/request-review?slug=${SLUG}`, {
             method: 'POST',
-            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ stage: 'shape', reviewer: '   ' }),
           })
           assert.equal(missingReviewer.status, 400)
@@ -323,7 +304,7 @@ test('Request Review requires a reviewer and rejects a stage that has no linked 
           // No work item was ever linked for this instance's "shape" stage.
           const noLinkedWorkItem = await fetch(`${base}/api/instance/request-review?slug=${SLUG}`, {
             method: 'POST',
-            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ stage: 'shape', reviewer: 'testuser@example.com' }),
           })
           assert.equal(noLinkedWorkItem.status, 400)
@@ -366,13 +347,13 @@ test('Request Review attributes the requester from Azure DevOps connection data 
         await withRunningServer({ instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
           await fetch(`${base}/api/instance/work-items/link?slug=${SLUG}`, {
             method: 'POST',
-            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ organization: ORGANIZATION, project: PROJECT, parentId: parent.id, baseUrl: adoBaseUrl }),
           })
 
           const response = await fetch(`${base}/api/instance/request-review?slug=${SLUG}`, {
             method: 'POST',
-            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ stage: 'shape', reviewer: 'testuser@example.com' }),
           })
           assert.equal(response.status, 200)
@@ -411,7 +392,7 @@ test('Request Review rejects a stage other than the instance\'s current stage', 
           // Azure DevOps Task is created.
           const response = await fetch(`${base}/api/instance/request-review?slug=${SLUG}`, {
             method: 'POST',
-            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ stage: 'hld-define', reviewer: 'testuser@example.com' }),
           })
           assert.equal(response.status, 400)
@@ -444,7 +425,7 @@ test('Review status check rejects an invalid review id and a review id with no m
         await withRunningServer({ instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
           const notANumber = await fetch(`${base}/api/instance/review-status?slug=${SLUG}`, {
             method: 'POST',
-            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ stage: 'shape', reviewId: 'not-a-number' }),
           })
           assert.equal(notANumber.status, 400)
@@ -452,7 +433,7 @@ test('Review status check rejects an invalid review id and a review id with no m
 
           const noSuchReview = await fetch(`${base}/api/instance/review-status?slug=${SLUG}`, {
             method: 'POST',
-            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ stage: 'shape', reviewId: 999999 }),
           })
           assert.equal(noSuchReview.status, 400)
@@ -489,7 +470,7 @@ test('the Workspace-backed screen exposes Review / Sign-off labels and the Reque
         await withRunningServer({ instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
           const linkResponse = await fetch(`${base}/api/instance/work-items/link?slug=${SLUG}`, {
             method: 'POST',
-            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ organization: ORGANIZATION, project: PROJECT, parentId: parent.id, baseUrl: adoBaseUrl }),
           })
           assert.equal(linkResponse.status, 200)
@@ -639,7 +620,7 @@ test('the Reviews list groups by outcome (#215) once a stage has more than a cou
         await withRunningServer({ instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
           const linkResponse = await fetch(`${base}/api/instance/work-items/link?slug=${SLUG}`, {
             method: 'POST',
-            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ organization: ORGANIZATION, project: PROJECT, parentId: parent.id, baseUrl: adoBaseUrl }),
           })
           assert.equal(linkResponse.status, 200)
@@ -657,7 +638,7 @@ test('the Reviews list groups by outcome (#215) once a stage has more than a cou
           async function requestReview() {
             const res = await fetch(`${base}/api/instance/request-review?slug=${SLUG}`, {
               method: 'POST',
-              headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+              headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
               body: JSON.stringify({ stage: 'shape', reviewer: 'testuser@example.com' }),
             })
             assert.equal(res.status, 200)
@@ -731,13 +712,13 @@ test('WI219: requestStageReview and checkStageReviewStatus degrade gracefully wh
         await withRunningServer({ instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
           await fetch(`${base}/api/instance/work-items/link?slug=${SLUG}`, {
             method: 'POST',
-            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ organization: ORGANIZATION, project: PROJECT, parentId: parent.id, baseUrl: adoBaseUrl }),
           })
           // Request Review should succeed even though the fake server will reject the Custom.GantryReviewStatus field — the retry without the field must kick in.
           const reqRes = await fetch(`${base}/api/instance/request-review?slug=${SLUG}`, {
             method: 'POST',
-            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ stage: 'shape', reviewer: 'testuser@example.com' }),
           })
           assert.equal(reqRes.status, 200)
@@ -750,7 +731,7 @@ test('WI219: requestStageReview and checkStageReviewStatus degrade gracefully wh
           // Check status should also succeed via the System.State fallback — the fake server will reject the combined fields read, the retry with System.State alone must succeed.
           const statusRes = await fetch(`${base}/api/instance/review-status?slug=${SLUG}`, {
             method: 'POST',
-            headers: { Authorization: authHeader(PAT), 'Content-Type': 'application/json' },
+            headers: { Authorization: basicAuthHeader(PAT), 'Content-Type': 'application/json' },
             body: JSON.stringify({ stage: 'shape', reviewId: reqBody.review.workItemId }),
           })
           assert.equal(statusRes.status, 200)

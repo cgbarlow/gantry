@@ -4,24 +4,8 @@ import { cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
-import { createServer } from '../lib/server.js'
+import { withRunningServer } from './helpers/lifecycle.js'
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 test('Navigation dropdown renders below Work item details card, lists headings in document order, and smooth-scrolls on selection (WI232)', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))

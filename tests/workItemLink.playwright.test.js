@@ -4,37 +4,17 @@ import { cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
-import { createServer } from '../lib/server.js'
 import { createInstance, readInstance } from '../lib/instance.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withRunningServer, basicAuthHeader, VALID_PAT } from './helpers/lifecycle.js'
 
 // Browser smoke test for #95/#103's Work Item panel (web/app.js's WorkItemPanel), post-#127: an unlinked instance renders no work-item panel at all (the freetext link form was removed — linking happens at instance creation, via the + New Workspace wizard), and a linked instance's panel drives the confirmed gate-pass-then-sync flow (both the confirm and the decline path) through a real rendered page against a real running gantry server and the fake in-process Azure DevOps Work Items server — nothing mocked at the browser or HTTP layer.
 
 const WI_ORGANIZATION = 'wi-org'
 const WI_PROJECT = 'wi-project'
-const VALID_PAT = 'valid-test-pat'
 
-function basicAuthHeader(pat) {
-  return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
-}
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 function withFakeWorkItemsServer(fn) {
   return withFakeAzureDevOpsServer({ organization: WI_ORGANIZATION, project: WI_PROJECT, validPat: VALID_PAT }, fn)

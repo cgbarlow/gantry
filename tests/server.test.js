@@ -9,23 +9,8 @@ import { loadDefinition } from '../lib/definition.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withRunningServer, basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 test('GET /api/instance reports the examples fixture, fully populated', async () => {
   await withRunningServer({ slug: 'examples' }, async (base) => {
@@ -712,14 +697,7 @@ test('POST /api/instances with an invalid slug reports 400, never reaching creat
 //
 // Unlike tests/serverAzureDevOpsAuth.test.js (a server *started* already pinned to one Azure DevOps location via `options.azureDevOps`), these exercise the per-request location this ticket adds: a plain `withRunningServer({ instancesDir })` server — no `options.azureDevOps` at all — accepting an `azureDevOps` field in the POST body itself.
 
-const ORGANIZATION = 'fake-org'
-const PROJECT = 'fake-project'
-const REPOSITORY = 'fake-repo'
-const VALID_PAT = 'valid-test-pat'
 
-function basicAuthHeader(pat) {
-  return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
-}
 
 test('POST /api/instances with an Azure DevOps location and no PAT returns the structured "authentication required" response, and writes nothing', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))

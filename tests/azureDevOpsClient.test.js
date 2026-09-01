@@ -8,11 +8,8 @@ import {
   DEFAULT_BASE_URL,
 } from '../lib/azureDevOpsClient.js'
 import { createFakeAzureDevOpsServer, withFakeAzureDevOpsServer as withFakeServer } from './helpers/fakeAzureDevOpsServer.js'
+import { ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
-const ORGANIZATION = 'fake-org'
-const PROJECT = 'fake-project'
-const REPOSITORY = 'fake-repo'
-const VALID_PAT = 'valid-test-pat'
 
 // Mirrors tests/server.test.js's withRunningServer helper's shape (per #82's testing decisions), but for the fake Azure DevOps server instead of gantry's own — a real HTTP server on an ephemeral port, hit with real `fetch` calls, never a mock of `fetch` internals. Pins this file's fixed organization/project/repository/PAT constants so call sites below only need to supply `files`.
 function withFakeAzureDevOpsServer(files, fn) {

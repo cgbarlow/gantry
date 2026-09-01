@@ -10,10 +10,8 @@ import {
   isAzureDevOpsFieldNotFoundError,
 } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer as withFakeServer } from './helpers/fakeAzureDevOpsServer.js'
+import { ORGANIZATION, PROJECT, VALID_PAT } from './helpers/lifecycle.js'
 
-const ORGANIZATION = 'fake-org'
-const PROJECT = 'fake-project'
-const VALID_PAT = 'valid-test-pat'
 
 // Mirrors tests/azureDevOpsClient.test.js's own wrapper: pins this file's fixed organization/project/PAT constants so call sites below only need to supply whatever varies (usually just `workItemTypeStates`). No `repository` is passed — Work Items endpoints aren't repository-scoped.
 function withFakeAzureDevOpsServer({ workItemTypeStates, workItemTypes, connectionDataUser } = {}, fn) {

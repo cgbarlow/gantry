@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createServer } from '../lib/server.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withRunningServer, basicAuthHeader } from './helpers/lifecycle.js'
 
 // HTTP-boundary tests for the two new routes #126's "+ New Workspace"
 // wizard step needs: `GET /api/azure-devops/work-item-types` and `GET
@@ -19,26 +19,7 @@ const ORGANIZATION = 'wi-lookup-org'
 const PROJECT = 'wi-lookup-project'
 const VALID_PAT = 'valid-test-pat'
 
-function basicAuthHeader(pat) {
-  return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
-}
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 function withFakeWorkItemsServer(options, fn) {
   return withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, validPat: VALID_PAT, ...options }, fn)

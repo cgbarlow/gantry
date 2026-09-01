@@ -16,94 +16,124 @@ const ONE_PX_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
 test('dry-run does not write out/ files', () => {
-  execFileSync('rm', ['-rf', 'instances/examples/out'])
-  const result = renderArtefact('examples', 'soap', { dryRun: true })
-  assert.equal(existsSync(result.docxPath), false)
-  assert.equal(existsSync(result.mdPath), false)
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+    const result = renderArtefact('examples', 'soap', { dryRun: true, instancesDir })
+    assert.equal(existsSync(result.docxPath), false)
+    assert.equal(existsSync(result.mdPath), false)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
 })
 
 test('dry-run compiles the template without writing anything, with no HTML-entity escaping', () => {
-  const result = renderArtefact('examples', 'soap', { dryRun: true })
-  assert.equal(result.dryRun, true)
-  assert.match(result.markdown, /# examples: Solution on a Page/)
-  assert.match(result.markdown, /- Client-facing self-service \(ContosoSelfService\)/)
-  assert.doesNotMatch(result.markdown, /&#39;|&quot;|&amp;/)
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    const result = renderArtefact('examples', 'soap', { dryRun: true, instancesDir })
+    assert.equal(result.dryRun, true)
+    assert.match(result.markdown, /# examples: Solution on a Page/)
+    assert.match(result.markdown, /- Client-facing self-service \(ContosoSelfService\)/)
+    assert.doesNotMatch(result.markdown, /&#39;|&quot;|&amp;/)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
 })
 
 test('renders the Full SOAP with the reference sections, metadata, static caveats, and markdown tables', () => {
-  const result = renderArtefact('examples', 'soap-full')
-  assert.equal(existsSync(result.docxPath), true)
-  assert.match(result.markdown, /# Introduction\n\n## Problem statement/)
-  for (const heading of [
-    'Opportunity',
-    'In Scope',
-    'Out of Scope',
-    'High Level Requirements',
-    'High level solution overview',
-    'Teams required',
-    'Dependencies',
-    'Assumptions',
-    'Estimates',
-    'Sequencing',
-    'Questions',
-    'Caveats',
-    'References',
-  ]) {
-    assert.match(result.markdown, new RegExp(`# ${heading}`))
-  }
-  assert.match(result.markdown, /\| Section \| Requirement \|/)
-  assert.match(result.markdown, /\| Requirement \| Team \| Estimate \| Notes \|/)
-  assert.match(result.markdown, /Cost is based on full AST team allocation/)
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    const result = renderArtefact('examples', 'soap-full', { instancesDir })
+    assert.equal(existsSync(result.docxPath), true)
+    assert.match(result.markdown, /# Introduction\n\n## Problem statement/)
+    for (const heading of [
+      'Opportunity',
+      'In Scope',
+      'Out of Scope',
+      'High Level Requirements',
+      'High level solution overview',
+      'Teams required',
+      'Dependencies',
+      'Assumptions',
+      'Estimates',
+      'Sequencing',
+      'Questions',
+      'Caveats',
+      'References',
+    ]) {
+      assert.match(result.markdown, new RegExp(`# ${heading}`))
+    }
+    assert.match(result.markdown, /\| Section \| Requirement \|/)
+    assert.match(result.markdown, /\| Requirement \| Team \| Estimate \| Notes \|/)
+    assert.match(result.markdown, /Cost is based on full AST team allocation/)
 
-  const roundTrip = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown', result.docxPath], { encoding: 'utf8' })
-  assert.match(roundTrip, /Full Solution on a Page/)
-  assert.match(roundTrip, /High Level Requirements/)
-  assert.match(roundTrip, /SOAP\/estimate delivered date/)
-  assert.match(roundTrip, /Cost is based on full AST team allocation/)
+    const roundTrip = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown', result.docxPath], { encoding: 'utf8' })
+    assert.match(roundTrip, /Full Solution on a Page/)
+    assert.match(roundTrip, /High Level Requirements/)
+    assert.match(roundTrip, /SOAP\/estimate delivered date/)
+    assert.match(roundTrip, /Cost is based on full AST team allocation/)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
 })
 
 test('renders a real docx styled from the HLD reference doc', () => {
-  const result = renderArtefact('examples', 'soap')
-  assert.equal(existsSync(result.docxPath), true)
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    const result = renderArtefact('examples', 'soap', { instancesDir })
+    assert.equal(existsSync(result.docxPath), true)
 
-  const roundTrip = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown', result.docxPath], {
-    encoding: 'utf8',
-  })
-  assert.match(roundTrip, /Solution on a Page/)
-  assert.match(roundTrip, /Client-facing self-service/)
+    const roundTrip = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown', result.docxPath], {
+      encoding: 'utf8',
+    })
+    assert.match(roundTrip, /Solution on a Page/)
+    assert.match(roundTrip, /Client-facing self-service/)
 
-  const documentXml = execFileSync('unzip', ['-p', result.docxPath, 'word/document.xml'], {
-    encoding: 'utf8',
-  })
-  const headingStyles = [...documentXml.matchAll(/w:pStyle w:val="(Heading\d)"/g)].map((m) => m[1])
-  // New document heading scale (ADR-0016): the artefact title and each module title sit at Heading1, every field heading at Heading2 — the templates emit nothing deeper, since author content starts at Heading3 and the examples' own prose uses no sub-headings.
-  assert.ok(headingStyles.includes('Heading1'))
-  assert.ok(headingStyles.includes('Heading2'))
-  assert.deepEqual(
-    [...new Set(headingStyles)],
-    ['Heading1', 'Heading2']
-  )
-  assert.ok((documentXml.match(/<w:numPr>/g) ?? []).length > 0, 'expected real list numbering, not flattened text')
+    const documentXml = execFileSync('unzip', ['-p', result.docxPath, 'word/document.xml'], {
+      encoding: 'utf8',
+    })
+    const headingStyles = [...documentXml.matchAll(/w:pStyle w:val="(Heading\d)"/g)].map((m) => m[1])
+    // New document heading scale (ADR-0016): the artefact title and each module title sit at Heading1, every field heading at Heading2 — the templates emit nothing deeper, since author content starts at Heading3 and the examples' own prose uses no sub-headings.
+    assert.ok(headingStyles.includes('Heading1'))
+    assert.ok(headingStyles.includes('Heading2'))
+    assert.deepEqual(
+      [...new Set(headingStyles)],
+      ['Heading1', 'Heading2']
+    )
+    assert.ok((documentXml.match(/<w:numPr>/g) ?? []).length > 0, 'expected real list numbering, not flattened text')
 
-  const referenceStyles = execFileSync(
-    'unzip',
-    ['-p', 'definitions/design/1/templates/reference.docx', 'word/styles.xml'],
-    { encoding: 'utf8' }
-  )
-  const outputStyles = execFileSync('unzip', ['-p', result.docxPath, 'word/styles.xml'], {
-    encoding: 'utf8',
-  })
-  const fontsOf = (xml) => new Set([...xml.matchAll(/w:ascii="([^"]+)"/g)].map((m) => m[1]))
-  const referenceFonts = fontsOf(referenceStyles)
-  const outputFonts = fontsOf(outputStyles)
-  for (const font of referenceFonts) {
-    assert.ok(outputFonts.has(font), `expected ${font} (from the HLD reference doc) in the rendered docx's fonts`)
+    const referenceStyles = execFileSync(
+      'unzip',
+      ['-p', 'definitions/design/1/templates/reference.docx', 'word/styles.xml'],
+      { encoding: 'utf8' }
+    )
+    const outputStyles = execFileSync('unzip', ['-p', result.docxPath, 'word/styles.xml'], {
+      encoding: 'utf8',
+    })
+    const fontsOf = (xml) => new Set([...xml.matchAll(/w:ascii="([^"]+)"/g)].map((m) => m[1]))
+    const referenceFonts = fontsOf(referenceStyles)
+    const outputFonts = fontsOf(outputStyles)
+    for (const font of referenceFonts) {
+      assert.ok(outputFonts.has(font), `expected ${font} (from the HLD reference doc) in the rendered docx's fonts`)
+    }
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
   }
 })
 
 test('suppressed optional sections do not leave runs of blank lines behind', () => {
-  const result = renderArtefact('examples', 'hld', { dryRun: true })
-  assert.doesNotMatch(result.markdown, /\n{3,}/)
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    const result = renderArtefact('examples', 'hld', { dryRun: true, instancesDir })
+    assert.doesNotMatch(result.markdown, /\n{3,}/)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
 })
 
 test('reference doc defines the paragraph styles pandoc references for list items', () => {
@@ -115,20 +145,26 @@ test('reference doc defines the paragraph styles pandoc references for list item
   )
   assert.match(referenceStyles, /w:styleId="Compact"/)
 
-  const result = renderArtefact('examples', 'soap')
-  const documentXml = execFileSync('unzip', ['-p', result.docxPath, 'word/document.xml'], {
-    encoding: 'utf8',
-  })
-  const outputStyles = execFileSync('unzip', ['-p', result.docxPath, 'word/styles.xml'], {
-    encoding: 'utf8',
-  })
-  const listParagraphStyles = new Set(
-    [...documentXml.matchAll(/<w:pPr>(?:(?!<\/w:pPr>).)*?<w:numPr>.*?<w:pStyle w:val="([^"]+)"\/>/gs)].map(
-      (m) => m[1]
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    const result = renderArtefact('examples', 'soap', { instancesDir })
+    const documentXml = execFileSync('unzip', ['-p', result.docxPath, 'word/document.xml'], {
+      encoding: 'utf8',
+    })
+    const outputStyles = execFileSync('unzip', ['-p', result.docxPath, 'word/styles.xml'], {
+      encoding: 'utf8',
+    })
+    const listParagraphStyles = new Set(
+      [...documentXml.matchAll(/<w:pPr>(?:(?!<\/w:pPr>).)*?<w:numPr>.*?<w:pStyle w:val="([^"]+)"\/>/gs)].map(
+        (m) => m[1]
+      )
     )
-  )
-  for (const styleId of listParagraphStyles) {
-    assert.match(outputStyles, new RegExp(`w:styleId="${styleId}"`), `list paragraphs reference an undefined style "${styleId}"`)
+    for (const styleId of listParagraphStyles) {
+      assert.match(outputStyles, new RegExp(`w:styleId="${styleId}"`), `list paragraphs reference an undefined style "${styleId}"`)
+    }
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
   }
 })
 
@@ -217,42 +253,54 @@ test('a local render injects a Document Control table immediately after the titl
   const expectedHash = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim()
   const expectedDate = execFileSync('git', ['log', '-1', '--format=%cs'], { encoding: 'utf8' }).trim()
 
-  const result = renderArtefact('examples', 'soap', { dryRun: true })
-  // Block headings appear in order: title -> Document Control -> Review & sign-off -> first content section
-  const titleIdx = result.markdown.indexOf('# examples: Solution on a Page')
-  const docIdx = result.markdown.indexOf('## Document Control')
-  const reviewIdx = result.markdown.indexOf('## Review & sign-off')
-  const contextIdx = result.markdown.indexOf('# Background and context')
-  assert.ok(titleIdx >= 0 && docIdx > titleIdx, 'Document Control should be after the title')
-  assert.ok(reviewIdx > docIdx, 'Review & sign-off should be after Document Control')
-  assert.ok(contextIdx > reviewIdx, 'Content should be after the two tables')
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    const result = renderArtefact('examples', 'soap', { dryRun: true, instancesDir })
+    // Block headings appear in order: title -> Document Control -> Review & sign-off -> first content section
+    const titleIdx = result.markdown.indexOf('# examples: Solution on a Page')
+    const docIdx = result.markdown.indexOf('## Document Control')
+    const reviewIdx = result.markdown.indexOf('## Review & sign-off')
+    const contextIdx = result.markdown.indexOf('# Background and context')
+    assert.ok(titleIdx >= 0 && docIdx > titleIdx, 'Document Control should be after the title')
+    assert.ok(reviewIdx > docIdx, 'Review & sign-off should be after Document Control')
+    assert.ok(contextIdx > reviewIdx, 'Content should be after the two tables')
 
-  assert.match(result.markdown, /## Document Control/)
-  assert.match(result.markdown, /## Review & sign-off/)
-  // Version: design v1 · SOAP (stage title for that gate)
-  assert.match(result.markdown, /\| Version \| design v1 · SOAP \|/)
-  assert.match(result.markdown, new RegExp(`\\| Date \\| ${escapeRegExp(expectedDate)} \\|`))
-  // Local commit: plain code span, not a hyperlink
-  assert.match(result.markdown, new RegExp(`\\| Commit \\| \`${escapeRegExp(expectedHash)}\` \\|`))
-  assert.doesNotMatch(result.markdown, new RegExp(`\\| Commit \\|.*\\(${escapeRegExp(expectedHash)}`))
-  // The old footer line is gone entirely
-  assert.doesNotMatch(result.markdown, /Rendered from commit/)
-  // Review table shows Pending when no review/sign-off data exists
-  assert.match(result.markdown, /\| Pending \|/)
-  // Columns follow the reference layout
-  assert.match(result.markdown, /\| Name \| Role \/ Title \| Date \| Review process \| Status \| Reference \|/)
+    assert.match(result.markdown, /## Document Control/)
+    assert.match(result.markdown, /## Review & sign-off/)
+    // Version: design v1 · SOAP (stage title for that gate)
+    assert.match(result.markdown, /\| Version \| design v1 · SOAP \|/)
+    assert.match(result.markdown, new RegExp(`\\| Date \\| ${escapeRegExp(expectedDate)} \\|`))
+    // Local commit: plain code span, not a hyperlink
+    assert.match(result.markdown, new RegExp(`\\| Commit \\| \`${escapeRegExp(expectedHash)}\` \\|`))
+    assert.doesNotMatch(result.markdown, new RegExp(`\\| Commit \\|.*\\(${escapeRegExp(expectedHash)}`))
+    // The old footer line is gone entirely
+    assert.doesNotMatch(result.markdown, /Rendered from commit/)
+    // Review table shows Pending when no review/sign-off data exists
+    assert.match(result.markdown, /\| Pending \|/)
+    // Columns follow the reference layout
+    assert.match(result.markdown, /\| Name \| Role \/ Title \| Date \| Review process \| Status \| Reference \|/)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
 })
 
 test('the Document Control block also survives the pandoc conversion into the rendered .docx, and the hash remains link-free for local', () => {
-  const result = renderArtefact('examples', 'soap')
-  const roundTrip = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown', result.docxPath], {
-    encoding: 'utf8',
-  })
-  assert.match(roundTrip, /Document Control/)
-  assert.match(roundTrip, /Review.*sign-off/)
-  // Local hash stays as code, not a hyperlink URL
-  assert.match(roundTrip, /`[0-9a-f]+`/)
-  assert.doesNotMatch(roundTrip, /Rendered from commit/)
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    const result = renderArtefact('examples', 'soap', { instancesDir })
+    const roundTrip = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown', result.docxPath], {
+      encoding: 'utf8',
+    })
+    assert.match(roundTrip, /Document Control/)
+    assert.match(roundTrip, /Review.*sign-off/)
+    // Local hash stays as code, not a hyperlink URL
+    assert.match(roundTrip, /`[0-9a-f]+`/)
+    assert.doesNotMatch(roundTrip, /Rendered from commit/)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
 })
 
 test('a definition other than "design" also gets a Document Control block — it is not special-cased to one definition\'s templates', () => {
@@ -285,12 +333,15 @@ test('a definition other than "design" also gets a Document Control block — it
 
 // Regression test for a review finding: rendering a local instance never used to depend on `git` at all — a local render against a directory with no git checkout (a missing/uninitialised repo) now fails, but should fail with one clear, actionable error rather than git's own raw stderr.
 test('a local render against a directory with no git checkout fails with one clear error, not a raw git stderr', () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   const notARepoDir = mkdtempSync(join(tmpdir(), 'gantry-not-a-git-repo-'))
   try {
-    assert.throws(() => renderArtefact('examples', 'soap', { dryRun: true, repoDir: notARepoDir }), {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    assert.throws(() => renderArtefact('examples', 'soap', { dryRun: true, repoDir: notARepoDir, instancesDir }), {
       message: /Cannot determine the local git commit for this render's Document Control/,
     })
   } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
     rmSync(notARepoDir, { recursive: true, force: true })
   }
 })
@@ -449,28 +500,40 @@ test('a populated reviewSummary renders one review row and one sign-off row with
       },
     ],
   }
-  const result = renderArtefact('examples', 'sad', { dryRun: true, reviewSummary })
-  assert.match(result.markdown, /## Review & sign-off/)
-  // First row: review
-  assert.match(result.markdown, /\| Lisa Haselton \| *\| 2024-04-01 \| *\| In review \| \[#123\]\(https:\/\/dev\.azure\.com\/fake-org\/fake-project\/_workitems\/edit\/123\) \|/)
-  // Second row: sign-off
-  assert.match(result.markdown, /\| Grant Hughson \| *\| 2024-04-02 \| *\| Approved \| \[PR #456\]\(https:\/\/dev\.azure\.com\/fake-org\/fake-project\/_git\/fake-repo\/pullrequest\/456\) \|/)
-  // Role / Title and Review process columns are blank (|| with optional spaces)
-  // Document Control Status reflects the summary's gateStatus
-  assert.match(result.markdown, /\| Status \| In review \|/)
-  assert.doesNotMatch(result.markdown, /Rendered from commit/)
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    const result = renderArtefact('examples', 'sad', { dryRun: true, reviewSummary, instancesDir })
+    assert.match(result.markdown, /## Review & sign-off/)
+    // First row: review
+    assert.match(result.markdown, /\| Lisa Haselton \| *\| 2024-04-01 \| *\| In review \| \[#123\]\(https:\/\/dev\.azure\.com\/fake-org\/fake-project\/_workitems\/edit\/123\) \|/)
+    // Second row: sign-off
+    assert.match(result.markdown, /\| Grant Hughson \| *\| 2024-04-02 \| *\| Approved \| \[PR #456\]\(https:\/\/dev\.azure\.com\/fake-org\/fake-project\/_git\/fake-repo\/pullrequest\/456\) \|/)
+    // Role / Title and Review process columns are blank (|| with optional spaces)
+    // Document Control Status reflects the summary's gateStatus
+    assert.match(result.markdown, /\| Status \| In review \|/)
+    assert.doesNotMatch(result.markdown, /Rendered from commit/)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
 })
 
 test('a draft render with no review/sign-off data still shows a Pending row and no footer — the block is never omitted', () => {
-  const result = renderArtefact('examples', 'hld', { dryRun: true })
-  assert.match(result.markdown, /## Document Control/)
-  assert.match(result.markdown, /## Review & sign-off/)
-  assert.match(result.markdown, /\| Pending \|/)
-  assert.doesNotMatch(result.markdown, /Rendered from commit/)
-  const docxRoundTrip = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown', renderArtefact('examples', 'hld').docxPath], { encoding: 'utf8' })
-  assert.match(docxRoundTrip, /Document Control/)
-  assert.match(docxRoundTrip, /Pending/)
-  assert.doesNotMatch(docxRoundTrip, /Rendered from commit/)
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    const result = renderArtefact('examples', 'hld', { dryRun: true, instancesDir })
+    assert.match(result.markdown, /## Document Control/)
+    assert.match(result.markdown, /## Review & sign-off/)
+    assert.match(result.markdown, /\| Pending \|/)
+    assert.doesNotMatch(result.markdown, /Rendered from commit/)
+    const docxRoundTrip = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown', renderArtefact('examples', 'hld', { instancesDir }).docxPath], { encoding: 'utf8' })
+    assert.match(docxRoundTrip, /Document Control/)
+    assert.match(docxRoundTrip, /Pending/)
+    assert.doesNotMatch(docxRoundTrip, /Rendered from commit/)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
 })
 
 test('review rows reflect only the artefact\'s own gate — a business-case review does not leak into the HLD artefact', () => {
@@ -482,15 +545,21 @@ test('review rows reflect only the artefact\'s own gate — a business-case revi
     gateStatus: 'In review',
     rows: [{ name: 'Alice', role: '', date: '', process: '', status: 'In review', reference: { text: '#100', url: 'https://example.com/100' } }],
   }
-  const soapResult = renderArtefact('examples', 'soap', { dryRun: true, reviewSummary: businessCaseSummary })
-  assert.match(soapResult.markdown, /Alice/)
-  assert.match(soapResult.markdown, /#100/)
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    const soapResult = renderArtefact('examples', 'soap', { dryRun: true, reviewSummary: businessCaseSummary, instancesDir })
+    assert.match(soapResult.markdown, /Alice/)
+    assert.match(soapResult.markdown, /#100/)
 
-  // HLD artefact for same slug but different gate — given no summary, it gets
-  // its own Pending row, not the business-case review above.
-  const hldResult = renderArtefact('examples', 'hld', { dryRun: true })
-  assert.doesNotMatch(hldResult.markdown, /Alice/)
-  assert.match(hldResult.markdown, /\| Pending \|/)
+    // HLD artefact for same slug but different gate — given no summary, it gets
+    // its own Pending row, not the business-case review above.
+    const hldResult = renderArtefact('examples', 'hld', { dryRun: true, instancesDir })
+    assert.doesNotMatch(hldResult.markdown, /Alice/)
+    assert.match(hldResult.markdown, /\| Pending \|/)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
 })
 
 test('compileArtefact stays pure — it does not import reviewStatus, stageReview or stageApproval', () => {
@@ -503,11 +572,17 @@ test('compileArtefact stays pure — it does not import reviewStatus, stageRevie
 })
 
 test('every design artefact (soap, hld, sad, ssad, as-built) renders a Document Control table immediately after its title', () => {
-  for (const artefactId of ['soap', 'hld', 'sad', 'ssad', 'as-built']) {
-    const result = renderArtefact('examples', artefactId, { dryRun: true })
-    assert.match(result.markdown, /## Document Control/, `expected ${artefactId} to have Document Control`)
-    assert.match(result.markdown, /## Review & sign-off/, `expected ${artefactId} to have Review & sign-off`)
-    assert.doesNotMatch(result.markdown, /Rendered from commit/, `expected ${artefactId} to have no footer`)
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    for (const artefactId of ['soap', 'hld', 'sad', 'ssad', 'as-built']) {
+      const result = renderArtefact('examples', artefactId, { dryRun: true, instancesDir })
+      assert.match(result.markdown, /## Document Control/, `expected ${artefactId} to have Document Control`)
+      assert.match(result.markdown, /## Review & sign-off/, `expected ${artefactId} to have Review & sign-off`)
+      assert.doesNotMatch(result.markdown, /Rendered from commit/, `expected ${artefactId} to have no footer`)
+    }
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
   }
 })
 

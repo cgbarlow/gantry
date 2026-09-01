@@ -3,10 +3,10 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createServer } from '../lib/server.js'
 import { createInstance } from '../lib/instance.js'
 import { registerWorkspace, isWorkspaceArchived } from '../lib/workspaceRegistry.js'
 import { registerInstance, isInstanceArchived } from '../lib/instanceRegistry.js'
+import { withRunningServer } from './helpers/lifecycle.js'
 
 // POST /api/workspace/archive|restore and POST /api/instance/archive|restore (#223): the
 // HTTP-API-boundary half of the archive/restore acceptance criteria — exercised as real HTTP
@@ -14,22 +14,6 @@ import { registerInstance, isInstanceArchived } from '../lib/instanceRegistry.js
 // routes consult a PAT (archived-ness is registry metadata), so no fake Azure DevOps server is
 // needed here.
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 function withScratchServer(fn) {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))

@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { setPat, clearPat, setWorkspacePatOverride, clearWorkspacePatOverride } from '../web/lib/credential.js'
+import { basicAuthHeader } from './helpers/lifecycle.js'
 
 // `apiFetchForInstance`'s workspace-id-for-slug cache (#104, web/lib/apiFetch.js) — a review pass on this ticket flagged the original version as caching *every* lookup outcome, including a failed one, permanently for the page's life. This exercises the fix directly: a stubbed global `fetch` simulates a transient failure on the first lookup, then a real answer on the second, proving the failure was not cached and a later call still applies the workspace's PAT override.
 //
@@ -9,9 +10,6 @@ async function freshApiFetchModule() {
   return import(`../web/lib/apiFetch.js?t=${Math.random()}`)
 }
 
-function basicAuthHeader(value) {
-  return `Basic ${Buffer.from(`:${value}`, 'utf8').toString('base64')}`
-}
 
 test('a failed workspace-id lookup is not cached — a later successful lookup still applies that workspace\'s PAT override', async () => {
   const originalFetch = globalThis.fetch

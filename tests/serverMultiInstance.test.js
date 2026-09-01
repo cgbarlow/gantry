@@ -6,34 +6,12 @@ import { join } from 'node:path'
 import { createServer } from '../lib/server.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withRunningServer, basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
 // #92: `createServer(options)` no longer takes one fixed `options.azureDevOps` location for the whole process — each request resolves its own slug against the instance registry (#89) to decide whether it's local or Azure-DevOps-backed. These tests are the acceptance test for that: one running server, with one local instance and one Azure-DevOps-backed (fake-server-backed) instance both registered ahead of time, exercised through the exact same server instance — mirroring tests/serverAzureDevOpsAuth.test.js's existing style.
 
-const ORGANIZATION = 'fake-org'
-const PROJECT = 'fake-project'
-const REPOSITORY = 'fake-repo'
-const VALID_PAT = 'valid-test-pat'
 
-function basicAuthHeader(pat) {
-  return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
-}
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 const SEED_FILES = {
   '/gantry-workspace/remote-initiative/instance.yaml': 'definition: design\nslug: remote-initiative\nstage: shape\n',

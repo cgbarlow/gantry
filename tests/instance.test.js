@@ -1,7 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { loadDefinition } from '../lib/definition.js'
 import {
@@ -18,23 +17,12 @@ import {
 } from '../lib/instance.js'
 import { AzureDevOpsAuthenticationError, AzureDevOpsNotFoundError, createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withScratchInstances, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
-const ORGANIZATION = 'fake-org'
-const PROJECT = 'fake-project'
-const REPOSITORY = 'fake-repo'
-const VALID_PAT = 'valid-test-pat'
 
-function withScratchInstances(fn) {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  try {
-    fn(instancesDir)
-  } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
-  }
-}
 
-test('creates a design instance with blank Shape-stage module files', () => {
-  withScratchInstances((instancesDir) => {
+test('creates a design instance with blank Shape-stage module files', async () => {
+  await withScratchInstances((instancesDir) => {
     const result = createInstance('design', 'my-initiative', { instancesDir, owner: 'c.barlow' })
     assert.equal(result.stage, 'shape')
     assert.deepEqual(result.modules, ['background', 'solution-definition', 'team-and-estimates', 'dependencies', 'soap-full-details', 'introduction'])
@@ -59,16 +47,16 @@ test('creates a design instance with blank Shape-stage module files', () => {
 //
 // An explicit, stored field on the instance record itself — replacing the old "derive an owner by scanning the current stage's module frontmatter" behaviour (now lib/registry.js/lib/repoCheck.js). Distinct from `options.owner` above, which still only seeds each first-stage module file's own frontmatter `owner` — the separate, untouched Design Authority sign-off convention.
 
-test('createInstance defaults the instance record\'s assignee to empty', () => {
-  withScratchInstances((instancesDir) => {
+test('createInstance defaults the instance record\'s assignee to empty', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const instance = readInstance('my-initiative', { instancesDir })
     assert.equal(instance.assignee, '')
   })
 })
 
-test('createInstance records an explicitly given assignee on the instance record, independently of options.owner\'s module-frontmatter seeding', () => {
-  withScratchInstances((instancesDir) => {
+test('createInstance records an explicitly given assignee on the instance record, independently of options.owner\'s module-frontmatter seeding', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir, assignee: 'c.barlow', owner: 'a-different-module-owner' })
     const instance = readInstance('my-initiative', { instancesDir })
     assert.equal(instance.assignee, 'c.barlow')
@@ -78,8 +66,8 @@ test('createInstance records an explicitly given assignee on the instance record
   })
 })
 
-test('a hand-written instance.yaml that predates #97 (no assignee field at all) reads back with assignee defaulting to \'\', not undefined', () => {
-  withScratchInstances((instancesDir) => {
+test('a hand-written instance.yaml that predates #97 (no assignee field at all) reads back with assignee defaulting to \'\', not undefined', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     writeFileSync(
       join(instancesDir, 'my-initiative', 'instance.yaml'),
@@ -91,16 +79,16 @@ test('a hand-written instance.yaml that predates #97 (no assignee field at all) 
 })
 
 // Regression test: `assignee`'s '' default must not paper over a genuinely blank/malformed instance.yaml. `yaml.parse('')` returns `null` (not an object), and naively spreading it (`{ assignee: '', ...null }`) would silently turn that `null` into `{ assignee: '' }` — masking a read that should fail immediately (the same way it always has) behind a later, less clear error wherever the caller next uses the "successfully" read instance (e.g. `loadDefinition` rejecting an `undefined` id).
-test('readInstance returns null (not a default-filled object) for a blank instance.yaml, the same as before #97', () => {
-  withScratchInstances((instancesDir) => {
+test('readInstance returns null (not a default-filled object) for a blank instance.yaml, the same as before #97', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     writeFileSync(join(instancesDir, 'my-initiative', 'instance.yaml'), '')
     assert.equal(readInstance('my-initiative', { instancesDir }), null)
   })
 })
 
-test('updateInstanceAssignee sets the stored assignee and preserves every other instance.yaml field', () => {
-  withScratchInstances((instancesDir) => {
+test('updateInstanceAssignee sets the stored assignee and preserves every other instance.yaml field', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const updated = updateInstanceAssignee('my-initiative', 'c.barlow', { instancesDir })
     assert.equal(updated.assignee, 'c.barlow')
@@ -113,16 +101,16 @@ test('updateInstanceAssignee sets the stored assignee and preserves every other 
   })
 })
 
-test('updateInstanceAssignee can clear a previously set assignee back to \'\'', () => {
-  withScratchInstances((instancesDir) => {
+test('updateInstanceAssignee can clear a previously set assignee back to \'\'', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir, assignee: 'c.barlow' })
     updateInstanceAssignee('my-initiative', '', { instancesDir })
     assert.equal(readInstance('my-initiative', { instancesDir }).assignee, '')
   })
 })
 
-test('assignee stays stable across a stage change — updating stage does not touch or clear it', () => {
-  withScratchInstances((instancesDir) => {
+test('assignee stays stable across a stage change — updating stage does not touch or clear it', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir, assignee: 'c.barlow' })
     // No real "advance a stage" API exists yet (#97's own investigation found none) — this simulates a stage transition the way one would actually land today, a direct instance.yaml edit, to prove assignee isn't wiped out or recomputed as a side effect of it.
     writeFileSync(
@@ -152,8 +140,8 @@ test('updateInstanceAssignee against Azure DevOps updates instance.yaml there, p
   )
 })
 
-test('listInstances lists every instance, sorted by slug, with definition, stage, and which stages have data', () => {
-  withScratchInstances((instancesDir) => {
+test('listInstances lists every instance, sorted by slug, with definition, stage, and which stages have data', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'zebra-initiative', { instancesDir })
     createInstance('design', 'alpha-initiative', { instancesDir })
 
@@ -165,8 +153,8 @@ test('listInstances lists every instance, sorted by slug, with definition, stage
   })
 })
 
-test('listInstances reports every stage with data, not just the instance\'s current stage', () => {
-  withScratchInstances((instancesDir) => {
+test('listInstances reports every stage with data, not just the instance\'s current stage', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     writeFileSync(
       join(instancesDir, 'my-initiative', 'modules', 'hld-submission.md'),
@@ -179,14 +167,14 @@ test('listInstances reports every stage with data, not just the instance\'s curr
   })
 })
 
-test('listInstances returns an empty array when instancesDir has no instances', () => {
-  withScratchInstances((instancesDir) => {
+test('listInstances returns an empty array when instancesDir has no instances', async () => {
+  await withScratchInstances((instancesDir) => {
     assert.deepEqual(listInstances({ instancesDir }), [])
   })
 })
 
-test('readInstance\'s error for an unknown slug lists the available instances', () => {
-  withScratchInstances((instancesDir) => {
+test('readInstance\'s error for an unknown slug lists the available instances', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     assert.throws(
       () => readInstance('not-a-real-slug', { instancesDir }),
@@ -195,8 +183,8 @@ test('readInstance\'s error for an unknown slug lists the available instances', 
   })
 })
 
-test('reads a hand-filled module file back into field-keyed data', () => {
-  withScratchInstances((instancesDir) => {
+test('reads a hand-filled module file back into field-keyed data', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const definition = loadDefinition('design')
 
@@ -235,8 +223,8 @@ test('reads a hand-filled module file back into field-keyed data', () => {
   })
 })
 
-test('writeModule is the exact inverse of readModule', () => {
-  withScratchInstances((instancesDir) => {
+test('writeModule is the exact inverse of readModule', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const definition = loadDefinition('design')
 
@@ -321,8 +309,8 @@ test('background + introduction round-trip through writeModule/readModule (WI #2
 // including a custom Section inserted between two defined fields — and
 // writeModule must replay it exactly, so the section stays below its
 // neighbour across save/reload instead of sinking to the end of the file.
-test('writeModule replays a supplied layout exactly, preserving a custom Section interleaved between defined fields', () => {
-  withScratchInstances((instancesDir) => {
+test('writeModule replays a supplied layout exactly, preserving a custom Section interleaved between defined fields', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const definition = loadDefinition('design')
 
@@ -369,8 +357,8 @@ test('writeModule replays a supplied layout exactly, preserving a custom Section
 })
 
 // Every caller that predates #132 supplies no layout; their output must stay byte-for-byte what it always was.
-test('writeModule without a layout still emits defined-field sections in definition order only', () => {
-  withScratchInstances((instancesDir) => {
+test('writeModule without a layout still emits defined-field sections in definition order only', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const definition = loadDefinition('design')
 
@@ -576,8 +564,8 @@ test('an empty custom section preserves list type through the round-trip', () =>
 })
 
 // List-typed custom field round-trip: write with a layout containing a custom list, then read it back — the parser must detect the bullet content as a list field with the same items.
-test('list-typed custom field round-trips through write/read with values intact', () => {
-  withScratchInstances((instancesDir) => {
+test('list-typed custom field round-trips through write/read with values intact', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const definition = loadDefinition('design')
 
@@ -695,8 +683,8 @@ test('layout records the interleaved order of defined and list-typed custom sect
 // WI 149: removing the last remaining item from a custom-inserted list removes the whole segment — the writer must omit an empty custom list's heading entirely, while schema-defined type:list fields keep their heading even when empty.
 
 // An empty custom list (zero items) is omitted from the persisted file — the segment disappears.
-test('an empty custom list is omitted from the written file (WI 149)', () => {
-  withScratchInstances((instancesDir) => {
+test('an empty custom list is omitted from the written file (WI 149)', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const definition = loadDefinition('design')
 
@@ -738,8 +726,8 @@ test('an empty custom list is omitted from the written file (WI 149)', () => {
 })
 
 // A custom list emptied to zero items round-trips as removed, while a non-empty one survives.
-test('a custom list with one item emptied to zero removes its segment on the next write/read round-trip', () => {
-  withScratchInstances((instancesDir) => {
+test('a custom list with one item emptied to zero removes its segment on the next write/read round-trip', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const definition = loadDefinition('design')
 
@@ -794,8 +782,8 @@ test('a custom list with one item emptied to zero removes its segment on the nex
 })
 
 // Schema-defined type:list fields must keep preserve-when-empty behaviour unchanged (WI 149 is custom-only).
-test('schema-defined type:list heading is preserved even when its value is empty', () => {
-  withScratchInstances((instancesDir) => {
+test('schema-defined type:list heading is preserved even when its value is empty', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const definition = loadDefinition('design')
 
@@ -846,8 +834,8 @@ test('schema-defined type:list heading is preserved even when its value is empty
 })
 
 // Mixed: a module with two custom lists, only the emptied one is removed.
-test('only the emptied custom list is removed; sibling custom lists remain', () => {
-  withScratchInstances((instancesDir) => {
+test('only the emptied custom list is removed; sibling custom lists remain', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const definition = loadDefinition('design')
 
@@ -1230,8 +1218,8 @@ const OLD_SCALE_WITH_AUTHOR_HEADINGS = [
   '',
 ].join('\n')
 
-test('reading an old-scale module file bumps it to the new heading scale and writes the result back', () => {
-  withScratchInstances((instancesDir) => {
+test('reading an old-scale module file bumps it to the new heading scale and writes the result back', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const definition = loadDefinition('design')
     const backgroundPath = join(instancesDir, 'my-initiative', 'modules', 'background.md')
@@ -1247,8 +1235,8 @@ test('reading an old-scale module file bumps it to the new heading scale and wri
   })
 })
 
-test('migration preserves every field\'s parsed content through the round-trip', () => {
-  withScratchInstances((instancesDir) => {
+test('migration preserves every field\'s parsed content through the round-trip', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const definition = loadDefinition('design')
     const moduleSpec = definition.modules.get('background')
@@ -1264,8 +1252,8 @@ test('migration preserves every field\'s parsed content through the round-trip',
   })
 })
 
-test('migration folds author sub-headings into field content at ### instead of leaving them as phantom structure', () => {
-  withScratchInstances((instancesDir) => {
+test('migration folds author sub-headings into field content at ### instead of leaving them as phantom structure', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const definition = loadDefinition('design')
     const backgroundPath = join(instancesDir, 'my-initiative', 'modules', 'background.md')
@@ -1282,8 +1270,8 @@ test('migration folds author sub-headings into field content at ### instead of l
   })
 })
 
-test('a new-scale file reads back byte-identical — migration never rewrites what is already migrated', () => {
-  withScratchInstances((instancesDir) => {
+test('a new-scale file reads back byte-identical — migration never rewrites what is already migrated', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const definition = loadDefinition('design')
     const moduleSpec = definition.modules.get('background')
@@ -1328,7 +1316,7 @@ test('readModule forwards options.strict to parseModuleFile on both the local an
     '---\nmodule: background\nstatus: draft\nowner:\n---\n\n# Background and context\n\n## Problem statement\n\nFirst.\n\n## Problem statement\n\nSecond.\n'
   const definition = loadDefinition('design')
 
-  withScratchInstances((instancesDir) => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     writeFileSync(join(instancesDir, 'my-initiative', 'modules', 'background.md'), badModuleText)
     assert.throws(
@@ -1464,8 +1452,8 @@ test('a module missing on the requested branch is reported as "no saved data", e
   })
 })
 
-test('createInstance/readInstance/readModule/writeModule stay fully synchronous (not Promises) with no Azure DevOps location given — the three local instances make zero Azure DevOps calls and are provably unaffected by this path existing', () => {
-  withScratchInstances((instancesDir) => {
+test('createInstance/readInstance/readModule/writeModule stay fully synchronous (not Promises) with no Azure DevOps location given — the three local instances make zero Azure DevOps calls and are provably unaffected by this path existing', async () => {
+  await withScratchInstances((instancesDir) => {
     const created = createInstance('design', 'my-initiative', { instancesDir })
     assert.equal(created instanceof Promise, false)
 

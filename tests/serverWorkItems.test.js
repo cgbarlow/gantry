@@ -9,33 +9,14 @@ import { registerInstance } from '../lib/instanceRegistry.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withRunningServer, basicAuthHeader, VALID_PAT } from './helpers/lifecycle.js'
 
 // HTTP-boundary tests for #95/#103's new routes: POST /api/instance/work-items/link, POST /api/instance/work-items/tag, POST /api/instance/work-items/sync, and the accompanying fix to GET /api/instance/check (previously local-only). Real HTTP requests against a real gantry server and a real (fake, in-process) Azure DevOps server throughout — nothing mocked.
 
 const WI_ORGANIZATION = 'wi-org'
 const WI_PROJECT = 'wi-project'
-const VALID_PAT = 'valid-test-pat'
 
-function basicAuthHeader(pat) {
-  return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
-}
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 function withFakeWorkItemsServer(fn) {
   return withFakeAzureDevOpsServer({ organization: WI_ORGANIZATION, project: WI_PROJECT, validPat: VALID_PAT }, fn)

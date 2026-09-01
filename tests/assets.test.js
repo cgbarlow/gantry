@@ -4,10 +4,10 @@ import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import MarkdownIt from 'markdown-it'
-import { createServer } from '../lib/server.js'
 import { createInstance } from '../lib/instance.js'
 import { createAsset, resolveAssetFileRefs } from '../lib/assets.js'
 import { resolveAssetRefs } from '../web/lib/assetRefs.js'
+import { withRunningServer } from './helpers/lifecycle.js'
 
 // A minimal real 1x1 red PNG, base64-encoded — small enough to inline, real enough to round-trip through the same file-write/serve path a genuine upload takes.
 const ONE_PX_PNG_BASE64 =
@@ -67,22 +67,6 @@ test('file asset citations render their source URL as a link while keeping the c
   }
 })
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 test('GET /api/instance/assets is empty for a freshly-created instance', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))

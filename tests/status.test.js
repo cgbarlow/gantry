@@ -1,24 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, unlinkSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { createInstance } from '../lib/instance.js'
 import { loadDefinition } from '../lib/definition.js'
 import { getStatus, evaluateStage } from '../lib/status.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withScratchInstances } from './helpers/lifecycle.js'
 
-function withScratchInstances(fn) {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  try {
-    fn(instancesDir)
-  } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
-  }
-}
 
-test('a freshly-created instance is incomplete, with every required field outstanding', () => {
-  withScratchInstances((instancesDir) => {
+test('a freshly-created instance is incomplete, with every required field outstanding', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const status = getStatus('my-initiative', { instancesDir })
 
@@ -34,8 +26,8 @@ test('a freshly-created instance is incomplete, with every required field outsta
   })
 })
 
-test('a module with no file on disk is reported missing, with all required fields outstanding', () => {
-  withScratchInstances((instancesDir) => {
+test('a module with no file on disk is reported missing, with all required fields outstanding', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     unlinkSync(join(instancesDir, 'my-initiative', 'modules', 'team-and-estimates.md'))
 
@@ -56,8 +48,8 @@ test('the examples fixture is complete', () => {
   }
 })
 
-test('stageId lets a caller evaluate a stage other than the instance\'s current one', () => {
-  withScratchInstances((instancesDir) => {
+test('stageId lets a caller evaluate a stage other than the instance\'s current one', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const status = getStatus('my-initiative', { instancesDir, stageId: 'hld-define' })
 
@@ -118,8 +110,8 @@ test('getStatus against Azure DevOps reports the same shape as the local path, w
   )
 })
 
-test('getStatus stays a plain synchronous return with no options.azureDevOps given', () => {
-  withScratchInstances((instancesDir) => {
+test('getStatus stays a plain synchronous return with no options.azureDevOps given', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
     const status = getStatus('my-initiative', { instancesDir })
     assert.equal(status instanceof Promise, false)

@@ -5,24 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'yaml'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
-import { createServer } from '../lib/server.js'
+import { withRunningServer } from './helpers/lifecycle.js'
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 test('Definition Editor viewer renders definitions with badges and detail pane is read-only', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))

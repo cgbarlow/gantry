@@ -13,6 +13,7 @@ import { loadDefinition } from '../lib/definition.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { resolveStageBranch } from '../lib/stageBranch.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withScratchInstances, basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
 // Lib-level tests for #125's "Check status" action (ADR-0014): reading a
 // stage's Pull Request reviewer votes and distinguishing an explicit
@@ -23,23 +24,12 @@ import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 // be in Azure DevOps's own UI, via the fake server's reviewers endpoint,
 // the same way a real vote would exercise "Check status"'s detection.
 
-const ORGANIZATION = 'fake-org'
-const PROJECT = 'fake-project'
-const REPOSITORY = 'fake-repo'
-const VALID_PAT = 'valid-test-pat'
 const SLUG = 'remote-initiative'
 
 const definition = loadDefinition('design')
 const [SHAPE] = definition.stages
 
-function basicAuthHeader(pat) {
-  return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
-}
 
-function withScratchInstances(fn) {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  return (async () => fn(instancesDir))().finally(() => rmSync(instancesDir, { recursive: true, force: true }))
-}
 
 async function fillShapeStage(azureDevOps, branch) {
   const client = createAzureDevOpsClient(azureDevOps)

@@ -3,16 +3,12 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createServer } from '../lib/server.js'
 import { createInstance } from '../lib/instance.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withRunningServer, basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
 // POST /api/instances/adopt (#94, under #88): registers an Azure-DevOps-backed location the setup wizard's own repo-check (#90) already found instance data at, so the module editor's per-request registry lookup (#92) can resolve it afterward — without writing anything, unlike POST /api/instances' create-and-register path (#93). Backed by the same in-process fake Azure DevOps server used throughout #84-#94 — never a real dev.azure.com.
 
-const ORGANIZATION = 'fake-org'
-const PROJECT = 'fake-project'
-const REPOSITORY = 'fake-repo'
-const VALID_PAT = 'valid-test-pat'
 
 const SEED_FILES = {
   '/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\nassignee: c.barlow\n',
@@ -38,26 +34,7 @@ const SEED_FILES = {
   ].join('\n'),
 }
 
-function basicAuthHeader(pat) {
-  return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
-}
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 function withFakeAzureDevOpsAndGantryServer(files, serverOptions, fn) {
   return withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files }, async (adoBaseUrl) => {

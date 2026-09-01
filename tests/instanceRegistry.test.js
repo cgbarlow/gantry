@@ -14,31 +14,24 @@ import {
   isInstanceArchived,
 } from '../lib/instanceRegistry.js'
 import { listWorkspaces, resolveWorkspace, findWorkspaceByLocation } from '../lib/workspaceRegistry.js'
+import { withScratchInstances } from './helpers/lifecycle.js'
 
-function withScratchInstances(fn) {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  try {
-    fn(instancesDir)
-  } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
-  }
-}
 
-test('resolveInstanceLocation returns undefined for a slug that is neither registered nor on disk', () => {
-  withScratchInstances((instancesDir) => {
+test('resolveInstanceLocation returns undefined for a slug that is neither registered nor on disk', async () => {
+  await withScratchInstances((instancesDir) => {
     assert.equal(resolveInstanceLocation('nowhere', { instancesDir }), undefined)
   })
 })
 
-test('registerInstance then resolveInstanceLocation round-trips a local location', () => {
-  withScratchInstances((instancesDir) => {
+test('registerInstance then resolveInstanceLocation round-trips a local location', async () => {
+  await withScratchInstances((instancesDir) => {
     registerInstance('my-initiative', { kind: 'local' }, { instancesDir })
     assert.deepEqual(resolveInstanceLocation('my-initiative', { instancesDir }), { kind: 'local' })
   })
 })
 
-test('registerInstance then resolveInstanceLocation round-trips an Azure DevOps location', () => {
-  withScratchInstances((instancesDir) => {
+test('registerInstance then resolveInstanceLocation round-trips an Azure DevOps location', async () => {
+  await withScratchInstances((instancesDir) => {
     const location = {
       kind: 'azureDevOps',
       organization: 'fake-org',
@@ -50,8 +43,8 @@ test('registerInstance then resolveInstanceLocation round-trips an Azure DevOps 
   })
 })
 
-test('registerInstance persists an optional baseUrl on an Azure DevOps location', () => {
-  withScratchInstances((instancesDir) => {
+test('registerInstance persists an optional baseUrl on an Azure DevOps location', async () => {
+  await withScratchInstances((instancesDir) => {
     const location = {
       kind: 'azureDevOps',
       organization: 'fake-org',
@@ -64,14 +57,14 @@ test('registerInstance persists an optional baseUrl on an Azure DevOps location'
   })
 })
 
-test('registerInstance rejects an unknown location kind', () => {
-  withScratchInstances((instancesDir) => {
+test('registerInstance rejects an unknown location kind', async () => {
+  await withScratchInstances((instancesDir) => {
     assert.throws(() => registerInstance('bad', { kind: 'ftp' }, { instancesDir }), /Unknown registry location kind/)
   })
 })
 
-test('registerInstance rejects an Azure DevOps location missing required fields', () => {
-  withScratchInstances((instancesDir) => {
+test('registerInstance rejects an Azure DevOps location missing required fields', async () => {
+  await withScratchInstances((instancesDir) => {
     assert.throws(
       () => registerInstance('bad', { kind: 'azureDevOps', organization: 'org' }, { instancesDir }),
       /missing: project, repository/
@@ -79,8 +72,8 @@ test('registerInstance rejects an Azure DevOps location missing required fields'
   })
 })
 
-test('an instance.yaml already on disk with no registry entry is auto-backfilled as local, with no manual step', () => {
-  withScratchInstances((instancesDir) => {
+test('an instance.yaml already on disk with no registry entry is auto-backfilled as local, with no manual step', async () => {
+  await withScratchInstances((instancesDir) => {
     // Simulates a pre-existing instance created before the registry ever existed (or by a caller that bypassed registerInstance entirely, e.g. createInstance's local path, which never calls it).
     createInstance('design', 'pre-existing', { instancesDir })
 
@@ -88,8 +81,8 @@ test('an instance.yaml already on disk with no registry entry is auto-backfilled
   })
 })
 
-test('auto-backfill persists to the registry file, not just the in-memory result', () => {
-  withScratchInstances((instancesDir) => {
+test('auto-backfill persists to the registry file, not just the in-memory result', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'pre-existing', { instancesDir })
     resolveInstanceLocation('pre-existing', { instancesDir })
 
@@ -99,8 +92,8 @@ test('auto-backfill persists to the registry file, not just the in-memory result
   })
 })
 
-test('listRegisteredInstances lists every entry, sorted by slug, mixing registered and backfilled instances', () => {
-  withScratchInstances((instancesDir) => {
+test('listRegisteredInstances lists every entry, sorted by slug, mixing registered and backfilled instances', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'zebra-initiative', { instancesDir })
     registerInstance('alpha-remote', { kind: 'azureDevOps', organization: 'org', project: 'proj', repository: 'repo' }, { instancesDir })
 
@@ -111,14 +104,14 @@ test('listRegisteredInstances lists every entry, sorted by slug, mixing register
   })
 })
 
-test('listRegisteredInstances returns an empty array when there is nothing registered or on disk', () => {
-  withScratchInstances((instancesDir) => {
+test('listRegisteredInstances returns an empty array when there is nothing registered or on disk', async () => {
+  await withScratchInstances((instancesDir) => {
     assert.deepEqual(listRegisteredInstances({ instancesDir }), [])
   })
 })
 
-test('the registry survives across multiple reads/writes (a fresh call sees a previous call\'s registration)', () => {
-  withScratchInstances((instancesDir) => {
+test('the registry survives across multiple reads/writes (a fresh call sees a previous call\'s registration)', async () => {
+  await withScratchInstances((instancesDir) => {
     registerInstance('first', { kind: 'local' }, { instancesDir })
     registerInstance('second', { kind: 'local' }, { instancesDir })
 
@@ -129,8 +122,8 @@ test('the registry survives across multiple reads/writes (a fresh call sees a pr
   })
 })
 
-test('instance.yaml\'s own (descriptive) azureDevOps field is never consulted — the registry alone decides kind', () => {
-  withScratchInstances((instancesDir) => {
+test('instance.yaml\'s own (descriptive) azureDevOps field is never consulted — the registry alone decides kind', async () => {
+  await withScratchInstances((instancesDir) => {
     // A local instance.yaml can't itself carry an azureDevOps field the way createInstance's Azure DevOps path writes one — but even if a local instance.yaml were hand-edited to include one, resolving a slug's location must come from the registry file alone, never from reading/parsing instance.yaml's own content.
     createInstance('design', 'local-only', { instancesDir })
     assert.deepEqual(resolveInstanceLocation('local-only', { instancesDir }), { kind: 'local' })
@@ -154,8 +147,8 @@ test('a custom registryPath overrides the default instancesDir-colocated file', 
 
 // ---------- #96: workspace-referencing storage shape ----------
 
-test('registerInstance persists an azureDevOps location as a workspace reference, not a duplicated organization/project/repository', () => {
-  withScratchInstances((instancesDir) => {
+test('registerInstance persists an azureDevOps location as a workspace reference, not a duplicated organization/project/repository', async () => {
+  await withScratchInstances((instancesDir) => {
     const location = { kind: 'azureDevOps', organization: 'fake-org', project: 'fake-project', repository: 'fake-repo' }
     registerInstance('remote-initiative', location, { instancesDir })
 
@@ -176,8 +169,8 @@ test('registerInstance persists an azureDevOps location as a workspace reference
   })
 })
 
-test('registerInstance accepts a direct { workspaceId } location once a workspace already exists', () => {
-  withScratchInstances((instancesDir) => {
+test('registerInstance accepts a direct { workspaceId } location once a workspace already exists', async () => {
+  await withScratchInstances((instancesDir) => {
     registerInstance(
       'first',
       { kind: 'azureDevOps', organization: 'fake-org', project: 'fake-project', repository: 'fake-repo' },
@@ -199,8 +192,8 @@ test('registerInstance accepts a direct { workspaceId } location once a workspac
   })
 })
 
-test('registerInstance rejects a { workspaceId } location referencing an unknown workspace', () => {
-  withScratchInstances((instancesDir) => {
+test('registerInstance rejects a { workspaceId } location referencing an unknown workspace', async () => {
+  await withScratchInstances((instancesDir) => {
     assert.throws(
       () => registerInstance('bad', { kind: 'azureDevOps', workspaceId: 'nowhere' }, { instancesDir }),
       /Unknown workspace/
@@ -208,8 +201,8 @@ test('registerInstance rejects a { workspaceId } location referencing an unknown
   })
 })
 
-test('two instances registered against the same organization/project/repository share one auto-created workspace', () => {
-  withScratchInstances((instancesDir) => {
+test('two instances registered against the same organization/project/repository share one auto-created workspace', async () => {
+  await withScratchInstances((instancesDir) => {
     const location = { kind: 'azureDevOps', organization: 'fake-org', project: 'fake-project', repository: 'fake-repo' }
     registerInstance('first', location, { instancesDir })
     registerInstance('second', location, { instancesDir })
@@ -223,8 +216,8 @@ test('two instances registered against the same organization/project/repository 
 
 // ---------- #96: backfilling a pre-#96 (legacy-shape) registry file ----------
 
-test('a registry file written before workspaces existed (organization/project/repository duplicated per entry) is auto-migrated on read, with no manual step', () => {
-  withScratchInstances((instancesDir) => {
+test('a registry file written before workspaces existed (organization/project/repository duplicated per entry) is auto-migrated on read, with no manual step', async () => {
+  await withScratchInstances((instancesDir) => {
     const registryPath = join(instancesDir, 'instance-registry.json')
     // Simulates a registry file persisted by a pre-#96 version of gantry — the exact shape `registerInstance`/`listRegisteredInstances` used to read and write before this ticket.
     writeFileSync(
@@ -255,8 +248,8 @@ test('a registry file written before workspaces existed (organization/project/re
   })
 })
 
-test('migrating two legacy entries for the same organization/project/repository backfills exactly one shared workspace', () => {
-  withScratchInstances((instancesDir) => {
+test('migrating two legacy entries for the same organization/project/repository backfills exactly one shared workspace', async () => {
+  await withScratchInstances((instancesDir) => {
     const registryPath = join(instancesDir, 'instance-registry.json')
     const legacyLocation = { kind: 'azureDevOps', organization: 'legacy-org', project: 'legacy-project', repository: 'legacy-repo' }
     writeFileSync(
@@ -274,21 +267,21 @@ test('migrating two legacy entries for the same organization/project/repository 
 
 // ---------- #104: resolveInstanceWorkspaceId ----------
 
-test('resolveInstanceWorkspaceId returns null for a local instance', () => {
-  withScratchInstances((instancesDir) => {
+test('resolveInstanceWorkspaceId returns null for a local instance', async () => {
+  await withScratchInstances((instancesDir) => {
     createInstance('design', 'local-only', { instancesDir })
     assert.equal(resolveInstanceWorkspaceId('local-only', { instancesDir }), null)
   })
 })
 
-test('resolveInstanceWorkspaceId returns null for a slug neither registered nor on disk', () => {
-  withScratchInstances((instancesDir) => {
+test('resolveInstanceWorkspaceId returns null for a slug neither registered nor on disk', async () => {
+  await withScratchInstances((instancesDir) => {
     assert.equal(resolveInstanceWorkspaceId('nowhere', { instancesDir }), null)
   })
 })
 
-test('resolveInstanceWorkspaceId returns the real workspace id for an Azure-DevOps-backed instance', () => {
-  withScratchInstances((instancesDir) => {
+test('resolveInstanceWorkspaceId returns the real workspace id for an Azure-DevOps-backed instance', async () => {
+  await withScratchInstances((instancesDir) => {
     registerInstance(
       'remote-initiative',
       { kind: 'azureDevOps', organization: 'fake-org', project: 'fake-project', repository: 'fake-repo' },
@@ -302,8 +295,8 @@ test('resolveInstanceWorkspaceId returns the real workspace id for an Azure-DevO
 
 // ---------- #223: archive / restore ----------
 
-test('archiveInstance sets archived: true on the entry; restoreInstance removes it (exact prior shape)', () => {
-  withScratchInstances((instancesDir) => {
+test('archiveInstance sets archived: true on the entry; restoreInstance removes it (exact prior shape)', async () => {
+  await withScratchInstances((instancesDir) => {
     registerInstance('my-initiative', { kind: 'local' }, { instancesDir })
 
     archiveInstance('my-initiative', { instancesDir })
@@ -321,8 +314,8 @@ test('archiveInstance sets archived: true on the entry; restoreInstance removes 
   })
 })
 
-test('archiveInstance keeps an Azure-DevOps entry as a workspace reference, archived last', () => {
-  withScratchInstances((instancesDir) => {
+test('archiveInstance keeps an Azure-DevOps entry as a workspace reference, archived last', async () => {
+  await withScratchInstances((instancesDir) => {
     registerInstance(
       'remote-initiative',
       { kind: 'azureDevOps', organization: 'fake-org', project: 'fake-project', repository: 'fake-repo' },
@@ -344,8 +337,8 @@ test('archiveInstance keeps an Azure-DevOps entry as a workspace reference, arch
   })
 })
 
-test('listRegisteredInstances excludes archived by default, includes them (with an archived flag) on includeArchived', () => {
-  withScratchInstances((instancesDir) => {
+test('listRegisteredInstances excludes archived by default, includes them (with an archived flag) on includeArchived', async () => {
+  await withScratchInstances((instancesDir) => {
     registerInstance('alpha', { kind: 'local' }, { instancesDir })
     registerInstance('beta', { kind: 'local' }, { instancesDir })
     archiveInstance('beta', { instancesDir })
@@ -358,8 +351,8 @@ test('listRegisteredInstances excludes archived by default, includes them (with 
   })
 })
 
-test('archiveInstance / restoreInstance are idempotent, and throw for an unknown slug', () => {
-  withScratchInstances((instancesDir) => {
+test('archiveInstance / restoreInstance are idempotent, and throw for an unknown slug', async () => {
+  await withScratchInstances((instancesDir) => {
     registerInstance('my-initiative', { kind: 'local' }, { instancesDir })
     archiveInstance('my-initiative', { instancesDir })
     assert.doesNotThrow(() => archiveInstance('my-initiative', { instancesDir }))
@@ -371,16 +364,16 @@ test('archiveInstance / restoreInstance are idempotent, and throw for an unknown
   })
 })
 
-test('an archived instance still resolves at resolveInstanceLocation (read-only-resolves, #223)', () => {
-  withScratchInstances((instancesDir) => {
+test('an archived instance still resolves at resolveInstanceLocation (read-only-resolves, #223)', async () => {
+  await withScratchInstances((instancesDir) => {
     registerInstance('my-initiative', { kind: 'local' }, { instancesDir })
     archiveInstance('my-initiative', { instancesDir })
     assert.deepEqual(resolveInstanceLocation('my-initiative', { instancesDir }), { kind: 'local' })
   })
 })
 
-test('resolveInstanceWorkspaceId resolves correctly even against a pre-#96 legacy-shape registry file (migrated on read)', () => {
-  withScratchInstances((instancesDir) => {
+test('resolveInstanceWorkspaceId resolves correctly even against a pre-#96 legacy-shape registry file (migrated on read)', async () => {
+  await withScratchInstances((instancesDir) => {
     const registryPath = join(instancesDir, 'instance-registry.json')
     writeFileSync(
       registryPath,

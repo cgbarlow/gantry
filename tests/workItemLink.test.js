@@ -15,21 +15,13 @@ import {
   DEFAULT_WORK_ITEM_TYPE,
 } from '../lib/workItemLink.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withScratchInstances, VALID_PAT } from './helpers/lifecycle.js'
 
 // #95/#103: optional instance-level link to an Azure DevOps work item, per-stage child work-item auto-creation, and confirmed read-write state sync on gate pass. The Work Items side always talks to the in-process fake server (#99's extension of tests/helpers/fakeAzureDevOpsServer.js) — never a mocked client — the same convention every other Azure DevOps client test in this repo follows.
 
 const WI_ORGANIZATION = 'wi-org'
 const WI_PROJECT = 'wi-project'
-const VALID_PAT = 'valid-test-pat'
 
-async function withScratchInstances(fn) {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  try {
-    return await fn(instancesDir)
-  } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
-  }
-}
 
 // Only the Work Items endpoints matter for these tests — no `repository`, mirroring tests/azureDevOpsWorkItemsClient.test.js's own wrapper.
 function withFakeWorkItemsServer(overrides, fn) {

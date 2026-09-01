@@ -4,9 +4,9 @@ import { cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
-import { createServer } from '../lib/server.js'
 import { readModule } from '../lib/instance.js'
 import { loadDefinition } from '../lib/definition.js'
+import { withRunningServer } from './helpers/lifecycle.js'
 
 // A minimal real 1x1 red PNG — small enough to inline as a Playwright setInputFiles buffer, real enough to round-trip through the actual upload -> disk -> serve path (mirrors tests/assets.test.js's HTTP-level copy of the same fixture).
 const ONE_PX_PNG_BASE64 =
@@ -15,22 +15,6 @@ const ONE_PX_PNG_BASE64 =
 // Minimal browser smoke test for the Preact/HTM-ported module editor (docs/adr/0006-preact-frontend-framework.md): confirms the real page loads with no console/page errors, and that a markdown field's edit -> save round-trips to the module file on disk — the same guarantee tests/server.test.js checks at the HTTP layer, exercised here through an actual rendered page and a real CodeMirror 6 editor instance.
 //
 // The module editor now lives at /instance/<slug> — the instance dashboard (#77) is the landing screen at / — so this navigates straight there rather than relying on a server-pinned default slug being shown at /. See tests/dashboard.playwright.test.js for the dashboard's own smoke test.
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 // Coverage for WI259 — top-of-page Insert control that prepends a first section/list.
 test('top-of-page Insert ▾ prepends Section and List as first field, survives Save + reload, hidden in Rendered (WI259)', async () => {

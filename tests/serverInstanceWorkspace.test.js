@@ -3,28 +3,12 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createServer } from '../lib/server.js'
 import { createInstance } from '../lib/instance.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
+import { withRunningServer } from './helpers/lifecycle.js'
 
 // GET /api/instance/workspace (#104): the small, registry-only lookup the client-side request layer (web/lib/apiFetch.js's `apiFetchForInstance`) asks *before* deciding which PAT to attach to a request that actually touches Azure DevOps for a given slug — see lib/instanceRegistry.js's `resolveInstanceWorkspaceId` for why this is a separate function/route rather than a new field on the existing `resolveInstanceLocation`/`GET /api/instances` shapes.
 
-function withRunningServer(options, fn) {
-  return new Promise((resolve, reject) => {
-    const server = createServer(options)
-    server.listen(0, async () => {
-      const { port } = server.address()
-      try {
-        await fn(`http://localhost:${port}`)
-        resolve()
-      } catch (err) {
-        reject(err)
-      } finally {
-        server.close()
-      }
-    })
-  })
-}
 
 function withScratchServer(fn) {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))

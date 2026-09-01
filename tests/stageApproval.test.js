@@ -9,6 +9,7 @@ import { resolveStageBranch, stageBranchName } from '../lib/stageBranch.js'
 import { readInstance, instanceDisplayName, renderedArtefactBasename } from '../lib/instance.js'
 import { requestStageApproval } from '../lib/stageApproval.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { VALID_PAT } from './helpers/lifecycle.js'
 
 // #124, ADR-0014: the Assignee's "Request approval" action for a
 // Workspace-backed instance — opens a Pull Request from a stage's own
@@ -20,7 +21,6 @@ import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 const ORGANIZATION = 'stage-approval-org'
 const PROJECT = 'stage-approval-project'
 const REPOSITORY = 'stage-approval-repo'
-const VALID_PAT = 'valid-test-pat'
 const SLUG = 'my-initiative'
 
 const definition = loadDefinition('design')
