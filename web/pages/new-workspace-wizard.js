@@ -38,6 +38,7 @@ import { renderMarkdown } from '../lib/markdown.js'
 import { TICKETING_SYSTEMS, defaultTicketingSystem } from '../lib/ticketingSystem.js'
 import { IdentityPicker } from '../lib/identityPicker.js'
 import { parseRepoUrl } from '../lib/validateRepo.js'
+import { advancedMode } from '../lib/advancedMode.js'
 import {
   isSupported as localWorkspaceSupported,
   pickWorkspaceDirectory,
@@ -67,6 +68,19 @@ const DEFAULT_WORK_ITEM_TYPE = 'Task'
 // can reach ('server'), or a folder on this browser user's own machine
 // reached through the File System Access API ('local', Chromium-only).
 const workspaceLocation = signal('server') // 'server' | 'local'
+
+// B3 (#302): advanced mode off skips the "Workspace location" toggle entirely
+// and the wizard behaves as if "Local" were already selected — no
+// Server-hosted option, no Azure DevOps URL field, no work-item step. This
+// effect is the single source of truth for that: whenever advanced mode is
+// off, force `workspaceLocation` to 'local', both on initial load (an effect
+// runs once immediately) and if advanced mode is switched off later (e.g. in
+// another tab) while the wizard is still open. `WorkspaceLocationToggle`
+// itself only renders when advanced mode is on, so there is no UI path back
+// to 'server' while this holds.
+effect(() => {
+  if (!advancedMode.value) workspaceLocation.value = 'local'
+})
 
 // Server-hosted + Pick: adopt an existing Azure DevOps repo by URL. Runs
 // the same GET /api/azure-devops/repo-check the final create step already
@@ -188,7 +202,7 @@ effect(() => {
 
 function resetWizard() {
   preselectedWorkspaceId.value = null
-  workspaceLocation.value = 'server'
+  workspaceLocation.value = advancedMode.value ? 'server' : 'local'
   adoptRepoUrl.value = ''
   adoptCheckStatus.value = 'idle'
   adoptCheckMessage.value = ''
@@ -947,9 +961,16 @@ function LocalWorkspacePanel() {
       <div class="wizard-field">
         <p class="inline-error" id="local-unsupported">Local workspaces need Chrome or Edge.</p>
         <p class="wizard-field-hint">
-          This browser does not support the File System Access API. Switch to "Server-hosted" above to
-          continue, or reopen gantry in Chrome or Edge.
+          This browser does not support the File System Access API.
+          ${advancedMode.value
+            ? ' Switch to "Server-hosted" above to continue, or reopen gantry in Chrome or Edge.'
+            : ' Reopen gantry in Chrome or Edge to continue.'}
         </p>
+        ${!advancedMode.value
+          ? html`<p class="wizard-field-hint" id="local-unsupported-advanced-hint">
+              Enable advanced mode in Settings to use a server-hosted workspace instead.
+            </p>`
+          : null}
         <button type="button" class="btn primary" disabled>
           ${workspaceMode.value === 'register' ? 'Create local workspace' : 'Open local workspace'}
         </button>
@@ -1114,7 +1135,7 @@ function WorkspaceStep() {
   }, [workspaceMode.value, workspaceLocation.value])
 
   return html`
-    <${WorkspaceLocationToggle} />
+    ${advancedMode.value ? html`<${WorkspaceLocationToggle} />` : null}
 
     <div class="wizard-field">
       <div class="wizard-mode-toggle" role="group" aria-label="Workspace source">

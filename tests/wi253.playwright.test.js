@@ -13,6 +13,14 @@ const PROJECT = 'Default'
 const REPOSITORY = 'wi253-repo'
 const VALID_PAT = 'valid-test-pat'
 
+// Tests B, C1, C2 and D1 below exercise the server-hosted registration
+// flow. WI #302 (B3) made that flow reachable only with advanced mode on —
+// off (the default) skips straight to the Local flow instead (see
+// tests/wizard-local-workspace.playwright.test.js). Setting this per-page
+// keeps this file's coverage of the server-hosted path exercising that path
+// deliberately, rather than accidentally relying on a default B3 changed.
+const ADVANCED_MODE_ON_INIT = `window.localStorage.setItem('gantry:advancedMode', 'true')`
+
 function basicAuthHeader(pat) {
   return `Basic ${Buffer.from(`:${pat}`, 'utf8').toString('base64')}`
 }
@@ -125,6 +133,7 @@ test('B: wizard Owner and Assignee are identity pickers hitting /api/identities'
     const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
       page.setDefaultTimeout(DEFAULT_TIMEOUT)
       let ownerHit = false
       let assigneeHit = false
@@ -181,6 +190,7 @@ test('C1: register form defaults to Contoso-Production/Default', async () => {
     const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
       await page.goto(`${gantryBase}/new-workspace`)
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
       await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
@@ -198,6 +208,7 @@ test('C2: Repository hint visible', async () => {
     const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
       await page.goto(`${gantryBase}/new-workspace`)
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
       await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
@@ -216,6 +227,7 @@ test('D1: create-new-parent is default link mode and creates+links', async () =>
     const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
       page.setDefaultTimeout(DEFAULT_TIMEOUT)
       await installBaseUrlRoutes(page, adoBaseUrl)
       // also route work-items creation

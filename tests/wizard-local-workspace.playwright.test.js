@@ -7,7 +7,9 @@ import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 
 // Browser tests for WI #295 — the "Workspace location" axis added to the
-// "+ New Workspace" wizard's first step (ADR-0029, Feature #290 / A4).
+// "+ New Workspace" wizard's first step (ADR-0029, Feature #290 / A4) — and
+// WI #302 (B3) — advanced mode off skips that axis and starts the wizard
+// directly in the Local flow.
 //
 // The File System Access API (`window.showDirectoryPicker`) is not driveable
 // from a headless test browser (it needs a real user gesture and a native
@@ -24,6 +26,14 @@ import { withRunningServer } from './helpers/lifecycle.js'
 // local-workspace instance is #297. These tests assert on the files written
 // through the handle and on the editor-route navigation URL (`?local=…`),
 // never on the editor rendering.
+//
+// advancedMode.js defaults to off (no `gantry:advancedMode` in localStorage),
+// which is B3's whole point — so every test below that exercises A4's full
+// "Workspace location" toggle (Server-hosted reachable, Local a deliberate
+// choice) sets `gantry:advancedMode`='true' via an init script before
+// navigating, to keep that A4 coverage exercising the toggle explicitly
+// rather than accidentally relying on a default that B3 changed.
+const ADVANCED_MODE_ON_INIT = `window.localStorage.setItem('gantry:advancedMode', 'true')`
 
 const FS_MOCK_INIT = `
   window.__nextPickFiles = {}
@@ -90,6 +100,7 @@ test('Local + Register: writes workspace.json, instance.yaml and blank module fi
       page.setDefaultTimeout(DEFAULT_TIMEOUT)
       const pageErrors = []
       page.on('pageerror', (err) => pageErrors.push(err.message))
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
       await page.addInitScript(FS_MOCK_INIT)
 
       await page.goto(`${gantryBase}/new-workspace`)
@@ -162,6 +173,7 @@ test('Local + Register: a folder that already contains gantry-workspace/ is reje
     try {
       const page = await browser.newPage()
       page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
       await page.addInitScript(FS_MOCK_INIT)
 
       await page.goto(`${gantryBase}/new-workspace`)
@@ -197,6 +209,7 @@ test('Local + Pick: lists the instances found in the folder and navigates with ?
     try {
       const page = await browser.newPage()
       page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
       await page.addInitScript(FS_MOCK_INIT)
 
       await page.goto(`${gantryBase}/new-workspace`)
@@ -238,6 +251,7 @@ test('Unsupported browser: the Local option is present but disabled with a messa
     try {
       const page = await browser.newPage()
       page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
       // Remove the API before any app script evaluates `isSupported`.
       await page.addInitScript(() => {
         try {
@@ -264,11 +278,155 @@ test('Unsupported browser: the Local option is present but disabled with a messa
       // The action button is disabled.
       const actionBtn = page.locator('.wizard-field button.btn.primary', { hasText: /local workspace/i })
       assert.equal(await actionBtn.first().isDisabled(), true)
+      // Advanced mode is on, so no "enable advanced mode" hint is needed —
+      // Server-hosted is already one click away, above.
+      assert.equal(await page.locator('#local-unsupported-advanced-hint').count(), 0)
 
       // Server-hosted still works: switch back and reach the register form.
       await page.getByRole('button', { name: 'Server-hosted', exact: true }).click()
       await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
       await page.waitForSelector('#ws-organization')
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// WI #302 (B3) — advanced mode off: the wizard skips the "Workspace
+// location" toggle entirely and starts directly in the Local flow.
+// ---------------------------------------------------------------------------
+
+test('B3: advanced mode off (default) — opens straight into the Local flow, no "Workspace location" toggle, no Server-hosted option', async () => {
+  await withServer(async ({ gantryBase }) => {
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      // No ADVANCED_MODE_ON_INIT here — advancedMode.js defaults to off with
+      // no `gantry:advancedMode` key at all, which is the case this test
+      // covers.
+      await page.addInitScript(FS_MOCK_INIT)
+
+      await page.goto(`${gantryBase}/new-workspace`)
+      await page.waitForSelector('h2:has-text("New Workspace")')
+
+      // No "Workspace location" toggle — neither "Server-hosted" nor "Local"
+      // buttons are reachable, because the axis itself is not rendered.
+      assert.equal(await page.getByRole('button', { name: 'Server-hosted', exact: true }).count(), 0)
+      assert.equal(await page.getByRole('button', { name: 'Local', exact: true }).count(), 0)
+      assert.equal(await page.locator('label', { hasText: 'Workspace location' }).count(), 0)
+
+      // The Local Pick/Register sub-toggle is already showing — same wizard
+      // step, straight to the Local flow's own toggle (defaulting to "Pick
+      // existing", same as the sub-toggle's own default).
+      await page.waitForSelector('button:has-text("Register new local workspace")')
+      assert.equal(await page.locator('#adopt-repo-url').count(), 0, 'no Azure DevOps URL field reachable')
+
+      // Full round-trip through the Local + Register flow works exactly as
+      // A4 built it, unchanged.
+      await page.getByRole('button', { name: 'Register new local workspace', exact: true }).click()
+      await page.locator('#local-register-pick').click()
+      await page.waitForSelector('#local-ws-name')
+      await page.locator('#local-ws-name').fill('Default Local Workspace')
+      await page.locator('#local-register-create').click()
+
+      await page.waitForSelector('#instance-name')
+      await page.locator('.definition-card').first().click()
+      await page.locator('#instance-name').fill('B3 Claims')
+
+      // No work-item step exists for the local flow — the primary button
+      // reads straight through to instance creation.
+      assert.equal(await page.getByRole('button', { name: 'Next: link a work item' }).count(), 0)
+
+      await Promise.all([
+        page.waitForNavigation(),
+        page.getByRole('button', { name: 'Create instance', exact: true }).click(),
+      ])
+      const url = new URL(page.url())
+      assert.equal(url.pathname, '/instance/b3-claims')
+      assert.ok(url.searchParams.get('local'), 'the ?local=<id> param is present')
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
+test('B3: advanced mode on — the full "Workspace location" toggle is visible and Server-hosted is selectable', async () => {
+  await withServer(async ({ gantryBase }) => {
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
+      await page.addInitScript(FS_MOCK_INIT)
+
+      await page.goto(`${gantryBase}/new-workspace`)
+      await page.waitForSelector('h2:has-text("New Workspace")')
+
+      // The "Workspace location" toggle is visible, defaulting to
+      // Server-hosted, exactly as A4 built it.
+      await page.waitForSelector('label:has-text("Workspace location")')
+      await page.waitForSelector('#adopt-repo-url')
+      const serverBtn = page.getByRole('button', { name: 'Server-hosted', exact: true })
+      assert.equal(await serverBtn.count(), 1)
+      assert.match(await serverBtn.getAttribute('class'), /active/)
+
+      // Server-hosted is genuinely reachable/selectable, and Local remains a
+      // deliberate opt-in via the same toggle.
+      await page.getByRole('button', { name: 'Local', exact: true }).click()
+      await page.waitForSelector('button:has-text("Register new local workspace")')
+      await page.getByRole('button', { name: 'Server-hosted', exact: true }).click()
+      await page.waitForSelector('#adopt-repo-url')
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
+test('B3: advanced mode off + unsupported browser — shows the unsupported message plus the "enable advanced mode" hint, no dead end', async () => {
+  await withServer(async ({ gantryBase }) => {
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      // No ADVANCED_MODE_ON_INIT — advanced mode stays off (default).
+      // Remove the File System Access API before any app script evaluates
+      // `isSupported`.
+      await page.addInitScript(() => {
+        try {
+          delete Object.getPrototypeOf(window).showDirectoryPicker
+        } catch {}
+        try {
+          delete window.showDirectoryPicker
+        } catch {}
+      })
+
+      await page.goto(`${gantryBase}/new-workspace`)
+      await page.waitForSelector('h2:has-text("New Workspace")')
+
+      // Straight into the Local flow (no toggle to click through) — and it
+      // is unsupported, so the unsupported message shows immediately.
+      await page.waitForSelector('#local-unsupported')
+      assert.match(
+        await page.locator('#local-unsupported').textContent(),
+        /Local workspaces need Chrome or Edge/
+      )
+
+      // The hint pointing at the way out — enabling advanced mode — is
+      // present, since there is no "Switch to Server-hosted above" here.
+      await page.waitForSelector('#local-unsupported-advanced-hint')
+      assert.match(
+        await page.locator('#local-unsupported-advanced-hint').textContent(),
+        /Enable advanced mode in Settings to use a server-hosted workspace instead\./
+      )
+
+      // No dead end: the action button is disabled (as expected — there's
+      // nothing it can do), but the page has not thrown and offers no other
+      // unhandled state.
+      const actionBtn = page.locator('.wizard-field button.btn.primary', { hasText: /local workspace/i })
+      assert.equal(await actionBtn.first().isDisabled(), true)
+      assert.equal(await page.getByRole('button', { name: 'Server-hosted', exact: true }).count(), 0)
     } finally {
       await browser.close()
     }

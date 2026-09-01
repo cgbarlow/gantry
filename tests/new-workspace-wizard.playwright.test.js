@@ -33,7 +33,14 @@ const ORGANIZATION = 'Contoso-Production'
 const PROJECT = 'Default'
 const REPOSITORY = 'wizard-repo'
 
-
+// Every test below exercises the server-hosted registration/pick flow this
+// file was written for. WI #302 (B3) made that flow reachable only with
+// advanced mode on — off (the default) skips straight to the Local flow
+// instead (see tests/wizard-local-workspace.playwright.test.js). Setting
+// this before each `goto` keeps this file's own coverage of the
+// server-hosted path exercising that path deliberately, rather than
+// accidentally relying on a default B3 changed.
+const ADVANCED_MODE_ON_INIT = `window.localStorage.setItem('gantry:advancedMode', 'true')`
 
 function withWizardTestServer(fn) {
   return withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {} }, (adoBaseUrl) => {
@@ -131,6 +138,7 @@ test('the "+ New Workspace" wizard registers a workspace, creates an instance, a
     const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
       page.setDefaultTimeout(DEFAULT_TIMEOUT)
       const pageErrors = []
       page.on('pageerror', (err) => pageErrors.push(err.message))
@@ -214,6 +222,7 @@ test('the "+ New Workspace" wizard\'s pick-existing-workspace path adds a second
     const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
       page.setDefaultTimeout(DEFAULT_TIMEOUT)
       await installBaseUrlRoutes(page, adoBaseUrl)
       await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
@@ -284,6 +293,7 @@ test('#137: empty pick-mode offers a control to switch to Register', async () =>
     const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
       await page.goto(`${gantryBase}/new-workspace`)
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
       // Pick mode is the default; with zero registered workspaces the list
@@ -311,6 +321,7 @@ test('#137: Back from Instance step returns to workspace picker with values inta
     const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
       await installBaseUrlRoutes(page, adoBaseUrl)
       await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
 
@@ -357,6 +368,7 @@ test('#137: Back from Link step returns to Instance step with values intact', as
     const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
       await installBaseUrlRoutes(page, adoBaseUrl)
       await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
 
@@ -395,6 +407,7 @@ test('#137: mid-flow revisit of /new-workspace persists step; Back reaches works
     const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
       await installBaseUrlRoutes(page, adoBaseUrl)
       await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
 
@@ -438,6 +451,7 @@ test('#138: Instance step renders "New Instance" heading between Workspace card 
     const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
       await installBaseUrlRoutes(page, adoBaseUrl)
       await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
 
