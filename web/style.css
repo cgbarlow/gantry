@@ -914,6 +914,53 @@ main.dashboard {
   .manage-card { justify-self: stretch; }
 }
 
+/* ---------- Local workspaces (#296) ---------- */
+.local-workspaces { margin-bottom: 28px; }
+.local-workspaces-heading {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15px;
+  margin: 0 0 12px;
+}
+.local-workspaces-list { display: flex; flex-direction: column; gap: 12px; }
+.local-workspace-row {
+  padding: 16px 20px;
+  background: var(--bg-raised);
+  border: var(--border-strong) solid var(--line-strong);
+  border-radius: var(--radius);
+}
+.local-workspace-head { display: flex; align-items: center; gap: 10px; }
+.local-workspace-head .name { font-family: var(--font-display); font-weight: 600; font-size: 16px; }
+.local-badge {
+  padding: 2px 6px;
+  border: var(--hairline) solid var(--line-strong);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.local-workspace-row .workspace-subtitle {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 4px 0 10px;
+}
+.local-instance-list { display: flex; flex-direction: column; gap: 8px; }
+.local-instance-row {
+  display: block;
+  padding: 8px 12px;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  text-decoration: none;
+}
+.local-instance-row:hover { border-color: var(--line-strong); }
+.local-instance-row .name { font-family: var(--font-display); font-weight: 600; font-size: 14px; }
+.local-workspace-recovery p { margin: 0 0 8px; color: var(--text-muted); font-size: 13px; }
+
 /* ---------- Stage swimlanes ---------- */
 .swimlane-group + .swimlane-group { margin-top: 32px; }
 .swimlane-group-title { font-family: var(--font-display); font-weight: 600; font-size: 15px; margin: 0 0 12px; }

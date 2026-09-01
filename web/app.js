@@ -25,6 +25,14 @@ import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, worksp
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
 import { advancedMode } from './lib/advancedMode.js'
+import {
+  recentLocalWorkspaces,
+  getWorkspaceHandle,
+  ensurePermission,
+  listDir,
+  readTextFile,
+  forgetWorkspace,
+} from './lib/localWorkspace.js'
 import { wrap } from './lib/editorWrap.js'
 import { assetReference, resolveAssetRefs, resolveRepoAssetRefs } from './lib/assetRefs.js'
 import { IdentityPicker } from './lib/identityPicker.js'
@@ -3887,10 +3895,205 @@ function ArchivedWorkspacesPanel({ onRestored }) {
   `
 }
 
+// ---------- Local workspaces (#296, Feature #290 / A5) ----------
+// Client-side merge of the browser's own "recent local workspaces"
+// (web/lib/localWorkspace.js, IndexedDB) into the landing page. The gantry
+// server holds no record of these (ADR-0029), so this is resolved entirely
+// in the browser and never blocks the server-row render: the section mounts
+// empty, reads IndexedDB, then fills a row in per remembered workspace as its
+// directory handle + permission resolve. Local rows carry no workspace
+// number (ADR-0024 is server-side only) and are always shown regardless of
+// advanced mode — a local workspace is never Azure-DevOps-backed.
+
+// One remembered local workspace. Owns its own handle/permission lifecycle so
+// a `'prompt'` handle can be re-granted (user gesture) and a missing/denied
+// one can be removed without disturbing sibling rows or the server listing.
+function LocalWorkspaceRow({ entry, onRemove }) {
+  // 'loading' | 'granted' | 'prompt' | 'denied' | 'missing'
+  const [state, setState] = useState('loading')
+  const [instances, setInstances] = useState([])
+  const [busy, setBusy] = useState(false)
+
+  async function resolve() {
+    setState('loading')
+    let handle
+    try {
+      handle = await getWorkspaceHandle(entry.id)
+    } catch {
+      setState('missing')
+      return
+    }
+    if (!handle) {
+      setState('missing')
+      return
+    }
+    let permission
+    try {
+      permission = await ensurePermission(handle)
+    } catch {
+      setState('missing')
+      return
+    }
+    if (permission === 'prompt') {
+      setState('prompt')
+      return
+    }
+    if (permission !== 'granted') {
+      setState('denied')
+      return
+    }
+    try {
+      const subdirs = await listDir(handle, 'gantry-workspace')
+      const found = []
+      for (const child of subdirs) {
+        if (child.kind !== 'directory') continue
+        try {
+          await readTextFile(handle, `gantry-workspace/${child.name}/instance.yaml`)
+          found.push({ slug: child.name })
+        } catch {
+          // A subdirectory with no instance.yaml is not an instance — skip it.
+        }
+      }
+      setInstances(found)
+      setState('granted')
+    } catch {
+      // The folder was picked before but its gantry-workspace/ is gone now.
+      setState('missing')
+    }
+  }
+
+  useEffect(() => {
+    resolve()
+    // eslint-disable-next-line
+  }, [entry.id])
+
+  async function clickToOpen() {
+    setBusy(true)
+    try {
+      const handle = await getWorkspaceHandle(entry.id)
+      if (!handle) {
+        setState('missing')
+        return
+      }
+      // This click is the user gesture the File System Access API needs to
+      // (re-)prompt for permission on a handle restored from IndexedDB.
+      await ensurePermission(handle)
+      await resolve()
+    } catch {
+      setState('missing')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function remove() {
+    setBusy(true)
+    try {
+      await forgetWorkspace(entry.id)
+      onRemove()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const instanceHrefFor = (slug) =>
+    `/instance/${encodeURIComponent(slug)}?local=${encodeURIComponent(entry.id)}&slug=${encodeURIComponent(slug)}`
+
+  return html`
+    <div class="local-workspace-row" data-state=${state}>
+      <div class="local-workspace-head">
+        <span class="name">${entry.name}</span>
+        <span class="local-badge">Local</span>
+      </div>
+      <p class="workspace-subtitle">Local workspace</p>
+      ${state === 'loading' ? html`<p class="loading">Opening…</p>` : null}
+      ${state === 'prompt'
+        ? html`
+            <button type="button" class="btn small" disabled=${busy} onClick=${clickToOpen}>
+              Click to open
+            </button>
+          `
+        : null}
+      ${state === 'granted'
+        ? html`
+            <div class="local-instance-list">
+              ${instances.length === 0
+                ? html`<p class="loading">No instances in this workspace yet.</p>`
+                : instances.map(
+                    (inst) => html`
+                      <a class="local-instance-row" key=${inst.slug} href=${instanceHrefFor(inst.slug)}>
+                        <span class="name">${inst.slug}</span>
+                      </a>
+                    `
+                  )}
+            </div>
+          `
+        : null}
+      ${state === 'denied' || state === 'missing'
+        ? html`
+            <div class="local-workspace-recovery">
+              <p>Can't find this folder — reopen or remove.</p>
+              <div class="detail-actions">
+                <button type="button" class="btn small" disabled=${busy} onClick=${clickToOpen}>Reopen</button>
+                <button type="button" class="btn small ghost" disabled=${busy} onClick=${remove}>Remove</button>
+              </div>
+            </div>
+          `
+        : null}
+    </div>
+  `
+}
+
+// The dashboard's Local-workspaces block. Renders nothing until IndexedDB has
+// been read, and nothing at all when there are no remembered workspaces — so
+// a browser that has never opened one sees the dashboard exactly as before.
+function LocalWorkspacesSection({ onCountChange }) {
+  const [entries, setEntries] = useState(null)
+
+  useEffect(() => {
+    let alive = true
+    recentLocalWorkspaces()
+      .then((list) => {
+        if (alive) setEntries(list)
+      })
+      .catch(() => {
+        if (alive) setEntries([])
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  useEffect(() => {
+    onCountChange?.(entries ? entries.length : 0)
+    // eslint-disable-next-line
+  }, [entries])
+
+  function removeEntry(id) {
+    setEntries((prev) => (prev ?? []).filter((e) => e.id !== id))
+  }
+
+  if (!entries || entries.length === 0) return null
+
+  return html`
+    <section class="local-workspaces">
+      <h2 class="local-workspaces-heading">Local workspaces</h2>
+      <div class="local-workspaces-list">
+        ${entries.map(
+          (entry) => html`
+            <${LocalWorkspaceRow} key=${entry.id} entry=${entry} onRemove=${() => removeEntry(entry.id)} />
+          `
+        )}
+      </div>
+    </section>
+  `
+}
+
 // ---------- Dashboard page ----------
 function DashboardPage() {
   const [instances, setInstances] = useState(null)
   const [error, setError] = useState(null)
+  const [localCount, setLocalCount] = useState(0)
 
   function reloadInstances() {
     loadInstances()
@@ -3926,12 +4129,15 @@ function DashboardPage() {
           <a class="btn small ghost" href=${`/settings?from=${encodeURIComponent('/')}`}>Settings</a>
         </div>
       </div>
+      <${LocalWorkspacesSection} onCountChange=${setLocalCount} />
       ${error
         ? html`<p class="load-error">Failed to load: ${error}</p>`
         : !instances
           ? html`<p class="loading">Loading…</p>`
           : visibleInstances.length === 0
-            ? html`<${EmptyState} />`
+            ? localCount > 0
+              ? null
+              : html`<${EmptyState} />`
             : dashboardViewMode.value === 'swimlanes'
               ? html`<${SwimlaneView} instances=${visibleInstances} />`
               : html`<${MasterDetailView} instances=${visibleInstances} />`}
