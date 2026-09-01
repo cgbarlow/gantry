@@ -478,6 +478,8 @@ test('the Workspace-backed screen exposes Review / Sign-off labels and the Reque
           const page = await browser.newPage()
           try {
             await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), PAT)
+            // #301 — the Work item details card (and its Review / Sign-off sub-sections) render only while advanced mode is on.
+            await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
             await page.goto(`${base}/instance/${SLUG}`)
             // #213 folded the old standalone "Request Review" and
             // "Review / Sign-off" panels entirely into the Work item
@@ -655,6 +657,8 @@ test('the Reviews list groups by outcome (#215) once a stage has more than a cou
           const page = await browser.newPage()
           try {
             await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), PAT)
+            // #301 — the Work item details card (and its Review / Sign-off sub-sections) render only while advanced mode is on.
+            await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
             await page.goto(`${base}/instance/${SLUG}`)
             const card = page.locator('#work-item-detail-card')
             const reviewsSection = card.locator('.reviews-section')

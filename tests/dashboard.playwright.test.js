@@ -40,6 +40,8 @@ test('dashboard: titled "Workspaces", master-detail is the default view, and its
     await withRunningServer(
       { instancesDir },
       withPage(async (page, base) => {
+        // #301 — the Manage sub-card renders only while advanced mode is on.
+        await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
         await page.goto(base)
         await page.waitForSelector('.master-detail', { timeout: 10_000 })
 
@@ -112,6 +114,8 @@ test('dashboard: Manage tracks a linked parent work item without inventing a rep
     await withRunningServer(
       { instancesDir },
       withPage(async (page, base) => {
+        // #301 — the Manage sub-card renders only while advanced mode is on.
+        await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
         await page.goto(base)
         await page.waitForSelector('.instance-card', { timeout: 10_000 })
 
@@ -152,6 +156,8 @@ test('dashboard: selecting a workspace with multiple instances shows every one o
           withPage(async (page, base) => {
             // A PAT is required to enrich an Azure-DevOps-backed row (see lib/registry.js's buildAzureDevOpsRow) — seeded into localStorage before navigating, mirroring tests/patPrompt.playwright.test.js's own technique, so GET /api/instances attaches it from the very first request.
             await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+            // #301 — Azure-DevOps-backed rows list on the dashboard only while advanced mode is on.
+            await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
             await page.goto(base)
             await page.waitForSelector('.master-detail', { timeout: 10_000 })
 

@@ -75,6 +75,8 @@ test('the synced-fields panel shows the link prompt when unlinked, then the dist
               await page.addInitScript((pat) => {
                 localStorage.setItem('gantry:ado-pat-overrides', JSON.stringify({ 'workspace-override': pat }))
               }, VALID_PAT)
+              // #301 — the Work item details / synced-fields panel renders only while advanced mode is on.
+              await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
 
               await page.goto(`${gantryBase}/instance/my-initiative`)
               const panel = page.locator('.synced-fields-panel')

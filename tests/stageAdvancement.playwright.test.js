@@ -245,6 +245,8 @@ test('the Stage advancement panel is never shown for a Workspace-backed instance
               // repo, so the initial `GET /api/instance` needs a real PAT
               // to succeed at all.
               await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+              // #301 — the synced-fields panel (used below as a "page loaded" sentinel) renders only while advanced mode is on.
+              await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
 
               await page.goto(`${base}/instance/remote-initiative`)
               await page.waitForSelector('#modules', { timeout: 10_000 })
@@ -283,6 +285,8 @@ test('the Stage advancement panel is never shown once the instance is already at
           if (msg.type() === 'error') pageErrors.push(msg.text())
         })
 
+        // #301 — the synced-fields panel (used below as a "page loaded" sentinel) renders only while advanced mode is on.
+        await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
         await page.goto(`${base}/instance/my-initiative`)
         await page.waitForSelector('#modules', { timeout: 10_000 })
 

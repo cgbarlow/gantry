@@ -151,6 +151,8 @@ test('the Request approval panel blocks on a failing gate for a Workspace-backed
           })
 
           await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+          // #301 — the Work item details card renders only while advanced mode is on.
+          await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
 
           await page.goto(`${base}/instance/${SLUG}`)
           await page.waitForSelector('.signoff-section', { timeout: 10_000 })
@@ -186,6 +188,8 @@ test('declining the confirmation opens no Pull Request', async () => {
           })
 
           await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+          // #301 — the Work item details card renders only while advanced mode is on.
+          await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
 
           await page.goto(`${base}/instance/${SLUG}`)
           await page.waitForSelector('.signoff-section', { timeout: 10_000 })
@@ -224,6 +228,8 @@ test('confirming opens a Pull Request, and the panel reflects it — including s
           })
 
           await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+          // #301 — the Work item details card renders only while advanced mode is on.
+          await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
 
           await page.goto(`${base}/instance/${SLUG}`)
           await page.waitForSelector('.signoff-section', { timeout: 10_000 })
@@ -273,6 +279,8 @@ test('reloading reflects a Pull Request abandoned outside gantry', async () => {
           })
 
           await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+          // #301 — the Work item details card renders only while advanced mode is on.
+          await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
           await page.goto(`${base}/instance/${SLUG}`)
           const panel = page.locator('.signoff-section')
           await panel.waitFor({ timeout: 10_000 })
@@ -326,6 +334,8 @@ test('Check status reports pending, then rejection, then approval — merging an
           })
 
           await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+          // #301 — the Work item details card renders only while advanced mode is on.
+          await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
 
           await page.goto(`${base}/instance/${SLUG}`)
           const card = page.locator('#work-item-detail-card')
@@ -391,6 +401,8 @@ test('a post-approval commit changes the panel to Request approval again, and re
       await withRunningBrowser(async (browser) => {
         const page = await browser.newPage()
         await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+        // #301 — the Work item details card renders only while advanced mode is on.
+        await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
         await page.goto(`${base}/instance/${SLUG}`)
 
         // #213: "Check status" lives once, at the top of the Work item

@@ -81,6 +81,8 @@ test('an unlinked instance renders no work-item panel at all (#127 removed its f
         if (msg.type() === 'error') pageErrors.push(msg.text())
       })
 
+      // #301 — the Work item details / synced-fields panel renders only while advanced mode is on.
+      await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
       await page.goto(`${gantryBase}/instance/my-initiative`)
       await page.locator('.synced-fields-panel').waitFor({ timeout: DEFAULT_TIMEOUT * 2 })
 
@@ -116,6 +118,8 @@ test('a linked instance\'s Work Item panel confirms a gate-pass state push', asy
 
       // The sync route does require a PAT (Work Items scope) — seed one up front, as if already entered in a prior session, so this test can drive the panel itself rather than the (separately covered, tests/patPrompt.playwright.test.js) PAT-prompt flow.
       await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+      // #301 — the Work item details / synced-fields panel renders only while advanced mode is on.
+      await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
 
       await page.goto(`${gantryBase}/instance/my-initiative`)
       await page.waitForSelector('.synced-fields-panel', { timeout: DEFAULT_TIMEOUT * 2 })
@@ -168,6 +172,8 @@ test('declining the confirmation leaves the linked work item\'s state unchanged'
       })
 
       await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+      // #301 — the Work item details / synced-fields panel renders only while advanced mode is on.
+      await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
 
       await page.goto(`${gantryBase}/instance/my-initiative`)
       await page.waitForSelector('.synced-fields-panel', { timeout: DEFAULT_TIMEOUT * 2 })

@@ -24,6 +24,7 @@ import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, worksp
 // Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79) markdown/split/rendered toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
+import { advancedMode } from './lib/advancedMode.js'
 import { wrap } from './lib/editorWrap.js'
 import { assetReference, resolveAssetRefs, resolveRepoAssetRefs } from './lib/assetRefs.js'
 import { IdentityPicker } from './lib/identityPicker.js'
@@ -2715,7 +2716,9 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
   return html`
     <main id="modules" data-view-mode=${viewMode.value}>
       <${ReopenStagePanel} instance=${instance} />
-      <${SyncedFieldsPanel} key=${instance.workItem ? 'linked' : 'unlinked'} instance=${instance} />
+      ${advancedMode.value
+        ? html`<${SyncedFieldsPanel} key=${instance.workItem ? 'linked' : 'unlinked'} instance=${instance} />`
+        : null}
       ${modules.length > 0
         ? html`<div class="insert-bar top-insert-bar" data-testid="top-insert" hidden=${viewMode.value === 'rendered'}>
             <${InsertDropdown} onSection=${() => setTopSectionOpen(true)} onList=${() => setTopListOpen(true)} />
@@ -3265,7 +3268,7 @@ function ModuleEditorPage({ slug: routeRef }) {
       selectedArtefact=${selectedArtefact}
       onArtefactChange=${changeArtefact}
       onClearAllFields=${clearAllFields}
-      requestApprovalSlug=${instance.workspaceBacked ? instance.slug : null}
+      requestApprovalSlug=${advancedMode.value && instance.workspaceBacked ? instance.slug : null}
     />
     <${StageScreen}
       key=${instance.stage.id}
@@ -3428,6 +3431,19 @@ function instanceHref(inst) {
   return `/instance/${inst.slug}`
 }
 
+// ---------- Advanced-mode listing filter (#301) ----------
+// A dashboard row is "Azure-DevOps-backed" when its location resolves to a
+// real Azure DevOps workspace — lib/registry.js sets `inst.workspace` only
+// then, and only for that case (a server-side local instance has no
+// `workspace` field at all). Feature #290's client-side local workspaces
+// will carry `workspace.kind === 'local'`, so the check is phrased as
+// "has an Azure DevOps workspace" — not "has any workspace" — so those
+// rows keep listing once they exist. When advanced mode is off (#301) the
+// dashboard listing drops these rows and shows only local instances.
+function isAzureDevOpsBacked(inst) {
+  return Boolean(inst.workspace) && inst.workspace.kind !== 'local'
+}
+
 // ---------- Grouping instances by workspace (#102) ----------
 // The Workspaces landing page's core grouping rule: an Azure-DevOps-backed row carries a `workspace` (lib/registry.js, #102) — every instance sharing that workspace's `id` groups into one row, one entry per workspace, per the ticket's acceptance criteria. A local instance has no `workspace` at all (Workspace is an Azure-DevOps-repo concept only, #96) — it groups on its own, keyed by its own slug, so a repo (or local instance) holding just one instance still renders through the exact same group shape as one holding several — nothing here special-cases a single-instance group.
 function groupInstancesByWorkspace(instances) {
@@ -3575,7 +3591,8 @@ function MasterDetailView({ instances }) {
                         </div>
                         ${actionStatus[inst.slug] ? html`<div class="save-status">${actionStatus[inst.slug]}</div>` : null}
                       </div>
-                      <div class="manage-card">
+                      ${advancedMode.value
+                        ? html`<div class="manage-card">
                         <h3>Manage</h3>
                         ${inst.workItem?.parentId
                           ? html`
@@ -3601,7 +3618,8 @@ function MasterDetailView({ instances }) {
                               </a>
                             `
                           : null}
-                      </div>
+                      </div>`
+                        : null}
                     </div>
                   `
                 )}
@@ -3885,6 +3903,14 @@ function DashboardPage() {
 
   useEffect(reloadInstances, [])
 
+  // #301: with advanced mode off the dashboard listing shows only local
+  // instances — Azure-DevOps-backed rows are hidden until it's turned on.
+  // Filtering here (rather than inside each view) covers both the
+  // master-detail and swimlane views from one place, and leaves the
+  // untouched `instances` for the archived panels below.
+  const visibleInstances =
+    instances && !advancedMode.value ? instances.filter((inst) => !isAzureDevOpsBacked(inst)) : instances
+
   return html`
     <main class="dashboard">
       <div class="dashboard-topbar">
@@ -3893,7 +3919,7 @@ function DashboardPage() {
           <h1>Workspaces</h1>
         </div>
         <div class="dashboard-controls">
-          ${instances?.length ? html`<${ViewToggle} />` : null}
+          ${visibleInstances?.length ? html`<${ViewToggle} />` : null}
           <a class="btn small ghost" href="/new-workspace">+ New Workspace</a>
           <a class="btn small ghost" href="/definitions">Definition Editor (experimental)</a>
           <a class="btn small ghost" href="/user-guide">User Guide</a>
@@ -3904,11 +3930,11 @@ function DashboardPage() {
         ? html`<p class="load-error">Failed to load: ${error}</p>`
         : !instances
           ? html`<p class="loading">Loading…</p>`
-          : instances.length === 0
+          : visibleInstances.length === 0
             ? html`<${EmptyState} />`
             : dashboardViewMode.value === 'swimlanes'
-              ? html`<${SwimlaneView} instances=${instances} />`
-              : html`<${MasterDetailView} instances=${instances} />`}
+              ? html`<${SwimlaneView} instances=${visibleInstances} />`
+              : html`<${MasterDetailView} instances=${visibleInstances} />`}
       ${instances ? html`<${ArchivedInstancesPanel} onRestored=${reloadInstances} />` : null}
       ${instances ? html`<${ArchivedWorkspacesPanel} onRestored=${reloadInstances} />` : null}
     </main>
