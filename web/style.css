@@ -766,6 +766,12 @@ main.dashboard {
   font-size: 14px;
 }
 
+/* Stage-branch "behind main" sync banner (WI #286) — reuses the archived-banner
+   look but needs a gap from the horizontal rule it sits under. */
+.stage-sync-banner {
+  margin-top: 16px;
+}
+
 /* Archived instances (#223) — a collapsed list below the active dashboard views. */
 .archived-panel { margin-top: 32px; border-top: 1px solid var(--border); padding-top: 16px; }
 .archived-panel > summary { cursor: pointer; color: var(--text-muted); font-size: 14px; user-select: none; }

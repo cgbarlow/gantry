@@ -77,6 +77,44 @@ test('GET /api/instance stageSync.behind + behindFiles correct when behind (main
   }
 })
 
+test('GET /api/instance stageSync.behind:false when main is ahead only outside this instance\'s workspace path (WI #286)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-sync-'))
+  try {
+    await withFakeAzureDevOpsServer(
+      {
+        organization: ORGANIZATION,
+        project: PROJECT,
+        repository: REPOSITORY,
+        validPat: VALID_PAT,
+        files: {
+          '/gantry-workspace/my-slug/instance.yaml': 'definition: design\nslug: my-slug\nstage: shape\n',
+          '/gantry-workspace/my-slug/modules/context.md': moduleContent('old'),
+        },
+      },
+      async (adoBaseUrl) => {
+        registerInstance('my-slug', { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl }, { instancesDir })
+        const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
+        await client.createBranch('gantry-workspace/my-slug/shape')
+        // main moves ahead, but only on paths that have nothing to do with this instance's
+        // gantry-workspace/my-slug/ subtree — README, and another instance's workspace.
+        await client.writeFile('/README.md', '# unrelated change\n', { branch: 'main' })
+        await client.writeFile('/gantry-workspace/other-slug/modules/context.md', moduleContent('other instance'), { branch: 'main' })
+
+        await withServer(instancesDir, adoBaseUrl, async (base) => {
+          const res = await fetch(`${base}/api/instance?slug=my-slug&stage=shape`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })
+          assert.equal(res.status, 200)
+          const body = await res.json()
+          assert.equal(body.stageSync.behind, false)
+          assert.deepEqual(body.stageSync.behindFiles, [])
+          assert.equal(body.stageSync.ahead, false)
+        })
+      }
+    )
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
 test('GET /api/instance stageSync.behind:false when level (up to date)', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-sync-'))
   try {

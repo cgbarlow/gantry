@@ -263,6 +263,93 @@ test('per-field Insert ▾ uses the shared dashed insert-bar and both bars hide 
   }
 })
 
+// Coverage for WI287 — the per-field dashed Insert bar was rendered only after
+// markdown fields; a list field had no way to insert a sibling after it.
+test('per-field Insert ▾ appears after a list field and inserts Section/List right after it (WI287)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await launchBrowser()
+      try {
+        const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        const firstModule = page.locator('.module').first()
+
+        // Prepend a list field via the top-of-page Insert so the first module owns
+        // a list field to test against, whatever the seeded artefact's own fields are.
+        const topInsert = page.locator('[data-testid="top-insert"]')
+        await topInsert.getByRole('button', { name: 'Insert ▾' }).click()
+        await topInsert.locator('.menu').getByRole('menuitem', { name: 'List' }).click()
+        const seedListDialog = page.locator('.modal[aria-label="New list"]')
+        await seedListDialog.waitFor({ state: 'visible', timeout: 5_000 })
+        await seedListDialog.locator('input[type=text]').fill('Checklist')
+        await seedListDialog.getByRole('button', { name: 'Insert list' }).click()
+        await seedListDialog.waitFor({ state: 'hidden', timeout: 5_000 })
+
+        const listField = firstModule.locator('.field-list').first()
+        await listField.waitFor({ state: 'visible', timeout: 5_000 })
+
+        // The dashed Insert bar now renders inside the list field, below its rows.
+        const listInsertBar = listField.locator('.insert-bar')
+        await listInsertBar.waitFor({ state: 'visible', timeout: 5_000 })
+        assert.equal(await listInsertBar.count(), 1, 'a list field should have exactly one trailing insert-bar')
+        assert.equal(await listInsertBar.evaluate((el) => getComputedStyle(el).borderStyle), 'dashed')
+        const rowsBox = await listField.locator('.list-rows').boundingBox()
+        const barBox = await listInsertBar.boundingBox()
+        assert.ok(barBox.y > rowsBox.y, 'insert-bar should sit after the list rows')
+
+        // Choosing Section from the list field's own Insert ▾ inserts right after it.
+        await listInsertBar.getByRole('button', { name: 'Insert ▾' }).click()
+        await listInsertBar.locator('.menu').waitFor({ state: 'visible', timeout: 5_000 })
+        assert.deepEqual(await listInsertBar.locator('.menu').getByRole('menuitem').allTextContents(), ['Section', 'List'])
+        await listInsertBar.locator('.menu').getByRole('menuitem', { name: 'Section' }).click()
+        const sectionDialog = page.locator('.modal[aria-label="New section"]')
+        await sectionDialog.waitFor({ state: 'visible', timeout: 5_000 })
+        await sectionDialog.locator('input[type=text]').fill('After-List Section')
+        await sectionDialog.getByRole('button', { name: 'Insert section' }).click()
+        await sectionDialog.waitFor({ state: 'hidden', timeout: 5_000 })
+
+        const afterSection = (await firstModule.locator('.field > label').allTextContents()).map((t) => t.replace(/ \*$/, ''))
+        assert.equal(afterSection[0], 'Checklist')
+        assert.equal(afterSection[1], 'After-List Section')
+
+        // Choosing List from the same bar inserts a list field directly after the list.
+        await listInsertBar.getByRole('button', { name: 'Insert ▾' }).click()
+        await listInsertBar.locator('.menu').waitFor({ state: 'visible', timeout: 5_000 })
+        await listInsertBar.locator('.menu').getByRole('menuitem', { name: 'List' }).click()
+        const listDialog = page.locator('.modal[aria-label="New list"]')
+        await listDialog.waitFor({ state: 'visible', timeout: 5_000 })
+        await listDialog.locator('input[type=text]').fill('After-List List')
+        await listDialog.getByRole('button', { name: 'Insert list' }).click()
+        await listDialog.waitFor({ state: 'hidden', timeout: 5_000 })
+
+        const afterList = (await firstModule.locator('.field > label').allTextContents()).map((t) => t.replace(/ \*$/, ''))
+        assert.equal(afterList[0], 'Checklist')
+        assert.equal(afterList[1], 'After-List List')
+        assert.equal(afterList[2], 'After-List Section')
+
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
 test('the ported module editor page loads with no errors and a markdown field save round-trips', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
@@ -1219,7 +1306,9 @@ test('Insert ▾ → Section adds a titled custom field below the requesting fie
           titles.map((t) => t.replace(/ \*$/, '')),
           ['Problem statement', 'Risks we carry', 'Affected domains']
         )
-        assert.equal(await contextModule.getByRole('button', { name: 'Insert ▾' }).count(), 2)
+        // One Insert ▾ per editable field: Problem statement, the new Risks we carry,
+        // and the Affected domains list (WI #287 gave list fields their own Insert bar).
+        assert.equal(await contextModule.getByRole('button', { name: 'Insert ▾' }).count(), 3)
 
         // Type into the new block, then save everything to disk.
         const newField = contextModule.locator('.field-markdown').nth(1)

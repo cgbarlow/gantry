@@ -901,7 +901,7 @@ function autosizeTextarea(el) {
   el.style.height = `${el.scrollHeight}px`
 }
 
-function ListField({ field, moduleId, onRegister, onRemove }) {
+function ListField({ field, moduleId, onRegister, onRemove, onRequestSection, onRequestList }) {
   const rowsRef = useRef(field.value?.length ? [...field.value] : [''])
   const [, bump] = useState(0)
   const rerender = () => bump((n) => n + 1)
@@ -965,6 +965,17 @@ function ListField({ field, moduleId, onRegister, onRemove }) {
         )}
       </div>
       ${viewMode.value !== 'rendered' ? html`<button type="button" class="btn small" onClick=${addRow}>Add</button>` : null}
+      ${viewMode.value !== 'rendered'
+        ? html`
+            <div class="insert-bar">
+              <${InsertDropdown}
+                onSection=${() => onRequestSection?.()}
+                onList=${() => onRequestList?.()}
+                flipOnOverflow=${false}
+              />
+            </div>
+          `
+        : null}
     </div>
   `
 }
@@ -1096,6 +1107,8 @@ function ModuleCard({ mod, stageId, onFieldRegistered, visibleFieldIds }) {
               moduleId=${mod.id}
               onRegister=${onRegister}
               onRemove=${field.custom ? handleRemoveCustomField : undefined}
+              onRequestSection=${() => setSectionAfterId(field.id)}
+              onRequestList=${() => setListAfterId(field.id)}
             />`
           : html`<${MarkdownField}
               key=${field.id}
@@ -3226,7 +3239,7 @@ function ModuleEditorPage({ slug: routeRef }) {
     instance.artefacts.find((artefact) => artefact.id === defaultArtefactId(instance.artefacts)) ?? null
   const visibleFieldIds = selectedArtefact ? artefactFieldIds(instance.modules, selectedArtefact) : null
   const stageSync = instance.stageSync
-  const showStageSyncBanner = Boolean(stageSync?.behind)
+  const showStageSyncBanner = Boolean(stageSync?.behind) && (stageSync?.behindFiles?.length ?? 0) > 0
   return html`
     <${AppHeader} instance=${instance} />
     ${instance.archived
@@ -3237,7 +3250,7 @@ function ModuleEditorPage({ slug: routeRef }) {
         </div>`
       : null}
     ${showStageSyncBanner
-      ? html`<div class="archived-banner" role="status" data-testid="stage-sync-banner">
+      ? html`<div class="archived-banner stage-sync-banner" role="status" data-testid="stage-sync-banner">
           This stage's working branch is behind main on ${stageSync.behindFiles.length} file(s). Sync to pull the latest.
           <button type="button" class="btn small" disabled=${syncing} onClick=${handleSyncFromMain} data-testid="sync-from-main">
             ${syncing ? 'Syncing…' : 'Sync from main'}
