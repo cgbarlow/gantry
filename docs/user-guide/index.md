@@ -8,9 +8,9 @@ Start at the **Workspaces** landing page. It shows the instances that Gantry kno
 
 ![Workspaces landing page showing grouped instances, search filter and creation controls](/user-guide-images/workspaces-landing.png)
 
-Choose **+ New Workspace** to begin. You can pick a workspace already registered with this Gantry server, or register an Azure DevOps repository as a new Workspace. When registering one, provide its repository details, the Workspace Owner and the ticketing system it should use. Gantry checks that the repository is reachable before registering it.
+Choose **+ New Workspace** to begin. By default this takes you straight into the **Local** flow — see **Local workspaces** below — with no Azure DevOps step at all. Turn on **Advanced mode** in **Settings** first if you need a Server-hosted Workspace instead; that adds a **Workspace location** choice, **Server-hosted** or **Local**, to the top of the wizard. With **Server-hosted** chosen, you can pick a workspace already registered with this Gantry server, or register an Azure DevOps repository as a new one. When registering one, provide its repository details, the Workspace Owner and the ticketing system it should use. Gantry checks that the repository is reachable before registering it.
 
-Next choose a Definition, such as `design`, then provide the Instance's name, directory and initial Assignee. The directory defaults from the name, but you can change it. If the Workspace has a ticketing system, the final step can link the Instance to a parent work item. That link is optional for local Instances, which do not need an Azure DevOps repository.
+Next choose a Definition, such as `design`, then provide the Instance's name, directory and initial Assignee. The directory defaults from the name, but you can change it. If the Workspace has a ticketing system, the final step can link the Instance to a parent work item. A Local-workspace Instance (or a legacy local Instance) skips that step entirely — neither has ticketing.
 
 ### Choosing a definition version
 
@@ -22,16 +22,29 @@ After creation, open the Instance from the landing page. Its header identifies t
 
 ## Workspaces & Instances
 
-A **Workspace** is an Azure DevOps organization, project and repository registered with Gantry. It is shared storage for one or more Instances. For example, a team can keep several `design` initiatives in separate directories in one Workspace while retaining one repository history and access boundary.
+A **Workspace** is where an Instance's data lives — shared storage for one or more Instances — and comes in two kinds: **Server-hosted**, an Azure DevOps organization, project and repository registered with Gantry, or **Local**, a folder on your own machine picked in the browser (see **Local workspaces** below). For example, a team can keep several `design` initiatives in separate directories in one Server-hosted Workspace while retaining one repository history and access boundary.
 
 An **Instance** is one run of a Definition against one initiative. It has its own module files, current Stage and Assignee. A `design` Instance might represent one system change; another `design` Instance can represent a different change in the same Workspace.
 
-Instances can be local or Workspace-backed:
+Instances can live in one of three places:
 
-- A local Instance stores its files in the Gantry server's local `instances/` directory. It is useful for individual work or offline authoring.
-- A Workspace-backed Instance stores its `instance.yaml` and modules in the Azure DevOps repository under `gantry-workspace/<instance-slug>/`. Its changes are made on a Stage branch and reviewed through Azure DevOps.
+- A **local Instance** stores its files in the Gantry server's own `instances/` directory. It is useful for individual work or offline authoring.
+- A **Workspace-backed Instance** stores its `instance.yaml` and modules inside a Server-hosted Workspace's Azure DevOps repository, under `gantry-workspace/<instance-slug>/`. Its changes are made on a Stage branch and reviewed through Azure DevOps.
+- A **Local-workspace Instance** stores its files the same way, under `gantry-workspace/<instance-slug>/`, but inside a Local workspace's folder on your own machine rather than an Azure DevOps repository — see **Local workspaces** below. It is a different thing from the local Instance above, even though both get called "local" in everyday speech: one lives on the machine running the Gantry server, the other lives on yours, and the server never sees it.
 
-The storage choice changes how stage advancement works, but not what a Module or Field means. Both kinds of Instance use the same Definition and the same authoring experience.
+The storage choice changes how stage advancement and ticketing work, but not what a Module or Field means. All three kinds of Instance use the same Definition and the same authoring experience.
+
+### Local workspaces
+
+The **+ New Workspace** wizard's **Local** option is what creates a Local-workspace Instance. Choose **Local** as the Workspace location, then either **register** a new Local workspace in an empty folder or **pick** an existing one. This needs **Chrome or Edge** — it relies on a browser API (File System Access) that only those two support today; on another browser the wizard shows a clear message and keeps **Server-hosted** available instead.
+
+By default the wizard skips the Workspace-location question altogether and takes you straight into this flow — you only see a choice between **Server-hosted** and **Local** once **Advanced mode** is turned on (see **Settings** below). With Advanced mode off, every Instance you create is a Local-workspace Instance.
+
+**Registering** asks you to pick a new or empty folder, then name the workspace (an owner is optional) — Gantry writes a `workspace.json` marker at the folder's root so the folder is recognisable as a Gantry workspace later. **Picking** an existing one opens a folder that already has that marker and lists the Instances already inside it; a **Recent local workspaces** list remembers folders you've opened in this browser before, so you usually don't have to browse to them again. After a browser restart — or the first time in a different browser — the browser typically needs you to **Grant access** again before it will read or write the folder; that is a normal permission reset, not a sign anything is broken. The Workspaces landing page keeps its own **Local workspaces** panel for the same purpose, so you can often get straight back into one from there without opening the wizard at all.
+
+Editing and saving modules works entirely offline — every change goes straight to the folder through the browser, with no server involved. Checking the gate and rendering an artefact both still need the Gantry server (rendering a `.docx` in particular happens there); if the server isn't reachable, those actions say so rather than failing silently. A rendered artefact is written straight into the folder's own `out/`, the same way a Workspace-backed Instance writes into its Azure DevOps repository.
+
+A Local-workspace Instance has no ticketing at all — no linked work item, no Review or Sign-off, no Stage branch or Pull Request. It advances the same way a local Instance does: once the current Stage's gate passes, use **Advance to next stage** to move it on yourself. See **Approval workflow** below.
 
 ### Numeric references
 
@@ -39,7 +52,7 @@ Every Workspace, Instance and Stage also carries a short numeric reference. Work
 
 ### Dashboard PR status badge
 
-On the Workspaces page, a Workspace-backed instance that has an open sign-off Pull Request shows a **PR OPEN** badge on its card. The badge reflects the persisted PR status — once the PR is completed or abandoned it disappears. Local instances never show a PR badge.
+On the Workspaces page, a Workspace-backed instance that has an open sign-off Pull Request shows a **PR OPEN** badge on its card. The badge reflects the persisted PR status — once the PR is completed or abandoned it disappears. Local instances never show a PR badge. Local-workspace instances are shown separately, in the landing page's own **Local workspaces** panel (see **Local workspaces** above) rather than as dashboard cards, so the badge doesn't apply to them either.
 
 ### Archive and restore
 
@@ -63,9 +76,9 @@ The worked example throughout this guide remains the `design` definition, illust
 
 A **Stage** is an ordered phase of a Definition. It makes the relevant modules available for authoring and ends at one **Gate**.
 
-A **Gate** is the decision point at the end of a Stage. A gate checks the artefact requirements declared by the Definition. Passing a gate permits the next action; it does not advance an Instance by itself. Local Instances advance explicitly, while Workspace-backed Instances advance when their approved Pull Request is merged.
+A **Gate** is the decision point at the end of a Stage. A gate checks the artefact requirements declared by the Definition. Passing a gate permits the next action; it does not advance an Instance by itself. Local Instances — including Local-workspace Instances (see **Local workspaces** above) — advance explicitly, while Workspace-backed Instances advance when their approved Pull Request is merged.
 
-For a Workspace-backed Instance the gate is checked as part of the Work Item Detail card's **Check status** action; a local Instance checks it with **Check gate & sync work item**. See *Approval workflow* for the full sequence.
+For a Workspace-backed Instance the gate is checked as part of the Work Item Detail card's **Check status** action; a local Instance with a linked work item checks it with **Check gate & sync work item**. A Local-workspace Instance has no linked work item at all, so its gate is checked as part of **Advance to next stage** itself, with no separate check step. See *Approval workflow* for the full sequence.
 
 A definition lists its stages, and the gate each one ends at, in its `definition.yaml`. The `design` definition, for instance, runs from initial shaping through high-level and detailed design to operational handover, each stage ending at its own gate.
 
@@ -103,13 +116,13 @@ Use the **Render** button in the view-mode bar to open the Render dialog. It lis
 
 ![Render dialog showing selectable artefacts for the current stage](/user-guide-images/render-dialog.png)
 
-Toggle the artefacts you want, then press **Render**. Gantry renders each selected artefact in sequence and reports the output path (and, for Workspace-backed instances, the Azure DevOps URL) in the dialog. For a Workspace-backed instance the rendered `.docx` is pushed to `gantry-workspace/<instance>/out/` in the repository; for a local instance it appears under `instances/<slug>/out/`.
+Toggle the artefacts you want, then press **Render**. Gantry renders each selected artefact in sequence and reports the output path (and, for Workspace-backed instances, the Azure DevOps URL) in the dialog. For a Workspace-backed instance the rendered `.docx` is pushed to `gantry-workspace/<instance>/out/` in the repository; for a local instance it appears under `instances/<slug>/out/`; for a Local-workspace instance it is written straight into that same `gantry-workspace/<instance>/out/` path, but inside your own folder rather than a repository.
 
 ## Approval workflow
 
 A gate passing permits the next action; it does not advance an Instance by itself.
 
-For a local Instance, such as a local run of the `design` Definition, use **Advance to next stage** after the current gate has passed. Gantry performs the advancement directly and the Instance moves to the next Stage. A local Instance with a linked work item also keeps a **Check gate & sync work item** button, which re-checks the current gate and, if it passes, offers to push a state update to that work item in Azure DevOps.
+For a local Instance, such as a local run of the `design` Definition, use **Advance to next stage** after the current gate has passed. Gantry performs the advancement directly and the Instance moves to the next Stage. A local Instance with a linked work item also keeps a **Check gate & sync work item** button, which re-checks the current gate and, if it passes, offers to push a state update to that work item in Azure DevOps. A Local-workspace Instance (see **Local workspaces** above) works the same way but has no linked work item and so no separate check button — clicking **Advance to next stage** itself runs the gate check first, then asks you to confirm before moving on.
 
 For a Workspace-backed Instance, such as a `design` initiative stored in Azure DevOps, everything to do with review and sign-off happens in the **Work Item Detail card** at the top of the Stage screen. There is no separate section further down the page.
 
@@ -147,7 +160,7 @@ Use **Show commit history** in the card header to open a dialog listing the comm
 
 Gantry's Settings are split by scope:
 
-- **Global Settings** controls the default Azure DevOps Personal Access Token and the ticketing system new Workspaces use by default. The PAT is stored in this browser and sent to the Gantry server only for Azure DevOps requests.
+- **Global Settings** holds the **Advanced mode** toggle, off by default — with it off, a browser only ever sees the Local workspace flow (see **Local workspaces** above), with no Azure DevOps, ticketing or sign-off UI anywhere in the app. Turning it on reveals the rest of this screen: the default Azure DevOps Personal Access Token and the ticketing system new Workspaces use by default. The PAT is stored in this browser and sent to the Gantry server only for Azure DevOps requests.
 - **Workspace Settings** controls the Owner, the Workspace's optional PAT override and its ticketing-system override. These settings apply to the Workspace and can be opened from an Instance that belongs to it. The same screen also holds **Archive workspace** / **Restore workspace**.
 - **Instance Settings** controls the Instance's Assignee and shows read-only information about the Instance and its linked work item. The same screen also holds **Archive instance** / **Restore instance**. An archived instance is hidden from the dashboard but still opens at its direct URL.
 
