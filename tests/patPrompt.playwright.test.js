@@ -136,7 +136,11 @@ test('clearing the stored PAT (from the Settings screen, #101) re-triggers the p
 
       // PAT management moved off the per-instance editor header entirely (#101) onto the global Settings screen's "Global Defaults" tab — exercised there instead of on `/instance/my-initiative`. Seeded via `page.evaluate` after an initial navigation (not `addInitScript`, which reruns on *every* subsequent navigation this test makes — including the one right after clearing — and would silently re-seed the very value this test clears).
       await page.goto(`${base}/settings`)
-      await page.evaluate((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+      // #300 — the PAT controls only render on Global Settings while advanced mode is on.
+      await page.evaluate((pat) => {
+        localStorage.setItem('gantry:ado-pat', pat)
+        localStorage.setItem('gantry:advancedMode', 'true')
+      }, VALID_PAT)
       await page.reload()
       await page.getByRole('button', { name: 'Clear Azure DevOps PAT' }).click()
       const storedAfterClear = await page.evaluate(() => localStorage.getItem('gantry:ado-pat'))
@@ -168,7 +172,11 @@ test('the Settings screen\'s "Replace Azure DevOps PAT" control (#101) opens the
 
       // Seeded via `page.evaluate` + `reload` after an initial navigation, not `addInitScript` — see the previous test's own comment on why `addInitScript` is unsafe once a test navigates more than once (it would re-seed VALID_PAT right before the later `/instance/my-initiative` navigation below, silently overwriting the replacement PAT this test proves gets used instead).
       await page.goto(`${base}/settings`)
-      await page.evaluate((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+      // #300 — the PAT controls only render on Global Settings while advanced mode is on.
+      await page.evaluate((pat) => {
+        localStorage.setItem('gantry:ado-pat', pat)
+        localStorage.setItem('gantry:advancedMode', 'true')
+      }, VALID_PAT)
       await page.reload()
       await page.locator('.settings-pat-status .stamp.agreed').waitFor({ state: 'visible', timeout: 5_000 })
 

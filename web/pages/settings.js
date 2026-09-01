@@ -14,6 +14,7 @@ import {
   clearWorkspacePatOverride,
 } from '../lib/credential.js'
 import { TICKETING_SYSTEMS, defaultTicketingSystem, setDefaultTicketingSystem } from '../lib/ticketingSystem.js'
+import { advancedMode, setAdvancedMode } from '../lib/advancedMode.js'
 import { apiFetch, apiFetchForInstance } from '../lib/apiFetch.js'
 import { IdentityPicker } from '../lib/identityPicker.js'
 
@@ -112,12 +113,36 @@ function TicketingSystemSection() {
   `
 }
 
+// #300 — a client-only, sticky toggle. Off by default: a local-only user never sees the Azure
+// DevOps PAT section or the default-ticketing-system selector below it. On: this screen is
+// exactly as it always was. Later tickets (#301/#302) read the same signal to hide ticketing UI
+// on other surfaces; this screen is the only place the setting is changed.
+function AdvancedModeSection() {
+  return html`
+    <section class="settings-section">
+      <h2>Advanced mode</h2>
+      <label class="settings-checkbox">
+        <input
+          type="checkbox"
+          checked=${advancedMode.value}
+          onChange=${(e) => setAdvancedMode(e.currentTarget.checked)}
+        />
+        Enable advanced mode
+      </label>
+      <p class="guidance">
+        Shows Azure DevOps repositories, work-item ticketing, and sign-off. Leave off for local-only use.
+      </p>
+    </section>
+  `
+}
+
 export function GlobalSettingsPage({ query }) {
   return html`
     <${SettingsHeader} title="Settings" backHref=${backHrefFrom(query)} />
     <main class="settings-page">
-      <${GlobalPatSection} />
-      <${TicketingSystemSection} />
+      <${AdvancedModeSection} />
+      ${advancedMode.value ? html`<${GlobalPatSection} />` : null}
+      ${advancedMode.value ? html`<${TicketingSystemSection} />` : null}
     </main>
   `
 }

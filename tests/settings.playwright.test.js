@@ -104,6 +104,8 @@ test('settings: "Settings" from the dashboard goes straight to Global Settings, 
       await page.waitForSelector('.settings-header', { timeout: 10_000 })
       assert.equal(new URL(page.url()).pathname, '/settings')
       assert.equal(await page.locator('.settings-header h1').textContent(), 'Settings')
+      // #300 — the PAT and ticketing sections only exist once advanced mode is enabled.
+      await page.getByLabel('Enable advanced mode').check()
       assert.ok(await page.locator('.settings-section', { hasText: 'Azure DevOps Personal Access Token' }).isVisible())
       assert.ok(await page.locator('.settings-section', { hasText: 'Default ticketing system' }).isVisible())
     })(base)
@@ -127,6 +129,8 @@ test('settings: the default PAT can be set, replaced, and cleared from Global Se
     await withPage(async (page) => {
       await page.goto(`${base}/settings`)
       await page.waitForSelector('.settings-section', { timeout: 10_000 })
+      // #300 — the PAT section is only rendered while advanced mode is on.
+      await page.getByLabel('Enable advanced mode').check()
 
       assert.match(await page.locator('.settings-pat-status').textContent(), /NOT SET/)
       assert.equal(await page.getByRole('button', { name: 'Set Azure DevOps PAT' }).count(), 1)
@@ -156,6 +160,9 @@ test('settings: a global ticketing-system default can be set to azure-devops; ji
   await withScratchServer(async (base) => {
     await withPage(async (page) => {
       await page.goto(`${base}/settings`)
+      await page.waitForSelector('.settings-section', { timeout: 10_000 })
+      // #300 — the ticketing selector is only rendered while advanced mode is on.
+      await page.getByLabel('Enable advanced mode').check()
       await page.waitForSelector('.settings-radio-group', { timeout: 10_000 })
 
       const adoRadio = page.locator('.settings-radio', { hasText: 'Azure DevOps' }).locator('input[type=radio]')
@@ -172,6 +179,51 @@ test('settings: a global ticketing-system default can be set to azure-devops; ji
       assert.ok(await adoRadio.isChecked())
       assert.equal(await jiraRadio.isChecked(), false)
       assert.equal(await page.evaluate(() => localStorage.getItem('gantry:default-ticketing-system')), 'azure-devops')
+    })(base)
+  })
+})
+
+// ---------- #300: "Enable advanced mode" toggle ----------
+// Fresh browser => advanced mode off => the Azure DevOps PAT section and the default-ticketing
+// selector are absent from Global Settings entirely. Toggling on reveals both; the choice is
+// sticky across a reload; toggling off hides them again.
+test('settings: advanced mode is off by default, hiding the PAT and ticketing sections until toggled on (sticky across reload)', async () => {
+  await withScratchServer(async (base) => {
+    await withPage(async (page) => {
+      await page.goto(`${base}/settings`)
+      await page.waitForSelector('.settings-header', { timeout: 10_000 })
+
+      const toggle = page.getByLabel('Enable advanced mode')
+      assert.equal(await toggle.count(), 1)
+      assert.equal(await toggle.isChecked(), false)
+      assert.match(
+        await page.locator('.settings-section', { hasText: 'Advanced mode' }).textContent(),
+        /Shows Azure DevOps repositories, work-item ticketing, and sign-off\. Leave off for local-only use\./
+      )
+
+      // Off: neither section is on the page.
+      assert.equal(await page.locator('.settings-section', { hasText: 'Azure DevOps Personal Access Token' }).count(), 0)
+      assert.equal(await page.locator('.settings-section', { hasText: 'Default ticketing system' }).count(), 0)
+
+      // On: both appear.
+      await toggle.check()
+      await page.waitForSelector('.settings-radio-group', { timeout: 5_000 })
+      assert.ok(await page.locator('.settings-section', { hasText: 'Azure DevOps Personal Access Token' }).isVisible())
+      assert.ok(await page.locator('.settings-section', { hasText: 'Default ticketing system' }).isVisible())
+      assert.equal(await page.evaluate(() => localStorage.getItem('gantry:advancedMode')), 'true')
+
+      // Sticky across a reload.
+      await page.reload()
+      await page.waitForSelector('.settings-header', { timeout: 10_000 })
+      assert.equal(await page.getByLabel('Enable advanced mode').isChecked(), true)
+      assert.ok(await page.locator('.settings-section', { hasText: 'Azure DevOps Personal Access Token' }).isVisible())
+      assert.ok(await page.locator('.settings-section', { hasText: 'Default ticketing system' }).isVisible())
+
+      // Off again: hidden again.
+      await page.getByLabel('Enable advanced mode').uncheck()
+      assert.equal(await page.locator('.settings-section', { hasText: 'Azure DevOps Personal Access Token' }).count(), 0)
+      assert.equal(await page.locator('.settings-section', { hasText: 'Default ticketing system' }).count(), 0)
+      assert.equal(await page.evaluate(() => localStorage.getItem('gantry:advancedMode')), 'false')
     })(base)
   })
 })
