@@ -17,6 +17,20 @@ import { TICKETING_SYSTEMS, defaultTicketingSystem, setDefaultTicketingSystem } 
 import { advancedMode, setAdvancedMode } from '../lib/advancedMode.js'
 import { apiFetch, apiFetchForInstance } from '../lib/apiFetch.js'
 import { IdentityPicker } from '../lib/identityPicker.js'
+// #303 — the local-workspace-aware branches of Workspace/Instance Settings
+// below (ADR-0029, WI #293/A2's client-side registry). Aliased to `Local`
+// names for the same reason web/app.js's own local-instance wiring does:
+// keeps them visually distinct from this file's existing server-backed
+// `fetch*`/`patch*` helpers below.
+import {
+  getWorkspaceHandle,
+  ensurePermission,
+  forgetWorkspace,
+  readTextFile as readLocalTextFile,
+  writeTextFile as writeLocalTextFile,
+  parseWorkspaceJson,
+} from '../lib/localWorkspace.js'
+import { parseInstanceYaml, withInstanceAssignee } from '../lib/localInstanceFiles.js'
 
 // ---------- Shared header ----------
 // One header shape for all three Settings screens: a title (distinct per
@@ -414,7 +428,156 @@ function WorkspaceArchiveSection({ workspace, onChanged }) {
   `
 }
 
+// #303 — a local-workspace instance's "Workspace Settings" equivalent. There
+// is no server-side workspace record to fetch (ADR-0029: the registry lives
+// client-side in IndexedDB) — this branch never calls fetchInstanceWorkspaceId
+// /fetchWorkspaceById at all, resolving the directory handle by its IndexedDB
+// id (`local=`, threaded on by web/app.js's SettingsMenu) instead. What's
+// genuinely configurable today: the `workspace.json` fields the wizard wrote
+// at creation (name/owner/createdAt, read-only — nothing writes them back
+// after creation) and the dashboard's own "Remove"/"Grant access" recovery
+// affordances (web/app.js's LocalWorkspaceRow), reused here rather than
+// reinvented — never a PAT or ticketing-system override, which don't apply
+// to a workspace with no Azure DevOps repo behind it at all.
+function LocalWorkspaceSettingsPage({ query, workspaceId }) {
+  const [state, setState] = useState('loading') // 'loading' | 'missing' | 'grant-needed' | 'ready' | 'error'
+  const [handle, setHandle] = useState(null)
+  const [record, setRecord] = useState(null)
+  const [error, setError] = useState('')
+  const [forgotten, setForgotten] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  async function load() {
+    setState('loading')
+    try {
+      const h = await getWorkspaceHandle(workspaceId)
+      if (!h) {
+        setState('missing')
+        return
+      }
+      setHandle(h)
+      const permission = await ensurePermission(h)
+      if (permission !== 'granted') {
+        setState('grant-needed')
+        return
+      }
+      const text = await readLocalTextFile(h, 'gantry-workspace/workspace.json')
+      setRecord(parseWorkspaceJson(text))
+      setState('ready')
+    } catch (err) {
+      setError(err.message)
+      setState('error')
+    }
+  }
+
+  useEffect(() => {
+    load()
+    // eslint-disable-next-line
+  }, [workspaceId])
+
+  async function handleGrantAccess() {
+    if (!handle) return
+    setBusy(true)
+    try {
+      const permission = await ensurePermission(handle)
+      if (permission === 'granted') await load()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleForget() {
+    if (
+      !window.confirm(
+        "Remove this workspace from this browser's remembered list? The folder and its files on disk are untouched — this only forgets it here."
+      )
+    ) {
+      return
+    }
+    setBusy(true)
+    try {
+      await forgetWorkspace(workspaceId)
+      setForgotten(true)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return html`
+    <${SettingsHeader} title="Workspace Settings" backHref=${backHrefFrom(query)} />
+    <main class="settings-page">
+      <section class="settings-section">
+        <h2>Local workspace</h2>
+        <p class="guidance">
+          This instance's local workspace — a folder on this browser's own machine (ADR-0029), not a
+          server-side workspace record. Its <code>workspace.json</code>, read straight from the folder, is
+          shown below; there is no PAT or ticketing-system override here — a local workspace has no Azure
+          DevOps repo behind it at all.
+        </p>
+        ${state === 'loading' ? html`<p class="loading">Loading…</p>` : null}
+        ${state === 'error' ? html`<p class="load-error">Failed to load: ${error}</p>` : null}
+        ${state === 'missing'
+          ? html`<p class="load-error">
+              This local workspace is no longer remembered in this browser — reopen it from the "+ New
+              Workspace" wizard.
+            </p>`
+          : null}
+        ${state === 'grant-needed'
+          ? html`
+              <p class="inline-error">This local workspace needs permission again in this browser.</p>
+              <button type="button" class="btn primary" disabled=${busy} onClick=${handleGrantAccess}>
+                Grant access
+              </button>
+            `
+          : null}
+        ${state === 'ready' && !forgotten
+          ? html`
+              <div class="result-card">
+                <div class="result-row"><span class="k">Name</span><span class="v">${record.name}</span></div>
+                <div class="result-row"><span class="k">Owner</span><span class="v">${record.owner || '—'}</span></div>
+                <div class="result-row"><span class="k">Created</span><span class="v">${record.createdAt}</span></div>
+              </div>
+            `
+          : null}
+      </section>
+      ${state === 'ready'
+        ? html`
+            <section class="settings-section">
+              <h2>Remove from this browser</h2>
+              <p class="guidance">
+                Removes this workspace from this browser's remembered list only — the folder and its files on
+                disk are untouched. Reopen the same folder later from the "+ New Workspace" wizard's "Pick
+                existing local workspace" option.
+              </p>
+              ${forgotten
+                ? html`<p class="save-status">Removed from this browser.</p>`
+                : html`<div class="settings-actions">
+                    <button type="button" class="btn" disabled=${busy} onClick=${handleForget}>
+                      Remove workspace
+                    </button>
+                  </div>`}
+            </section>
+          `
+        : null}
+    </main>
+  `
+}
+
+// #303 — a local-workspace instance's link (web/app.js's SettingsMenu)
+// carries `local=<IndexedDB id>`; this dispatches to the local-workspace-aware
+// screen above before any of RemoteWorkspaceSettingsPage's server-side
+// registry fetches would otherwise run. Deliberately hook-free itself — a
+// component that returns early *between* its own hook calls breaks Preact's
+// per-instance hook ordering the moment the branch it takes changes, so the
+// branching lives here, one level up from either hook-using body.
 export function WorkspaceSettingsPage({ query }) {
+  if (query?.local) {
+    return html`<${LocalWorkspaceSettingsPage} query=${query} workspaceId=${query.local} />`
+  }
+  return html`<${RemoteWorkspaceSettingsPage} query=${query} />`
+}
+
+function RemoteWorkspaceSettingsPage({ query }) {
   const slug = query?.slug
   const [state, setState] = useState('loading') // 'loading' | 'no-slug' | 'no-workspace' | 'ready' | 'error'
   const [error, setError] = useState('')
@@ -743,7 +906,170 @@ function InstanceArchiveSection({ slug, archived: initialArchived }) {
   `
 }
 
+// #303 — a local-workspace instance's "Instance Settings" equivalent. There
+// is no `GET /api/instance` to call (that route resolves the instance
+// through the server-side registry, per-request — lib/server.js's own doc
+// comment — which a local-workspace instance was never entered into,
+// ADR-0029). What's genuinely stored and editable today, per
+// `web/lib/localInstanceFiles.js`'s `instance.yaml` schema: `assignee`. No
+// required-reviewer override (no PR/review ceremony for a local workspace
+// at all, ADR-0029's own "Ticketing" section), no work-item link section
+// (same reason), no archive action (nothing server-side to flip a flag on).
+// The Assignee field here is a plain text input, not the Azure-DevOps-backed
+// `IdentityPicker` the server-backed screen below uses — a local workspace
+// has no Azure DevOps organization/project to search identities against, so
+// an autocomplete would either search the wrong org (whichever workspace
+// happens to be registered first server-side) or nothing at all; a plain
+// field matches exactly what's stored (a free-text name) and is honest
+// about there being no such lookup available for it.
+function LocalInstanceSettingsPage({ query, workspaceId, slug }) {
+  const [state, setState] = useState('loading') // 'loading' | 'missing' | 'grant-needed' | 'ready' | 'error'
+  const [handle, setHandle] = useState(null)
+  const [record, setRecord] = useState(null)
+  const [error, setError] = useState('')
+  const [assigneeDraft, setAssigneeDraft] = useState('')
+  const [assigneeStatus, setAssigneeStatus] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function load() {
+    setState('loading')
+    try {
+      const h = await getWorkspaceHandle(workspaceId)
+      if (!h) {
+        setState('missing')
+        return
+      }
+      setHandle(h)
+      const permission = await ensurePermission(h)
+      if (permission !== 'granted') {
+        setState('grant-needed')
+        return
+      }
+      const text = await readLocalTextFile(h, `gantry-workspace/${slug}/instance.yaml`)
+      const rec = parseInstanceYaml(text)
+      setRecord(rec)
+      setAssigneeDraft(rec.assignee ?? '')
+      setState('ready')
+    } catch (err) {
+      setError(err.message)
+      setState('error')
+    }
+  }
+
+  useEffect(() => {
+    if (!slug) {
+      setState('error')
+      setError('No instance was specified for these Instance Settings.')
+      return
+    }
+    load()
+    // eslint-disable-next-line
+  }, [workspaceId, slug])
+
+  async function handleGrantAccess() {
+    if (!handle) return
+    setBusy(true)
+    try {
+      const permission = await ensurePermission(handle)
+      if (permission === 'granted') await load()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleSaveAssignee() {
+    if (!handle || !record) return
+    setAssigneeStatus('Saving…')
+    try {
+      await writeLocalTextFile(
+        handle,
+        `gantry-workspace/${slug}/instance.yaml`,
+        withInstanceAssignee(record, assigneeDraft)
+      )
+      setRecord({ ...record, assignee: assigneeDraft })
+      setAssigneeStatus('Saved.')
+    } catch (err) {
+      setAssigneeStatus(err.message)
+    }
+  }
+
+  return html`
+    <${SettingsHeader} title="Instance Settings" backHref=${backHrefFrom(query)} />
+    <main class="settings-page">
+      ${state === 'loading' ? html`<p class="loading">Loading…</p>` : null}
+      ${state === 'error' ? html`<p class="load-error">Failed to load: ${error}</p>` : null}
+      ${state === 'missing'
+        ? html`<p class="load-error">
+            This local workspace is no longer remembered in this browser — reopen it from the "+ New
+            Workspace" wizard.
+          </p>`
+        : null}
+      ${state === 'grant-needed'
+        ? html`
+            <div class="wizard-field">
+              <p class="inline-error">This local workspace needs permission again in this browser.</p>
+              <button type="button" class="btn primary" disabled=${busy} onClick=${handleGrantAccess}>
+                Grant access
+              </button>
+            </div>
+          `
+        : null}
+      ${state === 'ready'
+        ? html`
+            <section class="settings-section">
+              <h2>Assignee</h2>
+              <p class="guidance">
+                The single named person responsible for this instance, stored in this workspace's own
+                <code>instance.yaml</code>.
+              </p>
+              <div class="workspace-field-row">
+                <input
+                  class="wizard-input"
+                  type="text"
+                  value=${assigneeDraft}
+                  placeholder="Unassigned"
+                  onInput=${(e) => setAssigneeDraft(e.currentTarget.value)}
+                />
+                <button type="button" class="btn small" onClick=${handleSaveAssignee}>Save</button>
+              </div>
+              <div class="workspace-field-status">${assigneeStatus}</div>
+            </section>
+            <section class="settings-section">
+              <h2>Instance info</h2>
+              <div class="result-card">
+                <div class="result-row"><span class="k">Slug</span><span class="v">${slug}</span></div>
+                <div class="result-row"><span class="k">Definition</span><span class="v">${record.definition}</span></div>
+                <div class="result-row"><span class="k">Current stage</span><span class="v">${record.stage}</span></div>
+              </div>
+            </section>
+            <section class="settings-section">
+              <h2>Azure DevOps work item</h2>
+              <p class="guidance">
+                Local workspaces don't support Azure DevOps ticketing (ADR-0029) — no work-item link, no
+                sign-off, no Pull Request ceremony. This instance advances self-serve once its current
+                stage's gate passes.
+              </p>
+            </section>
+          `
+        : null}
+    </main>
+  `
+}
+
+// #303 — dispatches to the local-workspace-aware screen above when this
+// instance's link (web/app.js's SettingsMenu) carries `local=<IndexedDB
+// id>`, before RemoteInstanceSettingsPage's `GET /api/instance` call would
+// otherwise run. Deliberately hook-free itself — see WorkspaceSettingsPage's
+// own comment for why the branch has to live one level up from either
+// hook-using body.
 export function InstanceSettingsPage({ query }) {
+  if (query?.local && query?.slug) {
+    return html`<${LocalInstanceSettingsPage} query=${query} workspaceId=${query.local} slug=${query.slug} />`
+  }
+  return html`<${RemoteInstanceSettingsPage} query=${query} />`
+}
+
+function RemoteInstanceSettingsPage({ query }) {
   const slug = query?.slug
   const [state, setState] = useState('loading') // 'loading' | 'no-slug' | 'ready' | 'error'
   const [error, setError] = useState('')

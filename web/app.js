@@ -3274,8 +3274,28 @@ function ViewModeToolbar({
 // this exact instance screen (`/instance/<slug>`) — not browser history —
 // so each Settings screen's own back control returns here. Its open/close
 // behaviour is the shared Dropdown's (web/lib/dropdown.js) — closed by any click outside it or by Escape. AppHeader owns which header menu is open so Settings and Instance Switcher cannot be open at the same time.
+// #303 — a local-workspace instance (`instance.isLocalWorkspace`, WI #297/A6's
+// naming) carries its own IndexedDB registry id (`localWorkspaceId`) rather
+// than a server-side workspace id, and the two Settings screens below need
+// that id to resolve the right directory handle client-side — so it's
+// threaded onto both links as `local=`, the same query-param convention the
+// wizard already writes onto `/instance/<slug>?local=<id>&slug=<slug>` URLs.
+// Without it, both screens would otherwise try (and fail) the old
+// server-side registry fetch, which is the bug this ticket fixes.
+//
+// `from` needs the same treatment: a local-workspace instance's editor route
+// only loads at all with `?local=&slug=` present (ModuleEditorPage's own
+// loadLocalInstance path) — a bare `/instance/<slug>` 404s against the
+// server-side registry it was never entered into. Without carrying those
+// params through `from` too, every Settings screen's "← Back" control would
+// dead-end back at a broken editor load, trading the ticket's broken
+// forward link for an equally broken back one.
 function SettingsMenu({ instance, open, onOpenChange }) {
-  const from = encodeURIComponent(`/instance/${instance.slug}`)
+  const localParam = instance.isLocalWorkspace ? `&local=${encodeURIComponent(instance.localWorkspaceId)}` : ''
+  const localQuery = instance.isLocalWorkspace
+    ? `?local=${encodeURIComponent(instance.localWorkspaceId)}&slug=${encodeURIComponent(instance.slug)}`
+    : ''
+  const from = encodeURIComponent(`/instance/${instance.slug}${localQuery}`)
   const slug = encodeURIComponent(instance.slug)
 
   return html`
@@ -3287,8 +3307,8 @@ function SettingsMenu({ instance, open, onOpenChange }) {
       onOpenChange=${onOpenChange}
     >
       <a role="menuitem" href=${`/settings?from=${from}`}>Global Settings</a>
-      <a role="menuitem" href=${`/settings/workspace?slug=${slug}&from=${from}`}>Workspace Settings</a>
-      <a role="menuitem" href=${`/settings/instance?slug=${slug}&from=${from}`}>Instance Settings</a>
+      <a role="menuitem" href=${`/settings/workspace?slug=${slug}&from=${from}${localParam}`}>Workspace Settings</a>
+      <a role="menuitem" href=${`/settings/instance?slug=${slug}&from=${from}${localParam}`}>Instance Settings</a>
     <//>
   `
 }

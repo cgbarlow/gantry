@@ -94,6 +94,17 @@ export function withInstanceStage(record, stage) {
   return stringifyYAML(canonicalizeForSerialization({ ...record, stage }))
 }
 
+/**
+ * The bytes to write back to `instance.yaml` after editing the instance's
+ * own stored `assignee` from a local-workspace Instance Settings screen (WI
+ * #303) — the existing record with `assignee` replaced, canonically
+ * re-serialized so a concurrent disjoint-field writer's own edits stay
+ * mergeable. Same read-modify-write shape as `withInstanceStage` above.
+ */
+export function withInstanceAssignee(record, assignee) {
+  return stringifyYAML(canonicalizeForSerialization({ ...record, assignee }))
+}
+
 // ---------------------------------------------------------------------------
 // Module files — read side (parse) + save-payload writer
 // ---------------------------------------------------------------------------
