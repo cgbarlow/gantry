@@ -25,12 +25,27 @@ import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, worksp
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
 import { advancedMode } from './lib/advancedMode.js'
+// Two call sites want this module's file/permission helpers under different
+// local names: A5's dashboard recovery UI (further down this file) calls
+// them bare; A6's editor wiring (loadLocalInstance and friends, just below)
+// aliases the read/write helpers to a `Local`-suffixed name to keep them
+// visually distinct from the server-backed `readTextFile`-shaped helpers
+// elsewhere in this file. One import statement, both local names, same
+// underlying export — importing the same binding twice under different
+// names in a single `import { ... }` is valid and avoids the
+// "already been declared" SyntaxError two separate import statements for
+// the same name would throw.
 import {
   recentLocalWorkspaces,
   getWorkspaceHandle,
   ensurePermission,
   listDir,
+  listDir as listLocalDir,
   readTextFile,
+  readTextFile as readLocalTextFile,
+  writeTextFile as writeLocalTextFile,
+  readBinaryFile as readLocalBinaryFile,
+  writeBinaryFile as writeLocalBinaryFile,
   forgetWorkspace,
 } from './lib/localWorkspace.js'
 import { wrap } from './lib/editorWrap.js'
@@ -44,14 +59,223 @@ import {
   readArtefactSelection,
   sortArtefacts,
 } from './lib/artefactSelection.js'
+import {
+  parseInstanceYaml,
+  withInstanceStage,
+  parseLocalModuleFile,
+  renderLocalModuleInstanceFile,
+  buildLocalModuleEntry,
+} from './lib/localInstanceFiles.js'
+
+// ---------- Local workspace instances (WI #297, ADR-0029, A6) ----------
+// A local-workspace instance's data lives in a folder on the browser user's
+// own machine, opened via `/instance/<slug>?local=<id>&slug=<slug>` (the URL
+// convention A4's wizard already writes, web/pages/new-workspace-wizard.js).
+// `localWorkspaceParam` carries the `{ id, slug }` parsed off that query
+// string for as long as ModuleEditorPage is mounted for a local instance;
+// `localDirHandle` is the resolved, permission-checked directory handle
+// (`web/lib/localWorkspace.js`'s `getWorkspaceHandle`/`ensurePermission`) the
+// rest of this module reads/writes `gantry-workspace/<slug>/…` files
+// through — never a server round-trip (offline degradation, ADR-0029's own
+// "Offline" section). `localGrantNeeded` flips on when a remembered handle's
+// permission has lapsed (the normal state after a reload — see
+// `ensurePermission`'s own doc comment), driving the same "Grant access"
+// affordance the wizard's own recent-workspaces list already uses.
+const localWorkspaceParam = signal(null) // { id, slug } | null
+const localDirHandle = signal(null) // FileSystemDirectoryHandle | null
+const localGrantNeeded = signal(false)
+const localRetryTick = signal(0) // bumped to re-run the instance-loading effect after a grant
+// Resolved `asset:<id>` object URLs for a local instance's images, keyed by
+// `${slug}/${assetId}` — populated asynchronously by `ensureLocalAssetUrl`
+// (readBinaryFile is async; the first preview render of a freshly-inserted
+// image has no URL yet, so `MarkdownField`'s own asset-source-sync effect
+// re-renders once this signal picks the URL up, see its own comment above).
+const localAssetUrls = signal({})
+const localAssetUrlPending = new Set()
+
+function localModuleFilesPath(slug, moduleId) {
+  return `gantry-workspace/${slug}/modules/${moduleId}.md`
+}
+
+async function ensureLocalAssetUrl(slug, assetId, key) {
+  if (localAssetUrlPending.has(key) || localAssetUrls.value[key]) return
+  const handle = localDirHandle.value
+  if (!handle) return
+  localAssetUrlPending.add(key)
+  try {
+    const bytes = await readLocalBinaryFile(handle, `gantry-workspace/${slug}/assets/${assetId}`)
+    const url = URL.createObjectURL(new Blob([bytes]))
+    localAssetUrls.value = { ...localAssetUrls.value, [key]: url }
+  } catch {
+    // Asset missing or unreadable — the <img> stays broken; nothing else to do client-side.
+  } finally {
+    localAssetUrlPending.delete(key)
+  }
+}
 
 function assetFileUrl(assetId, slug, stageId) {
+  const instance = instanceData.value
+  if (instance?.isLocalWorkspace && instance.slug === slug) {
+    const key = `${slug}/${assetId}`
+    const cached = localAssetUrls.value[key]
+    if (cached) return cached
+    ensureLocalAssetUrl(slug, assetId, key)
+    return ''
+  }
   const params = new URLSearchParams()
   if (slug) params.set('slug', slug)
   if (stageId) params.set('stage', stageId)
   const qs = params.toString()
   const base = `/api/instance/assets/${encodeURIComponent(assetId)}/file`
   return qs ? `${base}?${qs}` : base
+}
+
+/**
+ * Reads `gantry-workspace/<slug>/instance.yaml` and every
+ * `gantry-workspace/<slug>/modules/*.md` through a local workspace's
+ * directory handle, resolves the definition via the same
+ * `/api/definitions/:id/versions/:n` route the wizard uses, and builds the
+ * same shape `GET /api/instance` returns (see `lib/server.js`'s
+ * `buildInstanceResponse`) — enough for `ModuleEditorPage` and its children
+ * to render unchanged. Throws an `Error` with `.needsGrant = true` when the
+ * remembered handle's permission is not (yet) granted; callers show the
+ * "Grant access" affordance instead of a raw load error for that case.
+ */
+async function loadLocalInstance(workspaceId, slug, requestedStageId) {
+  const handle = await getWorkspaceHandle(workspaceId)
+  if (!handle) {
+    throw new Error('This local workspace is no longer remembered in this browser — reopen it from the "+ New Workspace" wizard.')
+  }
+  const permission = await ensurePermission(handle)
+  if (permission !== 'granted') {
+    const err = new Error('This local workspace needs permission again in this browser.')
+    err.needsGrant = true
+    throw err
+  }
+  localDirHandle.value = handle
+
+  const instanceYamlText = await readLocalTextFile(handle, `gantry-workspace/${slug}/instance.yaml`)
+  const record = parseInstanceYaml(instanceYamlText)
+  const definitionId = record.definition
+  const definitionVersion = record.definitionVersion ?? 1
+  const res = await fetch(
+    `/api/definitions/${encodeURIComponent(definitionId)}/versions/${encodeURIComponent(String(definitionVersion))}`
+  )
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error ?? body.message ?? `Failed to load definition "${definitionId}" (${res.status})`)
+  }
+  const structure = await res.json()
+
+  const stageId = requestedStageId ?? record.stage
+  const stage = structure.stages.find((s) => s.id === stageId)
+  if (!stage) throw new Error(`Definition "${definitionId}" has no stage "${stageId}"`)
+  const modulesById = new Map(structure.modules.map((m) => [m.id, m]))
+
+  const modules = []
+  for (const moduleId of stage.modules) {
+    const moduleSpec = modulesById.get(moduleId)
+    if (!moduleSpec) continue
+    let data = { status: 'draft', owner: '', fields: {} }
+    try {
+      const text = await readLocalTextFile(handle, localModuleFilesPath(slug, moduleId))
+      data = parseLocalModuleFile(text, moduleSpec)
+    } catch {
+      // No saved data yet for this module — the blank draft above stands, matching GET /api/instance's own "no module file yet" default.
+    }
+    modules.push(buildLocalModuleEntry(moduleSpec, stage, data, null))
+  }
+
+  return {
+    slug,
+    definition: definitionId,
+    stage: { id: stage.id, title: stage.title, gate: stage.gate, number: structure.stages.findIndex((s) => s.id === stage.id) + 1 },
+    currentStageId: record.stage,
+    hasExample: false,
+    stages: structure.stages.map((s, i) => ({ id: s.id, title: s.title, gate: s.gate, number: i + 1 })),
+    workspaceNumber: 0,
+    instanceNumber: 0,
+    ref: '',
+    // Scoped down vs. the server route: filtered only by gate, not also by
+    // whether the artefact's template file exists (that check lives inside
+    // `definitionsDir` on the server; a local instance has no equivalent
+    // client-side signal for it) — a local instance's Render dialog can
+    // list an artefact fractionally earlier than a server-hosted one would.
+    artefacts: structure.artefacts.filter((a) => a.gate === stage.gate).map((a) => ({ id: a.id, title: a.title, requires: a.requires })),
+    modules,
+    workItem: null,
+    pullRequests: {},
+    approvalStates: {},
+    reviewRequests: {},
+    reviews: [],
+    pullRequest: null,
+    assignee: record.assignee ?? '',
+    requiredReviewer: '',
+    reopened: {},
+    workspaceBacked: false,
+    workspace: null,
+    archived: false,
+    stageSync: { behind: false, behindFiles: [], ahead: false },
+    // Local-workspace-only extras — never present for a server-backed
+    // instance — that the save/render/advance/gate-check code paths below
+    // branch on.
+    isLocalWorkspace: true,
+    localWorkspaceId: workspaceId,
+    localDefinitionVersion: definitionVersion,
+  }
+}
+
+/**
+ * Builds the `{ definitionId, definitionVersion, instanceYaml, moduleFiles }`
+ * payload `/api/local/*` (A3, lib/localWorkspace.js's `runLocalWorkspaceCompute`)
+ * expects, from the local instance's current on-disk files — always freshly
+ * read, so a gate check/validate/render always reflects the latest save.
+ */
+async function buildLocalComputePayload(instance) {
+  const handle = localDirHandle.value
+  if (!handle) throw new Error('Local workspace folder is not open.')
+  const slug = instance.slug
+  const instanceYaml = await readLocalTextFile(handle, `gantry-workspace/${slug}/instance.yaml`)
+  const moduleFiles = {}
+  const entries = await listLocalDir(handle, `gantry-workspace/${slug}/modules`).catch(() => [])
+  for (const entry of entries) {
+    if (entry.kind !== 'file' || !entry.name.endsWith('.md')) continue
+    const moduleId = entry.name.slice(0, -'.md'.length)
+    moduleFiles[moduleId] = await readLocalTextFile(handle, `gantry-workspace/${slug}/modules/${entry.name}`)
+  }
+  return { definitionId: instance.definition, definitionVersion: instance.localDefinitionVersion, instanceYaml, moduleFiles }
+}
+
+// The message shown wherever a `/api/local/*` call fails because the server
+// can't be reached at all (a genuine network error, not a 4xx/5xx response)
+// — ADR-0029's "Offline" section: gate check/validate/render need the
+// server, editing and saving never do.
+const LOCAL_OFFLINE_MESSAGE = 'Connect to the gantry server to check status / validate / render.'
+
+/**
+ * POSTs one `/api/local/<operation>` request (status | check | validate |
+ * render) built from the local instance's current on-disk files. A network
+ * failure (server unreachable) throws an `Error` with `.offline = true`
+ * carrying `LOCAL_OFFLINE_MESSAGE`, distinct from a real 4xx/5xx response —
+ * callers show the offline message only for the former.
+ */
+async function runLocalCompute(operation, instance, extra = {}) {
+  const payload = { ...(await buildLocalComputePayload(instance)), ...extra }
+  let res
+  try {
+    res = await fetch(`/api/local/${operation}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+  } catch {
+    const err = new Error(LOCAL_OFFLINE_MESSAGE)
+    err.offline = true
+    throw err
+  }
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(body.error ?? body.message ?? `Local ${operation} failed (${res.status})`)
+  return body
 }
 
 // ---------- Navigation heading helpers (WI232) ----------
@@ -119,6 +343,15 @@ async function loadInstance(slug, stageId) {
 }
 
 async function fetchAssets(slug, stageId) {
+  const instance = instanceData.value
+  if (instance?.isLocalWorkspace && instance.slug === slug) {
+    const handle = localDirHandle.value
+    if (!handle) return []
+    const entries = await listLocalDir(handle, `gantry-workspace/${slug}/assets`).catch(() => [])
+    return entries
+      .filter((e) => e.kind === 'file')
+      .map((e) => ({ id: e.name, filename: e.name, name: e.name, source: '', uploadedBy: '', usedIn: [] }))
+  }
   const params = new URLSearchParams()
   if (slug) params.set('slug', slug)
   if (stageId) params.set('stage', stageId)
@@ -132,7 +365,20 @@ async function fetchAssets(slug, stageId) {
   return res.json()
 }
 
+// Local-workspace asset ids are just their filename (mirrors the
+// workspace-backed/repo-as-asset-store convention already used for
+// Azure-DevOps-backed instances, `lib/server.js`'s GET /api/instance/assets)
+// — scoped down from the server-local path's generated ids, since a local
+// workspace has no server-side registry to hand one out from.
 async function uploadAsset({ slug, filename, dataBase64, name, source, uploadedBy }) {
+  const instance = instanceData.value
+  if (instance?.isLocalWorkspace && instance.slug === slug) {
+    const handle = localDirHandle.value
+    if (!handle) throw new Error('Local workspace folder is not open.')
+    const bytes = Uint8Array.from(atob(dataBase64 ?? ''), (c) => c.charCodeAt(0))
+    await writeLocalBinaryFile(handle, `gantry-workspace/${slug}/assets/${filename}`, bytes)
+    return { id: filename, filename, name: name || filename, source: source ?? '', uploadedBy: uploadedBy ?? '' }
+  }
   const qs = slug ? `?slug=${encodeURIComponent(slug)}` : ''
   const res = await apiFetchForInstance(slug, `/api/instance/assets${qs}`, {
     method: 'POST',
@@ -192,6 +438,24 @@ effect(() => {
   const slug = currentSlug.value
   if (!slug) return
   const stageId = viewedStage.value
+  const local = localWorkspaceParam.value
+  void localRetryTick.value // re-subscribe so a "Grant access" retry re-runs this effect
+  if (local) {
+    localGrantNeeded.value = false
+    loadLocalInstance(local.id, slug, stageId)
+      .then((data) => {
+        instanceData.value = data
+        loadError.value = null
+      })
+      .catch((err) => {
+        if (err.needsGrant) {
+          localGrantNeeded.value = true
+          return
+        }
+        loadError.value = err.message
+      })
+    return
+  }
   loadInstance(slug, stageId)
     .then((data) => {
       instanceData.value = data
@@ -760,9 +1024,10 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
       view.dispatch({ effects: wrapCompartment.reconfigure(wrap.value ? EditorView.lineWrapping : []) })
     })
 
-    // Re-render when the asset source map becomes available (initial async load) — citations depend on it, but the preview was already rendered once without them (#147).
+    // Re-render when the asset source map becomes available (initial async load) — citations depend on it, but the preview was already rendered once without them (#147). Also re-renders once a local-workspace asset's object URL resolves (WI #297) — the first render of an `asset:<id>` reference in a local instance has no URL yet (readBinaryFile is async), so this fires again once localAssetUrls picks it up.
     const stopAssetSourceSync = effect(() => {
       const _sources = assetSources.value
+      const _localUrls = localAssetUrls.value
       if (viewRef.current && previewRef.current) renderPreview(previewRef.current, viewRef.current.state.doc.toString())
     })
 
@@ -1020,6 +1285,44 @@ function ModuleCard({ mod, stageId, onFieldRegistered, visibleFieldIds }) {
       )
     })
     setStatus('Saving…')
+
+    // A local-workspace instance (ADR-0029, WI #297) saves straight through
+    // the directory handle — no server round-trip, so this keeps working
+    // with the gantry server unreachable (ADR-0029's "Offline" section).
+    // Completeness is computed here from each field's own `required` flag
+    // rather than by calling `/api/local/status` — a deliberate scope-down
+    // from the server-backed path's full `getStatus` (which also considers
+    // requiredAt-by-gate and artefact `requires`): good enough for an
+    // immediate "did I fill in the required fields" signal without a
+    // network call, at the cost of not distinguishing "required for this
+    // gate" from "required always". The gate check panel below still runs
+    // the real `/api/local/check` before Advance.
+    const instanceForSave = instanceData.value
+    if (instanceForSave?.isLocalWorkspace) {
+      try {
+        const handle = localDirHandle.value
+        if (!handle) throw new Error('Local workspace folder is not open.')
+        const moduleSpec = {
+          id: mod.id,
+          title: mod.title,
+          fields: mod.fields.filter((f) => !f.custom).map((f) => ({ id: f.id, title: f.title, type: f.type })),
+        }
+        const text = renderLocalModuleInstanceFile(mod.id, moduleSpec, { status: mod.status, owner: mod.owner, fields, layout })
+        await writeLocalTextFile(handle, localModuleFilesPath(instanceForSave.slug, mod.id), text)
+        const outstanding = mod.fields
+          .filter((f) => {
+            if (!f.required) return false
+            const value = fields[f.id]
+            return Array.isArray(value) ? value.length === 0 : !value || !String(value).trim()
+          })
+          .map((f) => f.title)
+        setStatus(outstanding.length ? `Saved — outstanding: ${outstanding.join(', ')}` : 'Saved — complete.')
+      } catch (err) {
+        setStatus(`Save failed: ${err.message}`)
+      }
+      return
+    }
+
     // `slug` is required here (not just `stage`) now that a server can host any number of instances at once with no fixed default (#88/#92) — without it, this PUT only ever resolved against whichever slug (if any) the server happened to be started with, silently 400ing for every other instance a multi-instance deployment serves. Surfaced by #94's own "Open instance ... allows editing end-to-end" acceptance criterion once a freshly adopted/created instance had no such server-pinned default to fall back on.
     const params = new URLSearchParams({ stage: stageId, slug: currentSlug.value })
     const res = await apiFetchForInstance(currentSlug.value, `/api/instance/modules/${mod.id}?${params}`, {
@@ -1516,6 +1819,24 @@ function RenderDialog({ instance, onClose }) {
     const slug = currentSlug.value
     for (const artefact of artefacts) {
       setStatus([...lines, { text: `Rendering ${artefact.title}…` }])
+      if (instance.isLocalWorkspace) {
+        try {
+          const body = await runLocalCompute('render', instance, { artefact: artefact.id })
+          const handle = localDirHandle.value
+          if (!handle) throw new Error('Local workspace folder is not open.')
+          const mdPath = `gantry-workspace/${slug}/out/${body.basename}.md`
+          const docxPath = `gantry-workspace/${slug}/out/${body.basename}.docx`
+          await writeLocalTextFile(handle, mdPath, body.markdown)
+          const docxBytes = Uint8Array.from(atob(body.docxBase64), (c) => c.charCodeAt(0))
+          await writeLocalBinaryFile(handle, docxPath, docxBytes)
+          // No download link — the file is already in the user's own folder (ADR-0029), so this reports the local relative path instead of a URL.
+          lines.push({ title: artefact.title, path: docxPath })
+        } catch (err) {
+          lines.push({ text: `${artefact.title}: render failed — ${err.offline ? LOCAL_OFFLINE_MESSAGE : err.message}` })
+        }
+        setStatus([...lines])
+        continue
+      }
       const res = await apiFetchForInstance(slug, `/api/instance/render/${artefact.id}?slug=${encodeURIComponent(slug)}`, {
         method: 'POST',
       })
@@ -2469,6 +2790,20 @@ function AdvanceStagePanel({ instance }) {
 
   async function handleCheckAndMaybeConfirm() {
     setStatus('Checking gate…')
+    if (instance.isLocalWorkspace) {
+      try {
+        const body = await runLocalCompute('check', instance)
+        if (!body.pass) {
+          setStatus(formatGateFailure(body))
+          return
+        }
+        setStatus('Gate passed.')
+        setConfirming(true)
+      } catch (err) {
+        setStatus(err.offline ? LOCAL_OFFLINE_MESSAGE : `Check failed: ${err.message}`)
+      }
+      return
+    }
     const res = await apiFetch(`/api/instance/check?slug=${encodeURIComponent(currentSlug.value)}`)
     const body = await res.json().catch(() => ({}))
     if (!res.ok) {
@@ -2483,7 +2818,49 @@ function AdvanceStagePanel({ instance }) {
     setConfirming(true)
   }
 
+  // Re-checks the gate through `/api/local/check` before writing the new
+  // stage (the same defense-in-depth the server-backed `advanceStage` path
+  // gets for free by re-evaluating the gate server-side) — a local instance
+  // has no server-side call of its own to fall back on for that, so this
+  // repeats the check done above rather than trusting the earlier PASS is
+  // still current.
+  async function handleConfirmAdvanceLocal() {
+    setConfirming(false)
+    setStatus('Advancing…')
+    try {
+      const checkBody = await runLocalCompute('check', instance)
+      if (!checkBody.pass) {
+        setStatus(formatGateFailure(checkBody))
+        return
+      }
+      const handle = localDirHandle.value
+      if (!handle) throw new Error('Local workspace folder is not open.')
+      const slug = instance.slug
+      const idx = instance.stages.findIndex((s) => s.id === instance.stage.id)
+      const nextStage = instance.stages[idx + 1]
+      if (!nextStage) {
+        setStatus('Already at the final stage.')
+        return
+      }
+      const instanceYamlText = await readLocalTextFile(handle, `gantry-workspace/${slug}/instance.yaml`)
+      const record = parseInstanceYaml(instanceYamlText)
+      await writeLocalTextFile(handle, `gantry-workspace/${slug}/instance.yaml`, withInstanceStage(record, nextStage.id))
+      setStatus(`Advanced to "${nextStage.title}".`)
+      const effectWillReload = viewedStage.value !== null
+      viewedStage.value = null
+      if (!effectWillReload) {
+        instanceData.value = await loadLocalInstance(instance.localWorkspaceId, slug, null)
+      }
+    } catch (err) {
+      setStatus(err.offline ? LOCAL_OFFLINE_MESSAGE : `Advance failed: ${err.message}`)
+    }
+  }
+
   async function handleConfirmAdvance() {
+    if (instance.isLocalWorkspace) {
+      await handleConfirmAdvanceLocal()
+      return
+    }
     setConfirming(false)
     setStatus('Advancing…')
     const res = await apiFetch(`/api/instance/advance-stage?slug=${encodeURIComponent(currentSlug.value)}`, {
@@ -3112,7 +3489,27 @@ function ModuleEditorPage({ slug: routeRef }) {
     batch(() => {
       instanceData.value = null
       loadError.value = null
+      localGrantNeeded.value = false
+      localDirHandle.value = null
     })
+
+    // A local-workspace instance (ADR-0029) is opened at
+    // `/instance/<slug>?local=<id>&slug=<slug>` — the convention A4's wizard
+    // already writes (web/pages/new-workspace-wizard.js's openLocalInstance).
+    // Detected here, off the route's own query string, the same convention
+    // every other route in this app already uses for its query params.
+    const searchParams = new URLSearchParams(window.location.search)
+    const localId = searchParams.get('local')
+    if (localId) {
+      const localSlug = searchParams.get('slug') || routeRef
+      batch(() => {
+        localWorkspaceParam.value = { id: localId, slug: localSlug }
+        currentSlug.value = localSlug
+        viewedStage.value = null
+      })
+      return
+    }
+    localWorkspaceParam.value = null
 
     // A numeric reference (WI200, docs/adr/0024) resolves through the server first — the one
     // source of truth for what it means — then pins `currentSlug`/`viewedStage` to the *real*
@@ -3241,6 +3638,25 @@ function ModuleEditorPage({ slug: routeRef }) {
     }
   }
 
+  // A remembered local-workspace handle's permission has lapsed (the normal
+  // state after a reload, `web/lib/localWorkspace.js`'s `ensurePermission`
+  // doc comment) — same "Grant access" affordance the wizard's own
+  // recent-workspaces list uses, rather than a raw load error.
+  if (localGrantNeeded.value) {
+    return html`
+      <div class="wizard-field" id="local-editor-grant-needed">
+        <p class="inline-error">This local workspace needs permission again in this browser.</p>
+        <button
+          type="button"
+          class="btn primary"
+          id="local-editor-grant"
+          onClick=${() => (localRetryTick.value += 1)}
+        >
+          Grant access
+        </button>
+      </div>
+    `
+  }
   if (error) return html`<p class="load-error">Failed to load: ${error}</p>`
   // Compared against `currentSlug` (the real slug the route's own ref/slug already resolved to),
   // not the raw `routeRef` prop — a numeric reference (WI200) never equals `instance.slug` itself.
