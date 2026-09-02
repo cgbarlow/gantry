@@ -472,3 +472,62 @@ test('local-workspace instance: the Instance Switcher\'s "+ New Instance" link j
     }
   })
 })
+
+// Regression: the wizard's own preselection signals (preselectedWorkspaceId/
+// preselectedLocalWorkspaceId/step/etc., web/pages/new-workspace-wizard.js)
+// are module-scoped, not component-scoped — client-side routing (preact-iso)
+// never remounts that module between visits within one SPA session. Once the
+// Instance Switcher's own "+ New Instance" shortcut above has driven
+// `step.value` to `'instance'`, a *later*, unrelated visit to the dashboard's
+// plain "+ New Workspace" link (no `?workspace=`/`?local=`) previously landed
+// on that same stale `'instance'` step instead of a genuine fresh
+// workspace-creation flow — reported directly by the user.
+test('a later plain "+ New Workspace" visit is not left on a stale "New Instance" shortcut from an earlier Instance Switcher visit', async () => {
+  await withRunningServer({}, async (base) => {
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      await page.addInitScript(() => {
+        FileSystemDirectoryHandle.prototype.queryPermission = async () => 'granted'
+        FileSystemDirectoryHandle.prototype.requestPermission = async () => 'granted'
+      })
+      const pageErrors = []
+      page.on('pageerror', (err) => pageErrors.push(err.message))
+
+      const slug = 'local-claims'
+      await page.goto(`${base}/`)
+      const workspaceId = await seedLocalWorkspace(page, slug)
+      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}&slug=${slug}`)
+      await page.waitForSelector('.module', { timeout: 10_000 })
+
+      // Drive the shortcut once, exactly as the test above does.
+      await page.getByRole('button', { name: 'Switch instance' }).click()
+      const menu = page.locator('.instance-switcher .menu')
+      await menu.waitFor({ state: 'visible', timeout: 5_000 })
+      await menu.getByRole('link', { name: '+ New Instance' }).click()
+      await page.waitForSelector('#instance-name', { timeout: 5_000 })
+      assert.equal(await page.locator('main.wizard-page > h2').textContent(), 'New Instance')
+
+      // Back Home via the wizard's own in-app link (client-side navigation —
+      // the whole point: a full page.goto() would reset module state on its
+      // own and mask this bug regardless of the fix).
+      await page.getByRole('link', { name: '← Workspaces' }).click()
+      await page.waitForSelector('.master-detail, .dashboard-empty', { timeout: 10_000 })
+
+      // A genuinely unrelated, later "+ New Workspace" visit.
+      await page.getByRole('link', { name: '+ New Workspace' }).first().click()
+      await page.waitForSelector('main.wizard-page h2', { timeout: 5_000 })
+
+      assert.equal(await page.locator('main.wizard-page > h2').textContent(), 'New Workspace')
+      // The real workspace-creation flow — a location toggle, not the
+      // instance-creation step's definition picker.
+      assert.ok(await page.locator('button:has-text("Local")').count() > 0, 'Workspace location toggle is present')
+      assert.equal(await page.locator('#instance-name').count(), 0, 'must not skip straight to instance creation')
+
+      assert.deepEqual(pageErrors, [])
+    } finally {
+      await browser.close()
+    }
+  })
+})

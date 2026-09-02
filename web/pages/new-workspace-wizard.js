@@ -2398,6 +2398,27 @@ function ImportForgetPrompt() {
 // this is the one place that tells them apart.
 export function NewWorkspaceWizardPage({ query }) {
   useEffect(() => {
+    // Every wizard signal above is module-scoped, not component-scoped —
+    // `preact-iso`'s client-side routing never remounts this module between
+    // visits. That's deliberate and correct for a genuine mid-flow revisit
+    // (#137: Home then the browser's own Back button must resume exactly
+    // where the architect left off) — so this must NOT reset unconditionally
+    // on every mount, only undo a *shortcut* jump (`?workspace=`/`?local=`,
+    // below) that a later, unrelated, non-shortcut visit inherited. Without
+    // this: open an instance, use the Instance Switcher's own "+ New
+    // Instance" shortcut (setting `instanceStepIsShortcut.value = true` and
+    // `step.value = 'instance'` below), then navigate Home and click the
+    // dashboard's plain "+ New Workspace" link (no query params) — that
+    // visit would still be sitting on the stale shortcut's `'instance'`
+    // step, skipping straight into creating an instance under whichever
+    // workspace the shortcut had preselected instead of actually offering to
+    // create/pick one. Scoped to exactly that: only when arriving with no
+    // shortcut query param at all, and only when the *previous* visit was
+    // itself a shortcut (never a genuine step-by-step flow, which never sets
+    // this flag) — reported directly by the user.
+    if (!query?.workspace && !query?.local && instanceStepIsShortcut.value) {
+      resetWizard()
+    }
     const ws = query?.workspace
     if (ws) {
       preselectedWorkspaceId.value = ws
