@@ -100,6 +100,44 @@ test('POST /api/local/render returns non-empty markdown and a .docx that decodes
   })
 })
 
+// WI314 — /api/local/compile is /api/local/render's dry-run sibling for the client-side WASM
+// Pandoc render path: markdown + which reference-doc file to fetch, no `pandoc` subprocess, no
+// docxBase64 at all (the browser produces that itself).
+test('POST /api/local/compile returns non-empty markdown, a reference-doc, and no docxBase64 — no pandoc subprocess involved', async () => {
+  await withRunningServer({}, async (base) => {
+    const before = tmpSandboxes()
+    const res = await post(base, 'compile', { ...payloadFromDiskInstance(), artefact: 'soap' })
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    assert.equal(body.artefact, 'soap')
+    assert.ok(body.markdown.length > 0, 'markdown should be non-empty')
+    assert.match(body.markdown, /Solution on a Page/)
+    assert.match(body.markdown, /## Document Control/)
+    assert.equal(body.docxBase64, undefined)
+    assert.equal(typeof body.referenceDocBase64, 'string')
+    // A real reference.docx, not just an opaque non-empty string — same PK zip signature the
+    // /api/local/render docx assertion checks.
+    assert.equal(Buffer.from(body.referenceDocBase64, 'base64').subarray(0, 2).toString(), 'PK')
+    // Sandbox torn down after a successful request, same as every other /api/local/* op.
+    assert.deepEqual(tmpSandboxes().filter((n) => !before.includes(n)), [])
+  })
+})
+
+test('POST /api/local/compile produces the exact markdown POST /api/local/render goes on to convert with pandoc', async () => {
+  await withRunningServer({}, async (base) => {
+    const compileRes = await post(base, 'compile', { ...payloadFromDiskInstance(), artefact: 'soap' })
+    const renderRes = await post(base, 'render', { ...payloadFromDiskInstance(), artefact: 'soap' })
+    const compileBody = await compileRes.json()
+    const renderBody = await renderRes.json()
+    // Both compiled independently (different temp sandboxes, different commit-info reads at
+    // slightly different instants) — the Document Control commit hash/date can legitimately
+    // differ between them only if run across a real commit boundary, which never happens in a
+    // test run, so the two markdown strings are byte-identical here.
+    assert.equal(compileBody.markdown, renderBody.markdown)
+    assert.equal(compileBody.basename, renderBody.basename)
+  })
+})
+
 test('an oversized request body is rejected with 413 and leaves no sandbox behind', async () => {
   await withRunningServer({}, async (base) => {
     const before = tmpSandboxes()
@@ -202,9 +240,10 @@ test('runLocalWorkspaceCompute requires a usable instanceYaml for non-validate o
   )
 })
 
-test('runLocalWorkspaceCompute requires artefact for render and a stage for status/check', async () => {
+test('runLocalWorkspaceCompute requires artefact for render/compile and a stage for status/check/compile', async () => {
   const yaml = 'slug: local\nstage: shape\n'
   await expectRequestError('render', { definitionId: 'design', instanceYaml: yaml }, { match: /artefact is required/ })
+  await expectRequestError('compile', { definitionId: 'design', instanceYaml: yaml }, { match: /artefact is required/ })
   await expectRequestError(
     'status',
     { definitionId: 'design', instanceYaml: 'slug: local\n' },
@@ -214,6 +253,11 @@ test('runLocalWorkspaceCompute requires artefact for render and a stage for stat
     'check',
     { definitionId: 'design', instanceYaml: 'slug: local\n' },
     { match: /must set "stage", or pass "gate"/ }
+  )
+  await expectRequestError(
+    'compile',
+    { definitionId: 'design', instanceYaml: 'slug: local\n', artefact: 'soap' },
+    { match: /must set "stage"/ }
   )
 })
 

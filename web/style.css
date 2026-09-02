@@ -1426,7 +1426,7 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .settings-page .settings-section { margin-bottom: 36px; }
 .settings-page .settings-section h2 { font-family: var(--font-display); font-weight: 600; font-size: 16px; margin: 0 0 6px; }
 .settings-page .settings-section .guidance { margin: 0 0 14px; max-width: 60ch; }
-.settings-pat-status { margin-bottom: 10px; }
+.settings-pat-status, .settings-render-engine-status { margin-bottom: 10px; }
 .settings-actions { display: flex; gap: 10px; }
 
 .settings-checkbox { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }

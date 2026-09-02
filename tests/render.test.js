@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { renderArtefact, renderStageArtefacts } from '../lib/render.js'
+import { renderArtefact, renderStageArtefacts, prepareAzureDevOpsWasmRender, finishAzureDevOpsWasmRender } from '../lib/render.js'
 import { createAsset } from '../lib/assets.js'
 import { loadDefinition } from '../lib/definition.js'
 import { readModule, writeModule } from '../lib/instance.js'
@@ -468,6 +468,146 @@ test('a render against Azure DevOps reads instance/module data from, and pushes 
       // 'main' has no ref at all — nothing was ever read from or pushed to
       // it by this render.
       await assert.rejects(() => client.getFileContent(result.azureDevOpsPath), AzureDevOpsNotFoundError)
+    }
+  )
+})
+
+// --- WI314: the client-side WASM Pandoc render path's server-side halves ---
+// (web/lib/pandocWasm.js does the actual browser-side conversion — see tests/pandocWasm.test.js
+// and tests/*.playwright.test.js for that half; these tests cover only what still runs here.)
+
+test('a dry run reports which reference-doc file a real render would use, so the WASM render path can fetch its bytes without ever calling pandoc itself', () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    const result = renderArtefact('examples', 'soap', { dryRun: true, instancesDir })
+    assert.equal(result.dryRun, true)
+    assert.match(result.referenceDocPath, /reference-soap\.docx$/)
+    assert.equal(existsSync(result.referenceDocPath), true)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('a real (non-dry-run) render also reports the reference-doc path it just used to pandoc, not just the dry run', () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    const result = renderArtefact('examples', 'soap', { instancesDir })
+    assert.equal(result.dryRun, false)
+    assert.match(result.referenceDocPath, /reference-soap\.docx$/)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('an artefact with neither an artefact-specific nor a definition-level reference doc reports referenceDocPath: null, not a path to a file that does not exist', () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'gantry-definitions-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('definitions/design', join(definitionsDir, 'design'), { recursive: true })
+    rmSync(join(definitionsDir, 'design', '1', 'templates', 'reference.docx'), { force: true })
+    rmSync(join(definitionsDir, 'design', '1', 'templates', 'reference-soap.docx'), { force: true })
+    const result = renderArtefact('examples', 'soap', { dryRun: true, instancesDir, definitionsDir })
+    assert.equal(result.referenceDocPath, null)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+    rmSync(definitionsDir, { recursive: true, force: true })
+  }
+})
+
+test('prepareAzureDevOpsWasmRender pushes a footer-less draft via native pandoc to learn the commit, then returns the Document-Control-complete pass-2 markdown plus the reference-doc path for the browser to convert itself', async () => {
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: seedExamplesAzureDevOpsFiles() },
+    async (baseUrl) => {
+      const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl }
+      const prepared = await prepareAzureDevOpsWasmRender('examples', 'soap', { azureDevOps })
+
+      assert.equal(prepared.dryRun, true)
+      assert.match(prepared.commit.hash, /^[0-9a-f]{7}$/)
+      assert.match(prepared.commit.fullHash, /^[0-9a-f]{40}$/)
+      assert.match(prepared.referenceDocPath, /reference-soap\.docx$/)
+      // WI226: basename is "<Instance name> - <Full artefact title>", not the bare artefact id.
+      assert.match(prepared.azureDevOpsPath, /gantry-workspace\/examples\/out\/.*\.docx$/)
+      assert.equal(prepared.branch, undefined) // no branch was given — matches the native path's own 'main' default handling
+
+      // pass-2's markdown already names the learned commit — the browser converts *this*, not a footer-less draft.
+      const commitLink = '[`' + prepared.commit.hash + '`](' + baseUrl + `/fake-org/fake-project/_git/fake-repo/commit/${prepared.commit.fullHash})`
+      assert.match(prepared.markdown, new RegExp(`\\| Commit \\| ${escapeRegExp(commitLink)} \\|`))
+
+      // The pass-1 (draft) push already landed — footer-less, immediately about to be overwritten by "finish" below — confirming the two-push shape survived the refactor into prepare/finish.
+      const client = createAzureDevOpsClient(azureDevOps)
+      const draftContent = await client.getFileContent(prepared.azureDevOpsPath)
+      const draftMarkdown = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown'], {
+        input: Buffer.from(draftContent, 'base64'),
+        encoding: 'utf8',
+      })
+      assert.match(draftMarkdown, /Document Control/)
+      assert.doesNotMatch(draftMarkdown, new RegExp(escapeRegExp(prepared.commit.hash)))
+    }
+  )
+})
+
+test('finishAzureDevOpsWasmRender pushes the caller-supplied (browser-converted) bytes verbatim as the final artefact, at the same path prepare named', async () => {
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: seedExamplesAzureDevOpsFiles() },
+    async (baseUrl) => {
+      const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl }
+      const prepared = await prepareAzureDevOpsWasmRender('examples', 'soap', { azureDevOps })
+
+      // Stand-in for "what the browser's pandoc-wasm module produced" — a real, well-formed
+      // docx converted from prepare's own pass-2 markdown, via native pandoc, purely so this
+      // test can assert on real, well-formed bytes rather than an opaque placeholder Buffer.
+      const scratchDir = mkdtempSync(join(tmpdir(), 'gantry-wasm-finish-'))
+      const mdPath = join(scratchDir, 'pass2.md')
+      const docxPath = join(scratchDir, 'pass2.docx')
+      writeFileSync(mdPath, prepared.markdown)
+      execFileSync('pandoc', ['-f', 'markdown', '-t', 'docx', '--reference-doc', prepared.referenceDocPath, '-o', docxPath, mdPath])
+      const docxBytes = readFileSync(docxPath)
+      rmSync(scratchDir, { recursive: true, force: true })
+
+      const finished = await finishAzureDevOpsWasmRender(docxBytes, {
+        azureDevOps,
+        azureDevOpsPath: prepared.azureDevOpsPath,
+        branch: prepared.branch,
+        commit: prepared.commit,
+        artefactId: 'soap',
+      })
+      assert.equal(finished.azureDevOpsPath, prepared.azureDevOpsPath)
+
+      const client = createAzureDevOpsClient(azureDevOps)
+      const storedContent = await client.getFileContent(prepared.azureDevOpsPath)
+      assert.equal(Buffer.from(storedContent, 'base64').toString('base64'), docxBytes.toString('base64'))
+    }
+  )
+})
+
+test('finishAzureDevOpsWasmRender fails with a clear error naming the already-landed draft commit when its own push fails, mirroring the fully-server-side path\'s own failure message', async () => {
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      files: seedExamplesAzureDevOpsFiles(),
+      // The draft (prepare's own) push succeeds; the "finish" push below is the one that fails.
+      failAfterPushes: 1,
+    },
+    async (baseUrl) => {
+      const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl }
+      const prepared = await prepareAzureDevOpsWasmRender('examples', 'soap', { azureDevOps })
+      await assert.rejects(
+        () =>
+          finishAzureDevOpsWasmRender(Buffer.from('fake docx bytes'), {
+            azureDevOps,
+            azureDevOpsPath: prepared.azureDevOpsPath,
+            branch: prepared.branch,
+            commit: prepared.commit,
+            artefactId: 'soap',
+          }),
+        { message: /pushed it to Azure DevOps as commit [0-9a-f]{7}, but the follow-up push that adds the commit-hash\/date Document Control failed/ }
+      )
     }
   )
 })

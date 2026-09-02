@@ -25,6 +25,8 @@ import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, worksp
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
 import { advancedMode } from './lib/advancedMode.js'
+import { renderEngine } from './lib/renderEngine.js'
+import { warmLoadPandocWasm, renderDocxWithWasm } from './lib/pandocWasm.js'
 // Two call sites want this module's file/permission helpers under different
 // local names: A5's dashboard recovery UI (further down this file) calls
 // them bare; A6's editor wiring (loadLocalInstance and friends, just below)
@@ -317,6 +319,129 @@ async function runLocalCheck(instance, options = {}) {
   const handle = localDirHandle.value
   if (!handle) throw new Error('Local workspace folder is not open.')
   return checkLocalGate(handle, instance.slug, instance.localDefinitionStructure, instance.currentStageId, options)
+}
+
+// Uint8Array -> base64, chunked so `String.fromCharCode` never gets a multi-megabyte spread of
+// individual bytes in one call (some engines cap the argument count `apply`/spread can pass).
+// The mirror-image decode (`atob` + `Uint8Array.from(...,(c) => c.charCodeAt(0))`) is already
+// used inline below and needs no such chunking — `atob`'s own output isn't call-stack-bound.
+function bytesToBase64(bytes) {
+  const CHUNK = 0x8000
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+  }
+  return btoa(binary)
+}
+
+function base64ToBytes(base64) {
+  return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
+}
+
+// WI314 — the local-workspace half of the engine-aware Render action (RenderDialog's
+// handleRenderBatch, below). `'wasm'`: compiles the artefact server-side (dry run — no
+// `pandoc` subprocess, see /api/local/compile) and converts it to `.docx` in the browser via
+// pandoc-wasm, with no further server round-trip for the conversion itself — the acceptance
+// criterion this ticket is built around. Any failure in that attempt (the module never
+// finished loading, a mid-conversion error) is swallowed here and falls through to the exact
+// same native path `'native'` uses unconditionally: an explicit WASM selection never
+// hard-fails a render. Throws (never swallows) on a failure in that final, native leg — the
+// caller's own try/catch (handleRenderBatch) reports that exactly as it always has.
+async function renderLocalArtefactViaEngine(instance, artefact, slug) {
+  const handle = localDirHandle.value
+  if (!handle) throw new Error('Local workspace folder is not open.')
+
+  if (renderEngine.value === 'wasm') {
+    try {
+      const compiled = await runLocalCompute('compile', instance, { artefact: artefact.id })
+      const referenceDocBytes = compiled.referenceDocBase64 ? base64ToBytes(compiled.referenceDocBase64) : null
+      const docxBytes = await renderDocxWithWasm({ markdown: compiled.markdown, referenceDocBytes })
+      const mdPath = `gantry-workspace/${slug}/out/${compiled.basename}.md`
+      const docxPath = `gantry-workspace/${slug}/out/${compiled.basename}.docx`
+      await writeLocalTextFile(handle, mdPath, compiled.markdown)
+      await writeLocalBinaryFile(handle, docxPath, docxBytes)
+      return { title: artefact.title, path: docxPath }
+    } catch {
+      // Falls through to the native leg below.
+    }
+  }
+
+  const body = await runLocalCompute('render', instance, { artefact: artefact.id })
+  const mdPath = `gantry-workspace/${slug}/out/${body.basename}.md`
+  const docxPath = `gantry-workspace/${slug}/out/${body.basename}.docx`
+  await writeLocalTextFile(handle, mdPath, body.markdown)
+  await writeLocalBinaryFile(handle, docxPath, base64ToBytes(body.docxBase64))
+  return { title: artefact.title, path: docxPath }
+}
+
+// WI314 — the Azure-DevOps-hosted half of the engine-aware Render action. `'wasm'`: a
+// two-step round trip either side of the browser's own conversion (mirrors lib/render.js's
+// prepareAzureDevOpsWasmRender/finishAzureDevOpsWasmRender doc comment for the full two-push
+// rationale) — "prepare" returns the compiled markdown + reference-doc bytes and pushes a
+// footer-less draft (still native Pandoc — never seen by a user, immediately overwritten) to
+// learn the commit Azure DevOps assigns; this module then converts the *real*, Document-
+// Control-complete markdown to `.docx` in the browser; "finish" pushes those bytes as the
+// final commit — exactly where the fully-server-side path's own second push would land them.
+// Never throws: like the pre-existing native-only code this replaces, a failure — from either
+// step of the WASM attempt, or from the native leg itself — resolves to an error-shaped
+// status line rather than rejecting, so `handleRenderBatch` doesn't need its own try/catch
+// here (it never had one for this branch).
+//
+// `workspaceBacked` (WI #317 fix): the WASM leg only exists server-side for an
+// Azure-DevOps-hosted instance (`render-wasm-prepare`/`-finish`, gated on
+// `resolveAzureDevOpsLocation`) — this function's own callers previously assumed "not an
+// ADR-0029 local workspace" meant "Azure-DevOps-hosted", which misses a third, pre-existing
+// case: a legacy server-side local instance (`instance.workspaceBacked === false`, plain
+// `instancesDir` on the box running `gantry serve`, no Azure DevOps and no client-side
+// File System Access workspace either). For that case the WASM prepare call always 400s —
+// harmless in that the native fallback below still renders correctly, but it fires a doomed
+// request and a logged console error on every single render, real regression surface WI #317
+// caught. `false` (or omitted) skips the WASM attempt entirely and goes straight to the native
+// leg, exactly as this instance kind rendered before this ticket ever existed.
+async function renderAzureArtefactViaEngine(artefact, slug, workspaceBacked = false) {
+  if (workspaceBacked && renderEngine.value === 'wasm') {
+    try {
+      const prepRes = await apiFetchForInstance(
+        slug,
+        `/api/instance/render-wasm-prepare/${artefact.id}?slug=${encodeURIComponent(slug)}`,
+        { method: 'POST' }
+      )
+      const prep = await prepRes.json()
+      if (!prepRes.ok) throw new Error(prep.message ?? prep.error ?? `Prepare failed (${prepRes.status})`)
+
+      const referenceDocBytes = prep.referenceDocBase64 ? base64ToBytes(prep.referenceDocBase64) : null
+      const docxBytes = await renderDocxWithWasm({ markdown: prep.markdown, referenceDocBytes })
+
+      const finishRes = await apiFetchForInstance(
+        slug,
+        `/api/instance/render-wasm-finish/${artefact.id}?slug=${encodeURIComponent(slug)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            docxBase64: bytesToBase64(docxBytes),
+            azureDevOpsPath: prep.azureDevOpsPath,
+            branch: prep.branch,
+            commit: prep.commit,
+          }),
+        }
+      )
+      const finish = await finishRes.json()
+      if (!finishRes.ok) throw new Error(finish.message ?? finish.error ?? `Finish failed (${finishRes.status})`)
+      return { title: artefact.title, path: finish.azureDevOpsPath, url: finish.azureDevOpsUrl }
+    } catch {
+      // Falls through to the native leg below.
+    }
+  }
+
+  const res = await apiFetchForInstance(slug, `/api/instance/render/${artefact.id}?slug=${encodeURIComponent(slug)}`, {
+    method: 'POST',
+  })
+  const body = await res.json()
+  // Azure-DevOps-backed instances report `azureDevOpsPath` (where the pandoc-rendered .docx was pushed back to, in the same repo the rest of the instance's data lives in); local instances report `docxPath` (a path on the machine running `gantry serve`).
+  return res.ok
+    ? { title: artefact.title, path: body.azureDevOpsPath ?? body.docxPath, url: body.azureDevOpsPath ? body.azureDevOpsUrl : null }
+    : { text: `${artefact.title}: render failed — ${body.message ?? body.error}` }
 }
 
 // ---------- Navigation heading helpers (WI232) ----------
@@ -1868,36 +1993,15 @@ function RenderDialog({ instance, onClose }) {
       setStatus([...lines, { text: `Rendering ${artefact.title}…` }])
       if (instance.isLocalWorkspace) {
         try {
-          const body = await runLocalCompute('render', instance, { artefact: artefact.id })
-          const handle = localDirHandle.value
-          if (!handle) throw new Error('Local workspace folder is not open.')
-          const mdPath = `gantry-workspace/${slug}/out/${body.basename}.md`
-          const docxPath = `gantry-workspace/${slug}/out/${body.basename}.docx`
-          await writeLocalTextFile(handle, mdPath, body.markdown)
-          const docxBytes = Uint8Array.from(atob(body.docxBase64), (c) => c.charCodeAt(0))
-          await writeLocalBinaryFile(handle, docxPath, docxBytes)
           // No download link — the file is already in the user's own folder (ADR-0029), so this reports the local relative path instead of a URL.
-          lines.push({ title: artefact.title, path: docxPath })
+          lines.push(await renderLocalArtefactViaEngine(instance, artefact, slug))
         } catch (err) {
           lines.push({ text: `${artefact.title}: render failed — ${err.offline ? LOCAL_OFFLINE_MESSAGE : err.message}` })
         }
         setStatus([...lines])
         continue
       }
-      const res = await apiFetchForInstance(slug, `/api/instance/render/${artefact.id}?slug=${encodeURIComponent(slug)}`, {
-        method: 'POST',
-      })
-      const body = await res.json()
-      // Azure-DevOps-backed instances report `azureDevOpsPath` (where the pandoc-rendered .docx was pushed back to, in the same repo the rest of the instance's data lives in); local instances report `docxPath` (a path on the machine running `gantry serve`).
-      lines.push(
-        res.ok
-          ? {
-              title: artefact.title,
-              path: body.azureDevOpsPath ?? body.docxPath,
-              url: body.azureDevOpsPath ? body.azureDevOpsUrl : null,
-            }
-          : { text: `${artefact.title}: render failed — ${body.message ?? body.error}` }
-      )
+      lines.push(await renderAzureArtefactViaEngine(artefact, slug, instance.workspaceBacked))
       setStatus([...lines])
     }
     setRendering(false)
@@ -3937,9 +4041,14 @@ async function runRender(slug) {
   if (!detail.artefacts.length) return 'No artefact available to render for this stage yet.'
   const results = []
   for (const artefact of detail.artefacts) {
-    const res = await apiFetchForInstance(slug, `/api/instance/render/${artefact.id}?slug=${encodeURIComponent(slug)}`, { method: 'POST' })
-    const body = await res.json()
-    results.push(res.ok ? `Rendered ${artefact.title}` : `${artefact.title} failed: ${body.message ?? body.error}`)
+    // WI314 — the dashboard swimlane's own quick-action "Render" (distinct from the module
+    // editor's RenderDialog above, same engine-aware helper): this view only ever lists
+    // registered (Azure-DevOps-hosted or plain-local) instances, never an ADR-0029
+    // local-workspace one. `detail.workspaceBacked` (WI #317 fix) tells the two apart — a
+    // plain-local instance skips the WASM leg entirely rather than firing a doomed
+    // render-wasm-prepare call before falling through to the native path.
+    const line = await renderAzureArtefactViaEngine(artefact, slug, detail.workspaceBacked)
+    results.push(line.text ?? `Rendered ${artefact.title}`)
   }
   return results.join(' · ')
 }
@@ -4814,5 +4923,12 @@ function App() {
     ${promptOpen.value ? html`<${PatPromptModal} />` : null}
   `
 }
+
+// WI314 — warm-load pandoc-wasm as soon as gantry opens (not gated behind opening Preview or
+// clicking Render): fire-and-forget, never awaited here, so a slow/failed load never delays
+// this module's own first paint below. web/lib/pandocWasm.js's own `pandocWasmState` signal
+// (read by Global Settings and the Render action) is how the rest of the app observes how
+// this turns out.
+warmLoadPandocWasm().catch(() => {})
 
 render(html`<${App} />`, document.getElementById('app'))

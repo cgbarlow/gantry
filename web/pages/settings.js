@@ -15,6 +15,8 @@ import {
 } from '../lib/credential.js'
 import { TICKETING_SYSTEMS, defaultTicketingSystem, setDefaultTicketingSystem } from '../lib/ticketingSystem.js'
 import { advancedMode, setAdvancedMode } from '../lib/advancedMode.js'
+import { renderEngine, setRenderEngine } from '../lib/renderEngine.js'
+import { pandocWasmState } from '../lib/pandocWasm.js'
 import { apiFetch, apiFetchForInstance } from '../lib/apiFetch.js'
 import { IdentityPicker } from '../lib/identityPicker.js'
 // #303 — the local-workspace-aware branches of Workspace/Instance Settings
@@ -150,11 +152,83 @@ function AdvancedModeSection() {
   `
 }
 
+// WI314 — WASM Pandoc (default) vs. native server-side Pandoc, for every Render action, both
+// local-workspace and Azure-DevOps-hosted. Not gated behind `advancedMode` (unlike the
+// PAT/ticketing sections above): rendering is a base gantry feature every user has, whether
+// or not they ever touch Azure DevOps ticketing.
+//
+// The status line is sourced from pandocWasm.js's own live `pandocWasmState` signal — never a
+// static "WASM enabled" claim — so it always reflects what a render right now would actually
+// do. The one state this section is careful to spell out rather than just label "unavailable":
+// WASM selected but not ready yet means renders are *currently* falling through to native,
+// not that they're broken — the render itself always succeeds either way (renderEngine.js's
+// own doc comment; web/app.js's Render action).
+function RenderEngineSection() {
+  const engine = renderEngine.value
+  const wasmState = pandocWasmState.value
+
+  let statusText
+  let statusStamp
+  if (wasmState === 'ready') {
+    statusText = 'Pandoc WASM: ready.'
+    statusStamp = 'agreed'
+  } else if (wasmState === 'loading') {
+    statusText =
+      engine === 'wasm'
+        ? 'Pandoc WASM: loading… renders will use native Pandoc until this finishes.'
+        : 'Pandoc WASM: loading…'
+    statusStamp = 'draft'
+  } else {
+    statusText =
+      engine === 'wasm'
+        ? 'Pandoc WASM: unavailable — renders are currently using native Pandoc instead.'
+        : 'Pandoc WASM: unavailable.'
+    statusStamp = 'review'
+  }
+
+  return html`
+    <section class="settings-section">
+      <h2>Render engine</h2>
+      <p class="guidance">
+        Which Pandoc converts a Render action's Markdown into a <code>.docx</code> — WASM Pandoc
+        runs entirely in this browser (no server round-trip for the conversion itself); native Pandoc
+        runs server-side, exactly as gantry always has. Both produce the same reference-doc styling.
+      </p>
+      <div class="settings-radio-group" role="radiogroup" aria-label="Render engine">
+        <label class="settings-radio">
+          <input
+            type="radio"
+            name="render-engine"
+            value="wasm"
+            checked=${engine === 'wasm'}
+            onChange=${() => setRenderEngine('wasm')}
+          />
+          WASM Pandoc (default)
+        </label>
+        <label class="settings-radio">
+          <input
+            type="radio"
+            name="render-engine"
+            value="native"
+            checked=${engine === 'native'}
+            onChange=${() => setRenderEngine('native')}
+          />
+          Native Pandoc
+        </label>
+      </div>
+      <div class="settings-render-engine-status">
+        <span class=${'stamp ' + statusStamp}>${statusText}</span>
+      </div>
+    </section>
+  `
+}
+
 export function GlobalSettingsPage({ query }) {
   return html`
     <${SettingsHeader} title="Settings" backHref=${backHrefFrom(query)} />
     <main class="settings-page">
       <${AdvancedModeSection} />
+      <${RenderEngineSection} />
       ${advancedMode.value ? html`<${GlobalPatSection} />` : null}
       ${advancedMode.value ? html`<${TicketingSystemSection} />` : null}
     </main>
