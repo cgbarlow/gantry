@@ -213,6 +213,7 @@ test('settings: from a local-workspace instance, the Settings dropdown\'s Worksp
       assert.equal(await page.locator('.workspace-field-row input[type=text]').inputValue(), 'a.architect')
       assert.match(await page.locator('.settings-section', { hasText: 'Instance info' }).textContent(), new RegExp(slug))
       assert.match(await page.locator('.settings-section', { hasText: 'Instance info' }).textContent(), /design/)
+      assert.match(await page.locator('.settings-section', { hasText: 'Instance info' }).textContent(), /Version.*v1/s)
       assert.match(
         await page.locator('.settings-section', { hasText: 'Azure DevOps work item' }).textContent(),
         /don't support Azure DevOps ticketing/

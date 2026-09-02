@@ -891,6 +891,7 @@ function InstanceInfoSection({ instance }) {
       <div class="result-card">
         <div class="result-row"><span class="k">Slug</span><span class="v">${instance.slug}</span></div>
         <div class="result-row"><span class="k">Definition</span><span class="v">${instance.definition}</span></div>
+        <div class="result-row"><span class="k">Version</span><span class="v">v${instance.definitionVersion}</span></div>
         <div class="result-row">
           <span class="k">Current stage</span>
           <span class="v">${instance.stage.title} (gate: ${instance.stage.gate})</span>
@@ -1114,6 +1115,7 @@ function LocalInstanceSettingsPage({ query, workspaceId, slug }) {
               <div class="result-card">
                 <div class="result-row"><span class="k">Slug</span><span class="v">${slug}</span></div>
                 <div class="result-row"><span class="k">Definition</span><span class="v">${record.definition}</span></div>
+                <div class="result-row"><span class="k">Version</span><span class="v">v${record.definitionVersion ?? 1}</span></div>
                 <div class="result-row"><span class="k">Current stage</span><span class="v">${record.stage}</span></div>
               </div>
             </section>

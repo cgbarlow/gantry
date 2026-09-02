@@ -389,6 +389,11 @@ test('settings: Instance Settings hosts an editable Assignee, read-only instance
       // Read-only instance info.
       assert.match(await page.locator('.settings-page').textContent(), /my-initiative/)
       assert.match(await page.locator('.settings-page').textContent(), /design/)
+      // A freshly created instance pins to the definition's latest published
+      // version at creation time (not necessarily "v1" — see lib/server.js's
+      // POST /api/instances), so this only checks the row exists and names
+      // *some* version, not which one.
+      assert.match(await page.locator('.settings-section', { hasText: 'Instance info' }).textContent(), /Version.*v\d+/s)
 
       // Editable assignee, pre-filled from the instance's own stored value.
       const assigneeInput = page.locator('section.settings-section', { hasText: 'Assignee' }).locator('input[type=text]')
