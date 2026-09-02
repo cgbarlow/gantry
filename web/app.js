@@ -66,6 +66,7 @@ import {
   renderLocalModuleInstanceFile,
   buildLocalModuleEntry,
 } from './lib/localInstanceFiles.js'
+import { getLocalStatus, checkLocalGate } from './lib/localStatus.js'
 
 // ---------- Local workspace instances (WI #297, ADR-0029, A6) ----------
 // A local-workspace instance's data lives in a folder on the browser user's
@@ -237,6 +238,13 @@ async function loadLocalInstance(workspaceId, slug, requestedStageId) {
     isLocalWorkspace: true,
     localWorkspaceId: workspaceId,
     localDefinitionVersion: definitionVersion,
+    // WI #313 — the full definition version projection (already fetched
+    // above), kept on the instance so `getLocalStatus`/`checkLocalGate` (both
+    // `web/lib/localStatus.js`) can evaluate status/gate-check for ANY stage
+    // (not just the one this load built `modules` for) entirely client-side —
+    // no second `/api/definitions/...` fetch, and no `/api/local/status` or
+    // `/api/local/check` round trip at all.
+    localDefinitionStructure: structure,
   }
 }
 
@@ -244,7 +252,7 @@ async function loadLocalInstance(workspaceId, slug, requestedStageId) {
  * Builds the `{ definitionId, definitionVersion, instanceYaml, moduleFiles }`
  * payload `/api/local/*` (A3, lib/localWorkspace.js's `runLocalWorkspaceCompute`)
  * expects, from the local instance's current on-disk files — always freshly
- * read, so a gate check/validate/render always reflects the latest save.
+ * read, so a render always reflects the latest save.
  */
 async function buildLocalComputePayload(instance) {
   const handle = localDirHandle.value
@@ -261,18 +269,21 @@ async function buildLocalComputePayload(instance) {
   return { definitionId: instance.definition, definitionVersion: instance.localDefinitionVersion, instanceYaml, moduleFiles }
 }
 
-// The message shown wherever a `/api/local/*` call fails because the server
-// can't be reached at all (a genuine network error, not a 4xx/5xx response)
-// — ADR-0029's "Offline" section: gate check/validate/render need the
-// server, editing and saving never do.
-const LOCAL_OFFLINE_MESSAGE = 'Connect to the gantry server to check status / validate / render.'
+// The message shown wherever a local-workspace action needs the gantry
+// server and it can't be reached (a genuine network error, not a 4xx/5xx
+// response) — ADR-0029's "Offline" section. As of WI #313, that's `render`
+// only (needs native `pandoc`/`git`): status, gate check and editing/saving
+// all run entirely client-side and never see this message.
+const LOCAL_OFFLINE_MESSAGE = 'Connect to the gantry server to render.'
 
 /**
- * POSTs one `/api/local/<operation>` request (status | check | validate |
- * render) built from the local instance's current on-disk files. A network
- * failure (server unreachable) throws an `Error` with `.offline = true`
- * carrying `LOCAL_OFFLINE_MESSAGE`, distinct from a real 4xx/5xx response —
- * callers show the offline message only for the former.
+ * POSTs one `/api/local/<operation>` request built from the local instance's
+ * current on-disk files. As of WI #313 the only operation any call site still
+ * uses is `render` (needs native `pandoc`/`git` — see `runLocalCheck`/
+ * `getLocalStatus` below for `status`/`check`, ported to run client-side
+ * instead). A network failure (server unreachable) throws an `Error` with
+ * `.offline = true` carrying `LOCAL_OFFLINE_MESSAGE`, distinct from a real
+ * 4xx/5xx response — callers show the offline message only for the former.
  */
 async function runLocalCompute(operation, instance, extra = {}) {
   const payload = { ...(await buildLocalComputePayload(instance)), ...extra }
@@ -291,6 +302,21 @@ async function runLocalCompute(operation, instance, extra = {}) {
   const body = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(body.error ?? body.message ?? `Local ${operation} failed (${res.status})`)
   return body
+}
+
+/**
+ * Runs a local workspace's gate check entirely client-side (WI #313) —
+ * `checkLocalGate` (`web/lib/localStatus.js`), reading module files straight
+ * through the open directory handle instead of POSTing to `/api/local/check`.
+ * `options.gate` is forwarded unchanged, matching `checkGate`'s own contract
+ * (resolve any stage owning that gate rather than the instance's current
+ * one) — no call site currently passes it, but this keeps parity with the
+ * server-side function's full signature.
+ */
+async function runLocalCheck(instance, options = {}) {
+  const handle = localDirHandle.value
+  if (!handle) throw new Error('Local workspace folder is not open.')
+  return checkLocalGate(handle, instance.slug, instance.localDefinitionStructure, instance.currentStageId, options)
 }
 
 // ---------- Navigation heading helpers (WI232) ----------
@@ -1316,14 +1342,11 @@ function ModuleCard({ mod, stageId, onFieldRegistered, visibleFieldIds }) {
     // A local-workspace instance (ADR-0029, WI #297) saves straight through
     // the directory handle — no server round-trip, so this keeps working
     // with the gantry server unreachable (ADR-0029's "Offline" section).
-    // Completeness is computed here from each field's own `required` flag
-    // rather than by calling `/api/local/status` — a deliberate scope-down
-    // from the server-backed path's full `getStatus` (which also considers
-    // requiredAt-by-gate and artefact `requires`): good enough for an
-    // immediate "did I fill in the required fields" signal without a
-    // network call, at the cost of not distinguishing "required for this
-    // gate" from "required always". The gate check panel below still runs
-    // the real `/api/local/check` before Advance.
+    // Completeness is now the real `getLocalStatus` (`web/lib/localStatus.js`,
+    // WI #313) — the same gate-aware, artefact-aware computation the
+    // server-hosted path's `getStatus` runs below, ported to run client-side
+    // — not the field's-own-`required`-flag approximation this used before
+    // that port existed.
     const instanceForSave = instanceData.value
     if (instanceForSave?.isLocalWorkspace) {
       try {
@@ -1336,14 +1359,11 @@ function ModuleCard({ mod, stageId, onFieldRegistered, visibleFieldIds }) {
         }
         const text = renderLocalModuleInstanceFile(mod.id, moduleSpec, { status: mod.status, owner: mod.owner, fields, layout })
         await writeLocalTextFile(handle, localModuleFilesPath(instanceForSave.slug, mod.id), text)
-        const outstanding = mod.fields
-          .filter((f) => {
-            if (!f.required) return false
-            const value = fields[f.id]
-            return Array.isArray(value) ? value.length === 0 : !value || !String(value).trim()
-          })
-          .map((f) => f.title)
-        setStatus(outstanding.length ? `Saved — outstanding: ${outstanding.join(', ')}` : 'Saved — complete.')
+        const localStatus = await getLocalStatus(handle, instanceForSave.slug, instanceForSave.localDefinitionStructure, stageId)
+        const thisModule = localStatus.modules.find((m) => m.id === mod.id)
+        setStatus(
+          thisModule?.complete ? 'Saved — complete.' : `Saved — outstanding: ${thisModule?.outstanding.join(', ') || 'none'}`
+        )
       } catch (err) {
         setStatus(`Save failed: ${err.message}`)
       }
@@ -2819,7 +2839,7 @@ function AdvanceStagePanel({ instance }) {
     setStatus('Checking gate…')
     if (instance.isLocalWorkspace) {
       try {
-        const body = await runLocalCompute('check', instance)
+        const body = await runLocalCheck(instance)
         if (!body.pass) {
           setStatus(formatGateFailure(body))
           return
@@ -2845,17 +2865,17 @@ function AdvanceStagePanel({ instance }) {
     setConfirming(true)
   }
 
-  // Re-checks the gate through `/api/local/check` before writing the new
-  // stage (the same defense-in-depth the server-backed `advanceStage` path
-  // gets for free by re-evaluating the gate server-side) — a local instance
-  // has no server-side call of its own to fall back on for that, so this
-  // repeats the check done above rather than trusting the earlier PASS is
-  // still current.
+  // Re-checks the gate (client-side, `runLocalCheck`, WI #313) before writing
+  // the new stage (the same defense-in-depth the server-backed `advanceStage`
+  // path gets for free by re-evaluating the gate server-side) — a local
+  // instance has no server-side call of its own to fall back on for that, so
+  // this repeats the check done above rather than trusting the earlier PASS
+  // is still current.
   async function handleConfirmAdvanceLocal() {
     setConfirming(false)
     setStatus('Advancing…')
     try {
-      const checkBody = await runLocalCompute('check', instance)
+      const checkBody = await runLocalCheck(instance)
       if (!checkBody.pass) {
         setStatus(formatGateFailure(checkBody))
         return

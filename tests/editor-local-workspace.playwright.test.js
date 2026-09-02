@@ -184,7 +184,16 @@ test('local-workspace instance: loads, saves offline-safe, gate-checks, advances
   })
 })
 
-test('local-workspace instance: offline degradation — /api/local/check unreachable shows a clear message, saving still works', async () => {
+// WI #313 — status, gate check and validate now run entirely client-side for
+// a local-workspace instance (web/lib/localStatus.js), so this used to be
+// "offline degradation": /api/local/check aborted, showing a clear "Connect
+// to the gantry server" message while saving still worked. As of #313 that
+// premise is gone — check no longer calls the server at all — so this now
+// proves the zero-round-trip claim directly: with EVERY request to the
+// server aborted (not just /api/local/*), status, the gate check, and
+// Advance still succeed. Only `render` (needs native `pandoc`/`git`) still
+// needs the server, and isn't exercised here.
+test('local-workspace instance: status, gate check and advance run entirely client-side with the server unreachable', async () => {
   await withRunningServer({}, async (base) => {
     const browser = await launchBrowser()
     try {
@@ -195,21 +204,19 @@ test('local-workspace instance: offline degradation — /api/local/check unreach
       await page.goto(`${base}/`)
       const workspaceId = await seedLocalWorkspace(page, slug)
 
-      // Simulate the server being unreachable for /api/local/* — a real network error, not a 4xx/5xx.
-      await page.route('**/api/local/**', (route) => route.abort('connectionrefused'))
-
+      // Load the editor — the one request to the server this test allows
+      // (fetching the definition version projection, GET
+      // /api/definitions/.../versions/:n — a one-time, cacheable read of
+      // static content, unaffected by this ticket's scope).
       await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}&slug=${slug}`)
       await page.waitForSelector('.module', { timeout: 10_000 })
 
-      const advancePanel = page.locator('.advance-stage-panel')
-      await advancePanel.waitFor({ state: 'visible', timeout: 5_000 })
-      await advancePanel.getByRole('button', { name: 'Advance to next stage' }).click()
-      await page.waitForFunction(
-        () => document.querySelector('.advance-stage-panel .save-status')?.textContent?.includes('Connect to the gantry server'),
-        { timeout: 10_000 }
-      )
+      // From here on, simulate `gantry serve` going away entirely: every
+      // further request to the server is a genuine network error, not a
+      // 4xx/5xx.
+      await page.route(`${base}/**`, (route) => route.abort('connectionrefused'))
 
-      // Editing and saving must still work with the server unreachable (ADR-0029's Offline section) — no /api/local/* involved.
+      // ---- Save: already client-side since WI #297, unaffected ----
       const problemField = page.locator('.field-markdown .cm-content').first()
       await problemField.click()
       await page.keyboard.type(' — saved while offline.')
@@ -218,6 +225,24 @@ test('local-workspace instance: offline degradation — /api/local/check unreach
 
       const backgroundOnDisk = await readOpfsFile(page, `gantry-workspace/${slug}/modules/background.md`)
       assert.match(backgroundOnDisk, /— saved while offline\./, 'save succeeded with the server unreachable')
+
+      // ---- Gate check + Advance: WI #313 — checkLocalGate runs client-side, so this must PASS and advance with the server unreachable throughout ----
+      const advancePanel = page.locator('.advance-stage-panel')
+      await advancePanel.waitFor({ state: 'visible', timeout: 5_000 })
+      await advancePanel.getByRole('button', { name: 'Advance to next stage' }).click()
+      await page.waitForSelector('.modal[aria-label="Confirm stage advancement"]', { timeout: 10_000 })
+      await page.getByRole('button', { name: 'Confirm & advance' }).click()
+      await page.waitForFunction(
+        () => document.querySelector('.advance-stage-panel .save-status')?.textContent?.includes('Advanced to'),
+        { timeout: 10_000 }
+      )
+
+      const instanceYamlAfterAdvance = await readOpfsFile(page, `gantry-workspace/${slug}/instance.yaml`)
+      assert.match(
+        instanceYamlAfterAdvance,
+        /stage: hld-define/,
+        'instance.yaml stage advanced on disk, with the server unreachable throughout'
+      )
     } finally {
       await browser.close()
     }
