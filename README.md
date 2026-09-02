@@ -123,6 +123,8 @@ npm link             # makes `gantry` available on your PATH
 
 > **TODO:** replace with the real install path once packaged — a released binary or `npx gantry` avoids the clone-to-use step for people who only ever consume definitions.
 
+**5. Run it.** From the repo root, `./run-local.sh` (macOS/Linux) or `run-local.cmd` (Windows) is the one-step way to run Gantry locally: it starts `gantry serve` (skipping startup if one's already running) and opens the dashboard in your default browser. Both scripts work from any working directory and stop the server cleanly on Ctrl+C (or closing the window they open).
+
 ## Software dependencies
 
 | Dependency | Version | Why |
