@@ -11,16 +11,31 @@ import { withRunningServer } from './helpers/lifecycle.js'
 
 // Browser smoke tests for the reworked Settings screens (#107): three separate, tab-free top-level routes — `/settings` (Global Settings), `/settings/workspace` (Workspace Settings, scoped to one instance's own workspace) and `/settings/instance` (Instance Settings) — replacing #101/#104's single tabbed `/settings` shell entirely. Mirrors tests/dashboard.playwright.test.js's pattern: a real server, a real Chromium page, asserting no console/page errors alongside the ticket's acceptance criteria.
 
-function withPage(fn) {
+// `ignoreConsoleErrors` (regexes) exists for exactly one caller below: typing
+// a plain owner name into a workspace row's IdentityPicker input fires its
+// live identity-search debounce (~250ms) regardless of whether a working PAT
+// is configured yet, same as any other character typed there. When no PAT is
+// set — as in the owner-save step of that test, which runs before a PAT
+// override exists — Azure DevOps genuinely 401s that debounced search, which
+// the picker already catches and shows inline; Chromium still logs the
+// failed fetch to the console on its own, unprompted by app code. That's a
+// real, correctly-surfaced auth failure (unlike the "no ADO workspace at
+// all" case, fixed at the source in `/api/identities` to return 200/[]
+// instead of a 4xx) — not safe to silence at the server, so it's allowlisted
+// here instead, scoped to the one test where it's expected.
+function withPage(fn, { ignoreConsoleErrors = [] } = {}) {
   return async (base) => {
     const browser = await launchBrowser()
     try {
       const page = await browser.newPage()
       page.setDefaultTimeout(DEFAULT_TIMEOUT)
       const pageErrors = []
-      page.on('pageerror', (err) => pageErrors.push(err.message))
+      const isIgnored = (text) => ignoreConsoleErrors.some((re) => re.test(text))
+      page.on('pageerror', (err) => {
+        if (!isIgnored(err.message)) pageErrors.push(err.message)
+      })
       page.on('console', (msg) => {
-        if (msg.type() === 'error') pageErrors.push(msg.text())
+        if (msg.type() === 'error' && !isIgnored(msg.text())) pageErrors.push(msg.text())
       })
       await fn(page, base)
       assert.deepEqual(pageErrors, [])
@@ -352,7 +367,7 @@ test('settings: Workspace Settings\' owner, PAT-override, and ticketing-system-o
       const reloadedRow = page.locator('.workspace-row')
       await reloadedRow.waitFor({ state: 'visible', timeout: 10_000 })
       assert.equal(await reloadedRow.locator('.workspace-owner input[type=text]').inputValue(), 'new-owner')
-    })(base)
+    }, { ignoreConsoleErrors: [/Failed to load resource: the server responded with a status of 401/] })(base)
   })
 })
 
