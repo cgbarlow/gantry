@@ -165,6 +165,11 @@ test('dashboard: a granted local workspace leads the blended list (position, not
         )
         const names = await page.locator('.instance-list .list-item .meta .name').allTextContents()
         assert.deepEqual(names, ['My Local Workspace', 'server-instance'])
+        // A local workspace's own summary line names its definition too,
+        // exactly like a server-hosted one's — it must never fall back to a
+        // bare "1 instance" just because the workspace is local.
+        const defs = await page.locator('.instance-list .list-item .def').allTextContents()
+        assert.deepEqual(defs, ['1 instance · design', '1 instance · design'])
         assert.equal(await page.locator('.local-badge').count(), 0)
         assert.equal(await page.locator('.local-workspaces-heading').count(), 0)
         assert.equal(await page.locator('.local-workspaces').count(), 0)

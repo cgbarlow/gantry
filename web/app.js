@@ -4097,13 +4097,11 @@ function groupInstancesByWorkspace(instances) {
   return [...groups.values()].sort((a, b) => a.title.localeCompare(b.title))
 }
 
-// The list-pane row's secondary line — deliberately the same shape whether the group holds one instance or several (count · distinct definitions), rather than branching into a one-off "single instance" format, so a single-instance workspace is never visually singled out from a multi-instance one (the ticket's own "no special-casing visible to the user" acceptance criterion). A local-workspace group (see useLocalGroups below) carries no `definition` per instance and has its own recovery states, so it gets its own, simpler summary text instead.
+// The list-pane row's secondary line — deliberately the same shape whether the group holds one instance or several (count · distinct definitions), rather than branching into a one-off "single instance" format, so a single-instance workspace is never visually singled out from a multi-instance one (the ticket's own "no special-casing visible to the user" acceptance criterion). A local-workspace group (see useLocalGroups below) has its own recovery states (not yet resolved / permission needed), so those still get their own, simpler text — but once its instances *are* resolved, each one's `instance.yaml` carries a `definition` just like a server-hosted instance's own record does, so the "· <definitions>" suffix applies here too rather than silently omitting it.
 function groupSummaryText(group) {
   if (group.kind === 'local') {
     if (group.state === 'loading') return 'Opening…'
     if (group.state !== 'granted') return 'Needs permission'
-    const count = group.instances.length
-    return `${count} instance${count === 1 ? '' : 's'}`
   }
   const definitions = [...new Set(group.instances.map((inst) => inst.definition))]
   const count = group.instances.length
@@ -4178,8 +4176,9 @@ function LocalGroupResolver({ entry, onChange, onRemoved }) {
       for (const child of subdirs) {
         if (child.kind !== 'directory') continue
         try {
-          await readTextFile(handle, `gantry-workspace/${child.name}/instance.yaml`)
-          found.push({ slug: child.name })
+          const instanceYamlText = await readTextFile(handle, `gantry-workspace/${child.name}/instance.yaml`)
+          const { definition } = parseInstanceYaml(instanceYamlText)
+          found.push({ slug: child.name, definition })
         } catch {
           // A subdirectory with no instance.yaml is not an instance — skip it.
         }
