@@ -29,14 +29,15 @@ function withAuthHeader(options, workspaceId) {
 }
 
 /**
- * Drop-in replacement for `fetch` for requests to gantry's own `/api/*` routes. Same signature and return value (a `Response`) as `fetch` itself, so existing callers only need their `fetch(...)` calls renamed. The optional third argument's `workspaceId` selects which workspace's PAT override (if any) to prefer over the global default — omit it (or leave it `undefined`) for a request with no specific workspace in mind, which resolves straight to the global default.
+ * Drop-in replacement for `fetch` for requests to gantry's own `/api/*` routes. Same signature and return value (a `Response`) as `fetch` itself, so existing callers only need their `fetch(...)` calls renamed. The optional third argument's `workspaceId` selects which workspace's PAT override (if any) to prefer over the global default — omit it (or leave it `undefined`) for a request with no specific workspace in mind, which resolves straight to the global default. `silent: true` skips the auto-prompt-and-retry below entirely, returning the bare 401 response instead — for a best-effort background request (e.g. IdentityPicker's debounced search-as-you-type) where a missing/rejected credential is routine and already handled inline; popping the page-wide PAT modal for that would interrupt whatever the architect is actually doing over a request they never asked for.
  */
-export async function apiFetch(url, options = {}, { workspaceId } = {}) {
+export async function apiFetch(url, options = {}, { workspaceId, silent } = {}) {
   let res = await fetch(url, withAuthHeader(options, workspaceId))
   if (res.status !== 401) return res
 
   const body = await readJsonBody(res)
   if (!isAuthenticationRequired(body)) return res
+  if (silent) return res
 
   if (body.credentialStatus === 'rejected') markCredentialRejected(workspaceId)
   // `workspaceId` is threaded through so `requestPat` can tell whether this 401 came from a workspace whose *own* override is the thing that's now invalid — see web/lib/credential.js's own doc comment on `requestPat`/`resolvePromptWith` for why that changes where the architect's submission gets written.
@@ -76,7 +77,7 @@ async function resolveWorkspaceIdForSlug(slug) {
 /**
  * `apiFetch`, but resolving which workspace `slug` belongs to first, so a workspace-specific PAT override (set from the Settings screen's Workspace tab, #104) is used from the very first request rather than only after an initial 401 against the wrong credential. Every call site that already knows which instance slug a request targets (loading/saving/rendering/checking an instance) should use this instead of calling `apiFetch` directly.
  */
-export async function apiFetchForInstance(slug, url, options = {}) {
+export async function apiFetchForInstance(slug, url, options = {}, { silent } = {}) {
   const workspaceId = await resolveWorkspaceIdForSlug(slug)
-  return apiFetch(url, options, { workspaceId })
+  return apiFetch(url, options, { workspaceId, silent })
 }

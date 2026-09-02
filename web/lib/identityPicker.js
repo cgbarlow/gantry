@@ -41,7 +41,13 @@ export function IdentityPicker({ value, onChange, placeholder, slug, organizatio
         params.set('organization', organization)
         params.set('project', project)
       }
-      const res = slug ? await apiFetchForInstance(slug, `/api/identities?${params}`) : await apiFetch(`/api/identities?${params}`)
+      // `silent: true` — a missing/rejected PAT here is routine (search-as-you-type
+      // fires before the architect has necessarily configured one) and already
+      // handled inline via `searchError` below; it must never pop the page-wide
+      // PAT prompt over a request nobody explicitly asked for.
+      const res = slug
+        ? await apiFetchForInstance(slug, `/api/identities?${params}`, {}, { silent: true })
+        : await apiFetch(`/api/identities?${params}`, {}, { silent: true })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setResults([])
