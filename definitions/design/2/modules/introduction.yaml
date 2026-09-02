@@ -1,0 +1,148 @@
+# Field order follows the approved ATLAS reference design's Introduction section,
+# which carries the fullest version of it: Overview -> Purpose -> Scope (In/Out)
+# -> Constraints -> Assumptions -> Caveats -> Design Principles -> Outcomes /
+# Deliverables. `content-standards` is last; only the SSAD renders it.
+#
+# CHANGED v2: `executive-summary` added — the SAD and SSAD references both open
+# with an "Executive Summary" that had no field at all. Optional; see CHANGES.md
+# for the one-line change that would mandate it.
+#
+# CHANGED v2: scope is no longer a lightweight-SOAP obligation. The reference
+# SOAP has no scope section, so `soap` does not reference `in-scope` /
+# `out-of-scope` and `business-case` is not in their `required-at`. The Full SOAP
+# does carry both sections, and `soap-full` still lists them as bare field
+# references, so producing a Full SOAP still forces them at that gate.
+
+id: introduction
+title: Introduction
+purpose: >
+  Introduce the solution — what it is, why it exists, what it covers, and the
+  constraints and principles it was designed under.
+
+  Mounted from the `shape` stage onward. `in-scope` / `out-of-scope` are the
+  canonical cross-stage scope statement and `assumptions` / `constraints` /
+  `caveats` accumulate from Shape to handover — each is entered once and
+  refined, never re-entered.
+
+fields:
+  - id: executive-summary
+    title: Executive summary
+    type: markdown
+    required: false
+    guidance: >
+      A standalone summary for a reader who will not read the rest of the
+      document — what the solution is, what was decided, and what is being
+      asked of them. The SAD and SSAD references both open with this section.
+      Distinct from `overview`, which introduces the document's subject rather
+      than summarising its conclusions; the SAD carries both.
+
+  - id: overview
+    title: Overview
+    type: markdown
+    required-at: [build-ready-checklist, operational-handover]
+    guidance: >
+      A short plain-language description of the solution and the change it
+      delivers — enough for a reader with no prior knowledge to understand
+      what this document is about. Also renders as the Full SOAP's opening
+      "Introduction" section when filled at Shape.
+
+      The HLD's `background` framing and this SAD `introduction` framing are
+      intentionally separate (TAC vs Design Authority audiences) — do not
+      expect this to pre-fill from `background.problem`. See the reconciliation
+      doc §5.
+
+  - id: purpose
+    title: Purpose
+    type: markdown
+    required-at: [build-ready-checklist, operational-handover]
+    guidance: >
+      What this document is for and who is expected to use it (e.g.
+      security teams for C&A sign-off, engineers to build or rebuild from).
+
+  - id: in-scope
+    title: In scope
+    type: markdown
+    required-at: [hld-tac-approved, build-ready-checklist, operational-handover]
+    guidance: >
+      The features, functionality, and deliverables inside the boundaries of
+      this design. This is the canonical scope statement — it re-opens and is
+      refined at every later stage.
+
+  - id: out-of-scope
+    title: Out of scope
+    type: markdown
+    required-at: [hld-tac-approved, build-ready-checklist, operational-handover]
+    guidance: >
+      What this design explicitly does not cover. Silence on out-of-scope is
+      the most common cause of a design being sent back with questions.
+
+  - id: constraints
+    title: Constraints
+    type: markdown
+    required: false
+    guidance: >
+      Fixed limits the design had to work within — deployment tooling,
+      pre-existing infrastructure it cannot change, other in-flight work it
+      is bound by. Capture from Shape onward — this file re-opens at every
+      later stage. Constraints particular to the architecture's shape belong
+      in `architecture.constraints`.
+
+  - id: assumptions
+    title: Assumptions
+    type: markdown
+    required: false
+    guidance: >
+      What was taken as given for the design to hold. Things that would
+      change the shape of the solution if they turned out false. Capture from
+      Shape onward — this file re-opens at every later stage, and carries the
+      SOAP's "Assumptions and considerations", the Full SOAP's "Assumptions"
+      and the SAD's "Architectural Assumptions" sections.
+
+  - id: caveats
+    title: Caveats
+    type: markdown
+    required: false
+    guidance: >
+      Qualifications a reader should carry into the rest of the document —
+      e.g. a short-lived workload, a known-incomplete area, a time-bound
+      exception. Capture from Shape onward — this file re-opens at every
+      later stage.
+
+      Verified distinct from `soap-full-details.caveats`, which qualifies the
+      *estimate* rather than the design. Evidence: the approved ATLAS design's
+      Caveats section reads "the migration infrastructure is expected to be a
+      short-lived workload, with an expected life span of up to 24 months" (a
+      fact about the solution), while every one of the JEDI Full SOAP's eight
+      caveats qualifies estimate reliability ("the actual effort will differ
+      once the IT requirements are elaborated"). The two are not
+      interchangeable, so both fields are kept; the Full SOAP renders only
+      `soap-full-details.caveats`.
+
+  - id: design-principles
+    title: Design principles
+    type: markdown
+    required: false
+    guidance: >
+      The principles used as a guide when weighing options — e.g. common
+      services shared where possible, least privilege, separation of
+      concerns. A table (Ref / Principle / How it is achieved) works well.
+
+  - id: outcomes-and-deliverables
+    title: Outcomes and deliverables
+    type: markdown
+    required: false
+    guidance: >
+      The concrete outputs this work produces and who owns each — by phase
+      where that helps (Design / Triage / Build / Handover).
+
+  - id: content-standards
+    title: Content standards
+    type: markdown
+    required: false
+    guidance: >
+      Conventions a reader needs to interpret this document — e.g. that
+      diagrams are collated from several parties and so vary in style, which
+      notation is used, or how this document relates to the fuller SAD. Only
+      the SSAD renders this field (the "Content Standards" sub-section of the
+      FV Help Tool SSAD's Introduction); the SAD and as-built templates leave
+      it out, so filling it does not affect them.

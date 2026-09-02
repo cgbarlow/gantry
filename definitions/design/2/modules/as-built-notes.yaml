@@ -1,0 +1,80 @@
+# Field set confirmed 2026-08-20 (ticket #53); reconciled against the approved ATLAS reference design 2026-08-29 (WI #227). Evidence: the Post-SOAP Artefact Coverage Assessment spreadsheet's "Detailed Design / As-built" column and its threaded comments ("good enough for the technical person who is not familiar with the system to successfully rebuild it from scratch"; "handover of the document does not include the handover of responsibility"), plus a direct statement on ownership and required depth: as-builts are the responsibility of senior developers/tech leads or contingent Architecture support, and must cover detailed business process flows, field-level logic, detailed API specifications, UI wireframes, validation rules, code-level sequence diagrams, and detailed acceptance criteria.
+#
+# WI #227: the sections this module previously re-implemented as ad-hoc sub-headings inside free-text fields — Terms & Definitions, Introduction/Overview/Purpose/Scope/Constraints/Assumptions/Caveats/Design Principles/Outcomes, Recovery Plan, Data Security Controls — now live in the shared `glossary`, `introduction`, `recovery-plan` and `data-security-controls` modules, referenced from the `as-built` artefact alongside this one. This module is reduced to the genuinely as-built-specific content. See docs/research/design-definition-reference-reconciliation.md Sections 1 and 4.
+
+id: as-built-notes
+title: As-Built Notes
+purpose: >
+  Describe what was actually built in enough detail that a skilled engineer could
+  rebuild it. Include how it differs from the approved design and how it was shown to
+  meet its requirements.
+
+fields:
+  - id: design-overview
+    title: Design overview
+    type: markdown
+    required: true
+    guidance: >
+      Describe the key architecture and technology as actually implemented and how it
+      aligns to the approved design. Reference a diagram if you have one, but describe the
+      structure in words too.
+  - id: architecture-decisions
+    title: Architecture decisions
+    type: markdown
+    required: false
+    guidance: >
+      List the key design decisions as implemented — for each, what was decided and what it
+      means in practice. Note any that changed from the approved design.
+  - id: process-flows
+    title: Data migration and process flows
+    type: markdown
+    required: true
+    guidance: >
+      Describe the detailed process and data flows step by step, as the system actually
+      behaves — not the intended flows from design.
+  - id: infrastructure-and-configuration
+    title: Infrastructure and configuration
+    type: markdown
+    required: true
+    guidance: >
+      Provide environment and infrastructure detail sufficient to rebuild — services, IP
+      addresses, ports, network configuration, resource names, roles and permissions, and
+      equivalent build-time values.
+  - id: appendix
+    title: Appendix
+    type: markdown
+    required: false
+    guidance: >
+      Include supporting reference material that would clutter the body, such as firewall
+      rules, test cases and the security control register.
+  - id: changes-from-design
+    title: Changes from the agreed design
+    type: markdown
+    required: true
+    guidance: >
+      Describe where the built solution diverges from the approved design and why.
+  - id: acceptance-criteria
+    title: Acceptance criteria
+    type: markdown
+    required: true
+    guidance: >
+      Detailed acceptance criteria confirming the build meets
+      requirements — the bar a rebuild should be tested against.
+
+  - id: operational-notes
+    title: Operational notes
+    type: markdown
+    required: false
+    guidance: >
+      Anything a support engineer would need that isn't already captured in
+      `support-and-operations`, the shared `recovery-plan`, or the shared
+      `data-security-controls` module — quirks, workarounds, known
+      limitations.
+
+  - id: handover-confirmation
+    title: Handover confirmation
+    type: markdown
+    required: true
+    guidance: >
+      Record who received the handover and when. Note that handover of the document does
+      not transfer responsibility for keeping it updated.

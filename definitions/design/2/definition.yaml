@@ -1,0 +1,511 @@
+id: design
+version: 2
+status: published
+title: Solution Design
+description: >
+  Design content for an initiative, from shaping through HLD approval,
+  build-ready detailed design, and operational handover.
+
+# v2 is a layout revision of v1. Every artefact's `requires` list is re-sequenced
+# to the reading order of its reference document (see CHANGES.md for the
+# heading-by-heading mapping and the confidence rating behind each move), and a
+# small number of fields that asked for the same information twice are collapsed
+# onto a single field that carries across stages. No field `id` is renamed.
+#
+# Ordering convention: an artefact's `requires` list is written in the order its
+# sections render, so the list doubles as the document outline. `?` marks a field
+# that is in the artefact's scope but only blocks the gate when its own
+# `required` / `required-at` makes it mandatory. Every entry that was bare in v1
+# is still bare, so no gate is looser than it was.
+#
+# Stage/gate topology note: The real-world Contoso process resolves to four gates (see
+# docs/research/stages-gates-module-specs.md, Section 3), not the three in Gantry's own
+# illustrative README example. HLD approval at TAC is a distinct gate with no analogue in
+# the README's worked example, so `define` has been split into `hld-define` and
+# `detailed-design`. See docs/adr/0001 for why.
+
+stages:
+  - id: shape
+    title: SOAP
+    purpose: >
+      Describe the initiative's context, proposed solution, team, estimates and
+      dependencies in enough detail to support a business case decision.
+    gate: business-case
+    # The editor mounts the union of the two Shape artefacts' modules. Gate
+    # passing itself is scoped to each artefact's `requires` list below.
+    # `introduction` is mounted from Shape onward: `in-scope` / `out-of-scope`
+    # are the canonical cross-stage scope statement, and `assumptions` /
+    # `constraints` / `caveats` accumulate from here.
+    # CHANGED v2: `open-questions` is mounted here too, replacing the removed
+    # `soap-full-details.questions` field — a question raised at Shape is the
+    # same question TAC sees at HLD.
+    modules: [background, solution-definition, team-and-estimates, dependencies, soap-full-details, introduction, open-questions]
+    # The instance the web form's "Populate example text" button reads from for this stage's fields — one shared instance covering every stage, so `gantry serve examples` shows every gate screen populated.
+    example: examples
+
+  - id: hld-define
+    title: High-level Design
+    purpose: >
+      Describe the proposed solution in enough detail to be approved before
+      detailed design begins. Cover what is needed to decide whether to proceed.
+    gate: hld-tac-approved
+    # nfrs, risks, security and dependencies are introduced here in early/light form and
+    # carried forward — not re-declared — at detailed-design, where the same module ids are
+    # required in fuller form. See each module's guidance.
+    # CHANGED v2: `solution-definition` is mounted here so the HLD can render the
+    # Shape solution overview as the opening of its "Proposed solution" section
+    # instead of asking for it again.
+    modules:
+      [hld-submission, background, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies, introduction, solution-definition]
+    example: examples
+
+  - id: detailed-design
+    title: Detailed Design
+    purpose: >
+      Describe the architecture, integration, data, quality, security, risk,
+      dependency and operational details needed to build the solution.
+    gate: build-ready-checklist
+    # glossary, introduction, recovery-plan and data-security-controls are shared
+    # modules (also required by the `handover` stage / `as-built` artefact).
+    # CHANGED v2: `solution-definition` and `team-and-estimates` are mounted so the
+    # SAD can render the agreed Shape requirements, the Shape process flow and the
+    # references list without re-entry. `support-and-operations.environments-and-domains`
+    # is now the SAD's environment list too (`integration.environments` is removed).
+    modules: [architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations, glossary, introduction, recovery-plan, data-security-controls, solution-definition, team-and-estimates]
+    example: examples
+
+  - id: handover
+    title: Operational Handover
+    purpose: >
+      Record what was built and the information needed to hand it over for
+      operation.
+    gate: operational-handover
+    # glossary, introduction, recovery-plan and data-security-controls are shared modules
+    # (see docs/research/design-definition-reference-reconciliation.md). They carry the
+    # reference ATLAS design's Terms & Definitions / Introduction / Recovery Plan / Data
+    # Security Controls sections, which this stage previously buried inside as-built-notes
+    # free-text fields.
+    # CHANGED v2 (round 2): `nfrs` mounted so `disaster-recovery-and-backup` — the
+    # recovery targets — travels with the as-built recovery mechanism.
+    modules: [glossary, introduction, as-built-notes, recovery-plan, data-security-controls, nfrs]
+    example: examples
+
+artefacts:
+  - id: soap
+    title: Solution on a Page
+    purpose: >
+      Summarise the initiative's context, solution, team and estimates for the
+      business case decision.
+    template: templates/soap.md.tmpl
+    gate: business-case
+    # Order follows the reference SOAP (SAMPLE SOAP - Mobile Phone Assistance):
+    # Background and context -> Solution definition (Process flow, High level
+    # solution design, Assumptions and considerations, Feature breakdown) ->
+    # Teams, contact persons and high-level estimates -> References.
+    #
+    # CHANGED v2:
+    #  - `introduction.assumptions?` restored. The reference SOAP carries an
+    #    "Assumptions and considerations" section; when WI #280 deleted
+    #    `solution-definition.assumptions-and-considerations` and moved the
+    #    concept to `introduction.assumptions`, the replacement was wired into
+    #    `soap-full` and `hld` but not into `soap`, so the lightweight SOAP lost
+    #    the section. Optional, so the gate is unchanged.
+    #  - `solution-definition.high-level-requirements` moved ahead of
+    #    `process-flow`. The Full SOAP reference states requirements before the
+    #    solution overview; requirements-then-flow-then-shape also reads better
+    #    than shape-then-requirements.
+    #  - `introduction.in-scope` / `.out-of-scope` removed. The reference SOAP has
+    #    no scope section; scope is a Full SOAP concept that WI #280 pushed onto
+    #    the lightweight artefact. `business-case` is also out of those fields'
+    #    `required-at`, so a lightweight SOAP carries no scope obligation. The
+    #    Full SOAP still lists both as bare field references, so producing one
+    #    still forces them at this gate.
+    requires:
+      [
+        background.problem,
+        background.affected-domains,
+        solution-definition.high-level-requirements,
+        solution-definition.process-flow,
+        solution-definition.high-level-solution-overview,
+        introduction.assumptions?,
+        solution-definition.feature-breakdown,
+        team-and-estimates.teams-required,
+        team-and-estimates.estimates,
+        team-and-estimates.references?,
+      ]
+
+  - id: soap-full
+    title: Full Solution on a Page
+    purpose: >
+      Provide a fuller summary with detailed scope, dependencies, sequencing,
+      dates and open questions.
+    template: templates/soap-full.md.tmpl
+    gate: business-case
+    # Order follows the JEDI Full SOAP reference document exactly: the
+    # front-matter metadata block, then Introduction, Problem statement,
+    # Opportunity, In Scope, Out of Scope, High Level Requirements, High level
+    # solution overview, Teams required, Dependencies, Assumptions, Estimates,
+    # Sequencing, Questions, Caveats, References.
+    #
+    # CHANGED v2:
+    #  - `introduction.overview?` added. The reference opens with an
+    #    "Introduction" section that had no field at all.
+    #  - `soap-full-details.questions` -> `open-questions.questions`. Same
+    #    concept as the HLD's "Open questions"; now one field across both stages.
+    #  - `introduction.caveats?` removed from this artefact. It sat alongside
+    #    `soap-full-details.caveats`, so the Full SOAP had two "Caveats"
+    #    sections. `soap-full-details.caveats` is the estimate caveats the
+    #    reference renders; `introduction.caveats` still carries design caveats
+    #    forward to the SAD and as-built.
+    #  - `solution-definition.alternatives-sketch?` kept but moved to sit with
+    #    the solution overview it qualifies; it has no analogue in the reference.
+    requires:
+      [
+        soap-full-details.epic-project,
+        soap-full-details.requested-lead-by,
+        soap-full-details.request-date,
+        soap-full-details.draft-agreed-date,
+        soap-full-details.delivered-date,
+        introduction.overview?,
+        background.problem,
+        background.opportunity,
+        introduction.in-scope,
+        introduction.out-of-scope,
+        solution-definition.high-level-requirements,
+        solution-definition.high-level-solution-overview,
+        solution-definition.alternatives-sketch?,
+        team-and-estimates.teams-required,
+        dependencies.dependencies-overview,
+        introduction.assumptions?,
+        introduction.constraints?,
+        team-and-estimates.estimates,
+        soap-full-details.sequencing,
+        open-questions.questions,
+        soap-full-details.caveats,
+        team-and-estimates.references,
+      ]
+
+  - id: hld
+    title: High Level Design
+    purpose: >
+      Present the proposed solution, alternatives, risks and open questions for
+      approval before detailed design.
+    template: templates/hld.md.tmpl
+    gate: hld-tac-approved
+    # Order follows the TAC HLD reference template: cover block -> Problem
+    # Statement (Current state, Desired future state, In scope / out of scope,
+    # Success criteria, Non-functional requirements) -> Proposed solution
+    # (Alignment with strategy, Dependencies, Implications, Trade-offs, Risks and
+    # mitigations, Security and privacy, Cost-benefit analysis, Delivery approach)
+    # -> Alternatives considered -> Open questions -> Attachment/s.
+    #
+    # CHANGED v2 — this artefact moved the most. v1 listed whole modules, which
+    # rendered nfrs / risks / security / dependencies *after* Alternatives and
+    # Open questions, and scope last of all; the reference places scope inside
+    # Problem Statement and the other four inside Proposed solution. The list is
+    # now field-level so the order can match. Every field of the four modules
+    # that were previously whole-module entries is still listed, with `?` on the
+    # ones that were not mandatory at this gate, so editor scope and gate
+    # strictness are unchanged apart from the three fields noted below.
+    #  - `solution-definition.high-level-solution-overview?` added: the
+    #    reference's "Proposed solution" opens by asking the author to outline
+    #    the solution, which had no field — the Shape overview now carries in.
+    #  - `hld-submission.attachments?` moved from first to last, matching
+    #    "Attachment/s" as the reference's final section.
+    #  - `nfrs.performance`, `nfrs.availability-and-continuity` and
+    #    `security.privacy-and-confidentiality` are now mandatory at this gate
+    #    (declared in their modules). The reference makes both sections
+    #    mandatory; v1 enforced neither.
+    requires:
+      [
+        hld-submission.purpose-statement,
+        hld-submission.authors-and-contributors?,
+        hld-submission.decision-requested,
+        hld-submission.next-steps?,
+        hld-submission.consultation,
+        background.problem,
+        background.affected-domains,
+        background.opportunity,
+        introduction.in-scope,
+        introduction.out-of-scope,
+        background.success-criteria,
+        nfrs.performance,
+        nfrs.availability-and-continuity,
+        nfrs.scalability-and-capacity?,
+        nfrs.disaster-recovery-and-backup?,
+        nfrs.other-nfrs?,
+        nfrs.requirements-traceability?,
+        solution-definition.high-level-solution-overview?,
+        proposed-solution.guardrails,
+        proposed-solution.strategy-alignment,
+        dependencies.dependencies-overview,
+        dependencies.dependency-list?,
+        proposed-solution.implications?,
+        proposed-solution.trade-offs,
+        risks.risk-register,
+        risks.open-issues?,
+        security.privacy-and-confidentiality,
+        security.security-architecture?,
+        security.identity-and-access?,
+        security.regulations-and-standards?,
+        proposed-solution.cost-benefit,
+        proposed-solution.delivery-approach,
+        alternatives-considered.alternatives,
+        open-questions.questions?,
+        introduction.assumptions?,
+        introduction.constraints?,
+        introduction.caveats?,
+        hld-submission.attachments?,
+      ]
+
+  - id: sad
+    title: Solution Architecture Document
+    purpose: >
+      Describe the complete solution architecture and its requirements,
+      security, dependencies and support handover readiness for build.
+    template: templates/sad.md.tmpl
+    gate: build-ready-checklist
+    # Order follows SAD Template.docx: Introduction / Overview -> Business
+    # Architecture View -> Solution Overview (+ Dependencies) -> High Level
+    # Architectural View -> Open Issues -> Logical Components View ->
+    # Requirements Traceability -> Technology Architecture + Deployment View ->
+    # Failure & Recovery -> Information View -> Security View -> Operating
+    # Considerations -> References.
+    #
+    # CHANGED v2 — the four big moves, all to match the reference:
+    #  - `dependencies` moves early (the reference puts Dependencies under
+    #    Solution Overview, §6); v1 had it second-to-last.
+    #  - `risks.open-issues` moves to its own position after the architectural
+    #    view (the reference's "Open Issues", §8); v1 buried it late with risks.
+    #  - `recovery-plan` + `nfrs.disaster-recovery-and-backup` move before the
+    #    Information View (the reference's "Failure & Recovery", §14); v1 had
+    #    recovery near the very end.
+    #  - the `nfrs` performance/scalability/availability fields move late, to the
+    #    reference's "Operating Considerations" (§17) where the detail actually
+    #    sits; `nfrs.requirements-traceability` stays mid-document at the
+    #    reference's "Requirements Traceability" (§10-11).
+    # Newly wired-in for reuse (all optional, so the gate is unchanged):
+    # stakeholders (the reference's "Stakeholder Mapping"), the Shape process
+    # flow and requirement set ("Business Process" / "Relevant Functional
+    # Requirements"), the five `integration` deployment fields that existed but
+    # no artefact rendered (Hardware, Bandwidth, Network Devices, Communication
+    # & Network Protocols, SAN), the three optional `recovery-plan` fields,
+    # `data-security-controls.inheritance-and-dependencies`, operational
+    # accounts / monitoring (the reference's "Terms & Conditions and Contracts"
+    # and "Systems Management & Monitoring"), and `team-and-estimates.references`
+    # (the reference's "References" under Document Control).
+    # MERGED: `integration.environments` -> `support-and-operations.environments-and-domains`.
+    # NOTE: `glossary.terms-and-definitions` is retained although SAD Template.docx
+    # has no glossary section — the v1 comment claiming it does is incorrect. The
+    # SSAD and the as-built references both carry one and it is worth keeping.
+    #
+    # CHANGED v2 (round 2), all optional so the gate is unchanged:
+    #  - `introduction.executive-summary?` opens the document (reference §1).
+    #  - `architecture.solution-users?` carries "Solution Users" (§5.2.1), which
+    #    had no field: the reference asks for a User / Description table of the
+    #    roles that use the system.
+    #  - `integration.software-and-licences?` carries "Application Software View"
+    #    (§13.1), which had no field: software, version, total count and licences
+    #    per environment.
+    #  - `support-and-operations.decommission?` carries "Decommission" (§17.9),
+    #    previously folded into `nfrs.other-nfrs`. End of life is an operational
+    #    lifecycle commitment, not a quality attribute.
+    # NOT modelled, by decision: "Executive Summary" is now covered, but
+    # "Tables & Figures" (§3), "Document Control" and its Approved By / Consulted /
+    # Distribution sub-sections (§18) and the SAD's own "Appendix" (§19) are left
+    # to the tool and the repo rather than given fields. "Hosting & Sites" (§12.3)
+    # is deliberately folded into `integration.network-and-infrastructure`.
+    requires:
+      [
+        introduction.executive-summary?,
+        introduction.overview,
+        introduction.purpose,
+        introduction.in-scope,
+        introduction.out-of-scope,
+        support-and-operations.stakeholders?,
+        architecture.business-context,
+        architecture.solution-users?,
+        solution-definition.process-flow?,
+        solution-definition.high-level-requirements?,
+        architecture.solution-description,
+        dependencies.dependencies-overview,
+        dependencies.dependency-list,
+        architecture.design-decisions,
+        architecture.architectural-risks,
+        architecture.constraints,
+        introduction.assumptions?,
+        introduction.constraints?,
+        architecture.standards,
+        risks.open-issues,
+        risks.risk-register,
+        architecture.logical-components,
+        nfrs.requirements-traceability,
+        integration.interfaces,
+        integration.network-and-infrastructure,
+        integration.software-and-licences?,
+        integration.hardware?,
+        integration.bandwidth?,
+        integration.network-devices?,
+        integration.communication-and-network-protocols?,
+        integration.san?,
+        recovery-plan.recovery-approach,
+        recovery-plan.resiliency?,
+        recovery-plan.test-scenarios?,
+        recovery-plan.raci?,
+        nfrs.disaster-recovery-and-backup,
+        data.logical-data-model,
+        data.data-classification,
+        data.data-replication,
+        data.data-retention-and-archiving,
+        data.data-migration,
+        support-and-operations.environments-and-domains,
+        security.identity-and-access,
+        security.security-architecture,
+        security.regulations-and-standards,
+        security.privacy-and-confidentiality,
+        data-security-controls.controls,
+        data-security-controls.inheritance-and-dependencies?,
+        support-and-operations.operational-accounts-and-licenses?,
+        nfrs.scalability-and-capacity,
+        nfrs.performance,
+        nfrs.availability-and-continuity,
+        support-and-operations.monitoring-and-alerting?,
+        nfrs.other-nfrs,
+        support-and-operations.decommission?,
+        support-and-operations.support-handover-readiness,
+        glossary.terms-and-definitions,
+        team-and-estimates.references?,
+      ]
+
+  - id: ssad
+    title: Solution Support Architecture Document
+    purpose: >
+      Describe the solution's design and operational readiness for the teams
+      that will support it after build.
+    template: templates/ssad.md.tmpl
+    gate: build-ready-checklist
+    # Order follows the FV Help Tool SSAD reference: Solution Products ->
+    # Architectural Risks -> Introduction (Purpose, Scope, Content Standards) ->
+    # Solution Overview (Stakeholders, Solution Domains, third-party platforms,
+    # Support Map, URLs and environments, context model and components,
+    # integrations, licences, security, Release Procedures) -> Glossary ->
+    # References.
+    #
+    # CHANGED v2:
+    #  - `architecture.architectural-risks` and `architecture.logical-components`
+    #    move to the front. The reference opens with Solution Products and puts
+    #    Architectural Risks fourth, before the Introduction; v1 ordered them
+    #    11th and 12th.
+    #  - `support-and-operations.release-procedures` moves late, where the
+    #    reference puts it; v1 had it third in the support block.
+    #  - `introduction.content-standards?` is named explicitly (the reference's
+    #    "Content Standards" sub-section) rather than left to a template guard.
+    #  - `team-and-estimates.references?` added — the reference ends with a
+    #    References section that no field was wired to.
+    #
+    # CHANGED v2 (round 2):
+    #  - `introduction.executive-summary?` opens the document (reference §1).
+    #  - `support-and-operations.operational-security-controls` →
+    #    `data-security-controls.controls` (+ `.inheritance-and-dependencies?`).
+    #    The removed field held the same kind of content — a named concern and how
+    #    it is implemented — at the same gate as the control register. The
+    #    reference SSAD's own security sections ("developer access to the
+    #    repositories is restricted to Somar staff only"; "API access to
+    #    Healthpoint is handled by the ingest API and is the only component that
+    #    calls it") are Access-management and Networking rows in the approved ATLAS
+    #    design's register. `controls` is bare here, as the removed field was, so
+    #    the gate is unchanged.
+    # Security now has two homes, layered by stage, not three: `security` for the
+    # design-time posture (opens at HLD), `data-security-controls` for the control
+    # set (opens at detailed design, re-opens as-built at handover).
+    requires:
+      [
+        introduction.executive-summary?,
+        architecture.logical-components,
+        architecture.architectural-risks,
+        risks.risk-register,
+        risks.open-issues,
+        introduction.purpose,
+        introduction.in-scope,
+        introduction.out-of-scope,
+        introduction.content-standards?,
+        architecture.solution-description,
+        support-and-operations.stakeholders,
+        support-and-operations.environments-and-domains,
+        dependencies.dependency-list,
+        integration.interfaces,
+        data.data-classification,
+        nfrs.availability-and-continuity,
+        nfrs.disaster-recovery-and-backup,
+        nfrs.scalability-and-capacity,
+        support-and-operations.operational-accounts-and-licenses,
+        security.identity-and-access,
+        security.privacy-and-confidentiality,
+        data-security-controls.controls,
+        data-security-controls.inheritance-and-dependencies?,
+        support-and-operations.monitoring-and-alerting,
+        support-and-operations.release-procedures,
+        support-and-operations.support-handover-readiness,
+        glossary.terms-and-definitions,
+        team-and-estimates.references?,
+      ]
+
+  - id: as-built
+    title: As-built
+    purpose: >
+      Record what was built and the final handover information needed for
+      operational use.
+    template: templates/as-built.md.tmpl
+    gate: operational-handover
+    # Order mirrors the approved ATLAS reference design: Terms & Definitions ->
+    # Introduction -> As-built design (Overview, Architecture Decisions, flows,
+    # infrastructure) -> Recovery plan -> Data security controls -> Appendix,
+    # then the gantry-only governance sections.
+    #
+    # CHANGED v2: v1's `requires` order contradicted that comment — it placed
+    # `changes-from-design`, `acceptance-criteria` and `handover-confirmation`
+    # between the infrastructure section and the recovery plan, so the governance
+    # sections landed in the middle of the reference's own structure. They now
+    # sit at the end, after the Appendix. The optional fields the reference does
+    # carry (`architecture-decisions`, the `introduction` and `recovery-plan`
+    # detail, `data-security-controls.inheritance-and-dependencies`, `appendix`)
+    # are listed with `?` so their position is explicit rather than left to the
+    # template's `if` guards.
+    #
+    # CHANGED v2 (round 2): `nfrs.disaster-recovery-and-backup` is pulled through
+    # from build-ready and rendered immediately before the recovery plan, so the
+    # as-built failover mechanism can be read against the RTO/RPO and backup
+    # policy it was built to meet. That field now owns those targets outright and
+    # `recovery-plan.recovery-approach` no longer restates them. It is bare here
+    # and declares `operational-handover` in its `required-at`; because it is
+    # already mandatory at `build-ready-checklist` the value exists by the time
+    # this gate runs, so nothing new is asked of an author.
+    requires:
+      [
+        glossary.terms-and-definitions,
+        introduction.overview,
+        introduction.purpose,
+        introduction.in-scope,
+        introduction.out-of-scope,
+        introduction.constraints?,
+        introduction.assumptions?,
+        introduction.caveats?,
+        introduction.design-principles?,
+        introduction.outcomes-and-deliverables?,
+        as-built-notes.design-overview,
+        as-built-notes.architecture-decisions?,
+        as-built-notes.process-flows,
+        as-built-notes.infrastructure-and-configuration,
+        nfrs.disaster-recovery-and-backup,
+        recovery-plan.recovery-approach,
+        recovery-plan.resiliency?,
+        recovery-plan.test-scenarios?,
+        recovery-plan.raci?,
+        data-security-controls.controls,
+        data-security-controls.inheritance-and-dependencies?,
+        as-built-notes.appendix?,
+        as-built-notes.changes-from-design,
+        as-built-notes.acceptance-criteria,
+        as-built-notes.operational-notes?,
+        as-built-notes.handover-confirmation,
+      ]

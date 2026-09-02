@@ -1,0 +1,286 @@
+# <%~ it.instance.slug %>: Solution Architecture Document
+<%
+  /* Intentional consolidation (WI #269, carried into WI #318 / design v2): this
+     template deliberately merges several "SAD Template.docx" viewpoint sections
+     into fewer gantry modules/fields — it is NOT a 1:1 heading map to the
+     reference, and that is by design. See
+     docs/research/design-definition-reference-reconciliation.md §5 and §9,
+     grounded in docs/reconciliation/sad-reconciliation.md.
+     WI #318: `requires` is reordered end to end to match the SAD reference's
+     own section order — see definition.yaml's `sad.requires` comment for the
+     section-by-section rationale (dependencies moved early, open issues gets
+     its own section, recovery moves before Information View, the nfrs
+     performance/scalability/availability trio moves to Operating
+     Considerations). `introduction`'s optional fields are inlined here rather
+     than via `_introductionOptional.md.tmpl` — this artefact's scope is only
+     `assumptions?` / `constraints?`, not the partial's full five-field set
+     (that stays as-built's own shape). Blank-field guard `na()` is injected
+     once as an Eta functionHeader by lib/render.js (WI #273 / R2). A
+     `module.field?` requires entry is in scope but not gate-blocking (WI
+     #276), so it renders as a suppress-when-blank `<% if %>` section; a bare
+     entry always renders its heading via na() — including
+     `glossary.terms-and-definitions`, which v1 rendered with a bare `<% if %>`
+     despite being a bare (gate-blocking) requires entry. */
+  const recovery = it.modules['recovery-plan'] || {}
+  const dsc = it.modules['data-security-controls'] || {}
+%>
+# Introduction
+<% if (it.modules.introduction['executive-summary']) { %>
+## Executive summary
+
+<%~ it.modules.introduction['executive-summary'] %>
+<% } %>
+## Overview
+
+<%~ na(it.modules.introduction.overview) %>
+
+## Purpose
+
+<%~ na(it.modules.introduction.purpose) %>
+
+## In scope
+
+<%~ na(it.modules.introduction['in-scope']) %>
+
+## Out of scope
+
+<%~ na(it.modules.introduction['out-of-scope']) %>
+<% if (it.modules.introduction.assumptions) { %>
+## Assumptions
+
+<%~ it.modules.introduction.assumptions %>
+<% } %>
+<% if (it.modules.introduction.constraints) { %>
+## Constraints
+
+<%~ it.modules.introduction.constraints %>
+<% } %>
+
+# Business architecture
+<% if (it.modules['support-and-operations'].stakeholders && it.modules['support-and-operations'].stakeholders.length) { %>
+## Stakeholders
+
+<% it.modules['support-and-operations'].stakeholders.forEach(function(item) { %>- <%~ item %>
+<% }) %>
+<% } %>
+## Business context
+
+<%~ na(it.modules.architecture['business-context']) %>
+
+# Solution overview
+<% if (it.modules.architecture['solution-users'] && it.modules.architecture['solution-users'].length) { %>
+## Solution users
+
+<% it.modules.architecture['solution-users'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+<% } %>
+<% if (it.modules['solution-definition']['process-flow']) { %>
+## Process flow
+
+<%~ it.modules['solution-definition']['process-flow'] %>
+<% } %>
+<% if (it.modules['solution-definition']['high-level-requirements']) { %>
+## High-level requirements
+
+<%~ it.modules['solution-definition']['high-level-requirements'] %>
+<% } %>
+## Solution description
+
+<%~ na(it.modules.architecture['solution-description']) %>
+
+## Dependencies overview
+
+<%~ na(it.modules.dependencies['dependencies-overview']) %>
+
+## Dependency list
+
+<% it.modules.dependencies['dependency-list'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+## Design decisions
+
+<%~ na(it.modules.architecture['design-decisions']) %>
+
+## Architectural risks
+
+<%~ na(it.modules.architecture['architectural-risks']) %>
+
+## Constraints and goals
+
+<%~ na(it.modules.architecture.constraints) %>
+<% if (it.modules.architecture.standards && it.modules.architecture.standards.length) { %>
+## Applicable standards
+
+<% it.modules.architecture.standards.forEach(function(item) { %>- <%~ item %>
+<% }) %>
+<% } %>
+
+# Open issues
+
+<%~ na(it.modules.risks['open-issues']) %>
+
+# Risks
+
+## Risk register
+
+<%~ na(it.modules.risks['risk-register']) %>
+
+# Logical components view
+
+<% it.modules.architecture['logical-components'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+# Requirements traceability
+
+<%~ na(it.modules.nfrs['requirements-traceability']) %>
+
+# Technology architecture
+
+## Interfaces
+
+<%~ na(it.modules.integration.interfaces) %>
+
+## Network and infrastructure architecture
+
+<%~ na(it.modules.integration['network-and-infrastructure']) %>
+<% if (it.modules.integration['software-and-licences']) { %>
+## Software and licences
+
+<%~ it.modules.integration['software-and-licences'] %>
+<% } %>
+<% if (it.modules.integration.hardware || it.modules.integration.bandwidth || it.modules.integration['network-devices'] || it.modules.integration['communication-and-network-protocols'] || it.modules.integration.san) { %>
+## Deployment view
+<% if (it.modules.integration.hardware) { %>
+### Hardware
+
+<%~ it.modules.integration.hardware %>
+<% } %>
+<% if (it.modules.integration.bandwidth) { %>
+### Bandwidth
+
+<%~ it.modules.integration.bandwidth %>
+<% } %>
+<% if (it.modules.integration['network-devices']) { %>
+### Network devices
+
+<%~ it.modules.integration['network-devices'] %>
+<% } %>
+<% if (it.modules.integration['communication-and-network-protocols']) { %>
+### Communication and network protocols
+
+<%~ it.modules.integration['communication-and-network-protocols'] %>
+<% } %>
+<% if (it.modules.integration.san) { %>
+### SAN (Database, Application Server, Backup, DR)
+
+<%~ it.modules.integration.san %>
+<% } %>
+<% } %>
+
+# Failure and recovery
+
+## Recovery approach
+
+<%~ na(recovery['recovery-approach']) %>
+<%~ include('templates/_recoveryPlanDetail.md.tmpl', { recovery }) %>
+
+## Backup and archiving policy
+
+<%~ na(it.modules.nfrs['disaster-recovery-and-backup']) %>
+
+# Information view
+
+## Logical data model
+
+<%~ na(it.modules.data['logical-data-model']) %>
+
+## Data classification
+
+<%~ na(it.modules.data['data-classification']) %>
+<% if (it.modules.data['data-replication']) { %>
+## Data replication
+
+<%~ it.modules.data['data-replication'] %>
+<% } %>
+## Data retention, archiving and records management
+
+<%~ na(it.modules.data['data-retention-and-archiving']) %>
+<% if (it.modules.data['data-migration']) { %>
+## Data migration
+
+<%~ it.modules.data['data-migration'] %>
+<% } %>
+
+# Environments, URLs and domains
+
+<% it.modules['support-and-operations']['environments-and-domains'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+# Security
+
+## Identity and access management
+
+<%~ na(it.modules.security['identity-and-access']) %>
+
+## Security architecture
+
+<%~ na(it.modules.security['security-architecture']) %>
+
+## Regulations and standards
+
+<% it.modules.security['regulations-and-standards'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+## Privacy and confidentiality concerns
+
+<%~ na(it.modules.security['privacy-and-confidentiality']) %>
+<%~ include('templates/_dataSecurityControls.md.tmpl', { dsc, controlsHeading: '## Security concerns', inheritanceHeading: '## Security control inheritance and dependencies' }) %>
+<% if (it.modules['support-and-operations']['operational-accounts-and-licenses'] && it.modules['support-and-operations']['operational-accounts-and-licenses'].length) { %>
+## Operational accounts and licenses
+
+<% it.modules['support-and-operations']['operational-accounts-and-licenses'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+<% } %>
+
+# Operating considerations
+
+## Scalability and capacity
+
+<%~ na(it.modules.nfrs['scalability-and-capacity']) %>
+
+## Performance
+
+<%~ na(it.modules.nfrs.performance) %>
+
+## Availability and continuity
+
+<%~ na(it.modules.nfrs['availability-and-continuity']) %>
+<% if (it.modules['support-and-operations']['monitoring-and-alerting']) { %>
+## Monitoring and alerting
+
+<%~ it.modules['support-and-operations']['monitoring-and-alerting'] %>
+<% } %>
+## Other non-functional requirements
+
+<%~ na(it.modules.nfrs['other-nfrs']) %>
+<% if (it.modules['support-and-operations'].decommission) { %>
+## Decommission
+
+<%~ it.modules['support-and-operations'].decommission %>
+<% } %>
+
+# Operational readiness
+
+<%~ na(it.modules['support-and-operations']['support-handover-readiness']) %>
+
+> Full support and operations detail is maintained in this solution's SSAD.
+
+# Glossary
+
+<%~ na(it.modules.glossary['terms-and-definitions']) %>
+<% if (it.modules['team-and-estimates'].references && it.modules['team-and-estimates'].references.length) { %>
+# References
+
+<% it.modules['team-and-estimates'].references.forEach(function(item) { %>- <%~ item %>
+<% }) %>
+<% } %>

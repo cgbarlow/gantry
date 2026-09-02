@@ -23,7 +23,10 @@ import { withScratchInstances, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } fr
 
 test('creates a design instance with blank Shape-stage module files', async () => {
   await withScratchInstances((instancesDir) => {
-    const result = createInstance('design', 'my-initiative', { instancesDir, owner: 'c.barlow' })
+    // Pinned to v1 explicitly (WI #318 published v2 alongside it, so an
+    // unpinned createInstance no longer defaults here) — this test is about
+    // v1's specific Shape-stage module set.
+    const result = createInstance('design', 'my-initiative', { instancesDir, owner: 'c.barlow', definitionVersion: 1 })
     assert.equal(result.stage, 'shape')
     assert.deepEqual(result.modules, ['background', 'solution-definition', 'team-and-estimates', 'dependencies', 'soap-full-details', 'introduction'])
 
@@ -920,7 +923,9 @@ function withFakeRepo(files, fn) {
 test('createInstance writes instance.yaml and blank module files to Azure DevOps when a location is supplied, recording that location in instance.yaml', async () => {
   await withFakeRepo({}, async (baseUrl) => {
     const azureDevOps = azureDevOpsOptions(baseUrl)
-    const result = await createInstance('design', 'my-initiative', { azureDevOps, owner: 'c.barlow' })
+    // Pinned to v1 explicitly (WI #318 published v2 alongside it) — this test
+    // is about v1's specific Shape-stage module set.
+    const result = await createInstance('design', 'my-initiative', { azureDevOps, owner: 'c.barlow', definitionVersion: 1 })
     assert.equal(result.stage, 'shape')
     assert.deepEqual(result.modules, ['background', 'solution-definition', 'team-and-estimates', 'dependencies', 'soap-full-details', 'introduction'])
 
@@ -929,7 +934,7 @@ test('createInstance writes instance.yaml and blank module files to Azure DevOps
     assert.equal(instance.stage, 'shape')
     assert.deepEqual(instance.azureDevOps, { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY })
 
-    const definition = loadDefinition('design')
+    const definition = loadDefinition('design', { version: 1 })
     const data = await readModule(definition, 'my-initiative', 'background', { azureDevOps })
     assert.equal(data.owner, 'c.barlow')
     assert.equal(data.status, 'draft')
@@ -1131,8 +1136,10 @@ test('createInstance against Azure DevOps reports exactly what was written and w
     { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {}, failAfterPushes: 3 },
     async (baseUrl) => {
       const azureDevOps = azureDevOpsOptions(baseUrl)
+      // Pinned to v1 explicitly (WI #318 published v2 alongside it) — this
+      // test is about v1's specific Shape-stage module set/order.
       await assert.rejects(
-        () => createInstance('design', 'my-initiative', { azureDevOps }),
+        () => createInstance('design', 'my-initiative', { azureDevOps, definitionVersion: 1 }),
         /partially created.*module\(s\) background were written, but module "solution-definition" failed.*writeModule directly for the remaining module\(s\) \(\s*solution-definition, team-and-estimates, dependencies, soap-full-details, introduction\)/s
       )
     }

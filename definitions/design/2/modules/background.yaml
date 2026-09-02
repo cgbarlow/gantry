@@ -1,0 +1,54 @@
+id: background
+title: Background and context
+purpose: >
+  Describe why this initiative exists and what it is responding to. Give a reader with
+  no prior knowledge enough context to understand the situation quickly, stated clearly
+  enough that a reviewer can judge the fit of the solution without inferring it.
+
+  One module used at Shape and at HLD — fill it progressively: at Shape state the
+  current problem and the domains it touches for the business case; by HLD add the
+  opportunity and success criteria in the depth TAC needs.
+
+fields:
+  - id: problem
+    title: Problem statement
+    type: markdown
+    required-at: [business-case, hld-tac-approved]
+    guidance: >
+      The current state — what is wrong, missing, or binding right now: the
+      legislative, operational, commercial, or technical constraint that makes
+      this necessary. Open with a one-line summary before the fuller narrative.
+      Describe only the present situation here; the desired end state belongs in
+      `opportunity`.
+
+      The HLD's `background` framing and the SAD's `introduction` framing are
+      intentionally separate (TAC vs Design Authority audiences) — do not expect
+      `introduction.overview` to pre-fill from this field. See the reconciliation
+      doc §5.
+
+      This field and `architecture.business-context` are also deliberately
+      separate: the problem stated here is what TAC decides on, while the
+      business context there is the setting a builder needs. Reviewed and
+      confirmed as a decision in v2, not an unresolved duplicate.
+
+  - id: affected-domains
+    title: Affected domains
+    type: list
+    required: true
+
+  - id: opportunity
+    title: Opportunity
+    type: markdown
+    required-at: [hld-tac-approved]
+    guidance: >
+      The desired future state — the better outcome, service, or capability this
+      initiative creates once the problem is addressed. Describe what "good" looks
+      like when the work is done, not how it will be built.
+
+  - id: success-criteria
+    title: Success criteria
+    type: markdown
+    required-at: [hld-tac-approved]
+    guidance: >
+      How you'll know the desired future state has actually been reached —
+      observable, not aspirational.

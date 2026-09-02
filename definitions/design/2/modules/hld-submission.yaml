@@ -1,0 +1,58 @@
+# Field order follows the TAC HLD reference template's cover table:
+# Purpose -> Author -> "Technical Architecture Committee are requested to"
+# (which embeds Next Steps) -> Contributors -> Consultation. `attachments` is
+# last: the reference renders "Attachment/s" as the final section of the
+# document, not part of the cover block, and the `hld` artefact places it there.
+
+id: hld-submission
+title: HLD Submission
+purpose: >
+  Provide the cover information for this submission — what is being asked, who has been
+  consulted and what happens next.
+
+fields:
+  - id: purpose-statement
+    title: Purpose statement
+    type: markdown
+    required: true
+    guidance: >
+      Summarise in one sentence what this document proposes and what decision is being
+      asked for.
+  - id: authors-and-contributors
+    title: Authors and contributors
+    type: list
+    required: false
+    guidance: >
+      List who wrote or contributed to this paper — name and role (for example, "J. Smith —
+      Architect"). Carries both the reference template's "Author" and
+      "Contributors" cover rows.
+  - id: decision-requested
+    title: Decision requested
+    type: markdown
+    required: true
+    guidance: >
+      State the decision being asked for — Approve, Endorse, Discuss or Note — and a short
+      summary of the ask.
+  - id: next-steps
+    title: Next steps
+    type: markdown
+    required: false
+    guidance: >
+      Describe where this paper goes next, if anywhere — for example, which governance step
+      follows.
+  - id: consultation
+    title: Consultation
+    type: markdown
+    required: true
+    guidance: >
+      List who was consulted before this submission and whether they endorsed it or raised
+      disagreement.
+  - id: attachments
+    title: Attachments
+    type: list
+    required: false
+    guidance: >
+      List any supplementary documents attached to this submission, with a name and
+      reference or link, such as a diagram export or spreadsheet needed alongside the
+      paper. Renders as the final section of the HLD, matching the reference
+      template's "Attachment/s".

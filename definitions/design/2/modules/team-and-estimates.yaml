@@ -1,0 +1,31 @@
+id: team-and-estimates
+title: Teams, contact persons, and high-level estimates
+purpose: >
+  List the teams involved and the order-of-magnitude sizing for the work. This is a
+  signal for planning, not a commitment.
+
+fields:
+  - id: teams-required
+    title: Teams required
+    type: list
+    required: true
+    guidance: >
+      Every team touched by this solution and a named contact for each —
+      not just the obvious delivery team.
+
+  - id: estimates
+    title: Estimates
+    type: markdown
+    required: true
+    guidance: >
+      T-shirt size (or equivalent order-of-magnitude estimate) per team or
+      workstream. This is a sizing signal for planning, not a commitment.
+
+  - id: references
+    title: References
+    type: list
+    required: false
+    guidance: >
+      Links to supporting material — prior art, related initiatives, source
+      documents, or the sizing methodology used for `estimates` — that
+      informed this instance but don't belong inline.

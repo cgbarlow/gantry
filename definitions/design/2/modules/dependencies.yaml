@@ -1,0 +1,26 @@
+id: dependencies
+title: Dependencies
+purpose: >
+  List what this solution depends on and what depends on it — systems, teams and
+  decisions still in progress. This is one module used in both high-level design and
+  detailed design — fill it progressively: during high-level design a narrative overview
+  is enough to support the decision; the full structured dependency list is needed before
+  build readiness.
+
+fields:
+  - id: dependencies-overview
+    title: Dependencies
+    type: markdown
+    required-at: [business-case, hld-tac-approved]
+    guidance: >
+      Describe what this solution depends on and what depends on it — other initiatives,
+      platforms, teams or decisions still in progress. Give enough for a reviewer to judge
+      the proposal without a full dependency list yet.
+  - id: dependency-list
+    title: Dependency list
+    type: list
+    required-at: [build-ready-checklist]
+    guidance: >
+      Every system, service or team this solution depends on to function,
+      and what it depends on them for — the complete list needed to build
+      against.

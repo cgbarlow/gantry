@@ -218,8 +218,11 @@ test('passes Business Case Approved with only the lightweight SOAP fields', asyn
 
 test('passes Business Case Approved with only the Full SOAP fields, without process-flow or feature-breakdown', async () => {
   await withScratchInstances((instancesDir) => {
-    const definition = loadDefinition('design')
-    createInstance('design', 'full-soap', { instancesDir })
+    // Pinned to v1 explicitly (WI #318 published v2 alongside it) — this test
+    // writes v1's exact Full SOAP field shape (e.g. `soap-full-details.questions`,
+    // which v2 replaced with `open-questions.questions`).
+    const definition = loadDefinition('design', { version: 1 })
+    createInstance('design', 'full-soap', { instancesDir, definitionVersion: 1 })
 
     writeModule(definition, 'full-soap', 'background', {
       fields: {

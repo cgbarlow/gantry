@@ -1,0 +1,23 @@
+# CHANGED v2: this module is now mounted from the `shape` stage, and
+# `open-questions.questions` is referenced by the `soap-full` artefact in place
+# of the removed `soap-full-details.questions`. A question raised while shaping
+# is the same question TAC sees at HLD — it is entered once and carries forward.
+
+id: open-questions
+title: Open Questions
+purpose: >
+  List the questions that are still open and what needs to happen to resolve them.
+
+  Open from the `shape` stage onward: the Full SOAP's "Questions" section and
+  the HLD's "Open questions" section render from this one field, so a question
+  raised at Shape carries into the HLD rather than being re-typed.
+
+fields:
+  - id: questions
+    title: Open questions
+    type: markdown
+    required: false
+    guidance: >
+      List each open question, who needs to resolve it and when it needs resolving.
+      Questions that mature into risks migrate to `risks` (`open-issues` ->
+      `risk-register`) at detailed design.

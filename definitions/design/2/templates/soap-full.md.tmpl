@@ -1,0 +1,93 @@
+# <%~ it.instance.slug %>: Full Solution on a Page
+<%
+  /* WI #318 (design v2): follows the JEDI Full SOAP reference order exactly, per
+     definition.yaml's `soap-full.requires` comment. Blank-field guard `na()` is
+     injected once as an Eta functionHeader by lib/render.js (WI #273 / R2). A
+     `module.field?` requires entry is in scope but not gate-blocking, so it
+     renders as a suppress-when-blank `<% if %>` section (WI #276) — `references`
+     is bare here (unlike `soap`), so it renders unconditionally. */
+%>
+# Metadata
+
+| Field | Value |
+|---|---|
+| Epic/Project | <%~ it.modules['soap-full-details']['epic-project'] %> |
+| Requested/lead by | <%~ it.modules['soap-full-details']['requested-lead-by'] %> |
+| Request date | <%~ it.modules['soap-full-details']['request-date'] %> |
+| Draft agreed date | <%~ it.modules['soap-full-details']['draft-agreed-date'] %> |
+| SOAP/estimate delivered date | <%~ it.modules['soap-full-details']['delivered-date'] %> |
+
+# Introduction
+<% if (it.modules.introduction.overview) { %>
+## Overview
+
+<%~ it.modules.introduction.overview %>
+<% } %>
+## Problem statement
+
+<%~ na(it.modules.background.problem) %>
+
+# Opportunity
+
+<%~ na(it.modules.background.opportunity) %>
+
+# In scope
+
+<%~ na(it.modules.introduction['in-scope']) %>
+
+# Out of scope
+
+<%~ na(it.modules.introduction['out-of-scope']) %>
+
+# High level requirements
+
+<%~ na(it.modules['solution-definition']['high-level-requirements']) %>
+
+# High level solution overview
+
+<%~ na(it.modules['solution-definition']['high-level-solution-overview']) %>
+<% if (it.modules['solution-definition']['alternatives-sketch']) { %>
+## Alternatives sketch
+
+<%~ it.modules['solution-definition']['alternatives-sketch'] %>
+<% } %>
+# Teams required
+
+<% it.modules['team-and-estimates']['teams-required'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+# Dependencies
+
+<%~ na(it.modules.dependencies['dependencies-overview']) %>
+<% if (it.modules.introduction.assumptions) { %>
+# Assumptions
+
+<%~ it.modules.introduction.assumptions %>
+<% } %>
+<% if (it.modules.introduction.constraints) { %>
+# Constraints
+
+<%~ it.modules.introduction.constraints %>
+<% } %>
+# Estimates
+
+<%~ na(it.modules['team-and-estimates'].estimates) %>
+
+# Sequencing
+
+> Sequencing is a possible example based on timeframes estimated for each piece of this work. It does not represent capacity available to do this work and will need to be re-planned prior to development beginning.
+
+<%~ na(it.modules['soap-full-details'].sequencing) %>
+
+# Questions
+
+<%~ na(it.modules['open-questions'].questions) %>
+
+# Caveats
+
+<%~ na(it.modules['soap-full-details'].caveats) %>
+
+# References
+
+<% (it.modules['team-and-estimates'].references || []).forEach(function(item) { %>- <%~ item %>
+<% }) %>

@@ -1,0 +1,142 @@
+# <%~ it.instance.slug %>: Solution Support Architecture Document
+<%
+  /* Intentional consolidation (WI #269, carried into WI #318 / design v2): this
+     template deliberately abstracts the reference SSAD's product-scattered
+     Solution Overview deep-dive into a small set of generic support-architecture
+     modules/fields — it is NOT a 1:1 heading map to the reference, and that is
+     by design. See docs/research/design-definition-reference-reconciliation.md
+     §6 and §9, grounded in docs/reconciliation/ssad-reconciliation.md.
+     WI #318: the FV Help Tool SSAD reference's own reading order groups
+     Stakeholders / Solution Domains / URLs+environments / licences / security /
+     Release Procedures under one "Solution Overview" — this template now groups
+     the `support-and-operations` fields under that single `# Solution overview`
+     heading (v1 gave each field its own bare top-level `#`) — see
+     definition.yaml's `ssad.requires` comment. Blank-field guard `na()` is
+     injected once as an Eta functionHeader by lib/render.js (WI #273 / R2). A
+     `module.field?` requires entry is in scope but not gate-blocking (WI #276),
+     so it renders as a suppress-when-blank `<% if %>` section; every other
+     field here is bare (gate-blocking) and rendered via na() — including
+     `architecture.architectural-risks`, `risks.open-issues` and
+     `glossary.terms-and-definitions`, which v1 rendered with a bare `<% if %>`
+     despite being bare requires entries. */
+  const dsc = it.modules['data-security-controls'] || {}
+%>
+<% if (it.modules.introduction['executive-summary']) { %>
+# Executive summary
+
+<%~ it.modules.introduction['executive-summary'] %>
+<% } %>
+# Logical components
+
+<% it.modules.architecture['logical-components'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+# Architectural risks
+
+<%~ na(it.modules.architecture['architectural-risks']) %>
+
+# Risks
+
+## Risk register
+
+<%~ na(it.modules.risks['risk-register']) %>
+
+## Open issues
+
+<%~ na(it.modules.risks['open-issues']) %>
+
+# Introduction
+
+## Purpose
+
+<%~ na(it.modules.introduction.purpose) %>
+
+## In scope
+
+<%~ na(it.modules.introduction['in-scope']) %>
+
+## Out of scope
+
+<%~ na(it.modules.introduction['out-of-scope']) %>
+<% if (it.modules.introduction['content-standards']) { %>
+## Content standards
+
+<%~ it.modules.introduction['content-standards'] %>
+<% } %>
+
+# Solution overview
+
+## Solution description
+
+<%~ na(it.modules.architecture['solution-description']) %>
+
+## Stakeholders and support contacts
+
+<% it.modules['support-and-operations'].stakeholders.forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+## Environments, URLs and domains
+
+<% it.modules['support-and-operations']['environments-and-domains'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+## Dependency list
+
+<% it.modules.dependencies['dependency-list'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+## Interfaces
+
+<%~ na(it.modules.integration.interfaces) %>
+
+## Data classification
+
+<%~ na(it.modules.data['data-classification']) %>
+
+## Availability and continuity
+
+<%~ na(it.modules.nfrs['availability-and-continuity']) %>
+
+## Disaster recovery and backup
+
+<%~ na(it.modules.nfrs['disaster-recovery-and-backup']) %>
+
+## Scalability and capacity
+
+<%~ na(it.modules.nfrs['scalability-and-capacity']) %>
+
+## Operational accounts and licenses
+
+<% it.modules['support-and-operations']['operational-accounts-and-licenses'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+## Identity and access management
+
+<%~ na(it.modules.security['identity-and-access']) %>
+
+## Privacy and confidentiality concerns
+
+<%~ na(it.modules.security['privacy-and-confidentiality']) %>
+<%~ include('templates/_dataSecurityControls.md.tmpl', { dsc, controlsHeading: '## Security concerns', inheritanceHeading: '## Security control inheritance and dependencies' }) %>
+
+## Monitoring and alerting
+
+<%~ na(it.modules['support-and-operations']['monitoring-and-alerting']) %>
+
+## Release procedures
+
+<%~ na(it.modules['support-and-operations']['release-procedures']) %>
+
+## Support handover readiness
+
+<%~ na(it.modules['support-and-operations']['support-handover-readiness']) %>
+
+# Glossary
+
+<%~ na(it.modules.glossary['terms-and-definitions']) %>
+<% if (it.modules['team-and-estimates'].references && it.modules['team-and-estimates'].references.length) { %>
+# References
+
+<% it.modules['team-and-estimates'].references.forEach(function(item) { %>- <%~ item %>
+<% }) %>
+<% } %>

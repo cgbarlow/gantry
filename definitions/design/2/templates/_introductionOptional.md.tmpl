@@ -1,0 +1,30 @@
+<%
+  /* Shared partial (WI #273 / R2, finding F9): the Introduction optional-field block —
+     verbatim-duplicated between sad.md.tmpl and as-built.md.tmpl before this. Each
+     field is optional (not in either artefact's `requires`), so it stays a
+     suppress-when-blank `<% if %>` section. Caller passes { intro }. */
+%><% if (it.intro.constraints) { %>
+## Constraints
+
+<%~ it.intro.constraints %>
+<% } %>
+<% if (it.intro.assumptions) { %>
+## Assumptions
+
+<%~ it.intro.assumptions %>
+<% } %>
+<% if (it.intro.caveats) { %>
+## Caveats
+
+<%~ it.intro.caveats %>
+<% } %>
+<% if (it.intro['design-principles']) { %>
+## Design principles
+
+<%~ it.intro['design-principles'] %>
+<% } %>
+<% if (it.intro['outcomes-and-deliverables']) { %>
+## Outcomes and deliverables
+
+<%~ it.intro['outcomes-and-deliverables'] %>
+<% } %>

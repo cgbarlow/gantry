@@ -1,0 +1,47 @@
+id: data-security-controls
+title: Data Security Controls
+purpose: >
+  Describe the security controls that protect the solution's data in operation and what
+  they depend on. Cover how data is protected in transit and at rest and how access is
+  managed.
+
+  Two-layer model with the shared `security` module: `security` carries the
+  design-time posture (identity model, security architecture, regulations,
+  privacy) and opens at high-level design; this module carries the concrete
+  control set the solution runs under, opens at detailed design and re-opens
+  at handover with the as-built values. There is no third home — the
+  operational posture a support team must maintain (restricted developer
+  access, connectivity restrictions, read-only postures) is part of this
+  control set and the SSAD renders it from here. The
+  Security Risk Assessment (SRA) control register itself is evidence about
+  the built system and lives with the as-built `appendix` field. Wired into
+  the `detailed-design` / `sad` and `handover` / `as-built` artefacts;
+  `controls` is required at both gates (see the reconciliation doc §5).
+
+fields:
+  - id: controls
+    title: Controls
+    type: markdown
+    required-at: [build-ready-checklist, operational-handover]
+    guidance: >
+      The security controls in force, grouped (e.g. Encryption, Incident
+      management, Networking, Virtual machines, Availability, Access
+      management, Application security, Documentation). For each, the concern
+      it addresses and how it is implemented. A Service / Definition / Controls
+      table works well.
+
+      Includes the controls a support team must keep true in production —
+      developer and repository access restrictions, permitted outbound
+      connectivity, dependency and vulnerability scanning, framework security
+      configuration. Required at `build-ready-checklist` as designed and again
+      at `operational-handover` as built.
+
+  - id: inheritance-and-dependencies
+    title: Inheritance and dependencies
+    type: markdown
+    required: false
+    guidance: >
+      What the solution's security posture inherits from an underlying
+      platform (e.g. the cloud platform's own controls), the services relied
+      on, data locality, and the security regulations/standards it is held
+      to.

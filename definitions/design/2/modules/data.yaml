@@ -1,0 +1,54 @@
+# Field order follows the SAD reference template's "Information View"
+# (SAD Template.docx §15): Information Structure View -> Data Classification ->
+# Data Replication -> Data Storage Archiving & Retention -> Data Migration ->
+# Records Management. `data-retention-and-archiving` carries both the
+# "Data Storage Archiving & Retention" and "Records Management" sub-sections.
+
+id: data
+title: Data
+purpose: >
+  Describe the solution's data — what it holds, how sensitive it is, and what happens
+  to it over its lifetime. Cover where it is stored, how long it is kept, and any
+  movement between systems.
+
+fields:
+  - id: logical-data-model
+    title: Logical data model
+    type: markdown
+    required: true
+    guidance: >
+      The solution's key data entities and how they relate — enough for a
+      reader to understand what data exists without reading the schema.
+
+  - id: data-classification
+    title: Data classification
+    type: markdown
+    required: true
+    guidance: >
+      The sensitivity classification of the data this solution holds (e.g.
+      personal, health, confidential), and what that classification requires
+      of how it's handled.
+
+  - id: data-replication
+    title: Data replication
+    type: markdown
+    required: false
+    guidance: >
+      Where this data is copied or synchronised to (e.g. across
+      environments, regions, or into a reporting store), and how.
+
+  - id: data-retention-and-archiving
+    title: Data retention, archiving and records management
+    type: markdown
+    required: true
+    guidance: >
+      How long data is kept, when/how it's archived, and any records-
+      management obligations that apply to it.
+
+  - id: data-migration
+    title: Data migration
+    type: markdown
+    required: false
+    guidance: >
+      Data that needs to move from an existing system into this one, and
+      the approach for doing so. Omit if there's nothing to migrate.

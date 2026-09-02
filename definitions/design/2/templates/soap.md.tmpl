@@ -1,0 +1,61 @@
+# <%~ it.instance.slug %>: Solution on a Page
+<%
+  /* WI #318 (design v2): background.problem/opportunity replaces v1's context/
+     problem-statement framing (already consolidated into `background` before v2).
+     Blank-field guard `na()` is injected once as an Eta functionHeader by
+     lib/render.js (WI #273 / R2) — in scope for every template without
+     redefinition. It renders the heading with a literal "— n/a —" line when a
+     bare (gate-blocking) `requires` field is blank, rather than an empty
+     section; non-blank output is byte-identical. A `module.field?` entry in
+     `requires` is in scope but not gate-blocking, so it stays a
+     suppress-when-blank `<% if %>` section, exactly as `references?` already
+     does below (WI #276). */
+%>
+# Background and context
+
+## Problem statement
+
+<%~ na(it.modules.background.problem) %>
+
+## Affected domains
+
+<% it.modules.background['affected-domains'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+# Solution definition
+
+## High-level requirements
+
+<%~ na(it.modules['solution-definition']['high-level-requirements']) %>
+
+## Process flow
+
+<%~ na(it.modules['solution-definition']['process-flow']) %>
+
+## High-level solution design
+
+<%~ na(it.modules['solution-definition']['high-level-solution-overview']) %>
+<% if (it.modules.introduction.assumptions) { %>
+## Assumptions and considerations
+
+<%~ it.modules.introduction.assumptions %>
+<% } %>
+## Feature breakdown and involved teams
+
+<%~ na(it.modules['solution-definition']['feature-breakdown']) %>
+
+# Teams, contact persons, and high-level estimates
+
+## Teams and contact persons
+
+<% it.modules['team-and-estimates']['teams-required'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+## High-level estimates
+
+<%~ na(it.modules['team-and-estimates'].estimates) %>
+<% if (it.modules['team-and-estimates'].references && it.modules['team-and-estimates'].references.length) { %>
+## References
+
+<% it.modules['team-and-estimates'].references.forEach(function(item) { %>- <%~ item %>
+<% }) %>
+<% } %>

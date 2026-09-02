@@ -1,0 +1,98 @@
+# <%~ it.instance.slug %>: As-built
+<%
+  /* Intentional consolidation (WI #269, carried into WI #318 / design v2): this
+     template deliberately collapses the ATLAS reference's deep Data Migration
+     Flows and Migration Services hierarchies (~70 headings) into a few generic
+     as-built fields — it is NOT a 1:1 heading map to the reference, and that is
+     by design. See docs/research/design-definition-reference-reconciliation.md
+     §4 and §9, grounded in docs/reconciliation/as-built-reconciliation.md.
+     WI #318: governance sections (`changes-from-design`, `acceptance-criteria`,
+     `handover-confirmation`) move to the very end, after the Appendix, matching
+     the ATLAS reference's own structure — v1's `requires` order placed them
+     between infrastructure and the recovery plan. `nfrs.disaster-recovery-and-
+     backup` now renders immediately before the recovery plan it was built to
+     meet, and owns RTO/RPO outright. The introduction-section overview is
+     renamed "As-built overview" in the As-built design section (v1 repeated
+     "## Overview" verbatim in both sections); infrastructure now nests under
+     "# As-built design" as a `##` sibling of the other as-built-notes fields
+     (v1 gave it its own bare top-level `#`). Blank-field guard `na()` is
+     injected once as an Eta functionHeader by lib/render.js (WI #273 / R2). A
+     `module.field?` requires entry is in scope but not gate-blocking (WI #276),
+     so it renders as a suppress-when-blank `<% if %>` section. */
+  const intro = it.modules.introduction || {}
+  const glossary = it.modules.glossary || {}
+  const notes = it.modules['as-built-notes'] || {}
+  const recovery = it.modules['recovery-plan'] || {}
+  const dsc = it.modules['data-security-controls'] || {}
+%>
+# Terms & Definitions
+
+<%~ na(glossary['terms-and-definitions']) %>
+
+# Introduction
+
+## Overview
+
+<%~ na(intro.overview) %>
+
+## Purpose
+
+<%~ na(intro.purpose) %>
+
+## In scope
+
+<%~ na(intro['in-scope']) %>
+
+## Out of scope
+
+<%~ na(intro['out-of-scope']) %>
+<%~ include('templates/_introductionOptional.md.tmpl', { intro }) %>
+# As-built design
+
+## As-built overview
+
+<%~ na(notes['design-overview']) %>
+<% if (notes['architecture-decisions']) { %>
+## Architecture decisions
+
+<%~ notes['architecture-decisions'] %>
+<% } %>
+## Data migration and process flows
+
+<%~ na(notes['process-flows']) %>
+
+## Infrastructure and configuration
+
+<%~ na(notes['infrastructure-and-configuration']) %>
+
+# Recovery plan
+
+## Backup and archiving policy
+
+<%~ na(it.modules.nfrs['disaster-recovery-and-backup']) %>
+
+## Recovery approach
+
+<%~ na(recovery['recovery-approach']) %>
+<%~ include('templates/_recoveryPlanDetail.md.tmpl', { recovery }) %>
+<%~ include('templates/_dataSecurityControls.md.tmpl', { dsc, controlsHeading: '# Data security controls', inheritanceHeading: '## Inheritance and dependencies' }) %>
+<% if (notes.appendix) { %>
+# Appendix
+
+<%~ notes.appendix %>
+<% } %>
+# Changes from the agreed design
+
+<%~ na(notes['changes-from-design']) %>
+
+# Acceptance criteria
+
+<%~ na(notes['acceptance-criteria']) %>
+<% if (notes['operational-notes']) { %>
+# Operational notes
+
+<%~ notes['operational-notes'] %>
+<% } %>
+# Handover confirmation
+
+<%~ na(notes['handover-confirmation']) %>

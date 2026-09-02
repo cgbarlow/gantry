@@ -1,0 +1,104 @@
+# Field order follows the SAD reference template's "High Level Architectural View"
+# (SAD Template.docx §7): Design Decisions -> Architectural Risks -> Solution
+# Description -> Architectural Goals -> Architectural Constraints -> Solution
+# Standards. `logical-components` is last because the reference renders it as its
+# own top-level section ("Logical Components View", §9) after "Open Issues", not
+# inside the architectural view.
+
+id: architecture
+title: Architecture
+purpose: >
+  Describe the solution's structure in enough detail to build from — components,
+  layers, and the design decisions behind them. Explain what was chosen and why, and
+  how the parts fit together.
+
+fields:
+  - id: business-context
+    title: Business context
+    type: markdown
+    required: false
+    guidance: >
+      Describe the business processes, users and regulatory context this
+      architecture sits within — the background the rest of this section
+      assumes. Already approved at earlier stages — see `background` and the
+      HLD's `proposed-solution`; do not re-derive, summarise for builders.
+      Carries the reference SAD's "Background" / "Context" / "Business Concept
+      View" / "Wider Government Context" sub-sections.
+
+      Kept deliberately separate from `background.problem`: the HLD frames the
+      problem for TAC, this frames the setting for builders. Confirmed as a
+      decision, not an oversight — see CHANGES.md.
+
+  - id: solution-users
+    title: Solution users
+    type: list
+    required: false
+    guidance: >
+      The roles that use this system, internal and external, each with a short
+      description of what they do with it. The reference SAD asks for a
+      User / Description table here and points at the requirements document's
+      use-case model. This is the business user catalogue — the security roles
+      and how they authenticate belong in `security.identity-and-access`, and
+      the people to contact about the running system belong in
+      `support-and-operations.stakeholders`.
+
+  - id: design-decisions
+    title: Design decisions
+    type: markdown
+    required: true
+    guidance: >
+      The decisions that shaped this architecture and why — not just what
+      was decided, but what else was on the table. Deepen the
+      `solution-definition.high-level-solution-overview` sketch to build-ready
+      depth rather than starting over.
+
+  - id: architectural-risks
+    title: Architectural risks
+    type: markdown
+    required: false
+    guidance: >
+      Risks specific to this architecture's shape. Broader project risk
+      belongs in the `risks` module — this is for risk that's a direct
+      consequence of a structural choice made here.
+
+  - id: solution-description
+    title: Solution description
+    type: markdown
+    required: true
+    guidance: >
+      The components and how they fit together. Reference a diagram if you
+      have one, but describe the structure in words too. Expands the
+      `solution-definition` `high-level-solution-overview` / `process-flow`
+      sketch — the original stays at `modules/solution-definition.md`.
+
+  - id: constraints
+    title: Constraints and goals
+    type: markdown
+    required: false
+    guidance: >
+      Architecture-specific constraints and goals only — the boundaries and
+      objectives that shaped this structure (e.g. a fixed platform, a latency
+      budget, a "reuse existing services" goal). Solution-wide assumptions
+      belong in `introduction.assumptions`; list here only what is particular
+      to the architecture and cross-reference that field.
+
+  - id: standards
+    title: Applicable standards
+    type: list
+    required: false
+    guidance: >
+      Architectural or solution standards this design follows (e.g.
+      messaging, security, UI, development framework) — and any it
+      deliberately departs from. Carries both the reference SAD's "Solution
+      Standards" and "Architectural Standards" sub-sections.
+
+  - id: logical-components
+    title: Logical components
+    type: list
+    required: true
+    guidance: >
+      The solution's logical components, and for each, whether it's new or
+      existing. Renders as its own section, after `risks.open-issues` — it
+      carries the reference SAD's whole "Logical Components View", including
+      its layered / product / application-usage / service-realisation
+      viewpoints.

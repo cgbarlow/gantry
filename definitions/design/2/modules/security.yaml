@@ -1,0 +1,62 @@
+# Field order follows the SAD reference template's "Security View" (§16).
+#
+# CHANGED v2: `privacy-and-confidentiality` is now also required at
+# `hld-tac-approved`. The TAC HLD reference template carries a mandatory
+# "Security and privacy" sub-section under Proposed solution ("Will the proposed
+# solution affect anyone's PII?"), but every field here was previously required
+# only at `build-ready-checklist`, so the HLD gate enforced nothing. Only the one
+# field the reference asks for directly is mandated at HLD;
+# `security-architecture` is a candidate for the same treatment if the second
+# half of that section ("does this introduce a new system that will need security
+# assessment?") should also gate — see CHANGES.md.
+
+id: security
+title: Security
+purpose: >
+  Describe the solution's security and privacy posture — how users are authenticated
+  and authorised, the security architecture and the regulations and standards that
+  apply. This is one module used in both high-level design and detailed design — fill it
+  progressively: during high-level design include the security implications that inform
+  that decision; before build readiness include the full posture needed to build against.
+
+  Design-time claims (who can do what, threat model, regulations). For the
+  concrete controls the built solution runs under (encryption, networking,
+  incident management) use `data-security-controls.controls`; for the posture a
+  support team must keep true in production use
+  `support-and-operations.operational-security-controls`.
+
+fields:
+  - id: identity-and-access
+    title: Identity and access management
+    type: markdown
+    required-at: [build-ready-checklist]
+    guidance: >
+      Authentication, authorisation, and the security roles involved. Carries the
+      reference SAD's "Identity & Access Management", "Security Roles",
+      "Authentication" and "User Roles" sub-sections.
+
+  - id: security-architecture
+    title: Security architecture
+    type: markdown
+    required-at: [build-ready-checklist]
+    guidance: >
+      Goals, constraints and assumptions specific to security — not a
+      restatement of the general architecture.
+
+  - id: regulations-and-standards
+    title: Regulations and standards
+    type: list
+    required-at: [build-ready-checklist]
+    guidance: >
+      The regulations and standards this solution is held to, including the acts
+      and regulations that govern the business process it supports.
+
+  - id: privacy-and-confidentiality
+    title: Privacy and confidentiality concerns
+    type: markdown
+    required-at: [hld-tac-approved, build-ready-checklist]
+    guidance: >
+      Whether the solution affects anyone's personal information, and any privacy
+      or confidentiality concern it raises. State this at high-level design in
+      enough depth for TAC to judge whether a security assessment is needed;
+      deepen before build readiness.

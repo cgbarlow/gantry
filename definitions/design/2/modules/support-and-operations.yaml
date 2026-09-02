@@ -1,0 +1,94 @@
+# Field order follows the FV Help Tool SSAD reference's "Solution Overview"
+# reading order: Stakeholders / Support Map -> Solution Domains, URLs and
+# environments -> licences -> security posture -> monitoring -> Release
+# Procedures -> handover.
+#
+# CHANGED v2: `environments-and-domains` is now the single environment list for
+# both the SSAD and the SAD (the SAD's "Environments" sub-section previously
+# came from a separate `integration.environments` field, which is removed).
+#
+# CHANGED v2: `operational-security-controls` is removed. It held the same kind
+# of content as `data-security-controls.controls` — a named concern and how it is
+# implemented — at the same gate. Evidence: the FV Help Tool SSAD's Security
+# sections record "developer access to the repositories is restricted to Somar
+# staff only" and "API access to Healthpoint is handled by the ingest API and is
+# the only component that calls it", which are Access-management and Networking
+# rows in the approved ATLAS design's own control register. The SSAD now
+# references `data-security-controls.controls` directly.
+#
+# CHANGED v2: `decommission` added. The reference SAD carries a Decommission
+# section under Operating Considerations; it was previously folded into
+# `nfrs.other-nfrs`, but end-of-life is an operational lifecycle commitment,
+# not a quality attribute.
+
+id: support-and-operations
+title: Support and Operations
+purpose: >
+  Describe what a support team needs to operate and hand over this solution — who to
+  contact, where it runs, how it is released and what 'ready to hand over' means.
+
+fields:
+  - id: stakeholders
+    title: Stakeholders and support contacts
+    type: list
+    required: true
+    guidance: >
+      Who owns this solution operationally once it's live, who to contact
+      for each part of it, and the escalation path/support map between
+      them — not just a flat contact list. Also carries the reference SAD's
+      "Stakeholder Mapping" sub-section.
+
+  - id: environments-and-domains
+    title: Environments, URLs and domains
+    type: list
+    required: true
+    guidance: >
+      Every environment this solution runs in, and the URLs/domains
+      (including redirects) associated with each. This is the single
+      environment list — the SAD's "Environments" section and the SSAD's
+      "Solution Domains" / "URL's, Domains and redirections" sections both
+      render from here, so enter it once.
+
+  - id: operational-accounts-and-licenses
+    title: Operational accounts and licenses
+    type: list
+    required: false
+    guidance: >
+      Third-party accounts, subscriptions or licenses the support team must
+      hold to operate this solution once it's live (e.g. a CI provider, a
+      hosted API) — distinct from the build-time dependencies in
+      `integration`. Carries the reference SAD's "Terms & Conditions and
+      Contracts" sub-section.
+
+  - id: monitoring-and-alerting
+    title: Monitoring and alerting
+    type: markdown
+    required: false
+    guidance: >
+      What's monitored once this solution is live — dashboards, alert
+      thresholds (e.g. request volume, 4xx/5xx rates) — and who gets
+      notified when they trip. Carries the reference SAD's "Systems
+      Management & Monitoring" sub-section.
+
+  - id: release-procedures
+    title: Release procedures
+    type: markdown
+    required: false
+
+  - id: support-handover-readiness
+    title: Support handover readiness
+    type: markdown
+    required: true
+    guidance: >
+      What "ready to hand over to support" means for this solution
+      specifically — what the support team needs in hand before they own it.
+
+  - id: decommission
+    title: Decommission
+    type: markdown
+    required: false
+    guidance: >
+      What happens at end of life — who turns the solution off, what becomes of
+      its data, which accounts, licences and contracts end, and any notice
+      period. Cross-reference `data.data-retention-and-archiving` for what must
+      be kept after the service stops.

@@ -1,0 +1,99 @@
+# Field order follows the SAD reference template's "Operating Considerations"
+# (§17): Scalability -> Performance -> Capacity -> Continuity -> Availability ->
+# Future Considerations / Decommission. `requirements-traceability` is last
+# because the reference renders it as its own earlier section (§10-11); the
+# `sad` artefact places it there.
+#
+# CHANGED v2: `performance` and `availability-and-continuity` are now also
+# required at `hld-tac-approved`. The TAC HLD reference template carries a
+# mandatory "Non-functional requirements" sub-section under Problem Statement
+# and instructs authors not to delete sections ("if a section is not relevant,
+# just put in n/a"), but every field here was previously required only at
+# `build-ready-checklist`, so the HLD gate enforced nothing. Only the two fields
+# the reference names explicitly are mandated; accessibility, Te Tiriti and data
+# sovereignty go in `other-nfrs`, which stays optional.
+#
+# CHANGED v2: `disaster-recovery-and-backup` is also required at
+# `operational-handover` and this module is mounted at the `handover` stage, so
+# the recovery targets travel with the as-built recovery mechanism instead of
+# being left behind at build-ready. It owns RTO/RPO and the backup policy
+# outright; `recovery-plan` no longer restates them.
+#
+# CHANGED v2: decommissioning is no longer folded into `other-nfrs`. End of life
+# is an operational lifecycle commitment, not a quality attribute — it now has
+# its own field at `support-and-operations.decommission`.
+
+id: nfrs
+title: Non-Functional Requirements
+purpose: >
+  Describe the quality attributes the solution must meet, such as performance,
+  availability and scalability. State the targets clearly enough to design and test
+  against. This is one module used in both high-level design and detailed design —
+  fill it progressively: during high-level design include only the NFRs that shape that
+  decision; before build readiness it should be complete enough to design and test
+  against.
+
+  For concrete operational controls (encryption, networking, incident
+  management) see `data-security-controls.controls` — this module carries the
+  targets, not the control set.
+
+fields:
+  - id: scalability-and-capacity
+    title: Scalability and capacity
+    type: markdown
+    required-at: [build-ready-checklist]
+
+  - id: performance
+    title: Performance
+    type: markdown
+    required-at: [hld-tac-approved, build-ready-checklist]
+    guidance: >
+      Keep this to a headline target at high-level design — the TAC reference
+      template asks only for the performance requirements that bear on the
+      decision. Deepen to testable figures before build readiness.
+
+  - id: availability-and-continuity
+    title: Availability and continuity
+    type: markdown
+    required-at: [hld-tac-approved, build-ready-checklist]
+    guidance: >
+      Keep this to a headline target at high-level design; deepen to a
+      testable availability target and continuity approach before build
+      readiness.
+
+  - id: disaster-recovery-and-backup
+    title: Disaster recovery and backup
+    type: markdown
+    required-at: [build-ready-checklist, operational-handover]
+    guidance: >
+      The recovery *targets*, and only the targets: recovery time and point
+      objectives, the scenarios that would satisfy them, backup type, method,
+      schedule and retention, and the archiving policy. This field owns RTO and
+      RPO — state them here once and reference them from `recovery-plan`.
+
+      The recovery *mechanism* that meets these targets (failover model,
+      resiliency design, tested scenarios, RACI) belongs in the `recovery-plan`
+      module. Both render under the single "Failure and recovery" section, so
+      state each fact in one place only. Carried through to handover so the
+      as-built recovery plan can be read against the targets it was built to.
+  - id: other-nfrs
+    title: Other non-functional requirements
+    type: markdown
+    required: false
+    guidance: >
+      Anything that doesn't fit the categories above but still constrains
+      the solution — accessibility, Te Tiriti obligations, data sovereignty,
+      compliance-driven quality attributes, contractual obligations, or
+      future-considerations notes. End-of-life commitments are not an NFR;
+      they belong in `support-and-operations.decommission`.
+
+  - id: requirements-traceability
+    title: Requirements traceability
+    type: markdown
+    required-at: [build-ready-checklist]
+    guidance: >
+      Describe how the design maps back to the agreed functional and non-functional
+      requirements — enough for a reviewer to check nothing was quietly dropped. Map back
+      to `solution-definition.high-level-requirements`, the agreed set captured at Shape,
+      rather than restating the requirements here. You can keep this light during
+      high-level design; it should be complete before build readiness.

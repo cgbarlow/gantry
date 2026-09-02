@@ -6,7 +6,9 @@ import { join } from 'node:path'
 import { loadDefinition, splitArtefactRequirement } from '../lib/definition.js'
 
 test('loads the real design definition', () => {
-  const design = loadDefinition('design')
+  // Pinned to v1 explicitly (WI #318 published v2 alongside it, so an unpinned
+  // load no longer resolves here — this test is about v1's specific shape).
+  const design = loadDefinition('design', { version: 1 })
 
   assert.equal(design.id, 'design')
   assert.equal(design.stages.length, 4)

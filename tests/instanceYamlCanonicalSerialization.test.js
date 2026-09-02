@@ -176,7 +176,10 @@ test('a genuine two-sided conflict (both branches setting the same field to diff
 
 test('canonical serialization does not change what instance.yaml actually contains — only its byte-level key order', async () => {
   await withScratchInstances((instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir, assignee: 'c.barlow' })
+    // Pinned to v1 explicitly (WI #318 published v2 alongside it) — this test
+    // asserts the exact byte-level instance.yaml shape, including
+    // `definitionVersion: 1`.
+    createInstance('design', 'my-initiative', { instancesDir, assignee: 'c.barlow', definitionVersion: 1 })
     const updated = writeInstanceStage('my-initiative', 'hld-define', { instancesDir })
     assert.deepEqual(updated, {
       definition: 'design',
