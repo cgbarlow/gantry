@@ -191,6 +191,16 @@ const selectedWorkspace = signal(null)
 
 // ---------- Step 2: instance fields ----------
 const step = signal('workspace') // 'workspace' | 'instance' | 'link' | 'done'
+// WI #316 fix #2 — distinguishes an "instance-only" arrival at the instance
+// step (WI #307's own in-wizard "+ New instance" button, or fix #1's
+// Instance-Switcher shortcut below) from the genuine from-scratch flow
+// (Pick-existing/Register, either location). Both land on the exact same
+// InstanceStep component, but only the shortcut paths skip ever creating or
+// picking a *workspace* in this wizard visit, so only they get the "New
+// Instance" heading (see NewWorkspaceWizardPage's own <h2> below) — the
+// from-scratch flow keeps "New Workspace" throughout, instance step
+// included, exactly as it always has.
+const instanceStepIsShortcut = signal(false)
 const definitions = signal([])
 const selectedDefinitionId = signal('')
 const selectedVersion = signal('latest')
@@ -258,12 +268,95 @@ effect(() => {
   if (found) {
     pickedWorkspaceId.value = found.id
     selectedWorkspace.value = found
+    // A prior local-workspace interaction in this same SPA session (e.g. the
+    // architect opened a local instance earlier, never navigating away via
+    // resetWizard) can leave `isLocalWorkspace`/`localRegHandle` set from
+    // that visit — continueFromInstanceStep() routes Create purely off
+    // `isLocalWorkspace.value`, so a stale `true` here would silently try to
+    // write this genuinely server-hosted instance through the local-write
+    // path using an unrelated folder handle. Clearing it explicitly (this is
+    // the one place a *server* workspace gets pre-selected without the
+    // architect ever visiting WorkspaceStep, where that clearing normally
+    // happens implicitly by never having set it) keeps Create routed
+    // correctly regardless of what this session did before landing here.
+    isLocalWorkspace.value = false
+    instanceStepIsShortcut.value = true
     step.value = 'instance'
   }
 })
 
+// Pre-scoped LOCAL workspace via ?local=<id> (fix #1, WI #316) — mirrors the
+// server-hosted shortcut above, but a local workspace has no server list to
+// resolve against.
+//
+// An earlier version of this effect checked whether `isLocalWorkspace.value`/
+// `localRegHandle.value` were *already* set, on the assumption that clicking
+// the Instance Switcher's own link is always an in-app SPA navigation with no
+// full reload in between, so whatever local workspace the architect had open
+// would still be live in memory underneath. That assumption doesn't hold in
+// the one case this fix actually exists for: the Instance Switcher itself
+// only ever renders inside the *editor* route — and the editor's own
+// local-instance load path (`loadLocalInstance`, web/app.js) never touches
+// these wizard-only signals at all. They're set exclusively by
+// `openLocalWorkspace()`/`confirmLocalRegister()`, both wizard-only
+// functions — so for the real, reported scenario (already viewing an open
+// editor, having landed there however: a fresh load, a bookmark, or the
+// wizard's own post-create `location.assign`, itself a full reload), these
+// signals were simply never populated. The "already held" check always
+// failed silently, defeating the whole point of this fix.
+//
+// Fixed the same way the server-hosted shortcut above is fundamentally
+// robust to this: it re-resolves fresh state (the server's own workspace
+// list) rather than trusting in-memory continuity. Here, that's re-reading
+// the handle IndexedDB already persisted for this workspace id
+// (`getWorkspaceHandle`, survives a reload same as the workspace list does)
+// and re-checking its permission (`ensurePermission` — `queryPermission`
+// first, no user gesture needed if already granted; this effect only runs as
+// a direct result of the architect's own click on the Switcher's link, which
+// again counts as a user gesture, so a `requestPermission` prompt can
+// legitimately fire here too if needed rather than silently failing). A
+// missing handle or a denied/dismissed permission falls through to the
+// normal Local + Pick flow instead — its own "Recent local workspaces" list
+// (with its "Reconnect"/"Grant access" affordance) already covers exactly
+// that case, and re-offers the same folder without the architect needing to
+// remember which one it was.
+const preselectedLocalWorkspaceId = signal(null)
+effect(() => {
+  const id = preselectedLocalWorkspaceId.value
+  if (!id) return
+  ;(async () => {
+    const handle = await getWorkspaceHandle(id)
+    if (!handle) return
+    const permission = await ensurePermission(handle)
+    if (permission !== 'granted') return
+    // A concurrent change of mind (the architect cleared `?local=` — e.g. by
+    // resetting the wizard — while this async lookup was in flight) must not
+    // resurrect the shortcut it was reset to escape.
+    if (preselectedLocalWorkspaceId.value !== id) return
+    // InstanceStep() (below) unconditionally reads `selectedWorkspace.value.isLocal`/
+    // `.name` — every other entry into that step (Register, Pick, and the
+    // server-hosted preselect above) already populates this; this shortcut
+    // must too, in the exact `{ isLocal: true, name }` shape
+    // openLocalWorkspace()/confirmLocalRegister() themselves use. The
+    // recent-workspaces list already carries the real stored name (from
+    // workspace.json, via rememberWorkspace) — a fallback to the raw
+    // directory handle's own `.name` only if that lookup somehow comes up
+    // empty (the same fallback rememberWorkspace itself uses).
+    const recent = await recentLocalWorkspaces()
+    const name = recent.find((w) => w.id === id)?.name ?? handle.name
+    selectedWorkspace.value = { isLocal: true, name }
+    localRegHandle.value = handle
+    localWorkspaceId.value = id
+    isLocalWorkspace.value = true
+    instanceStepIsShortcut.value = true
+    step.value = 'instance'
+  })()
+})
+
 function resetWizard() {
   preselectedWorkspaceId.value = null
+  preselectedLocalWorkspaceId.value = null
+  instanceStepIsShortcut.value = false
   workspaceLocation.value = advancedMode.value ? 'server' : 'local'
   adoptRepoUrl.value = ''
   adoptCheckStatus.value = 'idle'
@@ -1441,7 +1534,10 @@ function LocalWorkspacePanel() {
                       class="btn primary"
                       id="local-new-instance"
                       style="margin-top:8px"
-                      onClick=${() => (step.value = 'instance')}
+                      onClick=${() => {
+                        instanceStepIsShortcut.value = true
+                        step.value = 'instance'
+                      }}
                     >
                       + New instance
                     </button>
@@ -2026,9 +2122,21 @@ function InstanceStep() {
           </select>
           <p class="wizard-field-hint">Draft versions require confirmation before creating an instance.</p>
           ${(() => {
+            // Collapsed by default behind a native disclosure (WI #316 fix #3) —
+            // the same `<details>`/`<summary>` pattern this app already uses for
+            // the dashboard's Archived instances/workspaces panels (web/app.js),
+            // reused here rather than inventing a new toggle. Only wraps the
+            // actual changelog content: while it's still loading, or once it's
+            // known there is none for this version, there is nothing to disclose,
+            // so no toggle renders for either state.
             if (changelogLoading.value) return html`<p class="wizard-field-hint">Loading changelog…</p>`
             if (changelog.value == null) return html`<p class="wizard-field-hint">No changelog for this version.</p>`
-            return html`<div class="wizard-changelog" dangerouslySetInnerHTML=${{ __html: renderMarkdown(changelog.value) }} />`
+            return html`
+              <details class="wizard-changelog-toggle">
+                <summary>Show release notes</summary>
+                <div class="wizard-changelog" dangerouslySetInnerHTML=${{ __html: renderMarkdown(changelog.value) }} />
+              </details>
+            `
           })()}
         </div>
       `
@@ -2280,13 +2388,24 @@ function ImportForgetPrompt() {
   `
 }
 
-export function NewWorkspaceWizardPage() {
+// `query` arrives as a route prop — `preact-iso` hands a matched route's
+// query string straight through this way (see web/pages/settings.js's own
+// doc comment on the same convention) — rather than this page re-parsing
+// `window.location.search` itself, so both `/new-workspace` (no query
+// string, the from-scratch dashboard entry point) and `/new-instance`
+// (`?workspace=<id>` or, since WI #316, `?local=<id>`, from the Instance
+// Switcher's own "+ New Instance" link) reach this exact same component and
+// this is the one place that tells them apart.
+export function NewWorkspaceWizardPage({ query }) {
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const ws = params.get('workspace')
+    const ws = query?.workspace
     if (ws) {
       preselectedWorkspaceId.value = ws
       if (workspaces.value === null) loadWorkspaces()
+    }
+    const local = query?.local
+    if (local) {
+      preselectedLocalWorkspaceId.value = local
     }
     fetch('/api/definitions')
       .then((res) => res.json())
@@ -2297,10 +2416,17 @@ export function NewWorkspaceWizardPage() {
       .catch(() => (definitions.value = []))
   }, [])
 
+  // WI #316 fix #2 — "New Instance" only for the shortcut paths that skip
+  // ever creating/picking a workspace in this visit (see
+  // `instanceStepIsShortcut`'s own doc comment above); every other path,
+  // including the from-scratch flow's own arrival at this same instance
+  // step, keeps the genuine "New Workspace" heading throughout.
+  const heading = step.value === 'instance' && instanceStepIsShortcut.value ? 'New Instance' : 'New Workspace'
+
   return html`
     <${WizardHeader} />
     <main class="wizard-page">
-      <h2>New Workspace</h2>
+      <h2>${heading}</h2>
       <p class="lede">
         Pick an existing workspace or register a new one, then create an instance in it — with a real
         parent-work-item link when that workspace has a ticketing system configured.

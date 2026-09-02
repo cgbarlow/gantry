@@ -488,3 +488,44 @@ test('#138: Instance step renders "New Instance" heading between Workspace card 
     }
   })
 })
+
+// WI #316 fix #3 — the selected definition version's changelog (WI #234) is
+// collapsed by default behind a native <details>/<summary> disclosure
+// ("Show release notes"), not shown in full unconditionally.
+test('#316: the version changelog is collapsed behind "Show release notes" by default, and expands on click', async () => {
+  await withWizardTestServer(async ({ gantryBase, adoBaseUrl }) => {
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
+      await installBaseUrlRoutes(page, adoBaseUrl)
+      await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+
+      await page.goto(`${gantryBase}/new-workspace`)
+      await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
+      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+      await page.locator('#ws-organization').fill(ORGANIZATION)
+      await page.locator('#ws-project').fill(PROJECT)
+      await page.locator('#ws-repository').fill(REPOSITORY)
+      await page.getByRole('button', { name: 'Register workspace' }).click()
+
+      await page.waitForSelector('#instance-name', { timeout: 10_000 })
+      // The "design" definition has a real CHANGELOG.md fixture (definitions/design/1/CHANGELOG.md).
+      await page.locator('.definition-card', { hasText: 'Solution Design' }).click()
+
+      const toggle = page.locator('.wizard-changelog-toggle summary', { hasText: 'Show release notes' })
+      await assert.doesNotReject(toggle.waitFor({ timeout: 5_000 }))
+      const content = page.locator('.wizard-changelog')
+
+      // Collapsed by default — the content exists in the DOM (a native
+      // <details>, not conditionally rendered) but isn't visible.
+      assert.equal(await content.isVisible(), false, 'changelog content is collapsed by default')
+
+      await toggle.click()
+      assert.equal(await content.isVisible(), true, 'changelog content expands on click')
+      assert.match(await content.textContent(), /\S/, 'expanded content is non-empty')
+    } finally {
+      await browser.close()
+    }
+  })
+})

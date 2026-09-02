@@ -3393,7 +3393,7 @@ function isWorkspaceGroup(group) {
   return Boolean(group?.instances[0]?.workspace)
 }
 
-function InstanceSwitcher({ slug, open, onOpenChange }) {
+function InstanceSwitcher({ slug, instance, open, onOpenChange }) {
   const [instances, setInstances] = useState(null)
   const [error, setError] = useState('')
   // Resets to the default (own-workspace) view every time the menu is
@@ -3428,7 +3428,24 @@ function InstanceSwitcher({ slug, open, onOpenChange }) {
   const workspaceId = isWorkspaceGroup(currentGroup)
     ? (currentGroup.instances[0]?.workspace?.id ?? currentGroup.key.replace(/^workspace:/, ''))
     : null
-  const newInstanceHref = workspaceId ? `/new-instance?workspace=${encodeURIComponent(workspaceId)}` : '/new-instance'
+  // WI #316 fix #1 — a local-workspace instance (ADR-0029) never shows up in
+  // `instances` at all (it has no server-side registry entry, see
+  // isLocalWorkspaceSlug's own doc comment above), so it can never resolve
+  // through `currentGroup`/`isWorkspaceGroup` above the way a genuine
+  // Azure-DevOps-hosted workspace does — that's exactly why this fell back
+  // to a bare, context-free `/new-instance` before. `instance` (passed down
+  // from AppHeader, unlike `slug` alone) already carries `isLocalWorkspace`/
+  // `localWorkspaceId` for every local instance regardless of how it was
+  // opened (loadLocalInstance sets both unconditionally), so that's used
+  // here instead — `?local=<id>` for the wizard to match against its own
+  // already-held handle (new-workspace-wizard.js's
+  // `preselectedLocalWorkspaceId` effect).
+  const localWorkspaceIdForSwitch = !workspaceId && instance?.isLocalWorkspace ? instance.localWorkspaceId : null
+  const newInstanceHref = workspaceId
+    ? `/new-instance?workspace=${encodeURIComponent(workspaceId)}`
+    : localWorkspaceIdForSwitch
+      ? `/new-instance?local=${encodeURIComponent(localWorkspaceIdForSwitch)}`
+      : '/new-instance'
 
   function renderInstanceLink(inst) {
     return html`
@@ -3518,6 +3535,7 @@ function AppHeader({ instance }) {
         <span class="instance-ref" title="Numeric reference (WI200) — the canonical short URL for this instance">${instance.ref}</span>
         <${InstanceSwitcher}
           slug=${instance.slug}
+          instance=${instance}
           open=${openMenu === 'instance-switcher'}
           onOpenChange=${(next) => setOpenMenu(next ? 'instance-switcher' : null)}
         />

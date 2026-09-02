@@ -389,3 +389,86 @@ test('local-workspace instance: Back-navigating off the editor never surfaces a 
     rmSync(instancesDir, { recursive: true, force: true })
   }
 })
+
+// WI #316 fix #1/#2 — the Instance Switcher's own "+ New Instance" link
+// (web/app.js's InstanceSwitcher, `switcher-escape` class) previously fell
+// back to a bare, context-free `/new-instance` for a local-workspace
+// instance (its `workspaceId` computation only ever resolves for an
+// Azure-DevOps-hosted workspace grouping) — landing on the wizard's
+// from-scratch screen even though a local workspace's handle was already
+// open in memory. It should instead jump straight to the instance-creation
+// step, reusing that already-held handle, with a "New Instance" (not "New
+// Workspace") heading.
+test('local-workspace instance: the Instance Switcher\'s "+ New Instance" link jumps straight to instance creation, reusing the already-open workspace handle, with a "New Instance" heading', async () => {
+  await withRunningServer({}, async (base) => {
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      // An OPFS-backed handle (this suite's whole seeding approach — see the
+      // file's own top comment for why) has no `queryPermission`/
+      // `requestPermission` at all, unlike a real handle from
+      // `showDirectoryPicker`: OPFS is always fully origin-scoped, no
+      // permission prompt to model. `ensurePermission` (web/lib/localWorkspace.js,
+      // exercised here via WI #316's `preselectedLocalWorkspaceId` effect)
+      // calls both, so without a stub it silently reads as "denied" and the
+      // shortcut under test would never fire — a test-environment gap, not
+      // a behaviour this fix is responsible for. Stubbed as always-granted,
+      // matching a real handle whose permission genuinely is already
+      // granted (the normal case for a workspace the architect is actively
+      // viewing an open instance from).
+      await page.addInitScript(() => {
+        FileSystemDirectoryHandle.prototype.queryPermission = async () => 'granted'
+        FileSystemDirectoryHandle.prototype.requestPermission = async () => 'granted'
+      })
+      const pageErrors = []
+      page.on('pageerror', (err) => pageErrors.push(err.message))
+
+      const slug = 'local-claims'
+      await page.goto(`${base}/`)
+      const workspaceId = await seedLocalWorkspace(page, slug)
+      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}&slug=${slug}`)
+      await page.waitForSelector('.module', { timeout: 10_000 })
+
+      await page.getByRole('button', { name: 'Switch instance' }).click()
+      const menu = page.locator('.instance-switcher .menu')
+      await menu.waitFor({ state: 'visible', timeout: 5_000 })
+      const newInstanceLink = menu.getByRole('link', { name: '+ New Instance' })
+      await assert.doesNotReject(newInstanceLink.waitFor({ timeout: 2_000 }))
+      // Carries the local workspace's own identity, not a bare, context-free link.
+      assert.match(await newInstanceLink.getAttribute('href'), /^\/new-instance\?local=/)
+
+      await newInstanceLink.click()
+
+      // Straight to the instance-creation step — no "Workspace location"
+      // toggle, no Pick/Register screen, no re-selecting the folder.
+      await page.waitForSelector('#instance-name', { timeout: 5_000 })
+      assert.equal(await page.locator('button:has-text("Local")').count(), 0, 'the Workspace location toggle never appears')
+      // Scoped to the wizard page's own top-level heading — a changelog
+      // rendered from real markdown (e.g. "## v1") can itself contain an
+      // <h2>, which a bare `page.locator('h2')` would ambiguously also match.
+      assert.equal(await page.locator('main.wizard-page > h2').textContent(), 'New Instance')
+
+      // The new instance is created inside the SAME already-open workspace
+      // (not a fresh/different one) — the pre-existing instance is untouched.
+      await page.locator('.definition-card').first().click()
+      await page.locator('#instance-name').fill('Second Claims')
+      assert.equal(await page.locator('#instance-directory').inputValue(), 'second-claims')
+      await page.locator('#instance-assignee').fill('a.architect')
+      await Promise.all([
+        page.waitForNavigation(),
+        page.getByRole('button', { name: 'Create instance', exact: true }).click(),
+      ])
+      const url = new URL(page.url())
+      assert.equal(url.pathname, '/instance/second-claims')
+      assert.equal(url.searchParams.get('local'), workspaceId, 'created in the same, already-open local workspace')
+
+      const originalStillThere = await readOpfsFile(page, `gantry-workspace/${slug}/instance.yaml`)
+      assert.match(originalStillThere, new RegExp(`slug: ${slug}`))
+
+      assert.deepEqual(pageErrors, [])
+    } finally {
+      await browser.close()
+    }
+  })
+})
