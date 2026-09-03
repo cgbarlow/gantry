@@ -9,6 +9,23 @@ REM Resolve the script's own directory so `node bin\gantry.js` can be found
 REM regardless of the caller's cwd. %~dp0 always ends with a backslash.
 set "SCRIPT_DIR=%~dp0"
 
+REM install.cmd (WI #327's no-admin-rights path) unpacks a portable Node
+REM build under .node-runtime\node-v<ver>-win-<arch>\ — prefer that over
+REM whatever's on PATH if it exists, so a machine that used install.cmd
+REM never accidentally falls back to a missing/different global `node`.
+REM Matched by wildcard (not a pinned version) so this doesn't need editing
+REM every time install.cmd's own pinned version bumps. Any real Node on
+REM PATH is untouched either way — this only decides which one *this
+REM script* calls.
+set "NODE_EXE=node"
+set "NPM_CMD=npm"
+for /d %%D in ("%SCRIPT_DIR%.node-runtime\node-v*-win-*") do (
+  if exist "%%D\node.exe" (
+    set "NODE_EXE=%%D\node.exe"
+    set "NPM_CMD=%%D\npm.cmd"
+  )
+)
+
 REM Matches bin/gantry.js's own `resolvePort` (--port flag > PORT env > 3000).
 REM We're not passing --port, so PORT (or its 3000 default) is also what the
 REM server itself will end up listening on.
@@ -25,7 +42,7 @@ if not errorlevel 1 (
 if not exist "%SCRIPT_DIR%node_modules" (
   echo First-run setup: node_modules not found, running "npm install" ^(this may take a minute^)...
   pushd "%SCRIPT_DIR%"
-  call npm install
+  call "%NPM_CMD%" install
   if errorlevel 1 (
     echo npm install failed. 1>&2
     popd
@@ -38,7 +55,7 @@ echo Starting gantry serve on %URL% ...
 REM A normal foreground window (not a hidden background process) so a
 REM first-time user can see the server's own log output, and so closing the
 REM window (or Ctrl+C inside it) stops the server with nothing left orphaned.
-start "gantry" cmd /k node "%SCRIPT_DIR%bin\gantry.js" serve
+start "gantry" cmd /k "%NODE_EXE%" "%SCRIPT_DIR%bin\gantry.js" serve
 
 echo Waiting for gantry to start listening on %URL% ...
 set /a attempts=0

@@ -74,7 +74,7 @@ Definitions are versioned (numbered `definitions/<id>/<n>/` dirs — see "Defini
 
 ## Installation
 
-Gantry runs anywhere Node.js and Pandoc do, including Windows — you don't need WSL. It's built and CI-tested on Linux, so Windows works in principle but is unverified in practice; WSL is the safer bet if you want the exact environment this project is tested against.
+Gantry runs anywhere Node.js does, including Windows — you don't need WSL. Pandoc is only needed for the `gantry render` CLI command or the web UI's native-rendering toggle (see step 2). It's built and CI-tested on Linux, so Windows works in principle but is unverified in practice; WSL is the safer bet if you want the exact environment this project is tested against.
 
 **1. Install Node.js 24+** (`package.json` `engines.node` is `>=24`)
 
@@ -85,7 +85,9 @@ Gantry runs anywhere Node.js and Pandoc do, including Windows — you don't need
   ```
 - **Windows**: download the 64-bit **Windows Installer (`.msi`)** from https://nodejs.org/en/download and run it (standard wizard), then restart your terminal so `node`/`npm` are on PATH.
 
-**2. Install Pandoc 3.x** (required at render time — see below)
+**2. Install Pandoc 3.x** (optional if you only use the web UI — see below)
+
+Rendering from the web UI (`gantry serve`, both local-folder and Azure-DevOps-backed instances) goes through an in-browser WASM build of Pandoc by default, so a native Pandoc install isn't required just to use Gantry that way — Settings has a toggle to the native engine, and Gantry falls back to it automatically if the WASM engine ever fails to load. The **`gantry render` CLI command** is a separate path (used e.g. by `npm run render:examples`) that always shells out to native Pandoc — install it if you'll use that command directly.
 
 - **Linux (Debian/Ubuntu)**:
   ```bash
@@ -94,7 +96,7 @@ Gantry runs anywhere Node.js and Pandoc do, including Windows — you don't need
   Or grab the latest `.deb` from the [Pandoc releases page](https://github.com/jgm/pandoc/releases/latest) if your distro's version lags.
 - **Windows**: download `pandoc-<version>-windows-x86_64.msi` from https://github.com/jgm/pandoc/releases/latest and run it.
 
-**3. Install Git**
+**3. Install Git** (needed to clone the source below, and if you'll back any instance with Azure DevOps — not needed for local-folder-only instances, see "Backing an instance with a local folder" below)
 
 - **Linux (Debian/Ubuntu)**:
   ```bash
@@ -111,6 +113,8 @@ Already have winget? `winget install OpenJS.NodeJS.LTS` and `winget install --ex
 > ```
 >
 > Then open a **new terminal** (`setx` only affects new sessions) and re-run `npm install`. For a single session instead: `set NODE_USE_SYSTEM_CA=1` (cmd) or `$env:NODE_USE_SYSTEM_CA=1` (PowerShell). `NODE_USE_SYSTEM_CA` needs Node 22+ (already required above).
+
+> **No admin rights on a locked-down corporate Windows machine?** The `.msi` installer above needs elevation. Skip step 1 entirely and run **`install.cmd`** (in the repo root, after step 4's `git clone`) instead — it downloads Node's official portable ZIP build (no installer, no registry writes) into a `.node-runtime\` folder inside the repo and runs `npm install` through it, all without touching PATH, the registry, or anything outside the repo folder. `run-local.cmd` automatically uses that bundled copy afterward, so step 4's `npm link` isn't needed either (nothing's on PATH for it to link onto) — skip straight to step 5. Git and Pandoc above still need their own install path (or your team's existing provisioning); this only covers Node/npm.
 
 **4. Clone and install Gantry** (same on both platforms)
 
@@ -130,8 +134,8 @@ npm link             # makes `gantry` available on your PATH
 | Dependency | Version | Why |
 |---|---|---|
 | Node.js | 24+ | Engine runtime and CLI (`package.json` `engines.node` is `>=24`) |
-| `pandoc` | 3.x confirmed (3.1.3) | **Required at render time** — `gantry render` shells out to it to convert the compiled Markdown to `.docx` |
-| Git | 2.x+ | Instance history and audit trail |
+| `pandoc` | 3.x confirmed (3.1.3) | **Required for the `gantry render` CLI command** (shells out to it unconditionally). Optional for the web UI — `gantry serve` renders via an in-browser WASM Pandoc by default; native Pandoc is only needed there if you use Settings' native-engine toggle, or as the automatic fallback if WASM fails to load |
+| Git | 2.x+ | Needed to clone the source below (or skip it via `install.cmd`/a source ZIP) and for any Azure-DevOps-backed instance. Not needed for local-folder-only instances |
 | A text editor | any | Modules are markdown; no tooling required to author them |
 | `vendor/anthropic-skills/{docx,pdf,pptx,xlsx}` | pinned to a commit, see `vendor/anthropic-skills/README.md` | Document-conversion code used to *verify* rendered artefacts during development (docx→pdf→image) — source-available, not open source; see that README for the license caveat. Not required at render time. |
 
