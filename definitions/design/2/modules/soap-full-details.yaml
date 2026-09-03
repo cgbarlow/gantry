@@ -3,7 +3,7 @@
 # the same idea at two stages, and keeping two fields meant the same unresolved
 # question was typed twice. `open-questions` is now mounted from the `shape`
 # stage and the `soap-full` artefact references `open-questions.questions`, so a
-# question raised at Shape carries into the HLD unchanged.
+# question raised at SOAP carries into the HLD unchanged.
 #
 # `caveats` is kept distinct from `introduction.caveats`, and v2 verified that
 # the two carry genuinely different content rather than the same idea twice.

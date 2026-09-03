@@ -10,7 +10,7 @@ purpose: >
 
   Open from the `shape` stage onward: the Full SOAP's "Questions" section and
   the HLD's "Open questions" section render from this one field, so a question
-  raised at Shape carries into the HLD rather than being re-typed.
+  raised at SOAP carries into the HLD rather than being re-typed.
 
 fields:
   - id: questions

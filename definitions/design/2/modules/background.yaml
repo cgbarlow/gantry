@@ -5,7 +5,7 @@ purpose: >
   no prior knowledge enough context to understand the situation quickly, stated clearly
   enough that a reviewer can judge the fit of the solution without inferring it.
 
-  One module used at Shape and at HLD — fill it progressively: at Shape state the
+  One module used at SOAP and at HLD — fill it progressively: at SOAP state the
   current problem and the domains it touches for the business case; by HLD add the
   opportunity and success criteria in the depth TAC needs.
 

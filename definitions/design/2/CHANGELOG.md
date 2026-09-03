@@ -133,8 +133,8 @@ Initial published version of the Solution Design definition.
 
 ### Cross-stage reuse: `background` + `introduction` backbone (WI #280, in place — see docs/adr/0028)
 
-A structural change to reduce Shape↔HLD duplication and give scope and
-assumptions a single home that carries from Shape to handover. Applied to
+A structural change to reduce SOAP↔HLD duplication and give scope and
+assumptions a single home that carries from SOAP to handover. Applied to
 `definitions/design/1/` in place (no `design/2`), with the `examples` and
 `atlas-reference-design` fixtures migrated in lockstep. Every gate still
 passes; `render:examples` loses no author content (headings move/rename and
@@ -156,11 +156,11 @@ scope splits into two sub-sections).
   `context.out-of-scope` and `problem-statement.scope` are gone.
 - **Assumptions backbone.** `solution-definition.assumptions-and-considerations`
   deleted; `introduction.assumptions` / `.constraints` / `.caveats` now carry
-  from Shape onward and are scoped into `soap-full` / `hld` (`?` optional).
+  from SOAP onward and are scoped into `soap-full` / `hld` (`?` optional).
   `architecture.constraints-and-assumptions` renamed to
   `architecture.constraints` ("Constraints and goals"), for
   architecture-specific constraints/goals only.
-- **Shape traceability.** `solution-definition.high-level-requirements` is now
+- **SOAP traceability.** `solution-definition.high-level-requirements` is now
   `required: true` and rendered by `soap.md.tmpl` (it is the agreed set
   `nfrs.requirements-traceability` maps back to). New optional
   `solution-definition.alternatives-sketch` seeds `alternatives-considered`

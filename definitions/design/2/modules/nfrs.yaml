@@ -94,6 +94,6 @@ fields:
     guidance: >
       Describe how the design maps back to the agreed functional and non-functional
       requirements — enough for a reviewer to check nothing was quietly dropped. Map back
-      to `solution-definition.high-level-requirements`, the agreed set captured at Shape,
+      to `solution-definition.high-level-requirements`, the agreed set captured at SOAP,
       rather than restating the requirements here. You can keep this light during
       high-level design; it should be complete before build readiness.

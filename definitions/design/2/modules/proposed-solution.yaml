@@ -12,7 +12,7 @@ purpose: >
   with strategy, its costs and benefits, implications and what you are trading off.
 
   The solution's shape itself is not re-entered here — the `hld` artefact
-  renders `solution-definition.high-level-solution-overview` from Shape as the
+  renders `solution-definition.high-level-solution-overview` from SOAP as the
   section's opening. Deepen or correct that sketch there rather than restating
   it.
 
@@ -29,7 +29,7 @@ fields:
     type: markdown
     required: true
     guidance: >
-      Builds on the Shape sketch — see `solution-definition`
+      Builds on the SOAP sketch — see `solution-definition`
       (`high-level-solution-overview`, `feature-breakdown`). Do not re-derive;
       show how that shape aligns with strategy for TAC.
 
@@ -45,7 +45,7 @@ fields:
     guidance: >
       What you're giving up by choosing this solution over the alternatives
       recorded in `alternatives-considered` (seeded by
-      `solution-definition.alternatives-sketch` at Shape).
+      `solution-definition.alternatives-sketch` at SOAP).
 
   - id: cost-benefit
     title: Cost-benefit analysis
@@ -62,5 +62,5 @@ fields:
     type: markdown
     required: true
     guidance: >
-      Traceable to `team-and-estimates.estimates` — refine the Shape T-shirt
+      Traceable to `team-and-estimates.estimates` — refine the SOAP T-shirt
       sizes into an indicative timeline rather than re-deriving them.
