@@ -114,7 +114,7 @@ Already have winget? `winget install OpenJS.NodeJS.LTS` and `winget install --ex
 >
 > Then open a **new terminal** (`setx` only affects new sessions) and re-run `npm install`. For a single session instead: `set NODE_USE_SYSTEM_CA=1` (cmd) or `$env:NODE_USE_SYSTEM_CA=1` (PowerShell). `NODE_USE_SYSTEM_CA` needs Node 22+ (already required above).
 
-> **No admin rights on a locked-down corporate Windows machine?** The `.msi` installer above needs elevation. Skip step 1 entirely and run **`install.cmd`** (in the repo root, after step 4's `git clone`) instead — it downloads Node's official portable ZIP build (no installer, no registry writes) into a `.node-runtime\` folder inside the repo and runs `npm install` through it, all without touching PATH, the registry, or anything outside the repo folder. `run-local.cmd` automatically uses that bundled copy afterward, so step 4's `npm link` isn't needed either (nothing's on PATH for it to link onto) — skip straight to step 5. Git and Pandoc above still need their own install path (or your team's existing provisioning); this only covers Node/npm. Every run writes `install.log` next to the script (overwritten each time) — if it fails, send that file rather than a screenshot; `install.cmd /debug` reruns with full command tracing and npm's verbose log level for deeper troubleshooting.
+> **No admin rights on a locked-down corporate Windows machine?** The `.msi` installer above needs elevation. Skip step 1 entirely and run **`install.cmd`** (in the repo root, after step 4's `git clone`) instead — it downloads Node's official portable ZIP build (no installer, no registry writes) into a `.node-runtime\` folder inside the repo and runs `npm install` through it, all without touching PATH, the registry, or anything outside the repo folder. `run.cmd` automatically uses that bundled copy afterward, so step 4's `npm link` isn't needed either (nothing's on PATH for it to link onto) — skip straight to step 5. Git and Pandoc above still need their own install path (or your team's existing provisioning); this only covers Node/npm. Every run writes `install.log` next to the script (overwritten each time) — if it fails, send that file rather than a screenshot; `install.cmd /debug` reruns with full command tracing and npm's verbose log level for deeper troubleshooting.
 
 **4. Clone and install Gantry** (same on both platforms)
 
@@ -129,7 +129,7 @@ npm link             # makes `gantry` available on your PATH
 
 **5. Run it.**
 
-- **Windows**: from the repo root, `run-local.cmd` is the one-step way to run Gantry locally: it starts `gantry serve` (skipping startup if one's already running) and opens the dashboard in your default browser. Works from any working directory and stops the server cleanly on Ctrl+C (or closing the window it opens).
+- **Windows**: from the repo root, `run.cmd` is the one-step way to run Gantry locally: it starts `gantry serve` (skipping startup if one's already running) and opens the dashboard in your default browser. Works from any working directory and stops the server cleanly on Ctrl+C (or closing the window it opens).
 - **macOS/Linux**: `gantry serve` (from step 4's `npm link`), then open the URL it prints in your browser.
 
 ## Software dependencies

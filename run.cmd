@@ -2,14 +2,14 @@
 REM One-step launcher for gantry: starts `gantry serve` (skipping startup if
 REM one's already running) and opens the gantry site in the default browser.
 REM
-REM Usage: run-local.cmd (double-click it, or run it from any directory).
+REM Usage: run.cmd (double-click it, or run it from any directory).
 REM Add /debug for verbose tracing (echoed probe/start commands and their
 REM results, curl -v, npm's own verbose log level) when troubleshooting a
 REM failure on someone else's machine. /v is accepted as a synonym — same
 REM flag names and on/off semantics as install.cmd's /debug, so there's only
 REM one convention to learn across both scripts.
 REM
-REM Every run writes run-local.log next to this script (overwritten each
+REM Every run writes run.log next to this script (overwritten each
 REM time, not appended — it always reflects the most recent run), so a
 REM failure can be shared without a live screen-share. The log captures this
 REM launcher's own probe/startup logic, /debug or not — the flag only
@@ -29,12 +29,12 @@ if /i "%~1"=="/v" set "DEBUG=1"
 REM Resolve the script's own directory so `node bin\gantry.js` can be found
 REM regardless of the caller's cwd. %~dp0 always ends with a backslash.
 set "SCRIPT_DIR=%~dp0"
-set "LOG_FILE=%SCRIPT_DIR%run-local.log"
+set "LOG_FILE=%SCRIPT_DIR%run.log"
 
 REM Self-relaunch-through-Tee-Object, same trick install.cmd uses: it's the
 REM only way to get curl's/npm's/gantry-probe's own console output (not
 REM just this script's `echo` lines) into both the console and a file at
-REM once, since cmd has no built-in `tee`. `GANTRY_RUN_LOCAL_RELAUNCHED` is
+REM once, since cmd has no built-in `tee`. `GANTRY_RUN_RELAUNCHED` is
 REM inherited by the child process PowerShell spawns (child processes
 REM inherit their parent's environment block), so that second pass sees it
 REM set and falls through to the real work below instead of relaunching
@@ -48,8 +48,8 @@ REM routine on a real corporate machine) would be exactly the kind of thing
 REM hand-built nested quoting gets wrong. PowerShell's `&` call operator
 REM invokes a .cmd file directly, and `$env:X` always reads as one literal
 REM string regardless of what it contains.
-if not "%GANTRY_RUN_LOCAL_RELAUNCHED%"=="1" (
-  set "GANTRY_RUN_LOCAL_RELAUNCHED=1"
+if not "%GANTRY_RUN_RELAUNCHED%"=="1" (
+  set "GANTRY_RUN_RELAUNCHED=1"
   set "GANTRY_SELF=%~f0"
   set "GANTRY_ARGS=%*"
   powershell -NoProfile -Command "& $env:GANTRY_SELF $env:GANTRY_ARGS 2>&1 | Tee-Object -FilePath $env:LOG_FILE"
@@ -132,7 +132,7 @@ if "%DEBUG%"=="1" echo [DEBUG] Command: "%NODE_EXE%" "%SCRIPT_DIR%bin\gantry.js"
 REM A normal foreground window (not a hidden background process) so a
 REM first-time user can see the server's own log output, and so closing the
 REM window (or Ctrl+C inside it) stops the server with nothing left orphaned.
-REM This window's own output is intentionally outside run-local.log — see
+REM This window's own output is intentionally outside run.log — see
 REM the header comment above.
 start "gantry" cmd /k "%NODE_EXE%" "%SCRIPT_DIR%bin\gantry.js" serve
 

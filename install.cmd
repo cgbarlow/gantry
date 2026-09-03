@@ -6,11 +6,11 @@ REM which needs elevation) straight from nodejs.org, unpacks it under this
 REM folder, then runs `npm install` through that unpacked copy. Nothing here
 REM touches PATH, the registry, or any system-wide location — a standard
 REM (non-admin) Windows account can run every step. If a real global `node`
-REM is already on PATH, run-local.cmd still prefers this bundled copy over
+REM is already on PATH, run.cmd still prefers this bundled copy over
 REM it once installed, so the two never end up mismatched mid-session.
 REM
 REM Usage: install.cmd (double-click it, or run it from any directory) once,
-REM before the first run-local.cmd. Add /debug for verbose tracing
+REM before the first run.cmd. Add /debug for verbose tracing
 REM (echoed commands, curl -v, npm's own verbose log level) when
 REM troubleshooting a failure on someone else's machine.
 REM
@@ -72,7 +72,7 @@ echo ============================================================
 if "%DEBUG%"=="1" echo [DEBUG] Verbose mode on — logging to %LOG_FILE%
 
 REM Pin an exact version rather than "latest" — reproducible installs, and
-REM this is the version run-local.cmd's own detection (below) is written
+REM this is the version run.cmd's own detection (below) is written
 REM against. Bump both together. Must satisfy package.json's own
 REM `engines.node` floor.
 set "NODE_VERSION=24.20.0"
@@ -107,7 +107,7 @@ set "ZIP_URL=https://nodejs.org/dist/v%NODE_VERSION%/%NODE_DIST%.zip"
 set "ZIP_PATH=%RUNTIME_DIR%\%NODE_DIST%.zip"
 if "%DEBUG%"=="1" echo [DEBUG] ZIP_URL=%ZIP_URL%
 
-REM Same curl-first, PowerShell-fallback pattern as run-local.cmd's own
+REM Same curl-first, PowerShell-fallback pattern as run.cmd's own
 REM :probe — curl has shipped with Windows 10 since build 1803, so this
 REM covers every machine that ships without a real package manager; the
 REM PowerShell path covers anything older or with curl removed by policy.
@@ -210,5 +210,5 @@ if errorlevel 1 (
 popd
 
 echo.
-echo Done. Run run-local.cmd to start gantry.
+echo Done. Run run.cmd to start gantry.
 echo Full trace of this run: %LOG_FILE%
