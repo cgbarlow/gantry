@@ -214,11 +214,9 @@ test('settings: from a local-workspace instance, the Settings dropdown\'s Worksp
       assert.match(await page.locator('.settings-section', { hasText: 'Instance info' }).textContent(), new RegExp(slug))
       assert.match(await page.locator('.settings-section', { hasText: 'Instance info' }).textContent(), /design/)
       assert.match(await page.locator('.settings-section', { hasText: 'Instance info' }).textContent(), /Version.*v1/s)
-      assert.match(
-        await page.locator('.settings-section', { hasText: 'Azure DevOps work item' }).textContent(),
-        /don't support Azure DevOps ticketing/
-      )
-      // No required-reviewer / archive sections — neither concept applies to a local workspace instance.
+      // No Azure DevOps work item / required-reviewer / archive sections —
+      // none of those concepts apply to a local workspace instance (ADR-0029).
+      assert.equal(await page.locator('.settings-section', { hasText: 'Azure DevOps work item' }).count(), 0)
       assert.equal(await page.locator('text=Required reviewer').count(), 0)
       assert.equal(await page.getByRole('button', { name: 'Archive instance' }).count(), 0)
     })(base)

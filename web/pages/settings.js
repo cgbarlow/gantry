@@ -1119,14 +1119,6 @@ function LocalInstanceSettingsPage({ query, workspaceId, slug }) {
                 <div class="result-row"><span class="k">Current stage</span><span class="v">${record.stage}</span></div>
               </div>
             </section>
-            <section class="settings-section">
-              <h2>Azure DevOps work item</h2>
-              <p class="guidance">
-                Local workspaces don't support Azure DevOps ticketing (ADR-0029) — no work-item link, no
-                sign-off, no Pull Request ceremony. This instance advances self-serve once its current
-                stage's gate passes.
-              </p>
-            </section>
           `
         : null}
     </main>
