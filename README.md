@@ -125,7 +125,9 @@ npm install          # installs the engine's deps AND the web form's browser dep
 npm link             # makes `gantry` available on your PATH
 ```
 
-> **TODO:** replace with the real install path once packaged — a released binary or `npx gantry` avoids the clone-to-use step for people who only ever consume definitions.
+> **No Git either?** Skip `git clone` entirely and download the latest zip release instead (Azure DevOps → Pipelines → the zip-release pipeline → latest successful run → Artifacts → `gantry-zip`), then unpack it and continue from `npm install` above. It's a trimmed, runtime-only copy (no `tests/`, `reference/`, or contributor docs) — everything `install.cmd`/`run.cmd` need and nothing else.
+>
+> **TODO:** publish to an npm feed (`npx gantry`) too, for people who only ever consume definitions and don't want even a zip-and-unpack step.
 
 **5. Run it.**
 

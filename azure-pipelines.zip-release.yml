@@ -1,0 +1,68 @@
+# Zip release pipeline — packages a trimmed, runtime-only copy of gantry
+# for locked-down corporate machines: download the zip, unpack, run
+# install.cmd (see README "No admin rights on a locked-down corporate
+# Windows machine?"). No Git, no Docker registry, no Azure Artifacts feed
+# auth required to consume it — just a browser download.
+#
+# OPERATOR SETUP REQUIRED (YAML alone does not create the pipeline):
+# 1. Register this YAML as a new pipeline in Azure DevOps (Pipelines → New
+#    pipeline → Existing Azure Pipelines YAML file → select
+#    azure-pipelines.zip-release.yml) and enable it.
+# 2. Cut a release by pushing a tag matching v* (e.g. `git tag v0.1.0 &&
+#    git push origin v0.1.0`) — the trigger below then runs automatically.
+#    No service connection or other manual config needed beyond step 1.
+# 3. Once the run completes, the zip is attached to it as a pipeline
+#    artifact named "gantry-zip" (Pipelines → this run → Artifacts).
+#
+# What's included: bin/, lib/, web/, definitions/, instances/ (so the
+# bundled examples come along), package.json, package-lock.json,
+# install.cmd, run.cmd, README.md — everything needed to run gantry.
+# Deliberately excluded: tests/, reference/ (real-world sample design
+# artefacts kept for inspiration, not used by gantry itself — see
+# CONTEXT.md if that changes), vendor/anthropic-skills/ (used only to
+# verify rendered output during development), docs/ (contributor/agent
+# docs), node_modules/ (install.cmd installs these fresh on the target
+# machine via `npm install --omit=dev`).
+
+trigger:
+  branches:
+    exclude:
+      - '*'
+  tags:
+    include:
+      - v*
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - script: |
+      version=$(node -p "require('./package.json').version")
+      echo "Resolved version: $version"
+      echo "##vso[task.setvariable variable=version]$version"
+    displayName: 'Resolve version'
+
+  - script: |
+      set -euo pipefail
+      stageDir="$(Agent.TempDirectory)/gantry-$(version)"
+      mkdir -p "$stageDir"
+      cp -r bin lib web definitions instances "$stageDir/"
+      cp package.json package-lock.json install.cmd run.cmd README.md "$stageDir/"
+      echo "##vso[task.setvariable variable=stageDir]$stageDir"
+    displayName: 'Stage runtime-only files'
+
+  - task: ArchiveFiles@2
+    displayName: 'Zip staged files'
+    inputs:
+      rootFolderOrFile: '$(stageDir)'
+      includeRootFolder: true
+      archiveType: zip
+      archiveFile: '$(Build.ArtifactStagingDirectory)/gantry-$(version).zip'
+      replaceExistingArchive: true
+
+  - task: PublishPipelineArtifact@1
+    displayName: 'Publish zip artifact'
+    inputs:
+      targetPath: '$(Build.ArtifactStagingDirectory)/gantry-$(version).zip'
+      artifact: 'gantry-zip'
