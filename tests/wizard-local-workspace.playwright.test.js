@@ -298,7 +298,7 @@ test('Local + Register: a folder that already contains gantry-workspace/ is reje
   })
 })
 
-test('Local + Pick: lists the instances found in the folder and navigates with ?local=&slug=', async () => {
+test('Local + Pick: lists the instances found in the folder and navigates with ?local=', async () => {
   await withServer(async ({ gantryBase }) => {
     const browser = await launchBrowser()
     try {
@@ -333,7 +333,7 @@ test('Local + Pick: lists the instances found in the folder and navigates with ?
       const url = new URL(page.url())
       assert.equal(url.pathname, '/instance/alpha')
       assert.ok(url.searchParams.get('local'), '?local=<id> present')
-      assert.equal(url.searchParams.get('slug'), 'alpha')
+      assert.equal(url.searchParams.get('slug'), null)
     } finally {
       await browser.close()
     }

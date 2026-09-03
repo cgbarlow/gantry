@@ -72,8 +72,8 @@ import { getLocalStatus, checkLocalGate } from './lib/localStatus.js'
 
 // ---------- Local workspace instances (WI #297, ADR-0029, A6) ----------
 // A local-workspace instance's data lives in a folder on the browser user's
-// own machine, opened via `/instance/<slug>?local=<id>&slug=<slug>` (the URL
-// convention A4's wizard already writes, web/pages/new-workspace-wizard.js).
+// own machine, opened via `/instance/<slug>?local=<id>` (the URL convention
+// A4's wizard already writes, web/pages/new-workspace-wizard.js).
 // `localWorkspaceParam` carries the `{ id, slug }` parsed off that query
 // string for as long as ModuleEditorPage is mounted for a local instance;
 // `localDirHandle` is the resolved, permission-checked directory handle
@@ -3430,12 +3430,12 @@ function ViewModeToolbar({
 // than a server-side workspace id, and the two Settings screens below need
 // that id to resolve the right directory handle client-side — so it's
 // threaded onto both links as `local=`, the same query-param convention the
-// wizard already writes onto `/instance/<slug>?local=<id>&slug=<slug>` URLs.
+// wizard already writes onto `/instance/<slug>?local=<id>` URLs.
 // Without it, both screens would otherwise try (and fail) the old
 // server-side registry fetch, which is the bug this ticket fixes.
 //
 // `from` needs the same treatment: a local-workspace instance's editor route
-// only loads at all with `?local=&slug=` present (ModuleEditorPage's own
+// only loads at all with `?local=` present (ModuleEditorPage's own
 // loadLocalInstance path) — a bare `/instance/<slug>` 404s against the
 // server-side registry it was never entered into. Without carrying those
 // params through `from` too, every Settings screen's "← Back" control would
@@ -3444,7 +3444,7 @@ function ViewModeToolbar({
 function SettingsMenu({ instance, open, onOpenChange }) {
   const localParam = instance.isLocalWorkspace ? `&local=${encodeURIComponent(instance.localWorkspaceId)}` : ''
   const localQuery = instance.isLocalWorkspace
-    ? `?local=${encodeURIComponent(instance.localWorkspaceId)}&slug=${encodeURIComponent(instance.slug)}`
+    ? `?local=${encodeURIComponent(instance.localWorkspaceId)}`
     : ''
   const from = encodeURIComponent(`/instance/${instance.slug}${localQuery}`)
   const slug = encodeURIComponent(instance.slug)
@@ -3683,17 +3683,16 @@ function ModuleEditorPage({ slug: routeRef }) {
     })
 
     // A local-workspace instance (ADR-0029) is opened at
-    // `/instance/<slug>?local=<id>&slug=<slug>` — the convention A4's wizard
+    // `/instance/<slug>?local=<id>` — the convention A4's wizard
     // already writes (web/pages/new-workspace-wizard.js's openLocalInstance).
     // Detected here, off the route's own query string, the same convention
     // every other route in this app already uses for its query params.
     const searchParams = new URLSearchParams(window.location.search)
     const localId = searchParams.get('local')
     if (localId) {
-      const localSlug = searchParams.get('slug') || routeRef
       batch(() => {
-        localWorkspaceParam.value = { id: localId, slug: localSlug }
-        currentSlug.value = localSlug
+        localWorkspaceParam.value = { id: localId, slug: routeRef }
+        currentSlug.value = routeRef
         viewedStage.value = null
       })
       return
@@ -4294,7 +4293,7 @@ function useLocalGroups() {
 }
 
 function localInstanceHref(workspaceId, slug) {
-  return `/instance/${encodeURIComponent(slug)}?local=${encodeURIComponent(workspaceId)}&slug=${encodeURIComponent(slug)}`
+  return `/instance/${encodeURIComponent(slug)}?local=${encodeURIComponent(workspaceId)}`
 }
 
 // ---------- Master-detail view ----------

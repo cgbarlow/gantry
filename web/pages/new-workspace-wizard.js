@@ -797,7 +797,7 @@ async function useRecentLocalWorkspace(id) {
 
 function openLocalInstance(slug) {
   window.location.assign(
-    `/instance/${encodeURIComponent(slug)}?local=${encodeURIComponent(localWorkspaceId.value)}&slug=${encodeURIComponent(slug)}`
+    `/instance/${encodeURIComponent(slug)}?local=${encodeURIComponent(localWorkspaceId.value)}`
   )
 }
 

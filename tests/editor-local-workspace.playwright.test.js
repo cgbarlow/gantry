@@ -9,7 +9,7 @@ import { createInstance } from '../lib/instance.js'
 
 // Browser tests for WI #297 (ADR-0029, Feature #290 / A6) — the module
 // editor loading, saving, gate-checking, advancing and rendering a
-// **local-workspace** instance (`/instance/<slug>?local=<id>&slug=<slug>`)
+// **local-workspace** instance (`/instance/<slug>?local=<id>`)
 // straight through a `FileSystemDirectoryHandle`, per ADR-0029.
 //
 // The File System Access API is not driveable from a headless test browser
@@ -100,7 +100,7 @@ test('local-workspace instance: loads, saves offline-safe, gate-checks, advances
       assert.ok(workspaceId, 'seeded a local workspace id')
 
       // ---- Load: the editor reads instance.yaml + module files through the handle ----
-      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}&slug=${slug}`)
+      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}`)
       await page.waitForSelector('.module', { timeout: 10_000 })
       const contextModule = page.locator('.module').first()
       await assert.doesNotReject(contextModule.getByRole('button', { name: /^Save /, exact: false }).first().waitFor({ timeout: 5_000 }))
@@ -208,7 +208,7 @@ test('local-workspace instance: status, gate check and advance run entirely clie
       // (fetching the definition version projection, GET
       // /api/definitions/.../versions/:n — a one-time, cacheable read of
       // static content, unaffected by this ticket's scope).
-      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}&slug=${slug}`)
+      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}`)
       await page.waitForSelector('.module', { timeout: 10_000 })
 
       // From here on, simulate `gantry serve` going away entirely: every
@@ -281,7 +281,7 @@ test('local-workspace instance: opening the editor never calls the server-side a
       await page.goto(`${base}/`)
       const workspaceId = await seedLocalWorkspace(page, slug)
 
-      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}&slug=${slug}`)
+      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}`)
       await page.waitForSelector('.module', { timeout: 10_000 })
       // Give the module-level assetSources effect (fires immediately on slug pin) a moment to settle.
       await page.waitForTimeout(500)
@@ -366,7 +366,7 @@ test('local-workspace instance: Back-navigating off the editor never surfaces a 
           a.href = href
           document.body.appendChild(a)
           a.click()
-        }, `/instance/${slug}?local=${encodeURIComponent(workspaceId)}&slug=${slug}`)
+        }, `/instance/${slug}?local=${encodeURIComponent(workspaceId)}`)
         await page.waitForSelector('.module', { timeout: 10_000 })
 
         // ---- Leave the local instance via the browser's own Back button, not an in-app link ----
@@ -427,7 +427,7 @@ test('local-workspace instance: the Instance Switcher\'s "+ New Instance" link j
       const slug = 'local-claims'
       await page.goto(`${base}/`)
       const workspaceId = await seedLocalWorkspace(page, slug)
-      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}&slug=${slug}`)
+      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}`)
       await page.waitForSelector('.module', { timeout: 10_000 })
 
       await page.getByRole('button', { name: 'Switch instance' }).click()
@@ -498,7 +498,7 @@ test('a later plain "+ New Workspace" visit is not left on a stale "New Instance
       const slug = 'local-claims'
       await page.goto(`${base}/`)
       const workspaceId = await seedLocalWorkspace(page, slug)
-      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}&slug=${slug}`)
+      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}`)
       await page.waitForSelector('.module', { timeout: 10_000 })
 
       // Drive the shortcut once, exactly as the test above does.
