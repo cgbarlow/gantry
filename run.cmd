@@ -134,7 +134,20 @@ REM first-time user can see the server's own log output, and so closing the
 REM window (or Ctrl+C inside it) stops the server with nothing left orphaned.
 REM This window's own output is intentionally outside run.log — see
 REM the header comment above.
-start "gantry" cmd /k "%NODE_EXE%" "%SCRIPT_DIR%bin\gantry.js" serve
+REM
+REM The extra outer quotes around the whole `cmd /k ...` argument are load
+REM -bearing, not decorative: cmd's /K (and /C) only preserves quotes as
+REM -written when the remainder of the line has *exactly two* quote
+REM characters. With two separately-quoted paths (NODE_EXE and gantry.js)
+REM that's four, so cmd falls back to compatibility behavior — stripping
+REM the first and last quote in the whole line — which mangles this into a
+REM broken path ("...node.exe" "...gantry.js becomes one token with a
+REM stray embedded quote) and fails with "The filename, directory name, or
+REM volume label syntax is incorrect." Wrapping the whole argument in one
+REM more pair of quotes makes that same stripping reproduce the original,
+REM correctly-quoted string instead of destroying it (WI #337) — this is
+REM independent of whether any path contains spaces.
+start "gantry" cmd /k ""%NODE_EXE%" "%SCRIPT_DIR%bin\gantry.js" serve"
 
 echo Waiting for gantry to start listening on %URL% ...
 set /a attempts=0
