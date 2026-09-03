@@ -147,7 +147,25 @@ REM volume label syntax is incorrect." Wrapping the whole argument in one
 REM more pair of quotes makes that same stripping reproduce the original,
 REM correctly-quoted string instead of destroying it (WI #337) — this is
 REM independent of whether any path contains spaces.
-start "gantry" cmd /k ""%NODE_EXE%" "%SCRIPT_DIR%bin\gantry.js" serve"
+REM
+REM `>nul 2>nul` on this line is also load-bearing (WI #338): this whole
+REM script's own stdout/stderr are the write end of the Tee-Object pipe set
+REM up by the self-relaunch above. CreateProcess duplicates the calling
+REM process's inheritable handles into whatever it spawns — including that
+REM pipe handle — into this new "gantry" window's process, even though the
+REM window never uses it (a freshly created console always gets its own
+REM console buffers for what it actually displays, regardless of what
+REM standard handles it inherited). An anonymous pipe only signals
+REM end-of-stream once EVERY handle to its write end is closed, across every
+REM process holding one — not just the one that opened it. So as long as
+REM the "gantry" window stayed open, it kept that duplicated handle alive,
+REM and the Tee-Object pipeline — and therefore the entire self-relaunch,
+REM and therefore the original invoking shell — never returned, even long
+REM after this script's own logic had finished. Redirecting this line's own
+REM output to NUL means the handle duplicated into the new window points at
+REM NUL instead of the live pipe, closing that stale reference without
+REM changing anything the "gantry" window itself displays.
+start "gantry" cmd /k ""%NODE_EXE%" "%SCRIPT_DIR%bin\gantry.js" serve" >nul 2>nul
 
 echo Waiting for gantry to start listening on %URL% ...
 set /a attempts=0
