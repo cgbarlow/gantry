@@ -113,18 +113,34 @@ REM covers every machine that ships without a real package manager; the
 REM PowerShell path covers anything older or with curl removed by policy.
 REM `-v` (curl) / `-Verbose` (Invoke-WebRequest) only in debug mode — full
 REM request/response header tracing is noise on a normal run.
+REM `-sS` ("silent but show errors"): curl always writes its own progress
+REM meter to stderr, even on a clean run. The self-relaunch above merges
+REM stderr into stdout (2>&1) before piping through PowerShell for logging,
+REM and PowerShell renders any merged native-command stderr text as a
+REM NativeCommandError block — so a fully successful download displayed as
+REM what looked like a fatal error. `-s` drops the progress meter entirely;
+REM `-S` (kept from before) still forces a real error message through even
+REM with `-s` set, so a genuine failure (bad URL, network down, etc.) below
+REM still reports clearly and still trips `errorlevel 1`. `-v` in debug mode
+REM is untouched — its request/response trace is what /debug is for.
 where curl >nul 2>nul
 if not errorlevel 1 (
   if "%DEBUG%"=="1" (
-    curl -v -fSL -o "%ZIP_PATH%" "%ZIP_URL%"
+    curl -v -sS -fL -o "%ZIP_PATH%" "%ZIP_URL%"
   ) else (
-    curl -fSL -o "%ZIP_PATH%" "%ZIP_URL%"
+    curl -sS -fL -o "%ZIP_PATH%" "%ZIP_URL%"
   )
 ) else (
+  REM PowerShell equivalent of curl's `-s`: Invoke-WebRequest's default
+  REM progress-bar rendering is the analogous noisy-on-success behavior;
+  REM `$ProgressPreference='SilentlyContinue'` (scoped to this one-liner via
+  REM the try block, not a persistent setting) suppresses it while leaving
+  REM the catch block's `Write-Error` — and the real download itself — fully
+  REM intact for genuine failures.
   if "%DEBUG%"=="1" (
-    powershell -NoProfile -Command "try { Invoke-WebRequest -Uri '%ZIP_URL%' -OutFile '%ZIP_PATH%' -UseBasicParsing -Verbose; exit 0 } catch { Write-Error $_; exit 1 }"
+    powershell -NoProfile -Command "try { $ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri '%ZIP_URL%' -OutFile '%ZIP_PATH%' -UseBasicParsing -Verbose; exit 0 } catch { Write-Error $_; exit 1 }"
   ) else (
-    powershell -NoProfile -Command "try { Invoke-WebRequest -Uri '%ZIP_URL%' -OutFile '%ZIP_PATH%' -UseBasicParsing; exit 0 } catch { Write-Error $_; exit 1 }"
+    powershell -NoProfile -Command "try { $ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri '%ZIP_URL%' -OutFile '%ZIP_PATH%' -UseBasicParsing; exit 0 } catch { Write-Error $_; exit 1 }"
   )
 )
 if errorlevel 1 (
@@ -167,12 +183,23 @@ if not exist "%NODE_EXE%" (
 echo Portable Node %NODE_VERSION% ^(%NODE_ARCH%^) ready at %NODE_HOME%.
 
 :npminstall
-echo Running npm install through the bundled npm (this may take a minute)...
+REM `--omit=dev`: this installer is for *running* gantry, not for
+REM developing/testing it, so devDependencies are skipped entirely.
+REM Without this, a full `npm install` also installs devDependency
+REM node-test-junit-reporter, which pulls in node-test-parser as a *git*
+REM dependency (github:nearform/node-test-parser#v2.2.1, per
+REM package-lock.json) — npm always re-runs a git dependency's own
+REM lifecycle scripts fresh at install time, and that repo's package.json
+REM has "prepare": "husky install", which shells out to a bare `node` that
+REM doesn't exist on PATH here by design (see the top-of-file note on never
+REM touching PATH). That made the whole install abort fatally even though
+REM nothing needed to actually *run* gantry depends on it. See WI #335.
+echo Running npm install through the bundled npm (production dependencies only, this may take a minute)...
 pushd "%SCRIPT_DIR%"
 if "%DEBUG%"=="1" (
-  call "%NPM_CMD%" install --loglevel verbose
+  call "%NPM_CMD%" install --omit=dev --loglevel verbose
 ) else (
-  call "%NPM_CMD%" install
+  call "%NPM_CMD%" install --omit=dev
 )
 if errorlevel 1 (
   echo npm install failed. 1>&2
