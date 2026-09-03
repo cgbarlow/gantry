@@ -129,7 +129,7 @@ test('a local-workspace Render produces a real, well-formed .docx via client-sid
       await page.goto(`${base}/`)
       const workspaceId = await seedLocalWorkspace(page, slug)
 
-      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}&slug=${slug}`)
+      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}`)
       await page.waitForSelector('.module', { timeout: 10_000 })
 
       // Render engine defaults to 'wasm' — no Settings visit needed to exercise the default path.
@@ -215,7 +215,7 @@ test('switching Settings\' Render engine to Native persists across reload and ro
         if (url.pathname.startsWith('/api/local/')) requestedPaths.push(url.pathname)
       })
 
-      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}&slug=${slug}`)
+      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}`)
       await page.waitForSelector('.module', { timeout: 10_000 })
       await page.getByRole('button', { name: 'Render', exact: true }).click()
       const renderDialog = page.locator('.modal[aria-label="Render an artefact"]')

@@ -175,7 +175,7 @@ test('settings: from a local-workspace instance, the Settings dropdown\'s Worksp
         assignee: 'a.architect',
       })
 
-      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}&slug=${slug}`)
+      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}`)
       await page.waitForSelector('.module', { timeout: 10_000 })
 
       // The dropdown's own links must carry `local=` for a local-workspace instance (the actual bug/fix).

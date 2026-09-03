@@ -137,7 +137,7 @@ function listItemNamed(page, name) {
   return page.locator('.instance-list .list-item', { hasText: name })
 }
 
-test('dashboard: a granted local workspace leads the blended list (position, not a badge), and its instance link navigates with ?local=&slug=', async () => {
+test('dashboard: a granted local workspace leads the blended list (position, not a badge), and its instance link navigates with ?local=', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     createInstance('design', 'server-instance', { instancesDir })
@@ -186,7 +186,7 @@ test('dashboard: a granted local workspace leads the blended list (position, not
         const url = new URL(page.url())
         assert.equal(url.pathname, '/instance/alpha')
         assert.equal(url.searchParams.get('local'), 'ws-1')
-        assert.equal(url.searchParams.get('slug'), 'alpha')
+        assert.equal(url.searchParams.get('slug'), null)
 
         // The unrelated, legacy server-side "local instance" concept
         // (ADR-0029) keeps its own distinct, renamed label (WI #306 item
