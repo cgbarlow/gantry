@@ -8,7 +8,7 @@ There is one set of data, not five documents that drift apart.
 
 Gantry itself knows nothing about design, procurement or anything else. Every use case is a definition, and definitions are configuration.
 
-Jump to [Executive Summary](exec-summary.md)
+Jump to [Executive Summary](docs/exec-summary.md)
 
 ## The problem this solves
 
@@ -127,7 +127,10 @@ npm link             # makes `gantry` available on your PATH
 
 > **TODO:** replace with the real install path once packaged — a released binary or `npx gantry` avoids the clone-to-use step for people who only ever consume definitions.
 
-**5. Run it.** From the repo root, `./run-local.sh` (macOS/Linux) or `run-local.cmd` (Windows) is the one-step way to run Gantry locally: it starts `gantry serve` (skipping startup if one's already running) and opens the dashboard in your default browser. Both scripts work from any working directory and stop the server cleanly on Ctrl+C (or closing the window they open).
+**5. Run it.**
+
+- **Windows**: from the repo root, `run-local.cmd` is the one-step way to run Gantry locally: it starts `gantry serve` (skipping startup if one's already running) and opens the dashboard in your default browser. Works from any working directory and stops the server cleanly on Ctrl+C (or closing the window it opens).
+- **macOS/Linux**: `gantry serve` (from step 4's `npm link`), then open the URL it prints in your browser.
 
 ## Software dependencies
 
