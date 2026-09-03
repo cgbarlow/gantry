@@ -1,5 +1,6 @@
 node_modules/
 .node-runtime/
+install.log
 instances/*/out/
 instances/instance-registry.json
 instances/workspace-registry.json
