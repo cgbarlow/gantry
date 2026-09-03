@@ -5,6 +5,64 @@ order of its reference document; reuse wired up where v1 declared it but never
 connected it; two duplicate field pairs merged. No field `id` renamed. The
 rest of this file gives the heading-by-heading mapping behind each move.
 
+### Round three: `introduction` split into "Overview" + "Design Basis" (WI #331)
+
+`introduction.yaml`'s eleven fields spanned two functionally different
+clusters sharing one module, one heading ("Introduction"), and one editor
+mount position per stage: document-opening framing content (executive
+summary, overview, purpose, in/out-of-scope, content standards) and ongoing
+design conditions (constraints, assumptions, caveats, design principles,
+outcomes/deliverables). The editor mount position was inconsistent across
+stages (near the end at SOAP/HLD, mid-list at Detailed Design, near the
+front at Handover), and the two clusters rendered inconsistently relative to
+each other across artefacts — bundled together near the top in SAD/As-built,
+but split apart in Full SOAP and HLD, where the conditions cluster was pushed
+to just before References/Attachments.
+
+- **`introduction` retitled "Overview"** (id unchanged — no data migration for
+  these fields). Field set narrowed to the framing cluster:
+  `executive-summary`, `overview`, `purpose`, `in-scope`, `out-of-scope`,
+  `content-standards`.
+- **New module `design-basis`** (title "Design Basis") holds the conditions
+  cluster: `constraints`, `assumptions`, `caveats`, `design-principles`,
+  `outcomes-and-deliverables`. Each field's own `id`, `type`, `required-at`
+  and `guidance` is unchanged — only its owning module changed. ADR-0028's
+  "entered once, refined at every later stage" reasoning for
+  constraints/assumptions/caveats still applies, per module.
+- **Stage mounts**: both modules mount at the same four stages `introduction`
+  always did (`shape`, `hld-define`, `detailed-design`, `handover`), as an
+  adjacent pair, near the front — immediately after the stage's own
+  context-setting module (`background`, where one exists), ahead of
+  solution-detail modules. `shape` and `hld-define` move the pair from
+  6th-7th/10th-11th to 2nd-3rd/3rd-4th; `detailed-design` (no context module
+  of its own) moves it from 10th to 1st-2nd, matching the SAD's own document
+  layout; `handover` keeps `introduction`'s existing 2nd position and adds
+  `design-basis` adjacent at 3rd.
+- **Document position**: "Overview" and "Design Basis" render as adjacent
+  headings, in that order, near the front of every artefact that carries them.
+  `soap-full` and `hld` move the conditions cluster from just before
+  References/Attachments (end of document) into a new "Design basis" section
+  right after Out of scope / Problem Statement — a deliberate deviation from
+  the JEDI/TAC reference documents' own literal section order, accepted
+  because cross-document consistency for this backbone module outweighs
+  fidelity to one legacy reference's placement of "Assumptions". `sad` and
+  `as-built` split their existing single "Introduction" heading into
+  "Overview" + "Design basis", both still adjacent and in the same position.
+  `ssad` folds `executive-summary` (previously its own standalone 1st-section
+  heading) into the same "Overview" block as purpose/scope/content-standards,
+  still 4th overall; `ssad` renders no `design-basis` fields, so nothing else
+  changes there. `soap` is unchanged — it renders no standalone heading for
+  either module; `design-basis.assumptions` still folds into "Assumptions and
+  considerations" mid-document.
+- **Cross-references updated**: `architecture.constraints`'s guidance and
+  `soap-full-details.caveats`'s guidance (both cross-reference a moved field)
+  now point at `design-basis.*` instead of `introduction.*`.
+- **Fixture instances updated**: `examples` and `atlas-reference-design`'s
+  stored `modules/introduction.md` content split into `modules/introduction.md`
+  (framing fields) and a new `modules/design-basis.md` (conditions fields) to
+  match the new module structure. Live/end-user instance data migration is out
+  of scope for this change (still pre-release).
+
 ### Round two: open questions closed
 
 - **`introduction.executive-summary` added** (optional), wired into `sad` and `ssad`.

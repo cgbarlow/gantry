@@ -79,8 +79,9 @@ fields:
       Architecture-specific constraints and goals only — the boundaries and
       objectives that shaped this structure (e.g. a fixed platform, a latency
       budget, a "reuse existing services" goal). Solution-wide assumptions
-      belong in `introduction.assumptions`; list here only what is particular
-      to the architecture and cross-reference that field.
+      belong in `design-basis.assumptions` (WI #331: was `introduction.assumptions`);
+      list here only what is particular to the architecture and cross-reference
+      that field.
 
   - id: standards
     title: Applicable standards

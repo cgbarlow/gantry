@@ -1,0 +1,91 @@
+# WI #331: new module, split out of `introduction.yaml`. Field content
+# (`id`, `type`, `required-at`, `guidance`) is unchanged from its previous home
+# — only the module it belongs to, and where that module mounts/renders,
+# changed. See introduction.yaml's header comment for the reasoning.
+#
+# ADR-0028's "entered once, refined at every later stage" reasoning for
+# constraints/assumptions/caveats is preserved intact — this is still one file,
+# mounted the same four stages `introduction` always was, just no longer
+# sharing a heading with the framing content it doesn't belong with (the
+# framing cluster already read as document-opening content everywhere it
+# renders; this cluster is ongoing conditions the design was built under, and
+# rendered inconsistently — sometimes bundled with framing, sometimes stranded
+# at the end of the document — because it never had its own heading to anchor
+# a consistent position).
+#
+# Field order matches the approved ATLAS reference design's Introduction
+# section, continuing where introduction.yaml's framing cluster leaves off:
+# Constraints -> Assumptions -> Caveats -> Design Principles -> Outcomes /
+# Deliverables.
+
+id: design-basis
+title: Design Basis
+purpose: >
+  Capture the conditions this solution was designed under — the fixed limits
+  it had to work within, what was taken as given, qualifications a reader
+  should carry forward, the principles used to weigh options, and what the
+  work actually produces.
+
+  Mounted from the `shape` stage onward, immediately after `introduction`:
+  each field here is entered once and refined at every later stage, never
+  re-entered.
+
+fields:
+  - id: constraints
+    title: Constraints
+    type: markdown
+    required: false
+    guidance: >
+      Fixed limits the design had to work within — deployment tooling,
+      pre-existing infrastructure it cannot change, other in-flight work it
+      is bound by. Capture from SOAP onward — this file re-opens at every
+      later stage. Constraints particular to the architecture's shape belong
+      in `architecture.constraints`.
+
+  - id: assumptions
+    title: Assumptions
+    type: markdown
+    required: false
+    guidance: >
+      What was taken as given for the design to hold. Things that would
+      change the shape of the solution if they turned out false. Capture from
+      SOAP onward — this file re-opens at every later stage, and carries the
+      SOAP's "Assumptions and considerations", the Full SOAP's "Assumptions"
+      and the SAD's "Architectural Assumptions" sections.
+
+  - id: caveats
+    title: Caveats
+    type: markdown
+    required: false
+    guidance: >
+      Qualifications a reader should carry into the rest of the document —
+      e.g. a short-lived workload, a known-incomplete area, a time-bound
+      exception. Capture from SOAP onward — this file re-opens at every
+      later stage.
+
+      Verified distinct from `soap-full-details.caveats`, which qualifies the
+      *estimate* rather than the design. Evidence: the approved ATLAS design's
+      Caveats section reads "the migration infrastructure is expected to be a
+      short-lived workload, with an expected life span of up to 24 months" (a
+      fact about the solution), while every one of the JEDI Full SOAP's eight
+      caveats qualifies estimate reliability ("the actual effort will differ
+      once the IT requirements are elaborated"). The two are not
+      interchangeable, so both fields are kept; the Full SOAP renders only
+      `soap-full-details.caveats`.
+
+  - id: design-principles
+    title: Design principles
+    type: markdown
+    required: false
+    guidance: >
+      The principles used as a guide when weighing options — e.g. common
+      services shared where possible, least privilege, separation of
+      concerns. A table (Ref / Principle / How it is achieved) works well.
+
+  - id: outcomes-and-deliverables
+    title: Outcomes and deliverables
+    type: markdown
+    required: false
+    guidance: >
+      The concrete outputs this work produces and who owns each — by phase
+      where that helps (Design / Triage / Build / Handover).

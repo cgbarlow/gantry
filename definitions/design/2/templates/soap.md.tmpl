@@ -9,7 +9,8 @@
      section; non-blank output is byte-identical. A `module.field?` entry in
      `requires` is in scope but not gate-blocking, so it stays a
      suppress-when-blank `<% if %>` section, exactly as `references?` already
-     does below (WI #276). */
+     does below (WI #276). WI #331: `introduction.assumptions` ->
+     `design-basis.assumptions` (module split); rendering is unchanged. */
 %>
 # Background and context
 
@@ -34,10 +35,10 @@
 ## High-level solution design
 
 <%~ na(it.modules['solution-definition']['high-level-solution-overview']) %>
-<% if (it.modules.introduction.assumptions) { %>
+<% if (it.modules['design-basis'].assumptions) { %>
 ## Assumptions and considerations
 
-<%~ it.modules.introduction.assumptions %>
+<%~ it.modules['design-basis'].assumptions %>
 <% } %>
 ## Feature breakdown and involved teams
 

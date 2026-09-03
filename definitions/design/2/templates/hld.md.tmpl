@@ -10,7 +10,13 @@
      entry is in scope but not gate-blocking (WI #276), so it renders as a
      suppress-when-blank `<% if %>` section; a bare entry always renders its
      heading via na(), including `risks.open-issues?` here, which v1 rendered
-     with no heading at all. */
+     with no heading at all. WI #331: `introduction.assumptions?` /
+     `.constraints?` / `.caveats?` -> `design-basis.*`, moved from just before
+     Attachment/s (end of document) into a new "# Design basis" section right
+     after Problem Statement — see definition.yaml's `hld.requires` comment
+     for why this deviates from the TAC reference's literal section order.
+     In/out-of-scope stay inside Problem Statement, reference-mandated,
+     unmoved. */
 %>
 # Submission
 
@@ -88,6 +94,25 @@
 
 <%~ it.modules.nfrs['requirements-traceability'] %>
 <% } %>
+<% if (it.modules['design-basis'].assumptions || it.modules['design-basis'].constraints || it.modules['design-basis'].caveats) { %>
+
+# Design basis
+<% if (it.modules['design-basis'].assumptions) { %>
+## Assumptions
+
+<%~ it.modules['design-basis'].assumptions %>
+<% } %>
+<% if (it.modules['design-basis'].constraints) { %>
+## Constraints
+
+<%~ it.modules['design-basis'].constraints %>
+<% } %>
+<% if (it.modules['design-basis'].caveats) { %>
+## Caveats
+
+<%~ it.modules['design-basis'].caveats %>
+<% } %>
+<% } %>
 
 # Proposed solution
 <% if (it.modules['solution-definition']['high-level-solution-overview']) { %>
@@ -160,24 +185,6 @@
 # Open questions
 
 <%~ it.modules['open-questions'].questions %>
-<% } %>
-<% if (it.modules.introduction.assumptions) { %>
-
-# Assumptions
-
-<%~ it.modules.introduction.assumptions %>
-<% } %>
-<% if (it.modules.introduction.constraints) { %>
-
-# Constraints
-
-<%~ it.modules.introduction.constraints %>
-<% } %>
-<% if (it.modules.introduction.caveats) { %>
-
-# Caveats
-
-<%~ it.modules.introduction.caveats %>
 <% } %>
 <% if (it.modules['hld-submission'].attachments && it.modules['hld-submission'].attachments.length) { %>
 

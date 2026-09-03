@@ -5,7 +5,13 @@
      injected once as an Eta functionHeader by lib/render.js (WI #273 / R2). A
      `module.field?` requires entry is in scope but not gate-blocking, so it
      renders as a suppress-when-blank `<% if %>` section (WI #276) — `references`
-     is bare here (unlike `soap`), so it renders unconditionally. */
+     is bare here (unlike `soap`), so it renders unconditionally. WI #331:
+     `introduction.assumptions?` / `.constraints?` -> `design-basis.*`, moved
+     from just before Estimates into a new "# Design basis" section right
+     after Out of scope — see definition.yaml's `soap-full.requires` comment
+     for why this deviates from the JEDI reference's literal section order.
+     The "# Introduction" heading itself (still wrapping `overview` +
+     `background.problem`) is reference-mandated and stays unrenamed. */
 %>
 # Metadata
 
@@ -38,7 +44,19 @@
 # Out of scope
 
 <%~ na(it.modules.introduction['out-of-scope']) %>
+<% if (it.modules['design-basis'].assumptions || it.modules['design-basis'].constraints) { %>
+# Design basis
+<% if (it.modules['design-basis'].assumptions) { %>
+## Assumptions
 
+<%~ it.modules['design-basis'].assumptions %>
+<% } %>
+<% if (it.modules['design-basis'].constraints) { %>
+## Constraints
+
+<%~ it.modules['design-basis'].constraints %>
+<% } %>
+<% } %>
 # High level requirements
 
 <%~ na(it.modules['solution-definition']['high-level-requirements']) %>
@@ -59,16 +77,7 @@
 # Dependencies
 
 <%~ na(it.modules.dependencies['dependencies-overview']) %>
-<% if (it.modules.introduction.assumptions) { %>
-# Assumptions
 
-<%~ it.modules.introduction.assumptions %>
-<% } %>
-<% if (it.modules.introduction.constraints) { %>
-# Constraints
-
-<%~ it.modules.introduction.constraints %>
-<% } %>
 # Estimates
 
 <%~ na(it.modules['team-and-estimates'].estimates) %>

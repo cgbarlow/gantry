@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createInstance, readModule, writeModule } from '../lib/instance.js'
+import { createInstance, readModule, writeModule, readInstance, instanceDefinitionVersion } from '../lib/instance.js'
 import { loadDefinition } from '../lib/definition.js'
 import { checkGate, formatGateOutstanding } from '../lib/check.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
@@ -176,11 +176,20 @@ test('passes Business Case Approved with only the lightweight SOAP fields', asyn
     const definition = loadDefinition('design')
     createInstance('design', 'light-soap', { instancesDir })
 
+    // Reading the real, checked-in `examples` fixture as a source of realistic
+    // field values — resolved against *its own* pinned definition version
+    // (instanceDefinitionVersion defaults to 1; `examples`'s instance.yaml has
+    // no `definitionVersion`), not the bare `definition` above (which resolves
+    // to the latest published version, currently v2). Reading it against a
+    // mismatched version's moduleSpec would trip readModule's lazy
+    // heading-scale migration write-back against the real on-disk fixture —
+    // corrupting a checked-in file as a side effect of a test read (WI #333).
+    const examplesDefinition = loadDefinition('design', { version: instanceDefinitionVersion(readInstance('examples')) })
     const source = {
-      background: readModule(definition, 'examples', 'background').fields,
-      introduction: readModule(definition, 'examples', 'introduction').fields,
-      'solution-definition': readModule(definition, 'examples', 'solution-definition').fields,
-      'team-and-estimates': readModule(definition, 'examples', 'team-and-estimates').fields,
+      background: readModule(examplesDefinition, 'examples', 'background').fields,
+      introduction: readModule(examplesDefinition, 'examples', 'introduction').fields,
+      'solution-definition': readModule(examplesDefinition, 'examples', 'solution-definition').fields,
+      'team-and-estimates': readModule(examplesDefinition, 'examples', 'team-and-estimates').fields,
     }
     writeModule(definition, 'light-soap', 'background', {
       fields: {

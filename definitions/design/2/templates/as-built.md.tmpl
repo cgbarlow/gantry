@@ -18,8 +18,15 @@
      (v1 gave it its own bare top-level `#`). Blank-field guard `na()` is
      injected once as an Eta functionHeader by lib/render.js (WI #273 / R2). A
      `module.field?` requires entry is in scope but not gate-blocking (WI #276),
-     so it renders as a suppress-when-blank `<% if %>` section. */
+     so it renders as a suppress-when-blank `<% if %>` section. WI #331:
+     already the cleanest case of the four stages — the framing (required) and
+     conditions (optional) fields were already adjacent under one
+     "# Introduction" heading, so the position is unchanged; the heading
+     splits into "# Overview" (required fields) and "# Design basis" (optional
+     fields, still via a shared partial — `_introductionOptional.md.tmpl`
+     reworked into `_designBasisOptional.md.tmpl`), both still 2nd/3rd. */
   const intro = it.modules.introduction || {}
+  const designBasis = it.modules['design-basis'] || {}
   const glossary = it.modules.glossary || {}
   const notes = it.modules['as-built-notes'] || {}
   const recovery = it.modules['recovery-plan'] || {}
@@ -29,7 +36,7 @@
 
 <%~ na(glossary['terms-and-definitions']) %>
 
-# Introduction
+# Overview
 
 ## Overview
 
@@ -46,7 +53,11 @@
 ## Out of scope
 
 <%~ na(intro['out-of-scope']) %>
-<%~ include('templates/_introductionOptional.md.tmpl', { intro }) %>
+<% if (designBasis.constraints || designBasis.assumptions || designBasis.caveats || designBasis['design-principles'] || designBasis['outcomes-and-deliverables']) { %>
+
+# Design basis
+<%~ include('templates/_designBasisOptional.md.tmpl', { designBasis }) %>
+<% } %>
 # As-built design
 
 ## As-built overview

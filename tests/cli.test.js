@@ -17,7 +17,9 @@ test('gantry new creates an instance with blank Shape-stage module files', () =>
       { cwd, encoding: 'utf8' }
     )
     assert.match(output, /Created instance "cli-test"/)
-    assert.match(output, /background, solution-definition, team-and-estimates/)
+    // WI #331: `introduction` (retitled "Overview") and the new `design-basis`
+    // module now mount adjacent, immediately after `background`.
+    assert.match(output, /background, introduction, design-basis, solution-definition, team-and-estimates/)
 
     const backgroundPath = join(cwd, 'instances', 'cli-test', 'modules', 'background.md')
     assert.ok(existsSync(backgroundPath))

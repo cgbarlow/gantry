@@ -5,15 +5,16 @@
 # stage and the `soap-full` artefact references `open-questions.questions`, so a
 # question raised at SOAP carries into the HLD unchanged.
 #
-# `caveats` is kept distinct from `introduction.caveats`, and v2 verified that
-# the two carry genuinely different content rather than the same idea twice.
-# Every one of the reference Full SOAP's eight caveats qualifies the *estimate*
-# ("the actual effort will differ once the IT requirements are elaborated",
-# "cost is based on full AST team allocation"); the approved ATLAS design's
-# Caveats section instead states a fact about the *solution* ("expected to be a
-# short-lived workload, with an expected life span of up to 24 months"). Both
-# fields stay. `introduction.caveats` is no longer scoped into `soap-full`, so
-# only one "Caveats" section renders there.
+# `caveats` is kept distinct from `design-basis.caveats` (WI #331: was
+# `introduction.caveats`), and v2 verified that the two carry genuinely
+# different content rather than the same idea twice. Every one of the
+# reference Full SOAP's eight caveats qualifies the *estimate* ("the actual
+# effort will differ once the IT requirements are elaborated", "cost is based
+# on full AST team allocation"); the approved ATLAS design's Caveats section
+# instead states a fact about the *solution* ("expected to be a short-lived
+# workload, with an expected life span of up to 24 months"). Both fields stay.
+# `design-basis.caveats` is no longer scoped into `soap-full`, so only one
+# "Caveats" section renders there.
 
 id: soap-full-details
 title: Full SOAP Details
@@ -79,5 +80,5 @@ fields:
       figures do and do not account for. Defaults to the JEDI Full SOAP
       template's eight caveat bullets; edit only if an initiative needs to
       add or vary one. Qualifications about the design rather than the
-      estimate belong in `introduction.caveats`, which carries forward to the
+      estimate belong in `design-basis.caveats`, which carries forward to the
       SAD and as-built.

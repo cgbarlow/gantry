@@ -33,13 +33,17 @@ stages:
     gate: business-case
     # The editor mounts the union of the two Shape artefacts' modules. Gate
     # passing itself is scoped to each artefact's `requires` list below.
-    # `introduction` is mounted from Shape onward: `in-scope` / `out-of-scope`
-    # are the canonical cross-stage scope statement, and `assumptions` /
+    # `introduction` / `design-basis` are mounted from Shape onward, adjacent,
+    # right after `background`: `in-scope` / `out-of-scope` are the canonical
+    # cross-stage scope statement, and `design-basis`'s `assumptions` /
     # `constraints` / `caveats` accumulate from here.
     # CHANGED v2: `open-questions` is mounted here too, replacing the removed
     # `soap-full-details.questions` field — a question raised at Shape is the
     # same question TAC sees at HLD.
-    modules: [background, solution-definition, team-and-estimates, dependencies, soap-full-details, introduction, open-questions]
+    # WI #331: `introduction` (retitled "Overview") and the new `design-basis`
+    # module moved from 6th/7 to 2nd/3rd of 8, immediately after `background` —
+    # the position they'd always logically belonged at, not buried near the end.
+    modules: [background, introduction, design-basis, solution-definition, team-and-estimates, dependencies, soap-full-details, open-questions]
     # The instance the web form's "Populate example text" button reads from for this stage's fields — one shared instance covering every stage, so `gantry serve examples` shows every gate screen populated.
     example: examples
 
@@ -55,8 +59,11 @@ stages:
     # CHANGED v2: `solution-definition` is mounted here so the HLD can render the
     # Shape solution overview as the opening of its "Proposed solution" section
     # instead of asking for it again.
+    # WI #331: `introduction` (retitled "Overview") and the new `design-basis`
+    # module moved from 10th/11 to 3rd/4th of 12, immediately after
+    # `background` — matching the position they mount at in every other stage.
     modules:
-      [hld-submission, background, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies, introduction, solution-definition]
+      [hld-submission, background, introduction, design-basis, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies, solution-definition]
     example: examples
 
   - id: detailed-design
@@ -71,7 +78,12 @@ stages:
     # SAD can render the agreed Shape requirements, the Shape process flow and the
     # references list without re-entry. `support-and-operations.environments-and-domains`
     # is now the SAD's environment list too (`integration.environments` is removed).
-    modules: [architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations, glossary, introduction, recovery-plan, data-security-controls, solution-definition, team-and-estimates]
+    # WI #331: `introduction` (retitled "Overview") and the new `design-basis`
+    # module moved from 10th/11 to 1st/2nd of 15 — this stage has no context
+    # module of its own to sit behind (unlike `background` at the other three
+    # stages), so the pair mounts at the very front, matching the SAD's own
+    # document layout.
+    modules: [introduction, design-basis, architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations, glossary, recovery-plan, data-security-controls, solution-definition, team-and-estimates]
     example: examples
 
   - id: handover
@@ -87,7 +99,10 @@ stages:
     # free-text fields.
     # CHANGED v2 (round 2): `nfrs` mounted so `disaster-recovery-and-backup` — the
     # recovery targets — travels with the as-built recovery mechanism.
-    modules: [glossary, introduction, as-built-notes, recovery-plan, data-security-controls, nfrs]
+    # WI #331: the new `design-basis` module mounts adjacent to `introduction`
+    # (retitled "Overview"), which already sat 2nd/6 at this stage — the pair
+    # is now 2nd/3rd of 7.
+    modules: [glossary, introduction, design-basis, as-built-notes, recovery-plan, data-security-controls, nfrs]
     example: examples
 
 artefacts:
@@ -110,6 +125,10 @@ artefacts:
     #    concept to `introduction.assumptions`, the replacement was wired into
     #    `soap-full` and `hld` but not into `soap`, so the lightweight SOAP lost
     #    the section. Optional, so the gate is unchanged.
+    #    WI #331: `introduction.assumptions` -> `design-basis.assumptions` —
+    #    `assumptions` moved module, this artefact's rendering is unchanged
+    #    (still no standalone Overview/Design Basis heading here; it still
+    #    folds into "Assumptions and considerations" mid-document).
     #  - `solution-definition.high-level-requirements` moved ahead of
     #    `process-flow`. The Full SOAP reference states requirements before the
     #    solution overview; requirements-then-flow-then-shape also reads better
@@ -127,7 +146,7 @@ artefacts:
         solution-definition.high-level-requirements,
         solution-definition.process-flow,
         solution-definition.high-level-solution-overview,
-        introduction.assumptions?,
+        design-basis.assumptions?,
         solution-definition.feature-breakdown,
         team-and-estimates.teams-required,
         team-and-estimates.estimates,
@@ -159,6 +178,17 @@ artefacts:
     #    forward to the SAD and as-built.
     #  - `solution-definition.alternatives-sketch?` kept but moved to sit with
     #    the solution overview it qualifies; it has no analogue in the reference.
+    #
+    # WI #331: `introduction.assumptions?` / `.constraints?` -> `design-basis.*`,
+    # moved from just before Estimates to a new "# Design basis" section right
+    # after Out of scope — adjacent to the Overview/Introduction content this
+    # module split off. This DEVIATES from the JEDI reference's literal section
+    # order (which places Assumptions/Constraints near the end); deliberate,
+    # per the ticket's Plan comment — cross-document consistency for a
+    # recurring backbone module is worth more than exact fidelity to one
+    # legacy reference document's placement of "Assumptions". The `# Introduction`
+    # heading itself (wrapping `overview` + `background.problem`) is
+    # reference-mandated and stays put, unrenamed.
     requires:
       [
         soap-full-details.epic-project,
@@ -171,13 +201,13 @@ artefacts:
         background.opportunity,
         introduction.in-scope,
         introduction.out-of-scope,
+        design-basis.assumptions?,
+        design-basis.constraints?,
         solution-definition.high-level-requirements,
         solution-definition.high-level-solution-overview,
         solution-definition.alternatives-sketch?,
         team-and-estimates.teams-required,
         dependencies.dependencies-overview,
-        introduction.assumptions?,
-        introduction.constraints?,
         team-and-estimates.estimates,
         soap-full-details.sequencing,
         open-questions.questions,
@@ -216,6 +246,16 @@ artefacts:
     #    `security.privacy-and-confidentiality` are now mandatory at this gate
     #    (declared in their modules). The reference makes both sections
     #    mandatory; v1 enforced neither.
+    #
+    # WI #331: `introduction.assumptions?` / `.constraints?` / `.caveats?` ->
+    # `design-basis.*`, moved from just before Attachments (end of document) to
+    # a new "# Design basis" section right after Problem Statement — adjacent
+    # to the in/out-of-scope content Problem Statement already carries. This
+    # DEVIATES from the TAC reference's literal section order (which has no
+    # equivalent section and effectively strands this content); deliberate,
+    # per the ticket's Plan comment, for the same cross-document-consistency
+    # reason as the Full SOAP. In/out-of-scope stay inside Problem Statement,
+    # reference-mandated, unmoved.
     requires:
       [
         hld-submission.purpose-statement,
@@ -235,6 +275,9 @@ artefacts:
         nfrs.disaster-recovery-and-backup?,
         nfrs.other-nfrs?,
         nfrs.requirements-traceability?,
+        design-basis.assumptions?,
+        design-basis.constraints?,
+        design-basis.caveats?,
         solution-definition.high-level-solution-overview?,
         proposed-solution.guardrails,
         proposed-solution.strategy-alignment,
@@ -252,9 +295,6 @@ artefacts:
         proposed-solution.delivery-approach,
         alternatives-considered.alternatives,
         open-questions.questions?,
-        introduction.assumptions?,
-        introduction.constraints?,
-        introduction.caveats?,
         hld-submission.attachments?,
       ]
 
@@ -315,6 +355,12 @@ artefacts:
     # Distribution sub-sections (§18) and the SAD's own "Appendix" (§19) are left
     # to the tool and the repo rather than given fields. "Hosting & Sites" (§12.3)
     # is deliberately folded into `integration.network-and-infrastructure`.
+    #
+    # WI #331: `introduction.assumptions?` / `.constraints?` -> `design-basis.*`,
+    # kept in the same document position (right after Out of scope) — this
+    # artefact already unified the framing and conditions clusters under one
+    # "# Introduction" heading; the template now splits that heading into
+    # "# Overview" and "# Design basis", still adjacent, still first.
     requires:
       [
         introduction.executive-summary?,
@@ -322,6 +368,8 @@ artefacts:
         introduction.purpose,
         introduction.in-scope,
         introduction.out-of-scope,
+        design-basis.assumptions?,
+        design-basis.constraints?,
         support-and-operations.stakeholders?,
         architecture.business-context,
         architecture.solution-users?,
@@ -333,8 +381,6 @@ artefacts:
         architecture.design-decisions,
         architecture.architectural-risks,
         architecture.constraints,
-        introduction.assumptions?,
-        introduction.constraints?,
         architecture.standards,
         risks.open-issues,
         risks.risk-register,
@@ -418,13 +464,19 @@ artefacts:
     # Security now has two homes, layered by stage, not three: `security` for the
     # design-time posture (opens at HLD), `data-security-controls` for the control
     # set (opens at detailed design, re-opens as-built at handover).
+    #
+    # WI #331: `introduction.executive-summary?` moves from 1st (its own
+    # standalone heading) down to join the rest of the Overview cluster —
+    # still 4th overall, matching the reference's own placement of its
+    # Introduction after Solution Products / Architectural Risks / Risks. No
+    # `design-basis` fields render in this artefact, so no other change.
     requires:
       [
-        introduction.executive-summary?,
         architecture.logical-components,
         architecture.architectural-risks,
         risks.risk-register,
         risks.open-issues,
+        introduction.executive-summary?,
         introduction.purpose,
         introduction.in-scope,
         introduction.out-of-scope,
@@ -480,6 +532,13 @@ artefacts:
     # and declares `operational-handover` in its `required-at`; because it is
     # already mandatory at `build-ready-checklist` the value exists by the time
     # this gate runs, so nothing new is asked of an author.
+    #
+    # WI #331: `introduction.constraints?` / `.assumptions?` / `.caveats?` /
+    # `.design-principles?` / `.outcomes-and-deliverables?` -> `design-basis.*`
+    # — already the cleanest case of the four stages: the framing (required)
+    # and conditions (optional) fields were already adjacent under one
+    # "# Introduction" heading, so the position is unchanged, only the heading
+    # splits into "# Overview" and "# Design basis", both still 2nd/3rd.
     requires:
       [
         glossary.terms-and-definitions,
@@ -487,11 +546,11 @@ artefacts:
         introduction.purpose,
         introduction.in-scope,
         introduction.out-of-scope,
-        introduction.constraints?,
-        introduction.assumptions?,
-        introduction.caveats?,
-        introduction.design-principles?,
-        introduction.outcomes-and-deliverables?,
+        design-basis.constraints?,
+        design-basis.assumptions?,
+        design-basis.caveats?,
+        design-basis.design-principles?,
+        design-basis.outcomes-and-deliverables?,
         as-built-notes.design-overview,
         as-built-notes.architecture-decisions?,
         as-built-notes.process-flows,

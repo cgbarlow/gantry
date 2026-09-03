@@ -1,0 +1,36 @@
+<%
+  /* Shared partial (WI #273 / R2, finding F9; reworked for WI #331's
+     `introduction` -> `design-basis` module split): the Design Basis
+     optional-field block — verbatim-duplicated between sad.md.tmpl and
+     as-built.md.tmpl before WI #273/R2 consolidated it here. `sad.md.tmpl`
+     stopped using this partial at WI #318 (its scope is only `assumptions?` /
+     `constraints?`, inlined directly); `as-built.md.tmpl` is this partial's
+     only caller now, wrapping the include in its own guard so an entirely
+     blank Design Basis section renders no heading at all. Each field is
+     optional (not in as-built's `requires`), so it stays a
+     suppress-when-blank `<% if %>` section. Caller passes { designBasis }. */
+%><% if (it.designBasis.constraints) { %>
+## Constraints
+
+<%~ it.designBasis.constraints %>
+<% } %>
+<% if (it.designBasis.assumptions) { %>
+## Assumptions
+
+<%~ it.designBasis.assumptions %>
+<% } %>
+<% if (it.designBasis.caveats) { %>
+## Caveats
+
+<%~ it.designBasis.caveats %>
+<% } %>
+<% if (it.designBasis['design-principles']) { %>
+## Design principles
+
+<%~ it.designBasis['design-principles'] %>
+<% } %>
+<% if (it.designBasis['outcomes-and-deliverables']) { %>
+## Outcomes and deliverables
+
+<%~ it.designBasis['outcomes-and-deliverables'] %>
+<% } %>

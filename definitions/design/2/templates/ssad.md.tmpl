@@ -18,14 +18,16 @@
      field here is bare (gate-blocking) and rendered via na() — including
      `architecture.architectural-risks`, `risks.open-issues` and
      `glossary.terms-and-definitions`, which v1 rendered with a bare `<% if %>`
-     despite being bare requires entries. */
+     despite being bare requires entries. WI #331: `executive-summary` used to
+     open the document as its own standalone "# Executive summary" heading
+     while the rest of `introduction` (retitled "Overview") trailed three
+     sections later — it now folds into the same "# Overview" block as
+     purpose/scope/content-standards, still 4th overall, matching the
+     reference's own placement of its Introduction after Solution Products /
+     Architectural Risks / Risks. No `design-basis` fields render in this
+     artefact. */
   const dsc = it.modules['data-security-controls'] || {}
 %>
-<% if (it.modules.introduction['executive-summary']) { %>
-# Executive summary
-
-<%~ it.modules.introduction['executive-summary'] %>
-<% } %>
 # Logical components
 
 <% it.modules.architecture['logical-components'].forEach(function(item) { %>- <%~ item %>
@@ -45,8 +47,12 @@
 
 <%~ na(it.modules.risks['open-issues']) %>
 
-# Introduction
+# Overview
+<% if (it.modules.introduction['executive-summary']) { %>
+## Executive summary
 
+<%~ it.modules.introduction['executive-summary'] %>
+<% } %>
 ## Purpose
 
 <%~ na(it.modules.introduction.purpose) %>

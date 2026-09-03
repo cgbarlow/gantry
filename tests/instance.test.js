@@ -290,6 +290,20 @@ test('background + introduction round-trip through writeModule/readModule (WI #2
         fields: {
           'in-scope': 'The migration infrastructure and its network wiring.',
           'out-of-scope': 'The SharePoint information architecture.',
+        },
+      },
+      { instancesDir }
+    )
+    // WI #331: `assumptions` moved from `introduction` to the new `design-basis`
+    // module (retitled "Overview" / "Design Basis" split) — write it there.
+    writeModule(
+      definition,
+      'my-initiative',
+      'design-basis',
+      {
+        status: 'draft',
+        owner: '',
+        fields: {
           assumptions: 'The private link is already provisioned.',
         },
       },
@@ -304,7 +318,9 @@ test('background + introduction round-trip through writeModule/readModule (WI #2
     const intro = readModule(definition, 'my-initiative', 'introduction', { instancesDir })
     assert.match(intro.fields['in-scope'], /network wiring/)
     assert.match(intro.fields['out-of-scope'], /information architecture/)
-    assert.match(intro.fields.assumptions, /private link/)
+
+    const designBasis = readModule(definition, 'my-initiative', 'design-basis', { instancesDir })
+    assert.match(designBasis.fields.assumptions, /private link/)
   })
 })
 

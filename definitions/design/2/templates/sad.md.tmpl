@@ -11,8 +11,8 @@
      section-by-section rationale (dependencies moved early, open issues gets
      its own section, recovery moves before Information View, the nfrs
      performance/scalability/availability trio moves to Operating
-     Considerations). `introduction`'s optional fields are inlined here rather
-     than via `_introductionOptional.md.tmpl` — this artefact's scope is only
+     Considerations). `design-basis`'s optional fields are inlined here rather
+     than via `_designBasisOptional.md.tmpl` — this artefact's scope is only
      `assumptions?` / `constraints?`, not the partial's full five-field set
      (that stays as-built's own shape). Blank-field guard `na()` is injected
      once as an Eta functionHeader by lib/render.js (WI #273 / R2). A
@@ -20,11 +20,16 @@
      #276), so it renders as a suppress-when-blank `<% if %>` section; a bare
      entry always renders its heading via na() — including
      `glossary.terms-and-definitions`, which v1 rendered with a bare `<% if %>`
-     despite being a bare (gate-blocking) requires entry. */
+     despite being a bare (gate-blocking) requires entry. WI #331: this
+     template already unified the framing and conditions clusters under one
+     "# Introduction" heading — that heading now splits into "# Overview" and
+     "# Design basis" (still adjacent, still first), matching the module split
+     of `introduction` (retitled "Overview") and the new `design-basis`
+     module. */
   const recovery = it.modules['recovery-plan'] || {}
   const dsc = it.modules['data-security-controls'] || {}
 %>
-# Introduction
+# Overview
 <% if (it.modules.introduction['executive-summary']) { %>
 ## Executive summary
 
@@ -45,15 +50,19 @@
 ## Out of scope
 
 <%~ na(it.modules.introduction['out-of-scope']) %>
-<% if (it.modules.introduction.assumptions) { %>
+<% if (it.modules['design-basis'].assumptions || it.modules['design-basis'].constraints) { %>
+
+# Design basis
+<% if (it.modules['design-basis'].assumptions) { %>
 ## Assumptions
 
-<%~ it.modules.introduction.assumptions %>
+<%~ it.modules['design-basis'].assumptions %>
 <% } %>
-<% if (it.modules.introduction.constraints) { %>
+<% if (it.modules['design-basis'].constraints) { %>
 ## Constraints
 
-<%~ it.modules.introduction.constraints %>
+<%~ it.modules['design-basis'].constraints %>
+<% } %>
 <% } %>
 
 # Business architecture
