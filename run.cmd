@@ -3,23 +3,25 @@ REM One-step launcher for gantry: starts `gantry serve` (skipping startup if
 REM one's already running) and opens the gantry site in the default browser.
 REM
 REM Usage: run.cmd (double-click it, or run it from any directory).
-REM Add /debug for verbose tracing (echoed probe/start commands and their
-REM results, curl -v, npm's own verbose log level) when troubleshooting a
-REM failure on someone else's machine. /v is accepted as a synonym — same
-REM flag names and on/off semantics as install.cmd's /debug, so there's only
-REM one convention to learn across both scripts.
+REM Add /debug for verbose tracing (echoed probe commands and their results,
+REM curl -v, npm's own verbose log level) when troubleshooting a failure on
+REM someone else's machine. /v is accepted as a synonym — same flag names
+REM and on/off semantics as install.cmd's /debug, so there's only one
+REM convention to learn across both scripts.
 REM
-REM Every run writes run.log next to this script (overwritten each
-REM time, not appended — it always reflects the most recent run), so a
-REM failure can be shared without a live screen-share. The log captures this
-REM launcher's own probe/startup logic, /debug or not — the flag only
-REM changes how much *detail* it gets, never whether logging happens.
-REM Deliberately NOT captured: the separate "gantry" server window started
-REM below. That window is its own long-running `start`ed console — it was
-REM never part of this process's stdout/stderr to begin with, relaunch or
-REM not — so the log naturally covers exactly the launcher logic (probe,
-REM decide, npm install if needed, hand off to the server window, wait
-REM loop) without also having to capture gantry serve's entire lifetime.
+REM gantry serve runs directly in THIS window — the window you ran this
+REM script from becomes the server's console for as long as it's running.
+REM Close the window, or press Ctrl+C inside it, to stop the server. An
+REM earlier version opened a second "gantry" window instead; that hit two
+REM separate real-world Windows quirks in a row (a cmd /k quoting bug,
+REM WI #337; a handle-inheritance hang, WI #338), both eliminated by not
+REM spawning a second console at all (WI #339).
+REM
+REM Every run writes run.log next to this script (overwritten each time,
+REM not appended), capturing this launcher's own setup logic AND gantry
+REM serve's own output for the whole session, since it's all one process
+REM now — so a failure (or the server's own runtime log) can be shared
+REM without a live screen-share.
 setlocal EnableDelayedExpansion
 
 set "DEBUG=0"
@@ -32,13 +34,12 @@ set "SCRIPT_DIR=%~dp0"
 set "LOG_FILE=%SCRIPT_DIR%run.log"
 
 REM Self-relaunch-through-Tee-Object, same trick install.cmd uses: it's the
-REM only way to get curl's/npm's/gantry-probe's own console output (not
-REM just this script's `echo` lines) into both the console and a file at
-REM once, since cmd has no built-in `tee`. `GANTRY_RUN_RELAUNCHED` is
-REM inherited by the child process PowerShell spawns (child processes
-REM inherit their parent's environment block), so that second pass sees it
-REM set and falls through to the real work below instead of relaunching
-REM again.
+REM only way to get curl's/npm's/gantry's own console output (not just this
+REM script's `echo` lines) into both the console and a file at once, since
+REM cmd has no built-in `tee`. `GANTRY_RUN_RELAUNCHED` is inherited by the
+REM child process PowerShell spawns (child processes inherit their parent's
+REM environment block), so that second pass sees it set and falls through
+REM to the real work below instead of relaunching again.
 REM
 REM The relaunch target and its args are passed through environment
 REM variables ($env:GANTRY_SELF / $env:GANTRY_ARGS), not interpolated into
@@ -128,71 +129,22 @@ if not exist "%SCRIPT_DIR%node_modules" (
 )
 
 echo Starting gantry serve on %URL% ...
-if "%DEBUG%"=="1" echo [DEBUG] Command: "%NODE_EXE%" "%SCRIPT_DIR%bin\gantry.js" serve (new window titled "gantry")
-REM A normal foreground window (not a hidden background process) so a
-REM first-time user can see the server's own log output, and so closing the
-REM window (or Ctrl+C inside it) stops the server with nothing left orphaned.
-REM This window's own output is intentionally outside run.log — see
-REM the header comment above.
-REM
-REM The extra outer quotes around the whole `cmd /k ...` argument are load
-REM -bearing, not decorative: cmd's /K (and /C) only preserves quotes as
-REM -written when the remainder of the line has *exactly two* quote
-REM characters. With two separately-quoted paths (NODE_EXE and gantry.js)
-REM that's four, so cmd falls back to compatibility behavior — stripping
-REM the first and last quote in the whole line — which mangles this into a
-REM broken path ("...node.exe" "...gantry.js becomes one token with a
-REM stray embedded quote) and fails with "The filename, directory name, or
-REM volume label syntax is incorrect." Wrapping the whole argument in one
-REM more pair of quotes makes that same stripping reproduce the original,
-REM correctly-quoted string instead of destroying it (WI #337) — this is
-REM independent of whether any path contains spaces.
-REM
-REM `>nul 2>nul` on this line is also load-bearing (WI #338): this whole
-REM script's own stdout/stderr are the write end of the Tee-Object pipe set
-REM up by the self-relaunch above. CreateProcess duplicates the calling
-REM process's inheritable handles into whatever it spawns — including that
-REM pipe handle — into this new "gantry" window's process, even though the
-REM window never uses it (a freshly created console always gets its own
-REM console buffers for what it actually displays, regardless of what
-REM standard handles it inherited). An anonymous pipe only signals
-REM end-of-stream once EVERY handle to its write end is closed, across every
-REM process holding one — not just the one that opened it. So as long as
-REM the "gantry" window stayed open, it kept that duplicated handle alive,
-REM and the Tee-Object pipeline — and therefore the entire self-relaunch,
-REM and therefore the original invoking shell — never returned, even long
-REM after this script's own logic had finished. Redirecting this line's own
-REM output to NUL means the handle duplicated into the new window points at
-REM NUL instead of the live pipe, closing that stale reference without
-REM changing anything the "gantry" window itself displays.
-start "gantry" cmd /k ""%NODE_EXE%" "%SCRIPT_DIR%bin\gantry.js" serve" >nul 2>nul
+if "%DEBUG%"=="1" echo [DEBUG] Command: "%NODE_EXE%" "%SCRIPT_DIR%bin\gantry.js" serve
 
-echo Waiting for gantry to start listening on %URL% ...
-set /a attempts=0
-set /a max_attempts=60
+REM Open the browser after a short fixed delay rather than a confirmed-ready
+REM probe loop: gantry serve (below) is about to become this window's own
+REM foreground process, blocking until Ctrl+C, so there's no script left
+REM running afterward to wait-loop from. This background one-liner is
+REM bounded and only opens a browser tab — a much smaller surface than the
+REM probe-loop-in-a-second-window design that caused WI #337/#338. If the
+REM page loads before the server's finished starting up, a manual refresh a
+REM moment later is all that's needed. Powershell (not a nested `cmd /c`)
+REM specifically to steer clear of cmd's /C multi-quote parsing pitfall
+REM (WI #337) for this one-liner too.
+start /B "" powershell -NoProfile -Command "Start-Sleep -Seconds 2; Start-Process '%URL%'"
 
-:waitloop
-call :probe
-set "PROBE_RC=!errorlevel!"
-if "%DEBUG%"=="1" echo [DEBUG] wait-loop probe attempt !attempts! of %URL% -^> errorlevel %PROBE_RC%
-if %PROBE_RC% EQU 0 goto ready
-set /a attempts+=1
-if !attempts! GEQ !max_attempts! (
-  echo gantry did not start listening on %URL% within 60 seconds. 1>&2
-  echo Check the "gantry" window for errors. 1>&2
-  echo See %LOG_FILE% for the full trace ^(re-run with /debug for more detail^). 1>&2
-  exit /b 1
-)
-REM ~1s pause. Not `timeout` — it errors out when stdin is redirected
-REM (e.g. invoked from another script), which `ping` doesn't.
-ping -n 2 127.0.0.1 >nul
-goto waitloop
-
-:ready
-echo gantry is up at %URL%
-start "" "%URL%"
-echo gantry is running in the "gantry" window. Close that window ^(or press Ctrl+C inside it^) to stop the server.
-echo Full trace of this run: %LOG_FILE%
+echo Full trace of this run (including gantry's own output): %LOG_FILE%
+"%NODE_EXE%" "%SCRIPT_DIR%bin\gantry.js" serve
 goto :eof
 
 REM Plain HTTP reachability probe on %URL% — not proof the responder is
@@ -202,7 +154,7 @@ REM something answered, non-zero otherwise. Prefers curl (bundled with
 REM Windows 10 1803+); falls back to PowerShell's Invoke-WebRequest if curl
 REM isn't on PATH. Callers must read the result via `!errorlevel!`
 REM (delayed expansion) immediately after `call :probe`, not further down
-REM inside a parenthesized block — see the two bugfix comments below for why.
+REM inside a parenthesized block — see the bugfix comment below for why.
 :probe
 where curl >nul 2>nul
 if not errorlevel 1 (
