@@ -15,14 +15,20 @@
 #    artifact named "gantry-zip" (Pipelines → this run → Artifacts).
 #
 # What's included: bin/, lib/, web/, definitions/, instances/ (so the
-# bundled examples come along), package.json, package-lock.json,
-# install.cmd, run.cmd, README.md — everything needed to run gantry.
+# bundled examples come along), docs/user-guide/ (runtime content — the
+# server's own /api/user-guide route in lib/server.js reads
+# docs/user-guide/index.md relative to the package root; this is NOT
+# contributor/agent documentation, don't fold it back into the exclusion
+# below), package.json, package-lock.json, install.cmd, run.cmd,
+# README.md — everything needed to run gantry.
 # Deliberately excluded: tests/, reference/ (real-world sample design
 # artefacts kept for inspiration, not used by gantry itself — see
 # CONTEXT.md if that changes), vendor/anthropic-skills/ (used only to
-# verify rendered output during development), docs/ (contributor/agent
-# docs), node_modules/ (install.cmd installs these fresh on the target
-# machine via `npm install --omit=dev`).
+# verify rendered output during development), the rest of docs/ (adr/,
+# agents/, exec-summary.md, qa/, reconciliation/, research/ —
+# contributor/agent docs, not read by the running server), node_modules/
+# (install.cmd installs these fresh on the target machine via
+# `npm install --omit=dev`).
 
 trigger:
   branches:
@@ -48,6 +54,8 @@ steps:
       stageDir="$(Agent.TempDirectory)/gantry-$(version)"
       mkdir -p "$stageDir"
       cp -r bin lib web definitions instances "$stageDir/"
+      mkdir -p "$stageDir/docs"
+      cp -r docs/user-guide "$stageDir/docs/"
       cp package.json package-lock.json install.cmd run.cmd README.md "$stageDir/"
       echo "##vso[task.setvariable variable=stageDir]$stageDir"
     displayName: 'Stage runtime-only files'
