@@ -4,6 +4,8 @@ Gantry helps teams capture process information once and use it throughout a stag
 
 ## Getting Started
 
+There are two ways to get Gantry running. The usual path is cloning the repository and running `npm install`. If you're on a locked-down corporate machine with no Git and no admin rights, there's a zip-release path instead: download the zip from the project's Azure DevOps pipeline artifacts, unpack it, then run `install.cmd` followed by `run.cmd` — no Git, no admin install, and no Docker needed. Either path lands you at the same running Gantry server described below; see README.md for full setup instructions.
+
 Start at the **Workspaces** landing page. It shows the instances that Gantry knows about and is also where you create your first one.
 
 ![Workspaces landing page showing grouped instances, search filter and creation controls](/user-guide-images/workspaces-landing.png)
@@ -62,7 +64,7 @@ Workspaces and instances can be archived — hidden from the dashboard's default
 
 Definitions are versioned. The first version of a definition is published and is the default for new instances; newer versions start as `draft`. Each version has its own `definition.yaml`, module specs, templates and `CHANGELOG.md`. Only the latest published version is used when no explicit version is requested; draft versions are opt-in via the wizard's version picker.
 
-The **Definition Editor** — linked from the Workspaces page header as **Definition Editor** — is an experimental, rudimentary screen for inspecting and editing definitions. It is explicitly experimental and rudimentary: the screen carries a disclaimer to that effect, and the editing experience is not yet at parity with hand-editing the YAML and templates.
+The **Definition Editor** — linked from the Workspaces page header as **Definition Editor (experimental)** — is an experimental, rudimentary screen for inspecting and editing definitions. It is explicitly experimental and rudimentary: the screen carries a disclaimer to that effect, and the editing experience is not yet at parity with hand-editing the YAML and templates.
 
 ![Definition Editor showing a draft version of a definition with stages, artefacts and modules](/user-guide-images/definition-editor.png)
 
@@ -70,7 +72,7 @@ On a published version the editor is read-only, with a **View template source** 
 
 ### Example instances
 
-The worked example throughout this guide remains the `design` definition, illustrated by the `examples` instance (a local instance with content for every stage). A second populated example, `atlas-reference-design`, is also included as a reference design — it demonstrates a more fully-worked handover with additional modules — but the concepts below are explained against `design` alone.
+The worked example throughout this guide remains the `design` definition, illustrated by the `examples` instance (a local instance with content for every stage).
 
 ## Stages & Gates
 
@@ -102,6 +104,17 @@ To the right of the Artefact selector, a **Navigation ▾** dropdown jumps to an
 
 Use **Insert ▾** below each field to add a new **Section** (a custom Markdown block) or **List** below that field. Custom sections appear as new fields with their own headings and are saved with the module.
 
+### Adding images
+
+To put a picture or diagram into a field, place the cursor where it should go and use the **Image** button on that field's formatting toolbar (see **The editor toolbar** above). This opens a dialog with two tabs:
+
+- **Upload new** — choose an image file (PNG or JPEG), optionally give it a name, and provide its **Source location**: a link to where the original file lives, such as a Draw.io diagram or an export from a design tool. The source location is required — it's what lets anyone reading the finished document trace a picture back to where it came from — and Gantry shows that link as a small citation beneath the image wherever it's used.
+- **Choose existing** — reuse a picture already uploaded elsewhere in the same instance instead of uploading it again.
+
+Either way, Gantry inserts the reference into the field for you at the cursor.
+
+For a Workspace-backed Instance (see **Workspaces & Instances** above), images work a little differently: uploading through the editor isn't available, since a picture needs to be committed to the Azure DevOps repository the same way everything else about the instance is. Instead, add the image file straight to the instance's own `assets` folder in the repository (alongside its `modules` folder), then reference it from a field yourself, the same way you would reference any other image, for example `![description](assets/your-file.png)`. Gantry resolves it the same way in both the live preview and rendered documents.
+
 ## Artefacts & Rendering
 
 An **Artefact** is a rendered output such as a summary, design document or handover document. Artefacts are generated from module data on demand and are never the authored source of truth.
@@ -122,7 +135,7 @@ Toggle the artefacts you want, then press **Render**. Gantry renders each select
 
 A gate passing permits the next action; it does not advance an Instance by itself.
 
-For a local Instance, such as a local run of the `design` Definition, use **Advance to next stage** after the current gate has passed. Gantry performs the advancement directly and the Instance moves to the next Stage. A local Instance with a linked work item also keeps a **Check gate & sync work item** button, which re-checks the current gate and, if it passes, offers to push a state update to that work item in Azure DevOps. A Local-workspace Instance (see **Local workspaces** above) works the same way but has no linked work item and so no separate check button — clicking **Advance to next stage** itself runs the gate check first, then asks you to confirm before moving on.
+For a local Instance, such as a local run of the `design` Definition, use **Advance to next stage** once the current gate has passed. Clicking it re-checks the gate and, if it passes, opens a confirmation dialog — confirm to move the Instance on to its next Stage, or decline to leave it where it is. A local Instance with a linked work item also keeps a separate **Check gate & sync work item** button, which re-checks the current gate and, if it passes, offers to push a state update to that work item in Azure DevOps. A Local-workspace Instance (see **Local workspaces** above) works the same way but has no linked work item and so no separate check button — **Advance to next stage** is the only action needed.
 
 For a Workspace-backed Instance, such as a `design` initiative stored in Azure DevOps, everything to do with review and sign-off happens in the **Work Item Detail card** at the top of the Stage screen. There is no separate section further down the page.
 
