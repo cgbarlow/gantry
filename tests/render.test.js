@@ -331,18 +331,41 @@ test('a definition other than "design" also gets a Document Control block — it
   }
 })
 
-// Regression test for a review finding: rendering a local instance never used to depend on `git` at all — a local render against a directory with no git checkout (a missing/uninitialised repo) now fails, but should fail with one clear, actionable error rather than git's own raw stderr.
-test('a local render against a directory with no git checkout fails with one clear error, not a raw git stderr', () => {
+// AB#345: a zip-release install (WI #312) is deliberately Git-free — it never has a .git
+// directory at the install dir a local render's commit stamp used to shell out to `git`
+// against. That used to fail the entire render with git's own "not a git repository" error;
+// it must now succeed, with the Document Control table naming the commit as "unknown".
+test('a local render against a directory with no git checkout and no build-info stamp succeeds, naming the commit "unknown" instead of failing', () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   const notARepoDir = mkdtempSync(join(tmpdir(), 'gantry-not-a-git-repo-'))
   try {
     cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
-    assert.throws(() => renderArtefact('examples', 'soap', { dryRun: true, repoDir: notARepoDir, instancesDir }), {
-      message: /Cannot determine the local git commit for this render's Document Control/,
-    })
+    const result = renderArtefact('examples', 'soap', { dryRun: true, repoDir: notARepoDir, instancesDir })
+    assert.match(result.markdown, /## Document Control/)
+    assert.match(result.markdown, /\| Commit \| `unknown` \|/)
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
     rmSync(notARepoDir, { recursive: true, force: true })
+  }
+})
+
+// AB#345 / WI #312: azure-pipelines.zip-release.yml stamps the source commit it packaged
+// into `.build-info.json` at the root of the staged output, since that install has no .git
+// directory for a live `git` lookup. A local render must read that stamp instead of falling
+// back to "unknown" (or to `git`) when it's present.
+test('a local render reads a .build-info.json stamp (as a zip-release install ships it) instead of shelling out to git or falling back to "unknown"', () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  const stampedDir = mkdtempSync(join(tmpdir(), 'gantry-build-info-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    writeFileSync(join(stampedDir, '.build-info.json'), JSON.stringify({ hash: 'abc1234', date: '2024-01-02' }))
+    const result = renderArtefact('examples', 'soap', { dryRun: true, repoDir: stampedDir, instancesDir })
+    assert.match(result.markdown, /## Document Control/)
+    assert.match(result.markdown, /\| Commit \| `abc1234` \|/)
+    assert.match(result.markdown, /\| Date \| 2024-01-02 \|/)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+    rmSync(stampedDir, { recursive: true, force: true })
   }
 })
 
