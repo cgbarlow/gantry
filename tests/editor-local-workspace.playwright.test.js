@@ -28,6 +28,9 @@ import { createInstance } from '../lib/instance.js'
 
 const SHAPE_MODULES = ['background', 'solution-definition', 'team-and-estimates', 'dependencies', 'soap-full-details', 'introduction']
 
+const ONE_PX_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+
 function readExampleFile(relPath) {
   return readFileSync(join('instances/examples', relPath), 'utf8')
 }
@@ -57,6 +60,39 @@ async function seedLocalWorkspace(page, slug) {
     const id = await rememberWorkspace({ handle: dir, name })
     return id
   }, { files, name: 'Local Editor Workspace' })
+}
+
+// Like seedLocalWorkspace above, but also writes one binary file (a base64
+// payload, decoded and written as bytes) alongside the text files — for
+// AB#343's repo-relative `assets/<name>` asset below, which needs a real
+// image file on disk under the workspace's own `assets/` directory, not a
+// text module file.
+async function seedLocalWorkspaceWithAsset(page, { textFiles, assetPath, assetBase64 }, name = 'Local Editor Workspace') {
+  return page.evaluate(
+    async ({ textFiles, assetPath, assetBase64, name }) => {
+      const { rememberWorkspace } = await import('/lib/localWorkspace.js')
+      async function writePath(dir, path, content) {
+        const parts = path.split('/')
+        const file = parts.pop()
+        let d = dir
+        for (const p of parts) d = await d.getDirectoryHandle(p, { create: true })
+        const fh = await d.getFileHandle(file, { create: true })
+        const w = await fh.createWritable()
+        await w.write(content)
+        await w.close()
+      }
+      const root = await navigator.storage.getDirectory()
+      const dir = await root.getDirectoryHandle('local-ws-' + Date.now() + '-' + Math.random().toString(36).slice(2), {
+        create: true,
+      })
+      for (const [path, content] of Object.entries(textFiles)) await writePath(dir, path, content)
+      const bytes = Uint8Array.from(atob(assetBase64), (c) => c.charCodeAt(0))
+      await writePath(dir, assetPath, bytes)
+      const id = await rememberWorkspace({ handle: dir, name })
+      return id
+    },
+    { textFiles, assetPath, assetBase64, name }
+  )
 }
 
 async function readOpfsFile(page, path) {
@@ -176,6 +212,72 @@ test('local-workspace instance: loads, saves offline-safe, gate-checks, advances
 
       const instanceYamlAfterAdvance = await readOpfsFile(page, `gantry-workspace/${slug}/instance.yaml`)
       assert.match(instanceYamlAfterAdvance, /stage: hld-define/, 'instance.yaml stage advanced on disk')
+
+      assert.deepEqual(pageErrors, [])
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
+// AB#343 — a local-workspace instance's module referencing the repo-relative
+// `assets/<name>` markdown-image convention (WI260's on-disk "assets sibling
+// of modules/" convention, distinct from the manifest-based `asset:<id>` one
+// covered by the tests above and by tests/repoAssets.playwright.test.js's
+// Azure-DevOps-backed coverage of this SAME convention) must render for real
+// in the preview, not as a raw, browser-unresolvable relative path.
+// renderPreview() (web/app.js) used to only run resolveRepoAssetRefs when
+// `instanceData.workspaceBacked` was true; loadLocalInstance() never sets
+// that flag for a local-workspace instance, so the rewrite never ran and the
+// <img> tried to load `assets/foo.png` resolved against the current page
+// instead of a real file. Asserts on the resulting <img>'s actual src (a
+// `blob:` object URL, per ensureLocalAssetUrl) and that it loads for real
+// (naturalWidth > 0) — not just that the markdown string got rewritten.
+test('local-workspace instance: assets/<name> markdown image renders via a blob: URL (AB#343)', async () => {
+  await withRunningServer({}, async (base) => {
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      const pageErrors = []
+      page.on('pageerror', (err) => pageErrors.push(err.message))
+
+      const slug = 'local-repo-asset'
+      const ctxWithImage = readExampleFile('modules/background.md').replace(
+        '## Problem statement',
+        '## Problem statement\n\n![Preview Img](assets/foo.png)'
+      )
+      const textFiles = {
+        [`gantry-workspace/${slug}/instance.yaml`]: `definition: design\nslug: ${slug}\nstage: shape\nassignee: a.architect\ndefinitionVersion: 1\n`,
+        [`gantry-workspace/${slug}/modules/background.md`]: ctxWithImage,
+      }
+      for (const moduleId of SHAPE_MODULES) {
+        if (moduleId === 'background') continue
+        textFiles[`gantry-workspace/${slug}/modules/${moduleId}.md`] = readExampleFile(`modules/${moduleId}.md`)
+      }
+
+      await page.goto(`${base}/`)
+      const workspaceId = await seedLocalWorkspaceWithAsset(page, {
+        textFiles,
+        assetPath: `gantry-workspace/${slug}/assets/foo.png`,
+        assetBase64: ONE_PX_PNG_BASE64,
+      })
+
+      await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}`)
+      await page.waitForSelector('.module', { timeout: 10_000 })
+
+      const previewImg = page.locator('.preview img').first()
+      await previewImg.waitFor({ timeout: 10_000 })
+      // The first render has no object URL yet (readBinaryFile is async) — wait for the re-render that picks it up (see the effect's own doc comment above).
+      await page.waitForFunction(() => document.querySelector('.preview img')?.getAttribute('src')?.startsWith('blob:'), {
+        timeout: 10_000,
+      })
+      const src = await previewImg.getAttribute('src')
+      assert.ok(src && src.startsWith('blob:'), `expected a blob: object URL, got ${src}`)
+
+      await page.waitForFunction(() => document.querySelector('.preview img')?.complete, { timeout: 10_000 })
+      const naturalWidth = await previewImg.evaluate((el) => el.naturalWidth)
+      assert.ok(naturalWidth > 0, `expected naturalWidth >0, got ${naturalWidth}`)
 
       assert.deepEqual(pageErrors, [])
     } finally {

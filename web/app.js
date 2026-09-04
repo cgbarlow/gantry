@@ -565,8 +565,23 @@ function readFileAsBase64(file) {
   })
 }
 
+// AB#343: instance kinds that store assets as repo-relative files in an on-disk `assets/`
+// directory (WI260's `assets/<name>` / `../assets/<name>` convention) — Azure-DevOps-backed
+// instances (`workspaceBacked`) and ADR-0029 local-workspace instances (`isLocalWorkspace`,
+// set by loadLocalInstance() above) both do; a legacy server-side local instance (ADR-0012 —
+// `workspaceBacked: false`, no client-side File System Access workspace either) does not: its
+// `/api/instance/assets/:id/file` route only resolves manifest asset IDs, never raw filenames
+// (see lib/server.js's assetFileMatch handler, which only branches to filename-based lookup for
+// a resolved Azure DevOps location). `assetFileUrl` itself already resolves correctly for both
+// true cases — `isLocalWorkspaceSlug` reads straight off the picked directory handle, and the
+// Azure DevOps route above reads the repo file by name — so this only needs to gate whether the
+// rewrite runs at all.
+function usesRepoAssetConvention(instance) {
+  return Boolean(instance?.workspaceBacked || instance?.isLocalWorkspace)
+}
+
 // `asset:<id>` references are resolved to the real, fetchable asset-file URL before markdown-it ever sees the text — the *stored* markdown source keeps the portable `asset:<id>` convention (see web/lib/assetRefs.js), only the live preview's rendered HTML points at a real URL.
-// WI260 also resolves `../assets/<name>` / `assets/<name>` for workspace-backed instances so a bare relative path (the repo-as-asset-store convention) shows in the preview.
+// WI260 also resolves `../assets/<name>` / `assets/<name>` for instances using the repo-as-asset-store convention so a bare relative path shows in the preview.
 // WI264: stage-aware — when free-browsing a completed stage, the preview's asset URLs pin to that stage's ref so the server reads both modules and assets from the same ref (main for a completed stage, the stage branch for the current stage).
 function renderPreview(node, text) {
   if (!node) return
@@ -578,8 +593,8 @@ function renderPreview(node, text) {
     (id) => assetFileUrl(id, slug, stageId),
     (id) => sources[id] ?? null
   )
-  // WI260 repo-as-asset-store: for workspace-backed instances also rewrite relative repo-asset refs to the fetchable file endpoint, the same way `asset:<id>` is rewritten.
-  if (instanceData.value?.workspaceBacked) {
+  // WI260 repo-as-asset-store: for instances that use the convention, also rewrite relative repo-asset refs to the fetchable file endpoint, the same way `asset:<id>` is rewritten. AB#343: this used to be gated on `workspaceBacked` alone, which missed local-workspace instances (ADR-0029) that use the identical on-disk convention.
+  if (usesRepoAssetConvention(instanceData.value)) {
     withSources = resolveRepoAssetRefs(withSources, (filename) => assetFileUrl(filename, slug, stageId))
   }
   node.innerHTML = renderMarkdown(withSources)

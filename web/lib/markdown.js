@@ -36,6 +36,16 @@ md.renderer.rules.image = (tokens, index, options, env, self) => {
   return defaultImageRenderer(tokens, index, options, env, self)
 }
 
+// AB#343: DOMPurify's default ALLOWED_URI_REGEXP has no `blob:` in its scheme allowlist, so a
+// local-workspace instance's resolved asset URLs (both the `asset:<id>` and `assets/<name>`
+// conventions — see web/app.js's ensureLocalAssetUrl, which always produces a
+// `URL.createObjectURL()` blob URL) were silently stripped down to a bare `<img>` with no `src`
+// attribute at all, DOMPurify treating the scheme as unrecognised/unsafe exactly like it would
+// `javascript:`. This extends the default allowlist by one scheme rather than disabling
+// sanitisation (`ALLOW_UNKNOWN_PROTOCOLS`) — same set DOMPurify ships, plus `blob:`.
+const ALLOWED_URI_REGEXP =
+  /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix|blob):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i
+
 export function renderMarkdown(source) {
-  return DOMPurify.sanitize(md.render(source ?? '', { headingIds: new Set() }))
+  return DOMPurify.sanitize(md.render(source ?? '', { headingIds: new Set() }), { ALLOWED_URI_REGEXP })
 }
