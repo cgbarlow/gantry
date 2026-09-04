@@ -20,7 +20,10 @@
 # docs/user-guide/index.md relative to the package root; this is NOT
 # contributor/agent documentation, don't fold it back into the exclusion
 # below), package.json, package-lock.json, install.cmd, run.cmd,
-# README.md — everything needed to run gantry.
+# README.md — everything needed to run gantry — plus a generated
+# .build-info.json stamping the source commit this build packaged (AB#345:
+# this install mode has no .git directory for lib/render.js's Document
+# Control commit stamp to read live, so it reads this file instead).
 # Deliberately excluded: tests/, reference/ (real-world sample design
 # artefacts kept for inspiration, not used by gantry itself — see
 # CONTEXT.md if that changes), vendor/anthropic-skills/ (used only to
@@ -47,6 +50,11 @@ steps:
       version=$(node -p "require('./package.json').version")
       echo "Resolved version: $version"
       echo "##vso[task.setvariable variable=version]$version"
+      commit=$(git rev-parse --short HEAD)
+      commitDate=$(git log -1 --format=%cs)
+      echo "Resolved commit: $commit ($commitDate)"
+      echo "##vso[task.setvariable variable=commit]$commit"
+      echo "##vso[task.setvariable variable=commitDate]$commitDate"
     displayName: 'Resolve version'
 
   - script: |
@@ -57,6 +65,12 @@ steps:
       mkdir -p "$stageDir/docs"
       cp -r docs/user-guide "$stageDir/docs/"
       cp package.json package-lock.json install.cmd run.cmd README.md "$stageDir/"
+      # AB#345 / WI #312: this package has no .git directory (deliberately — see the
+      # header comment above), so lib/render.js's Document Control commit stamp has
+      # nothing to `git rev-parse` against at render time. Stamp the source commit
+      # this build actually packaged here instead — lib/render.js's
+      # localHeadCommitInfo() reads it before ever trying a live `git` lookup.
+      printf '{"hash": "%s", "date": "%s"}\n' "$(commit)" "$(commitDate)" > "$stageDir/.build-info.json"
       echo "##vso[task.setvariable variable=stageDir]$stageDir"
     displayName: 'Stage runtime-only files'
 
