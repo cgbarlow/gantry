@@ -5,6 +5,7 @@ import { createServer as createHttpServer } from 'node:http'
 import { createServer } from '../lib/server.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withRunningServer, basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
+import { exampleModuleText } from './helpers/fixtureModules.js'
 
 // GET /api/azure-devops/repo-check (#90, under #88): given an Azure DevOps location (organization/project/repository, as query params — never a gantry slug) and the caller's own PAT, reports whether that location already holds instance data. Read-only; never touches instancesDir or lib/registry.js. Backed by the same fake in-process Azure DevOps server tests/serverAzureDevOpsAuth.test.js and tests/instance.test.js use — never the real dev.azure.com.
 //
@@ -103,9 +104,9 @@ test('GET /api/azure-devops/repo-check with a valid PAT against a repo that alre
 test('GET /api/azure-devops/repo-check reports "complete" once every module required at the current stage is present and filled in', async () => {
   const fullFiles = {
     ...SEED_FILES,
-    '/modules/introduction.md': readFileSync('instances/examples/modules/introduction.md', 'utf8'),
-    '/modules/solution-definition.md': readFileSync('instances/examples/modules/solution-definition.md', 'utf8'),
-    '/modules/team-and-estimates.md': readFileSync('instances/examples/modules/team-and-estimates.md', 'utf8'),
+    '/modules/introduction.md': exampleModuleText('introduction'),
+    '/modules/solution-definition.md': exampleModuleText('solution-definition'),
+    '/modules/team-and-estimates.md': exampleModuleText('team-and-estimates'),
   }
   await withFakeAzureDevOpsAndGantryServer(fullFiles, async (gantryBase, adoBaseUrl) => {
     const res = await fetch(repoCheckUrl(gantryBase, adoBaseUrl), {

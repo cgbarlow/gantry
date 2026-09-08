@@ -8,6 +8,7 @@ import { registerInstance } from '../lib/instanceRegistry.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withRunningServer, basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
+import { exampleModuleText } from './helpers/fixtureModules.js'
 
 // WI314 — the Azure-DevOps-hosted half of the client-side WASM Pandoc render path's HTTP
 // surface: POST /api/instance/render-wasm-prepare/:artefact (compile + learn-the-commit) and
@@ -22,16 +23,11 @@ function seedFiles(slug) {
   const instanceYaml = readFileSync('instances/examples/instance.yaml', 'utf8').replace(/^slug: examples$/m, `slug: ${slug}`)
   return {
     [`/gantry-workspace/${slug}/instance.yaml`]: instanceYaml,
-    [`/gantry-workspace/${slug}/modules/background.md`]: readFileSync('instances/examples/modules/background.md', 'utf8'),
-    [`/gantry-workspace/${slug}/modules/introduction.md`]: readFileSync('instances/examples/modules/introduction.md', 'utf8'),
-    [`/gantry-workspace/${slug}/modules/solution-definition.md`]: readFileSync(
-      'instances/examples/modules/solution-definition.md',
-      'utf8'
-    ),
-    [`/gantry-workspace/${slug}/modules/team-and-estimates.md`]: readFileSync(
-      'instances/examples/modules/team-and-estimates.md',
-      'utf8'
-    ),
+    [`/gantry-workspace/${slug}/modules/background.md`]: exampleModuleText('background'),
+    [`/gantry-workspace/${slug}/modules/introduction.md`]: exampleModuleText('introduction'),
+    [`/gantry-workspace/${slug}/modules/design-basis.md`]: exampleModuleText('design-basis'),
+    [`/gantry-workspace/${slug}/modules/solution-definition.md`]: exampleModuleText('solution-definition'),
+    [`/gantry-workspace/${slug}/modules/team-and-estimates.md`]: exampleModuleText('team-and-estimates'),
   }
 }
 

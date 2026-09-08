@@ -14,6 +14,7 @@ import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { resolveStageBranch } from '../lib/stageBranch.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withScratchInstances, basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
+import { exampleModuleText } from './helpers/fixtureModules.js'
 
 // Lib-level tests for #125's "Check status" action (ADR-0014): reading a
 // stage's Pull Request reviewer votes and distinguishing an explicit
@@ -33,8 +34,8 @@ const [SHAPE] = definition.stages
 
 async function fillShapeStage(azureDevOps, branch) {
   const client = createAzureDevOpsClient(azureDevOps)
-  for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
-    const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
+  for (const moduleId of ['background', 'introduction', 'design-basis', 'solution-definition', 'team-and-estimates']) {
+    const text = exampleModuleText(moduleId)
     await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
   }
   await client.writeFile(`gantry-workspace/${SLUG}/out/Remote Initiative - Solution on a Page.docx`, 'rendered soap', { branch })
@@ -343,7 +344,7 @@ test('approving the final stage completes its Pull Request without attempting an
         // WI #227: the handover gate now spans the shared glossary / introduction /
         // recovery-plan / data-security-controls modules as well as as-built-notes.
         for (const moduleId of ['glossary', 'introduction', 'as-built-notes', 'recovery-plan', 'data-security-controls']) {
-          const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
+          const text = exampleModuleText(moduleId)
           await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
         }
         await client.writeFile(`gantry-workspace/${SLUG}/out/Remote Initiative - As-built.docx`, 'rendered as-built', { branch })

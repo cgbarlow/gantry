@@ -51,7 +51,7 @@ import {
   forgetWorkspace,
 } from './lib/localWorkspace.js'
 import { wrap } from './lib/editorWrap.js'
-import { assetReference, resolveAssetRefs, resolveRepoAssetRefs } from './lib/assetRefs.js'
+import { assetReference, isLocalAssetSource, resolveAssetRefs, resolveRepoAssetRefs } from './lib/assetRefs.js'
 import { IdentityPicker } from './lib/identityPicker.js'
 import {
   artefactFieldIds,
@@ -591,7 +591,12 @@ function renderPreview(node, text) {
   let withSources = resolveAssetRefs(
     text ?? '',
     (id) => assetFileUrl(id, slug, stageId),
-    (id) => sources[id] ?? null
+    // WI #348: a local source (the image's own copy within the instance) is labelled by its stored path but linked to the served file, so the citation opens in the browser the same way it opens the local file from a rendered .docx.
+    (id) => {
+      const source = sources[id]
+      if (!source) return null
+      return isLocalAssetSource(source) ? { label: source, href: assetFileUrl(id, slug, stageId) } : source
+    }
   )
   // WI260 repo-as-asset-store: for instances that use the convention, also rewrite relative repo-asset refs to the fetchable file endpoint, the same way `asset:<id>` is rewritten. AB#343: this used to be gated on `workspaceBacked` alone, which missed local-workspace instances (ADR-0029) that use the identical on-disk convention.
   if (usesRepoAssetConvention(instanceData.value)) {
@@ -1957,7 +1962,7 @@ function AssetLibraryPage() {
                         <div class="name">${asset.name}</div>
                         <div class="meta">
                           ${asset.uploadedBy ? html`${asset.uploadedBy} · ` : null}
-                          <a href=${asset.source} target="_blank" rel="noreferrer">${asset.source}</a>
+                          <a href=${isLocalAssetSource(asset.source) ? assetFileUrl(asset.id, librarySlug) : asset.source} target="_blank" rel="noreferrer">${asset.source}</a>
                         </div>
                         <span class=${'stamp used-badge ' + (asset.usedIn.length ? 'agreed' : 'review')}>
                           ${asset.usedIn.length ? `USED IN ${asset.usedIn.length}` : 'UNUSED'}

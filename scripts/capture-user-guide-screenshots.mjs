@@ -19,10 +19,6 @@ async function main() {
     cpSync('instances/examples', join(tmpDir, 'examples'), { recursive: true })
     // Remove rendered out/ so the run is deterministic.
     try { rmSync(join(tmpDir, 'examples', 'out'), { recursive: true, force: true }) } catch {}
-    if (existsSync('instances/atlas-reference-design')) {
-      cpSync('instances/atlas-reference-design', join(tmpDir, 'atlas-reference-design'), { recursive: true })
-      try { rmSync(join(tmpDir, 'atlas-reference-design', 'out'), { recursive: true, force: true }) } catch {}
-    }
 
     // Seed a dummy workspace so the New Workspace wizard's "pick existing"
     // list is populated and the instance step (definition picker + changelog)

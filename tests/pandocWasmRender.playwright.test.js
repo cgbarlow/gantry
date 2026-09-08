@@ -9,6 +9,7 @@ import { withRunningServer, basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, 
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
+import { exampleModuleText } from './helpers/fixtureModules.js'
 
 // WI314 — real, in-browser coverage for the client-side WASM Pandoc render path: a real
 // pandoc-wasm instantiate and a real markdown→docx conversion (not mocked, unlike
@@ -22,7 +23,8 @@ import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 const SHAPE_MODULES = ['background', 'solution-definition', 'team-and-estimates', 'dependencies', 'soap-full-details', 'introduction']
 
 function readExampleFile(relPath) {
-  return readFileSync(join('instances/examples', relPath), 'utf8')
+  // WI #348: fixture text is borrowed for another instance with no asset manifest, so image references are stripped.
+  return relPath.startsWith('modules/') ? exampleModuleText(relPath.slice('modules/'.length).replace(/\.md$/, '')) : readFileSync(join('instances/examples', relPath), 'utf8')
 }
 
 async function seedLocalWorkspace(page, slug) {
@@ -241,10 +243,11 @@ test('an Azure-DevOps-hosted Render produces a real, well-formed .docx via clien
   const slug = 'wasm-ado-render'
   const files = {
     [`/gantry-workspace/${slug}/instance.yaml`]: readFileSync('instances/examples/instance.yaml', 'utf8').replace(/^slug: examples$/m, `slug: ${slug}`),
-    [`/gantry-workspace/${slug}/modules/background.md`]: readFileSync('instances/examples/modules/background.md', 'utf8'),
-    [`/gantry-workspace/${slug}/modules/introduction.md`]: readFileSync('instances/examples/modules/introduction.md', 'utf8'),
-    [`/gantry-workspace/${slug}/modules/solution-definition.md`]: readFileSync('instances/examples/modules/solution-definition.md', 'utf8'),
-    [`/gantry-workspace/${slug}/modules/team-and-estimates.md`]: readFileSync('instances/examples/modules/team-and-estimates.md', 'utf8'),
+    [`/gantry-workspace/${slug}/modules/background.md`]: exampleModuleText('background'),
+    [`/gantry-workspace/${slug}/modules/introduction.md`]: exampleModuleText('introduction'),
+    [`/gantry-workspace/${slug}/modules/design-basis.md`]: exampleModuleText('design-basis'),
+    [`/gantry-workspace/${slug}/modules/solution-definition.md`]: exampleModuleText('solution-definition'),
+    [`/gantry-workspace/${slug}/modules/team-and-estimates.md`]: exampleModuleText('team-and-estimates'),
   }
 
   await withFakeAzureDevOpsServer(

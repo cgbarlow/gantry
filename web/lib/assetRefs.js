@@ -12,8 +12,15 @@ export function assetReference(asset) {
 }
 
 /**
+ * WI #348: a manifest `source` that is not an http(s) URL is a *local* source — the image's own copy stored within the instance (`assets/<filename>`). Keep in sync with lib/assets.js's isLocalAssetSource.
+ */
+export function isLocalAssetSource(source) {
+  return typeof source === 'string' && source.trim() !== '' && !/^https?:\/\//i.test(source.trim())
+}
+
+/**
  * Rewrites every `![alt](asset:<id>)` reference in `markdown` to `![alt](<resolveUrl(id)>)`, so a downstream markdown renderer sees an ordinary, fetchable image URL. Leaves everything else untouched.
- * When `resolveSource` is supplied, also emits a caption-styled citation immediately below the image — `*Source: [<source>](<<source>>)*` — for assets that carry a `source` URL. No citation is emitted when the asset lacks a source.
+ * When `resolveSource` is supplied, also emits a caption-styled citation immediately below the image — `*Source: [<label>](<<href>>)*` — for assets that carry a source. `resolveSource(id)` may return the source string (label and link are the same) or `{ label, href }` (WI #348: a local source is labelled by its stored path but linked to the fetchable file URL). No citation is emitted when the asset lacks a source.
  */
 export function resolveAssetRefs(markdown, resolveUrl, resolveSource) {
   return markdown.replace(ASSET_REF_RE, (match, alt, id) => {
@@ -22,8 +29,8 @@ export function resolveAssetRefs(markdown, resolveUrl, resolveSource) {
     if (!resolveSource) return base
     const source = resolveSource(id)
     if (!source) return base
-    const label = source.replaceAll(']', '\\]')
-    return `${base}\n\n*Source: [${label}](<${source}>)*`
+    const { label, href } = typeof source === 'string' ? { label: source, href: source } : source
+    return `${base}\n\n*Source: [${label.replaceAll(']', '\\]')}](<${href}>)*`
   })
 }
 

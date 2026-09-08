@@ -607,7 +607,7 @@ podman build --file ContainerFile \
 docker run -p 3000:3000 gantry
 ```
 
-Open http://localhost:3000 in a browser. The dashboard lists the instances shipped with the repo (`examples`, a fixture with content for every stage, and `atlas-reference-design`, a worked reference instance). Click any instance to view its stages, modules, and completeness. This one-liner uses the bundled `instances/` baked into the image — no volume mounts, no env vars.
+Open http://localhost:3000 in a browser. The dashboard lists the instance shipped with the repo (`examples`, a fully worked design — Kiwi Cover Mutual's claims handling modernisation — with content and diagrams for every stage). Click any instance to view its stages, modules, and completeness. This one-liner uses the bundled `instances/` baked into the image — no volume mounts, no env vars.
 
 ## Corporate proxy / custom CA certificates
 
@@ -706,7 +706,7 @@ GANTRY_IMAGE=gantry:0.0.1 docker compose up -d
 ```
 
 - `GANTRY_INSTANCES_DIR` tells the server (and the `new`/`status`/`check`/`render`/`instances` CLI commands) where to read/write `instance.yaml` and `modules/*.md`. The image's `instances/` baked into `/app/instances` is still there, but when `GANTRY_INSTANCES_DIR` points elsewhere (e.g. `/data`) that directory is used instead.
-- The bundled `examples` and `atlas-reference-design` fixtures ship inside the image at `/app/instances`. When you switch the data dir to `/data`, they will not appear on the dashboard — this is expected. Seed the volume once (copy them in, or create a fresh instance with `docker exec gantry node bin/gantry.js new design my-instance --instances-dir /data`).
+- The bundled `examples` fixture ships inside the image at `/app/instances`. When you switch the data dir to `/data`, it will not appear on the dashboard — this is expected. Seed the volume once (copy it in, or create a fresh instance with `docker exec gantry node bin/gantry.js new design my-instance --instances-dir /data`).
 - The runtime image runs as `USER node` (uid 1000) and does `mkdir -p instances && chown -R node:node /app` at build time, so the baked-in `instances/` is writable by `node`. For a **named volume** (`gantry-data:/data`), Docker initialises ownership correctly — no extra steps.
 - For a **bind mount** (`-v "$PWD/my-data:/data"`), the host directory must be writable by uid 1000: `mkdir -p my-data && chown 1000:1000 my-data` (or `chmod 777 my-data` if `chown` is not possible). Without this, writes from `USER node` will fail with `EACCES`.
 

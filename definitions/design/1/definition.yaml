@@ -21,8 +21,6 @@ stages:
     # `out-of-scope` are the canonical cross-stage scope statement, and
     # `assumptions` / `constraints` / `caveats` accumulate from here.
     modules: [background, solution-definition, team-and-estimates, dependencies, soap-full-details, introduction]
-    # The instance the web form's "Populate example text" button reads from for this stage's fields — one shared instance covering every stage, so `gantry serve examples` shows every gate screen populated.
-    example: examples
 
   - id: hld-define
     title: High-level Design
@@ -33,7 +31,6 @@ stages:
     # nfrs, risks, security and dependencies are introduced here in early/light form and carried forward — not re-declared — at detailed-design, where the same module ids are required in fuller form. See each module's guidance.
     modules:
       [hld-submission, background, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies, introduction]
-    example: examples
 
   - id: detailed-design
     title: Detailed Design
@@ -49,7 +46,6 @@ stages:
     # from these shared modules rather than re-typed at this stage. See the
     # reconciliation doc, Section 5 (WI #228 applied the SAD side; #227 the glossary).
     modules: [architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations, glossary, introduction, recovery-plan, data-security-controls]
-    example: examples
 
   - id: handover
     title: Operational Handover
@@ -63,7 +59,6 @@ stages:
     # Security Controls sections, which this stage previously buried inside as-built-notes
     # free-text fields.
     modules: [glossary, introduction, as-built-notes, recovery-plan, data-security-controls]
-    example: examples
 
 artefacts:
   - id: soap

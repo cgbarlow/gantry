@@ -24,14 +24,14 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
       {
         id: 'soap',
         title: 'Solution on a Page',
+        // design v2 `soap.requires` (the fixture is pinned to v2, WI #348)
         requires: [
           'background.problem',
           'background.affected-domains',
-          'introduction.in-scope',
-          'introduction.out-of-scope',
+          'solution-definition.high-level-requirements',
           'solution-definition.process-flow',
           'solution-definition.high-level-solution-overview',
-          'solution-definition.high-level-requirements',
+          'design-basis.assumptions?',
           'solution-definition.feature-breakdown',
           'team-and-estimates.teams-required',
           'team-and-estimates.estimates',
@@ -47,21 +47,21 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
           'soap-full-details.request-date',
           'soap-full-details.draft-agreed-date',
           'soap-full-details.delivered-date',
+          'introduction.overview?',
           'background.problem',
           'background.opportunity',
           'introduction.in-scope',
           'introduction.out-of-scope',
+          'design-basis.assumptions?',
+          'design-basis.constraints?',
           'solution-definition.high-level-requirements',
           'solution-definition.high-level-solution-overview',
           'solution-definition.alternatives-sketch?',
           'team-and-estimates.teams-required',
           'dependencies.dependencies-overview',
-          'introduction.assumptions?',
-          'introduction.constraints?',
-          'introduction.caveats?',
           'team-and-estimates.estimates',
           'soap-full-details.sequencing',
-          'soap-full-details.questions',
+          'open-questions.questions',
           'soap-full-details.caveats',
           'team-and-estimates.references',
         ],
@@ -87,7 +87,17 @@ test('GET /api/instance?stage=<id> browses a different stage\'s modules without 
     const body = await res.json()
     assert.deepEqual(body.stage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-tac-approved', number: 2 })
     assert.equal(body.currentStageId, 'shape')
-    assert.deepEqual(body.artefacts, [{ id: 'hld', title: 'High Level Design', requires: ['hld-submission', 'background', 'proposed-solution', 'alternatives-considered', 'open-questions', 'nfrs', 'risks', 'security', 'dependencies', 'introduction.in-scope', 'introduction.out-of-scope', 'introduction.assumptions?', 'introduction.constraints?', 'introduction.caveats?'] }])
+    // design v2 `hld.requires` — field-level end to end (WI #318), fixture pinned to v2 (WI #348)
+    assert.deepEqual(body.artefacts, [{ id: 'hld', title: 'High Level Design', requires: [
+      'hld-submission.purpose-statement', 'hld-submission.authors-and-contributors?', 'hld-submission.decision-requested', 'hld-submission.next-steps?', 'hld-submission.consultation',
+      'background.problem', 'background.affected-domains', 'background.opportunity', 'introduction.in-scope', 'introduction.out-of-scope', 'background.success-criteria',
+      'nfrs.performance', 'nfrs.availability-and-continuity', 'nfrs.scalability-and-capacity?', 'nfrs.disaster-recovery-and-backup?', 'nfrs.other-nfrs?', 'nfrs.requirements-traceability?',
+      'design-basis.assumptions?', 'design-basis.constraints?', 'design-basis.caveats?',
+      'solution-definition.high-level-solution-overview?', 'proposed-solution.guardrails', 'proposed-solution.strategy-alignment', 'dependencies.dependencies-overview', 'dependencies.dependency-list?',
+      'proposed-solution.implications?', 'proposed-solution.trade-offs', 'risks.risk-register', 'risks.open-issues?',
+      'security.privacy-and-confidentiality', 'security.security-architecture?', 'security.identity-and-access?', 'security.regulations-and-standards?',
+      'proposed-solution.cost-benefit', 'proposed-solution.delivery-approach', 'alternatives-considered.alternatives', 'open-questions.questions?', 'hld-submission.attachments?',
+    ] }])
     assert.ok(body.modules.some((m) => m.id === 'hld-submission'))
 
     const instance = readInstance('examples')

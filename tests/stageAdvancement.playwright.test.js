@@ -1,12 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { createInstance, readInstance, writeInstanceStage } from '../lib/instance.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withRunningServer, withScratchInstances, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
+import { exampleModuleText } from './helpers/fixtureModules.js'
 
 // Browser smoke test for #115's Stage advancement panel (web/app.js's
 // AdvanceStagePanel): the local-instance self-serve "Advance to next
@@ -20,7 +21,7 @@ import { withRunningServer, withScratchInstances, ORGANIZATION, PROJECT, REPOSIT
 
 function fillShapeStage(instancesDir, slug) {
   for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
-    cpSync(join('instances', 'examples', 'modules', `${moduleId}.md`), join(instancesDir, slug, 'modules', `${moduleId}.md`))
+    writeFileSync(join(instancesDir, slug, 'modules', `${moduleId}.md`), exampleModuleText(moduleId))
   }
 }
 

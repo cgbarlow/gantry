@@ -1,112 +1,45 @@
 ---
 module: introduction
 status: agreed
-owner: c.barlow
+owner: p.natarajan
 ---
-# Introduction
+# Overview
+
+## Executive summary
+
+Kiwi Cover Mutual's claims handling is slow and fragmented because it runs across four systems that were never integrated after the ArchiSurance merger. This design replaces the manual hand-offs between them with a single Handle Claim process and a small set of shared application services — customer information, claims information, and premium and claims payment — while leaving Policy Data Management on the mainframe as the policy system of record for now.
+
+The solution introduces a Claims Information Service (Claims InfoServ) and a Customer Information Service (CIS) in the UNIX server farm, extends the CRM System and the Home & Away Financial Application to consume them, integrates the BIBIT payment gateway for same-day claims payment and premium collection through the bank, and moves claim documents into a document management system every step can read. Policy intake over web and telephone reuses the same services so a request is captured once.
+
+The Design Authority is asked to approve this design as build-ready. Delivery is planned in three increments over nine months; the first increment (registration and acceptance) is estimated at a Large, the remaining two at a Medium each. The principal risks are the mainframe integration capacity and the BIBIT contract, both with mitigations in hand.
 
 ## Overview
 
-The Provider Portal lets registered health providers submit a Disability
-Allowance medical certificate for an existing Contoso client without needing an
-Contoso login for the client or exposing the client's identity to the provider
-beyond a masked name and month/year of birth. The certificate is attached to
-the client's existing application in EOS, Contoso's system of record.
+This document describes the target architecture for KCM's claims handling modernisation: a single end-to-end Handle Claim process, the application services that support it, the data those services share, and the infrastructure they run on. It also covers the web and telephone policy intake flow, which shares the same services. The change is an integration and process change first and a platform change second — the mainframe stays, but stops being something people key into.
 
 ## Purpose
 
-This document describes the solution as built, in enough detail for a support
-engineer or a future delivery team — unfamiliar with this system — to operate
-it, change it safely, or rebuild it. It is also the evidence base for the
-Certification and Accreditation (C&A) sign-off obtained before go-live.
+This document is the build-ready Solution Architecture Document for the claims handling modernisation. It is written for the delivery teams that will build and integrate the solution, the Security and Privacy teams performing the certification and accreditation review, the Technology Operations team that will run it, and the Design Authority that approves it. The Solution Support Architecture Document derived from the same content is the support team's reference after go-live, and the As-built document records what was actually delivered.
 
 ## In scope
 
-The first release covers the ContosoSelfService entry point, application intake and review,
-carrier provisioning, payment, notifications, reporting, and annual review of
-the Mobile Phone Assistance benefit. For the provider-certificate workstream:
-a new provider-facing submission portal, one-time reference code issuance and
-validation, and automated attachment to the client's existing EOS application.
-
-- A public web portal for provider-authenticated certificate submission.
-- An internal Intake API that validates the one-time reference code, validates
-  the uploaded file, stores it, and attaches it to the EOS application.
-- The `reference_codes` table and the extension of the existing `eos-sync`
-  job that populates it.
-- AWS infrastructure for the portal, the API, the session store and the
-  certificates bucket, all in the existing Contoso landing zone.
+- A single Handle Claim business process — register, accept, valuate, pay — orchestrated across the CRM System, Policy Data Management and the Home & Away Financial Application.
+- New shared application services: Customer Information Service (CIS), Claims Information Service (Claims InfoServ), and the customer data modification, insurance application, claim registration, claim payment and premium payment services exposed to the channels.
+- Integration of the BIBIT payment gateway with the Home & Away Financial Application and the bank system for claims payment and premium collection.
+- Web and telephone policy intake ("take out insurance") using the same customer and policy services, removing seller re-keying.
+- Migration of claim documents from the scanning archive into the document management system, indexed by claim.
+- Home, contents, motor and travel product lines; liability and legal-aid claims follow the same process with no product-specific change.
+- The claims data mart feed used by Finance and Actuarial reporting.
 
 ## Out of scope
 
-Selecting or negotiating the mobile carrier partnership itself is out of
-scope for this initiative — that commercial arrangement is assumed to exist
-by the time this solution is built. Support for multiple concurrent carriers
-is also out of scope for the first release; the solution is scoped to a
-single carrier integration. No change is made to how Disability Allowance
-applications are created or assessed, and there is no provider
-self-registration capability (providers must already hold
-provider-authentication service credentials).
-
-- Provider registration and provider identity — handled entirely by the
-  external provider-authentication service.
-- Any change to EOS beyond calling its existing `create-application-document`
-  endpoint.
-- Reference-code generation — EOS already generates these; this solution only
-  consumes them.
-- Provider-facing status tracking after submission.
-
-## Constraints
-
-- Must run in the existing Contoso AWS landing zone (`contoso-prod-govt`,
-  `ap-southeast-2`) and reuse the existing Contoso API Gateway and `*.contoso.com`
-  wildcard certificate — no new public IP or domain.
-- Must not hold any client-identifying data at rest beyond what EOS already
-  holds; the portal may only ever show a masked name and month/year of birth.
-- All infrastructure is defined in Terraform and deploys via pipeline.
-
-## Assumptions
-
-- The external provider-authentication service is available and returns a
-  provider registration number in its `id_token`.
-- EOS reference codes are created at application time and are available in the
-  `reference_codes` table within the `eos-sync` interval (nominally 5 minutes).
-- The existing shared Postgres instance has capacity for the additional
-  `intake` schema.
-- The carrier will provide a portal that can be linked from ContosoSelfService to browse
-  available phones and plans, and an API for provisioning and terminating a
-  subscription once an application is approved. The carrier handles physical
-  delivery of the device through its own existing channels (courier or
-  in-branch pickup) — Contoso does not take on any device logistics.
-
-## Caveats
-
-- The Redis session store is single-node; a restart mid-session forces the
-  provider to start the submission again. Accepted for launch.
-- `eos-sync` can lag up to 10 minutes under EOS's end-of-day batch load, so a
-  freshly created reference code may briefly 404.
-
-## Design principles
-
-| Ref | Principle | How it is achieved |
-|-----|-----------|--------------------|
-| DP1 | Least client data | The portal only ever handles a masked name and month/year of birth; nothing client-identifying is stored or logged. |
-| DP2 | Reuse before build | Existing API Gateway, wildcard cert, Postgres instance, KMS key and `eos-sync` job are reused rather than replaced. |
-| DP3 | Fail closed | An unrecognised or bad-checksum reference code, or a file that fails magic-byte validation, is rejected before any state is written. |
-| DP4 | No ambient authority | The Intake API has no public route; it is reachable only from the portal's security group. |
-
-## Outcomes and deliverables
-
-| Phase | Deliverable | Ownership |
-|-------|-------------|-----------|
-| Design | Solution architecture (SAD/SSAD), C&A evidence pack | Architecture |
-| Build | `provider-portal` and `intake-api` services, `007_reference_codes.sql` migration, `eos-sync` extension, Terraform | Provider Portal delivery team |
-| Handover | This as-built document, runbook links, operational handover to Contoso Digital Support | Delivery lead + Architecture |
+- Replacing Policy Data Management or retiring the mainframe. The mainframe remains the policy system of record; its retirement is a separate roadmap item that this design deliberately makes easier but does not deliver.
+- Replacing the CRM System or the Home & Away Financial Application. Both are extended, not replaced.
+- Underwriting rules, pricing and product configuration changes.
+- Fraud analytics beyond the existing referral rules; the claims data mart feed is provided, the models are not.
+- Broker and partner channels. Only KCM's own web and telephone channels are in scope for policy intake.
+- Member-facing mobile applications.
 
 ## Content standards
 
-This SSAD is the support-oriented view of the same design dataset as the SAD;
-where a topic is covered in full by the SAD, this document summarises it and
-points there rather than repeating it. Component and sequence diagrams use the
-C4 model; infrastructure diagrams are generated from the Terraform plan and so
-follow AWS's own iconography. Diagrams contributed by the provider-authentication
-vendor keep their original house style.
+Diagrams in this document use ArchiMate 3 notation: yellow for business layer elements, blue for application layer, green for technology layer. The viewpoint diagrams were produced in the enterprise architecture repository and are reproduced here as images; each image carries a source citation to the copy stored with this design. Where a diagram shows the legacy name "ArchiSurance" it refers to the inherited Policy Data Management platform and its supporting roles, not to a separate organisation. This SSAD covers what a support team needs and refers to the Solution Architecture Document for the full design rationale.

@@ -12,6 +12,7 @@ import {
   runLocalWorkspaceCompute,
   LocalWorkspaceRequestError,
 } from '../lib/localWorkspace.js'
+import { exampleModuleText } from './helpers/fixtureModules.js'
 
 // docs/adr/0029 / WI #294: the stateless `/api/local/*` routes let a browser
 // holding a local workspace's files on the user's own machine run gantry's
@@ -29,9 +30,11 @@ function payloadFromDiskInstance(slug = DISK_INSTANCE) {
   const moduleFiles = {}
   for (const file of readdirSync(join(dir, 'modules'))) {
     if (!file.endsWith('.md')) continue
-    moduleFiles[file.replace(/\.md$/, '')] = readFileSync(join(dir, 'modules', file), 'utf8')
+    // Image references are stripped: a local-workspace payload carries no asset manifest (see helpers/fixtureModules.js).
+    moduleFiles[file.replace(/\.md$/, '')] = exampleModuleText(file.replace(/\.md$/, ''))
   }
-  return { definitionId: 'design', definitionVersion: 1, instanceYaml, moduleFiles }
+  // The on-disk fixture is pinned to design v2 (WI #348); the payload must say so or the local routes would evaluate it against v1.
+  return { definitionId: 'design', definitionVersion: 2, instanceYaml, moduleFiles }
 }
 
 function tmpSandboxes() {
