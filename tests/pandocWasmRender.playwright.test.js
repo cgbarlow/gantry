@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { readFileSync, mkdtempSync, rmSync, cpSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -311,4 +311,58 @@ test('an Azure-DevOps-hosted Render produces a real, well-formed .docx via clien
       }
     }
   )
+})
+
+// WI #349 — a plain local instance (the bundled `examples` on a zip-release install, where no
+// native pandoc exists) renders through the same client-side WASM flow: the browser calls
+// render-wasm-prepare (compile, no pandoc subprocess) and render-wasm-finish (land the bytes),
+// never the native /api/instance/render/:artefact route.
+test('a local-instance Render produces a real, well-formed .docx via client-side WASM Pandoc, landing in the instance out/ dir with no native render call', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await launchBrowser()
+      try {
+        const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
+        const requestedPaths = []
+        page.on('request', (req) => {
+          const url = new URL(req.url())
+          if (url.pathname.startsWith('/api/instance/render')) requestedPaths.push(url.pathname)
+        })
+
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+        await page.getByRole('button', { name: 'Render', exact: true }).click()
+        const renderDialog = page.locator('.modal[aria-label="Render an artefact"]')
+        await renderDialog.waitFor({ state: 'visible', timeout: 5_000 })
+        await renderDialog.getByRole('button', { name: 'Solution on a Page', exact: true }).click()
+        await renderDialog.locator('.modal-actions').getByRole('button', { name: 'Render' }).click()
+        await page.waitForFunction(
+          () => /rendered to|render failed/.test(document.querySelector('.modal[aria-label="Render an artefact"]')?.textContent ?? ''),
+          { timeout: 30_000 }
+        )
+        const renderStatusText = await renderDialog.textContent()
+        assert.doesNotMatch(renderStatusText, /render failed/, `WASM render must not fail: ${renderStatusText}`)
+
+        assert.ok(requestedPaths.includes('/api/instance/render-wasm-prepare/soap'), `expected render-wasm-prepare among: ${requestedPaths.join(', ')}`)
+        assert.ok(requestedPaths.includes('/api/instance/render-wasm-finish/soap'), `expected render-wasm-finish among: ${requestedPaths.join(', ')}`)
+        assert.ok(!requestedPaths.includes('/api/instance/render/soap'), `expected no native render call, got: ${requestedPaths.join(', ')}`)
+
+        const docxPath = join(instancesDir, 'examples', 'out', 'Examples - Solution on a Page.docx')
+        const docxBytes = readFileSync(docxPath)
+        assert.equal(docxBytes.subarray(0, 2).toString(), 'PK', '.docx should start with a PK zip header')
+        const markdown = docxToMarkdown(docxBytes.toString('base64'))
+        assert.match(markdown, /Solution on a Page/)
+        assert.match(markdown, /Document Control/)
+        assert.match(markdown, /Kiwi Cover Mutual/)
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
 })

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, cpSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, cpSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -132,32 +132,56 @@ test('render-wasm-prepare then render-wasm-finish: a real, well-formed docx ends
   )
 })
 
-test('render-wasm-prepare on a local (non-Azure-DevOps) instance responds 400, pointing at /api/local/compile instead', async () => {
+// WI #349 — a plain local instance (the bundled `examples` on a zip-release install, where
+// there is no native pandoc) gets the same two-step WASM flow: prepare compiles without a
+// pandoc subprocess and writes the .md; finish lands the browser's bytes as the .docx.
+test('render-wasm-prepare then render-wasm-finish on a local instance writes the .md and a real .docx into the instance out/ dir, without a pandoc subprocess in prepare', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
     await withRunningServer({ instancesDir }, async (base) => {
-      const res = await fetch(`${base}/api/instance/render-wasm-prepare/soap?slug=examples`, { method: 'POST' })
-      assert.equal(res.status, 400)
-      assert.match((await res.json()).error, /not an Azure-DevOps-hosted instance/)
+      const prepRes = await fetch(`${base}/api/instance/render-wasm-prepare/soap?slug=examples`, { method: 'POST' })
+      assert.equal(prepRes.status, 200)
+      const prep = await prepRes.json()
+      assert.equal(prep.artefact, 'soap')
+      assert.match(prep.markdown, /^# examples: Solution on a Page/)
+      assert.match(prep.markdown, /## Document Control/)
+      assert.ok(prep.referenceDocBase64, 'the v2 reference doc is handed to the browser for styling')
+      assert.match(prep.docxPath, /\.docx$/)
+      // The markdown is on disk already, next to where the docx will land — same as the native route.
+      const mdPath = join(instancesDir, 'examples', 'out', `${prep.basename}.md`)
+      assert.equal(readFileSync(mdPath, 'utf8'), prep.markdown)
+      assert.equal(existsSync(join(instancesDir, 'examples', 'out', `${prep.basename}.docx`)), false)
+
+      const docxBytes = fakeWasmConvert(prep.markdown, prep.referenceDocBase64)
+      const finishRes = await fetch(`${base}/api/instance/render-wasm-finish/soap?slug=examples`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ docxBase64: docxBytes.toString('base64') }),
+      })
+      assert.equal(finishRes.status, 200)
+      const finish = await finishRes.json()
+      assert.equal(finish.docxPath, prep.docxPath)
+      const landed = readFileSync(join(instancesDir, 'examples', 'out', `${prep.basename}.docx`))
+      assert.deepEqual(landed, docxBytes)
+      assert.equal(landed.subarray(0, 2).toString(), 'PK')
     })
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }
 })
 
-test('render-wasm-finish on a local (non-Azure-DevOps) instance responds 400, before ever reading the request body', async () => {
+test('render-wasm-finish on a local instance rejects a body without docxBase64 with 400 and writes nothing', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
     await withRunningServer({ instancesDir }, async (base) => {
-      // Deliberately no body at all — if this route read the body before checking the
-      // instance's location, a missing body would 400 for the wrong reason.
       const res = await fetch(`${base}/api/instance/render-wasm-finish/soap?slug=examples`, { method: 'POST' })
       assert.equal(res.status, 400)
-      assert.match((await res.json()).error, /not an Azure-DevOps-hosted instance/)
+      assert.match((await res.json()).error, /docxBase64/)
+      assert.equal(existsSync(join(instancesDir, 'examples', 'out')), false)
     })
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
