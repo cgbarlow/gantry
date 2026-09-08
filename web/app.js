@@ -399,6 +399,33 @@ async function renderLocalArtefactViaEngine(instance, artefact, slug) {
 // caught. `false` (or omitted) skips the WASM attempt entirely and goes straight to the native
 // leg, exactly as this instance kind rendered before this ticket ever existed.
 async function renderAzureArtefactViaEngine(artefact, slug, workspaceBacked = false) {
+  // WI #349 — a plain local instance (e.g. the bundled `examples`) gets the same WASM flow:
+  // the server compiles (no pandoc subprocess), the browser converts, the server lands the
+  // bytes in the instance's out/. Before this the local kind went straight to the native
+  // route, which on a zip-release install with no pandoc fails with `spawnSync pandoc ENOENT`.
+  if (!workspaceBacked && renderEngine.value === 'wasm') {
+    try {
+      const prepRes = await apiFetchForInstance(
+        slug,
+        `/api/instance/render-wasm-prepare/${artefact.id}?slug=${encodeURIComponent(slug)}`,
+        { method: 'POST' }
+      )
+      const prep = await prepRes.json()
+      if (!prepRes.ok) throw new Error(prep.message ?? prep.error ?? `Prepare failed (${prepRes.status})`)
+      const referenceDocBytes = prep.referenceDocBase64 ? base64ToBytes(prep.referenceDocBase64) : null
+      const docxBytes = await renderDocxWithWasm({ markdown: prep.markdown, referenceDocBytes })
+      const finishRes = await apiFetchForInstance(
+        slug,
+        `/api/instance/render-wasm-finish/${artefact.id}?slug=${encodeURIComponent(slug)}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ docxBase64: bytesToBase64(docxBytes) }) }
+      )
+      const finish = await finishRes.json()
+      if (!finishRes.ok) throw new Error(finish.message ?? finish.error ?? `Finish failed (${finishRes.status})`)
+      return { title: artefact.title, path: finish.docxPath, url: null }
+    } catch {
+      // Falls through to the native leg below.
+    }
+  }
   if (workspaceBacked && renderEngine.value === 'wasm') {
     try {
       const prepRes = await apiFetchForInstance(
@@ -4063,9 +4090,9 @@ async function runRender(slug) {
     // WI314 — the dashboard swimlane's own quick-action "Render" (distinct from the module
     // editor's RenderDialog above, same engine-aware helper): this view only ever lists
     // registered (Azure-DevOps-hosted or plain-local) instances, never an ADR-0029
-    // local-workspace one. `detail.workspaceBacked` (WI #317 fix) tells the two apart — a
-    // plain-local instance skips the WASM leg entirely rather than firing a doomed
-    // render-wasm-prepare call before falling through to the native path.
+    // local-workspace one. `detail.workspaceBacked` (WI #317 fix) tells the two apart so the
+    // helper picks the matching WASM leg — the Azure DevOps two-push flow, or (WI #349) the
+    // local out/ flow — before falling through to the native path.
     const line = await renderAzureArtefactViaEngine(artefact, slug, detail.workspaceBacked)
     results.push(line.text ?? `Rendered ${artefact.title}`)
   }
