@@ -556,7 +556,8 @@ test('artefact selector filters Shape and Detailed Design fields, persists per s
         await detailedSelector.waitFor({ state: 'visible', timeout: 5_000 })
         assert.equal(await detailedSelector.inputValue(), 'sad')
         assert.equal(await page.locator('.field label', { hasText: 'Design decisions' }).count(), 1)
-        assert.equal(await page.locator('.field label', { hasText: 'Operational accounts and licenses' }).count(), 0)
+        // design v2 wires `support-and-operations.operational-accounts-and-licenses?` into the SAD too (optional), so it shows for both artefacts; `Design decisions` is the SAD-only discriminator.
+        assert.equal(await page.locator('.field label', { hasText: 'Operational accounts and licenses' }).count(), 1)
 
         await detailedSelector.selectOption('ssad')
         assert.equal(await page.locator('.field label', { hasText: 'Design decisions' }).count(), 0)
@@ -777,19 +778,18 @@ test("Image is a direct formatting-toolbar action and Insert offers only Section
         await page.goto(`${base}/instance/examples`)
         await page.waitForSelector('.module', { timeout: 10_000 })
 
-        // The `soap`-scoped `introduction` module: its two markdown fields
-        // in-scope / out-of-scope (WI #280) are the only two fields it
-        // contributes to the lightweight SOAP editor.
-        const contextModule = page.locator('.module').filter({ has: page.locator('h2', { hasText: 'Introduction' }) })
-        await assert.doesNotReject(contextModule.locator('h2', { hasText: 'Introduction' }).waitFor({ timeout: 2_000 }))
+        // The `soap`-scoped `solution-definition` module (design v2, WI #348): its four
+        // markdown fields — high-level requirements, process flow, solution overview,
+        // feature breakdown — are what it contributes to the lightweight SOAP editor.
+        const contextModule = page.locator('.module').filter({ has: page.locator('h2', { hasText: 'Solution Definition' }) })
+        await assert.doesNotReject(contextModule.locator('h2', { hasText: 'Solution Definition' }).waitFor({ timeout: 2_000 }))
 
         // The old single affordance is gone; each markdown field has its own generic dropdown instead.
         assert.equal(await page.getByRole('button', { name: '+ Insert asset' }).count(), 0)
-        // `soap`'s field-level `requires` (WI #276/#280) scopes introduction to
-        // the two markdown fields in-scope / out-of-scope, so two per-field
-        // Insert ▾ triggers.
+        // `soap`'s field-level `requires` scopes solution-definition to four
+        // markdown fields, so four per-field Insert ▾ triggers.
         const triggers = contextModule.getByRole('button', { name: 'Insert ▾' })
-        assert.equal(await triggers.count(), 2)
+        assert.equal(await triggers.count(), 4)
         const firstTrigger = triggers.nth(0)
         const firstField = contextModule.locator('.field-markdown').nth(0)
         const secondField = contextModule.locator('.field-markdown').nth(1)
@@ -864,7 +864,7 @@ test("Image is a direct formatting-toolbar action and Insert offers only Section
         assert.deepEqual(pageErrors, [])
 
         // Usage is computed from the saved module file on disk, so save before checking the library reflects it as used.
-        await contextModule.getByRole('button', { name: 'Save Introduction' }).click()
+        await contextModule.getByRole('button', { name: 'Save Solution Definition' }).click()
         await page.waitForSelector('text=Saved', { timeout: 5_000 })
 
         // Asset library screen: the inserted asset shows USED IN >= 1; uploading one more, never referenced, shows UNUSED. Navigated to directly — the toolbar's "View asset library" link was removed as redundant once assets are insertable inline from the editor.
@@ -882,11 +882,11 @@ test("Image is a direct formatting-toolbar action and Insert offers only Section
     })
 
     const definition = loadDefinition('design')
-    const data = readModule(definition, 'examples', 'introduction', { instancesDir })
-    assert.match(data.fields['in-scope'], /asset:/)
-    // Second markdown field of the `soap`-scoped introduction module (WI #280):
-    // in-scope, then out-of-scope. The "Choose existing" / hand-typed inserts target it.
-    assert.match(data.fields['out-of-scope'], /asset:/)
+    const data = readModule(definition, 'examples', 'solution-definition', { instancesDir })
+    assert.match(data.fields['high-level-requirements'], /asset:/)
+    // Second markdown field of the `soap`-scoped solution-definition module:
+    // high-level requirements, then process flow. The "Choose existing" / hand-typed inserts target it.
+    assert.match(data.fields['process-flow'], /asset:/)
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }

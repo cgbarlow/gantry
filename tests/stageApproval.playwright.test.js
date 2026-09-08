@@ -10,6 +10,7 @@ import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { resolveStageBranch } from '../lib/stageBranch.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withRunningServer, withScratchInstances, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
+import { exampleModuleText } from './helpers/fixtureModules.js'
 
 // Browser smoke test for #124's sign-off flow — the Workspace-backed
 // counterpart to tests/stageAdvancement.playwright.test.js's own
@@ -33,7 +34,7 @@ const [SHAPE] = definition.stages
 async function fillShapeStage(azureDevOps, branch) {
   const client = createAzureDevOpsClient(azureDevOps)
   for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
-    const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
+    const text = exampleModuleText(moduleId)
     await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
   }
   await client.writeFile(`gantry-workspace/${SLUG}/out/Remote Initiative - Solution on a Page.docx`, 'rendered soap', { branch })

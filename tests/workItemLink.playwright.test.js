@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync, mkdtempSync, rmSync } from 'node:fs'
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
@@ -8,6 +8,7 @@ import { createInstance, readInstance } from '../lib/instance.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withRunningServer, basicAuthHeader, VALID_PAT } from './helpers/lifecycle.js'
+import { exampleModuleText } from './helpers/fixtureModules.js'
 
 // Browser smoke test for #95/#103's Work Item panel (web/app.js's WorkItemPanel), post-#127: an unlinked instance renders no work-item panel at all (the freetext link form was removed — linking happens at instance creation, via the + New Workspace wizard), and a linked instance's panel drives the confirmed gate-pass-then-sync flow (both the confirm and the decline path) through a real rendered page against a real running gantry server and the fake in-process Azure DevOps Work Items server — nothing mocked at the browser or HTTP layer.
 
@@ -48,10 +49,7 @@ function withLinkableInstanceServer(fn) {
     try {
       createInstance('design', 'my-initiative', { instancesDir })
       for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
-        cpSync(
-          join('instances', 'examples', 'modules', `${moduleId}.md`),
-          join(instancesDir, 'my-initiative', 'modules', `${moduleId}.md`)
-        )
+        writeFileSync(join(instancesDir, 'my-initiative', 'modules', `${moduleId}.md`), exampleModuleText(moduleId))
       }
 
       await withRunningServer(

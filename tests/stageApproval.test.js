@@ -10,6 +10,7 @@ import { readInstance, instanceDisplayName, renderedArtefactBasename } from '../
 import { requestStageApproval } from '../lib/stageApproval.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { VALID_PAT } from './helpers/lifecycle.js'
+import { exampleModuleText } from './helpers/fixtureModules.js'
 
 // #124, ADR-0014: the Assignee's "Request approval" action for a
 // Workspace-backed instance — opens a Pull Request from a stage's own
@@ -50,8 +51,8 @@ function withServer(overrides, fn) {
 // checkGate's "business-case" gate genuinely passes there.
 async function fillShapeStage(azureDevOps, branch) {
   const client = createAzureDevOpsClient(azureDevOps)
-  for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
-    const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
+  for (const moduleId of ['background', 'introduction', 'design-basis', 'solution-definition', 'team-and-estimates']) {
+    const text = exampleModuleText(moduleId)
     await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
   }
   await client.writeFile(outDocxRepoPath('soap'), 'rendered soap', { branch })
@@ -60,7 +61,7 @@ async function fillShapeStage(azureDevOps, branch) {
 async function fillDetailedDesignStage(azureDevOps, branch) {
   const client = createAzureDevOpsClient(azureDevOps)
   for (const moduleId of DETAILED_DESIGN.modules) {
-    const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
+    const text = exampleModuleText(moduleId)
     await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
   }
   for (const artefactId of ['sad', 'ssad']) {
@@ -69,7 +70,8 @@ async function fillDetailedDesignStage(azureDevOps, branch) {
 }
 
 function seedInstanceYaml(stage = SHAPE) {
-  return { [`/gantry-workspace/${SLUG}/instance.yaml`]: `definition: design\nslug: ${SLUG}\nstage: ${stage.id}\n` }
+  // Pinned to design v2 — the fixture module text seeded above is v2-shaped (WI #348).
+  return { [`/gantry-workspace/${SLUG}/instance.yaml`]: `definition: design\nslug: ${SLUG}\nstage: ${stage.id}\ndefinitionVersion: 2\n` }
 }
 
 test('requestStageApproval opens a Pull Request from the stage branch into "main" once the gate has passed, and records its id on instance.yaml', async () => {
@@ -123,8 +125,8 @@ test('requestStageApproval auto-renders missing required artefacts and opens PR 
     const azureDevOps = locationFor(baseUrl)
     const branch = await resolveStageBranch(azureDevOps, definition, SLUG, SHAPE.id)
     const client = createAzureDevOpsClient(azureDevOps)
-    for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
-      const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
+    for (const moduleId of ['background', 'introduction', 'design-basis', 'solution-definition', 'team-and-estimates']) {
+      const text = exampleModuleText(moduleId)
       await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
     }
 
@@ -213,7 +215,7 @@ test('requestStageApproval still aborts with render error when artefact renderin
   const shapeModules = {
     [`/gantry-workspace/${SLUG}/instance.yaml`]: `definition: design\nslug: ${SLUG}\nstage: ${SHAPE.id}\n`,
   }
-  for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
+  for (const moduleId of ['background', 'introduction', 'design-basis', 'solution-definition', 'team-and-estimates']) {
     shapeModules[`/gantry-workspace/${SLUG}/modules/${moduleId}.md`] = readFileSync(
       join('instances', 'examples', 'modules', `${moduleId}.md`),
       'utf8'

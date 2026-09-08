@@ -1,66 +1,24 @@
 ---
 module: data-security-controls
 status: agreed
-owner: c.barlow
+owner: s.okafor
 ---
 # Data Security Controls
 
 ## Controls
 
-### Encryption
-
-- **In transit** — all external traffic terminates TLS 1.2+ at the Contoso API
-  Gateway; portal↔API and API↔Postgres traffic stays within the VPC and uses
-  TLS. S3 access is HTTPS-only (`aws:SecureTransport` bucket-policy condition).
-- **At rest** — the certificates bucket uses SSE with the Contoso-managed KMS key
-  `alias/contoso-shared-docs`; the `intake` Postgres schema inherits the shared
-  instance's storage encryption; ElastiCache Redis has encryption at rest and
-  in transit enabled.
-
-### Operational — incident management
-
-- CloudWatch alarms on 5xx rate, API latency, and failed file validations
-  route to the `#contoso-digital-support` on-call rotation.
-- All certificate submissions write an audit line (submission ID, reference
-  code, provider registration number, timestamp — no client identifiers) to a
-  dedicated, non-expiring CloudWatch log group.
-- Segregation of duties: the delivery team can deploy via pipeline but has no
-  standing write access to the production S3 bucket or Postgres schema.
-
-### Networking
-
-- The Intake API has no public route; `sg-intake-api` accepts port 4000 only
-  from `sg-provider-portal`.
-- The certificates bucket denies every request that does not arrive via the
-  VPC endpoint `vpce-0f1e2d3c`.
-- Outbound internet access from the private subnet is limited to the AWS
-  service endpoints the API needs.
-
-### Access management
-
-- Human access to AWS is via SSO with short-lived role assumption; no static
-  IAM users.
-- Database access is via IAM-authenticated RDS proxy — no stored credentials.
-- Secrets (OIDC client secret, KMS key ARN) live in AWS Secrets Manager and
-  are injected at task start; they are never committed.
-
-### Documentation
-
-- This as-built document, the runbook, and the Terraform in the
-  `provider-portal-infra` repo are sufficient to rebuild the system from
-  scratch.
+| Service / area | Concern | Controls |
+| --- | --- | --- |
+| Encryption in transit | Member data and payment instructions readable on the network | TLS 1.3 with mutual authentication between all KCM components; TLS 1.2 on the mainframe MQ channels by documented exception; signed requests to the payment gateway; internal CA-issued certificates rotated annually |
+| Encryption at rest | Data readable from disk or backup | PostgreSQL volumes and backups encrypted (AES-256, keys in the enterprise key management service); document store encrypted by the document management system; backup media encrypted before leaving the site |
+| Access management | Staff or services acting beyond their role | Active Directory groups mapped to CRM and Financial Application profiles; per-application service accounts for the shared services with mutual TLS; separation of valuation and payment approval enforced in Claims InfoServ; quarterly access reviews by the Claims Product Owner; privileged access to hosts and databases through the bastion with session recording |
+| Application security | Injection, broken authorisation, dependency vulnerabilities | OpenAPI-validated inputs; member-scoped authorisation on every web route; dependency and container scanning in the Jenkins pipeline blocking on high severity; annual penetration test of the member web forms and the services; CRM extension code reviewed by two engineers |
+| Networking | Lateral movement, unauthorised egress | Zone firewalls with explicit rules (Integration module); the only internet egress from the application zone is the Financial Application to the gateway endpoints; no inbound access to the services except through the API gateway and the CRM; developer access to repositories restricted to the Claims Platform Team |
+| Incident management | Suspected data exposure or payment fraud | Security events forwarded to the security monitoring platform; Information Security paged in parallel with Technology Operations for any authentication anomaly or unexpected payment pattern; payment holds available to the Claims Payment Approver; incident runbook RB-SEC-CLM |
+| Availability | Denial of service against member forms | Rate limiting and bot protection at the API gateway; services sized at five times peak; process fallback keeps claims flowing |
+| Data handling | Sensitive claim details visible beyond need to know | Health and third-party information on a claim restricted to the handler roles assigned to it; every read of a member record logged; non-production data masked |
+| Documentation | Controls drift over time | This register reviewed at each increment gate and at the annual C&A renewal; control owners named in the RACI |
 
 ## Inheritance and dependencies
 
-The solution runs entirely within the existing Contoso AWS landing zone and
-inherits its controls:
-
-- **Platform** — Contoso AWS Organization guardrails (SCPs), centralised
-  CloudTrail, GuardDuty, and Config rules.
-- **Services used** — ECS Fargate, ALB, S3, RDS (Postgres), ElastiCache
-  (Redis), Secrets Manager, KMS, API Gateway.
-- **Data locality** — `ap-southeast-2` (Sydney) only.
-- **Standards** — NZISM, the Contoso Cloud Security Standard, and OWASP ASVS L2
-  for the portal.
-- **Description of use** — client-identifying data stays in EOS; this system
-  handles only a masked identity plus the certificate file itself.
+The solution inherits the data-centre physical and environmental controls, the network zoning and firewall management, the enterprise identity provider and its multi-factor authentication, the key management service, the security monitoring platform and the backup infrastructure, all of which are accredited under KCM's existing C&A and are not re-assessed here. It depends on the mainframe's own security accreditation for Policy Data Management, on the CRM and Financial Application vendors' secure development practices under their support agreements, and on the BIBIT gateway's PCI DSS certification and its data-processing terms (payment data processed in Australia and New Zealand). Data locality: all member data other than payment instructions stays in KCM's Wellington and Auckland facilities. The regulations and standards the control set is held to are listed in the Security module.

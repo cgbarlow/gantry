@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync, mkdtempSync, rmSync } from 'node:fs'
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
@@ -8,6 +8,7 @@ import { createInstance, readInstance } from '../lib/instance.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withRunningServer, basicAuthHeader, VALID_PAT } from './helpers/lifecycle.js'
+import { exampleModuleText } from './helpers/fixtureModules.js'
 
 // Browser smoke test for #111's Work item details panel (web/app.js's
 // SyncedFieldsPanel): the unlinked "Link to a work item" prompt taking the
@@ -31,10 +32,7 @@ test('the synced-fields panel shows the link prompt when unlinked, then the dist
       try {
         createInstance('design', 'my-initiative', { instancesDir, assignee: 'Ada Lovelace' })
         for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
-          cpSync(
-            join('instances', 'examples', 'modules', `${moduleId}.md`),
-            join(instancesDir, 'my-initiative', 'modules', `${moduleId}.md`)
-          )
+          writeFileSync(join(instancesDir, 'my-initiative', 'modules', `${moduleId}.md`), exampleModuleText(moduleId))
         }
 
         await withRunningServer(

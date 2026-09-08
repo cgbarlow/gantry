@@ -10,6 +10,7 @@ import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { stageBranchName } from '../lib/stageBranch.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withRunningServer, basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
+import { exampleModuleText } from './helpers/fixtureModules.js'
 
 // Server-level credential gating (#86), now driven by per-request resolution against the instance registry (#89/#92) rather than a fixed `createServer({ azureDevOps })` location: a slug the registry says is Azure-DevOps-backed marks that one request's single-instance routes (GET /api/instance, PUT /api/instance/modules/:id, POST /api/instance/render/:artefact) as such. These tests exercise that gating with real HTTP requests against a running gantry server (mirroring tests/server.test.js's existing `withRunningServer` pattern), backed by the same fake in-process Azure DevOps server tests/instance.test.js and tests/azureDevOpsClient.test.js use — never the real dev.azure.com.
 
@@ -45,7 +46,7 @@ function withAzureDevOpsBackedServer(files, serverOptions, fn) {
 
 const SEED_FILES = {
   '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
-  '/gantry-workspace/my-initiative/modules/introduction.md': readFileSync('instances/examples/modules/introduction.md', 'utf8'),
+  '/gantry-workspace/my-initiative/modules/introduction.md': exampleModuleText('introduction'),
   '/gantry-workspace/my-initiative/modules/background.md': [
     '---',
     'module: background',
@@ -248,8 +249,8 @@ test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance with
 test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance also renders and commits the stage\'s own artefact(s) to the same stage branch (#123, ADR-0014)', async () => {
   const fullFiles = {
     ...SEED_FILES,
-    '/gantry-workspace/my-initiative/modules/solution-definition.md': readFileSync('instances/examples/modules/solution-definition.md', 'utf8'),
-    '/gantry-workspace/my-initiative/modules/team-and-estimates.md': readFileSync('instances/examples/modules/team-and-estimates.md', 'utf8'),
+    '/gantry-workspace/my-initiative/modules/solution-definition.md': exampleModuleText('solution-definition'),
+    '/gantry-workspace/my-initiative/modules/team-and-estimates.md': exampleModuleText('team-and-estimates'),
   }
   await withAzureDevOpsBackedServer(fullFiles, {}, async (base, adoBaseUrl) => {
     const res = await fetch(`${base}/api/instance/modules/background`, {
@@ -376,8 +377,8 @@ test('POST /api/instance/render/:artefact against an Azure-DevOps-backed instanc
 test('POST /api/instance/render/:artefact against an Azure-DevOps-backed instance with a valid PAT renders a real docx, reading module data from Azure DevOps, and pushes it back to that same repo', async () => {
   const fullFiles = {
     ...SEED_FILES,
-    '/gantry-workspace/my-initiative/modules/solution-definition.md': readFileSync('instances/examples/modules/solution-definition.md', 'utf8'),
-    '/gantry-workspace/my-initiative/modules/team-and-estimates.md': readFileSync('instances/examples/modules/team-and-estimates.md', 'utf8'),
+    '/gantry-workspace/my-initiative/modules/solution-definition.md': exampleModuleText('solution-definition'),
+    '/gantry-workspace/my-initiative/modules/team-and-estimates.md': exampleModuleText('team-and-estimates'),
   }
   await withAzureDevOpsBackedServer(fullFiles, {}, async (base, adoBaseUrl) => {
     const res = await fetch(`${base}/api/instance/render/soap`, {
@@ -415,8 +416,8 @@ test('POST /api/instance/render/:artefact against an Azure-DevOps-backed instanc
 test('rendering the same artefact against an Azure-DevOps-backed instance twice overwrites the previous render rather than accumulating files', async () => {
   const fullFiles = {
     ...SEED_FILES,
-    '/gantry-workspace/my-initiative/modules/solution-definition.md': readFileSync('instances/examples/modules/solution-definition.md', 'utf8'),
-    '/gantry-workspace/my-initiative/modules/team-and-estimates.md': readFileSync('instances/examples/modules/team-and-estimates.md', 'utf8'),
+    '/gantry-workspace/my-initiative/modules/solution-definition.md': exampleModuleText('solution-definition'),
+    '/gantry-workspace/my-initiative/modules/team-and-estimates.md': exampleModuleText('team-and-estimates'),
   }
   await withAzureDevOpsBackedServer(fullFiles, {}, async (base) => {
     for (let i = 0; i < 2; i++) {

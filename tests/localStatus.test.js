@@ -156,10 +156,9 @@ describe('getLocalStatus matches getStatus', () => {
 
   test('the examples fixture is complete', async () => {
     const serverStatus = getStatus('examples')
-    // instances/examples has no `definitionVersion`, so it resolves to v1
-    // (lib/instance.js's own compat default) — pinned here to match (WI #318
-    // published v2 alongside it, so an unpinned projection would diverge).
-    const structure = projectionFor('design', { version: 1 })
+    // instances/examples is pinned to `definitionVersion: 2` (WI #348) — the
+    // projection must match, or the local and server views would diverge.
+    const structure = projectionFor('design', { version: 2 })
     const handle = await memHandleFromInstance('instances', 'examples')
     const localStatus = await getLocalStatus(handle, 'examples', structure, serverStatus.stage.id)
 
@@ -297,9 +296,8 @@ describe('checkLocalGate matches checkGate', () => {
   test('the identical SAD and SSAD requirements still pass both artefacts together', async () => {
     const serverResult = checkGate('examples', { gate: 'build-ready-checklist' })
 
-    // instances/examples has no `definitionVersion`, so it resolves to v1 —
-    // pinned here to match (WI #318 published v2 alongside it).
-    const structure = projectionFor('design', { version: 1 })
+    // instances/examples is pinned to `definitionVersion: 2` (WI #348).
+    const structure = projectionFor('design', { version: 2 })
     const handle = await memHandleFromInstance('instances', 'examples')
     const localResult = await checkLocalGate(handle, 'examples', structure, 'shape', { gate: 'build-ready-checklist' })
 
@@ -315,9 +313,8 @@ describe('checkLocalGate matches checkGate', () => {
       unlinkSync(join(instancesDir, 'examples', 'modules', 'architecture.md'))
       const serverResult = checkGate('examples', { instancesDir, gate: 'build-ready-checklist' })
 
-      // Copied from instances/examples, so still has no `definitionVersion`
-      // and resolves to v1 — pinned here to match (WI #318).
-      const structure = projectionFor('design', { version: 1 })
+      // Copied from instances/examples, so pinned to v2 like the fixture (WI #348).
+      const structure = projectionFor('design', { version: 2 })
       const handle = await memHandleFromInstance(instancesDir, 'examples')
       const localResult = await checkLocalGate(handle, 'examples', structure, 'shape', { gate: 'build-ready-checklist' })
 
@@ -356,7 +353,7 @@ describe('checkLocalGate matches checkGate', () => {
     const serverResult = checkGate('examples')
     // instances/examples has no `definitionVersion`, so it resolves to v1 —
     // pinned here to match (WI #318).
-    const structure = projectionFor('design', { version: 1 })
+    const structure = projectionFor('design', { version: 2 })
     const handle = await memHandleFromInstance('instances', 'examples')
     const localResult = await checkLocalGate(handle, 'examples', structure, 'shape')
 
@@ -369,7 +366,7 @@ describe('checkLocalGate matches checkGate', () => {
     const serverResult = checkGate('examples', { gate: 'hld-tac-approved' })
     // instances/examples has no `definitionVersion`, so it resolves to v1 —
     // pinned here to match (WI #318).
-    const structure = projectionFor('design', { version: 1 })
+    const structure = projectionFor('design', { version: 2 })
     const handle = await memHandleFromInstance('instances', 'examples')
     const localResult = await checkLocalGate(handle, 'examples', structure, 'shape', { gate: 'hld-tac-approved' })
 

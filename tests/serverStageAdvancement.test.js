@@ -18,7 +18,7 @@ import { withRunningServer, withScratchInstances, ORGANIZATION, PROJECT, REPOSIT
 
 
 function fillShapeStage(instancesDir, slug) {
-  for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
+  for (const moduleId of ['background', 'introduction', 'design-basis', 'solution-definition', 'team-and-estimates']) {
     cpSync(join('instances', 'examples', 'modules', `${moduleId}.md`), join(instancesDir, slug, 'modules', `${moduleId}.md`))
   }
 }

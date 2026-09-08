@@ -16,7 +16,8 @@ test('loads the real design definition', () => {
   const shape = design.stages.find((stage) => stage.id === 'shape')
   assert.match(shape.purpose, /business case/i)
   assert.deepEqual(shape.modules, ['background', 'solution-definition', 'team-and-estimates', 'dependencies', 'soap-full-details', 'introduction'])
-  assert.equal(shape.example, 'examples')
+  // WI #348: the `examples` fixture moved to v2, so v1 no longer declares it as a stage example.
+  assert.equal(shape.example, undefined)
 
   const soap = design.artefacts.find((artefact) => artefact.id === 'soap')
   assert.match(soap.purpose, /summarise/i)

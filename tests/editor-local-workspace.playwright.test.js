@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { createInstance } from '../lib/instance.js'
+import { exampleModuleText } from './helpers/fixtureModules.js'
 
 // Browser tests for WI #297 (ADR-0029, Feature #290 / A6) — the module
 // editor loading, saving, gate-checking, advancing and rendering a
@@ -32,7 +33,8 @@ const ONE_PX_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
 function readExampleFile(relPath) {
-  return readFileSync(join('instances/examples', relPath), 'utf8')
+  // WI #348: fixture text is borrowed for another instance with no asset manifest, so image references are stripped.
+  return relPath.startsWith('modules/') ? exampleModuleText(relPath.slice('modules/'.length).replace(/\.md$/, '')) : readFileSync(join('instances/examples', relPath), 'utf8')
 }
 
 async function seedLocalWorkspace(page, slug) {

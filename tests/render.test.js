@@ -10,6 +10,7 @@ import { loadDefinition } from '../lib/definition.js'
 import { readModule, writeModule } from '../lib/instance.js'
 import { createAzureDevOpsClient, AzureDevOpsNotFoundError, AzureDevOpsAuthenticationError } from '../lib/azureDevOpsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { exampleModuleText } from './helpers/fixtureModules.js'
 
 // A minimal real 1x1 red PNG, base64-encoded — small enough to inline, real enough to round-trip through the same file-write/render path a genuine upload takes. Matches the fixture tests/assets.test.js uses.
 const ONE_PX_PNG_BASE64 =
@@ -35,7 +36,7 @@ test('dry-run compiles the template without writing anything, with no HTML-entit
     const result = renderArtefact('examples', 'soap', { dryRun: true, instancesDir })
     assert.equal(result.dryRun, true)
     assert.match(result.markdown, /# examples: Solution on a Page/)
-    assert.match(result.markdown, /- Client-facing self-service \(ContosoSelfService\)/)
+    assert.match(result.markdown, /- Claims handling \(register, accept, valuate, pay\)/)
     assert.doesNotMatch(result.markdown, /&#39;|&quot;|&amp;/)
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
@@ -48,12 +49,12 @@ test('renders the Full SOAP with the reference sections, metadata, static caveat
     cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
     const result = renderArtefact('examples', 'soap-full', { instancesDir })
     assert.equal(existsSync(result.docxPath), true)
-    assert.match(result.markdown, /# Introduction\n\n## Problem statement/)
+    assert.match(result.markdown, /# Introduction\n\n## Overview[\s\S]*## Problem statement/)
     for (const heading of [
       'Opportunity',
-      'In Scope',
-      'Out of Scope',
-      'High Level Requirements',
+      'In scope',
+      'Out of scope',
+      'High level requirements',
       'High level solution overview',
       'Teams required',
       'Dependencies',
@@ -68,13 +69,14 @@ test('renders the Full SOAP with the reference sections, metadata, static caveat
     }
     assert.match(result.markdown, /\| Section \| Requirement \|/)
     assert.match(result.markdown, /\| Requirement \| Team \| Estimate \| Notes \|/)
-    assert.match(result.markdown, /Cost is based on full AST team allocation/)
+    assert.match(result.markdown, /The actual effort will differ once the IT requirements are elaborated/)
 
     const roundTrip = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown', result.docxPath], { encoding: 'utf8' })
     assert.match(roundTrip, /Full Solution on a Page/)
-    assert.match(roundTrip, /High Level Requirements/)
+    assert.match(roundTrip, /High level requirements/)
     assert.match(roundTrip, /SOAP\/estimate delivered date/)
-    assert.match(roundTrip, /Cost is based on full AST team allocation/)
+    // pandoc's markdown writer hard-wraps the round-tripped bullet, so match across the line break.
+    assert.match(roundTrip, /The actual effort will differ once the IT requirements are\s+elaborated/)
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }
@@ -91,18 +93,18 @@ test('renders a real docx styled from the HLD reference doc', () => {
       encoding: 'utf8',
     })
     assert.match(roundTrip, /Solution on a Page/)
-    assert.match(roundTrip, /Client-facing self-service/)
+    assert.match(roundTrip, /Claims handling \(register, accept, valuate, pay\)/)
 
     const documentXml = execFileSync('unzip', ['-p', result.docxPath, 'word/document.xml'], {
       encoding: 'utf8',
     })
     const headingStyles = [...documentXml.matchAll(/w:pStyle w:val="(Heading\d)"/g)].map((m) => m[1])
-    // New document heading scale (ADR-0016): the artefact title and each module title sit at Heading1, every field heading at Heading2 — the templates emit nothing deeper, since author content starts at Heading3 and the examples' own prose uses no sub-headings.
+    // New document heading scale (ADR-0016): the artefact title and each module title sit at Heading1, every field heading at Heading2 — the templates emit nothing deeper. Author content starts at Heading3: the examples fixture's process-flow field carries `###` sub-headings for its two processes (WI #348), so Heading3 appears too, and nothing below it.
     assert.ok(headingStyles.includes('Heading1'))
     assert.ok(headingStyles.includes('Heading2'))
     assert.deepEqual(
       [...new Set(headingStyles)],
-      ['Heading1', 'Heading2']
+      ['Heading1', 'Heading2', 'Heading3']
     )
     assert.ok((documentXml.match(/<w:numPr>/g) ?? []).length > 0, 'expected real list numbering, not flattened text')
 
@@ -221,22 +223,24 @@ test('an asset:<id> reference (#80) inserted into a module field compiles into a
       encoding: 'utf8',
     })
     assert.match(relationshipsXml, /Target="https:\/\/draw\.io\/diagrams\/eligibility-flow"/)
-    const driverIndex = roundTrip.indexOf('Business driver')
+    // v2 renders the field as "Problem statement" (the same `background.problem` field the reference was appended to).
+    const driverIndex = roundTrip.indexOf('Problem statement')
     const imageIndex = roundTrip.indexOf('![Eligibility flow]')
     const affectedDomainsIndex = roundTrip.indexOf('Affected domains')
     assert.ok(driverIndex >= 0 && imageIndex >= 0 && affectedDomainsIndex >= 0)
-    assert.ok(driverIndex < imageIndex, 'expected the image after the Business driver section')
+    assert.ok(driverIndex < imageIndex, 'expected the image after the Problem statement section')
     assert.ok(imageIndex < affectedDomainsIndex, 'expected the image before the next heading, Affected domains')
 
     // The embedded image is a real, extractable media file in the docx (not just referenced by a URL), and its bytes match what was uploaded.
     const mediaListing = execFileSync('unzip', ['-l', result.docxPath], { encoding: 'utf8' })
-    const mediaFile = mediaListing
+    // The examples fixture embeds its own diagrams too (WI #348), so find the media entry whose bytes are the uploaded PNG rather than assuming it is the only image.
+    const mediaFiles = mediaListing
       .split('\n')
       .map((line) => line.trim().split(/\s+/).pop())
-      .find((name) => name && /^word\/media\/.*\.png$/.test(name) && name !== 'word/media/image1.png')
-    assert.ok(mediaFile, 'expected an embedded PNG media file for the inserted asset')
-    const extractedBytes = execFileSync('unzip', ['-p', result.docxPath, mediaFile])
-    assert.deepEqual(extractedBytes, pngBytes)
+      .filter((name) => name && /^word\/media\/.*\.png$/.test(name))
+    assert.ok(mediaFiles.length > 0, 'expected embedded PNG media files')
+    const matched = mediaFiles.some((name) => execFileSync('unzip', ['-p', result.docxPath, name]).equals(pngBytes))
+    assert.ok(matched, 'expected one embedded PNG media file whose bytes match the inserted asset')
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }
@@ -268,8 +272,8 @@ test('a local render injects a Document Control table immediately after the titl
 
     assert.match(result.markdown, /## Document Control/)
     assert.match(result.markdown, /## Review & sign-off/)
-    // Version: design v1 · SOAP (stage title for that gate)
-    assert.match(result.markdown, /\| Version \| design v1 · SOAP \|/)
+    // Version: design v2 · SOAP (stage title for that gate)
+    assert.match(result.markdown, /\| Version \| design v2 · SOAP \|/)
     assert.match(result.markdown, new RegExp(`\\| Date \\| ${escapeRegExp(expectedDate)} \\|`))
     // Local commit: plain code span, not a hyperlink
     assert.match(result.markdown, new RegExp(`\\| Commit \\| \`${escapeRegExp(expectedHash)}\` \\|`))
@@ -310,9 +314,11 @@ test('a definition other than "design" also gets a Document Control block — it
     cpSync('definitions/design', join(definitionsDir, 'design'), { recursive: true })
     cpSync(join(definitionsDir, 'design'), join(definitionsDir, 'another-definition'), { recursive: true })
     // Give the copy a distinct id, matching loadDefinition's "directory must match id" requirement — otherwise it would just be "design" again under a different path, not a genuinely distinct definition.
-    const definitionYamlPath = join(definitionsDir, 'another-definition', '1', 'definition.yaml')
-    const definitionYaml = readFileSync(definitionYamlPath, 'utf8').replace(/^id: design$/m, 'id: another-definition')
-    writeFileSync(definitionYamlPath, definitionYaml)
+    for (const version of ['1', '2']) {
+      const definitionYamlPath = join(definitionsDir, 'another-definition', version, 'definition.yaml')
+      const definitionYaml = readFileSync(definitionYamlPath, 'utf8').replace(/^id: design$/m, 'id: another-definition')
+      writeFileSync(definitionYamlPath, definitionYaml)
+    }
 
     cpSync('instances/examples', join(instancesDir, 'other-instance'), { recursive: true })
     const instanceYamlPath = join(instancesDir, 'other-instance', 'instance.yaml')
@@ -323,7 +329,7 @@ test('a definition other than "design" also gets a Document Control block — it
     assert.match(result.markdown, /## Document Control/)
     assert.match(result.markdown, /## Review & sign-off/)
     assert.match(result.markdown, /\| Commit \| `[0-9a-f]+`/)
-    assert.match(result.markdown, /\| Version \| another-definition v1/)
+    assert.match(result.markdown, /\| Version \| another-definition v2/)
     assert.doesNotMatch(result.markdown, /Rendered from commit/)
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
@@ -382,10 +388,11 @@ function escapeRegExp(value) {
 function seedExamplesAzureDevOpsFiles() {
   return {
     '/gantry-workspace/examples/instance.yaml': readFileSync('instances/examples/instance.yaml', 'utf8'),
-    '/gantry-workspace/examples/modules/background.md': readFileSync('instances/examples/modules/background.md', 'utf8'),
-    '/gantry-workspace/examples/modules/introduction.md': readFileSync('instances/examples/modules/introduction.md', 'utf8'),
-    '/gantry-workspace/examples/modules/solution-definition.md': readFileSync('instances/examples/modules/solution-definition.md', 'utf8'),
-    '/gantry-workspace/examples/modules/team-and-estimates.md': readFileSync('instances/examples/modules/team-and-estimates.md', 'utf8'),
+    '/gantry-workspace/examples/modules/background.md': exampleModuleText('background'),
+    '/gantry-workspace/examples/modules/introduction.md': exampleModuleText('introduction'),
+    '/gantry-workspace/examples/modules/design-basis.md': exampleModuleText('design-basis'),
+    '/gantry-workspace/examples/modules/solution-definition.md': exampleModuleText('solution-definition'),
+    '/gantry-workspace/examples/modules/team-and-estimates.md': exampleModuleText('team-and-estimates'),
   }
 }
 
@@ -530,8 +537,10 @@ test('an artefact with neither an artefact-specific nor a definition-level refer
   try {
     cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
     cpSync('definitions/design', join(definitionsDir, 'design'), { recursive: true })
-    rmSync(join(definitionsDir, 'design', '1', 'templates', 'reference.docx'), { force: true })
-    rmSync(join(definitionsDir, 'design', '1', 'templates', 'reference-soap.docx'), { force: true })
+    for (const version of ['1', '2']) {
+      rmSync(join(definitionsDir, 'design', version, 'templates', 'reference.docx'), { force: true })
+      rmSync(join(definitionsDir, 'design', version, 'templates', 'reference-soap.docx'), { force: true })
+    }
     const result = renderArtefact('examples', 'soap', { dryRun: true, instancesDir, definitionsDir })
     assert.equal(result.referenceDocPath, null)
   } finally {
@@ -701,7 +710,7 @@ test('a draft render with no review/sign-off data still shows a Pending row and 
 
 test('review rows reflect only the artefact\'s own gate — a business-case review does not leak into the HLD artefact', () => {
   const businessCaseSummary = {
-    version: 'design v1 · SOAP',
+    version: 'design v2 · SOAP',
     stageTitle: 'SOAP',
     date: '2024-04-01',
     commit: { hash: 'aaaaaaa', date: '2024-04-01' },
@@ -757,27 +766,21 @@ test('every design artefact (soap, hld, sad, ssad, as-built) renders a Document 
 function seedDetailedDesignAzureDevOpsFiles() {
   return {
     '/gantry-workspace/examples/instance.yaml': 'definition: design\nslug: examples\nstage: detailed-design\n',
-    '/gantry-workspace/examples/modules/architecture.md': readFileSync('instances/examples/modules/architecture.md', 'utf8'),
-    '/gantry-workspace/examples/modules/integration.md': readFileSync('instances/examples/modules/integration.md', 'utf8'),
-    '/gantry-workspace/examples/modules/data.md': readFileSync('instances/examples/modules/data.md', 'utf8'),
-    '/gantry-workspace/examples/modules/nfrs.md': readFileSync('instances/examples/modules/nfrs.md', 'utf8'),
-    '/gantry-workspace/examples/modules/security.md': readFileSync('instances/examples/modules/security.md', 'utf8'),
-    '/gantry-workspace/examples/modules/risks.md': readFileSync('instances/examples/modules/risks.md', 'utf8'),
-    '/gantry-workspace/examples/modules/dependencies.md': readFileSync('instances/examples/modules/dependencies.md', 'utf8'),
-    '/gantry-workspace/examples/modules/support-and-operations.md': readFileSync(
-      'instances/examples/modules/support-and-operations.md',
-      'utf8'
-    ),
+    '/gantry-workspace/examples/modules/architecture.md': exampleModuleText('architecture'),
+    '/gantry-workspace/examples/modules/integration.md': exampleModuleText('integration'),
+    '/gantry-workspace/examples/modules/data.md': exampleModuleText('data'),
+    '/gantry-workspace/examples/modules/nfrs.md': exampleModuleText('nfrs'),
+    '/gantry-workspace/examples/modules/security.md': exampleModuleText('security'),
+    '/gantry-workspace/examples/modules/risks.md': exampleModuleText('risks'),
+    '/gantry-workspace/examples/modules/dependencies.md': exampleModuleText('dependencies'),
+    '/gantry-workspace/examples/modules/support-and-operations.md': exampleModuleText('support-and-operations'),
     // WI #227: `glossary` is a shared module the SAD and SSAD artefacts now reference.
-    '/gantry-workspace/examples/modules/glossary.md': readFileSync('instances/examples/modules/glossary.md', 'utf8'),
+    '/gantry-workspace/examples/modules/glossary.md': exampleModuleText('glossary'),
     // WI #228: `introduction` / `recovery-plan` / `data-security-controls` are now
     // shared into detailed-design and referenced (field-level) by the SAD artefact.
-    '/gantry-workspace/examples/modules/introduction.md': readFileSync('instances/examples/modules/introduction.md', 'utf8'),
-    '/gantry-workspace/examples/modules/recovery-plan.md': readFileSync('instances/examples/modules/recovery-plan.md', 'utf8'),
-    '/gantry-workspace/examples/modules/data-security-controls.md': readFileSync(
-      'instances/examples/modules/data-security-controls.md',
-      'utf8'
-    ),
+    '/gantry-workspace/examples/modules/introduction.md': exampleModuleText('introduction'),
+    '/gantry-workspace/examples/modules/recovery-plan.md': exampleModuleText('recovery-plan'),
+    '/gantry-workspace/examples/modules/data-security-controls.md': exampleModuleText('data-security-controls'),
   }
 }
 
@@ -828,7 +831,7 @@ test('renderStageArtefacts reports an artefact as skipped, not failed, when its 
       branchFiles: {
         [branch]: {
           '/gantry-workspace/examples/instance.yaml': 'definition: design\nslug: examples\nstage: shape\n',
-          '/gantry-workspace/examples/modules/background.md': readFileSync('instances/examples/modules/background.md', 'utf8'),
+          '/gantry-workspace/examples/modules/background.md': exampleModuleText('background'),
         },
       },
     },

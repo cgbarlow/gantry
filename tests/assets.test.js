@@ -1,12 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import MarkdownIt from 'markdown-it'
 import { createInstance } from '../lib/instance.js'
-import { createAsset, resolveAssetFileRefs } from '../lib/assets.js'
-import { resolveAssetRefs } from '../web/lib/assetRefs.js'
+import { assetCitation, createAsset, resolveAssetFileRefs } from '../lib/assets.js'
+import { isLocalAssetSource, resolveAssetRefs } from '../web/lib/assetRefs.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 
 // A minimal real 1x1 red PNG, base64-encoded — small enough to inline, real enough to round-trip through the same file-write/serve path a genuine upload takes.
@@ -67,6 +67,56 @@ test('file asset citations render their source URL as a link while keeping the c
   }
 })
 
+
+// WI #348: a manifest `source` that is a relative path is a *local* source — the image's own copy stored within the instance. Its citation links to that copy relative to the render output dir (`out/`), so a zip-release install opens the local file; the live preview labels it the same way but links to the served file.
+test('live asset citations with a local source label the stored path and link to the resolved href', () => {
+  const resolved = resolveAssetRefs(
+    '![Layered viewpoint](asset:kcm-layered-viewpoint)',
+    (id) => `/api/instance/assets/${id}/file`,
+    (id) => ({ label: `assets/${id}.png`, href: `/api/instance/assets/${id}/file` })
+  )
+  assert.equal(
+    resolved,
+    '![Layered viewpoint](/api/instance/assets/kcm-layered-viewpoint/file)\n\n*Source: [assets/kcm-layered-viewpoint.png](</api/instance/assets/kcm-layered-viewpoint/file>)*'
+  )
+  assert.ok(isLocalAssetSource('assets/kcm-layered-viewpoint.png'))
+  assert.ok(!isLocalAssetSource('https://draw.io/diagrams/x'))
+  assert.ok(!isLocalAssetSource(''))
+})
+
+test('file asset citations with a local source link to the stored copy relative to the render output dir', () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'my-initiative', { instancesDir })
+    // createAsset() refuses a non-http(s) source by design (UI uploads must cite an originating URL) — a local source is only ever a hand-written manifest entry, so write one directly, the way the bundled `examples` fixture does.
+    const assetsDir = join(instancesDir, 'my-initiative', 'assets')
+    mkdirSync(assetsDir, { recursive: true })
+    writeFileSync(join(assetsDir, 'kcm-layered-viewpoint.png'), Buffer.from(ONE_PX_PNG_BASE64, 'base64'))
+    writeFileSync(
+      join(assetsDir, 'manifest.yaml'),
+      '- id: kcm-layered-viewpoint\n  filename: kcm-layered-viewpoint.png\n  name: Layered viewpoint\n  source: assets/kcm-layered-viewpoint.png\n'
+    )
+    const resolved = resolveAssetFileRefs('![Layered viewpoint](asset:kcm-layered-viewpoint)', 'my-initiative', { instancesDir })
+    assert.ok(resolved.startsWith(`![Layered viewpoint](${join(assetsDir, 'kcm-layered-viewpoint.png')})`))
+    assert.ok(resolved.endsWith('\n\n*Source: [assets/kcm-layered-viewpoint.png](<../assets/kcm-layered-viewpoint.png>)*'))
+    assert.ok(markdown.render(resolved).includes('<p><em>Source: <a href="../assets/kcm-layered-viewpoint.png">assets/kcm-layered-viewpoint.png</a></em></p>'))
+    assert.deepEqual(assetCitation({ filename: 'x.png', source: 'https://example.test/x' }), { label: 'https://example.test/x', href: 'https://example.test/x' })
+    assert.equal(assetCitation({ filename: 'x.png', source: '' }), null)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('the bundled examples fixture cites every diagram by its local copy', () => {
+  const manifest = readFileSync('instances/examples/assets/manifest.yaml', 'utf8')
+  const ids = [...manifest.matchAll(/^- id: (\S+)$/gm)].map((m) => m[1])
+  assert.equal(ids.length, 9, 'nine SAD-template diagrams are shipped with the examples instance')
+  for (const id of ids) {
+    assert.match(manifest, new RegExp(`  source: assets/${id}\\.(png|jpeg)\\n`), `${id} cites its stored copy`)
+  }
+  const modules = readdirSync('instances/examples/modules').map((f) => readFileSync(join('instances/examples/modules', f), 'utf8')).join('\n')
+  for (const id of ids) assert.ok(modules.includes(`(asset:${id})`), `${id} is referenced from a module field`)
+})
 
 test('GET /api/instance/assets is empty for a freshly-created instance', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))

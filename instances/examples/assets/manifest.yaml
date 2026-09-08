@@ -1,0 +1,51 @@
+# Asset manifest for the bundled `examples` instance (WI #348). The nine diagrams are the
+# example ArchiMate views carried by reference/current_design_artefacts/SAD Template.docx
+# (originally from The Open Group's ArchiSurance case study, http://pubs.opengroup.org/),
+# re-used here as the design views of the fictitious Kiwi Cover Mutual claims initiative.
+# Each `source` is a *local* source — the stored copy within this instance — so the
+# rendered citation links to the file that ships alongside the document (lib/assets.js).
+- id: kcm-business-concept-view
+  filename: kcm-business-concept-view.png
+  name: Business concept view
+  source: assets/kcm-business-concept-view.png
+  uploadedBy: p.natarajan
+- id: kcm-take-out-insurance-process
+  filename: kcm-take-out-insurance-process.jpeg
+  name: Take out insurance process
+  source: assets/kcm-take-out-insurance-process.jpeg
+  uploadedBy: p.natarajan
+- id: kcm-claims-introductory-view
+  filename: kcm-claims-introductory-view.png
+  name: Claims handling introductory view
+  source: assets/kcm-claims-introductory-view.png
+  uploadedBy: p.natarajan
+- id: kcm-layered-viewpoint
+  filename: kcm-layered-viewpoint.png
+  name: Layered viewpoint
+  source: assets/kcm-layered-viewpoint.png
+  uploadedBy: p.natarajan
+- id: kcm-product-viewpoint
+  filename: kcm-product-viewpoint.jpeg
+  name: Product viewpoint
+  source: assets/kcm-product-viewpoint.jpeg
+  uploadedBy: p.natarajan
+- id: kcm-application-usage-viewpoint
+  filename: kcm-application-usage-viewpoint.jpeg
+  name: Application usage viewpoint
+  source: assets/kcm-application-usage-viewpoint.jpeg
+  uploadedBy: p.natarajan
+- id: kcm-service-realisation-viewpoint
+  filename: kcm-service-realisation-viewpoint.jpeg
+  name: Service realisation viewpoint
+  source: assets/kcm-service-realisation-viewpoint.jpeg
+  uploadedBy: p.natarajan
+- id: kcm-deployment-viewpoint
+  filename: kcm-deployment-viewpoint.png
+  name: Deployment viewpoint
+  source: assets/kcm-deployment-viewpoint.png
+  uploadedBy: p.natarajan
+- id: kcm-information-structure-view
+  filename: kcm-information-structure-view.jpeg
+  name: Information structure view
+  source: assets/kcm-information-structure-view.jpeg
+  uploadedBy: p.natarajan

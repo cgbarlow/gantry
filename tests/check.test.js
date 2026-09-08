@@ -8,6 +8,7 @@ import { loadDefinition } from '../lib/definition.js'
 import { checkGate, formatGateOutstanding } from '../lib/check.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withScratchInstances, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
+import { exampleModuleText } from './helpers/fixtureModules.js'
 
 
 
@@ -322,8 +323,8 @@ test('checkGate against Azure DevOps fails a freshly-created instance the same w
 
 test('checkGate against Azure DevOps passes once the Shape-stage modules are filled in, the same content that passes locally', async () => {
   const seedFiles = { '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n' }
-  for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
-    seedFiles[`/gantry-workspace/my-initiative/modules/${moduleId}.md`] = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
+  for (const moduleId of ['background', 'introduction', 'design-basis', 'solution-definition', 'team-and-estimates']) {
+    seedFiles[`/gantry-workspace/my-initiative/modules/${moduleId}.md`] = exampleModuleText(moduleId)
   }
 
   await withFakeRepo(seedFiles, async (baseUrl) => {

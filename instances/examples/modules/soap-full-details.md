@@ -1,52 +1,51 @@
 ---
 module: soap-full-details
 status: agreed
-owner: c.barlow
+owner: p.natarajan
 ---
 # Full SOAP Details
 
 ## Epic/Project
 
-Mobile Phone Assistance Epic
+KCM-2026-014 Claims Handling Modernisation
 
 ## Requested/lead by
 
-Requested by Client Support; led by the Delivery Lead
+Hana Te Rangi, Head of Claims (sponsor); Priya Natarajan, Solution Architect (lead)
 
 ## Request date
 
-2026-01-12
+9 February 2026
 
 ## Draft agreed date
 
-2026-02-06
+27 February 2026
 
 ## SOAP/estimate delivered date
 
-2026-02-13
+13 March 2026
 
 ## Sequencing
 
 | Requirement | Team | Estimate | Notes |
 | --- | --- | --- | --- |
-| ContosoSelfService application entry point | ContosoSelfService | 15 person-days | Reuses the existing hardship application patterns. |
-| Application review and workflow | Case management and workflow | 20 person-days | Depends on the agreed eligibility and review rules. |
-| Carrier provisioning integration | Integration and carrier | 25 person-days | Requires the carrier API contract before build starts. |
-| Payments and notifications | Payments and correspondence | 15 person-days | Coordinates payment and client notification changes. |
-
-## Questions
-
-- Which carrier catalogue and provisioning API will be used for the first release?
-- What evidence is required before a Mobile Phone Assistance application can be approved?
-- Which team owns the annual review policy after launch?
+| Shared information services (CIS, Claims InfoServ) | Claims Platform Team, Mainframe Integration | L | Increment 1; first two CICS exposures in the April window, remaining two in May |
+| Claims registration and acceptance in the CRM | Claims Platform Team, Claims Operations | M | Increment 1; can start against stubbed services |
+| Document management integration and migration | Claims Platform Team, Records Management | M | Increment 1 integration; migration runs in background through increment 2 |
+| Claims valuation and routing rules | Claims Platform Team, Claims Operations | M | Increment 2 |
+| Claims data mart feed and audit trail | Data & Analytics, Internal Audit | S | Increment 2 |
+| Financial Application integration | Finance Systems | M | Increment 2; needs Treasury sign-off on reconciliation |
+| Claims payment via BIBIT and bank | Finance Systems, Treasury, Claims Platform Team | M | Increment 3; depends on contract variation |
+| Web and telephone policy intake | Digital Channels, Contact Centre | M | Increment 3; reuses increment 1 services |
+| Security, privacy and C&A | Information Security, Privacy Office | S | Runs alongside; C&A sign-off before increment 3 go-live |
 
 ## Caveats
 
-- This is high level estimate based on the information and requirements collated above
-- The requirements may not have been sufficient to do more accurate estimates
-- The actual effort will differ once the IT requirements are elaborated
-- Timeframes are dependent on PI prioritisation and detailed requirements
-- Some of the changes may be able to be done incrementally
-- Architectural council recommendations may impact the options and their costings
-- Resource allocation depends on PEC prioritisation, PI planning and resource availability
-- Cost is based on full AST team allocation (unless using a story point estimate)
+- This is a high-level estimate based on the information available at the time of shaping.
+- The requirements may not have been sufficiently elaborated to reflect the full complexity of the work.
+- The actual effort will differ once the IT requirements are elaborated in detail.
+- Timeframes are dependent on prioritisation of this work in the delivery portfolio and the availability of the teams named.
+- Some of the changes may be able to be delivered incrementally, and the sequencing above assumes they are.
+- Architecture governance recommendations may change the shape of the work and therefore the estimate.
+- Resource allocation depends on portfolio prioritisation and on the mainframe change windows.
+- Cost is based on full allocation of the Claims Platform Team for the duration; part-time allocation extends the elapsed time.

@@ -85,7 +85,7 @@ test('listRegistry reports "complete" once every required field for the current 
     createInstance('design', 'my-initiative', { instancesDir, assignee: 'c.barlow' })
     const definition = loadDefinition('design')
 
-    for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
+    for (const moduleId of ['background', 'introduction', 'design-basis', 'solution-definition', 'team-and-estimates']) {
       const moduleSpec = definition.modules.get(moduleId)
       const fields = {}
       for (const field of moduleSpec.fields) {

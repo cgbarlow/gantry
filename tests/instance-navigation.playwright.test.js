@@ -57,9 +57,11 @@ test('Navigation dropdown renders below Work item details card, lists headings i
         // Should be a Dropdown trigger (aria-haspopup)
         assert.equal(await trigger.getAttribute('aria-haspopup'), 'true')
 
-        // Collect headings from DOM in document order
+        // Collect headings from DOM in document order — field headings only (`.field-heading`), not the
+        // author's own `###` sub-headings the preview renders inside a field (the examples fixture has
+        // those since WI #348), which carry markdown-it ids without the `module--field` separator.
         const headings = await page.evaluate(() => {
-          const els = [...document.querySelectorAll('.module h2[id], .field h3[id]')]
+          const els = [...document.querySelectorAll('.module h2[id], .field h3.field-heading[id]')]
           return els.map((el) => ({ id: el.id, text: el.textContent.trim(), tag: el.tagName }))
         })
         // Each module h2 and each field h3 should have a stable id derived from slug of module id + heading text
@@ -68,7 +70,7 @@ test('Navigation dropdown renders below Work item details card, lists headings i
           assert.match(h.id, /^[a-z0-9._-]+--[a-z0-9-]+$/, `heading id "${h.id}" should be slugified`)
         }
         // Ids are deterministic: re-query after evaluation should be same
-        const headings2 = await page.evaluate(() => [...document.querySelectorAll('.module h2[id], .field h3[id]')].map((el) => el.id))
+        const headings2 = await page.evaluate(() => [...document.querySelectorAll('.module h2[id], .field h3.field-heading[id]')].map((el) => el.id))
         assert.deepEqual(headings2, headings.map((h) => h.id))
 
         // Opening dropdown lists every heading in document order

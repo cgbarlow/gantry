@@ -10,6 +10,7 @@ import { resolveStageBranch } from '../lib/stageBranch.js'
 import { createAzureDevOpsPullRequestsClient } from '../lib/azureDevOpsPullRequestsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withRunningServer, withScratchInstances, basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
+import { exampleModuleText } from './helpers/fixtureModules.js'
 
 // HTTP-boundary tests for #124's new route: POST /api/instance/request-approval
 // (the Assignee's "Request approval" action for a Workspace-backed instance,
@@ -29,8 +30,8 @@ const [SHAPE] = definition.stages
 
 async function fillShapeStage(azureDevOps, branch) {
   const client = createAzureDevOpsClient(azureDevOps)
-  for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
-    const text = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
+  for (const moduleId of ['background', 'introduction', 'design-basis', 'solution-definition', 'team-and-estimates']) {
+    const text = exampleModuleText(moduleId)
     await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, text, { branch })
   }
   await client.writeFile(`gantry-workspace/${SLUG}/out/Remote Initiative - Solution on a Page.docx`, 'rendered soap', { branch })
