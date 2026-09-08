@@ -11,6 +11,7 @@ const GUIDE_SECTIONS = [
   { id: 'artefacts-rendering', label: 'Artefacts & Rendering' },
   { id: 'approval-workflow', label: 'Approval workflow' },
   { id: 'settings', label: 'Settings' },
+  { id: 'definition-reference-guide', label: 'Definition Reference Guide' },
 ]
 
 function GantryBrandIcon() {
