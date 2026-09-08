@@ -44,6 +44,7 @@ test('User Guide: loads markdown content, ordered navigation, and definition-bac
         'Artefacts & Rendering',
         'Approval workflow',
         'Settings',
+        'Definition Reference Guide',
       ])
       assert.deepEqual(await page.locator('.guide-content h2').allTextContents(), [
         'Getting Started',
@@ -53,6 +54,7 @@ test('User Guide: loads markdown content, ordered navigation, and definition-bac
         'Artefacts & Rendering',
         'Approval workflow',
         'Settings',
+        'Definition Reference Guide',
       ])
       assert.equal(await page.locator('.guide-navigation li.pending').count(), 0)
       assert.equal(await page.locator('.guide-navigation a').nth(2).getAttribute('href'), '#stages-gates')
@@ -65,6 +67,7 @@ test('User Guide: loads markdown content, ordered navigation, and definition-bac
         'artefacts-rendering',
         'approval-workflow',
         'settings',
+        'definition-reference-guide',
       ])
       const repeatedHeadingIds = await page.evaluate(async () => {
         const { renderMarkdown } = await import('/lib/markdown.js')
@@ -83,12 +86,30 @@ test('User Guide: loads markdown content, ordered navigation, and definition-bac
       assert.match(await page.locator('.guide-content').textContent(), /Request Approval/)
       assert.match(await page.locator('.guide-content').textContent(), /Workspace Settings/)
       const guideText = await page.locator('.guide-content').textContent()
-      // The guide describes concepts at a high level and no longer enumerates the
-      // design definition's specific stages, artefacts, modules or fields.
+      // The concept sections describe Gantry at a high level; the definition-specific
+      // detail lives only in the Definition Reference Guide section, which is authored
+      // by hand rather than generated from the definition.
       assert.doesNotMatch(guideText, /Its exit gate is/)
       assert.doesNotMatch(guideText, /context\.driver/)
       // New subsections added in WI222 second pass
       const h3Texts = await page.locator('.guide-content h3').allTextContents()
+      // Definition Reference Guide: one sub-page per definition, with a mapping table
+      // per reference document and the field-by-stage table.
+      assert.ok(h3Texts.includes('Contoso Solution Design'))
+      const h4Texts = await page.locator('.guide-content h4').allTextContents()
+      for (const doc of [
+        'Solution on a Page (SOAP)',
+        'Full Solution on a Page (Full SOAP)',
+        'High Level Design (HLD)',
+        'Solution Architecture Document (SAD)',
+        'Solution Support Architecture Document (SSAD)',
+        'As-built',
+        'Fields by stage',
+      ]) {
+        assert.ok(h4Texts.includes(doc), `expected a "${doc}" sub-section in the Definition Reference Guide`)
+      }
+      assert.ok((await page.locator('.guide-content table').count()) >= 8, 'expected the reference-mapping and field-by-stage tables')
+      assert.match(guideText, /introduction\.in-scope/)
       assert.ok(h3Texts.includes('Choosing a definition version'))
       assert.ok(h3Texts.includes('Dashboard PR status badge'))
       assert.ok(h3Texts.includes('Archive and restore'))
@@ -135,15 +156,18 @@ test('User Guide: screenshots fit the content column and open in a click-to-expa
       await page.goto(`${base}/user-guide`)
       await page.waitForSelector('.guide-content img', { timeout: DEFAULT_TIMEOUT })
 
-      // Every screenshot fits inside its content column, and the page never scrolls sideways.
-      const { maxImgWidth, contentWidth } = await page.evaluate(() => {
+      // Every screenshot and table fits inside its content column, and the page never scrolls sideways.
+      const { maxImgWidth, maxTableWidth, contentWidth } = await page.evaluate(() => {
         const imgs = [...document.querySelectorAll('.guide-content img')]
+        const tables = [...document.querySelectorAll('.guide-content table')]
         return {
           maxImgWidth: Math.max(...imgs.map((img) => img.getBoundingClientRect().width)),
+          maxTableWidth: Math.max(...tables.map((table) => table.getBoundingClientRect().width)),
           contentWidth: document.querySelector('.guide-content').getBoundingClientRect().width,
         }
       })
       assert.ok(maxImgWidth <= contentWidth + 1, `widest image ${maxImgWidth}px should fit content column ${contentWidth}px`)
+      assert.ok(maxTableWidth <= contentWidth + 1, `widest table ${maxTableWidth}px should scroll inside content column ${contentWidth}px`)
       assert.ok(
         await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1),
         'the guide page must not scroll horizontally',
