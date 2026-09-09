@@ -156,7 +156,9 @@ Visually verifying a rendered `.docx` (not required to *use* Gantry, only to san
 
 ## Latest releases
 
-> **TODO:** link the releases page once tagging starts.
+Release notes live in **[CHANGELOG.md](CHANGELOG.md)** — one section per tagged release, newest first. It ships inside the zip release too, since a zip install has no `.git` and its user usually has no Azure DevOps access, making it the only place they can see what changed.
+
+Releases are tagged `v<version>` on their merge commit on `main`; the tag fires the zip-release pipeline (Pipelines → the zip-release pipeline → the run → Artifacts → `gantry-zip`). Every version bump adds a changelog section in the same commit — `tests/changelog.test.js` fails the build otherwise. Full process: [`docs/agents/release-process.md`](docs/agents/release-process.md).
 
 Early. The engine, definition schema and design definition are under active development. Treat the definition schema as unstable until v0.1.
 

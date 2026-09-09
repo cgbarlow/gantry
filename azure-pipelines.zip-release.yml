@@ -20,7 +20,7 @@
 # docs/user-guide/index.md relative to the package root; this is NOT
 # contributor/agent documentation, don't fold it back into the exclusion
 # below), package.json, package-lock.json, install.cmd, run.cmd,
-# README.md — everything needed to run gantry — plus a generated
+# README.md, CHANGELOG.md — everything needed to run gantry — plus a generated
 # .build-info.json stamping the source commit this build packaged (AB#345:
 # this install mode has no .git directory for lib/render.js's Document
 # Control commit stamp to read live, so it reads this file instead).
@@ -64,7 +64,13 @@ steps:
       cp -r bin lib web definitions instances "$stageDir/"
       mkdir -p "$stageDir/docs"
       cp -r docs/user-guide "$stageDir/docs/"
-      cp package.json package-lock.json install.cmd run.cmd README.md "$stageDir/"
+      # CHANGELOG.md is runtime content for this audience, not contributor docs:
+      # a zip install has no .git and its user typically has no Azure DevOps
+      # access, so the merge-commit messages and work items that carry this
+      # project's release history elsewhere are both unreadable to them. This
+      # file is the only way someone holding a zip can answer "what changed, and
+      # does this copy have the fix in it?".
+      cp package.json package-lock.json install.cmd run.cmd README.md CHANGELOG.md "$stageDir/"
       # AB#345 / WI #312: this package has no .git directory (deliberately — see the
       # header comment above), so lib/render.js's Document Control commit stamp has
       # nothing to `git rev-parse` against at render time. Stamp the source commit
