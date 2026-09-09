@@ -4,7 +4,7 @@ Gantry helps teams capture process information once and use it throughout a stag
 
 ## Getting Started
 
-There are two ways to get Gantry running. The usual path is cloning the repository and running `npm install`. If you're on a locked-down corporate machine with no Git and no admin rights, there's a zip-release path instead: download the zip from the project's Azure DevOps pipeline artifacts, unpack it, then run `install.cmd` followed by `run.cmd` — no Git, no admin install, and no Docker needed. Either path lands you at the same running Gantry server described below; see README.md for full setup instructions.
+To get Gantry running, clone the repository and run `npm install`, then start the server with `gantry serve`. See README.md for full setup instructions, including the prerequisites (Node.js, Pandoc and Git) and the corporate-proxy caveats.
 
 Start at the **Workspaces** landing page. It shows the instances that Gantry knows about and is also where you create your first one.
 

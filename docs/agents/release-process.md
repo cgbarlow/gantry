@@ -1,10 +1,9 @@
 # Release process
 
-How a change gets from a branch to a zip someone can download. The mechanics
-were settled well before this file existed — tags, the zip-release pipeline, the
-version in `package.json` — but they lived only in commit messages and people's
-heads. This writes them down, and adds the one part that was genuinely missing:
-a maintained changelog.
+How a change gets from a branch to a tagged release. The mechanics were settled
+well before this file existed — tags, the version in `package.json` — but they
+lived only in commit messages and people's heads. This writes them down, and
+adds the one part that was genuinely missing: a maintained changelog.
 
 ## The convention, in one line
 
@@ -16,21 +15,15 @@ locally, before the PR, where the fix is a one-line edit.
 
 ## Why a changelog is a requirement here and not a nicety
 
-Gantry has a class of user that no other release surface reaches. The
-zip-release package (`azure-pipelines.zip-release.yml`) exists for locked-down
-corporate machines: no Git, often no admin rights, and typically no Azure DevOps
-access. That package deliberately ships **without a `.git` directory**.
-
-So for that user:
-
-- `git log` — not available, there's no repo.
-- Merge commit messages — same.
-- Azure DevOps work items — no access.
+Gantry has a class of user that no other release surface reaches: people who
+run it without ever reading the repository. For them, `git log` is not somewhere
+they go, merge commit messages are not written for them, and Azure DevOps work
+items are usually behind an access boundary they don't have.
 
 Every place this project's release history has historically lived is invisible
 to exactly the people most likely to be holding an old build and wondering
-whether their problem is already fixed. `CHANGELOG.md` is staged into the zip
-for that reason, and is the only answer they have.
+whether their problem is already fixed. `CHANGELOG.md` ships in the repo root,
+in plain prose, and is the only answer they have.
 
 ## Cutting a release
 
@@ -67,11 +60,15 @@ for that reason, and is the only answer they have.
    ```
 
    The tag goes on the **merge commit on `main`**, matching every tag before it.
-   Tagging the branch commit instead would build a zip from code that isn't on
-   `main`.
-5. **The tag fires the zip-release pipeline** (`trigger: tags: include: v*`).
-   The artifact lands at Pipelines → the zip-release pipeline → the run →
-   Artifacts → `gantry-zip`.
+   Tagging the branch commit instead would mark code that isn't on `main`.
+
+## The zip-release path
+
+The trimmed, Git-free zip package for locked-down corporate Windows machines —
+`azure-pipelines.zip-release.yml`, `install.cmd` and `run.cmd` — no longer lives
+on `main`. It lives on the **`zip-release`** branch, cut from `main` at
+`0.2.2-beta`. Nothing on `main` builds or ships a zip; if that path is picked
+back up, it's that branch's history to continue.
 
 ## Version numbers
 

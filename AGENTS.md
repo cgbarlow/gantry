@@ -14,4 +14,4 @@ Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/do
 
 ### Releases
 
-Every version bump adds a `CHANGELOG.md` section in the same commit — enforced by `tests/changelog.test.js`. Tags go on the merge commit on `main` and fire the zip-release pipeline. See `docs/agents/release-process.md`.
+Every version bump adds a `CHANGELOG.md` section in the same commit — enforced by `tests/changelog.test.js`. Tags go on the merge commit on `main`. See `docs/agents/release-process.md`.
