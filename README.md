@@ -114,9 +114,7 @@ Already have winget? `winget install OpenJS.NodeJS.LTS` and `winget install --ex
 >
 > Then open a **new terminal** (`setx` only affects new sessions — a terminal or Explorer window that was already open keeps the old environment, which is the usual reason this looks like it didn't work) and re-run `npm install`. For a single session instead: `set NODE_USE_SYSTEM_CA=1` (cmd) or `$env:NODE_USE_SYSTEM_CA=1` (PowerShell). `NODE_USE_SYSTEM_CA` needs Node 22+ (already required above).
 >
-> **`install.cmd` and `run.cmd` do this for you** — they set `NODE_USE_SYSTEM_CA` themselves and also export the Windows root stores to `.node-runtime\windows-ca.pem` and point `NODE_EXTRA_CA_CERTS` at it, so neither needs the `setx` above. Both only add trust anchors on top of Node's built-in ones and only for their own session; certificate verification stays on, and nothing is written to your persistent environment or the registry. If you already have `NODE_EXTRA_CA_CERTS` set, they leave it alone. If an install still fails after that, your proxy's CA isn't in the Windows root store — ask IT where it lives and point `NODE_EXTRA_CA_CERTS` at a PEM copy of it before re-running.
-
-> **No admin rights on a locked-down corporate Windows machine?** The `.msi` installer above needs elevation. Skip step 1 entirely and run **`install.cmd`** (in the repo root, after step 4's `git clone`) instead — it downloads Node's official portable ZIP build (no installer, no registry writes) into a `.node-runtime\` folder inside the repo and runs `npm install` through it, all without touching PATH, the registry, or anything outside the repo folder. `run.cmd` automatically uses that bundled copy afterward, so step 4's `npm link` isn't needed either (nothing's on PATH for it to link onto) — skip straight to step 5. Git and Pandoc above still need their own install path (or your team's existing provisioning); this only covers Node/npm. Every run writes `install.log` next to the script (overwritten each time) — if it fails, send that file rather than a screenshot; `install.cmd /debug` reruns with full command tracing and npm's verbose log level for deeper troubleshooting.
+> If an install still fails after that, your proxy's CA isn't in the Windows root store — ask IT where it lives and point `NODE_EXTRA_CA_CERTS` at a PEM copy of it before re-running.
 
 **4. Clone and install Gantry** (same on both platforms)
 
@@ -127,14 +125,9 @@ npm install          # installs the engine's deps AND the web form's browser dep
 npm link             # makes `gantry` available on your PATH
 ```
 
-> **No Git either?** Skip `git clone` entirely and download the latest zip release instead (Azure DevOps → Pipelines → the zip-release pipeline → latest successful run → Artifacts → `gantry-zip`), then unpack it and continue from `npm install` above. It's a trimmed, runtime-only copy (no `tests/`, `reference/`, or contributor docs) — everything `install.cmd`/`run.cmd` need and nothing else.
->
-> **TODO:** publish to an npm feed (`npx gantry`) too, for people who only ever consume definitions and don't want even a zip-and-unpack step.
+> **TODO:** publish to an npm feed (`npx gantry`) too, for people who only ever consume definitions and don't want a clone-and-install step at all.
 
-**5. Run it.**
-
-- **Windows**: from the repo root, `run.cmd` is the one-step way to run Gantry locally: it starts `gantry serve` (skipping startup if one's already running) and opens the dashboard in your default browser. Works from any working directory and stops the server cleanly on Ctrl+C (or closing the window it opens).
-- **macOS/Linux**: `gantry serve` (from step 4's `npm link`), then open the URL it prints in your browser.
+**5. Run it.** `gantry serve` (from step 4's `npm link`), then open the URL it prints in your browser. Same on all platforms.
 
 ## Software dependencies
 
@@ -142,7 +135,7 @@ npm link             # makes `gantry` available on your PATH
 |---|---|---|
 | Node.js | 24+ | Engine runtime and CLI (`package.json` `engines.node` is `>=24`) |
 | `pandoc` | 3.x confirmed (3.1.3) | **Required for the `gantry render` CLI command** (shells out to it unconditionally). Optional for the web UI — `gantry serve` renders via an in-browser WASM Pandoc by default; native Pandoc is only needed there if you use Settings' native-engine toggle, or as the automatic fallback if WASM fails to load |
-| Git | 2.x+ | Needed to clone the source below (or skip it via `install.cmd`/a source ZIP) and for any Azure-DevOps-backed instance. Not needed for local-folder-only instances |
+| Git | 2.x+ | Needed to clone the source below and for any Azure-DevOps-backed instance. Not needed for local-folder-only instances |
 | A text editor | any | Modules are markdown; no tooling required to author them |
 | `vendor/anthropic-skills/{docx,pdf,pptx,xlsx}` | pinned to a commit, see `vendor/anthropic-skills/README.md` | Document-conversion code used to *verify* rendered artefacts during development (docx→pdf→image) — source-available, not open source; see that README for the license caveat. Not required at render time. |
 
@@ -156,9 +149,9 @@ Visually verifying a rendered `.docx` (not required to *use* Gantry, only to san
 
 ## Latest releases
 
-Release notes live in **[CHANGELOG.md](CHANGELOG.md)** — one section per tagged release, newest first. It ships inside the zip release too, since a zip install has no `.git` and its user usually has no Azure DevOps access, making it the only place they can see what changed.
+Release notes live in **[CHANGELOG.md](CHANGELOG.md)** — one section per tagged release, newest first. It's the one place a user can see what changed without reading commit messages or having Azure DevOps access.
 
-Releases are tagged `v<version>` on their merge commit on `main`; the tag fires the zip-release pipeline (Pipelines → the zip-release pipeline → the run → Artifacts → `gantry-zip`). Every version bump adds a changelog section in the same commit — `tests/changelog.test.js` fails the build otherwise. Full process: [`docs/agents/release-process.md`](docs/agents/release-process.md).
+Releases are tagged `v<version>` on their merge commit on `main`. Every version bump adds a changelog section in the same commit — `tests/changelog.test.js` fails the build otherwise. Full process: [`docs/agents/release-process.md`](docs/agents/release-process.md).
 
 Early. The engine, definition schema and design definition are under active development. Treat the definition schema as unstable until v0.1.
 

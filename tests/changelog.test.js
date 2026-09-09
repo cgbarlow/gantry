@@ -6,12 +6,12 @@ import { readFileSync } from 'node:fs'
 // every version bump adds a section to CHANGELOG.md in the same commit. A
 // changelog nobody is *forced* to update is a changelog that silently stops
 // being true after two releases — and this one has a real audience who cannot
-// fall back to anything else: a zip-release install has no .git directory and
-// its user typically has no Azure DevOps access, so merge-commit messages and
-// work items (where this project's release history has lived until now) are
-// both unreadable to them. CHANGELOG.md ships inside the zip precisely so it
-// is the one place that always answers "what changed, and does the copy I'm
-// holding have the fix in it?".
+// fall back to anything else: people who run Gantry without reading the
+// repository, and typically without Azure DevOps access, so merge-commit
+// messages and work items (where this project's release history has lived
+// until now) are both unreadable to them. CHANGELOG.md is the one place that
+// always answers "what changed, and does the copy I'm holding have the fix
+// in it?".
 //
 // Checking this in the unit suite rather than a pipeline-only step is
 // deliberate: it fails locally, before the PR, where fixing it is a one-line

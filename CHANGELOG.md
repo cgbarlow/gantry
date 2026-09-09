@@ -1,9 +1,8 @@
 # Changelog
 
 Release notes for Gantry itself — one section per tagged release, newest first.
-Written for the people who *run* Gantry, including anyone who only ever receives
-a zip release and has no repo, no git history and no Azure DevOps access to read
-instead.
+Written for the people who *run* Gantry, including anyone who never reads the
+repository and has no Azure DevOps access to read instead.
 
 Not to be confused with `definitions/<id>/<n>/CHANGELOG.md`, which is a different
 thing entirely: those describe changes to a *design definition* (modules renamed,
@@ -16,7 +15,21 @@ build if the version in `package.json` has no entry. See
 `docs/agents/release-process.md` for the full convention.
 
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
-commit on `main`, which is what triggers the zip-release pipeline.
+commit on `main`.
+
+## 0.2.3-beta — 2026-09-09
+
+### Removed
+
+- **The zip-release install path has moved off `main`** (WI #352). `install.cmd`,
+  `run.cmd` and the pipeline that packaged them into a downloadable zip now live
+  on the `zip-release` branch, cut from `main` at 0.2.2-beta. Nothing about a
+  normal install changes: clone the repository, `npm install`, `npm link`, then
+  `gantry serve` — the same on Windows, macOS and Linux. If you installed from a
+  zip or used `install.cmd`/`run.cmd`, that copy keeps working and keeps getting
+  fixes on the `zip-release` branch, but releases from `main` no longer produce a
+  zip. The corporate-proxy guidance those scripts automated is still in
+  README.md as the manual `NODE_USE_SYSTEM_CA` step.
 
 ## 0.2.2-beta — 2026-09-09
 

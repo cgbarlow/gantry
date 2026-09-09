@@ -12,4 +12,4 @@ Always pass `project: "Default"` explicitly on every Azure DevOps MCP tool call 
 
 If you change the version in `package.json`, add a matching `CHANGELOG.md` section in the same commit — `## <version> — <YYYY-MM-DD>`, newest at the top, written for someone running Gantry rather than someone reading the diff. `tests/changelog.test.js` fails the build otherwise.
 
-Release tags go on the merge commit on `main` (never a branch commit) and fire the zip-release pipeline. Full process in `docs/agents/release-process.md`.
+Release tags go on the merge commit on `main` (never a branch commit). Full process in `docs/agents/release-process.md`.
