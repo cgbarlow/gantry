@@ -11,3 +11,7 @@ Default canonical role names, applied as `System.Tags` strings (Azure DevOps has
 ### Domain docs
 
 Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Releases
+
+Every version bump adds a `CHANGELOG.md` section in the same commit — enforced by `tests/changelog.test.js`. Tags go on the merge commit on `main` and fire the zip-release pipeline. See `docs/agents/release-process.md`.

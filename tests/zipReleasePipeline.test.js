@@ -48,6 +48,19 @@ test('the zip-release staging step does not stage the rest of docs/ (contributor
   )
 })
 
+test('the zip-release staging step stages CHANGELOG.md', () => {
+  const script = stagingScript()
+  // The zip's user is the changelog's primary audience, not an afterthought:
+  // no .git to read history from, typically no Azure DevOps access to read
+  // work items from. Without this file in the package there is no way for
+  // them to tell what changed between two zips they've been sent.
+  assert.match(
+    script,
+    /\bCHANGELOG\.md\b/,
+    'staging step must copy CHANGELOG.md — a zip-release user has no other way to read release notes'
+  )
+})
+
 test('simulated staging produces a docs/ subtree containing only user-guide/index.md', () => {
   const stageDir = mkdtempSync(join(tmpdir(), 'gantry-zip-stage-'))
   try {
