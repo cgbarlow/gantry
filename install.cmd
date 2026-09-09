@@ -9,6 +9,11 @@ REM (non-admin) Windows account can run every step. If a real global `node`
 REM is already on PATH, run.cmd still prefers this bundled copy over
 REM it once installed, so the two never end up mismatched mid-session.
 REM
+REM It also trusts the Windows certificate store for the npm step, so a
+REM corporate TLS-inspecting proxy (Zscaler and friends) doesn't fail the
+REM install with UNABLE_TO_GET_ISSUER_CERT_LOCALLY — see the WI #350
+REM block further down for the full reasoning.
+REM
 REM Usage: install.cmd (double-click it, or run it from any directory) once,
 REM before the first run.cmd. Add /debug for verbose tracing
 REM (echoed commands, curl -v, npm's own verbose log level) when
@@ -183,6 +188,67 @@ if not exist "%NODE_EXE%" (
 echo Portable Node %NODE_VERSION% ^(%NODE_ARCH%^) ready at %NODE_HOME%.
 
 :npminstall
+REM ---------------------------------------------------------------------
+REM Corporate TLS inspection (WI #350). On a machine behind Zscaler /
+REM Netskope / any inspecting firewall, every HTTPS response is re-signed
+REM by a corporate CA that *Windows* trusts but *Node* does not — Node
+REM ships its own baked-in Mozilla root list and ignores the Windows
+REM certificate store by default. curl (Schannel) therefore downloads the
+REM Node ZIP above quite happily and then npm dies on the very first
+REM tarball with UNABLE_TO_GET_ISSUER_CERT_LOCALLY, which reads like a
+REM registry outage rather than a trust problem.
+REM
+REM Two independent mechanisms, both additive to Node's bundled roots
+REM (neither disables verification — `strict-ssl false` is not what this
+REM does, and must not be what anyone reaches for instead):
+REM
+REM   1. NODE_USE_SYSTEM_CA=1 — Node 22.15+ reads the Windows store
+REM      directly. This was previously a manual `setx` step in the README,
+REM      which is exactly the kind of instruction that gets followed and
+REM      still doesn't take effect: `setx` only reaches processes started
+REM      afterwards, so double-clicking install.cmd from an Explorer window
+REM      that was already open, or re-running in the same terminal, silently
+REM      keeps the old (empty) environment. Setting it here means the npm
+REM      process always has it, no matter how this script was launched.
+REM   2. NODE_EXTRA_CA_CERTS — the Windows root stores exported to a PEM
+REM      bundle. Belt-and-braces for the cases mechanism 1 misses: an older
+REM      Node, or a trust anchor Node's system-store reader doesn't pick up.
+REM
+REM Both are set inside this script's `setlocal` scope only — nothing is
+REM written to the user's persistent environment, the registry, or PATH,
+REM which is the whole premise of this installer. run.cmd repeats this
+REM block for itself (gantry's own Azure DevOps calls hit the same
+REM inspecting proxy at runtime); the two are deliberately duplicated
+REM rather than factored out, same as the Tee-Object relaunch above, so
+REM each script stays self-contained in the trimmed zip release.
+set "NODE_USE_SYSTEM_CA=1"
+REM `!NODE_EXTRA_CA_CERTS!`, not `%...%`: a value expanded at parse time
+REM inside a parenthesized block takes its own `)` with it — and a
+REM "C:\Program Files (x86)\..." certificate path is entirely plausible
+REM here — which would close this block early and mangle the script.
+REM Delayed expansion substitutes at run time, after the block is parsed.
+if not "%NODE_EXTRA_CA_CERTS%"=="" (
+  echo Using the certificate bundle already set in NODE_EXTRA_CA_CERTS: !NODE_EXTRA_CA_CERTS!
+  goto cadone
+)
+set "GANTRY_CA_PEM=%RUNTIME_DIR%\windows-ca.pem"
+if not exist "%RUNTIME_DIR%" mkdir "%RUNTIME_DIR%"
+if "%DEBUG%"=="1" echo [DEBUG] Exporting Windows root stores to %GANTRY_CA_PEM%
+REM Output path travels via the environment ($env:GANTRY_CA_PEM), not
+REM interpolated into the -Command string — same space-in-path reasoning as
+REM the relaunch block above. Kept as an inline -Command (rather than a
+REM .ps1 file) on purpose: PowerShell's execution policy applies to script
+REM *files*, and an AllSigned policy is exactly the kind of thing set by
+REM GPO on the locked-down machines this installer exists for.
+powershell -NoProfile -Command "$out=[Environment]::GetEnvironmentVariable('GANTRY_CA_PEM');$l=New-Object System.Collections.ArrayList;foreach($s in @('Cert:\LocalMachine\Root','Cert:\CurrentUser\Root')){try{foreach($c in (Get-ChildItem -Path $s -ErrorAction Stop)){[void]$l.Add('-----BEGIN CERTIFICATE-----');[void]$l.Add([Convert]::ToBase64String($c.RawData,'InsertLineBreaks'));[void]$l.Add('-----END CERTIFICATE-----')}}catch{}};if($l.Count -eq 0){exit 1};Set-Content -LiteralPath $out -Value $l -Encoding ascii;exit 0"
+if errorlevel 1 (
+  echo Could not export the Windows certificate store — continuing with NODE_USE_SYSTEM_CA alone.
+  goto cadone
+)
+set "NODE_EXTRA_CA_CERTS=%GANTRY_CA_PEM%"
+echo Trusting the Windows certificate store ^(for corporate TLS inspection^) — bundle: %GANTRY_CA_PEM%
+
+:cadone
 REM `--omit=dev`: this installer is for *running* gantry, not for
 REM developing/testing it, so devDependencies are skipped entirely.
 REM Without this, a full `npm install` also installs devDependency
@@ -203,6 +269,7 @@ if "%DEBUG%"=="1" (
 )
 if errorlevel 1 (
   echo npm install failed. 1>&2
+  echo If the log mentions UNABLE_TO_GET_ISSUER_CERT_LOCALLY or SELF_SIGNED_CERT_IN_CHAIN, your network inspects HTTPS traffic and the signing CA isn't in the Windows certificate store this script just exported — ask IT which store it lives in, or set NODE_EXTRA_CA_CERTS to a PEM of your corporate CA before re-running. 1>&2
   echo See %LOG_FILE% for the full trace ^(re-run with /debug for more detail^). 1>&2
   popd
   exit /b 1

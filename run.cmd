@@ -94,6 +94,38 @@ if "%DEBUG%"=="1" (
   echo [DEBUG] NPM_CMD=%NPM_CMD%
 )
 
+REM ---------------------------------------------------------------------
+REM Corporate TLS inspection (WI #350) — the same block install.cmd runs,
+REM for the same reason and with the same caveats (see the long comment
+REM over there).
+REM It matters twice over here: the first-run `npm install` below hits the
+REM npm registry, and `gantry serve` itself then makes HTTPS calls to Azure
+REM DevOps for the whole session — both through the inspecting proxy, both
+REM failing with UNABLE_TO_GET_ISSUER_CERT_LOCALLY without this. Additive
+REM to Node's bundled roots; verification stays on. Scoped to this script's
+REM `setlocal` — nothing persists to the user's environment or the registry.
+REM Duplicated rather than shared with install.cmd on purpose: each script
+REM has to stand alone in the trimmed zip release.
+set "NODE_USE_SYSTEM_CA=1"
+REM `!NODE_EXTRA_CA_CERTS!`, not `%...%` — a parse-time expansion inside a
+REM parenthesized block would bring its own `)` with it (think
+REM "C:\Program Files (x86)\...") and close the block early.
+if not "%NODE_EXTRA_CA_CERTS%"=="" (
+  if "%DEBUG%"=="1" echo [DEBUG] Using the certificate bundle already set in NODE_EXTRA_CA_CERTS: !NODE_EXTRA_CA_CERTS!
+  goto cadone
+)
+set "GANTRY_CA_PEM=%SCRIPT_DIR%.node-runtime\windows-ca.pem"
+if not exist "%SCRIPT_DIR%.node-runtime" mkdir "%SCRIPT_DIR%.node-runtime"
+if "%DEBUG%"=="1" echo [DEBUG] Exporting Windows root stores to %GANTRY_CA_PEM%
+powershell -NoProfile -Command "$out=[Environment]::GetEnvironmentVariable('GANTRY_CA_PEM');$l=New-Object System.Collections.ArrayList;foreach($s in @('Cert:\LocalMachine\Root','Cert:\CurrentUser\Root')){try{foreach($c in (Get-ChildItem -Path $s -ErrorAction Stop)){[void]$l.Add('-----BEGIN CERTIFICATE-----');[void]$l.Add([Convert]::ToBase64String($c.RawData,'InsertLineBreaks'));[void]$l.Add('-----END CERTIFICATE-----')}}catch{}};if($l.Count -eq 0){exit 1};Set-Content -LiteralPath $out -Value $l -Encoding ascii;exit 0"
+if errorlevel 1 (
+  if "%DEBUG%"=="1" echo [DEBUG] Could not export the Windows certificate store — continuing with NODE_USE_SYSTEM_CA alone.
+  goto cadone
+)
+set "NODE_EXTRA_CA_CERTS=%GANTRY_CA_PEM%"
+if "%DEBUG%"=="1" echo [DEBUG] NODE_EXTRA_CA_CERTS=%NODE_EXTRA_CA_CERTS%
+
+:cadone
 REM Matches bin/gantry.js's own `resolvePort` (--port flag > PORT env > 3000).
 REM We're not passing --port, so PORT (or its 3000 default) is also what the
 REM server itself will end up listening on.
@@ -121,6 +153,7 @@ if not exist "%SCRIPT_DIR%node_modules" (
   )
   if errorlevel 1 (
     echo npm install failed. 1>&2
+    echo If the log mentions UNABLE_TO_GET_ISSUER_CERT_LOCALLY or SELF_SIGNED_CERT_IN_CHAIN, your network inspects HTTPS traffic and the signing CA isn't in the Windows certificate store this script just exported — ask IT which store it lives in, or set NODE_EXTRA_CA_CERTS to a PEM of your corporate CA before re-running. 1>&2
     echo See %LOG_FILE% for the full trace ^(re-run with /debug for more detail^). 1>&2
     popd
     exit /b 1
