@@ -1931,3 +1931,66 @@ test('⤢ expands a field full-screen with both split panes and its toolbar; Esc
     rmSync(instancesDir, { recursive: true, force: true })
   }
 })
+
+// Regression: the "Source: …" citation under an embedded diagram is a link to the
+// asset's own served file (`/api/instance/assets/<id>/file?slug=…&stage=…`, WI #348). Because
+// that link is same-origin and had no `target`, preact-iso's global click handler swallowed it
+// as a client-side route change — the URL bar updated but no request was ever made, no client
+// route matched, and the user landed on the dashboard instead of the diagram. Every rendered
+// markdown link now carries `target="_blank"` (in-page `#anchor` links excepted), so the click
+// leaves the router alone and actually fetches the file.
+test('asset source citation opens the served file rather than being swallowed by the router', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await launchBrowser()
+      try {
+        const page = await browser.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        page.on('console', (msg) => {
+          if (msg.type() === 'error') pageErrors.push(msg.text())
+        })
+
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        // The citation only appears once the asset manifest fetch resolves, so wait for it.
+        const citation = page.locator('.preview p.asset-source a').first()
+        await assert.doesNotReject(citation.waitFor({ state: 'attached', timeout: 10_000 }))
+
+        // A local source (the instance's own copy) is labelled by its stored path but linked to
+        // the fetchable file endpoint.
+        const href = await citation.getAttribute('href')
+        assert.match(href, /^\/api\/instance\/assets\/[^/]+\/file\?/)
+        assert.equal(await citation.getAttribute('target'), '_blank', 'the citation must not be routed client-side')
+        assert.equal(await citation.getAttribute('rel'), 'noreferrer')
+
+        // And that href really serves the image, rather than the SPA shell the extensionless
+        // fallback in lib/server.js hands back for an unmatched path.
+        const response = await page.request.get(`${base}${href}`)
+        assert.equal(response.status(), 200)
+        assert.match(response.headers()['content-type'], /^image\//)
+
+        // In-page anchors stay in-page — a new tab would break heading navigation.
+        const anchorTargets = await page.evaluate(() =>
+          [...document.querySelectorAll('.preview a[href^="#"]')].map((a) => a.getAttribute('target'))
+        )
+        assert.ok(
+          anchorTargets.every((t) => t === null),
+          'in-page #anchor links must not open in a new tab'
+        )
+
+        assert.deepEqual(pageErrors, [])
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})

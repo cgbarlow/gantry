@@ -17,6 +17,22 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.4.3-beta — 2026-09-10
+
+### Fixed
+
+- **The "Source:" citation under a diagram now opens the file it names**
+  (WI #364). Clicking the citation beneath an embedded diagram appeared to do
+  nothing useful: the address bar changed to the asset's file address, but the
+  Workspaces home screen came up instead of the image — and any unsaved edits
+  in the module you were in went with it. The click was never leaving the
+  browser: the app was treating the link as a move to another screen, found no
+  screen at that address, and fell back to the dashboard. The file itself was
+  being served correctly the whole time. Citations now open in a new tab, so
+  the file loads and you keep your place — and your unsaved edits — in the
+  module editor. Any other link in a module's text behaves the same way; only
+  in-page links to a heading still jump within the page.
+
 ## 0.4.2-beta — 2026-09-10
 
 ### Fixed
