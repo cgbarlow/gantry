@@ -17,6 +17,19 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.3.1-beta — 2026-09-10
+
+### Changed
+
+- **The bundled `gantry` example now proposes Azure Container Apps instead of
+  virtual machines** (WI #354). Engineering review pointed out that Container
+  Apps provides the load balancing, health probing, always-on replicas,
+  revision-based deployment and log collection that the VM design would have
+  assembled by hand, so the Full SOAP's overview, topology diagrams, feature
+  breakdown, dependencies, sequencing, caveats and open questions were rewritten
+  around it. The VM design stays in the Alternatives sketch as the rejected
+  option. No application behaviour changes in this release.
+
 ## 0.3.0-beta — 2026-09-10
 
 ### Added

@@ -605,7 +605,7 @@ podman build --file ContainerFile \
 docker run -p 3000:3000 gantry
 ```
 
-Open http://localhost:3000 in a browser. The dashboard lists the instances shipped with the repo: `examples`, a fully worked design (Kiwi Cover Mutual's claims handling modernisation) with content and diagrams for every stage, and `gantry`, Gantry's own hosting proposal as a complete Full SOAP with Mermaid diagrams (WI #354; identifiers are angle-bracket placeholders, not real Contoso resources). Click any instance to view its stages, modules, and completeness. This one-liner uses the bundled `instances/` baked into the image — no volume mounts, no env vars.
+Open http://localhost:3000 in a browser. The dashboard lists the instances shipped with the repo: `examples`, a fully worked design (Kiwi Cover Mutual's claims handling modernisation) with content and diagrams for every stage, and `gantry`, Gantry's own Azure Container Apps hosting proposal as a complete Full SOAP with Mermaid diagrams (WI #354; identifiers are angle-bracket placeholders, not real Contoso resources). Click any instance to view its stages, modules, and completeness. This one-liner uses the bundled `instances/` baked into the image — no volume mounts, no env vars.
 
 ## Corporate proxy / custom CA certificates
 
