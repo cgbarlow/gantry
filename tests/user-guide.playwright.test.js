@@ -1,5 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { cpSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { createServer } from '../lib/server.js'
 
@@ -184,8 +187,35 @@ test('User Guide: screenshots fit the content column and open in a click-to-expa
   })
 })
 
+// WI #356: unlike this file's other tests (doc-only routes, no instance data needed), this one
+// needs a real, reachable "examples" instance for its header assertions — the shared no-args
+// `withRunningServer` above points at the real (pre-#358, not-yet-migrated) `instances/` directory,
+// which this repo's own registry no longer auto-discovers as a bare directory. A scratch copy plus
+// startup migration gives this one test real instance data without ever touching the checked-out
+// `instances/` directory itself.
+function withRunningExamplesServer(fn) {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+  rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+  return new Promise((resolve, reject) => {
+    const server = createServer({ instancesDir, migrateWorkspacesOnStart: true })
+    server.listen(0, async () => {
+      const { port } = server.address()
+      try {
+        await fn(`http://localhost:${port}`)
+        resolve()
+      } catch (err) {
+        reject(err)
+      } finally {
+        server.close()
+        rmSync(instancesDir, { recursive: true, force: true })
+      }
+    })
+  })
+}
+
 test('User Guide: landing and instance headers place the link before Settings', async () => {
-  await withRunningServer(async (base) => {
+  await withRunningExamplesServer(async (base) => {
     const browser = await launchBrowser()
     try {
       const page = await browser.newPage()

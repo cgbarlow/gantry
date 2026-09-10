@@ -252,8 +252,9 @@ test('POST /api/instance/assets registers a real asset, stored under the instanc
       assert.deepEqual(bytes, Buffer.from(ONE_PX_PNG_BASE64, 'base64'))
     })
 
-    // Sits in assets/ alongside — not nested inside — modules/.
-    const onDisk = readFileSync(join(instancesDir, 'my-initiative', 'assets', created.filename))
+    // Sits in assets/ alongside — not nested inside — modules/. WI #356: the server's own startup
+    // migration moved this scratch instance into the reserved `default` server workspace.
+    const onDisk = readFileSync(join(instancesDir, 'default', 'my-initiative', 'assets', created.filename))
     assert.deepEqual(onDisk, Buffer.from(ONE_PX_PNG_BASE64, 'base64'))
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })

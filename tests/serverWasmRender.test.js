@@ -150,9 +150,10 @@ test('render-wasm-prepare then render-wasm-finish on a local instance writes the
       assert.ok(prep.referenceDocBase64, 'the v2 reference doc is handed to the browser for styling')
       assert.match(prep.docxPath, /\.docx$/)
       // The markdown is on disk already, next to where the docx will land — same as the native route.
-      const mdPath = join(instancesDir, 'examples', 'out', `${prep.basename}.md`)
+      // WI #356: the server's own startup migration moved this scratch instance into the reserved `default` server workspace.
+      const mdPath = join(instancesDir, 'default', 'examples', 'out', `${prep.basename}.md`)
       assert.equal(readFileSync(mdPath, 'utf8'), prep.markdown)
-      assert.equal(existsSync(join(instancesDir, 'examples', 'out', `${prep.basename}.docx`)), false)
+      assert.equal(existsSync(join(instancesDir, 'default', 'examples', 'out', `${prep.basename}.docx`)), false)
 
       const docxBytes = fakeWasmConvert(prep.markdown, prep.referenceDocBase64)
       const finishRes = await fetch(`${base}/api/instance/render-wasm-finish/soap?slug=examples`, {
@@ -163,7 +164,7 @@ test('render-wasm-prepare then render-wasm-finish on a local instance writes the
       assert.equal(finishRes.status, 200)
       const finish = await finishRes.json()
       assert.equal(finish.docxPath, prep.docxPath)
-      const landed = readFileSync(join(instancesDir, 'examples', 'out', `${prep.basename}.docx`))
+      const landed = readFileSync(join(instancesDir, 'default', 'examples', 'out', `${prep.basename}.docx`))
       assert.deepEqual(landed, docxBytes)
       assert.equal(landed.subarray(0, 2).toString(), 'PK')
     })

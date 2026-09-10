@@ -351,7 +351,8 @@ test('a local-instance Render produces a real, well-formed .docx via client-side
         assert.ok(requestedPaths.includes('/api/instance/render-wasm-finish/soap'), `expected render-wasm-finish among: ${requestedPaths.join(', ')}`)
         assert.ok(!requestedPaths.includes('/api/instance/render/soap'), `expected no native render call, got: ${requestedPaths.join(', ')}`)
 
-        const docxPath = join(instancesDir, 'examples', 'out', 'Examples - Solution on a Page.docx')
+        // WI #356: the server's own startup migration moved this scratch instance into the reserved `default` server workspace.
+        const docxPath = join(instancesDir, 'default', 'examples', 'out', 'Examples - Solution on a Page.docx')
         const docxBytes = readFileSync(docxPath)
         assert.equal(docxBytes.subarray(0, 2).toString(), 'PK', '.docx should start with a PK zip header')
         const markdown = docxToMarkdown(docxBytes.toString('base64'))

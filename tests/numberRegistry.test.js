@@ -25,8 +25,15 @@ import {
 import { withScratchInstances } from './helpers/lifecycle.js'
 
 
+// WI #356: a LOCAL_SCOPE-scoped instance now physically lives under the reserved `default` server
+// workspace folder (lib/instanceRegistry.js's MIGRATED_DEFAULT_WORKSPACE_FOLDER) — creation-time
+// ordering (localInstanceOrderKey) stats that exact path.
 function makeLocalInstance(instancesDir, slug) {
-  mkdirSync(join(instancesDir, slug), { recursive: true })
+  mkdirSync(join(instancesDir, 'default', slug), { recursive: true })
+}
+
+function registerLocalInstance(slug, options) {
+  registerInstance(slug, { kind: 'directory', workspace: 'default' }, options)
 }
 
 // ---------- workspace numbers ----------
@@ -86,7 +93,7 @@ test('resolveInstanceNumber/resolveSlugByNumber round-trip, undefined when unkno
 test('scopeKeyForSlug returns LOCAL_SCOPE for a local instance and the workspace id for an azureDevOps one', async () => {
   await withScratchInstances((instancesDir) => {
     makeLocalInstance(instancesDir, 'local-one')
-    registerInstance('local-one', { kind: 'local' }, { instancesDir })
+    registerLocalInstance('local-one', { instancesDir })
     assert.equal(scopeKeyForSlug('local-one', { instancesDir }), LOCAL_SCOPE)
 
     registerInstance(
@@ -111,7 +118,7 @@ test('scopeKeyForSlug treats a never-registered slug as local', async () => {
 test('instanceNumbersFor gives a local instance workspaceNumber = LOCAL_WORKSPACE_NUMBER', async () => {
   await withScratchInstances((instancesDir) => {
     makeLocalInstance(instancesDir, 'demo')
-    registerInstance('demo', { kind: 'local' }, { instancesDir })
+    registerLocalInstance('demo', { instancesDir })
     const { workspaceNumber, instanceNumber } = instanceNumbersFor('demo', { instancesDir })
     assert.equal(workspaceNumber, LOCAL_WORKSPACE_NUMBER)
     assert.equal(instanceNumber, 1)
@@ -147,8 +154,8 @@ test('resolveSlugForRef resolves a fully-qualified ref, and defaults a workspace
   await withScratchInstances((instancesDir) => {
     makeLocalInstance(instancesDir, 'first')
     makeLocalInstance(instancesDir, 'second')
-    registerInstance('first', { kind: 'local' }, { instancesDir })
-    registerInstance('second', { kind: 'local' }, { instancesDir })
+    registerLocalInstance('first', { instancesDir })
+    registerLocalInstance('second', { instancesDir })
     instanceNumbersFor('first', { instancesDir })
     instanceNumbersFor('second', { instancesDir })
 
@@ -186,7 +193,7 @@ test('backfillNumberRegistry assigns numbers to pre-existing workspaces/instance
     const ws = registerWorkspace({ organization: 'org', project: 'proj', repository: 'repo' }, { instancesDir })
     registerInstance('remote-one', { kind: 'azureDevOps', workspaceId: ws.id }, { instancesDir })
     makeLocalInstance(instancesDir, 'local-one')
-    registerInstance('local-one', { kind: 'local' }, { instancesDir })
+    registerLocalInstance('local-one', { instancesDir })
 
     const result = backfillNumberRegistry({ instancesDir })
     assert.equal(result.workspacesAssigned, 1)
@@ -207,10 +214,10 @@ test('backfillNumberRegistry orders pre-existing local instances by directory cr
     makeLocalInstance(instancesDir, 'alpha')
     const older = new Date(Date.now() - 60_000)
     const newer = new Date()
-    utimesSync(join(instancesDir, 'zeta'), older, older)
-    utimesSync(join(instancesDir, 'alpha'), newer, newer)
-    registerInstance('zeta', { kind: 'local' }, { instancesDir })
-    registerInstance('alpha', { kind: 'local' }, { instancesDir })
+    utimesSync(join(instancesDir, 'default', 'zeta'), older, older)
+    utimesSync(join(instancesDir, 'default', 'alpha'), newer, newer)
+    registerLocalInstance('zeta', { instancesDir })
+    registerLocalInstance('alpha', { instancesDir })
 
     backfillNumberRegistry({ instancesDir })
 
@@ -223,7 +230,7 @@ test('backfillNumberRegistry is idempotent — a second call assigns nothing new
   await withScratchInstances((instancesDir) => {
     registerWorkspace({ organization: 'org', project: 'proj', repository: 'repo' }, { instancesDir })
     makeLocalInstance(instancesDir, 'demo')
-    registerInstance('demo', { kind: 'local' }, { instancesDir })
+    registerLocalInstance('demo', { instancesDir })
 
     const first = backfillNumberRegistry({ instancesDir })
     assert.ok(first.workspacesAssigned + first.instancesAssigned > 0)

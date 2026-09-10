@@ -143,7 +143,7 @@ test('the synced-fields panel shows the link prompt when unlinked, then the dist
               await panel.locator('input#synced-title').fill('Custom shape title')
               await panel.locator('input#synced-title').press('Enter')
               await assert.doesNotReject(panel.locator('text=Saved.').waitFor({ timeout: 10_000 }))
-              const stored = readInstance('my-initiative', { instancesDir })
+              const stored = readInstance('my-initiative', { instancesDir: join(instancesDir, 'default') })
               assert.equal(stored.syncedFields.shape.title, 'Custom shape title')
               await assert.doesNotReject(panel.locator('text=Title · overridden').waitFor({ timeout: 5_000 }))
 

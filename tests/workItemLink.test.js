@@ -4,6 +4,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInstance, readInstance } from '../lib/instance.js'
+import { writeWorkspaceJson } from '../lib/workspaceDirectory.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import {
@@ -122,17 +123,21 @@ test('tagLinkedWorkItems tags only recorded stage work items, preserves tags, an
 test('tagAllLinkedWorkItems scans every registered linked instance and skips unlinked instances', async () => {
   await withFakeWorkItemsServer({}, async (baseUrl) => {
     await withScratchInstances(async (instancesDir) => {
+      // WI #356: instances live inside a real server workspace folder (`default`, the reserved
+      // scope) — `tagAllLinkedWorkItems`'s own registry scan only auto-discovers instances there.
+      writeWorkspaceJson(instancesDir, 'default', { name: 'default', kind: 'local', createdAt: new Date().toISOString() })
+      const localInstancesDir = join(instancesDir, 'default')
       const linkedSlugs = ['first-initiative', 'second-initiative']
       const links = []
       for (const slug of [...linkedSlugs, 'unlinked-initiative']) {
-        createInstance('design', slug, { instancesDir })
+        createInstance('design', slug, { instancesDir: localInstancesDir })
         if (slug === 'unlinked-initiative') continue
         const parentId = await createParentWorkItem(baseUrl)
         links.push(
           await linkInstanceToWorkItem(
             slug,
             { organization: WI_ORGANIZATION, project: WI_PROJECT, parentId, pat: VALID_PAT, baseUrl },
-            { instancesDir }
+            { instancesDir: localInstancesDir }
           )
         )
       }
@@ -156,15 +161,17 @@ test('tagAllLinkedWorkItems scans every registered linked instance and skips unl
 test('tagAllLinkedWorkItems accepts per-instance credentials and continues after an instance failure', async () => {
   await withFakeWorkItemsServer({}, async (baseUrl) => {
     await withScratchInstances(async (instancesDir) => {
+      writeWorkspaceJson(instancesDir, 'default', { name: 'default', kind: 'local', createdAt: new Date().toISOString() })
+      const localInstancesDir = join(instancesDir, 'default')
       const links = []
       for (const slug of ['first-initiative', 'second-initiative']) {
-        createInstance('design', slug, { instancesDir })
+        createInstance('design', slug, { instancesDir: localInstancesDir })
         const parentId = await createParentWorkItem(baseUrl)
         links.push(
           await linkInstanceToWorkItem(
             slug,
             { organization: WI_ORGANIZATION, project: WI_PROJECT, parentId, pat: VALID_PAT, baseUrl },
-            { instancesDir }
+            { instancesDir: localInstancesDir }
           )
         )
       }

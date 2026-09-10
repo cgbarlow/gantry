@@ -7,14 +7,25 @@ import { createInstance, writeModule } from '../lib/instance.js'
 import { loadDefinition } from '../lib/definition.js'
 import { listRegistry } from '../lib/registry.js'
 import { registerInstance, archiveInstance } from '../lib/instanceRegistry.js'
+import { writeWorkspaceJson } from '../lib/workspaceDirectory.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withScratchInstances } from './helpers/lifecycle.js'
+
+// WI #356: a directory-backed instance now lives inside a real server workspace folder (a
+// workspace.json marker plus instance subdirectories), not directly under the workspaces root —
+// this seeds one and returns its concrete path, so `createInstance`'s own (unchanged) local path can
+// be pointed at it exactly like any other flat instancesDir.
+function seedWorkspace(instancesDir, folder = 'default') {
+  writeWorkspaceJson(instancesDir, folder, { name: folder, kind: 'local', createdAt: new Date().toISOString() })
+  return join(instancesDir, folder)
+}
 
 
 test('listRegistry lists every instance, sorted by slug, with definition, current stage, status and assignee', async () => {
   await withScratchInstances((instancesDir) => {
-    createInstance('design', 'zebra-initiative', { instancesDir })
-    createInstance('design', 'alpha-initiative', { instancesDir, assignee: 'c.barlow' })
+    const workspaceDir = seedWorkspace(instancesDir)
+    createInstance('design', 'zebra-initiative', { instancesDir: workspaceDir })
+    createInstance('design', 'alpha-initiative', { instancesDir: workspaceDir, assignee: 'c.barlow' })
 
     const registry = listRegistry({ instancesDir })
     assert.deepEqual(
@@ -63,18 +74,19 @@ test('listRegistry lists every instance, sorted by slug, with definition, curren
 
 test('listRegistry uses the newest local instance or module mtime for updatedAt', async () => {
   await withScratchInstances((instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir })
+    const workspaceDir = seedWorkspace(instancesDir)
+    createInstance('design', 'my-initiative', { instancesDir: workspaceDir })
     // Let any one-time module heading migration finish before making the timestamps deterministic for this assertion.
     listRegistry({ instancesDir })
-    const instancePath = join(instancesDir, 'my-initiative', 'instance.yaml')
+    const instancePath = join(workspaceDir, 'my-initiative', 'instance.yaml')
     const older = new Date('2026-01-01T00:00:00Z')
     const newer = new Date('2026-02-01T00:00:00Z')
     const definition = loadDefinition('design')
     utimesSync(instancePath, older, older)
     for (const moduleId of definition.stages[0].modules) {
-      utimesSync(join(instancesDir, 'my-initiative', 'modules', `${moduleId}.md`), older, older)
+      utimesSync(join(workspaceDir, 'my-initiative', 'modules', `${moduleId}.md`), older, older)
     }
-    utimesSync(join(instancesDir, 'my-initiative', 'modules', 'background.md'), newer, newer)
+    utimesSync(join(workspaceDir, 'my-initiative', 'modules', 'background.md'), newer, newer)
 
     assert.equal(listRegistry({ instancesDir })[0].updatedAt, newer.toISOString())
   })
@@ -82,7 +94,8 @@ test('listRegistry uses the newest local instance or module mtime for updatedAt'
 
 test('listRegistry reports "complete" once every required field for the current stage is filled in, independently of assignee', async () => {
   await withScratchInstances((instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir, assignee: 'c.barlow' })
+    const workspaceDir = seedWorkspace(instancesDir)
+    createInstance('design', 'my-initiative', { instancesDir: workspaceDir, assignee: 'c.barlow' })
     const definition = loadDefinition('design')
 
     for (const moduleId of ['background', 'introduction', 'design-basis', 'solution-definition', 'team-and-estimates']) {
@@ -91,7 +104,7 @@ test('listRegistry reports "complete" once every required field for the current 
       for (const field of moduleSpec.fields) {
         if (field.required || field.requiredAt) fields[field.id] = field.type === 'list' ? ['Filled in.'] : 'Filled in.'
       }
-      writeModule(definition, 'my-initiative', moduleId, { status: 'agreed', owner: '', fields }, { instancesDir })
+      writeModule(definition, 'my-initiative', moduleId, { status: 'agreed', owner: '', fields }, { instancesDir: workspaceDir })
     }
 
     const registry = listRegistry({ instancesDir })
@@ -104,14 +117,15 @@ test('listRegistry reports "complete" once every required field for the current 
 // The instance-level assignee (#97) is a plain field on the instance record, not derived by scanning any module's frontmatter `owner` — even though every module below has one set, it must not leak into this row.
 test('listRegistry falls back to \'\' for assignee when the instance record has none set, regardless of module frontmatter owner', async () => {
   await withScratchInstances((instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir })
+    const workspaceDir = seedWorkspace(instancesDir)
+    createInstance('design', 'my-initiative', { instancesDir: workspaceDir })
     const definition = loadDefinition('design')
     writeModule(
       definition,
       'my-initiative',
       'background',
       { status: 'draft', owner: 'c.barlow', fields: {} },
-      { instancesDir }
+      { instancesDir: workspaceDir }
     )
 
     const registry = listRegistry({ instancesDir })
@@ -127,8 +141,9 @@ test('listRegistry returns an empty array when instancesDir has no instances', a
 
 test('listRegistry excludes an archived instance by default, and includes it (with archived: true) on includeArchived (#223)', async () => {
   await withScratchInstances((instancesDir) => {
-    createInstance('design', 'alpha-initiative', { instancesDir })
-    createInstance('design', 'zebra-initiative', { instancesDir })
+    const workspaceDir = seedWorkspace(instancesDir)
+    createInstance('design', 'alpha-initiative', { instancesDir: workspaceDir })
+    createInstance('design', 'zebra-initiative', { instancesDir: workspaceDir })
     // Backfill both, then archive one.
     listRegistry({ instancesDir })
     archiveInstance('zebra-initiative', { instancesDir })
@@ -153,13 +168,14 @@ test('listRegistry excludes an archived instance by default, and includes it (wi
 
 test('listRegistry skips a stale registry entry (instance deleted from disk after being registered), without failing the whole listing', async () => {
   await withScratchInstances((instancesDir) => {
-    createInstance('design', 'alpha-initiative', { instancesDir })
-    createInstance('design', 'zebra-initiative', { instancesDir })
+    const workspaceDir = seedWorkspace(instancesDir)
+    createInstance('design', 'alpha-initiative', { instancesDir: workspaceDir })
+    createInstance('design', 'zebra-initiative', { instancesDir: workspaceDir })
     // Backfills both slugs into the registry file.
     listRegistry({ instancesDir })
 
     // Simulates an instance directory removed after the registry already knows about it (manual cleanup, a rename, a future delete feature) — the registry itself has no way to notice this on its own.
-    rmSync(join(instancesDir, 'alpha-initiative'), { recursive: true, force: true })
+    rmSync(join(workspaceDir, 'alpha-initiative'), { recursive: true, force: true })
 
     const registry = listRegistry({ instancesDir })
     assert.deepEqual(
@@ -171,24 +187,25 @@ test('listRegistry skips a stale registry entry (instance deleted from disk afte
 
 test('listRegistry still throws on a genuine read failure, rather than silently skipping it the way a stale/missing entry is', async () => {
   await withScratchInstances((instancesDir) => {
-    createInstance('design', 'broken-initiative', { instancesDir })
+    const workspaceDir = seedWorkspace(instancesDir)
+    createInstance('design', 'broken-initiative', { instancesDir: workspaceDir })
     // Unlike a *missing* instance.yaml (readInstance's "No instance ..." error, which listRegistry deliberately skips), a present-but-unparseable instance.yaml is a real problem that must still surface — it isn't the "instance was deleted after being registered" case the stale-entry skip above exists for.
-    writeFileSync(join(instancesDir, 'broken-initiative', 'instance.yaml'), ': not: valid: yaml: [')
+    writeFileSync(join(workspaceDir, 'broken-initiative', 'instance.yaml'), ': not: valid: yaml: [')
 
     assert.throws(() => listRegistry({ instancesDir }), /Nested mappings/)
   })
 })
 
-test('listRegistry reflects the real examples fixture in this repo', () => {
-  const registry = listRegistry()
-  const slugs = registry.map((i) => i.slug)
-  assert.ok(slugs.includes('examples'))
-
-  const examples = registry.find((i) => i.slug === 'examples')
-  assert.equal(examples.definition, 'design')
-  assert.equal(examples.stage, 'shape')
-  assert.equal(examples.status, 'complete')
-  assert.equal(examples.assignee, 'c.barlow')
+// WI #356: the real `instances/examples`/`instances/gantry` fixtures are still bare (not yet under
+// a server workspace folder) until Feature #358 deliberately moves them to `workspaces/examples/*` —
+// see that Feature's own acceptance criteria. Until then, `listRegistry()`'s default (unmigrated)
+// call correctly finds nothing at the repo's real `instances/` root, exactly like any other
+// pre-#356 flat directory — this is proven directly against a scratch fixture instead.
+test('listRegistry does not discover a bare (workspace-unqualified) instance directory — that requires migration first', async () => {
+  await withScratchInstances((instancesDir) => {
+    createInstance('design', 'bare-initiative', { instancesDir })
+    assert.deepEqual(listRegistry({ instancesDir }), [])
+  })
 })
 
 // ---------- #102: the `workspace` field, for the Workspaces dashboard's grouping ----------
@@ -203,9 +220,10 @@ const SEED_FILES = {
   '/gantry-workspace/instance-two/instance.yaml': 'definition: design\nstage: shape\nassignee: c.barlow\n',
 }
 
-test('listRegistry has no `workspace` field on a local row — Workspace is an Azure-DevOps-repo concept only', async () => {
+test('listRegistry has no `workspace` field on a directory-backed row — the dashboard `workspace` field is an Azure-DevOps-repo concept only', async () => {
   await withScratchInstances((instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir })
+    const workspaceDir = seedWorkspace(instancesDir)
+    createInstance('design', 'my-initiative', { instancesDir: workspaceDir })
     const registry = listRegistry({ instancesDir })
     assert.equal('workspace' in registry[0], false)
   })

@@ -58,7 +58,7 @@ test('the Stage advancement panel blocks on a failing gate, then advances the in
     })
 
     // Genuinely untouched on disk.
-    assert.equal(readInstance('my-initiative', { instancesDir }).stage, 'shape')
+    assert.equal(readInstance('my-initiative', { instancesDir: join(instancesDir, 'default') }).stage, 'shape')
   })
 })
 
@@ -95,7 +95,7 @@ test('declining the confirmation leaves the instance at its current stage', asyn
       }
     })
 
-    assert.equal(readInstance('my-initiative', { instancesDir }).stage, 'shape')
+    assert.equal(readInstance('my-initiative', { instancesDir: join(instancesDir, 'default') }).stage, 'shape')
   })
 })
 
@@ -142,7 +142,7 @@ test('confirming advances the instance to its next stage, and the header reflect
       }
     })
 
-    assert.equal(readInstance('my-initiative', { instancesDir }).stage, 'hld-define')
+    assert.equal(readInstance('my-initiative', { instancesDir: join(instancesDir, 'default') }).stage, 'hld-define')
   })
 })
 
@@ -204,7 +204,7 @@ test('confirming advances the instance exactly once, even after the current stag
       }
     })
 
-    assert.equal(readInstance('my-initiative', { instancesDir }).stage, 'hld-define')
+    assert.equal(readInstance('my-initiative', { instancesDir: join(instancesDir, 'default') }).stage, 'hld-define')
   })
 })
 

@@ -36,13 +36,13 @@ const LOCATION = { organization: 'fake-org', project: 'fake-project', repository
 
 test('POST /api/instance/archive archives a known instance and is reflected on disk', async () => {
   await withScratchServer(async (base, instancesDir) => {
-    createInstance('design', 'alpha-initiative', { instancesDir })
+    createInstance('design', 'alpha-initiative', { instancesDir: join(instancesDir, 'default') })
 
     const res = await postJSON(base, '/api/instance/archive', { slug: 'alpha-initiative' })
     assert.equal(res.status, 200)
     assert.deepEqual(await res.json(), {
       slug: 'alpha-initiative',
-      location: { kind: 'local' },
+      location: { kind: 'directory', workspace: 'default' },
       archived: true,
     })
     assert.equal(isInstanceArchived('alpha-initiative', { instancesDir }), true)
@@ -51,7 +51,7 @@ test('POST /api/instance/archive archives a known instance and is reflected on d
 
 test('POST /api/instance/archive is idempotent for an already-archived instance', async () => {
   await withScratchServer(async (base, instancesDir) => {
-    createInstance('design', 'alpha-initiative', { instancesDir })
+    createInstance('design', 'alpha-initiative', { instancesDir: join(instancesDir, 'default') })
     await postJSON(base, '/api/instance/archive', { slug: 'alpha-initiative' })
 
     const res = await postJSON(base, '/api/instance/archive', { slug: 'alpha-initiative' })
@@ -79,14 +79,14 @@ test('POST /api/instance/archive 400s for an invalid slug', async () => {
 
 test('POST /api/instance/restore returns an archived instance to exactly its prior state', async () => {
   await withScratchServer(async (base, instancesDir) => {
-    createInstance('design', 'alpha-initiative', { instancesDir })
+    createInstance('design', 'alpha-initiative', { instancesDir: join(instancesDir, 'default') })
     await postJSON(base, '/api/instance/archive', { slug: 'alpha-initiative' })
 
     const res = await postJSON(base, '/api/instance/restore', { slug: 'alpha-initiative' })
     assert.equal(res.status, 200)
     assert.deepEqual(await res.json(), {
       slug: 'alpha-initiative',
-      location: { kind: 'local' },
+      location: { kind: 'directory', workspace: 'default' },
       archived: false,
     })
     assert.equal(isInstanceArchived('alpha-initiative', { instancesDir }), false)
@@ -95,7 +95,7 @@ test('POST /api/instance/restore returns an archived instance to exactly its pri
 
 test('POST /api/instance/restore is idempotent, and 404s for an unknown instance', async () => {
   await withScratchServer(async (base, instancesDir) => {
-    createInstance('design', 'alpha-initiative', { instancesDir })
+    createInstance('design', 'alpha-initiative', { instancesDir: join(instancesDir, 'default') })
     const ok = await postJSON(base, '/api/instance/restore', { slug: 'alpha-initiative' })
     assert.equal(ok.status, 200)
 

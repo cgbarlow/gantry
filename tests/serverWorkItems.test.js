@@ -45,7 +45,7 @@ function withScratchGantryServer(fn) {
 
 function fillShapeStage(instancesDir, slug) {
   for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
-    cpSync(join('instances', 'examples', 'modules', `${moduleId}.md`), join(instancesDir, slug, 'modules', `${moduleId}.md`))
+    cpSync(join('instances', 'examples', 'modules', `${moduleId}.md`), join(instancesDir, 'default', slug, 'modules', `${moduleId}.md`))
   }
 }
 
@@ -53,7 +53,7 @@ function fillShapeStage(instancesDir, slug) {
 
 test('GET /api/instance reports workItem as null for an unlinked instance, then the recorded link once linked', async () => {
   await withScratchGantryServer(async (gantryBase, wiBaseUrl, instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir })
+    createInstance('design', 'my-initiative', { instancesDir: join(instancesDir, 'default') })
 
     const before = await (await fetch(`${gantryBase}/api/instance?slug=my-initiative`)).json()
     assert.equal(before.workItem, null)
@@ -76,7 +76,7 @@ test('GET /api/instance reports workItem as null for an unlinked instance, then 
 
 test('POST /api/instance/work-items/link with no PAT returns the structured "authentication required" response', async () => {
   await withScratchGantryServer(async (gantryBase, wiBaseUrl, instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir })
+    createInstance('design', 'my-initiative', { instancesDir: join(instancesDir, 'default') })
     const parentId = await createParentWorkItem(wiBaseUrl)
 
     const res = await fetch(`${gantryBase}/api/instance/work-items/link?slug=my-initiative`, {
@@ -92,7 +92,7 @@ test('POST /api/instance/work-items/link with no PAT returns the structured "aut
 
 test('POST /api/instance/work-items/link with a PAT Azure DevOps itself rejects returns the same structured response', async () => {
   await withScratchGantryServer(async (gantryBase, wiBaseUrl, instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir })
+    createInstance('design', 'my-initiative', { instancesDir: join(instancesDir, 'default') })
     const parentId = await createParentWorkItem(wiBaseUrl)
 
     const res = await fetch(`${gantryBase}/api/instance/work-items/link?slug=my-initiative`, {
@@ -108,7 +108,7 @@ test('POST /api/instance/work-items/link with a PAT Azure DevOps itself rejects 
 
 test('POST /api/instance/work-items/link with missing fields reports 400, not 500', async () => {
   await withScratchGantryServer(async (gantryBase, wiBaseUrl, instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir })
+    createInstance('design', 'my-initiative', { instancesDir: join(instancesDir, 'default') })
 
     const res = await fetch(`${gantryBase}/api/instance/work-items/link?slug=my-initiative`, {
       method: 'POST',
@@ -123,7 +123,7 @@ test('POST /api/instance/work-items/link with missing fields reports 400, not 50
 
 test('POST /api/instance/work-items/link succeeds, creating one child work item per stage and recording the link', async () => {
   await withScratchGantryServer(async (gantryBase, wiBaseUrl, instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir })
+    createInstance('design', 'my-initiative', { instancesDir: join(instancesDir, 'default') })
     const parentId = await createParentWorkItem(wiBaseUrl)
 
     const res = await fetch(`${gantryBase}/api/instance/work-items/link?slug=my-initiative`, {
@@ -137,7 +137,7 @@ test('POST /api/instance/work-items/link succeeds, creating one child work item 
     assert.equal(body.workItemType, 'Task')
     assert.deepEqual(Object.keys(body.stages).sort(), ['detailed-design', 'handover', 'hld-define', 'shape'])
 
-    const instance = readInstance('my-initiative', { instancesDir })
+    const instance = readInstance('my-initiative', { instancesDir: join(instancesDir, 'default') })
     assert.deepEqual(instance.workItem, body)
   })
 })
@@ -197,7 +197,7 @@ test('POST /api/instance/work-items/link makes the link visible when browsing a 
 
 test('POST /api/instance/work-items/link reports 409 for an instance already linked', async () => {
   await withScratchGantryServer(async (gantryBase, wiBaseUrl, instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir })
+    createInstance('design', 'my-initiative', { instancesDir: join(instancesDir, 'default') })
     const parentId = await createParentWorkItem(wiBaseUrl)
     const linkBody = JSON.stringify({ organization: WI_ORGANIZATION, project: WI_PROJECT, parentId, baseUrl: wiBaseUrl })
 
@@ -223,7 +223,7 @@ test('POST /api/instance/work-items/link reports 409 for an instance already lin
 
 test('POST /api/instance/work-items/tag reports backfill counts and preserves unrelated parent work items', async () => {
   await withScratchGantryServer(async (gantryBase, wiBaseUrl, instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir })
+    createInstance('design', 'my-initiative', { instancesDir: join(instancesDir, 'default') })
     const parentId = await createParentWorkItem(wiBaseUrl)
     const linkRes = await fetch(`${gantryBase}/api/instance/work-items/link?slug=my-initiative`, {
       method: 'POST',
@@ -264,7 +264,7 @@ test('POST /api/work-items/tag backfills every registered linked instance', asyn
   await withScratchGantryServer(async (gantryBase, wiBaseUrl, instancesDir) => {
     const links = []
     for (const slug of ['first-initiative', 'second-initiative']) {
-      createInstance('design', slug, { instancesDir })
+      createInstance('design', slug, { instancesDir: join(instancesDir, 'default') })
       const parentId = await createParentWorkItem(wiBaseUrl)
       const linkRes = await fetch(`${gantryBase}/api/instance/work-items/link?slug=${slug}`, {
         method: 'POST',
@@ -273,7 +273,7 @@ test('POST /api/work-items/tag backfills every registered linked instance', asyn
       })
       links.push(await linkRes.json())
     }
-    createInstance('design', 'unlinked-initiative', { instancesDir })
+    createInstance('design', 'unlinked-initiative', { instancesDir: join(instancesDir, 'default') })
 
     const client = createAzureDevOpsWorkItemsClient({ organization: WI_ORGANIZATION, project: WI_PROJECT, pat: VALID_PAT, baseUrl: wiBaseUrl })
     for (const link of links) {
@@ -299,7 +299,7 @@ test('POST /api/work-items/tag backfills every registered linked instance', asyn
 
 test('POST /api/instance/work-items/sync with no PAT returns the structured "authentication required" response', async () => {
   await withScratchGantryServer(async (gantryBase, wiBaseUrl, instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir })
+    createInstance('design', 'my-initiative', { instancesDir: join(instancesDir, 'default') })
     const res = await fetch(`${gantryBase}/api/instance/work-items/sync?slug=my-initiative`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -313,7 +313,7 @@ test('POST /api/instance/work-items/sync with no PAT returns the structured "aut
 
 test('POST /api/instance/work-items/sync reports 400 when the gate has not passed yet', async () => {
   await withScratchGantryServer(async (gantryBase, wiBaseUrl, instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir })
+    createInstance('design', 'my-initiative', { instancesDir: join(instancesDir, 'default') })
     const parentId = await createParentWorkItem(wiBaseUrl)
     await fetch(`${gantryBase}/api/instance/work-items/link?slug=my-initiative`, {
       method: 'POST',
@@ -334,7 +334,7 @@ test('POST /api/instance/work-items/sync reports 400 when the gate has not passe
 
 test('POST /api/instance/work-items/sync reports 400 for an unlinked instance', async () => {
   await withScratchGantryServer(async (gantryBase, wiBaseUrl, instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir })
+    createInstance('design', 'my-initiative', { instancesDir: join(instancesDir, 'default') })
     fillShapeStage(instancesDir, 'my-initiative')
 
     const res = await fetch(`${gantryBase}/api/instance/work-items/sync?slug=my-initiative`, {
@@ -350,7 +350,7 @@ test('POST /api/instance/work-items/sync reports 400 for an unlinked instance', 
 
 test('POST /api/instance/work-items/sync pushes a real state to the stage\'s work item once the gate passes (the confirmed push)', async () => {
   await withScratchGantryServer(async (gantryBase, wiBaseUrl, instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir })
+    createInstance('design', 'my-initiative', { instancesDir: join(instancesDir, 'default') })
     fillShapeStage(instancesDir, 'my-initiative')
     const parentId = await createParentWorkItem(wiBaseUrl)
     const linkRes = await fetch(`${gantryBase}/api/instance/work-items/link?slug=my-initiative`, {

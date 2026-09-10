@@ -88,7 +88,7 @@ test('A1: Wrap toggle persists across reload and re-flows editors', async () => 
   try {
     cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
-    const server = createServer({ slug: 'examples', instancesDir })
+    const server = createServer({ slug: 'examples', instancesDir, migrateWorkspacesOnStart: true })
     await new Promise((resolve, reject) => {
       server.listen(0, async () => {
         const { port } = server.address()
@@ -280,7 +280,7 @@ test('E1: nav list wraps - longest list-item width <= list-pane width', async ()
     // Create another instance with long slug to test wrapping.
     const longSlug = 'this-is-a-very-long-slug-name-that-should-wrap-anywhere-inside-the-pane-width'
     try { createInstance('design', longSlug, { instancesDir }) } catch {}
-    const server = createServer({ instancesDir })
+    const server = createServer({ instancesDir, migrateWorkspacesOnStart: true })
     await new Promise((resolve, reject) => {
       server.listen(0, async () => {
         const { port } = server.address()

@@ -9,11 +9,11 @@ import { loadDefinition } from '../lib/definition.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
-import { withRunningServer, basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
+import { withRunningServer, withRunningExamplesServer, basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
 
 test('GET /api/instance reports the examples fixture, fully populated', async () => {
-  await withRunningServer({ slug: 'examples' }, async (base) => {
+  await withRunningExamplesServer({}, async (base) => {
     const res = await fetch(`${base}/api/instance`)
     assert.equal(res.status, 200)
     const body = await res.json()
@@ -81,7 +81,7 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
 })
 
 test('GET /api/instance?stage=<id> browses a different stage\'s modules without changing the instance\'s persisted stage', async () => {
-  await withRunningServer({ slug: 'examples' }, async (base) => {
+  await withRunningExamplesServer({}, async (base) => {
     const res = await fetch(`${base}/api/instance?stage=hld-define`)
     assert.equal(res.status, 200)
     const body = await res.json()
@@ -130,7 +130,7 @@ test('GET /api/instance?stage=<id> includes each field\'s example text from the 
 })
 
 test('GET /api/instance?stage=<unknown> throws', async () => {
-  await withRunningServer({ slug: 'examples' }, async (base) => {
+  await withRunningExamplesServer({}, async (base) => {
     const res = await fetch(`${base}/api/instance?stage=not-a-real-stage`)
     assert.equal(res.status, 500)
   })
@@ -164,7 +164,9 @@ test('PUT /api/instance/modules/:id writes the same file format the CLI reads, a
     })
 
     const definition = loadDefinition('design')
-    const data = readModule(definition, 'examples', 'background', { instancesDir })
+    // WI #356: the server's own startup migration moved the scratch "examples" copy into the
+    // reserved `default` server workspace — read it back from there, not the pre-migration root.
+    const data = readModule(definition, 'examples', 'background', { instancesDir: join(instancesDir, 'default') })
     assert.equal(data.status, 'agreed')
     assert.equal(data.fields.problem, 'Updated via the web form.')
     assert.deepEqual(data.fields['affected-domains'], ['Payments'])
@@ -215,7 +217,9 @@ test('PUT /api/instance/assignee sets the instance record\'s stored assignee, le
       const body = await res.json()
       assert.deepEqual(body, { slug: 'my-initiative', assignee: 'c.barlow' })
 
-      const instance = readInstance('my-initiative', { instancesDir })
+      // WI #356: the server's own startup migration moved this scratch instance into the reserved
+      // `default` server workspace — read it back from there, not the pre-migration root.
+      const instance = readInstance('my-initiative', { instancesDir: join(instancesDir, 'default') })
       assert.equal(instance.assignee, 'c.barlow')
       assert.equal(instance.stage, 'shape')
 
@@ -329,7 +333,7 @@ test('GET /api/definitions/:id/stages for an unknown definition reports a 500, n
 })
 
 test('GET / serves index.html with the import map resolved (no leftover placeholder)', async () => {
-  await withRunningServer({ slug: 'examples' }, async (base) => {
+  await withRunningExamplesServer({}, async (base) => {
     const res = await fetch(`${base}/`)
     assert.equal(res.status, 200)
     const html = await res.text()
@@ -339,7 +343,7 @@ test('GET / serves index.html with the import map resolved (no leftover placehol
 })
 
 test('GET /new-workspace (a client-side route with no matching static file) falls back to index.html, not a 404', async () => {
-  await withRunningServer({ slug: 'examples' }, async (base) => {
+  await withRunningExamplesServer({}, async (base) => {
     const res = await fetch(`${base}/new-workspace`)
     assert.equal(res.status, 200)
     const html = await res.text()
@@ -349,14 +353,14 @@ test('GET /new-workspace (a client-side route with no matching static file) fall
 })
 
 test('GET /does-not-exist.js (a missing file with an extension) still 404s rather than falling back to index.html', async () => {
-  await withRunningServer({ slug: 'examples' }, async (base) => {
+  await withRunningExamplesServer({}, async (base) => {
     const res = await fetch(`${base}/does-not-exist.js`)
     assert.equal(res.status, 404)
   })
 })
 
 test('GET /node_modules/... serves real dependency files for the browser to import', async () => {
-  await withRunningServer({ slug: 'examples' }, async (base) => {
+  await withRunningExamplesServer({}, async (base) => {
     const res = await fetch(`${base}/node_modules/codemirror/dist/index.js`)
     assert.equal(res.status, 200)
     const text = await res.text()
@@ -365,7 +369,7 @@ test('GET /node_modules/... serves real dependency files for the browser to impo
 })
 
 test('GET /instance/<slug> (a client-side preact-iso route, not a real file) serves the app shell, not a 404', async () => {
-  await withRunningServer({ slug: 'examples' }, async (base) => {
+  await withRunningExamplesServer({}, async (base) => {
     const res = await fetch(`${base}/instance/examples`)
     assert.equal(res.status, 200)
     const html = await res.text()
@@ -375,7 +379,7 @@ test('GET /instance/<slug> (a client-side preact-iso route, not a real file) ser
 })
 
 test('GET /app.js serves the web form script from web/', async () => {
-  await withRunningServer({ slug: 'examples' }, async (base) => {
+  await withRunningExamplesServer({}, async (base) => {
     const res = await fetch(`${base}/app.js`)
     assert.equal(res.status, 200)
     const text = await res.text()
@@ -449,7 +453,11 @@ test('GET /api/instances reflects instances registered after server startup', as
       const before = await (await fetch(`${base}/api/instances`)).json()
       assert.deepEqual(before, [])
 
-      createInstance('design', 'my-initiative', { instancesDir })
+      // WI #356: every instance this server creates (or, as here, one a test seeds directly to
+      // simulate that) lives under the one reserved `default` server workspace — the migration that
+      // would otherwise move a bare instance there only ever runs once, at server startup, before
+      // this instance existed.
+      createInstance('design', 'my-initiative', { instancesDir: join(instancesDir, 'default') })
 
       const after = await (await fetch(`${base}/api/instances`)).json()
       assert.deepEqual(after.map((i) => i.slug), ['my-initiative'])

@@ -375,11 +375,11 @@ test('settings: Workspace Settings\' owner, PAT-override, and ticketing-system-o
 
 test('settings: Instance Settings hosts an editable Assignee, read-only instance info, and read-only work-item link details', async () => {
   await withScratchServer(async (base, instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir, assignee: 'c.barlow' })
+    createInstance('design', 'my-initiative', { instancesDir: join(instancesDir, 'default'), assignee: 'c.barlow' })
     recordInstanceWorkItemLink(
       'my-initiative',
       { organization: 'wi-org', project: 'wi-project', workItemType: 'Task', parentId: 42, stages: { shape: 101 } },
-      { instancesDir }
+      { instancesDir: join(instancesDir, 'default') }
     )
 
     await withPage(async (page) => {
@@ -401,7 +401,7 @@ test('settings: Instance Settings hosts an editable Assignee, read-only instance
       await assigneeInput.fill('new-assignee')
       await assigneeInput.blur()
       await page.waitForSelector('text=Saved.', { timeout: 5_000 })
-      assert.equal(readInstance('my-initiative', { instancesDir }).assignee, 'new-assignee')
+      assert.equal(readInstance('my-initiative', { instancesDir: join(instancesDir, 'default') }).assignee, 'new-assignee')
 
       // Read-only work-item link details — no re-linking form anywhere on
       // this screen.
@@ -425,7 +425,7 @@ test('settings: Instance Settings hosts an editable Assignee, read-only instance
 // earlier blur-only test above didn't cover.
 test('settings: clicking the Assignee section\'s Save button issues exactly one save request, not two', async () => {
   await withScratchServer(async (base, instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir, assignee: 'c.barlow' })
+    createInstance('design', 'my-initiative', { instancesDir: join(instancesDir, 'default'), assignee: 'c.barlow' })
 
     await withPage(async (page) => {
       let saveRequestCount = 0
@@ -444,7 +444,7 @@ test('settings: clicking the Assignee section\'s Save button issues exactly one 
       await saveButton.click()
       await page.waitForSelector('text=Saved.', { timeout: 5_000 })
 
-      assert.equal(readInstance('my-initiative', { instancesDir }).assignee, 'clicked-assignee')
+      assert.equal(readInstance('my-initiative', { instancesDir: join(instancesDir, 'default') }).assignee, 'clicked-assignee')
       assert.equal(saveRequestCount, 1)
     })(base)
   })
@@ -452,7 +452,7 @@ test('settings: clicking the Assignee section\'s Save button issues exactly one 
 
 test('settings: Instance Settings reports "not linked" when the instance has no work-item link', async () => {
   await withScratchServer(async (base, instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir })
+    createInstance('design', 'my-initiative', { instancesDir: join(instancesDir, 'default') })
 
     await withPage(async (page) => {
       await page.goto(`${base}/settings/instance?slug=my-initiative`)
@@ -466,7 +466,7 @@ test('settings: Instance Settings reports "not linked" when the instance has no 
 // via) the dashboard's "Archived instances" panel.
 test('settings: an instance can be archived from Instance Settings and restored from the dashboard archived panel', async () => {
   await withScratchServer(async (base, instancesDir) => {
-    createInstance('design', 'my-initiative', { instancesDir })
+    createInstance('design', 'my-initiative', { instancesDir: join(instancesDir, 'default') })
 
     await withPage(async (page) => {
       page.on('dialog', (dialog) => dialog.accept())
