@@ -26,6 +26,14 @@ on, the other is server-side storage. New text names the concept in full —
 "local workspace" or "local instance" — and never bare "local" where the
 sense is ambiguous.
 
+> **Superseded (ADR-0031, WI #358):** the legacy server-side **local
+> instance** described above no longer exists — every server-side instance
+> now lives inside a real **server workspace** directory, which
+> deliberately shares this ADR's own `workspace.json` format. Where this
+> ADR contrasts "local workspace" against "local instance", read the latter
+> as historical context for why the vocabulary is precise, not as a
+> concept still in use — see ADR-0031 for the current shape.
+
 ### Transport — File System Access API
 
 The browser reaches the picked folder through the **File System Access

@@ -148,7 +148,7 @@ test('POST /api/instance/stage/reopen re-opens a completed stage: branch recreat
           assert.equal(hasReopenCommit, true)
 
           // Edit + requestStageApproval should open fresh PR
-          const edited = readFileSync(join('instances', 'examples', 'modules', 'background.md'), 'utf8') + '\nLate edit after reopen.\n'
+          const edited = readFileSync(join('workspaces', 'examples', 'kiwi-cover-mutual', 'modules', 'background.md'), 'utf8') + '\nLate edit after reopen.\n'
           await client.writeFile('gantry-workspace/remote-initiative/modules/background.md', edited, { branch: 'gantry-workspace/remote-initiative/shape' })
           const secondReq = await fetch(`${base}/api/instance/request-approval?slug=${SLUG}`, { method: 'POST', headers: { Authorization: basicAuthHeader(VALID_PAT) } })
           const secondText = await secondReq.text()
@@ -287,7 +287,7 @@ test('completing re-opened stage clears marker and re-advances', async () => {
           assert.equal(reopenRes.status, 200)
 
           // Edit and request again
-          const edited = readFileSync(join('instances', 'examples', 'modules', 'background.md'), 'utf8') + '\nSecond edit after reopen.\n'
+          const edited = readFileSync(join('workspaces', 'examples', 'kiwi-cover-mutual', 'modules', 'background.md'), 'utf8') + '\nSecond edit after reopen.\n'
           await client.writeFile('gantry-workspace/remote-initiative/modules/background.md', edited, { branch: 'gantry-workspace/remote-initiative/shape' })
           const secondReq = await fetch(`${base}/api/instance/request-approval?slug=${SLUG}`, { method: 'POST', headers: { Authorization: basicAuthHeader(VALID_PAT) } })
           const secondReqBody = await secondReq.json()

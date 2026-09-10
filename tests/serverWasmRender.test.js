@@ -20,7 +20,7 @@ import { exampleModuleText } from './helpers/fixtureModules.js'
 // stack (through the actual HTTP routes + credential gating, not lib/render.js directly).
 
 function seedFiles(slug) {
-  const instanceYaml = readFileSync('instances/examples/instance.yaml', 'utf8').replace(/^slug: examples$/m, `slug: ${slug}`)
+  const instanceYaml = readFileSync('workspaces/examples/kiwi-cover-mutual/instance.yaml', 'utf8').replace(/^slug: examples$/m, `slug: ${slug}`)
   return {
     [`/gantry-workspace/${slug}/instance.yaml`]: instanceYaml,
     [`/gantry-workspace/${slug}/modules/background.md`]: exampleModuleText('background'),
@@ -138,14 +138,14 @@ test('render-wasm-prepare then render-wasm-finish: a real, well-formed docx ends
 test('render-wasm-prepare then render-wasm-finish on a local instance writes the .md and a real .docx into the instance out/ dir, without a pandoc subprocess in prepare', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
     await withRunningServer({ instancesDir }, async (base) => {
       const prepRes = await fetch(`${base}/api/instance/render-wasm-prepare/soap?slug=examples`, { method: 'POST' })
       assert.equal(prepRes.status, 200)
       const prep = await prepRes.json()
       assert.equal(prep.artefact, 'soap')
-      assert.match(prep.markdown, /^# examples: Solution on a Page/)
+      assert.match(prep.markdown, /^# kiwi-cover-mutual: Solution on a Page/)
       assert.match(prep.markdown, /## Document Control/)
       assert.ok(prep.referenceDocBase64, 'the v2 reference doc is handed to the browser for styling')
       assert.match(prep.docxPath, /\.docx$/)
@@ -176,7 +176,7 @@ test('render-wasm-prepare then render-wasm-finish on a local instance writes the
 test('render-wasm-finish on a local instance rejects a body without docxBase64 with 400 and writes nothing', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
     await withRunningServer({ instancesDir }, async (base) => {
       const res = await fetch(`${base}/api/instance/render-wasm-finish/soap?slug=examples`, { method: 'POST' })

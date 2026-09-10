@@ -108,13 +108,13 @@ test('file asset citations with a local source link to the stored copy relative 
 })
 
 test('the bundled examples fixture cites every diagram by its local copy', () => {
-  const manifest = readFileSync('instances/examples/assets/manifest.yaml', 'utf8')
+  const manifest = readFileSync('workspaces/examples/kiwi-cover-mutual/assets/manifest.yaml', 'utf8')
   const ids = [...manifest.matchAll(/^- id: (\S+)$/gm)].map((m) => m[1])
   assert.equal(ids.length, 9, 'nine SAD-template diagrams are shipped with the examples instance')
   for (const id of ids) {
     assert.match(manifest, new RegExp(`  source: assets/${id}\\.(png|jpeg)\\n`), `${id} cites its stored copy`)
   }
-  const modules = readdirSync('instances/examples/modules').map((f) => readFileSync(join('instances/examples/modules', f), 'utf8')).join('\n')
+  const modules = readdirSync('workspaces/examples/kiwi-cover-mutual/modules').map((f) => readFileSync(join('workspaces/examples/kiwi-cover-mutual/modules', f), 'utf8')).join('\n')
   for (const id of ids) assert.ok(modules.includes(`(asset:${id})`), `${id} is referenced from a module field`)
 })
 
@@ -298,7 +298,7 @@ test('GET /api/instance/assets returns a clean 400 (not a 500) for a slug the se
 test('an asset referenced via the asset:<id> convention from a module\'s markdown is reported USED IN that module', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     let created
@@ -400,7 +400,7 @@ test('assets routes work with ?slug= on a server started without a default slug 
 test('an asset with no markdown referencing it anywhere is reported as unused (empty usedIn)', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {

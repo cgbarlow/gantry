@@ -217,7 +217,7 @@ test('requestStageApproval still aborts with render error when artefact renderin
   }
   for (const moduleId of ['background', 'introduction', 'design-basis', 'solution-definition', 'team-and-estimates']) {
     shapeModules[`/gantry-workspace/${SLUG}/modules/${moduleId}.md`] = readFileSync(
-      join('instances', 'examples', 'modules', `${moduleId}.md`),
+      join('workspaces', 'examples', 'kiwi-cover-mutual', 'modules', `${moduleId}.md`),
       'utf8'
     )
   }

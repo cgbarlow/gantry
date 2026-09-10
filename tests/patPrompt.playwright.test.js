@@ -210,7 +210,7 @@ test('the Settings screen\'s "Replace Azure DevOps PAT" control (#101) opens the
 test('a local instance never shows the PAT prompt, and its editor header shows no PAT management controls (moved to Settings, #101)', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {

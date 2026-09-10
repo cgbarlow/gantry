@@ -2,9 +2,17 @@ node_modules/
 .node-runtime/
 install.log
 run.log
+results/
+ci-results/
+
+# WI #358: the workspaces root replaces the flat instances/ layout — registries and rendered
+# output are gitignored the same way, one level deeper (workspaces/<workspace>/<instance>/out/).
+# The instances/ patterns are kept for a pre-0.4 flat data directory that hasn't migrated yet.
 instances/*/out/
 instances/instance-registry.json
 instances/workspace-registry.json
-results/
-ci-results/
 instances/number-registry.json
+workspaces/*/*/out/
+workspaces/instance-registry.json
+workspaces/workspace-registry.json
+workspaces/number-registry.json

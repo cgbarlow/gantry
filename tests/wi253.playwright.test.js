@@ -86,7 +86,7 @@ function installBaseUrlRoutes(page, adoBaseUrl) {
 test('A1: Wrap toggle persists across reload and re-flows editors', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-wrap-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
     const server = createServer({ slug: 'examples', instancesDir, migrateWorkspacesOnStart: true })
     await new Promise((resolve, reject) => {

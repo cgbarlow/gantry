@@ -17,6 +17,44 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.4.0-beta — 2026-09-10
+
+### Added
+
+- **Server workspace directories** (WI #355/#356/#358, `docs/adr/0031-server-workspace-directories.md`).
+  A server-hosted instance's data now lives inside a **server workspace** — a
+  folder with its own `workspace.json` (the same format a Local workspace
+  already uses, plus an optional `description`), holding one or more
+  instances — instead of the old flat `instances/<slug>` layout with no
+  grouping above it. Two different server workspaces can each have an
+  instance with the same slug; the dashboard shows one row per workspace,
+  with every instance — server workspace or Local workspace alike — getting
+  the same full status card (stage, complete/incomplete badge, assignee,
+  updated, Edit/Check).
+- **`GANTRY_WORKSPACES_DIR` / `--workspaces-dir`** replace `GANTRY_INSTANCES_DIR`
+  / `--instances-dir` as the primary way to point Gantry at its data,
+  default `workspaces/`. The old names keep working everywhere, resolving
+  to the same value with a one-line deprecation notice logged — nothing
+  breaks for an existing install that hasn't switched yet.
+- **Automatic migration.** The first time `gantry serve` starts against a
+  pre-0.4 flat data directory, every bare instance directory it finds moves
+  into a new, reserved `default` server workspace, preserving every
+  instance's numbered reference and archived state exactly — a bookmarked
+  or linked `w0i1`-style URL keeps working unchanged. `gantry migrate-workspaces
+  --dry-run` shows the same mapping first, without touching anything.
+- The bundled example data moves onto the new shape: `workspaces/examples/`
+  now holds both `kiwi-cover-mutual` (the Kiwi Cover Mutual worked example,
+  previously the single `examples` instance) and `gantry` (Gantry's own
+  hosting SOAP, WI #354) — one workspace, two instances, matching what the
+  dashboard shows.
+
+### Changed
+
+- CLI commands (`new`, `status`, `check`, `render`, `instances`, `serve`)
+  all resolve their data directory through the new `--workspaces-dir` /
+  `GANTRY_WORKSPACES_DIR` precedence, with `--instances-dir` /
+  `GANTRY_INSTANCES_DIR` kept working as deprecated aliases.
+
 ## 0.3.1-beta — 2026-09-10
 
 ### Changed

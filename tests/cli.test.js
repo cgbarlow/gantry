@@ -21,7 +21,7 @@ test('gantry new creates an instance with blank Shape-stage module files', () =>
     // module now mount adjacent, immediately after `background`.
     assert.match(output, /background, introduction, design-basis, solution-definition, team-and-estimates/)
 
-    const backgroundPath = join(cwd, 'instances', 'cli-test', 'modules', 'background.md')
+    const backgroundPath = join(cwd, 'workspaces', 'cli-test', 'modules', 'background.md')
     assert.ok(existsSync(backgroundPath))
     assert.match(readFileSync(backgroundPath, 'utf8'), /owner: c\.barlow/)
   } finally {
@@ -40,11 +40,11 @@ test('gantry new --assignee records the instance record\'s own assignee, indepen
       { cwd, encoding: 'utf8' }
     )
 
-    const instanceYaml = readFileSync(join(cwd, 'instances', 'cli-test', 'instance.yaml'), 'utf8')
+    const instanceYaml = readFileSync(join(cwd, 'workspaces', 'cli-test', 'instance.yaml'), 'utf8')
     const instance = parseYAML(instanceYaml)
     assert.equal(instance.assignee, 'j.smith')
 
-    const backgroundPath = join(cwd, 'instances', 'cli-test', 'modules', 'background.md')
+    const backgroundPath = join(cwd, 'workspaces', 'cli-test', 'modules', 'background.md')
     assert.match(readFileSync(backgroundPath, 'utf8'), /owner: c\.barlow/)
   } finally {
     rmSync(cwd, { recursive: true, force: true })

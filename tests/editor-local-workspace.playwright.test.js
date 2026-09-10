@@ -23,7 +23,7 @@ import { exampleModuleText } from './helpers/fixtureModules.js'
 // in between.
 //
 // Seed content is the "shape" stage's own module files from the curated
-// `instances/examples` fixture (the same content `readModule`/existing tests
+// `workspaces/examples/kiwi-cover-mutual` fixture (the same content `readModule`/existing tests
 // already trust as gate-passing for the `business-case` gate) — copied
 // as-is except `instance.yaml`'s `slug`.
 
@@ -34,7 +34,7 @@ const ONE_PX_PNG_BASE64 =
 
 function readExampleFile(relPath) {
   // WI #348: fixture text is borrowed for another instance with no asset manifest, so image references are stripped.
-  return relPath.startsWith('modules/') ? exampleModuleText(relPath.slice('modules/'.length).replace(/\.md$/, '')) : readFileSync(join('instances/examples', relPath), 'utf8')
+  return relPath.startsWith('modules/') ? exampleModuleText(relPath.slice('modules/'.length).replace(/\.md$/, '')) : readFileSync(join('workspaces/examples/kiwi-cover-mutual', relPath), 'utf8')
 }
 
 async function seedLocalWorkspace(page, slug) {

@@ -31,7 +31,7 @@ COPY bin/               bin/
 COPY lib/               lib/
 COPY web/               web/
 COPY definitions/       definitions/
-COPY instances/         instances/
+COPY workspaces/        workspaces/
 COPY docs/user-guide/   docs/user-guide/
 COPY tests/             tests/
 
@@ -48,7 +48,7 @@ COPY tests/             tests/
 #   - eslint           for JS   (lib/, bin/, web/, tests/)
 #     → eslint --format @microsoft/eslint-formatter-sarif -o results/sarif/eslint.sarif
 #   - stylelint        for CSS  (web/style.css)
-#   - markdownlint-cli2 for MD  (definitions/, instances/, docs/)
+#   - markdownlint-cli2 for MD  (definitions/, workspaces/, docs/)
 #   - prettier --check for YAML (gantry.yaml, definitions/**/*.yaml)
 #   - htmlhint         for HTML (web/**/*.html)
 
@@ -125,10 +125,10 @@ COPY --from=source /app/bin/               bin/
 COPY --from=source /app/lib/               lib/
 COPY --from=source /app/web/               web/
 COPY --from=source /app/definitions/       definitions/
-COPY --from=source /app/instances/         instances/
+COPY --from=source /app/workspaces/        workspaces/
 COPY --from=source /app/docs/user-guide/   docs/user-guide/
 
-RUN mkdir -p instances && chown -R node:node /app
+RUN mkdir -p workspaces && chown -R node:node /app
 USER node
 
 EXPOSE 3000
@@ -137,6 +137,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["nod
 
 # Entrypoint/CMD split: `docker run gantry` starts the web UI;
 # override CMD to run any other gantry command, e.g.:
-#   docker run gantry render examples soap
+#   docker run gantry render kiwi-cover-mutual soap --workspaces-dir workspaces/examples
 ENTRYPOINT ["node", "bin/gantry.js"]
 CMD ["serve", "--port", "3000"]

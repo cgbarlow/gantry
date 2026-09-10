@@ -230,7 +230,7 @@ test('a commit after approval invalidates auto-merge, persists the state, and ca
     await waitForTimestampToAdvance()
 
     const client = createAzureDevOpsClient(azureDevOps)
-    const current = readFileSync(join('instances', 'examples', 'modules', 'background.md'), 'utf8')
+    const current = readFileSync(join('workspaces', 'examples', 'kiwi-cover-mutual', 'modules', 'background.md'), 'utf8')
     await client.writeFile(`gantry-workspace/${SLUG}/modules/background.md`, `${current}\nPost-approval edit.\n`, {
       branch,
       message: 'Post-approval edit',
@@ -267,7 +267,7 @@ test('request approval again posts a fallback comment when Azure DevOps denies r
       await castVote(azureDevOps.baseUrl, pullRequestId, 10)
       await waitForTimestampToAdvance()
       const client = createAzureDevOpsClient(azureDevOps)
-      const current = readFileSync(join('instances', 'examples', 'modules', 'background.md'), 'utf8')
+      const current = readFileSync(join('workspaces', 'examples', 'kiwi-cover-mutual', 'modules', 'background.md'), 'utf8')
       await client.writeFile(`gantry-workspace/${SLUG}/modules/background.md`, `${current}\nAnother edit.\n`, { branch })
       await checkStageApprovalStatus(SLUG, { azureDevOps })
 

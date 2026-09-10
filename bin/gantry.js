@@ -16,13 +16,31 @@ export function resolveInstancesDir(cliInstancesDir) {
 
 // WI #355: the CLI-side counterpart of resolveInstancesDir above, for the workspaces root a **server
 // workspace** directory (lib/workspaceDirectory.js) lives under — same precedence (an explicit flag value
-// beats the env var, which beats the literal default), same reasoning. No command wires this in yet: that
-// cutover — a real --workspaces-dir flag on `serve`/`new`/`status`/`check`/`render`/`instances`, replacing
-// --instances-dir as the primary way to point the CLI at data — is Feature #356's job, not this one's.
-// Exported now, and unit-tested now, so #356 has this precedence already proven rather than writing it
-// from scratch under time pressure.
+// beats the env var, which beats the literal default), same reasoning.
 export function resolveWorkspacesDir(cliWorkspacesDir) {
   return cliWorkspacesDir ?? process.env.GANTRY_WORKSPACES_DIR ?? 'workspaces'
+}
+
+// WI #358: every command's actual entry point into "which directory holds the data" — wires
+// --workspaces-dir/GANTRY_WORKSPACES_DIR in as the primary way to point the CLI at data, with the
+// older --instances-dir/GANTRY_INSTANCES_DIR kept working as a deprecated alias (resolving to the
+// exact same value; a pre-0.4 flat data directory is still just a directory gantry can point at).
+// Precedence: --workspaces-dir flag > GANTRY_WORKSPACES_DIR env > --instances-dir flag (deprecated)
+// > GANTRY_INSTANCES_DIR env (deprecated) > the literal default 'workspaces'. Only the two deprecated
+// forms log a notice — pointing at the new name once per invocation — so a caller who has already
+// moved on sees nothing.
+export function resolveEffectiveWorkspacesDir(options) {
+  if (options.workspacesDir) return options.workspacesDir
+  if (process.env.GANTRY_WORKSPACES_DIR) return process.env.GANTRY_WORKSPACES_DIR
+  if (options.instancesDir) {
+    console.error('gantry: --instances-dir is deprecated — use --workspaces-dir instead')
+    return options.instancesDir
+  }
+  if (process.env.GANTRY_INSTANCES_DIR) {
+    console.error('gantry: GANTRY_INSTANCES_DIR is deprecated — use GANTRY_WORKSPACES_DIR instead')
+    return process.env.GANTRY_INSTANCES_DIR
+  }
+  return resolveWorkspacesDir()
 }
 
 export function resolvePort(cliPort) {
@@ -46,9 +64,10 @@ program
   .command('instances')
   .description('List instances available in this repo')
   .option('--json', 'emit structured JSON output')
-  .option('--instances-dir <path>', 'instances directory (default: instances) — superseded by --workspaces-dir, coming soon')
+  .option('--workspaces-dir <path>', 'workspaces directory (default: workspaces; or GANTRY_WORKSPACES_DIR env)')
+  .option('--instances-dir <path>', 'deprecated alias for --workspaces-dir')
   .action((options) => {
-    const instancesDir = resolveInstancesDir(options.instancesDir)
+    const instancesDir = resolveEffectiveWorkspacesDir(options)
     const instances = listInstances({ instancesDir })
     if (options.json) {
       console.log(JSON.stringify(instances, null, 2))
@@ -72,10 +91,11 @@ program
   .option('--assignee <assignee>', 'assignee to record on the instance record itself (#97)')
   .option('--definition-version <version>', 'definition version to pin (default latest published)')
   .option('--version <version>', 'alias for --definition-version')
-  .option('--instances-dir <path>', 'instances directory (default: instances) — superseded by --workspaces-dir, coming soon')
+  .option('--workspaces-dir <path>', 'workspaces directory (default: workspaces; or GANTRY_WORKSPACES_DIR env)')
+  .option('--instances-dir <path>', 'deprecated alias for --workspaces-dir')
   .action((definition, slug, options) => {
     const version = options.definitionVersion ?? options.version ?? null
-    const instancesDir = resolveInstancesDir(options.instancesDir)
+    const instancesDir = resolveEffectiveWorkspacesDir(options)
     const result = createInstance(definition, slug, { instancesDir, owner: options.owner, assignee: options.assignee, definitionVersion: version ?? undefined })
     console.log(`Created instance "${result.slug}" (${result.definitionId}, stage: ${result.stage})`)
     console.log(`Modules: ${result.modules.join(', ')}`)
@@ -85,9 +105,10 @@ program
   .command('status <slug>')
   .description("Current stage, module completeness, what's outstanding")
   .option('--json', 'emit structured JSON output')
-  .option('--instances-dir <path>', 'instances directory (default: instances) — superseded by --workspaces-dir, coming soon')
+  .option('--workspaces-dir <path>', 'workspaces directory (default: workspaces; or GANTRY_WORKSPACES_DIR env)')
+  .option('--instances-dir <path>', 'deprecated alias for --workspaces-dir')
   .action((slug, options) => {
-    const instancesDir = resolveInstancesDir(options.instancesDir)
+    const instancesDir = resolveEffectiveWorkspacesDir(options)
     const status = getStatus(slug, { instancesDir })
     if (options.json) {
       console.log(JSON.stringify(status, null, 2))
@@ -111,9 +132,10 @@ program
   .description("Validate an instance against a gate's requirements")
   .option('--gate <id>', 'the gate to check against')
   .option('--json', 'emit structured JSON output')
-  .option('--instances-dir <path>', 'instances directory (default: instances) — superseded by --workspaces-dir, coming soon')
+  .option('--workspaces-dir <path>', 'workspaces directory (default: workspaces; or GANTRY_WORKSPACES_DIR env)')
+  .option('--instances-dir <path>', 'deprecated alias for --workspaces-dir')
   .action((slug, options) => {
-    const instancesDir = resolveInstancesDir(options.instancesDir)
+    const instancesDir = resolveEffectiveWorkspacesDir(options)
     const result = checkGate(slug, { gate: options.gate, instancesDir })
     if (options.json) {
       console.log(JSON.stringify(result, null, 2))
@@ -138,9 +160,10 @@ program
   .command('render <slug> <artefact>')
   .description('Render an artefact to out/')
   .option('--dry-run', 'resolve the template without writing')
-  .option('--instances-dir <path>', 'instances directory (default: instances) — superseded by --workspaces-dir, coming soon')
+  .option('--workspaces-dir <path>', 'workspaces directory (default: workspaces; or GANTRY_WORKSPACES_DIR env)')
+  .option('--instances-dir <path>', 'deprecated alias for --workspaces-dir')
   .action((slug, artefact, options) => {
-    const instancesDir = resolveInstancesDir(options.instancesDir)
+    const instancesDir = resolveEffectiveWorkspacesDir(options)
     const result = renderArtefact(slug, artefact, { dryRun: options.dryRun, instancesDir })
     if (result.dryRun) {
       console.log(result.markdown)
@@ -156,18 +179,21 @@ program
       '/api/instances) and the stage-by-stage form at /instance/<slug>. [slug] only sets a ' +
       'fallback default for API requests made with no ?slug=<slug> of their own — it does not ' +
       'change what the dashboard shows or require picking one instance up front. ' +
-      'Instances directory resolves as --instances-dir flag > GANTRY_INSTANCES_DIR env > instances; ' +
+      'Workspaces directory resolves as --workspaces-dir flag > GANTRY_WORKSPACES_DIR env > ' +
+      '--instances-dir flag (deprecated) > GANTRY_INSTANCES_DIR env (deprecated) > workspaces; ' +
       'port resolves as --port flag > PORT env > 3000.'
   )
   .option('--port <port>', 'port to listen on')
-  .option(
-    '--instances-dir <path>',
-    'instances directory (default: instances; or GANTRY_INSTANCES_DIR env) — superseded by --workspaces-dir, coming soon'
-  )
+  .option('--workspaces-dir <path>', 'workspaces directory (default: workspaces; or GANTRY_WORKSPACES_DIR env)')
+  .option('--instances-dir <path>', 'deprecated alias for --workspaces-dir')
   .action((slug, options) => {
-    const instancesDir = resolveInstancesDir(options.instancesDir)
+    const instancesDir = resolveEffectiveWorkspacesDir(options)
     const port = resolvePort(options.port)
-    const server = createServer({ slug, instancesDir })
+    // A real `gantry serve` is the one place a pre-0.4 flat data directory gets migrated into the
+    // reserved `default` server workspace on first start (WI #356/#358) — every other command, and
+    // every test that constructs a server directly, opts in explicitly instead (see
+    // lib/server.js's own createServer doc comment and tests/helpers/lifecycle.js).
+    const server = createServer({ slug, instancesDir, migrateWorkspacesOnStart: true })
     server.listen(port, () => {
       const label = slug ? `default instance for slug-less API requests: ${slug}` : 'no default instance'
       console.log(`gantry serve: http://localhost:${port} (${label})`)
