@@ -4553,6 +4553,11 @@ function localInstanceHref(workspaceId, slug) {
 // `localInstanceHref` + the resolver's own `checkOne` for a local-workspace row), so the card
 // itself never needs to branch on kind.
 function InstanceCard({ inst, editHref, checkStatus, onCheck }) {
+  // Neither Manage link applies to most server/directory-backed or local-workspace instances
+  // (Show files is Azure-DevOps-only; Track Work Item needs a linked work item) — an empty
+  // "Manage" panel with no links is a useless UI element, so the whole card is hidden rather
+  // than shown blank.
+  const hasManageLinks = Boolean(inst.workItem?.parentId) || inst.workspace?.kind === 'azureDevOps'
   return html`
     <div class="instance-card" key=${inst.slug}>
       <div class="instance-card-content">
@@ -4579,7 +4584,7 @@ function InstanceCard({ inst, editHref, checkStatus, onCheck }) {
         </div>
         ${checkStatus ? html`<div class="save-status">${checkStatus}</div>` : null}
       </div>
-      ${advancedMode.value
+      ${advancedMode.value && hasManageLinks
         ? html`<div class="manage-card">
         <h3>Manage</h3>
         ${inst.workItem?.parentId

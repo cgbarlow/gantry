@@ -75,12 +75,9 @@ test('dashboard: titled "Workspaces", master-detail is the default view, and its
         assert.ok(await card.getByRole('button', { name: 'Check' }).isVisible())
         assert.equal(await card.getByRole('button', { name: 'Render' }).count(), 0)
         assert.ok(await card.getByRole('link', { name: 'Edit', exact: true }).isVisible())
-        assert.equal(await card.locator('.manage-card').count(), 1)
-        assert.equal(await card.locator('.manage-card .manage-link').count(), 0)
-
-        const contentBox = await card.locator('.instance-card-content').boundingBox()
-        const manageBox = await card.locator('.manage-card').boundingBox()
-        assert.ok(Math.abs(contentBox.y - manageBox.y) < 1, 'Manage card should align with the instance card content')
+        // Neither Manage link applies here (no linked work item, not Azure-DevOps-backed) — the
+        // whole card is hidden rather than shown with nothing in it.
+        assert.equal(await card.locator('.manage-card').count(), 0)
         assert.equal(await card.locator('.save-status').count(), 0, 'empty action status should not reserve space')
 
         await card.getByRole('button', { name: 'Check' }).click()
