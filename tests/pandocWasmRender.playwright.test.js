@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, mkdtempSync, rmSync, cpSync } from 'node:fs'
+import { readFileSync, mkdtempSync, rmSync, cpSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -313,11 +313,12 @@ test('an Azure-DevOps-hosted Render produces a real, well-formed .docx via clien
   )
 })
 
-// WI #349 — a plain local instance (the bundled `examples` on a zip-release install, where no
-// native pandoc exists) renders through the same client-side WASM flow: the browser calls
-// render-wasm-prepare (compile, no pandoc subprocess) and render-wasm-finish (land the bytes),
-// never the native /api/instance/render/:artefact route.
-test('a local-instance Render produces a real, well-formed .docx via client-side WASM Pandoc, landing in the instance out/ dir with no native render call', async () => {
+// WI #349 — a plain server-hosted (directory-backed) instance (the bundled `examples` on a
+// zip-release install, where no native pandoc exists) renders through the same client-side WASM
+// flow: the browser calls render-wasm-prepare (compile, no pandoc subprocess) and
+// render-wasm-finish. WI #360 — the resulting bytes are delivered straight to the browser as a
+// real download instead of being written into the instance's own out/ directory at all.
+test('a server-hosted instance Render produces a real, well-formed .docx via client-side WASM Pandoc, downloaded to the browser with nothing written server-side', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
@@ -325,7 +326,8 @@ test('a local-instance Render produces a real, well-formed .docx via client-side
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
       const browser = await launchBrowser()
       try {
-        const page = await browser.newPage()
+        const context = await browser.newContext({ acceptDownloads: true })
+        const page = await context.newPage()
         page.setDefaultTimeout(DEFAULT_TIMEOUT)
         const requestedPaths = []
         page.on('request', (req) => {
@@ -339,7 +341,10 @@ test('a local-instance Render produces a real, well-formed .docx via client-side
         const renderDialog = page.locator('.modal[aria-label="Render an artefact"]')
         await renderDialog.waitFor({ state: 'visible', timeout: 5_000 })
         await renderDialog.getByRole('button', { name: 'Solution on a Page', exact: true }).click()
-        await renderDialog.locator('.modal-actions').getByRole('button', { name: 'Render' }).click()
+        const [download] = await Promise.all([
+          page.waitForEvent('download', { timeout: 30_000 }),
+          renderDialog.locator('.modal-actions').getByRole('button', { name: 'Render' }).click(),
+        ])
         await page.waitForFunction(
           () => /rendered to|render failed/.test(document.querySelector('.modal[aria-label="Render an artefact"]')?.textContent ?? ''),
           { timeout: 30_000 }
@@ -351,14 +356,19 @@ test('a local-instance Render produces a real, well-formed .docx via client-side
         assert.ok(requestedPaths.includes('/api/instance/render-wasm-finish/soap'), `expected render-wasm-finish among: ${requestedPaths.join(', ')}`)
         assert.ok(!requestedPaths.includes('/api/instance/render/soap'), `expected no native render call, got: ${requestedPaths.join(', ')}`)
 
-        // WI #356: the server's own startup migration moved this scratch instance into the reserved `default` server workspace.
-        const docxPath = join(instancesDir, 'default', 'examples', 'out', 'Examples - Solution on a Page.docx')
-        const docxBytes = readFileSync(docxPath)
+        // WI #360 — delivered to the browser as a real download, not a server-side path.
+        assert.match(download.suggestedFilename(), /^Kiwi Cover Mutual - Solution on a Page\.docx$/)
+        const downloadPath = await download.path()
+        const docxBytes = readFileSync(downloadPath)
         assert.equal(docxBytes.subarray(0, 2).toString(), 'PK', '.docx should start with a PK zip header')
         const markdown = docxToMarkdown(docxBytes.toString('base64'))
         assert.match(markdown, /Solution on a Page/)
         assert.match(markdown, /Document Control/)
         assert.match(markdown, /Kiwi Cover Mutual/)
+
+        // WI #356: the server's own startup migration moved this scratch instance into the
+        // reserved `default` server workspace. WI #360 — nothing was ever written there.
+        assert.equal(existsSync(join(instancesDir, 'default', 'examples', 'out')), false)
       } finally {
         await browser.close()
       }

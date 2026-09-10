@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, isAbsolute, relative } from 'node:path'
+import { join, relative } from 'node:path'
 import { createServer } from '../lib/server.js'
 import { createInstance, readInstance, readModule } from '../lib/instance.js'
 import { loadDefinition } from '../lib/definition.js'
@@ -256,7 +256,12 @@ test('PUT /api/instance/assignee?slug=<traversal> is rejected with 400, never wr
   }
 })
 
-test('POST /api/instance/render/:artefact renders a real docx via the web form path', async () => {
+// WI #360 — a server-hosted (directory-backed) instance's render is delivered straight to the
+// browser and never lands under the instance's own out/ directory at all. `withRunningServer`
+// migrates a flat scratch `instancesDir` into `<instancesDir>/default/<slug>/` on startup
+// (`migrateWorkspacesOnStart`), which is why the "never created" assertions below check that
+// nested path, not `instancesDir` itself.
+test('POST /api/instance/render/:artefact returns real docx bytes and never creates out/', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
@@ -268,10 +273,14 @@ test('POST /api/instance/render/:artefact renders a real docx via the web form p
       const body = await res.json()
       assert.equal(body.artefact, 'soap')
       assert.equal(body.azureDevOpsUrl, undefined)
-      assert.match(body.docxPath, /out[/\\]Kiwi Cover Mutual - Solution on a Page\.docx$/)
-      // Absolute, not relative to wherever `gantry serve` happened to be launched from — the browser has no way to resolve a relative path.
-      assert.equal(isAbsolute(body.docxPath), true)
-      assert.ok(existsSync(body.docxPath))
+      assert.equal(body.format, 'docx')
+      assert.equal(body.basename, 'Kiwi Cover Mutual - Solution on a Page')
+      assert.equal(body.markdown, null)
+      assert.ok(typeof body.docxBase64 === 'string' && body.docxBase64.length > 0)
+      const docxBytes = Buffer.from(body.docxBase64, 'base64')
+      // A real docx (a zip) starts with the local-file-header magic bytes "PK\x03\x04".
+      assert.equal(docxBytes.subarray(0, 4).toString('hex'), '504b0304')
+      assert.equal(existsSync(join(instancesDir, 'default', 'examples', 'out')), false)
     })
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
@@ -279,7 +288,7 @@ test('POST /api/instance/render/:artefact renders a real docx via the web form p
 })
 
 // WI #359 — the render dialog's docx/md format toggle, at the HTTP route level.
-test('POST /api/instance/render/:artefact?format=md renders only a .md — no .docx anywhere, exactly one of docxPath/mdPath non-null', async () => {
+test('POST /api/instance/render/:artefact?format=md returns the compiled markdown itself and never creates out/', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
@@ -291,18 +300,16 @@ test('POST /api/instance/render/:artefact?format=md renders only a .md — no .d
       const body = await res.json()
       assert.equal(body.artefact, 'soap')
       assert.equal(body.format, 'md')
-      assert.equal(body.docxPath, null)
-      assert.match(body.mdPath, /out[/\\]Kiwi Cover Mutual - Solution on a Page\.md$/)
-      assert.equal(isAbsolute(body.mdPath), true)
-      assert.ok(existsSync(body.mdPath))
-      assert.equal(existsSync(body.mdPath.replace(/\.md$/, '.docx')), false)
+      assert.equal(body.docxBase64, null)
+      assert.match(body.markdown, /# kiwi-cover-mutual: Solution on a Page/)
+      assert.equal(existsSync(join(instancesDir, 'default', 'examples', 'out')), false)
     })
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }
 })
 
-test('POST /api/instance/render/:artefact with no format (or ?format=docx) reports format: "docx" and does not persist a .md', async () => {
+test('POST /api/instance/render/:artefact with no format (or ?format=docx) reports format: "docx" and never persists a .md', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
@@ -313,9 +320,9 @@ test('POST /api/instance/render/:artefact with no format (or ?format=docx) repor
       assert.equal(res.status, 200)
       const body = await res.json()
       assert.equal(body.format, 'docx')
-      assert.equal(body.mdPath, null)
-      assert.ok(existsSync(body.docxPath))
-      assert.equal(existsSync(body.docxPath.replace(/\.docx$/, '.md')), false)
+      assert.equal(body.markdown, null)
+      assert.ok(body.docxBase64)
+      assert.equal(existsSync(join(instancesDir, 'default', 'examples', 'out')), false)
     })
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })

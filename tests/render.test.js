@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -73,6 +73,58 @@ test('the default (docx) format on a local render does not persist the intermedi
     assert.equal(result.mdPath, null)
     assert.equal(existsSync(result.docxPath), true)
     assert.equal(existsSync(result.docxPath.replace(/\.docx$/, '.md')), false)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// WI #360 — a server-hosted (directory-backed) instance's render never lands under the
+// instance's own out/ directory at all when delivered to the client; the caller gets the
+// bytes back in memory instead.
+test('deliverToClient (docx): out/ is never created, docxPath/mdPath are both null, and docxBytes holds a real .docx', () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+    const result = renderArtefact('examples', 'soap', { instancesDir, deliverToClient: true })
+    assert.equal(result.format, 'docx')
+    assert.equal(result.docxPath, null)
+    assert.equal(result.mdPath, null)
+    assert.equal(existsSync(join(instancesDir, 'examples', 'out')), false)
+    assert.ok(Buffer.isBuffer(result.docxBytes))
+    assert.ok(result.docxBytes.length > 0)
+    // A real docx (a zip) starts with the local-file-header magic bytes "PK\x03\x04".
+    assert.equal(result.docxBytes.subarray(0, 4).toString('hex'), '504b0304')
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('deliverToClient (md): out/ is never created, and the markdown is available without any file at all', () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+    const result = renderArtefact('examples', 'soap', { instancesDir, format: 'md', deliverToClient: true })
+    assert.equal(result.format, 'md')
+    assert.equal(result.docxPath, null)
+    assert.equal(result.mdPath, null)
+    assert.equal(existsSync(join(instancesDir, 'examples', 'out')), false)
+    assert.match(result.markdown, /# kiwi-cover-mutual: Solution on a Page/)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('deliverToClient leaves no scratch temp files behind after a docx render', () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+    const before = new Set(readdirSync(tmpdir()).filter((n) => n.startsWith('gantry-render-')))
+    renderArtefact('examples', 'soap', { instancesDir, deliverToClient: true })
+    const after = new Set(readdirSync(tmpdir()).filter((n) => n.startsWith('gantry-render-')))
+    assert.deepEqual([...after].filter((n) => !before.has(n)), [])
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }
