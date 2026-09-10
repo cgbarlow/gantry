@@ -340,6 +340,25 @@ function base64ToBytes(base64) {
   return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
 }
 
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+
+// WI #360 — a server-hosted (directory-backed) instance's render never lands on the server's
+// own filesystem; the bytes come back over the wire and are handed straight to the browser as
+// a download instead. Standard Blob + object URL + synthetic `<a download>` click; the object
+// URL is revoked right after the click since nothing else in this codebase needs to keep it
+// alive (contrast `ensureLocalAssetUrl` above, whose object URLs back a live `<img>` and must
+// persist for as long as that element is on screen).
+function triggerBrowserDownload(bytes, filename, mimeType) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: mimeType }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
 // WI314 — the local-workspace half of the engine-aware Render action (RenderDialog's
 // handleRenderBatch, below). `'wasm'`: compiles the artefact server-side (dry run — no
 // `pandoc` subprocess, see /api/local/compile) and converts it to `.docx` in the browser via
@@ -414,10 +433,13 @@ async function renderLocalArtefactViaEngine(instance, artefact, slug, format = '
 // no browser-side conversion step to offload for a markdown-only render, so it goes straight to
 // the plain native route (which, since #359, is itself format-aware) with `?format=md`.
 async function renderAzureArtefactViaEngine(artefact, slug, workspaceBacked = false, format = 'docx') {
-  // WI #349 — a plain local instance (e.g. the bundled `examples`) gets the same WASM flow:
-  // the server compiles (no pandoc subprocess), the browser converts, the server lands the
-  // bytes in the instance's out/. Before this the local kind went straight to the native
-  // route, which on a zip-release install with no pandoc fails with `spawnSync pandoc ENOENT`.
+  // WI #349 — a plain server-hosted (directory-backed) instance (e.g. the bundled `examples`)
+  // gets the same WASM flow: the server compiles (no pandoc subprocess), the browser converts.
+  // WI #360 — the resulting bytes are never written to the instance's own `out/` directory;
+  // `render-wasm-finish` just echoes the bytes the browser already produced back in its
+  // response (a round trip kept for symmetry with the workspace-backed leg below, not because
+  // the server needs to do anything with them), and this leg triggers a real download from
+  // them instead of reporting a server-side path.
   if (format === 'docx' && !workspaceBacked && renderEngine.value === 'wasm') {
     try {
       const prepRes = await apiFetchForInstance(
@@ -437,7 +459,9 @@ async function renderAzureArtefactViaEngine(artefact, slug, workspaceBacked = fa
       )
       const finish = await finishRes.json()
       if (!finishRes.ok) throw new Error(finish.message ?? finish.error ?? `Finish failed (${finishRes.status})`)
-      return { title: artefact.title, path: finish.docxPath, url: null }
+      const filename = `${finish.basename}.docx`
+      triggerBrowserDownload(docxBytes, filename, DOCX_MIME)
+      return { title: artefact.title, path: filename, url: null }
     } catch {
       // Falls through to the native leg below.
     }
@@ -484,13 +508,26 @@ async function renderAzureArtefactViaEngine(artefact, slug, workspaceBacked = fa
     { method: 'POST' }
   )
   const body = await res.json()
+  if (!res.ok) {
+    return { text: `${artefact.title}: render failed — ${body.message ?? body.error}` }
+  }
   // Azure-DevOps-backed instances report `azureDevOpsPath` (where the render was pushed back
   // to, in the same repo the rest of the instance's data lives in, `.md` or `.docx` per
-  // `format`); local instances report `docxPath` or `mdPath` (a path on the machine running
-  // `gantry serve`) — exactly one of the two local fields is non-null, matching `format`.
-  return res.ok
-    ? { title: artefact.title, path: body.azureDevOpsPath ?? body.docxPath ?? body.mdPath, url: body.azureDevOpsPath ? body.azureDevOpsUrl : null }
-    : { text: `${artefact.title}: render failed — ${body.message ?? body.error}` }
+  // `format`) — unchanged by WI #360.
+  if (body.azureDevOpsPath) {
+    return { title: artefact.title, path: body.azureDevOpsPath, url: body.azureDevOpsUrl }
+  }
+  // WI #360 — a server-hosted (directory-backed) instance's render carries its bytes straight
+  // in the response (`markdown` for `format: 'md'`, `docxBase64` for `format: 'docx'`) instead
+  // of a server-side path; nothing is written to the instance's own `out/` directory, so the
+  // only place the artefact lands is a real browser download.
+  const filename = `${body.basename}.${format}`
+  if (format === 'md') {
+    triggerBrowserDownload(new TextEncoder().encode(body.markdown), filename, 'text/markdown')
+  } else {
+    triggerBrowserDownload(base64ToBytes(body.docxBase64), filename, DOCX_MIME)
+  }
+  return { title: artefact.title, path: filename, url: null }
 }
 
 // ---------- Navigation heading helpers (WI232) ----------
