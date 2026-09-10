@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, readFileSync, existsSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { resolveInstancesDir, resolvePort, program } from '../bin/gantry.js'
+import { resolveInstancesDir, resolveWorkspacesDir, resolvePort, program } from '../bin/gantry.js'
 
 function withEnv(env, fn) {
   const prev = {}
@@ -57,6 +57,31 @@ test('resolveInstancesDir: default when neither flag nor env', () => {
 test('resolveInstancesDir: flag undefined falls back to default when env empty string? nullish only', () => {
   withEnv({ GANTRY_INSTANCES_DIR: undefined }, () => {
     assert.equal(resolveInstancesDir(null), 'instances')
+  })
+})
+
+// workspacesDir (WI #355): flag > env > default, same precedence as resolveInstancesDir above
+test('resolveWorkspacesDir: flag takes precedence over env and default', () => {
+  withEnv({ GANTRY_WORKSPACES_DIR: '/from-env' }, () => {
+    assert.equal(resolveWorkspacesDir('/from-flag'), '/from-flag')
+  })
+})
+
+test('resolveWorkspacesDir: env used when flag is undefined', () => {
+  withEnv({ GANTRY_WORKSPACES_DIR: '/from-env' }, () => {
+    assert.equal(resolveWorkspacesDir(undefined), '/from-env')
+  })
+})
+
+test('resolveWorkspacesDir: default when neither flag nor env', () => {
+  withEnv({ GANTRY_WORKSPACES_DIR: undefined }, () => {
+    assert.equal(resolveWorkspacesDir(undefined), 'workspaces')
+  })
+})
+
+test('resolveWorkspacesDir: flag undefined falls back to default when env empty string? nullish only', () => {
+  withEnv({ GANTRY_WORKSPACES_DIR: undefined }, () => {
+    assert.equal(resolveWorkspacesDir(null), 'workspaces')
   })
 })
 
