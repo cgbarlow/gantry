@@ -43,6 +43,41 @@ test('dry-run compiles the template without writing anything, with no HTML-entit
   }
 })
 
+// WI #359 — the render dialog's docx/md format toggle. `format` defaults to `'docx'`
+// (every pre-#359 caller) when omitted entirely.
+test('format: "md" on a local render writes only the .md, produces no .docx at all, and never shells out to pandoc', () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+    const result = renderArtefact('examples', 'soap', { instancesDir, format: 'md' })
+    assert.equal(result.format, 'md')
+    assert.equal(result.docxPath, null)
+    assert.ok(result.mdPath)
+    assert.equal(existsSync(result.mdPath), true)
+    assert.equal(readFileSync(result.mdPath, 'utf8'), result.markdown)
+    // Confirms no .docx landed anywhere in out/ either — this render never invoked pandoc at all.
+    assert.equal(existsSync(result.mdPath.replace(/\.md$/, '.docx')), false)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('the default (docx) format on a local render does not persist the intermediate .md in out/ — only the .docx a caller asked for', () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+    const result = renderArtefact('examples', 'soap', { instancesDir })
+    assert.equal(result.format, 'docx')
+    assert.equal(result.mdPath, null)
+    assert.equal(existsSync(result.docxPath), true)
+    assert.equal(existsSync(result.docxPath.replace(/\.docx$/, '.md')), false)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
 test('renders the Full SOAP with the reference sections, metadata, static caveats, and markdown tables', () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
@@ -463,6 +498,34 @@ test('if the follow-up push that adds the Document Control fails, the error name
       await assert.rejects(() => renderArtefact('examples', 'soap', { azureDevOps }), {
         message: /pushed it to Azure DevOps as commit [0-9a-f]{7}, but the follow-up push that adds the commit-hash\/date Document Control failed/,
       })
+    }
+  )
+})
+
+// WI #359 — the same two-push commit-learning trick (a commit can't truthfully name its own
+// hash inside its own content, see pushDraftAndLearnCommit's doc comment) applies unchanged
+// when the selected format is markdown, not docx: it just pushes different bytes to a
+// differently-extensioned path.
+test('format: "md" against Azure DevOps pushes the compiled markdown itself (never a .docx) to a .md path, with an accurate self-referencing commit hash', async () => {
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: seedExamplesAzureDevOpsFiles() },
+    async (baseUrl) => {
+      const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl }
+      const result = await renderArtefact('examples', 'soap', { azureDevOps, format: 'md' })
+
+      assert.equal(result.format, 'md')
+      assert.match(result.azureDevOpsPath, /\.md$/)
+      assert.match(result.commit.hash, /^[0-9a-f]{7}$/)
+      assert.match(result.commit.fullHash, /^[0-9a-f]{40}$/)
+
+      const client = createAzureDevOpsClient(azureDevOps)
+      const pushedContent = await client.getFileContent(result.azureDevOpsPath)
+      const pushedMarkdown = Buffer.from(pushedContent, 'base64').toString('utf8')
+      assert.match(pushedMarkdown, /## Document Control/)
+      assert.match(pushedMarkdown, new RegExp(`\\| Commit \\| \\[\`${escapeRegExp(result.commit.hash)}\`\\]`))
+      assert.match(pushedMarkdown, /# kiwi-cover-mutual: Solution on a Page/)
+      // Not a docx: pandoc's own zip-file magic bytes ("PK") never appear.
+      assert.doesNotMatch(pushedContent, /^UEs/) // "PK" as the first two bytes, base64-encoded
     }
   )
 })

@@ -117,7 +117,10 @@ test('a ```mermaid fence renders as an SVG in the preview, and a WASM Render emb
       assert.ok(prepared.size > 100, 'the PNG should have real bytes')
       assert.match(prepared.markdown, /!\[Diagram 1\]\(mermaid-diagram-1\.png\)/)
 
-      // Render via the default WASM engine.
+      // Render via the default WASM engine — docx format (WI #359's default). A docx-format
+      // render no longer also persists the .md sidecar (see editor-local-workspace's own
+      // updated assertion for the same behaviour); the fenced-source guarantee below is
+      // exercised separately, by explicitly selecting the md format.
       await page.getByRole('button', { name: 'Render', exact: true }).click()
       const renderDialog = page.locator('.modal[aria-label="Render an artefact"]')
       await renderDialog.waitFor({ state: 'visible', timeout: 5_000 })
@@ -131,10 +134,6 @@ test('a ```mermaid fence renders as an SVG in the preview, and a WASM Render emb
       assert.doesNotMatch(renderStatusText, /render failed/, `WASM render must not fail: ${renderStatusText}`)
 
       const basename = 'Mermaid Local Render - Solution on a Page'
-      const md = await readOpfsFile(page, `gantry-workspace/${slug}/out/${basename}.md`, { binary: false })
-      assert.ok(md.includes('```mermaid'), 'the exported .md keeps the fenced Mermaid source')
-      assert.ok(!md.includes('mermaid-diagram-1.png'), 'the exported .md never references the docx-only PNG')
-
       const docxBase64 = await readOpfsFile(page, `gantry-workspace/${slug}/out/${basename}.docx`, { binary: true })
       const roundTrip = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown', `--extract-media=${mediaDir}`], {
         input: Buffer.from(docxBase64, 'base64'),
@@ -143,6 +142,23 @@ test('a ```mermaid fence renders as an SVG in the preview, and a WASM Render emb
       assert.ok(!roundTrip.includes('flowchart LR'), 'the docx must not carry the Mermaid source as a code block')
       const media = readdirSync(join(mediaDir, 'media'))
       assert.ok(media.some((f) => f.endsWith('.png')), `the docx should embed a PNG, got: ${media.join(', ')}`)
+
+      // WI #359 — still the same open dialog: switch to the md format and render again. No PNG
+      // rasterisation this time, the fenced Mermaid source is preserved as-is, and no .md was
+      // written by the docx render above.
+      await renderDialog.getByRole('radio', { name: 'md' }).check()
+      await renderDialog.locator('.modal-actions').getByRole('button', { name: 'Render' }).click()
+      await page.waitForFunction(
+        () => /rendered to|render failed/.test(document.querySelector('.modal[aria-label="Render an artefact"]')?.textContent ?? ''),
+        { timeout: 20_000 }
+      )
+      const mdRenderStatusText = await renderDialog.textContent()
+      assert.doesNotMatch(mdRenderStatusText, /render failed/, `md-format render must not fail: ${mdRenderStatusText}`)
+
+      const md = await readOpfsFile(page, `gantry-workspace/${slug}/out/${basename}.md`, { binary: false })
+      assert.ok(md.includes('```mermaid'), 'the exported .md keeps the fenced Mermaid source')
+      assert.ok(!md.includes('mermaid-diagram-1.png'), 'the exported .md never references the docx-only PNG')
+
       assert.deepEqual(consoleErrors, [], 'no uncaught page errors')
     } finally {
       rmSync(mediaDir, { recursive: true, force: true })

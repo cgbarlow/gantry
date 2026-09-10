@@ -163,7 +163,7 @@ test('local-workspace instance: loads, saves offline-safe, gate-checks, advances
       const backgroundOnDisk = await readOpfsFile(page, `gantry-workspace/${slug}/modules/background.md`)
       assert.match(backgroundOnDisk, /— edited locally\./, 'the edit landed in the on-disk module file')
 
-      // ---- Render: writes .md and .docx into gantry-workspace/<slug>/out/ through the handle. Rendered while still on "shape" (its own seeded modules cover the "soap" artefact's own requires) — before advancing, so the next stage's own (unseeded) modules are never needed. ----
+      // ---- Render: writes only the .docx (WI #359's default format) into gantry-workspace/<slug>/out/ through the handle — a docx-format render no longer also persists the intermediate .md. Rendered while still on "shape" (its own seeded modules cover the "soap" artefact's own requires) — before advancing, so the next stage's own (unseeded) modules are never needed. ----
       await page.getByRole('button', { name: 'Render', exact: true }).click()
       const renderDialog = page.locator('.modal[aria-label="Render an artefact"]')
       await renderDialog.waitFor({ state: 'visible', timeout: 5_000 })
@@ -196,10 +196,9 @@ test('local-workspace instance: loads, saves offline-safe, gate-checks, advances
         return listDir(handle, `gantry-workspace/local-claims/out`).catch(() => [])
       })
       const names = outEntries.map((e) => e.name)
-      assert.ok(names.some((n) => n.endsWith('.md')), `expected a rendered .md in out/, got: ${names.join(', ')}`)
+      // WI #359: the default (docx) format render no longer persists the intermediate .md.
       assert.ok(names.some((n) => n.endsWith('.docx')), `expected a rendered .docx in out/, got: ${names.join(', ')}`)
-      const renderedMd = await readOpfsFile(page, `gantry-workspace/${slug}/out/${names.find((n) => n.endsWith('.md'))}`)
-      assert.ok(renderedMd.trim().length > 0, 'the rendered .md has real content')
+      assert.ok(!names.some((n) => n.endsWith('.md')), `docx-only render must not persist a .md, got: ${names.join(', ')}`)
 
       // ---- Gate check + Advance: /api/local/check against the real running server, then instance.yaml rewritten through the handle ----
       const advancePanel = page.locator('.advance-stage-panel')
