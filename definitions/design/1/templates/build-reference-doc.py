@@ -33,6 +33,17 @@ as distinct files with a placeholder comment pending the ARB/TAC vs
 Design Authority decision — so that decision can land as a docx-only
 edit without further code changes.
 
+Post-WI363: `reference-soap-full.docx` is a byte copy of
+`reference-soap.docx` — the Full SOAP is the same document family as the
+SOAP, so it gets the same neutral footer. It exists as its own file
+because the fallback is not a safe default: before it existed, the Full
+SOAP fell through to `reference.docx` and inherited the TAC footer. The
+definition-level `reference.docx` has since had that committee line
+stripped too, so the fallback is now neutral rather than wrong. Every
+artefact must still ship its own `reference-<artefact>.docx`;
+`tests/referenceDocFooter.test.js` fails the build if one is missing, or
+if any artefact's footer names a committee it doesn't go to.
+
 To regenerate after updating the source HLD template:
     python3 build-reference-doc.py <source-hld.docx> definitions/design/templates/reference.docx
     # then re-derive the artefact variants (see inline patch_footer in the
