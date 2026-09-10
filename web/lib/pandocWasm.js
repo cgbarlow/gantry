@@ -140,16 +140,23 @@ export function warmLoadPandocWasm(testOverrides) {
  * that and falls back to native Pandoc rather than surfacing a WASM-specific outage to the
  * user.
  *
- * @param {{ markdown: string, referenceDocBytes?: ArrayBuffer|Uint8Array|Blob|null }} args
+ * `files` (WI #353): extra virtual-filesystem entries — the PNGs web/lib/mermaid.js produces
+ * for each Mermaid block, keyed by the relative filename the rewritten markdown's image
+ * references use — injected exactly the way `reference.docx` is, so pandoc embeds them.
+ *
+ * @param {{ markdown: string, referenceDocBytes?: ArrayBuffer|Uint8Array|Blob|null, files?: Record<string, Blob|Uint8Array|ArrayBuffer> }} args
  * @param {{ importCore?: Function, fetchImpl?: Function }} [testOverrides] test-only —
  *   see `warmLoadPandocWasm`'s own doc comment
  * @returns {Promise<Uint8Array>} the produced `.docx`'s raw bytes
  */
-export async function renderDocxWithWasm({ markdown, referenceDocBytes }, testOverrides) {
+export async function renderDocxWithWasm({ markdown, referenceDocBytes, files: extraFiles }, testOverrides) {
   const instance = await warmLoadPandocWasm(testOverrides)
 
   const options = { from: 'markdown', to: 'docx', 'output-file': 'output.docx' }
   const files = {}
+  for (const [name, bytes] of Object.entries(extraFiles ?? {})) {
+    files[name] = bytes instanceof Blob ? bytes : new Blob([bytes])
+  }
   if (referenceDocBytes) {
     options['reference-doc'] = 'reference.docx'
     files['reference.docx'] = referenceDocBytes instanceof Blob ? referenceDocBytes : new Blob([referenceDocBytes])

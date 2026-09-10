@@ -115,6 +115,21 @@ Either way, Gantry inserts the reference into the field for you at the cursor.
 
 For a Workspace-backed Instance (see **Workspaces & Instances** above), images work a little differently: uploading through the editor isn't available, since a picture needs to be committed to the Azure DevOps repository the same way everything else about the instance is. Instead, add the image file straight to the instance's own `assets` folder in the repository (alongside its `modules` folder), then reference it from a field yourself, the same way you would reference any other image, for example `![description](assets/your-file.png)`. Gantry resolves it the same way in both the live preview and rendered documents.
 
+### Drawing diagrams with Mermaid
+
+For a diagram you would rather write than draw, put a fenced `mermaid` block in the field:
+
+````markdown
+```mermaid
+flowchart LR
+  Author --> Gantry --> Artefact
+```
+````
+
+The live preview shows the diagram in place of the source. When you **Render** with the default WASM Pandoc engine, the Word document carries the diagram as a picture, and the Markdown file written beside it keeps the Mermaid source so it stays editable. If Mermaid cannot parse a block, the preview keeps the source and shows a short error note under it; the rest of the field and the render are unaffected.
+
+Two things to know: the **Native Pandoc** engine (and the `gantry render` command) still export the block as source text, and HTML markup inside labels is not supported — use plain text.
+
 ## Artefacts & Rendering
 
 An **Artefact** is a rendered output such as a summary, design document or handover document. Artefacts are generated from module data on demand and are never the authored source of truth.
