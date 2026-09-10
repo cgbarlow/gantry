@@ -26,6 +26,7 @@ Overall: four Smalls. Indicatively three to five weeks elapsed for UAT and a fur
 
 - README.md, "Deploying to a server (UAT / production)": persistence, access control, health check and upgrade guidance for the container
 - `azure-pipelines.release.yml` and `ContainerFile`: how the image is built and which tags are published
+- `azure-pipelines.yml`: the branch-protection build that gates every merge to `main` — the container build, the unit, integration and Playwright suites, the coverage thresholds and the example renders — and the commented-out SARIF publish step where static-analysis results would go if a linter produced them
 - docs/adr/0005, docs/adr/0010 and docs/adr/0029: why instance data lives in Azure DevOps workspace repositories, and what a local workspace is
 - Azure Container Apps documentation: ingress (internal environments, TLS, load-balancing, 240-second request timeout), storage mounts (Azure Files shared across replicas), scaling (minimum replicas), revisions (zero-downtime update and rollback), health probes, and Log Analytics monitoring
 - Azure DevOps work item #354 (this initiative) and #353 (Mermaid rendering, which these diagrams depend on)
