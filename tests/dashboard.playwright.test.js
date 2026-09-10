@@ -33,7 +33,11 @@ function withPage(fn) {
 test('dashboard: titled "Workspaces", master-detail is the default view, and its detail column shows each instance\'s definition/status/read-only assignee with Check/Edit reachable', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    // Local instances have no workspace (#96 — Workspace is an Azure-DevOps-repo concept only), so each groups on its own, one row per instance — the single-instance case the ticket's own "a workspace with only one instance still displays correctly" criterion describes.
+    // Both instances are bare (no `workspace.json` of their own), so on server start (WI #356) they
+    // migrate into the one reserved "default" server workspace — one row for that workspace (WI
+    // #357's one-row-per-workspace grouping), its detail column listing both instances as their own
+    // cards, sorted by slug — the multi-instance-workspace case the ticket's own "a multi-instance
+    // workspace's detail column listing every instance it holds" criterion describes.
     createInstance('design', 'alpha-initiative', { instancesDir, assignee: 'c.barlow' })
     createInstance('design', 'zebra-initiative', { instancesDir })
 
@@ -47,7 +51,7 @@ test('dashboard: titled "Workspaces", master-detail is the default view, and its
 
         assert.equal(await page.locator('.dashboard-topbar h1').textContent(), 'Workspaces')
         assert.equal(await page.locator('.dashboard-heading svg').count(), 1)
-        assert.equal(await page.locator('.instance-list .list-item').count(), 2)
+        assert.equal(await page.locator('.instance-list .list-item').count(), 1)
         const viewTrigger = page.getByRole('button', { name: 'View mode' })
         assert.equal(await viewTrigger.count(), 1)
         await viewTrigger.click()
@@ -58,21 +62,22 @@ test('dashboard: titled "Workspaces", master-detail is the default view, and its
         await viewMenu.getByRole('menuitem', { name: 'Default' }).click()
         await viewMenu.waitFor({ state: 'hidden', timeout: 2_000 })
 
-        // First group (sorted by title: alpha-initiative) is selected by default — its one instance shows up as its own card in the detail column.
+        // The one group (the migrated "default" server workspace) is selected by default — both
+        // instances it holds show up as their own cards in the detail column, sorted by slug.
         await page.waitForSelector('.instance-card', { timeout: 10_000 })
-        assert.equal(await page.locator('.detail-pane h2').textContent(), 'alpha-initiative')
-        assert.equal(await page.locator('.instance-card').count(), 1)
-        assert.equal(await page.locator('.instance-card .name').textContent(), 'alpha-initiative')
-        assert.match(await page.locator('.instance-card .def').textContent(), /design/)
-        assert.equal(await page.locator('.instance-card .assignee').textContent(), 'c.barlow')
-        assert.equal(await page.locator('.instance-card .identity-picker').count(), 0)
-        assert.ok(await page.getByRole('button', { name: 'Check' }).isVisible())
-        assert.equal(await page.locator('.instance-card').getByRole('button', { name: 'Render' }).count(), 0)
-        assert.ok(await page.getByRole('link', { name: 'Edit', exact: true }).isVisible())
-        assert.equal(await page.locator('.manage-card').count(), 1)
-        assert.equal(await page.locator('.manage-card .manage-link').count(), 0)
+        assert.equal(await page.locator('.detail-pane h2').textContent(), 'default')
+        assert.equal(await page.locator('.instance-card').count(), 2)
+        const card = page.locator('.instance-card').filter({ hasText: 'alpha-initiative' })
+        assert.equal(await card.locator('.name').textContent(), 'alpha-initiative')
+        assert.match(await card.locator('.def').textContent(), /design/)
+        assert.equal(await card.locator('.assignee').textContent(), 'c.barlow')
+        assert.equal(await card.locator('.identity-picker').count(), 0)
+        assert.ok(await card.getByRole('button', { name: 'Check' }).isVisible())
+        assert.equal(await card.getByRole('button', { name: 'Render' }).count(), 0)
+        assert.ok(await card.getByRole('link', { name: 'Edit', exact: true }).isVisible())
+        assert.equal(await card.locator('.manage-card').count(), 1)
+        assert.equal(await card.locator('.manage-card .manage-link').count(), 0)
 
-        const card = page.locator('.instance-card')
         const contentBox = await card.locator('.instance-card-content').boundingBox()
         const manageBox = await card.locator('.manage-card').boundingBox()
         assert.ok(Math.abs(contentBox.y - manageBox.y) < 1, 'Manage card should align with the instance card content')

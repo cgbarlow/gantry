@@ -358,6 +358,17 @@ export async function readTextFile(rootHandle, path) {
 }
 
 /**
+ * The browser-side counterpart of `lib/registry.js`'s `localUpdatedAt` (WI #357): the last-modified
+ * timestamp (epoch ms, `File.lastModified`) of the file at `path` under `rootHandle` — used by the
+ * dashboard to show a local workspace instance's own "updated" time without a full text read.
+ */
+export async function getFileLastModified(rootHandle, path) {
+  const fileHandle = await resolveFile(rootHandle, path, { create: false })
+  const file = await fileHandle.getFile()
+  return file.lastModified
+}
+
+/**
  * Write `text` to `path` under `rootHandle`, creating any intermediate
  * directories. Overwrites an existing file.
  */

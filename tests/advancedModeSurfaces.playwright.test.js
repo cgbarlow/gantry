@@ -85,8 +85,11 @@ test('advanced mode off (fresh browser): the dashboard lists only local instance
     await page.waitForSelector('.master-detail', { timeout: 10_000 })
 
     // Only the local instance's row — the Azure-DevOps-backed one is filtered out client-side.
+    // `LOCAL_SLUG` is bare (no `workspace.json` of its own), so it migrates into the reserved
+    // "default" server workspace on server start (WI #356) — the list-item shown is that
+    // workspace's row (WI #357's one-row-per-workspace grouping), not the instance's own slug.
     assert.equal(await page.locator('.instance-list .list-item').count(), 1)
-    assert.equal(await page.locator('.instance-list .list-item .name').textContent(), LOCAL_SLUG)
+    assert.equal(await page.locator('.instance-list .list-item .name').textContent(), 'default')
     assert.equal(await page.locator('.instance-list .list-item .name', { hasText: REPOSITORY }).count(), 0)
 
     // Turning advanced mode on (a sticky choice) and reloading brings the ADO row back.
@@ -95,7 +98,7 @@ test('advanced mode off (fresh browser): the dashboard lists only local instance
     await page.waitForSelector('.master-detail', { timeout: 10_000 })
     assert.equal(await page.locator('.instance-list .list-item').count(), 2)
     const names = await page.locator('.instance-list .list-item .name').allTextContents()
-    assert.deepEqual([...names].sort(), [REPOSITORY, LOCAL_SLUG].sort())
+    assert.deepEqual([...names].sort(), [REPOSITORY, 'default'].sort())
   })
 })
 

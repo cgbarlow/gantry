@@ -929,18 +929,9 @@ main.dashboard {
 }
 
 /* ---------- Local workspaces, blended into the master-detail list (#296/A5, reworked by #306) ---------- */
-.local-instance-list { display: flex; flex-direction: column; gap: 8px; }
-.local-instance-row {
-  display: block;
-  padding: 8px 12px;
-  border: var(--hairline) solid var(--line);
-  border-radius: var(--radius);
-  background: var(--bg);
-  color: var(--text);
-  text-decoration: none;
-}
-.local-instance-row:hover { border-color: var(--line-strong); }
-.local-instance-row .name { font-family: var(--font-display); font-weight: 600; font-size: 14px; }
+/* WI #357: a local workspace's instances now render through the same .instance-card / .workspace-instances
+   rules every other workspace kind uses (see InstanceCard, web/app.js) — the plain-row .local-instance-list/
+   .local-instance-row styling above is retired along with that code path. */
 .local-workspace-recovery p { margin: 0 0 8px; color: var(--text-muted); font-size: 13px; }
 
 /* ---------- Stage swimlanes ---------- */
