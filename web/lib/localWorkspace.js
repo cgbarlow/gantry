@@ -44,8 +44,12 @@ function isIsoDateString(value) {
  * folder" step, later) can show every problem at once rather than the first.
  *
  * Rules (ADR-0029): `kind` must be exactly `"local"`; `name` is required and
- * must not be blank/whitespace-only; `owner` is optional but must be a
- * string when present; `createdAt` must be an ISO date string.
+ * must not be blank/whitespace-only; `description` is optional but must be a
+ * string when present (WI #355 — a short human-facing subtitle, shown on the
+ * dashboard in place of the generic "Server instance"/"Local workspace"
+ * label once a caller sets one; never required, never defaulted); `owner` is
+ * optional but must be a string when present; `createdAt` must be an ISO
+ * date string.
  */
 export function validateWorkspaceRecord(obj) {
   const errors = []
@@ -58,6 +62,9 @@ export function validateWorkspaceRecord(obj) {
   if (typeof obj.name !== 'string' || obj.name.trim() === '') {
     errors.push('name is required and must not be blank')
   }
+  if (obj.description !== undefined && typeof obj.description !== 'string') {
+    errors.push('description, when present, must be a string')
+  }
   if (obj.owner !== undefined && typeof obj.owner !== 'string') {
     errors.push('owner, when present, must be a string')
   }
@@ -67,13 +74,15 @@ export function validateWorkspaceRecord(obj) {
   return { valid: errors.length === 0, errors }
 }
 
-/** Normalized record — stable key order, `owner` omitted when absent. */
+/** Normalized record — stable key order, `description`/`owner` omitted when absent. */
 function normalizeRecord(obj) {
   const record = { name: obj.name.trim(), kind: LOCAL_WORKSPACE_KIND, createdAt: obj.createdAt }
+  if (obj.description !== undefined) record.description = obj.description
   if (obj.owner !== undefined) record.owner = obj.owner
-  // Key order chosen for a readable on-disk file: name, owner, kind, createdAt.
+  // Key order chosen for a readable on-disk file: name, description, owner, kind, createdAt.
   return {
     name: record.name,
+    ...(record.description !== undefined ? { description: record.description } : {}),
     ...(record.owner !== undefined ? { owner: record.owner } : {}),
     kind: record.kind,
     createdAt: record.createdAt,

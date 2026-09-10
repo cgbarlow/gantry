@@ -165,6 +165,23 @@ describe('workspace.json schema', () => {
     assert.ok(errors.some((e) => e.includes('owner')))
   })
 
+  test('accepts a record with no description (description is optional)', () => {
+    const { valid } = validateWorkspaceRecord(goodRecord({ description: undefined }))
+    assert.equal(valid, true)
+  })
+
+  test('accepts a record with a description', () => {
+    const { valid, errors } = validateWorkspaceRecord(goodRecord({ description: 'Bundled with Gantry' }))
+    assert.equal(valid, true)
+    assert.deepEqual(errors, [])
+  })
+
+  test('rejects a non-string description', () => {
+    const { valid, errors } = validateWorkspaceRecord(goodRecord({ description: 42 }))
+    assert.equal(valid, false)
+    assert.ok(errors.some((e) => e.includes('description')))
+  })
+
   test('rejects a createdAt that is not an ISO date string', () => {
     for (const createdAt of ['not-a-date', '2026-08-31', 1234567890, undefined]) {
       const { valid, errors } = validateWorkspaceRecord(goodRecord({ createdAt }))
@@ -204,6 +221,24 @@ describe('workspace.json schema', () => {
       createdAt: '2026-08-31T12:00:00.000Z',
     })
     assert.ok(!('owner' in parsed))
+  })
+
+  test('round-trips through serialize -> parse (with description)', () => {
+    const record = goodRecord({ description: 'Bundled with Gantry' })
+    const parsed = parseWorkspaceJson(serializeWorkspaceJson(record))
+    assert.deepEqual(parsed, {
+      name: 'Demo Workspace',
+      description: 'Bundled with Gantry',
+      owner: 'alice',
+      kind: 'local',
+      createdAt: '2026-08-31T12:00:00.000Z',
+    })
+  })
+
+  test('round-trips through serialize -> parse (no description)', () => {
+    const record = goodRecord({ description: undefined })
+    const parsed = parseWorkspaceJson(serializeWorkspaceJson(record))
+    assert.ok(!('description' in parsed))
   })
 
   test('serializeWorkspaceJson refuses an invalid record', () => {

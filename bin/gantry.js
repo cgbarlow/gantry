@@ -14,6 +14,17 @@ export function resolveInstancesDir(cliInstancesDir) {
   return cliInstancesDir ?? process.env.GANTRY_INSTANCES_DIR ?? 'instances'
 }
 
+// WI #355: the CLI-side counterpart of resolveInstancesDir above, for the workspaces root a **server
+// workspace** directory (lib/workspaceDirectory.js) lives under — same precedence (an explicit flag value
+// beats the env var, which beats the literal default), same reasoning. No command wires this in yet: that
+// cutover — a real --workspaces-dir flag on `serve`/`new`/`status`/`check`/`render`/`instances`, replacing
+// --instances-dir as the primary way to point the CLI at data — is Feature #356's job, not this one's.
+// Exported now, and unit-tested now, so #356 has this precedence already proven rather than writing it
+// from scratch under time pressure.
+export function resolveWorkspacesDir(cliWorkspacesDir) {
+  return cliWorkspacesDir ?? process.env.GANTRY_WORKSPACES_DIR ?? 'workspaces'
+}
+
 export function resolvePort(cliPort) {
   return Number(cliPort ?? process.env.PORT ?? '3000')
 }
@@ -35,7 +46,7 @@ program
   .command('instances')
   .description('List instances available in this repo')
   .option('--json', 'emit structured JSON output')
-  .option('--instances-dir <path>', 'instances directory (default: instances)')
+  .option('--instances-dir <path>', 'instances directory (default: instances) — superseded by --workspaces-dir, coming soon')
   .action((options) => {
     const instancesDir = resolveInstancesDir(options.instancesDir)
     const instances = listInstances({ instancesDir })
@@ -61,7 +72,7 @@ program
   .option('--assignee <assignee>', 'assignee to record on the instance record itself (#97)')
   .option('--definition-version <version>', 'definition version to pin (default latest published)')
   .option('--version <version>', 'alias for --definition-version')
-  .option('--instances-dir <path>', 'instances directory (default: instances)')
+  .option('--instances-dir <path>', 'instances directory (default: instances) — superseded by --workspaces-dir, coming soon')
   .action((definition, slug, options) => {
     const version = options.definitionVersion ?? options.version ?? null
     const instancesDir = resolveInstancesDir(options.instancesDir)
@@ -74,7 +85,7 @@ program
   .command('status <slug>')
   .description("Current stage, module completeness, what's outstanding")
   .option('--json', 'emit structured JSON output')
-  .option('--instances-dir <path>', 'instances directory (default: instances)')
+  .option('--instances-dir <path>', 'instances directory (default: instances) — superseded by --workspaces-dir, coming soon')
   .action((slug, options) => {
     const instancesDir = resolveInstancesDir(options.instancesDir)
     const status = getStatus(slug, { instancesDir })
@@ -100,7 +111,7 @@ program
   .description("Validate an instance against a gate's requirements")
   .option('--gate <id>', 'the gate to check against')
   .option('--json', 'emit structured JSON output')
-  .option('--instances-dir <path>', 'instances directory (default: instances)')
+  .option('--instances-dir <path>', 'instances directory (default: instances) — superseded by --workspaces-dir, coming soon')
   .action((slug, options) => {
     const instancesDir = resolveInstancesDir(options.instancesDir)
     const result = checkGate(slug, { gate: options.gate, instancesDir })
@@ -127,7 +138,7 @@ program
   .command('render <slug> <artefact>')
   .description('Render an artefact to out/')
   .option('--dry-run', 'resolve the template without writing')
-  .option('--instances-dir <path>', 'instances directory (default: instances)')
+  .option('--instances-dir <path>', 'instances directory (default: instances) — superseded by --workspaces-dir, coming soon')
   .action((slug, artefact, options) => {
     const instancesDir = resolveInstancesDir(options.instancesDir)
     const result = renderArtefact(slug, artefact, { dryRun: options.dryRun, instancesDir })
@@ -149,7 +160,10 @@ program
       'port resolves as --port flag > PORT env > 3000.'
   )
   .option('--port <port>', 'port to listen on')
-  .option('--instances-dir <path>', 'instances directory (default: instances; or GANTRY_INSTANCES_DIR env)')
+  .option(
+    '--instances-dir <path>',
+    'instances directory (default: instances; or GANTRY_INSTANCES_DIR env) — superseded by --workspaces-dir, coming soon'
+  )
   .action((slug, options) => {
     const instancesDir = resolveInstancesDir(options.instancesDir)
     const port = resolvePort(options.port)
