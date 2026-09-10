@@ -24,6 +24,7 @@ import {
   readBinaryFile,
   writeBinaryFile,
   listDir,
+  getFileLastModified,
 } from '../web/lib/localWorkspace.js'
 
 // ---------------------------------------------------------------------------
@@ -35,11 +36,17 @@ class MemFileHandle {
     this.kind = 'file'
     this.name = name
     this.bytes = new Uint8Array()
+    // Real File System Access API `File` objects carry `lastModified` (epoch ms); the mock stamps
+    // it at creation and bumps it on every write, mirroring a real filesystem closely enough for
+    // `getFileLastModified` (WI #357) to be exercised meaningfully.
+    this.lastModified = Date.now()
   }
 
   async getFile() {
     const bytes = this.bytes
+    const lastModified = this.lastModified
     return {
+      lastModified,
       async text() {
         return new TextDecoder().decode(bytes)
       },
@@ -65,7 +72,9 @@ class MemFileHandle {
           throw new Error(`unsupported write payload: ${typeof data}`)
         }
       },
-      async close() {},
+      async close() {
+        handle.lastModified = Date.now()
+      },
     }
   }
 }
@@ -453,5 +462,21 @@ describe('file ops over the gantry-workspace layout', () => {
 
   test('reading a missing file rejects', async () => {
     await assert.rejects(() => readTextFile(root, 'gantry-workspace/demo/nope.yaml'), /NotFoundError/)
+  })
+
+  test('getFileLastModified reports a numeric timestamp that advances on rewrite (WI #357)', async () => {
+    const path = 'gantry-workspace/demo/instance.yaml'
+    await writeTextFile(root, path, 'kind: demo\n')
+    const firstStamp = await getFileLastModified(root, path)
+    assert.equal(typeof firstStamp, 'number')
+
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    await writeTextFile(root, path, 'kind: demo\nstage: shape\n')
+    const secondStamp = await getFileLastModified(root, path)
+    assert.ok(secondStamp >= firstStamp, 'a rewrite should not report an earlier timestamp than the original write')
+  })
+
+  test('getFileLastModified on a missing file rejects', async () => {
+    await assert.rejects(() => getFileLastModified(root, 'gantry-workspace/demo/nope.yaml'), /NotFoundError/)
   })
 })

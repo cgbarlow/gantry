@@ -53,7 +53,12 @@ async function seedGrantedWorkspace(page, { id, name, slug }) {
         const instDir = await gw.getDirectoryHandle(slug, { create: true })
         const fh = await instDir.getFileHandle('instance.yaml', { create: true })
         const w = await fh.createWritable()
-        await w.write(`definition: design\nslug: ${slug}\nstage: soap\n`)
+        // WI #357: the dashboard card's full status computation (getLocalStatus) actually resolves
+        // this stage id against the definition now — `soap` was never a real stage id (the design
+        // definition's Shape stage's own id is `shape`; SOAP is only its title/artefact name), a
+        // latent fixture bug invisible before this ticket since the old plain-row rendering never
+        // read `stage` at all.
+        await w.write(`definition: design\nslug: ${slug}\nstage: shape\n`)
         await w.close()
       }
       await new Promise((resolve, reject) => {
@@ -159,12 +164,17 @@ test('dashboard: a granted local workspace leads the blended list (position, not
         // Eventually both rows are present, local leading — no separate
         // section/heading and no per-row "Local" badge (WI #306's resolved
         // design: position plus the subtitle-text difference is enough).
+        // The bare `server-instance` this test seeds directly under
+        // `instancesDir` (no `workspace.json`) is migrated on server start
+        // (WI #356) into a reserved `default` server workspace — so the
+        // second row is that workspace ("default"), not the instance itself,
+        // exactly the one-row-per-workspace grouping WI #357 requires.
         await page.waitForFunction(
           () => document.querySelectorAll('.instance-list .list-item').length === 2,
           { timeout: 10_000 }
         )
         const names = await page.locator('.instance-list .list-item .meta .name').allTextContents()
-        assert.deepEqual(names, ['My Local Workspace', 'server-instance'])
+        assert.deepEqual(names, ['My Local Workspace', 'default'])
         // A local workspace's own summary line names its definition too,
         // exactly like a server-hosted one's — it must never fall back to a
         // bare "1 instance" just because the workspace is local.
@@ -177,11 +187,15 @@ test('dashboard: a granted local workspace leads the blended list (position, not
         await listItemNamed(page, 'My Local Workspace').click()
         assert.equal(await page.locator('.workspace-subtitle').textContent(), 'Local workspace')
 
-        await page.waitForSelector('.local-instance-row', { timeout: 10_000 })
-        assert.equal(await page.locator('.local-instance-row').count(), 1)
-        assert.equal(await page.locator('.local-instance-row .name').textContent(), 'alpha')
+        // WI #357: a local workspace's instances render through the same
+        // full `.instance-card` every other workspace kind uses (stage,
+        // status, assignee, Edit/Check) — no more plain name-only row.
+        await page.waitForSelector('.instance-card', { timeout: 10_000 })
+        assert.equal(await page.locator('.instance-card').count(), 1)
+        assert.equal(await page.locator('.instance-card .name').textContent(), 'alpha')
+        assert.equal(await page.locator('.instance-card .stamp').textContent(), 'INCOMPLETE')
 
-        await page.locator('.local-instance-row').click()
+        await page.locator('.instance-card a.btn.primary').click()
         await page.waitForURL(/\/instance\/alpha\?/, { timeout: 10_000 })
         const url = new URL(page.url())
         assert.equal(url.pathname, '/instance/alpha')
@@ -193,11 +207,15 @@ test('dashboard: a granted local workspace leads the blended list (position, not
         // 4) — never confusable with the new local *workspace* above. A
         // fresh navigation back to the dashboard (not page.goBack(), which
         // would leave the editor route's own instance/asset state
-        // mid-teardown) keeps this assertion scoped to the dashboard.
+        // mid-teardown) keeps this assertion scoped to the dashboard. Its
+        // subtitle is now the migrated "default" server workspace's own —
+        // "Server workspace" (no `workspace.json` description set) — never
+        // the retired "Server instance" wording (WI #357/#358).
         await page.goto(base)
         await page.waitForSelector('.master-detail', { timeout: 10_000 })
-        await listItemNamed(page, 'server-instance').click()
-        assert.equal(await page.locator('.workspace-subtitle').textContent(), 'Server instance')
+        await listItemNamed(page, 'default').click()
+        assert.equal(await page.locator('.workspace-subtitle').textContent(), 'Server workspace')
+        assert.equal(await page.locator('.instance-card .name').textContent(), 'server-instance')
       })
     )
   } finally {
@@ -241,7 +259,7 @@ test('dashboard: a denied/stale local workspace shows "Reconnect" recovery (not 
 
         await page.waitForSelector('.local-workspace-recovery', { timeout: 10_000 })
         assert.match(await page.locator('.local-workspace-recovery').textContent(), /Can't find this folder/)
-        assert.equal(await page.locator('.local-instance-row').count(), 0)
+        assert.equal(await page.locator('.instance-card').count(), 0)
 
         // WI #306's resolved relabel: "Reconnect", not "Grant access" —
         // access was already granted once; this is a repeat confirmation.

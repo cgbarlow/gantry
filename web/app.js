@@ -50,6 +50,7 @@ import {
   readBinaryFile as readLocalBinaryFile,
   writeBinaryFile as writeLocalBinaryFile,
   forgetWorkspace,
+  getFileLastModified,
 } from './lib/localWorkspace.js'
 import { wrap } from './lib/editorWrap.js'
 import { assetReference, isLocalAssetSource, resolveAssetRefs, resolveRepoAssetRefs } from './lib/assetRefs.js'
@@ -4121,19 +4122,34 @@ function instanceHref(inst) {
 
 // ---------- Advanced-mode listing filter (#301) ----------
 // A dashboard row is "Azure-DevOps-backed" when its location resolves to a
-// real Azure DevOps workspace — lib/registry.js sets `inst.workspace` only
-// then, and only for that case (a server-side local instance has no
-// `workspace` field at all). Feature #290's client-side local workspaces
-// will carry `workspace.kind === 'local'`, so the check is phrased as
-// "has an Azure DevOps workspace" — not "has any workspace" — so those
-// rows keep listing once they exist. When advanced mode is off (#301) the
-// dashboard listing drops these rows and shows only local instances.
+// real Azure DevOps workspace — `lib/registry.js` now attaches a `workspace`
+// to every row (WI #357), tagged `kind: 'azureDevOps'` or `kind: 'directory'`
+// (a server workspace, WI #356) — so this checks the kind explicitly rather
+// than mere presence. Browser local workspaces (ADR-0029, `useLocalGroups`
+// below) never appear in this `instances` list at all — their own groups are
+// blended in separately by `MasterDetailView`, unaffected by this filter.
+// When advanced mode is off (#301) the dashboard listing drops
+// Azure-DevOps-backed rows and shows only server-workspace-backed ones.
 function isAzureDevOpsBacked(inst) {
-  return Boolean(inst.workspace) && inst.workspace.kind !== 'local'
+  return inst.workspace?.kind === 'azureDevOps'
 }
 
-// ---------- Grouping instances by workspace (#102) ----------
-// The Workspaces landing page's core grouping rule: an Azure-DevOps-backed row carries a `workspace` (lib/registry.js, #102) — every instance sharing that workspace's `id` groups into one row, one entry per workspace, per the ticket's acceptance criteria. A local instance has no `workspace` at all (Workspace is an Azure-DevOps-repo concept only, #96) — it groups on its own, keyed by its own slug, so a repo (or local instance) holding just one instance still renders through the exact same group shape as one holding several — nothing here special-cases a single-instance group.
+// A workspace's short display label for contexts that just need one line, not the full title/subtitle
+// pair `groupInstancesByWorkspace` builds below (the archived-instances panel, e.g.) — same per-kind
+// rule as that function's own title, factored out so the two can't drift.
+function workspaceLabel(workspace) {
+  if (!workspace) return null
+  return workspace.kind === 'azureDevOps' ? `${workspace.organization}/${workspace.project}` : workspace.name
+}
+
+// ---------- Grouping instances by workspace (#102, WI #357) ----------
+// The Workspaces landing page's core grouping rule: every row now carries a `workspace` (lib/registry.js,
+// WI #357) — an Azure-DevOps-backed one (`kind: 'azureDevOps'`, #102) or a server-workspace one
+// (`kind: 'directory'`, WI #356) — and every instance sharing that workspace's `id` groups into one row,
+// one entry per workspace, regardless of kind. The `local:<slug>` fallback below is defensive only: every
+// row `GET /api/instances` can produce as of WI #356 belongs to some real workspace, so it should never
+// actually trigger, but grouping by the instance's own slug rather than silently dropping a row that
+// somehow lacks one is the same "fail into a visible, singleton group" choice #102 always made here.
 function groupInstancesByWorkspace(instances) {
   const groups = new Map()
   for (const inst of instances) {
@@ -4141,8 +4157,12 @@ function groupInstancesByWorkspace(instances) {
     if (!groups.has(key)) {
       groups.set(key, {
         key,
-        title: inst.workspace ? inst.workspace.repository : inst.slug,
-        subtitle: inst.workspace ? `${inst.workspace.organization}/${inst.workspace.project}` : 'Server instance',
+        title: inst.workspace ? (inst.workspace.kind === 'azureDevOps' ? inst.workspace.repository : inst.workspace.name) : inst.slug,
+        subtitle: inst.workspace
+          ? inst.workspace.kind === 'azureDevOps'
+            ? `${inst.workspace.organization}/${inst.workspace.project}`
+            : (inst.workspace.description || 'Server workspace')
+          : 'Server instance',
         instances: [],
       })
     }
@@ -4188,10 +4208,74 @@ function groupStatusClass(group) {
 // blocking any other row — including the server-hosted ones, which render
 // immediately from the one already-loaded `instances` list — matching the
 // "pop in asynchronously, don't block the page" requirement.
+// Fetches (and caches, per resolve() call) a definition version's projection — the same
+// `/api/definitions/:id/versions/:n` route `loadLocalInstance` already uses — so a local
+// workspace holding several instances of the same definition/version fetches it once, not once
+// per instance.
+async function fetchLocalDefinitionStructure(cache, definitionId, definitionVersion) {
+  const cacheKey = `${definitionId}:${definitionVersion}`
+  if (cache.has(cacheKey)) return cache.get(cacheKey)
+  const res = await fetch(
+    `/api/definitions/${encodeURIComponent(definitionId)}/versions/${encodeURIComponent(String(definitionVersion))}`
+  )
+  if (!res.ok) throw new Error(`Failed to load definition "${definitionId}" (${res.status})`)
+  const structure = await res.json()
+  cache.set(cacheKey, structure)
+  return structure
+}
+
+// WI #357: builds the full dashboard-card row for one local-workspace instance — status, stage
+// position, assignee and last-updated, computed entirely client-side via `getLocalStatus`
+// (`web/lib/localStatus.js`, WI #313's port of `lib/status.js`'s gate-evaluation core) — the same
+// parity helper this ticket asked for, so a local workspace's card carries exactly the same
+// information a server-hosted one's does, with no server round trip beyond the one-time,
+// cacheable definition-structure fetch above (unaffected by this ticket's own "no new server API
+// call" requirement, which is about *instance* data, not static definition content).
+async function buildLocalInstanceRow(handle, slug, structureCache) {
+  const instanceYamlText = await readTextFile(handle, `gantry-workspace/${slug}/instance.yaml`)
+  const record = parseInstanceYaml(instanceYamlText)
+  const definitionId = record.definition
+  const definitionVersion = record.definitionVersion ?? 1
+  const structure = await fetchLocalDefinitionStructure(structureCache, definitionId, definitionVersion)
+  const localStatus = await getLocalStatus(handle, slug, structure, record.stage)
+  const stageIndex = structure.stages.findIndex((s) => s.id === localStatus.stage.id)
+
+  const mtimes = [await getFileLastModified(handle, `gantry-workspace/${slug}/instance.yaml`)]
+  const moduleFiles = await listLocalDir(handle, `gantry-workspace/${slug}/modules`).catch(() => [])
+  for (const file of moduleFiles) {
+    if (file.kind !== 'file') continue
+    mtimes.push(await getFileLastModified(handle, `gantry-workspace/${slug}/modules/${file.name}`))
+  }
+
+  return {
+    slug,
+    definition: definitionId,
+    definitionVersion,
+    stage: localStatus.stage.id,
+    status: localStatus.complete ? 'complete' : 'incomplete',
+    assignee: record.assignee ?? '',
+    stageNumber: stageIndex + 1,
+    stageCount: structure.stages.length,
+    stageTitle: localStatus.stage.title,
+    updatedAt: new Date(Math.max(...mtimes)).toISOString(),
+    ref: '',
+    workItem: record.workItem ?? null,
+    workspace: null,
+    // Kept on the row so a later Check re-evaluates without refetching the definition structure —
+    // the same "already fetched, reuse it" convention `loadLocalInstance`'s own
+    // `localDefinitionStructure` field follows for the module editor.
+    structure,
+  }
+}
+
 function LocalGroupResolver({ entry, onChange, onRemoved }) {
   const [state, setState] = useState('loading') // 'loading' | 'granted' | 'prompt' | 'denied' | 'missing'
   const [instances, setInstances] = useState([])
   const [busy, setBusy] = useState(false)
+  // The last successfully-permissioned handle, kept outside resolve()'s own scope so `checkOne`
+  // (called later, from a Check button click — not during a resolve) can re-read this workspace's
+  // files without re-running the permission flow every time.
+  const handleRef = useRef(null)
 
   // Mirrors the old LocalWorkspaceRow's own resolve() exactly: same states,
   // same recovery rules — only the destination (onChange, not this
@@ -4224,17 +4308,17 @@ function LocalGroupResolver({ entry, onChange, onRemoved }) {
       setState('denied')
       return
     }
+    handleRef.current = handle
     try {
       const subdirs = await listDir(handle, 'gantry-workspace')
+      const structureCache = new Map()
       const found = []
       for (const child of subdirs) {
         if (child.kind !== 'directory') continue
         try {
-          const instanceYamlText = await readTextFile(handle, `gantry-workspace/${child.name}/instance.yaml`)
-          const { definition } = parseInstanceYaml(instanceYamlText)
-          found.push({ slug: child.name, definition })
+          found.push(await buildLocalInstanceRow(handle, child.name, structureCache))
         } catch {
-          // A subdirectory with no instance.yaml is not an instance — skip it.
+          // A subdirectory with no instance.yaml, or whose definition/stage can't be resolved, is not a usable instance row — skip it.
         }
       }
       setInstances(found)
@@ -4242,6 +4326,22 @@ function LocalGroupResolver({ entry, onChange, onRemoved }) {
     } catch {
       // The folder was picked before but its gantry-workspace/ is gone now.
       setState('missing')
+    }
+  }
+
+  // The dashboard card's Check action for a local-workspace instance (WI #357) — strict gate
+  // evaluation via `checkLocalGate`, same pass/fail wording `runCheck`'s server-hosted counterpart
+  // uses (`formatGateFailure` — identical result shape, `{ modules, artefacts, complete }`, from
+  // either engine). `inst.structure` is the definition projection already fetched for this row, so
+  // this never re-fetches it.
+  async function checkOne(inst) {
+    const handle = handleRef.current
+    if (!handle) return 'Check failed: local workspace folder is not open.'
+    try {
+      const result = await checkLocalGate(handle, inst.slug, inst.structure, inst.stage)
+      return result.pass ? 'PASS — gate requirements met.' : formatGateFailure(result)
+    } catch (err) {
+      return `Check failed: ${err.message}`
     }
   }
 
@@ -4298,6 +4398,7 @@ function LocalGroupResolver({ entry, onChange, onRemoved }) {
       busy,
       reconnect,
       remove,
+      checkOne,
     })
     // eslint-disable-next-line
   }, [state, instances, busy])
@@ -4360,6 +4461,76 @@ function localInstanceHref(workspaceId, slug) {
 // dashboard with zero server-hosted instances but one remembered local
 // workspace must still reach this view, not the empty state) — see
 // DashboardPage's own doc comment.
+// WI #357: the one instance card every workspace kind renders through — Azure DevOps, server
+// (directory-backed, WI #356), and now a browser local workspace's (ADR-0029) too. Previously this
+// markup lived only in MasterDetailView's server-hosted branch; a local workspace's instances
+// rendered as plain name-only rows instead (no stage, badge, assignee, Edit/Check, Manage) since
+// `useLocalGroups`/`LocalGroupResolver` never had that data to show. Now that
+// `buildLocalInstanceRow` (above) computes it client-side via `getLocalStatus`, every group's
+// instances share this exact same card — the caller decides `editHref` and `onCheck` (a
+// numbered-ref/`instanceHref` server edit + `runCheck` for a server-hosted row, a
+// `localInstanceHref` + the resolver's own `checkOne` for a local-workspace row), so the card
+// itself never needs to branch on kind.
+function InstanceCard({ inst, editHref, checkStatus, onCheck }) {
+  return html`
+    <div class="instance-card" key=${inst.slug}>
+      <div class="instance-card-content">
+        <div class="instance-card-header">
+          <span class="name">${inst.slug}</span>
+          <span class="ref" title="Numeric reference (WI200)">${inst.ref}</span>
+          <span class="def">${inst.definition}</span>
+          <span class="instance-card-status">
+            <${StatusStamp} status=${inst.status} />
+            ${pullRequestBadge(inst)}
+          </span>
+        </div>
+        <div class="instance-card-context">
+          <span class="stage-position">Stage ${inst.stageNumber} of ${inst.stageCount}: ${inst.stageTitle}</span>
+          <${UpdatedAt} value=${inst.updatedAt} />
+        </div>
+        <div class="instance-card-row">
+          <span class="field-label">Assignee</span>
+          <span class="assignee">${inst.assignee || 'Unassigned'}</span>
+        </div>
+        <div class="detail-actions">
+          <a class="btn primary" href=${editHref}>Edit</a>
+          <button type="button" class="btn" onClick=${onCheck}>Check</button>
+        </div>
+        ${checkStatus ? html`<div class="save-status">${checkStatus}</div>` : null}
+      </div>
+      ${advancedMode.value
+        ? html`<div class="manage-card">
+        <h3>Manage</h3>
+        ${inst.workItem?.parentId
+          ? html`
+              <a
+                class="manage-link"
+                href=${workItemWebUrlFor(inst.workItem, inst.workItem.parentId)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Track Work Item
+              </a>
+            `
+          : null}
+        ${inst.workspace?.kind === 'azureDevOps'
+          ? html`
+              <a
+                class="manage-link"
+                href=${instanceFilesUrl(inst.workspace, inst.slug)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Show files
+              </a>
+            `
+          : null}
+      </div>`
+        : null}
+    </div>
+  `
+}
+
 function MasterDetailView({ instances, localGroups }) {
   const [filter, setFilter] = useState('')
   const [selectedKey, setSelectedKey] = useState(null)
@@ -4396,6 +4567,15 @@ function MasterDetailView({ instances, localGroups }) {
     setActionStatus((prev) => ({ ...prev, [slug]: 'Checking…' }))
     const result = await runCheck(slug)
     setActionStatus((prev) => ({ ...prev, [slug]: result }))
+  }
+
+  // The local-workspace counterpart of handleCheck (WI #357) — routes through the selected
+  // group's own `checkOne` (LocalGroupResolver, above) instead of the server-hosted `/api/instance/check`
+  // route `runCheck` calls, since a local workspace's instance data never leaves the browser.
+  async function handleLocalCheck(inst) {
+    setActionStatus((prev) => ({ ...prev, [inst.slug]: 'Checking…' }))
+    const result = await selectedGroup.checkOne(inst)
+    setActionStatus((prev) => ({ ...prev, [inst.slug]: result }))
   }
 
   return html`
@@ -4469,14 +4649,17 @@ function MasterDetailView({ instances, localGroups }) {
                   : null}
                 ${selectedGroup.state === 'granted'
                   ? html`
-                      <div class="local-instance-list">
+                      <div class="workspace-instances">
                         ${selectedGroup.instances.length === 0
                           ? html`<p class="loading">No instances in this workspace yet.</p>`
                           : selectedGroup.instances.map(
                               (inst) => html`
-                                <a class="local-instance-row" key=${inst.slug} href=${localInstanceHref(selectedGroup.entry.id, inst.slug)}>
-                                  <span class="name">${inst.slug}</span>
-                                </a>
+                                <${InstanceCard}
+                                  inst=${inst}
+                                  editHref=${localInstanceHref(selectedGroup.entry.id, inst.slug)}
+                                  checkStatus=${actionStatus[inst.slug]}
+                                  onCheck=${() => handleLocalCheck(inst)}
+                                />
                               `
                             )}
                       </div>
@@ -4488,9 +4671,10 @@ function MasterDetailView({ instances, localGroups }) {
               <p class="workspace-subtitle">${selectedGroup.subtitle}</p>
               ${(() => {
                 // A path to Workspace Settings (where archive / owner / ticketing-system live) from
-                // the dashboard — otherwise it's only reachable by first opening one of the
+                // the dashboard — Azure DevOps workspaces only (a server workspace, WI #356, has no
+                // such settings screen) — otherwise it's only reachable by first opening one of the
                 // workspace's instances. Scoped via any one of its instances, like the SettingsMenu.
-                const wsInstance = selectedGroup.instances.find((inst) => inst.workspace)
+                const wsInstance = selectedGroup.instances.find((inst) => inst.workspace?.kind === 'azureDevOps')
                 return wsInstance
                   ? html`<p class="workspace-settings-link">
                       <a href=${`/settings/workspace?slug=${encodeURIComponent(wsInstance.slug)}&from=${encodeURIComponent('/')}`}>Workspace settings →</a>
@@ -4500,61 +4684,12 @@ function MasterDetailView({ instances, localGroups }) {
               <div class="workspace-instances">
                 ${selectedGroup.instances.map(
                   (inst) => html`
-                    <div class="instance-card" key=${inst.slug}>
-                      <div class="instance-card-content">
-                        <div class="instance-card-header">
-                          <span class="name">${inst.slug}</span>
-                          <span class="ref" title="Numeric reference (WI200)">${inst.ref}</span>
-                          <span class="def">${inst.definition}</span>
-                          <span class="instance-card-status">
-                            <${StatusStamp} status=${inst.status} />
-                            ${pullRequestBadge(inst)}
-                          </span>
-                        </div>
-                        <div class="instance-card-context">
-                          <span class="stage-position">Stage ${inst.stageNumber} of ${inst.stageCount}: ${inst.stageTitle}</span>
-                          <${UpdatedAt} value=${inst.updatedAt} />
-                        </div>
-                        <div class="instance-card-row">
-                          <span class="field-label">Assignee</span>
-                          <span class="assignee">${inst.assignee || 'Unassigned'}</span>
-                        </div>
-                        <div class="detail-actions">
-                          <a class="btn primary" href=${instanceHref(inst)}>Edit</a>
-                          <button type="button" class="btn" onClick=${() => handleCheck(inst.slug)}>Check</button>
-                        </div>
-                        ${actionStatus[inst.slug] ? html`<div class="save-status">${actionStatus[inst.slug]}</div>` : null}
-                      </div>
-                      ${advancedMode.value
-                        ? html`<div class="manage-card">
-                        <h3>Manage</h3>
-                        ${inst.workItem?.parentId
-                          ? html`
-                              <a
-                                class="manage-link"
-                                href=${workItemWebUrlFor(inst.workItem, inst.workItem.parentId)}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                Track Work Item
-                              </a>
-                            `
-                          : null}
-                        ${inst.workspace
-                          ? html`
-                              <a
-                                class="manage-link"
-                                href=${instanceFilesUrl(inst.workspace, inst.slug)}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                Show files
-                              </a>
-                            `
-                          : null}
-                      </div>`
-                        : null}
-                    </div>
+                    <${InstanceCard}
+                      inst=${inst}
+                      editHref=${instanceHref(inst)}
+                      checkStatus=${actionStatus[inst.slug]}
+                      onCheck=${() => handleCheck(inst.slug)}
+                    />
                   `
                 )}
               </div>
@@ -4738,7 +4873,7 @@ function ArchivedInstancesPanel({ onRestored }) {
             <div class="archived-row" key=${inst.slug}>
               <span class="name">${inst.slug}</span>
               <span class="def">${inst.definition}</span>
-              ${inst.workspace ? html`<span class="def">${inst.workspace.organization}/${inst.workspace.project}</span>` : null}
+              ${inst.workspace ? html`<span class="def">${workspaceLabel(inst.workspace)}</span>` : null}
               <button
                 type="button"
                 class="btn small"

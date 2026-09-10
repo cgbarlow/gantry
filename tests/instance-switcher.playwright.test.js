@@ -115,7 +115,7 @@ test('instance switcher: defaults to the current workspace\'s other instances, a
   )
 })
 
-test('instance switcher: a server-side instance (no workspace) says so without claiming a workspace, and clicking outside the panel closes it', async () => {
+test('instance switcher: two bare instances migrated into the same "default" server workspace (WI #356) are shown as direct siblings, not via the cross-workspace escape hatch, and clicking outside the panel closes it', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     createInstance('design', 'alpha-initiative', { instancesDir })
@@ -131,20 +131,16 @@ test('instance switcher: a server-side instance (no workspace) says so without c
         const menu = page.locator('.instance-switcher .menu')
         await menu.waitFor({ state: 'visible', timeout: 5_000 })
 
-        // A server-side instance (the legacy, unrelated-to-local-workspaces
-        // concept, ADR-0029 — labelled "Server instance", WI #306 item 4)
-        // has no workspace siblings of its own — and the empty-state copy
-        // must not claim "workspace" for it (Workspace is a reserved,
-        // Azure-DevOps-repo-only entity, docs/adr/0009).
-        assert.equal(await menu.locator('.switcher-heading').first().textContent(), 'Server instance')
-        assert.match(await menu.locator('.switcher-empty').textContent(), /not part of a workspace/)
-        // But zebra-initiative's own (separate, local) group is still
-        // reachable via the escape hatch — worded generically ("Browse
-        // other instances", not "Switch workspace") since the destination
-        // here is another local instance, not a real Workspace.
-        await menu.getByRole('button', { name: 'Browse other instances →' }).click()
+        // Every server-side instance now lives inside some workspace (WI
+        // #356 retires the old workspace-less "Server instance" concept) —
+        // a bare instance with no `workspace.json` of its own migrates into
+        // the reserved "default" server workspace on server start, so its
+        // sibling (zebra-initiative, migrated the same way) shows up
+        // directly here, the same as any other workspace's siblings would.
+        assert.equal(await menu.locator('.switcher-heading').first().textContent(), 'default')
+        assert.equal(await menu.locator('.switcher-empty').count(), 0)
         await assert.doesNotReject(
-          menu.locator('.switcher-group', { hasText: 'zebra-initiative' }).waitFor({ timeout: 2_000 })
+          menu.locator('.switcher-item', { hasText: 'zebra-initiative' }).waitFor({ timeout: 2_000 })
         )
 
         // Clicking outside the panel closes it.

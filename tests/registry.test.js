@@ -220,12 +220,31 @@ const SEED_FILES = {
   '/gantry-workspace/instance-two/instance.yaml': 'definition: design\nstage: shape\nassignee: c.barlow\n',
 }
 
-test('listRegistry has no `workspace` field on a directory-backed row — the dashboard `workspace` field is an Azure-DevOps-repo concept only', async () => {
+test('listRegistry carries a directory-kind `workspace` field on a server-workspace-backed row (WI #357), read from that workspace\'s own workspace.json', async () => {
   await withScratchInstances((instancesDir) => {
-    const workspaceDir = seedWorkspace(instancesDir)
+    const workspaceDir = seedWorkspace(instancesDir, 'examples')
     createInstance('design', 'my-initiative', { instancesDir: workspaceDir })
     const registry = listRegistry({ instancesDir })
-    assert.equal('workspace' in registry[0], false)
+    assert.deepEqual(registry[0].workspace, { kind: 'directory', id: 'examples', name: 'examples' })
+  })
+})
+
+test('listRegistry surfaces a server workspace\'s optional workspace.json description as row.workspace.description (WI #357)', async () => {
+  await withScratchInstances((instancesDir) => {
+    writeWorkspaceJson(instancesDir, 'examples', {
+      name: 'Examples',
+      description: 'Bundled with Gantry',
+      kind: 'local',
+      createdAt: new Date().toISOString(),
+    })
+    createInstance('design', 'my-initiative', { instancesDir: join(instancesDir, 'examples') })
+    const registry = listRegistry({ instancesDir })
+    assert.deepEqual(registry[0].workspace, {
+      kind: 'directory',
+      id: 'examples',
+      name: 'Examples',
+      description: 'Bundled with Gantry',
+    })
   })
 })
 
