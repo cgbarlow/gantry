@@ -1,22 +1,23 @@
 # <%~ it.instance.slug %>: High Level Design
 <%
-  /* WI #318 (design v2): this artefact moved the most — `requires` is now
-     field-level end to end so render order can match the TAC HLD reference
-     template exactly (cover block -> Problem Statement -> Proposed solution ->
-     Alternatives considered -> Open questions -> Attachment/s). See
-     definition.yaml's `hld.requires` comment for the section-by-section
-     rationale. Blank-field guard `na()` is injected once as an Eta
-     functionHeader by lib/render.js (WI #273 / R2). A `module.field?` requires
-     entry is in scope but not gate-blocking (WI #276), so it renders as a
-     suppress-when-blank `<% if %>` section; a bare entry always renders its
-     heading via na(), including `risks.open-issues?` here, which v1 rendered
-     with no heading at all. WI #331: `introduction.assumptions?` /
-     `.constraints?` / `.caveats?` -> `design-basis.*`, moved from just before
-     Attachment/s (end of document) into a new "# Design basis" section right
-     after Problem Statement — see definition.yaml's `hld.requires` comment
-     for why this deviates from the TAC reference's literal section order.
-     In/out-of-scope stay inside Problem Statement, reference-mandated,
-     unmoved. */
+  /* WI #318 (design v2): `requires` is field-level end to end so render order
+     can match the TAC HLD reference template exactly (cover block -> Problem
+     Statement -> Proposed solution -> Alternatives considered -> Open
+     questions -> Attachment/s).
+
+     WI #362: this template now renders the reference's sections and nothing
+     else. Affected domains, Design basis, Solution overview, Dependency list
+     and Open issues are gone — the TAC template has no heading for any of
+     them — and Non-functional requirements / Security and privacy are back to
+     a single `##` heading each (the v1 layout), carrying only the two mandated
+     NFR fields and privacy-and-confidentiality. The dropped fields still
+     render in the artefacts of the stages that own them; see
+     definition.yaml's `hld.requires` comment and CHANGELOG.md.
+
+     Blank-field guard `na()` is injected once as an Eta functionHeader by
+     lib/render.js (WI #273 / R2). A `module.field?` requires entry is in scope
+     but not gate-blocking (WI #276), so it renders as a suppress-when-blank
+     `<% if %>` section; a bare entry always renders its heading via na(). */
 %>
 # Submission
 
@@ -45,10 +46,6 @@
 
 <%~ na(it.modules.background.problem) %>
 
-## Affected domains
-
-<% it.modules.background['affected-domains'].forEach(function(item) { %>- <%~ item %>
-<% }) %>
 ## Desired future state
 
 <%~ na(it.modules.background.opportunity) %>
@@ -67,59 +64,12 @@
 
 ## Non-functional requirements
 
-### Performance
-
 <%~ na(it.modules.nfrs.performance) %>
 
-### Availability and continuity
-
 <%~ na(it.modules.nfrs['availability-and-continuity']) %>
-<% if (it.modules.nfrs['scalability-and-capacity']) { %>
-### Scalability and capacity
-
-<%~ it.modules.nfrs['scalability-and-capacity'] %>
-<% } %>
-<% if (it.modules.nfrs['disaster-recovery-and-backup']) { %>
-### Disaster recovery and backup
-
-<%~ it.modules.nfrs['disaster-recovery-and-backup'] %>
-<% } %>
-<% if (it.modules.nfrs['other-nfrs']) { %>
-### Other non-functional requirements
-
-<%~ it.modules.nfrs['other-nfrs'] %>
-<% } %>
-<% if (it.modules.nfrs['requirements-traceability']) { %>
-### Requirements traceability
-
-<%~ it.modules.nfrs['requirements-traceability'] %>
-<% } %>
-<% if (it.modules['design-basis'].assumptions || it.modules['design-basis'].constraints || it.modules['design-basis'].caveats) { %>
-
-# Design basis
-<% if (it.modules['design-basis'].assumptions) { %>
-## Assumptions
-
-<%~ it.modules['design-basis'].assumptions %>
-<% } %>
-<% if (it.modules['design-basis'].constraints) { %>
-## Constraints
-
-<%~ it.modules['design-basis'].constraints %>
-<% } %>
-<% if (it.modules['design-basis'].caveats) { %>
-## Caveats
-
-<%~ it.modules['design-basis'].caveats %>
-<% } %>
-<% } %>
 
 # Proposed solution
-<% if (it.modules['solution-definition']['high-level-solution-overview']) { %>
-## Solution overview
 
-<%~ it.modules['solution-definition']['high-level-solution-overview'] %>
-<% } %>
 <%~ na(it.modules['proposed-solution'].guardrails) %>
 
 ## Alignment with strategy
@@ -129,12 +79,6 @@
 ## Dependencies
 
 <%~ na(it.modules.dependencies['dependencies-overview']) %>
-<% if (it.modules.dependencies['dependency-list'] && it.modules.dependencies['dependency-list'].length) { %>
-## Dependency list
-
-<% it.modules.dependencies['dependency-list'].forEach(function(item) { %>- <%~ item %>
-<% }) %>
-<% } %>
 <% if (it.modules['proposed-solution'].implications) { %>
 ## Implications
 
@@ -147,27 +91,10 @@
 ## Risks and mitigations
 
 <%~ na(it.modules.risks['risk-register']) %>
-<% if (it.modules.risks['open-issues']) { %>
-## Open issues
 
-<%~ it.modules.risks['open-issues'] %>
-<% } %>
 ## Security and privacy
 
 <%~ na(it.modules.security['privacy-and-confidentiality']) %>
-<% if (it.modules.security['security-architecture']) { %>
-
-<%~ it.modules.security['security-architecture'] %>
-<% } %>
-<% if (it.modules.security['identity-and-access']) { %>
-
-<%~ it.modules.security['identity-and-access'] %>
-<% } %>
-<% if (it.modules.security['regulations-and-standards'] && it.modules.security['regulations-and-standards'].length) { %>
-
-<% it.modules.security['regulations-and-standards'].forEach(function(item) { %>- <%~ item %>
-<% }) %>
-<% } %>
 
 ## Cost-benefit analysis
 

@@ -42,6 +42,19 @@ respectively).
 
 ### 2. `introduction` as the scope + assumptions backbone
 
+**Amended (WI #362, docs/adr/0032).** The assumptions half of this backbone no
+longer reaches the `hld` artefact. WI #331 split `introduction`'s conditions
+cluster out as the `design-basis` module and rendered it as a `# Design basis`
+section in every artefact that carried it, the HLD included; WI #362 removes it
+from the HLD, because the 2026 TAC HLD reference template has no such section
+and the HLD is a submission read against a template its audience owns. The
+backbone itself is unchanged — `design-basis.assumptions` / `.constraints` /
+`.caveats` are still entered once at Shape and still refined and rendered at
+Full SOAP, SAD and As-built — and the scope half (`introduction.in-scope` /
+`.out-of-scope`) still runs through all six artefacts including the HLD. See
+`docs/adr/0032-hld-follows-the-tac-reference-template.md` for the
+fidelity-versus-consistency trade-off.
+
 - `introduction.scope` is split into `introduction.in-scope` and
   `introduction.out-of-scope` (both `markdown`). The "silence on out-of-scope
   is the most common cause of a design being sent back" guidance moves to
