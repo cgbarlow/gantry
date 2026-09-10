@@ -55,7 +55,9 @@ Alternatives considered and rejected:
   reusing this repo's existing Playwright/Chromium dependency rather than
   a new toolchain. Rejected for this first cut as its own, separable
   problem — worth a dedicated follow-up ticket, not bundled into an
-  already-large schema change.
+  already-large schema change. **Superseded by docs/adr/0030** (WI #353):
+  Mermaid now renders in the preview and in browser-driven docx exports,
+  rasterised in the browser rather than server-side.
 - **A fixed-option checklist field type** for Teams required, matching the
   template's actual checkbox UI — rejected for this first cut alongside
   Mermaid: real new field-type infrastructure (schema + editor UI) beyond

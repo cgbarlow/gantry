@@ -27,6 +27,7 @@ import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
 import { advancedMode } from './lib/advancedMode.js'
 import { renderEngine } from './lib/renderEngine.js'
 import { warmLoadPandocWasm, renderDocxWithWasm } from './lib/pandocWasm.js'
+import { hydrateMermaidPreview, prepareMermaidForDocx } from './lib/mermaid.js'
 // Two call sites want this module's file/permission helpers under different
 // local names: A5's dashboard recovery UI (further down this file) calls
 // them bare; A6's editor wiring (loadLocalInstance and friends, just below)
@@ -355,7 +356,9 @@ async function renderLocalArtefactViaEngine(instance, artefact, slug) {
     try {
       const compiled = await runLocalCompute('compile', instance, { artefact: artefact.id })
       const referenceDocBytes = compiled.referenceDocBase64 ? base64ToBytes(compiled.referenceDocBase64) : null
-      const docxBytes = await renderDocxWithWasm({ markdown: compiled.markdown, referenceDocBytes })
+      // WI #353: Mermaid blocks become PNGs for the docx only; the .md written below keeps the source.
+      const docxInput = await prepareMermaidForDocx(compiled.markdown)
+      const docxBytes = await renderDocxWithWasm({ markdown: docxInput.markdown, referenceDocBytes, files: docxInput.files })
       const mdPath = `gantry-workspace/${slug}/out/${compiled.basename}.md`
       const docxPath = `gantry-workspace/${slug}/out/${compiled.basename}.docx`
       await writeLocalTextFile(handle, mdPath, compiled.markdown)
@@ -413,7 +416,8 @@ async function renderAzureArtefactViaEngine(artefact, slug, workspaceBacked = fa
       const prep = await prepRes.json()
       if (!prepRes.ok) throw new Error(prep.message ?? prep.error ?? `Prepare failed (${prepRes.status})`)
       const referenceDocBytes = prep.referenceDocBase64 ? base64ToBytes(prep.referenceDocBase64) : null
-      const docxBytes = await renderDocxWithWasm({ markdown: prep.markdown, referenceDocBytes })
+      const docxInput = await prepareMermaidForDocx(prep.markdown)
+      const docxBytes = await renderDocxWithWasm({ markdown: docxInput.markdown, referenceDocBytes, files: docxInput.files })
       const finishRes = await apiFetchForInstance(
         slug,
         `/api/instance/render-wasm-finish/${artefact.id}?slug=${encodeURIComponent(slug)}`,
@@ -437,7 +441,8 @@ async function renderAzureArtefactViaEngine(artefact, slug, workspaceBacked = fa
       if (!prepRes.ok) throw new Error(prep.message ?? prep.error ?? `Prepare failed (${prepRes.status})`)
 
       const referenceDocBytes = prep.referenceDocBase64 ? base64ToBytes(prep.referenceDocBase64) : null
-      const docxBytes = await renderDocxWithWasm({ markdown: prep.markdown, referenceDocBytes })
+      const docxInput = await prepareMermaidForDocx(prep.markdown)
+      const docxBytes = await renderDocxWithWasm({ markdown: docxInput.markdown, referenceDocBytes, files: docxInput.files })
 
       const finishRes = await apiFetchForInstance(
         slug,
@@ -630,6 +635,9 @@ function renderPreview(node, text) {
     withSources = resolveRepoAssetRefs(withSources, (filename) => assetFileUrl(filename, slug, stageId))
   }
   node.innerHTML = renderMarkdown(withSources)
+  // WI #353: ```mermaid fences render as diagrams in place. Async and fire-and-forget — a
+  // re-render before a diagram finishes just leaves the swap with nothing to replace.
+  hydrateMermaidPreview(node).catch(() => {})
   // Caption-styling hook: the citation renders as <p><em>Source: …</em></p>; mark that paragraph so the stylesheet can make it visually subordinate (caption) rather than body text.
   node.querySelectorAll('p').forEach((p) => {
     const em = p.querySelector('em')

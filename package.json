@@ -1,6 +1,6 @@
 {
   "name": "gantry",
-  "version": "0.2.3-beta",
+  "version": "0.3.0-beta",
   "private": true,
   "description": "A repo-driven pipeline for staged, gated processes.",
   "type": "module",
@@ -27,6 +27,7 @@
     "eta": "^4.6.0",
     "htm": "^3.1.1",
     "markdown-it": "^15.0.0",
+    "mermaid": "^11.17.2",
     "pandoc-wasm": "1.1.0",
     "preact": "^10.29.8",
     "preact-iso": "^2.12.2",

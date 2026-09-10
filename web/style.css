@@ -568,6 +568,20 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
   padding: 1px 4px;
   border-radius: var(--radius);
 }
+/* WI #353: a ```mermaid fence rendered in place (web/lib/mermaid.js). The
+ * figure is a plain block so the diagram sizes to the preview's width; a
+ * diagram that failed to parse keeps its <pre> and gains a muted note. */
+.field-markdown .preview figure.mermaid-diagram {
+  margin: 12px 0;
+  overflow-x: auto;
+  background: #fff;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+.field-markdown .preview figure.mermaid-diagram svg { max-width: 100%; height: auto; }
+.field-markdown .preview pre.mermaid-error { border-left: 3px solid var(--danger, #b00020); }
+.field-markdown .preview .mermaid-error-note { color: var(--text-muted, #666); font-size: 12px; margin: -6px 0 12px; }
 /* GFM tables in the preview (#134): hairline rules on every cell edge so
  * column structure reads at a glance; header row raised and muted-bold like
  * the app's other table-ish surfaces. All token-driven, so light/dark/hc

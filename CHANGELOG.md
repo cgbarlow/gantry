@@ -17,6 +17,21 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.3.0-beta — 2026-09-10
+
+### Added
+
+- **Mermaid diagrams render in the preview and in exported Word documents**
+  (WI #353). Put a fenced ```` ```mermaid ```` block in any markdown field
+  and the editor preview shows the diagram instead of the source. When you
+  Render with the default WASM engine, the `.docx` carries the diagram as an
+  image; the `.md` written beside it keeps the Mermaid source so it stays
+  editable. A block Mermaid cannot parse stays as source with a short error
+  note under it, and never stops the rest of the render. Two limits to know
+  about: the Native Pandoc engine and the `gantry render` command still
+  export the block as source text, and HTML markup inside diagram labels is
+  not supported.
+
 ## 0.2.3-beta — 2026-09-09
 
 ### Removed
