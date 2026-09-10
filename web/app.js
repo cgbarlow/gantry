@@ -349,20 +349,30 @@ function base64ToBytes(base64) {
 // same native path `'native'` uses unconditionally: an explicit WASM selection never
 // hard-fails a render. Throws (never swallows) on a failure in that final, native leg — the
 // caller's own try/catch (handleRenderBatch) reports that exactly as it always has.
-async function renderLocalArtefactViaEngine(instance, artefact, slug) {
+// `format` (WI #359, default `'docx'`): `'md'` skips pandoc/WASM conversion entirely — a dry-run
+// compile is all a markdown-only render ever needs — and writes only the `.md` into the picked
+// folder. `'docx'` (the default, and every caller that predates this option) keeps its previous
+// behaviour except for one change: the compiled markdown is no longer also written to the
+// folder — a docx-only render must not persist a `.md` a caller never asked to keep.
+async function renderLocalArtefactViaEngine(instance, artefact, slug, format = 'docx') {
   const handle = localDirHandle.value
   if (!handle) throw new Error('Local workspace folder is not open.')
+
+  if (format === 'md') {
+    const compiled = await runLocalCompute('compile', instance, { artefact: artefact.id })
+    const mdPath = `gantry-workspace/${slug}/out/${compiled.basename}.md`
+    await writeLocalTextFile(handle, mdPath, compiled.markdown)
+    return { title: artefact.title, path: mdPath }
+  }
 
   if (renderEngine.value === 'wasm') {
     try {
       const compiled = await runLocalCompute('compile', instance, { artefact: artefact.id })
       const referenceDocBytes = compiled.referenceDocBase64 ? base64ToBytes(compiled.referenceDocBase64) : null
-      // WI #353: Mermaid blocks become PNGs for the docx only; the .md written below keeps the source.
+      // WI #353: Mermaid blocks become PNGs for the docx.
       const docxInput = await prepareMermaidForDocx(compiled.markdown)
       const docxBytes = await renderDocxWithWasm({ markdown: docxInput.markdown, referenceDocBytes, files: docxInput.files })
-      const mdPath = `gantry-workspace/${slug}/out/${compiled.basename}.md`
       const docxPath = `gantry-workspace/${slug}/out/${compiled.basename}.docx`
-      await writeLocalTextFile(handle, mdPath, compiled.markdown)
       await writeLocalBinaryFile(handle, docxPath, docxBytes)
       return { title: artefact.title, path: docxPath }
     } catch {
@@ -371,9 +381,7 @@ async function renderLocalArtefactViaEngine(instance, artefact, slug) {
   }
 
   const body = await runLocalCompute('render', instance, { artefact: artefact.id })
-  const mdPath = `gantry-workspace/${slug}/out/${body.basename}.md`
   const docxPath = `gantry-workspace/${slug}/out/${body.basename}.docx`
-  await writeLocalTextFile(handle, mdPath, body.markdown)
   await writeLocalBinaryFile(handle, docxPath, base64ToBytes(body.docxBase64))
   return { title: artefact.title, path: docxPath }
 }
@@ -402,12 +410,15 @@ async function renderLocalArtefactViaEngine(instance, artefact, slug) {
 // request and a logged console error on every single render, real regression surface WI #317
 // caught. `false` (or omitted) skips the WASM attempt entirely and goes straight to the native
 // leg, exactly as this instance kind rendered before this ticket ever existed.
-async function renderAzureArtefactViaEngine(artefact, slug, workspaceBacked = false) {
+// `format` (WI #359, default `'docx'`): `'md'` never reaches either WASM leg below — there is
+// no browser-side conversion step to offload for a markdown-only render, so it goes straight to
+// the plain native route (which, since #359, is itself format-aware) with `?format=md`.
+async function renderAzureArtefactViaEngine(artefact, slug, workspaceBacked = false, format = 'docx') {
   // WI #349 — a plain local instance (e.g. the bundled `examples`) gets the same WASM flow:
   // the server compiles (no pandoc subprocess), the browser converts, the server lands the
   // bytes in the instance's out/. Before this the local kind went straight to the native
   // route, which on a zip-release install with no pandoc fails with `spawnSync pandoc ENOENT`.
-  if (!workspaceBacked && renderEngine.value === 'wasm') {
+  if (format === 'docx' && !workspaceBacked && renderEngine.value === 'wasm') {
     try {
       const prepRes = await apiFetchForInstance(
         slug,
@@ -431,7 +442,7 @@ async function renderAzureArtefactViaEngine(artefact, slug, workspaceBacked = fa
       // Falls through to the native leg below.
     }
   }
-  if (workspaceBacked && renderEngine.value === 'wasm') {
+  if (format === 'docx' && workspaceBacked && renderEngine.value === 'wasm') {
     try {
       const prepRes = await apiFetchForInstance(
         slug,
@@ -467,13 +478,18 @@ async function renderAzureArtefactViaEngine(artefact, slug, workspaceBacked = fa
     }
   }
 
-  const res = await apiFetchForInstance(slug, `/api/instance/render/${artefact.id}?slug=${encodeURIComponent(slug)}`, {
-    method: 'POST',
-  })
+  const res = await apiFetchForInstance(
+    slug,
+    `/api/instance/render/${artefact.id}?slug=${encodeURIComponent(slug)}&format=${format}`,
+    { method: 'POST' }
+  )
   const body = await res.json()
-  // Azure-DevOps-backed instances report `azureDevOpsPath` (where the pandoc-rendered .docx was pushed back to, in the same repo the rest of the instance's data lives in); local instances report `docxPath` (a path on the machine running `gantry serve`).
+  // Azure-DevOps-backed instances report `azureDevOpsPath` (where the render was pushed back
+  // to, in the same repo the rest of the instance's data lives in, `.md` or `.docx` per
+  // `format`); local instances report `docxPath` or `mdPath` (a path on the machine running
+  // `gantry serve`) — exactly one of the two local fields is non-null, matching `format`.
   return res.ok
-    ? { title: artefact.title, path: body.azureDevOpsPath ?? body.docxPath, url: body.azureDevOpsPath ? body.azureDevOpsUrl : null }
+    ? { title: artefact.title, path: body.azureDevOpsPath ?? body.docxPath ?? body.mdPath, url: body.azureDevOpsPath ? body.azureDevOpsUrl : null }
     : { text: `${artefact.title}: render failed — ${body.message ?? body.error}` }
 }
 
@@ -2025,6 +2041,11 @@ function RenderDialog({ instance, onClose }) {
   const [status, setStatus] = useState([])
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [rendering, setRendering] = useState(false)
+  // WI #359 — dialog-scoped (not a persisted global setting like the WASM/native engine
+  // choice in Settings, web/lib/renderEngine.js): resets to the default every time the dialog
+  // is opened fresh, since `RenderDialog` itself unmounts on close (`${renderOpen ? html`...` :
+  // null}` in the editor toolbar) and remounts with fresh `useState` the next time it opens.
+  const [format, setFormat] = useState('docx')
 
   function toggleArtefact(artefactId) {
     setSelectedIds((prev) => {
@@ -2050,14 +2071,14 @@ function RenderDialog({ instance, onClose }) {
       if (instance.isLocalWorkspace) {
         try {
           // No download link — the file is already in the user's own folder (ADR-0029), so this reports the local relative path instead of a URL.
-          lines.push(await renderLocalArtefactViaEngine(instance, artefact, slug))
+          lines.push(await renderLocalArtefactViaEngine(instance, artefact, slug, format))
         } catch (err) {
           lines.push({ text: `${artefact.title}: render failed — ${err.offline ? LOCAL_OFFLINE_MESSAGE : err.message}` })
         }
         setStatus([...lines])
         continue
       }
-      lines.push(await renderAzureArtefactViaEngine(artefact, slug, instance.workspaceBacked))
+      lines.push(await renderAzureArtefactViaEngine(artefact, slug, instance.workspaceBacked, format))
       setStatus([...lines])
     }
     setRendering(false)
@@ -2108,6 +2129,29 @@ function RenderDialog({ instance, onClose }) {
           )}
         </div>
         <div class="modal-actions">
+          <fieldset class="render-format-toggle" disabled=${rendering}>
+            <legend class="sr-only">Render format</legend>
+            <label>
+              <input
+                type="radio"
+                name="render-format"
+                value="docx"
+                checked=${format === 'docx'}
+                onChange=${() => setFormat('docx')}
+              />
+              docx
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="render-format"
+                value="md"
+                checked=${format === 'md'}
+                onChange=${() => setFormat('md')}
+              />
+              md
+            </label>
+          </fieldset>
           <button
             type="button"
             class="btn primary"

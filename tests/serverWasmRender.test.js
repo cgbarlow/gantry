@@ -135,7 +135,7 @@ test('render-wasm-prepare then render-wasm-finish: a real, well-formed docx ends
 // WI #349 — a plain local instance (the bundled `examples` on a zip-release install, where
 // there is no native pandoc) gets the same two-step WASM flow: prepare compiles without a
 // pandoc subprocess and writes the .md; finish lands the browser's bytes as the .docx.
-test('render-wasm-prepare then render-wasm-finish on a local instance writes the .md and a real .docx into the instance out/ dir, without a pandoc subprocess in prepare', async () => {
+test('render-wasm-prepare then render-wasm-finish on a local instance writes only a real .docx into the instance out/ dir, without a pandoc subprocess in prepare and without ever persisting the intermediate .md (WI #359 — the WASM leg only ever runs for a docx-format render)', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
@@ -149,10 +149,12 @@ test('render-wasm-prepare then render-wasm-finish on a local instance writes the
       assert.match(prep.markdown, /## Document Control/)
       assert.ok(prep.referenceDocBase64, 'the v2 reference doc is handed to the browser for styling')
       assert.match(prep.docxPath, /\.docx$/)
-      // The markdown is on disk already, next to where the docx will land — same as the native route.
-      // WI #356: the server's own startup migration moved this scratch instance into the reserved `default` server workspace.
+      // WI #359: prepare is a dry run and no longer eagerly writes the compiled markdown to
+      // disk — the browser already has `prep.markdown` in the response; nothing lands in out/
+      // until finish writes the real .docx. WI #356: the server's own startup migration moved
+      // this scratch instance into the reserved `default` server workspace.
       const mdPath = join(instancesDir, 'default', 'examples', 'out', `${prep.basename}.md`)
-      assert.equal(readFileSync(mdPath, 'utf8'), prep.markdown)
+      assert.equal(existsSync(mdPath), false)
       assert.equal(existsSync(join(instancesDir, 'default', 'examples', 'out', `${prep.basename}.docx`)), false)
 
       const docxBytes = fakeWasmConvert(prep.markdown, prep.referenceDocBase64)
@@ -167,6 +169,8 @@ test('render-wasm-prepare then render-wasm-finish on a local instance writes the
       const landed = readFileSync(join(instancesDir, 'default', 'examples', 'out', `${prep.basename}.docx`))
       assert.deepEqual(landed, docxBytes)
       assert.equal(landed.subarray(0, 2).toString(), 'PK')
+      // WI #359 — a docx-format render never persists the intermediate markdown, even after finish.
+      assert.equal(existsSync(mdPath), false)
     })
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })

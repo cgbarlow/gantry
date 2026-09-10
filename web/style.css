@@ -1173,7 +1173,24 @@ main[data-view-mode='rendered'] .field-markdown .preview img.asset-thumb {
   cursor: pointer;
 }
 .modal-tabs button.active { color: var(--text); border-bottom: 2px solid var(--text); margin-bottom: -2px; }
-.modal-actions { margin-top: 16px; display: flex; justify-content: flex-end; gap: 8px; }
+.modal-actions { margin-top: 16px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+
+/* WI #359 — the Render dialog's docx/md toggle, sitting immediately left of the Render
+   button in .modal-actions (a flex row, so DOM order here is visual order). */
+.render-format-toggle { display: flex; align-items: center; gap: 12px; margin: 0; padding: 0; border: 0; }
+.render-format-toggle label { display: flex; align-items: center; gap: 4px; font-size: 0.9em; }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 
 .field-label {
   display: block;

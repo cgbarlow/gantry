@@ -278,6 +278,50 @@ test('POST /api/instance/render/:artefact renders a real docx via the web form p
   }
 })
 
+// WI #359 — the render dialog's docx/md format toggle, at the HTTP route level.
+test('POST /api/instance/render/:artefact?format=md renders only a .md — no .docx anywhere, exactly one of docxPath/mdPath non-null', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instance/render/soap?format=md`, { method: 'POST' })
+      assert.equal(res.status, 200)
+      const body = await res.json()
+      assert.equal(body.artefact, 'soap')
+      assert.equal(body.format, 'md')
+      assert.equal(body.docxPath, null)
+      assert.match(body.mdPath, /out[/\\]Kiwi Cover Mutual - Solution on a Page\.md$/)
+      assert.equal(isAbsolute(body.mdPath), true)
+      assert.ok(existsSync(body.mdPath))
+      assert.equal(existsSync(body.mdPath.replace(/\.md$/, '.docx')), false)
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('POST /api/instance/render/:artefact with no format (or ?format=docx) reports format: "docx" and does not persist a .md', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instance/render/soap`, { method: 'POST' })
+      assert.equal(res.status, 200)
+      const body = await res.json()
+      assert.equal(body.format, 'docx')
+      assert.equal(body.mdPath, null)
+      assert.ok(existsSync(body.docxPath))
+      assert.equal(existsSync(body.docxPath.replace(/\.docx$/, '.md')), false)
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
 test('GET /api/instance/check reports pass/fail for the instance\'s current gate, mirroring `gantry check`', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
