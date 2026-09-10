@@ -36,6 +36,24 @@ md.renderer.rules.image = (tokens, index, options, env, self) => {
   return defaultImageRenderer(tokens, index, options, env, self)
 }
 
+// Every link in rendered markdown opens in a new tab, except pure in-page anchors
+// (`#heading`, which must stay in-page). Two reasons, one rule: (1) preact-iso's router
+// intercepts *every* same-origin anchor click that has no `target` and turns it into a
+// client-side route change — so an asset citation's `/api/instance/assets/<id>/file` link
+// never reached the server at all, it just pushed an unroutable URL and dropped the user on
+// the dashboard; (2) an external reference opening in the same tab navigates away from the
+// module editor and loses unsaved edits. `target="_blank"` sidesteps both.
+const defaultLinkRenderer =
+  md.renderer.rules.link_open ?? ((tokens, index, options, env, self) => self.renderToken(tokens, index, options))
+md.renderer.rules.link_open = (tokens, index, options, env, self) => {
+  const href = tokens[index].attrGet('href') ?? ''
+  if (!href.startsWith('#')) {
+    tokens[index].attrSet('target', '_blank')
+    tokens[index].attrSet('rel', 'noreferrer')
+  }
+  return defaultLinkRenderer(tokens, index, options, env, self)
+}
+
 // AB#343: DOMPurify's default ALLOWED_URI_REGEXP has no `blob:` in its scheme allowlist, so a
 // local-workspace instance's resolved asset URLs (both the `asset:<id>` and `assets/<name>`
 // conventions — see web/app.js's ensureLocalAssetUrl, which always produces a
@@ -47,5 +65,10 @@ const ALLOWED_URI_REGEXP =
   /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix|blob):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i
 
 export function renderMarkdown(source) {
-  return DOMPurify.sanitize(md.render(source ?? '', { headingIds: new Set() }), { ALLOWED_URI_REGEXP })
+  // `target` is not in DOMPurify's default attribute allowlist, so the link rule above would be
+  // sanitised straight back out without ADD_ATTR.
+  return DOMPurify.sanitize(md.render(source ?? '', { headingIds: new Set() }), {
+    ALLOWED_URI_REGEXP,
+    ADD_ATTR: ['target'],
+  })
 }
