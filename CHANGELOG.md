@@ -17,6 +17,35 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.4.1-beta — 2026-09-10
+
+### Added
+
+- **A docx/md toggle in the Render dialog** (WI #359). A new radio choice sits
+  immediately left of the Render button, defaulting to docx. Choosing md
+  renders only the Markdown — no `.docx` is produced at all — and choosing
+  docx (the default) no longer leaves a stray `.md` file behind next to it;
+  the Markdown is still compiled as an internal step (Pandoc needs it), but
+  it's no longer written anywhere. This applies across every instance kind
+  and both render engines. Mermaid diagrams keep rendering correctly either
+  way — as an image in the docx, as the original fenced code in the md.
+
+### Changed
+
+- **Rendering a server-hosted instance now downloads the file to your browser
+  instead of saving it into the repository** (WI #360). Previously, clicking
+  Render on an instance stored under a `workspaces/<workspace>/` directory on
+  the server wrote the result into that instance's own `out/` folder, the
+  same way an Azure DevOps-backed instance's render is pushed to its repo.
+  That made sense for Azure DevOps, where `out/` is the shared, durable
+  record — but for a server-hosted instance there was no equivalent reason to
+  persist it there, and it meant this second copy is what a browser download
+  now replaces. Nothing changes for an Azure DevOps-backed instance (still
+  pushed to the repo) or a local workspace opened in the browser (still
+  written into the folder you picked) — this is specific to the server-
+  hosted case introduced by the workspace-directories work (WI #355-358,
+  0.4.0-beta).
+
 ## 0.4.0-beta — 2026-09-10
 
 ### Added
