@@ -283,19 +283,17 @@ Reference: *2026 TAC Architecture High Level Solution Design Template*. All fiel
 | `H3` Next Steps | HLD Submission › Next steps `hld-submission.next-steps` *(optional)* → `## Next steps` under `# Submission` | Same text. The reference's detached cover heading is grouped with the rest of the submission metadata rather than floating before the body. |
 | `H2` Problem Statement | `# Problem statement`, built from the Background and context and Overview modules | Same section; sub-sections follow. |
 | `H3` Current state | Background and context › Problem statement `background.problem` *(carried from SOAP)* → `## Current state` | The SOAP's Problem statement re-opened, pre-filled. Deepen it for a TAC reader; do not re-derive it. |
-| *(gantry-only)* `## Affected domains` | Background and context › Affected domains `background.affected-domains` *(carried from SOAP)* → `## Affected domains` | No TAC heading, kept because it is already written at SOAP and reviewers need it. |
 | `H3` Desired future state | Background and context › Opportunity `background.opportunity` → `## Desired future state` | Same field as the Full SOAP's Opportunity. Required at this gate. |
 | `H3` In scope / out of scope | Overview › In scope `introduction.in-scope` → `## In scope`; › Out of scope `introduction.out-of-scope` → `## Out of scope` | The shared scope backbone, pre-filled from a Full SOAP if one was produced. Two headings rather than one so each half is gated separately. |
 | `H3` Success criteria | Background and context › Success criteria `background.success-criteria` → `## Success criteria` | Match. |
-| `H3` Non-functional requirements | Non-Functional Requirements › Performance `nfrs.performance`, › Availability and continuity `nfrs.availability-and-continuity` *(mandatory at this gate)*; › Scalability and capacity, › Disaster recovery and backup, › Other non-functional requirements, › Requirements traceability *(optional)* → `## Non-functional requirements` with a `###` per field | The reference has one section and makes it mandatory. Gantry keeps the fields separate because the same module is completed in full at Detailed Design; only the two headline NFRs are required for TAC, at headline depth. |
-| *(gantry-only)* `# Design basis` | Design Basis › Assumptions, › Constraints, › Caveats *(all optional, carried from SOAP)* → `# Design basis` / `## Assumptions` / `## Constraints` / `## Caveats` | The TAC template has no home for assumptions or constraints. Gantry renders the backbone block straight after Problem statement, in the same position as every other document. |
-| `H2` Proposed solution | `# Proposed solution`; opens with `## Solution overview` = Solution Definition › High level solution overview `solution-definition.high-level-solution-overview` *(optional, carried from SOAP)*, then Proposed Solution › Guardrails `proposed-solution.guardrails` as the intro paragraph | The reference asks the author to outline the solution here — version 2 renders the SOAP overview instead of asking for it again. Guardrails are prose in the reference too ("note the applicable guardrail(s)…"), so they have no heading. |
+| `H3` Non-functional requirements | Non-Functional Requirements › Performance `nfrs.performance`, › Availability and continuity `nfrs.availability-and-continuity` *(both mandatory at this gate)* → one `## Non-functional requirements` | The reference has one section and makes it mandatory. Only the two headline NFRs are asked for at TAC, at headline depth; the rest of the module — scalability, disaster recovery, other NFRs, requirements traceability — is completed at Detailed Design and does not appear in the HLD form or document. |
+| `H2` Proposed solution | `# Proposed solution`, opening with Proposed Solution › Guardrails `proposed-solution.guardrails` as the intro paragraph | Guardrails are prose in the reference too ("note the applicable guardrail(s)…"), so they have no heading. |
 | `H3` Alignment with strategy | Proposed Solution › Alignment with strategy `proposed-solution.strategy-alignment` → `## Alignment with strategy` | Match. Show how the SOAP shape aligns with strategy; do not restate the shape. |
-| `H3` Dependencies | Dependencies › Dependencies `dependencies.dependencies-overview` *(carried from SOAP)* → `## Dependencies`; › Dependency list `dependencies.dependency-list` *(optional)* → `## Dependency list` | Same narrative field as the Full SOAP. The structured list is only required at Detailed Design but can be started here. |
+| `H3` Dependencies | Dependencies › Dependencies `dependencies.dependencies-overview` *(carried from SOAP)* → `## Dependencies` | Same narrative field as the Full SOAP. The structured Dependency list is a Detailed Design concern and is not asked for here. |
 | `H3` Implications | Proposed Solution › Implications `proposed-solution.implications` *(optional)* → `## Implications` | Match. |
 | `H3` Trade-offs | Proposed Solution › Trade-offs `proposed-solution.trade-offs` → `## Trade-offs` | Match. |
-| `H3` Risks and mitigations | Risks › Risks and mitigations `risks.risk-register` → `## Risks and mitigations`; › Open issues `risks.open-issues` *(optional)* → `## Open issues` | Match. The same register is completed at Detailed Design; at HLD, include the risks that bear on the decision. |
-| `H3` Security and privacy | Security › Privacy and confidentiality concerns `security.privacy-and-confidentiality` *(mandatory at this gate)*; › Security architecture, › Identity and access management, › Regulations and standards *(optional)* → one `## Security and privacy` | The reference has one section. Gantry concatenates the four security fields under it; only privacy is mandated for TAC (enough to judge whether a security assessment is needed) and the full posture is completed at Detailed Design. |
+| `H3` Risks and mitigations | Risks › Risks and mitigations `risks.risk-register` → `## Risks and mitigations` | Match. The same register is completed at Detailed Design; at HLD, include the risks that bear on the decision. Open issues are a Detailed Design concern and are not asked for here. |
+| `H3` Security and privacy | Security › Privacy and confidentiality concerns `security.privacy-and-confidentiality` *(mandatory at this gate)* → one `## Security and privacy` | The reference has one section. Only privacy is asked for at TAC — enough to judge whether a security assessment is needed; the rest of the posture (security architecture, identity and access, regulations and standards) is completed at Detailed Design and does not appear in the HLD form or document. |
 | `H3` Cost-benefit analysis | Proposed Solution › Cost-benefit analysis `proposed-solution.cost-benefit` → `## Cost-benefit analysis` | Match. Start from the SOAP estimates. |
 | `H3` Delivery approach and indicative timeline | Proposed Solution › Delivery approach and indicative timeline `proposed-solution.delivery-approach` → `## Delivery approach and indicative timeline` | Match. Refine the SOAP T-shirt sizes into a timeline. |
 | `H2` Alternatives considered | Alternatives considered › Alternatives `alternatives-considered.alternatives` → `# Alternatives considered` | One field for all alternatives. Seeded by the Full SOAP's Alternatives sketch. |
@@ -570,12 +568,12 @@ The table below is the field-level view of "content is introduced once and carri
 - **●** — required at that stage: the gate will not pass without it. The documents that render it are listed.
 - **○** — available at that stage but not required: it is in the editor, and is rendered by the documents listed when it is filled. *Editor only* means the module is open for editing at that stage but no document produced there renders the field yet — typically a field you may start early that a later stage's document will render.
 - **—** — not available at that stage.
-- **Carried across** — the first and last stage the field is available at. A field that spans more than one stage is one file that every listed stage re-opens; nothing is copied.
+- **Carried across** — the first and last stage the field is available at. A field that spans more than one stage is one file that every listed stage re-opens; nothing is copied. A field can be unavailable at a stage in between: the Design Basis fields, for example, are open at SOAP, Detailed Design and Handover but not at HLD, because the TAC HLD paper has no section for them.
 
 | Module › Field | SOAP | High-level Design | Detailed Design | Operational Handover | Carried across |
 | --- | --- | --- | --- | --- | --- |
 | Background and context › Problem statement `background.problem` | ● SOAP, Full SOAP | ● HLD | — | — | SOAP → HLD |
-| Background and context › Affected domains `background.affected-domains` | ● SOAP | ● HLD | — | — | SOAP → HLD |
+| Background and context › Affected domains `background.affected-domains` | ● SOAP | — | — | — | SOAP |
 | Background and context › Opportunity `background.opportunity` | ● Full SOAP | ● HLD | — | — | SOAP → HLD |
 | Background and context › Success criteria `background.success-criteria` | ○ editor only | ● HLD | — | — | SOAP → HLD |
 | Overview › Executive summary `introduction.executive-summary` | ○ editor only | ○ editor only | ○ SAD, SSAD | ○ editor only | SOAP → Handover |
@@ -584,21 +582,21 @@ The table below is the field-level view of "content is introduced once and carri
 | Overview › In scope `introduction.in-scope` | ● Full SOAP | ● HLD | ● SAD, SSAD | ● As-built | SOAP → Handover |
 | Overview › Out of scope `introduction.out-of-scope` | ● Full SOAP | ● HLD | ● SAD, SSAD | ● As-built | SOAP → Handover |
 | Overview › Content standards `introduction.content-standards` | ○ editor only | ○ editor only | ○ SSAD | ○ editor only | SOAP → Handover |
-| Design Basis › Constraints `design-basis.constraints` | ○ Full SOAP | ○ HLD | ○ SAD | ○ As-built | SOAP → Handover |
-| Design Basis › Assumptions `design-basis.assumptions` | ○ SOAP, Full SOAP | ○ HLD | ○ SAD | ○ As-built | SOAP → Handover |
-| Design Basis › Caveats `design-basis.caveats` | ○ editor only | ○ HLD | ○ editor only | ○ As-built | SOAP → Handover |
+| Design Basis › Constraints `design-basis.constraints` | ○ Full SOAP | — | ○ SAD | ○ As-built | SOAP → Handover |
+| Design Basis › Assumptions `design-basis.assumptions` | ○ SOAP, Full SOAP | — | ○ SAD | ○ As-built | SOAP → Handover |
+| Design Basis › Caveats `design-basis.caveats` | ○ editor only | — | ○ editor only | ○ As-built | SOAP → Handover |
 | Design Basis › Design principles `design-basis.design-principles` | ○ editor only | ○ editor only | ○ editor only | ○ As-built | SOAP → Handover |
 | Design Basis › Outcomes and deliverables `design-basis.outcomes-and-deliverables` | ○ editor only | ○ editor only | ○ editor only | ○ As-built | SOAP → Handover |
-| Solution Definition › High-level requirements `solution-definition.high-level-requirements` | ● SOAP, Full SOAP | ○ editor only | ● SAD | — | SOAP → DD |
-| Solution Definition › Process flow `solution-definition.process-flow` | ● SOAP | ○ editor only | ● SAD | — | SOAP → DD |
-| Solution Definition › High level solution overview `solution-definition.high-level-solution-overview` | ● SOAP, Full SOAP | ● HLD | ○ editor only | — | SOAP → DD |
-| Solution Definition › Feature breakdown and involved teams `solution-definition.feature-breakdown` | ● SOAP | ○ editor only | ○ editor only | — | SOAP → DD |
-| Solution Definition › Alternatives sketch `solution-definition.alternatives-sketch` | ○ Full SOAP | ○ editor only | ○ editor only | — | SOAP → DD |
+| Solution Definition › High-level requirements `solution-definition.high-level-requirements` | ● SOAP, Full SOAP | — | ● SAD | — | SOAP → DD |
+| Solution Definition › Process flow `solution-definition.process-flow` | ● SOAP | — | ● SAD | — | SOAP → DD |
+| Solution Definition › High level solution overview `solution-definition.high-level-solution-overview` | ● SOAP, Full SOAP | — | ○ editor only | — | SOAP → DD |
+| Solution Definition › Feature breakdown and involved teams `solution-definition.feature-breakdown` | ● SOAP | — | ○ editor only | — | SOAP → DD |
+| Solution Definition › Alternatives sketch `solution-definition.alternatives-sketch` | ○ Full SOAP | — | ○ editor only | — | SOAP → DD |
 | Teams, contact persons, and high-level estimates › Teams required `team-and-estimates.teams-required` | ● SOAP, Full SOAP | — | ○ editor only | — | SOAP → DD |
 | Teams, contact persons, and high-level estimates › Estimates `team-and-estimates.estimates` | ● SOAP, Full SOAP | — | ○ editor only | — | SOAP → DD |
 | Teams, contact persons, and high-level estimates › References `team-and-estimates.references` | ● Full SOAP · ○ SOAP | — | ○ SAD, SSAD | — | SOAP → DD |
 | Dependencies › Dependencies `dependencies.dependencies-overview` | ● Full SOAP | ● HLD | ● SAD | — | SOAP → DD |
-| Dependencies › Dependency list `dependencies.dependency-list` | ○ editor only | ○ HLD | ● SAD, SSAD | — | SOAP → DD |
+| Dependencies › Dependency list `dependencies.dependency-list` | ○ editor only | — | ● SAD, SSAD | — | SOAP → DD |
 | Full SOAP Details › Epic/Project `soap-full-details.epic-project` | ● Full SOAP | — | — | — | SOAP |
 | Full SOAP Details › Requested/lead by `soap-full-details.requested-lead-by` | ● Full SOAP | — | — | — | SOAP |
 | Full SOAP Details › Request date `soap-full-details.request-date` | ● Full SOAP | — | — | — | SOAP |
@@ -620,17 +618,17 @@ The table below is the field-level view of "content is introduced once and carri
 | Proposed Solution › Cost-benefit analysis `proposed-solution.cost-benefit` | — | ● HLD | — | — | HLD |
 | Proposed Solution › Delivery approach and indicative timeline `proposed-solution.delivery-approach` | — | ● HLD | — | — | HLD |
 | Alternatives considered › Alternatives `alternatives-considered.alternatives` | — | ● HLD | — | — | HLD |
-| Non-Functional Requirements › Scalability and capacity `nfrs.scalability-and-capacity` | — | ○ HLD | ● SAD, SSAD | ○ editor only | HLD → Handover |
+| Non-Functional Requirements › Scalability and capacity `nfrs.scalability-and-capacity` | — | — | ● SAD, SSAD | ○ editor only | DD → Handover |
 | Non-Functional Requirements › Performance `nfrs.performance` | — | ● HLD | ● SAD | ○ editor only | HLD → Handover |
 | Non-Functional Requirements › Availability and continuity `nfrs.availability-and-continuity` | — | ● HLD | ● SAD, SSAD | ○ editor only | HLD → Handover |
-| Non-Functional Requirements › Disaster recovery and backup `nfrs.disaster-recovery-and-backup` | — | ○ HLD | ● SAD, SSAD | ● As-built | HLD → Handover |
-| Non-Functional Requirements › Other non-functional requirements `nfrs.other-nfrs` | — | ○ HLD | ● SAD | ○ editor only | HLD → Handover |
-| Non-Functional Requirements › Requirements traceability `nfrs.requirements-traceability` | — | ○ HLD | ● SAD | ○ editor only | HLD → Handover |
+| Non-Functional Requirements › Disaster recovery and backup `nfrs.disaster-recovery-and-backup` | — | — | ● SAD, SSAD | ● As-built | DD → Handover |
+| Non-Functional Requirements › Other non-functional requirements `nfrs.other-nfrs` | — | — | ● SAD | ○ editor only | DD → Handover |
+| Non-Functional Requirements › Requirements traceability `nfrs.requirements-traceability` | — | — | ● SAD | ○ editor only | DD → Handover |
 | Risks › Risks and mitigations `risks.risk-register` | — | ● HLD | ● SAD, SSAD | — | HLD → DD |
-| Risks › Open issues `risks.open-issues` | — | ○ HLD | ● SAD, SSAD | — | HLD → DD |
-| Security › Identity and access management `security.identity-and-access` | — | ○ HLD | ● SAD, SSAD | — | HLD → DD |
-| Security › Security architecture `security.security-architecture` | — | ○ HLD | ● SAD | — | HLD → DD |
-| Security › Regulations and standards `security.regulations-and-standards` | — | ○ HLD | ● SAD | — | HLD → DD |
+| Risks › Open issues `risks.open-issues` | — | — | ● SAD, SSAD | — | DD |
+| Security › Identity and access management `security.identity-and-access` | — | — | ● SAD, SSAD | — | DD |
+| Security › Security architecture `security.security-architecture` | — | — | ● SAD | — | DD |
+| Security › Regulations and standards `security.regulations-and-standards` | — | — | ● SAD | — | DD |
 | Security › Privacy and confidentiality concerns `security.privacy-and-confidentiality` | — | ● HLD | ● SAD, SSAD | — | HLD → DD |
 | Architecture › Business context `architecture.business-context` | — | — | ● SAD | — | DD |
 | Architecture › Solution users `architecture.solution-users` | — | — | ○ SAD | — | DD |
@@ -679,10 +677,10 @@ The table below is the field-level view of "content is introduced once and carri
 
 Reading the table by module gives the carry-forward picture in the definition:
 
-- **Background and context** is written at SOAP and completed for TAC at HLD; it does not travel further because the SAD's Overview and Business context are written for a builder, not a committee, and are deliberately separate framings.
-- **Overview** (scope, purpose, overview) and **Design Basis** (constraints, assumptions, caveats, design principles, outcomes) are open from SOAP to handover. Scope is required from HLD onward; the rest become required only when the SAD and As-built render them.
-- **Solution Definition** and **Teams, contact persons, and high-level estimates** are SOAP content that later documents quote: the solution overview opens the HLD's Proposed solution, and the requirements, process flow and references reappear in the SAD.
-- **Dependencies, Non-Functional Requirements, Risks and Security** are introduced in light form at HLD — only the fields TAC needs are required there — and required in full at Detailed Design.
+- **Background and context** is written at SOAP and completed for TAC at HLD; it does not travel further because the SAD's Overview and Business context are written for a builder, not a committee, and are deliberately separate framings. Affected domains is the exception: it is SOAP-only, because the TAC HLD template has no section for it.
+- **Overview** (scope, purpose, overview) is open from SOAP to handover; scope is required from HLD onward, the rest become required only when the SAD and As-built render them. **Design Basis** (constraints, assumptions, caveats, design principles, outcomes) is open at SOAP, Detailed Design and handover but not at HLD — the TAC template has no home for assumptions or constraints, so the HLD neither asks for them nor renders them. They are still entered once and refined, and the Full SOAP, SAD and As-built all render them.
+- **Solution Definition** and **Teams, contact persons, and high-level estimates** are SOAP content that the SAD quotes: the requirements, process flow and references all reappear there. None of it appears at HLD — the HLD's Proposed solution is written for TAC in its own words.
+- **Dependencies, Non-Functional Requirements, Risks and Security** open at HLD with only the fields the TAC template asks for — the dependencies narrative, the two headline NFRs, the risk register and privacy — and are completed in full at Detailed Design.
 - **Glossary, Recovery Plan, Data Security Controls** and the recovery targets in **Non-Functional Requirements › Disaster recovery and backup** are written at Detailed Design and re-opened at handover.
 - **HLD Submission, Proposed Solution, Alternatives considered, Architecture, Integration, Data, Support and Operations, Full SOAP Details** and **As-Built Notes** belong to one stage each.
 

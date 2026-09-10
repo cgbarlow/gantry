@@ -16,7 +16,9 @@ description: >
 # sections render, so the list doubles as the document outline. `?` marks a field
 # that is in the artefact's scope but only blocks the gate when its own
 # `required` / `required-at` makes it mandatory. Every entry that was bare in v1
-# is still bare, so no gate is looser than it was.
+# is still bare, so no gate is looser than it was — with one deliberate
+# exception, `hld`, which WI #362 trimmed to the TAC reference template's own
+# sections; see that artefact's comment for exactly which two obligations moved.
 #
 # Stage/gate topology note: The real-world Contoso process resolves to four gates (see
 # docs/research/stages-gates-module-specs.md, Section 3), not the three in Gantry's own
@@ -56,14 +58,15 @@ stages:
     # nfrs, risks, security and dependencies are introduced here in early/light form and
     # carried forward — not re-declared — at detailed-design, where the same module ids are
     # required in fuller form. See each module's guidance.
-    # CHANGED v2: `solution-definition` is mounted here so the HLD can render the
-    # Shape solution overview as the opening of its "Proposed solution" section
-    # instead of asking for it again.
-    # WI #331: `introduction` (retitled "Overview") and the new `design-basis`
-    # module moved from 10th/11 to 3rd/4th of 12, immediately after
-    # `background` — matching the position they mount at in every other stage.
-    modules:
-      [hld-submission, background, introduction, design-basis, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies, solution-definition]
+    # WI #331: `introduction` (retitled "Overview") moved from 10th/11 to 3rd of
+    # 12, immediately after `background` — matching the position it mounts at in
+    # every other stage.
+    # WI #362: `design-basis` and `solution-definition` unmounted. The trimmed
+    # `hld` artefact requires no field from either, and `hld` is this stage's only
+    # artefact, so mounting them would put editor cards here that no HLD section
+    # renders. Both still mount at `shape` and `detailed-design` — the
+    # `design-basis` backbone accumulates there, not here.
+    modules: [hld-submission, background, introduction, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies]
     example: examples
 
   - id: detailed-design
@@ -233,29 +236,46 @@ artefacts:
     # rendered nfrs / risks / security / dependencies *after* Alternatives and
     # Open questions, and scope last of all; the reference places scope inside
     # Problem Statement and the other four inside Proposed solution. The list is
-    # now field-level so the order can match. Every field of the four modules
-    # that were previously whole-module entries is still listed, with `?` on the
-    # ones that were not mandatory at this gate, so editor scope and gate
-    # strictness are unchanged apart from the three fields noted below.
-    #  - `solution-definition.high-level-solution-overview?` added: the
-    #    reference's "Proposed solution" opens by asking the author to outline
-    #    the solution, which had no field — the Shape overview now carries in.
-    #  - `hld-submission.attachments?` moved from first to last, matching
-    #    "Attachment/s" as the reference's final section.
-    #  - `nfrs.performance`, `nfrs.availability-and-continuity` and
-    #    `security.privacy-and-confidentiality` are now mandatory at this gate
-    #    (declared in their modules). The reference makes both sections
-    #    mandatory; v1 enforced neither.
+    # field-level so the order can match, and `hld-submission.attachments?` moved
+    # from first to last, matching "Attachment/s" as the reference's final
+    # section.
     #
-    # WI #331: `introduction.assumptions?` / `.constraints?` / `.caveats?` ->
-    # `design-basis.*`, moved from just before Attachments (end of document) to
-    # a new "# Design basis" section right after Problem Statement — adjacent
-    # to the in/out-of-scope content Problem Statement already carries. This
-    # DEVIATES from the TAC reference's literal section order (which has no
-    # equivalent section and effectively strands this content); deliberate,
-    # per the ticket's Plan comment, for the same cross-document-consistency
-    # reason as the Full SOAP. In/out-of-scope stay inside Problem Statement,
-    # reference-mandated, unmoved.
+    # WI #362 — one entry per reference section, and nothing else. Going
+    # field-level in v2 was done by listing *every* field of the four
+    # whole-module entries so editor scope would not change, which grew the list
+    # to 38 against the reference's 19 headed body sections. 14 entries are now
+    # gone: the per-field `nfrs` / `security` tail, `dependencies.dependency-list`
+    # and `risks.open-issues` (build-ready concerns surfaced early), the three
+    # `design-basis.*` fields, `background.affected-domains` and
+    # `solution-definition.high-level-solution-overview` (gantry-only content the
+    # TAC template has no heading for). CHANGELOG.md lists all 14 by name. No
+    # data is lost: every dropped field still mounts at the stage that owns it
+    # (Shape or Detailed Design), so anything already written stays on disk and
+    # reappears there.
+    #
+    # Design basis is deliberately NOT carried here, reversing WI #331's
+    # "every artefact" placement for this one document — see docs/adr/0032. The
+    # TAC template has no home for assumptions / constraints / caveats, and for
+    # a paper written to be read by TAC, fidelity to the reference beats
+    # cross-document consistency.
+    #
+    # Kept gantry-only additions, all endorsed by the WI #266 reconciliation:
+    # the headed `# Submission` block (the reference's cover is a table of rows,
+    # not headings), `proposed-solution.guardrails` as the Proposed solution
+    # intro paragraph (prose in the reference too, not a section), and
+    # `hld-submission.attachments?` rendered last.
+    #
+    # Gate note. `nfrs.performance`, `nfrs.availability-and-continuity` and
+    # `security.privacy-and-confidentiality` stay bare and declare
+    # `required-at: [hld-tac-approved, ...]` in their own module YAML — the
+    # reference makes both sections mandatory, and v1 enforced neither. Of the
+    # 14 dropped entries, 12 did not gate at `hld-tac-approved` at all. The two
+    # that did are `background.affected-domains` and
+    # `solution-definition.high-level-solution-overview` (both `required: true`,
+    # so an `?` suffix did not exempt the latter). Both stay mandatory at
+    # `business-case`, which every HLD is downstream of, and
+    # `high-level-solution-overview` was only ever asked for at this gate from
+    # v2 onwards — so this restores v1 behaviour for it.
     requires:
       [
         hld-submission.purpose-statement,
@@ -264,33 +284,19 @@ artefacts:
         hld-submission.next-steps?,
         hld-submission.consultation,
         background.problem,
-        background.affected-domains,
         background.opportunity,
         introduction.in-scope,
         introduction.out-of-scope,
         background.success-criteria,
         nfrs.performance,
         nfrs.availability-and-continuity,
-        nfrs.scalability-and-capacity?,
-        nfrs.disaster-recovery-and-backup?,
-        nfrs.other-nfrs?,
-        nfrs.requirements-traceability?,
-        design-basis.assumptions?,
-        design-basis.constraints?,
-        design-basis.caveats?,
-        solution-definition.high-level-solution-overview?,
         proposed-solution.guardrails,
         proposed-solution.strategy-alignment,
         dependencies.dependencies-overview,
-        dependencies.dependency-list?,
         proposed-solution.implications?,
         proposed-solution.trade-offs,
         risks.risk-register,
-        risks.open-issues?,
         security.privacy-and-confidentiality,
-        security.security-architecture?,
-        security.identity-and-access?,
-        security.regulations-and-standards?,
         proposed-solution.cost-benefit,
         proposed-solution.delivery-approach,
         alternatives-considered.alternatives,

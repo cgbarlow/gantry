@@ -5,6 +5,72 @@ order of its reference document; reuse wired up where v1 declared it but never
 connected it; two duplicate field pairs merged. No field `id` renamed. The
 rest of this file gives the heading-by-heading mapping behind each move.
 
+### Round four: the HLD trimmed to the TAC reference template's sections (WI #362)
+
+The `hld` artefact listed **38** field references. The *2026 TAC Architecture High
+Level Solution Design Template* has a cover block plus 19 headed body sections,
+one concept each, and the WI #266 reconciliation concluded "no new fields needed,
+no fields to remove". The count roughly doubled for three reasons — whole modules
+expanded to every one of their fields when `requires` went field-level (`nfrs`,
+`security`, `risks`, `dependencies`); backbone fields wired in for cross-document
+reuse (`design-basis.*`, `background.affected-domains`,
+`solution-definition.high-level-solution-overview`); and build-ready concerns
+surfaced early (`dependencies.dependency-list`, three more `nfrs` fields).
+Because the web editor filters visible fields by the selected artefact's
+`requires`, the HLD form, the gate and the rendered document inflated together.
+
+`hld.requires` is now **24 entries — one per reference section**, in render order,
+using the field ids as consolidated since that template was written
+(`problem-statement` → `background`; scope → `introduction.in-scope` /
+`.out-of-scope`; questions → the shared `open-questions`).
+
+- **14 field references dropped from the HLD** (38 → 24; the WI #362 ticket says
+  "16", but its own list — reproduced here — names 14, and 38 − 24 = 14):
+  `background.affected-domains`;
+  `design-basis.assumptions?`, `design-basis.constraints?`,
+  `design-basis.caveats?`; `solution-definition.high-level-solution-overview?`;
+  `nfrs.scalability-and-capacity?`, `nfrs.disaster-recovery-and-backup?`,
+  `nfrs.other-nfrs?`, `nfrs.requirements-traceability?`;
+  `dependencies.dependency-list?`; `risks.open-issues?`;
+  `security.security-architecture?`, `security.identity-and-access?`,
+  `security.regulations-and-standards?`.
+- **Design basis is removed from the HLD**, reversing WI #331's "every artefact"
+  placement for this one document. The TAC template has no home for assumptions,
+  constraints or caveats, and for a paper written to be read by TAC, fidelity to
+  the reference outweighs cross-document consistency. The `# Design basis`
+  section still renders in the Full SOAP, the SAD and the As-built, and the
+  fields are still authored at Shape, Detailed Design and Handover. See
+  `docs/adr/0032-hld-follows-the-tac-reference-template.md`.
+- **Template**: `templates/hld.md.tmpl` drops `## Affected domains`, the whole
+  `# Design basis` block, `## Solution overview`, `## Dependency list` and
+  `## Open issues`. `## Non-functional requirements` and `## Security and
+  privacy` collapse back to a single `##` heading each — the v1 layout —
+  carrying `nfrs.performance` + `nfrs.availability-and-continuity` and
+  `security.privacy-and-confidentiality` respectively.
+- **Stage mounts**: `hld-define` drops `design-basis` and `solution-definition`
+  from its `modules:` list. The trimmed artefact requires no field from either
+  and `hld` is the stage's only artefact, so mounting them would put editor cards
+  on the HLD screen that no HLD section renders. Both still mount at `shape` and
+  `detailed-design`.
+- **Kept gantry-only additions** (endorsed by WI #266): the headed `# Submission`
+  block, `proposed-solution.guardrails` as the Proposed solution intro paragraph,
+  and Attachments rendered last.
+- **Gate**: no gate was loosened or tightened for the two fixture instances —
+  `gantry` still fails `hld-tac-approved` and `kiwi-cover-mutual` still passes.
+  At the field level, 12 of the 14 dropped references did not gate at
+  `hld-tac-approved` at all. Two did: `background.affected-domains` (bare,
+  `required: true`) and `solution-definition.high-level-solution-overview`
+  (`required: true`, so its `?` suffix did not exempt it). Both remain mandatory
+  at `business-case`, which every HLD is downstream of, and
+  `high-level-solution-overview` was only ever demanded at this gate from v2
+  onwards — so for that field this restores v1 behaviour. The three fields the
+  reference does mandate — `nfrs.performance`,
+  `nfrs.availability-and-continuity`, `security.privacy-and-confidentiality` —
+  stay bare and keep their `required-at: hld-tac-approved`.
+- **No data is lost.** Every dropped field lives in a shared module that still
+  mounts at Shape or Detailed Design, so anything already written stays on disk
+  and reappears at the stage that owns it.
+
 ### Round three: `introduction` split into "Overview" + "Design Basis" (WI #331)
 
 `introduction.yaml`'s eleven fields spanned two functionally different
