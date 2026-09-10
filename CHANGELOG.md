@@ -17,6 +17,27 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.4.2-beta — 2026-09-10
+
+### Fixed
+
+- **The Full Solution on a Page no longer carries the HLD's committee footer**
+  (WI #363). Every page of a Full SOAP rendered to Word was footed
+  "Technical Architecture Committee – High Level Solution Design" — a
+  governance body that document never goes to, on a document people were
+  circulating for a decision. The Full SOAP now uses the same neutral footer
+  as the Solution on a Page (page number and the Contoso strapline); the HLD is
+  still footed with the Technical Architecture Committee, which is correct
+  for it. Re-render any Full SOAP you have already produced to pick up the
+  corrected footer — the fix is in the template, not the document. This
+  affects both the installed-Pandoc and the in-browser render, and both
+  published versions of the Solution Design definition.
+- **A new artefact can no longer silently inherit another artefact's footer.**
+  The shared fallback template every artefact falls back to when it has no
+  template of its own no longer names any committee, and the build now fails
+  if an artefact is added without its own Word template — so the next
+  artefact cannot repeat this.
+
 ## 0.4.1-beta — 2026-09-10
 
 ### Added
