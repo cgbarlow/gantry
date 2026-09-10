@@ -196,11 +196,9 @@ test('listRegistry still throws on a genuine read failure, rather than silently 
   })
 })
 
-// WI #356: the real `instances/examples`/`instances/gantry` fixtures are still bare (not yet under
-// a server workspace folder) until Feature #358 deliberately moves them to `workspaces/examples/*` —
-// see that Feature's own acceptance criteria. Until then, `listRegistry()`'s default (unmigrated)
-// call correctly finds nothing at the repo's real `instances/` root, exactly like any other
-// pre-#356 flat directory — this is proven directly against a scratch fixture instead.
+// WI #358: the real bundled fixtures now live at `workspaces/examples/kiwi-cover-mutual` and
+// `workspaces/examples/gantry`, inside a real server workspace folder — no longer an example of
+// this "bare, unmigrated" state. Proven directly against a scratch fixture instead.
 test('listRegistry does not discover a bare (workspace-unqualified) instance directory — that requires migration first', async () => {
   await withScratchInstances((instancesDir) => {
     createInstance('design', 'bare-initiative', { instancesDir })

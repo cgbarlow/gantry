@@ -41,7 +41,7 @@ function withRunningServer(options, fn) {
 // WI260: for a workspace-backed instance whose repo has gantry-workspace/<slug>/assets/foo.png
 // and a module referencing ../assets/foo.png, the module-editor preview renders an <img> with naturalWidth >0
 test('workspace-backed repo asset renders in preview (WI #260)', async () => {
-  const ctxWithImage = readFileSync('instances/examples/modules/background.md', 'utf8').replace(
+  const ctxWithImage = readFileSync('workspaces/examples/kiwi-cover-mutual/modules/background.md', 'utf8').replace(
     '## Problem statement',
     '## Problem statement\n\n![Preview Img](../assets/foo.png)'
   )
@@ -50,11 +50,11 @@ test('workspace-backed repo asset renders in preview (WI #260)', async () => {
     '/gantry-workspace/preview-asset-test/instance.yaml': 'definition: design\nslug: preview-asset-test\nstage: shape\n',
     '/gantry-workspace/preview-asset-test/modules/background.md': ctxWithImage,
     '/gantry-workspace/preview-asset-test/modules/solution-definition.md': readFileSync(
-      'instances/examples/modules/solution-definition.md',
+      'workspaces/examples/kiwi-cover-mutual/modules/solution-definition.md',
       'utf8'
     ),
     '/gantry-workspace/preview-asset-test/modules/team-and-estimates.md': readFileSync(
-      'instances/examples/modules/team-and-estimates.md',
+      'workspaces/examples/kiwi-cover-mutual/modules/team-and-estimates.md',
       'utf8'
     ),
     '/gantry-workspace/preview-asset-test/assets/foo.png': ONE_PX_PNG_BASE64,
@@ -113,7 +113,7 @@ test('workspace-backed repo asset renders in preview (WI #260)', async () => {
 // <img> (server forces the read to main), and its src must carry `stage=shape`.
 test('workspace-backed repo asset renders in preview for a COMPLETED stage (WI #264)', async () => {
   const slug = 'preview-asset-completed'
-  const ctxWithImage = readFileSync('instances/examples/modules/background.md', 'utf8').replace(
+  const ctxWithImage = readFileSync('workspaces/examples/kiwi-cover-mutual/modules/background.md', 'utf8').replace(
     '## Problem statement',
     '## Problem statement\n\n![Preview Img](../assets/figure-1.png)'
   )
@@ -123,15 +123,15 @@ test('workspace-backed repo asset renders in preview for a COMPLETED stage (WI #
     [`/gantry-workspace/${slug}/instance.yaml`]: `definition: design\nslug: ${slug}\nstage: hld-define\n`,
     [`/gantry-workspace/${slug}/modules/background.md`]: ctxWithImage,
     [`/gantry-workspace/${slug}/modules/solution-definition.md`]: readFileSync(
-      'instances/examples/modules/solution-definition.md',
+      'workspaces/examples/kiwi-cover-mutual/modules/solution-definition.md',
       'utf8'
     ),
     [`/gantry-workspace/${slug}/modules/team-and-estimates.md`]: readFileSync(
-      'instances/examples/modules/team-and-estimates.md',
+      'workspaces/examples/kiwi-cover-mutual/modules/team-and-estimates.md',
       'utf8'
     ),
     [`/gantry-workspace/${slug}/modules/hld-submission.md`]: readFileSync(
-      'instances/examples/modules/hld-submission.md',
+      'workspaces/examples/kiwi-cover-mutual/modules/hld-submission.md',
       'utf8'
     ),
     // figure-1.png committed on main (as after the merged shape PR)

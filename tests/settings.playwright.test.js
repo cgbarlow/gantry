@@ -57,7 +57,7 @@ function withScratchServer(fn) {
 function withExamplesServer(fn) {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
     return withRunningServer({ slug: 'examples', instancesDir }, (base) => fn(base, instancesDir)).finally(() =>
       rmSync(instancesDir, { recursive: true, force: true })

@@ -44,7 +44,7 @@ test('one running server, with no fixed Azure DevOps location, correctly serves 
       const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
       try {
         // A real local instance, on disk, auto-backfilled into the registry as `{ kind: 'local' }` the first time it's resolved.
-        cpSync('instances/examples', join(instancesDir, 'local-initiative'), { recursive: true })
+        cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'local-initiative'), { recursive: true })
         rmSync(join(instancesDir, 'local-initiative', 'out'), { recursive: true, force: true })
 
         // A remote instance, registered directly (per #92's scope: this ticket doesn't add a way to register one through the app itself, only makes the server capable of correctly serving one already in the registry).
@@ -97,7 +97,7 @@ test('writing a module on the Azure-DevOps-backed instance never touches the loc
     async (adoBaseUrl) => {
       const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
       try {
-        cpSync('instances/examples', join(instancesDir, 'local-initiative'), { recursive: true })
+        cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'local-initiative'), { recursive: true })
         rmSync(join(instancesDir, 'local-initiative', 'out'), { recursive: true, force: true })
         registerInstance(
           'remote-initiative',

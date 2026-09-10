@@ -426,13 +426,13 @@ test('a post-approval commit changes the panel to Request approval again, and re
         await new Promise((resolve) => setTimeout(resolve, 10))
         await createAzureDevOpsClient(azureDevOps).writeFile(
           `gantry-workspace/${SLUG}/modules/background.md`,
-          `${readFileSync(join('instances', 'examples', 'modules', 'background.md'), 'utf8')}\nPost-approval browser edit.\n`,
+          `${readFileSync(join('workspaces', 'examples', 'kiwi-cover-mutual', 'modules', 'background.md'), 'utf8')}\nPost-approval browser edit.\n`,
           { branch, message: 'Post-approval browser edit' },
         )
         for (let i = 1; i <= 40; i += 1) {
           await createAzureDevOpsClient(azureDevOps).writeFile(
             `gantry-workspace/${SLUG}/modules/background.md`,
-            `${readFileSync(join('instances', 'examples', 'modules', 'background.md'), 'utf8')}\nPost-approval browser edit ${i}.\n`,
+            `${readFileSync(join('workspaces', 'examples', 'kiwi-cover-mutual', 'modules', 'background.md'), 'utf8')}\nPost-approval browser edit ${i}.\n`,
             { branch, message: `Post-approval browser edit ${i}` },
           )
         }

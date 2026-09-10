@@ -100,7 +100,7 @@ test('GET /api/instance?stage=<id> browses a different stage\'s modules without 
     ] }])
     assert.ok(body.modules.some((m) => m.id === 'hld-submission'))
 
-    const instance = readInstance('examples')
+    const instance = readInstance('kiwi-cover-mutual', { instancesDir: 'workspaces/examples' })
     assert.equal(instance.stage, 'shape')
   })
 })
@@ -110,7 +110,7 @@ test('GET /api/instance?stage=<id> includes each field\'s example text from the 
   try {
     createInstance('design', 'my-initiative', { instancesDir })
     // stage.example resolves within the same instancesDir as the instance being browsed — mirroring how every instance lives side by side under the repo's real instances/ root.
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
 
     await withRunningServer({ slug: 'my-initiative', instancesDir }, async (base) => {
       const res = await fetch(`${base}/api/instance?stage=hld-define`)
@@ -120,7 +120,7 @@ test('GET /api/instance?stage=<id> includes each field\'s example text from the 
 
       const hldSubmission = body.modules.find((m) => m.id === 'hld-submission')
       const purpose = hldSubmission.fields.find((f) => f.id === 'purpose-statement')
-      // The new instance has no hld-define modules on disk yet — blank value, but a real example pulled from instances/examples/.
+      // The new instance has no hld-define modules on disk yet — blank value, but a real example pulled from workspaces/examples/kiwi-cover-mutual/.
       assert.equal(purpose.value, '')
       assert.match(purpose.example, /\S/)
     })
@@ -139,7 +139,7 @@ test('GET /api/instance?stage=<unknown> throws', async () => {
 test('PUT /api/instance/modules/:id writes the same file format the CLI reads, and returns updated status', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     // out/ isn't part of the module-file contract this endpoint touches, but drop it so the scratch copy mirrors a fresh instance rather than a previously-rendered one.
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
@@ -259,7 +259,7 @@ test('PUT /api/instance/assignee?slug=<traversal> is rejected with 400, never wr
 test('POST /api/instance/render/:artefact renders a real docx via the web form path', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
@@ -268,7 +268,7 @@ test('POST /api/instance/render/:artefact renders a real docx via the web form p
       const body = await res.json()
       assert.equal(body.artefact, 'soap')
       assert.equal(body.azureDevOpsUrl, undefined)
-      assert.match(body.docxPath, /out[/\\]Examples - Solution on a Page\.docx$/)
+      assert.match(body.docxPath, /out[/\\]Kiwi Cover Mutual - Solution on a Page\.docx$/)
       // Absolute, not relative to wherever `gantry serve` happened to be launched from — the browser has no way to resolve a relative path.
       assert.equal(isAbsolute(body.docxPath), true)
       assert.ok(existsSync(body.docxPath))
@@ -281,7 +281,7 @@ test('POST /api/instance/render/:artefact renders a real docx via the web form p
 test('GET /api/instance/check reports pass/fail for the instance\'s current gate, mirroring `gantry check`', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
     createInstance('design', 'my-initiative', { instancesDir })
 
@@ -470,7 +470,7 @@ test('GET /api/instances reflects instances registered after server startup', as
 test('GET /api/instance?slug=<slug> serves instance data per-request even when the server has no default slug', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     await withRunningServer({ instancesDir }, async (base) => {
@@ -502,7 +502,7 @@ test('GET /api/instance?slug=<traversal> is rejected with 400, never reading out
   const outsideDir = mkdtempSync(join(tmpdir(), 'gantry-outside-'))
   try {
     // A real instance sitting just outside instancesDir — `traversalSlug` is the exact relative path from instancesDir to it (not merely a `../` prefix), so if the check below were absent, this is genuinely the directory `join(instancesDir, traversalSlug)` would resolve to and expose, not an arbitrary escape into an unrelated/nonexistent path.
-    cpSync('instances/examples', join(outsideDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(outsideDir, 'examples'), { recursive: true })
     rmSync(join(outsideDir, 'examples', 'out'), { recursive: true, force: true })
     const traversalSlug = relative(instancesDir, join(outsideDir, 'examples'))
     assert.ok(traversalSlug.includes('/'), 'test setup sanity check: traversal slug must span directories')

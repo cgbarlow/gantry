@@ -110,7 +110,7 @@ test('a gate with two different artefacts fails when neither artefact is complet
 })
 
 test('a gate with the existing identical SAD and SSAD requirements still passes both artefacts together', () => {
-  const result = checkGate('examples', { gate: 'build-ready-checklist' })
+  const result = checkGate('kiwi-cover-mutual', { instancesDir: 'workspaces/examples', gate: 'build-ready-checklist' })
 
   assert.equal(result.pass, true)
   assert.deepEqual(result.artefacts.map((artefact) => artefact.id), ['sad', 'ssad'])
@@ -120,7 +120,7 @@ test('a gate with the existing identical SAD and SSAD requirements still passes 
 test('identical SAD and SSAD requirements still fail together when their shared module data is missing', () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     unlinkSync(join(instancesDir, 'examples', 'modules', 'architecture.md'))
 
     const result = checkGate('examples', { instancesDir, gate: 'build-ready-checklist' })
@@ -166,7 +166,7 @@ test('a module with no file on disk fails the gate, with all its required fields
 })
 
 test('passes the examples fixture against its current stage', () => {
-  const result = checkGate('examples')
+  const result = checkGate('kiwi-cover-mutual', { instancesDir: 'workspaces/examples' })
   assert.equal(result.pass, true)
   assert.equal(result.complete, true)
   assert.equal(result.gate, 'business-case')
@@ -185,12 +185,13 @@ test('passes Business Case Approved with only the lightweight SOAP fields', asyn
     // mismatched version's moduleSpec would trip readModule's lazy
     // heading-scale migration write-back against the real on-disk fixture —
     // corrupting a checked-in file as a side effect of a test read (WI #333).
-    const examplesDefinition = loadDefinition('design', { version: instanceDefinitionVersion(readInstance('examples')) })
+    const exampleInstancesDir = 'workspaces/examples'
+    const examplesDefinition = loadDefinition('design', { version: instanceDefinitionVersion(readInstance('kiwi-cover-mutual', { instancesDir: exampleInstancesDir })) })
     const source = {
-      background: readModule(examplesDefinition, 'examples', 'background').fields,
-      introduction: readModule(examplesDefinition, 'examples', 'introduction').fields,
-      'solution-definition': readModule(examplesDefinition, 'examples', 'solution-definition').fields,
-      'team-and-estimates': readModule(examplesDefinition, 'examples', 'team-and-estimates').fields,
+      background: readModule(examplesDefinition, 'kiwi-cover-mutual', 'background', { instancesDir: exampleInstancesDir }).fields,
+      introduction: readModule(examplesDefinition, 'kiwi-cover-mutual', 'introduction', { instancesDir: exampleInstancesDir }).fields,
+      'solution-definition': readModule(examplesDefinition, 'kiwi-cover-mutual', 'solution-definition', { instancesDir: exampleInstancesDir }).fields,
+      'team-and-estimates': readModule(examplesDefinition, 'kiwi-cover-mutual', 'team-and-estimates', { instancesDir: exampleInstancesDir }).fields,
     }
     writeModule(definition, 'light-soap', 'background', {
       fields: {

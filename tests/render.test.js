@@ -19,7 +19,7 @@ const ONE_PX_PNG_BASE64 =
 test('dry-run does not write out/ files', () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
     const result = renderArtefact('examples', 'soap', { dryRun: true, instancesDir })
     assert.equal(existsSync(result.docxPath), false)
@@ -32,10 +32,10 @@ test('dry-run does not write out/ files', () => {
 test('dry-run compiles the template without writing anything, with no HTML-entity escaping', () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     const result = renderArtefact('examples', 'soap', { dryRun: true, instancesDir })
     assert.equal(result.dryRun, true)
-    assert.match(result.markdown, /# examples: Solution on a Page/)
+    assert.match(result.markdown, /# kiwi-cover-mutual: Solution on a Page/)
     assert.match(result.markdown, /- Claims handling \(register, accept, valuate, pay\)/)
     assert.doesNotMatch(result.markdown, /&#39;|&quot;|&amp;/)
   } finally {
@@ -46,7 +46,7 @@ test('dry-run compiles the template without writing anything, with no HTML-entit
 test('renders the Full SOAP with the reference sections, metadata, static caveats, and markdown tables', () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     const result = renderArtefact('examples', 'soap-full', { instancesDir })
     assert.equal(existsSync(result.docxPath), true)
     assert.match(result.markdown, /# Introduction\n\n## Overview[\s\S]*## Problem statement/)
@@ -85,7 +85,7 @@ test('renders the Full SOAP with the reference sections, metadata, static caveat
 test('renders a real docx styled from the HLD reference doc', () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     const result = renderArtefact('examples', 'soap', { instancesDir })
     assert.equal(existsSync(result.docxPath), true)
 
@@ -130,7 +130,7 @@ test('renders a real docx styled from the HLD reference doc', () => {
 test('suppressed optional sections do not leave runs of blank lines behind', () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     const result = renderArtefact('examples', 'hld', { dryRun: true, instancesDir })
     assert.doesNotMatch(result.markdown, /\n{3,}/)
   } finally {
@@ -149,7 +149,7 @@ test('reference doc defines the paragraph styles pandoc references for list item
 
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     const result = renderArtefact('examples', 'soap', { instancesDir })
     const documentXml = execFileSync('unzip', ['-p', result.docxPath, 'word/document.xml'], {
       encoding: 'utf8',
@@ -173,7 +173,7 @@ test('reference doc defines the paragraph styles pandoc references for list item
 test('an asset:<id> reference (#80) inserted into a module field compiles into an embedded image at the same paragraph position in the rendered artefact (#81)', () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
 
     const pngBytes = Buffer.from(ONE_PX_PNG_BASE64, 'base64')
@@ -259,10 +259,10 @@ test('a local render injects a Document Control table immediately after the titl
 
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     const result = renderArtefact('examples', 'soap', { dryRun: true, instancesDir })
     // Block headings appear in order: title -> Document Control -> Review & sign-off -> first content section
-    const titleIdx = result.markdown.indexOf('# examples: Solution on a Page')
+    const titleIdx = result.markdown.indexOf('# kiwi-cover-mutual: Solution on a Page')
     const docIdx = result.markdown.indexOf('## Document Control')
     const reviewIdx = result.markdown.indexOf('## Review & sign-off')
     const contextIdx = result.markdown.indexOf('# Background and context')
@@ -292,7 +292,7 @@ test('a local render injects a Document Control table immediately after the titl
 test('the Document Control block also survives the pandoc conversion into the rendered .docx, and the hash remains link-free for local', () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     const result = renderArtefact('examples', 'soap', { instancesDir })
     const roundTrip = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown', result.docxPath], {
       encoding: 'utf8',
@@ -320,7 +320,7 @@ test('a definition other than "design" also gets a Document Control block — it
       writeFileSync(definitionYamlPath, definitionYaml)
     }
 
-    cpSync('instances/examples', join(instancesDir, 'other-instance'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'other-instance'), { recursive: true })
     const instanceYamlPath = join(instancesDir, 'other-instance', 'instance.yaml')
     const instanceYaml = readFileSync(instanceYamlPath, 'utf8').replace(/^definition: design$/m, 'definition: another-definition')
     writeFileSync(instanceYamlPath, instanceYaml)
@@ -345,7 +345,7 @@ test('a local render against a directory with no git checkout and no build-info 
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   const notARepoDir = mkdtempSync(join(tmpdir(), 'gantry-not-a-git-repo-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     const result = renderArtefact('examples', 'soap', { dryRun: true, repoDir: notARepoDir, instancesDir })
     assert.match(result.markdown, /## Document Control/)
     assert.match(result.markdown, /\| Commit \| `unknown` \|/)
@@ -363,7 +363,7 @@ test('a local render reads a .build-info.json stamp (as a zip-release install sh
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   const stampedDir = mkdtempSync(join(tmpdir(), 'gantry-build-info-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     writeFileSync(join(stampedDir, '.build-info.json'), JSON.stringify({ hash: 'abc1234', date: '2024-01-02' }))
     const result = renderArtefact('examples', 'soap', { dryRun: true, repoDir: stampedDir, instancesDir })
     assert.match(result.markdown, /## Document Control/)
@@ -387,7 +387,7 @@ function escapeRegExp(value) {
 // Seeds a fake Azure DevOps repo with the exact same instance/module data as the local "examples" fixture, so the Azure-DevOps-backed render tests below exercise the real "soap" template against real content, the same way the local-path tests above do, rather than a bespoke minimal fixture.
 function seedExamplesAzureDevOpsFiles() {
   return {
-    '/gantry-workspace/examples/instance.yaml': readFileSync('instances/examples/instance.yaml', 'utf8'),
+    '/gantry-workspace/examples/instance.yaml': readFileSync('workspaces/examples/kiwi-cover-mutual/instance.yaml', 'utf8'),
     '/gantry-workspace/examples/modules/background.md': exampleModuleText('background'),
     '/gantry-workspace/examples/modules/introduction.md': exampleModuleText('introduction'),
     '/gantry-workspace/examples/modules/design-basis.md': exampleModuleText('design-basis'),
@@ -509,7 +509,7 @@ test('a render against Azure DevOps reads instance/module data from, and pushes 
 test('a dry run reports which reference-doc file a real render would use, so the WASM render path can fetch its bytes without ever calling pandoc itself', () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     const result = renderArtefact('examples', 'soap', { dryRun: true, instancesDir })
     assert.equal(result.dryRun, true)
     assert.match(result.referenceDocPath, /reference-soap\.docx$/)
@@ -522,7 +522,7 @@ test('a dry run reports which reference-doc file a real render would use, so the
 test('a real (non-dry-run) render also reports the reference-doc path it just used to pandoc, not just the dry run', () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     const result = renderArtefact('examples', 'soap', { instancesDir })
     assert.equal(result.dryRun, false)
     assert.match(result.referenceDocPath, /reference-soap\.docx$/)
@@ -535,7 +535,7 @@ test('an artefact with neither an artefact-specific nor a definition-level refer
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   const definitionsDir = mkdtempSync(join(tmpdir(), 'gantry-definitions-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     cpSync('definitions/design', join(definitionsDir, 'design'), { recursive: true })
     for (const version of ['1', '2']) {
       rmSync(join(definitionsDir, 'design', version, 'templates', 'reference.docx'), { force: true })
@@ -674,7 +674,7 @@ test('a populated reviewSummary renders one review row and one sign-off row with
   }
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     const result = renderArtefact('examples', 'sad', { dryRun: true, reviewSummary, instancesDir })
     assert.match(result.markdown, /## Review & sign-off/)
     // First row: review
@@ -693,7 +693,7 @@ test('a populated reviewSummary renders one review row and one sign-off row with
 test('a draft render with no review/sign-off data still shows a Pending row and no footer — the block is never omitted', () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     const result = renderArtefact('examples', 'hld', { dryRun: true, instancesDir })
     assert.match(result.markdown, /## Document Control/)
     assert.match(result.markdown, /## Review & sign-off/)
@@ -719,7 +719,7 @@ test('review rows reflect only the artefact\'s own gate — a business-case revi
   }
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     const soapResult = renderArtefact('examples', 'soap', { dryRun: true, reviewSummary: businessCaseSummary, instancesDir })
     assert.match(soapResult.markdown, /Alice/)
     assert.match(soapResult.markdown, /#100/)
@@ -746,7 +746,7 @@ test('compileArtefact stays pure — it does not import reviewStatus, stageRevie
 test('every design artefact (soap, hld, sad, ssad, as-built) renders a Document Control table immediately after its title', () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     for (const artefactId of ['soap', 'hld', 'sad', 'ssad', 'as-built']) {
       const result = renderArtefact('examples', artefactId, { dryRun: true, instancesDir })
       assert.match(result.markdown, /## Document Control/, `expected ${artefactId} to have Document Control`)

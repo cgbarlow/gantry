@@ -4,7 +4,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - GANTRY_INSTANCES_DIR=/data
+      - GANTRY_WORKSPACES_DIR=/data
       # For TLS-inspecting proxies (e.g. Zscaler), uncomment to trust corporate CA:
       # - NODE_EXTRA_CA_CERTS=/certs/corporate-ca.pem
     volumes:

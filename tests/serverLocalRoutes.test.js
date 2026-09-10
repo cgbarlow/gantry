@@ -18,14 +18,14 @@ import { exampleModuleText } from './helpers/fixtureModules.js'
 // holding a local workspace's files on the user's own machine run gantry's
 // compute server-side, inside a throwaway temp dir, with no PAT and nothing
 // persisted. These assert each route matches what the CLI/`lib` produce for the
-// same instance sitting on disk under `instances/`, and that the sandbox is
+// same instance sitting on disk under `workspaces/examples/`, and that the sandbox is
 // always torn down.
 
-const DISK_INSTANCE = 'examples'
-const DISK_OPTS = { instancesDir: 'instances', definitionsDir: 'definitions' }
+const DISK_INSTANCE = 'kiwi-cover-mutual'
+const DISK_OPTS = { instancesDir: 'workspaces/examples', definitionsDir: 'definitions' }
 
 function payloadFromDiskInstance(slug = DISK_INSTANCE) {
-  const dir = join('instances', slug)
+  const dir = join('workspaces/examples', slug)
   const instanceYaml = readFileSync(join(dir, 'instance.yaml'), 'utf8')
   const moduleFiles = {}
   for (const file of readdirSync(join(dir, 'modules'))) {

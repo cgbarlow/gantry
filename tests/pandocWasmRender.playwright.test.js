@@ -24,7 +24,7 @@ const SHAPE_MODULES = ['background', 'solution-definition', 'team-and-estimates'
 
 function readExampleFile(relPath) {
   // WI #348: fixture text is borrowed for another instance with no asset manifest, so image references are stripped.
-  return relPath.startsWith('modules/') ? exampleModuleText(relPath.slice('modules/'.length).replace(/\.md$/, '')) : readFileSync(join('instances/examples', relPath), 'utf8')
+  return relPath.startsWith('modules/') ? exampleModuleText(relPath.slice('modules/'.length).replace(/\.md$/, '')) : readFileSync(join('workspaces/examples/kiwi-cover-mutual', relPath), 'utf8')
 }
 
 async function seedLocalWorkspace(page, slug) {
@@ -242,7 +242,7 @@ test('switching Settings\' Render engine to Native persists across reload and ro
 test('an Azure-DevOps-hosted Render produces a real, well-formed .docx via client-side WASM Pandoc, pushed to Azure DevOps exactly as the native path would push it', async () => {
   const slug = 'wasm-ado-render'
   const files = {
-    [`/gantry-workspace/${slug}/instance.yaml`]: readFileSync('instances/examples/instance.yaml', 'utf8').replace(/^slug: examples$/m, `slug: ${slug}`),
+    [`/gantry-workspace/${slug}/instance.yaml`]: readFileSync('workspaces/examples/kiwi-cover-mutual/instance.yaml', 'utf8').replace(/^slug: examples$/m, `slug: ${slug}`),
     [`/gantry-workspace/${slug}/modules/background.md`]: exampleModuleText('background'),
     [`/gantry-workspace/${slug}/modules/introduction.md`]: exampleModuleText('introduction'),
     [`/gantry-workspace/${slug}/modules/design-basis.md`]: exampleModuleText('design-basis'),
@@ -320,7 +320,7 @@ test('an Azure-DevOps-hosted Render produces a real, well-formed .docx via clien
 test('a local-instance Render produces a real, well-formed .docx via client-side WASM Pandoc, landing in the instance out/ dir with no native render call', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
       const browser = await launchBrowser()

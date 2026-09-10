@@ -173,17 +173,19 @@ gantry/
 │               ├── soap.md.tmpl  # one .md.tmpl per artefact (soap, soap-full, hld, sad, ssad, as-built)
 │               ├── ...
 │               └── reference-*.docx  # pandoc --reference-doc, one per artefact, derived from the real templates
-├── instances/
+├── workspaces/                   # the workspaces root (WI #355/#358) — every server workspace lives here
 │   ├── instance-registry.json    # slug -> workspace/location map, gitignored
 │   ├── workspace-registry.json   # Azure DevOps org/project/repo entities, gitignored
 │   ├── number-registry.json      # scoped numeric refs (ADR-0024): workspace/instance/stage ordinals, gitignored
-│   └── <initiative-slug>/        # local instances only — an Azure DevOps-backed
-│       ├── instance.yaml         # instance lives at gantry-workspace/<slug>/ in
-│       ├── modules/              # its own repo instead (see below), never here
-│       │   ├── context.md
-│       │   └── solution-definition.md
-│       ├── assets/               # (WI260) local asset store — for a Workspace-backed instance the same dir lives as gantry-workspace/<slug>/assets/ in the Azure DevOps repo, sibling of modules/ and out/
-│       └── out/                  # rendered artefacts (gitignored by default)
+│   └── <workspace-slug>/         # a server workspace directory — a folder with workspace.json,
+│       ├── workspace.json        # same format a local (browser) workspace uses (ADR-0029/ADR-0031)
+│       └── <initiative-slug>/    # an Azure DevOps-backed instance lives at gantry-workspace/<slug>/
+│           ├── instance.yaml     # in its own repo instead (see below), never here
+│           ├── modules/
+│           │   ├── context.md
+│           │   └── solution-definition.md
+│           ├── assets/           # (WI260) local asset store — for a Workspace-backed instance the same dir lives as gantry-workspace/<slug>/assets/ in the Azure DevOps repo, sibling of modules/ and out/
+│           └── out/              # rendered artefacts (gitignored by default)
 ├── lib/                          # the engine: definition/instance loading, render, status, the web server
 │   ├── server.js                 # HTTP routes, incl. the work-item, workspace, stage-advancement/approval,
 │   │                             # stage-review and synced-fields (Work item details card) endpoints
@@ -266,7 +268,7 @@ Each screen's own back control returns to wherever it was actually opened from (
 - **Workspace Settings** (`/settings/workspace`, from an instance's own Settings dropdown) — the workspace *behind that one instance* (never a picker across every registered workspace): its Azure DevOps repo URL and three editable fields — a free-text **owner** label, a **PAT override** for that workspace alone (falls back to the Global Settings PAT when unset, and — like the global PAT — never leaves the browser), and a per-workspace **ticketing-system** override. It also offers **Archive** — a reversible "set aside" that drops the workspace out of the default dashboard and API listings without deleting anything on disk or in Azure DevOps (blocked while it still has an active instance; `?archived=1` reveals archived rows for a per-row Restore). A local instance has no workspace, so this screen reports that instead.
 - **Instance Settings** (`/settings/instance`, from an instance's own Settings dropdown) — that instance's own stored **Assignee** (editable), read-only instance info (slug, definition, current stage), and a read-only view of its Azure DevOps work-item link (organization/project/parent work item/type, and each stage's own child work item id). Re-linking isn't supported here or anywhere else after creation — linking happens only at instance creation (see "Linking an instance to an Azure DevOps work item" below). This screen also offers **Archive** for the instance itself — the same reversible set-aside as for a workspace; an archived instance still resolves read-only at its direct URL.
 
-Once registered, a local and an Azure DevOps-backed instance are indistinguishable from the dashboard's point of view — same listing, same module editor, same render command. Where each one's data actually lives is tracked server-side across three registry files (`instances/instance-registry.json`: slug -> workspace; `instances/workspace-registry.json`: workspace -> organization/project/repository/owner/ticketing-system/`archived`; `instances/number-registry.json`: the scoped numeric ordinals of ADR-0024 — all gitignored, application state, not source), not in any client-visible config.
+Once registered, a server-workspace-backed and an Azure DevOps-backed instance are indistinguishable from the dashboard's point of view — same listing, same module editor, same render command. Where each one's data actually lives is tracked server-side across three registry files at the workspaces root (`workspaces/instance-registry.json`: slug -> workspace; `workspaces/workspace-registry.json`: workspace -> organization/project/repository/owner/ticketing-system/`archived`, for an Azure DevOps workspace, or -> its own `workspace.json`, for a server workspace directory; `workspaces/number-registry.json`: the scoped numeric ordinals of ADR-0024 — all gitignored, application state, not source), not in any client-visible config.
 
 ## Backing an instance with a local folder
 
@@ -300,7 +302,7 @@ Because the layout is identical, a picked folder can be a plain `git clone` of a
 
 **What works offline.** Editing module files and saving them needs no server at all — every read and write goes straight through the browser's own handle on the folder. Checking a gate, validating and rendering an artefact still need the gantry server (that's where the compute lives, Pandoc `.docx` step included): the browser sends the relevant file contents to a stateless `/api/local/*` endpoint for a one-off run and gets the result back, and the server never keeps a copy. Those actions report a clear "connect to the gantry server" message rather than failing silently when it can't be reached.
 
-**No ticketing.** A Local-workspace instance has no linked Azure DevOps work item, no "Check gate & sync work item", no Review/Sign-off flow, no stage branches and no Pull Requests. It advances exactly the way a legacy local instance does (see "Stage advancement and approval" below): once the current stage's gate passes, **Advance to next stage** moves it on directly, self-serve, with no approval ceremony. This is a genuinely different thing from that legacy **local instance** mode (data stored server-side under `instances/`, reachable by `gantry serve` on the box, not picked in the browser) — both are "local" in the everyday sense, but one is data the server has no handle on at all and the other is data sitting right there on the box running `gantry serve`. See `CONTEXT.md`'s "Workspace location" entry for the fuller distinction.
+**No ticketing.** A Local-workspace instance has no linked Azure DevOps work item, no "Check gate & sync work item", no Review/Sign-off flow, no stage branches and no Pull Requests. It advances exactly the way a server-workspace instance does (see "Stage advancement and approval" below): once the current stage's gate passes, **Advance to next stage** moves it on directly, self-serve, with no approval ceremony. This is a genuinely different thing from a **server workspace** instance (data stored server-side under `workspaces/`, reachable by `gantry serve` on the box, not picked in the browser) — both are "local" in the everyday sense, but one is data the server has no handle on at all and the other is data sitting right there on the box running `gantry serve`. See `CONTEXT.md`'s "Workspace location" entry for the fuller distinction.
 
 ## Linking an instance to an Azure DevOps work item
 
@@ -475,7 +477,7 @@ Where a field's *content* genuinely changes shape across the gates its module sp
 
 ## Instance module files
 
-**`instances/my-initiative/modules/context.md`** — what someone actually writes:
+**`workspaces/<workspace>/my-initiative/modules/context.md`** — what someone actually writes:
 
 ```markdown
 ---
@@ -605,7 +607,7 @@ podman build --file ContainerFile \
 docker run -p 3000:3000 gantry
 ```
 
-Open http://localhost:3000 in a browser. The dashboard lists the instances shipped with the repo: `examples`, a fully worked design (Kiwi Cover Mutual's claims handling modernisation) with content and diagrams for every stage, and `gantry`, Gantry's own Azure Container Apps hosting proposal as a complete Full SOAP with Mermaid diagrams (WI #354; identifiers are angle-bracket placeholders, not real Contoso resources). Click any instance to view its stages, modules, and completeness. This one-liner uses the bundled `instances/` baked into the image — no volume mounts, no env vars.
+Open http://localhost:3000 in a browser. The dashboard shows one **Examples** workspace shipped with the repo, holding two instances: `kiwi-cover-mutual`, a fully worked design (Kiwi Cover Mutual's claims handling modernisation) with content and diagrams for every stage, and `gantry`, Gantry's own Azure Container Apps hosting proposal as a complete Full SOAP with Mermaid diagrams (WI #354; identifiers are angle-bracket placeholders, not real Contoso resources). Click either instance to view its stages, modules, and completeness. This one-liner uses the bundled `workspaces/` baked into the image — no volume mounts, no env vars.
 
 ## Corporate proxy / custom CA certificates
 
@@ -627,14 +629,14 @@ For `npm install` TLS failures on Windows itself (not in a container), see the W
 The default entrypoint is `node bin/gantry.js`, so any gantry subcommand can be passed directly:
 
 ```bash
-# Render the SOAP artefact for the "examples" instance
-docker run gantry render examples soap
+# Render the SOAP artefact for the "kiwi-cover-mutual" instance in the Examples workspace
+docker run gantry render kiwi-cover-mutual soap --workspaces-dir workspaces/examples
 
 # Extract the rendered .docx to your host
-docker run -v "$(pwd)/output:/app/instances/examples/out" gantry render examples soap
+docker run -v "$(pwd)/output:/app/workspaces/examples/kiwi-cover-mutual/out" gantry render kiwi-cover-mutual soap --workspaces-dir workspaces/examples
 ```
 
-After the volume-mounted run, the rendered document is at `./output/Examples - Solution on a Page.docx` —
+After the volume-mounted run, the rendered document is at `./output/Kiwi Cover Mutual - Solution on a Page.docx` —
 rendered artefacts are named `<Instance name> - <Full artefact title>.docx` (the instance's `name:`, or a
 title-cased form of its slug, plus the artefact's title from the definition).
 
@@ -645,7 +647,7 @@ title-cased form of its slug, plus the artefact's title from the definition).
 docker run gantry instances
 
 # Check gate status
-docker run gantry status examples
+docker run gantry status kiwi-cover-mutual --workspaces-dir workspaces/examples
 
 # Validate the design definition
 docker run gantry validate design
@@ -656,7 +658,7 @@ docker run gantry validate design
 | Override | How |
 |---|---|
 | Port | `docker run -p 3000:3000 gantry serve --port 3000` or `-e PORT=3000 -p 3000:3000 gantry serve` (see Port below) |
-| Instances directory | `-e GANTRY_INSTANCES_DIR=/data -v gantry-data:/data` (see Persistence below) |
+| Workspaces directory | `-e GANTRY_WORKSPACES_DIR=/data -v gantry-data:/data` (see Persistence below) |
 | Your own definitions/instances | Mount a volume: `-v /path/to/your/repo:/app` |
 | Custom CA certs | `-v /etc/pki/tls/certs/ca-bundle.crt:/certs/ca-bundle.crt:ro -e NODE_EXTRA_CA_CERTS=/certs/ca-bundle.crt` |
 | Shell into the container | `docker run -it --entrypoint sh gantry` |
@@ -691,7 +693,7 @@ The container's filesystem is ephemeral — use a persistent volume for instance
 docker run -d \
   --name gantry \
   -p 3000:3000 \
-  -e GANTRY_INSTANCES_DIR=/data \
+  -e GANTRY_WORKSPACES_DIR=/data \
   -v gantry-data:/data \
   --restart unless-stopped \
   gantry
@@ -703,9 +705,9 @@ Or with Compose (see `compose.yaml` at the repo root):
 GANTRY_IMAGE=gantry:0.0.1 docker compose up -d
 ```
 
-- `GANTRY_INSTANCES_DIR` tells the server (and the `new`/`status`/`check`/`render`/`instances` CLI commands) where to read/write `instance.yaml` and `modules/*.md`. The image's `instances/` baked into `/app/instances` is still there, but when `GANTRY_INSTANCES_DIR` points elsewhere (e.g. `/data`) that directory is used instead. A `GANTRY_WORKSPACES_DIR`/workspaces-root model — grouping instances under named **server workspace** directories, each with its own `workspace.json` — is in progress and will supersede this flat layout; this note will move once it lands.
-- The bundled `examples` fixture ships inside the image at `/app/instances`. When you switch the data dir to `/data`, it will not appear on the dashboard — this is expected. Seed the volume once (copy it in, or create a fresh instance with `docker exec gantry node bin/gantry.js new design my-instance --instances-dir /data`).
-- The runtime image runs as `USER node` (uid 1000) and does `mkdir -p instances && chown -R node:node /app` at build time, so the baked-in `instances/` is writable by `node`. For a **named volume** (`gantry-data:/data`), Docker initialises ownership correctly — no extra steps.
+- `GANTRY_WORKSPACES_DIR` tells the server (and the `new`/`status`/`check`/`render`/`instances` CLI commands) where to read/write server workspaces — each a folder with its own `workspace.json` and instance subdirectories. The image's `workspaces/` baked into `/app/workspaces` is still there, but when `GANTRY_WORKSPACES_DIR` points elsewhere (e.g. `/data`) that directory is used instead. `GANTRY_INSTANCES_DIR` still works as a deprecated alias, resolving to the same value with a one-line deprecation notice logged.
+- The bundled `Examples` workspace ships inside the image at `/app/workspaces/examples`. When you switch the data dir to `/data`, it will not appear on the dashboard — this is expected. Seed the volume once (copy `workspaces/examples` in, or start the server against `/data` so it migrates/creates the reserved `default` workspace, then create a fresh instance inside it: `docker exec gantry node bin/gantry.js new design my-instance --workspaces-dir /data/default`).
+- The runtime image runs as `USER node` (uid 1000) and does `mkdir -p workspaces && chown -R node:node /app` at build time, so the baked-in `workspaces/` is writable by `node`. For a **named volume** (`gantry-data:/data`), Docker initialises ownership correctly — no extra steps.
 - For a **bind mount** (`-v "$PWD/my-data:/data"`), the host directory must be writable by uid 1000: `mkdir -p my-data && chown 1000:1000 my-data` (or `chmod 777 my-data` if `chown` is not possible). Without this, writes from `USER node` will fail with `EACCES`.
 
 ### Port
@@ -717,7 +719,7 @@ docker run -p 3000:3000 gantry          # host 3000 → container 3000
 docker run -p 8080:3000 gantry          # host 8080 → container 3000
 ```
 
-To change the in-container port, set `PORT` or pass `--port` — the server resolves it as `--port` flag > `PORT` env > `3000` (and `--instances-dir` as `--instances-dir` flag > `GANTRY_INSTANCES_DIR` env > `instances`):
+To change the in-container port, set `PORT` or pass `--port` — the server resolves it as `--port` flag > `PORT` env > `3000` (and the workspaces directory as `--workspaces-dir` flag > `GANTRY_WORKSPACES_DIR` env > `--instances-dir` flag (deprecated) > `GANTRY_INSTANCES_DIR` env (deprecated) > `workspaces`):
 
 ```bash
 docker run -e PORT=4000 -p 4000:4000 gantry serve
@@ -764,7 +766,7 @@ docker pull gantry:0.0.2          # or gantry:latest / gantry:<short-sha>
 docker rm -f gantry
 docker run -d --name gantry \
   -p 3000:3000 \
-  -e GANTRY_INSTANCES_DIR=/data \
+  -e GANTRY_WORKSPACES_DIR=/data \
   -v gantry-data:/data \
   --restart unless-stopped \
   gantry:0.0.2

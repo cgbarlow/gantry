@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, readFileSync, existsSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { resolveInstancesDir, resolveWorkspacesDir, resolvePort, program } from '../bin/gantry.js'
+import { resolveInstancesDir, resolveWorkspacesDir, resolveEffectiveWorkspacesDir, resolvePort, program } from '../bin/gantry.js'
 
 function withEnv(env, fn) {
   const prev = {}
@@ -82,6 +82,66 @@ test('resolveWorkspacesDir: default when neither flag nor env', () => {
 test('resolveWorkspacesDir: flag undefined falls back to default when env empty string? nullish only', () => {
   withEnv({ GANTRY_WORKSPACES_DIR: undefined }, () => {
     assert.equal(resolveWorkspacesDir(null), 'workspaces')
+  })
+})
+
+// WI #358: resolveEffectiveWorkspacesDir — the actual precedence every command wires in.
+// --workspaces-dir flag > GANTRY_WORKSPACES_DIR env > --instances-dir flag (deprecated) >
+// GANTRY_INSTANCES_DIR env (deprecated) > 'workspaces'. Only the two deprecated forms log a notice.
+test('resolveEffectiveWorkspacesDir: --workspaces-dir flag wins over everything else', () => {
+  withEnv({ GANTRY_WORKSPACES_DIR: '/env-ws', GANTRY_INSTANCES_DIR: '/env-inst' }, () => {
+    assert.equal(
+      resolveEffectiveWorkspacesDir({ workspacesDir: '/flag-ws', instancesDir: '/flag-inst' }),
+      '/flag-ws'
+    )
+  })
+})
+
+test('resolveEffectiveWorkspacesDir: GANTRY_WORKSPACES_DIR env wins over the deprecated forms', () => {
+  withEnv({ GANTRY_WORKSPACES_DIR: '/env-ws', GANTRY_INSTANCES_DIR: '/env-inst' }, () => {
+    assert.equal(resolveEffectiveWorkspacesDir({ instancesDir: '/flag-inst' }), '/env-ws')
+  })
+})
+
+test('resolveEffectiveWorkspacesDir: --instances-dir flag (deprecated) is used and logs a deprecation notice', () => {
+  withEnv({ GANTRY_WORKSPACES_DIR: undefined, GANTRY_INSTANCES_DIR: undefined }, () => {
+    const orig = console.error
+    const logs = []
+    console.error = (...args) => logs.push(args.join(' '))
+    try {
+      assert.equal(resolveEffectiveWorkspacesDir({ instancesDir: '/flag-inst' }), '/flag-inst')
+      assert.ok(logs.some((l) => /--instances-dir is deprecated/.test(l)))
+    } finally {
+      console.error = orig
+    }
+  })
+})
+
+test('resolveEffectiveWorkspacesDir: GANTRY_INSTANCES_DIR env (deprecated) is used and logs a deprecation notice', () => {
+  withEnv({ GANTRY_WORKSPACES_DIR: undefined, GANTRY_INSTANCES_DIR: '/env-inst' }, () => {
+    const orig = console.error
+    const logs = []
+    console.error = (...args) => logs.push(args.join(' '))
+    try {
+      assert.equal(resolveEffectiveWorkspacesDir({}), '/env-inst')
+      assert.ok(logs.some((l) => /GANTRY_INSTANCES_DIR is deprecated/.test(l)))
+    } finally {
+      console.error = orig
+    }
+  })
+})
+
+test('resolveEffectiveWorkspacesDir: default "workspaces" when nothing is set, with no deprecation notice', () => {
+  withEnv({ GANTRY_WORKSPACES_DIR: undefined, GANTRY_INSTANCES_DIR: undefined }, () => {
+    const orig = console.error
+    const logs = []
+    console.error = (...args) => logs.push(args.join(' '))
+    try {
+      assert.equal(resolveEffectiveWorkspacesDir({}), 'workspaces')
+      assert.deepEqual(logs, [])
+    } finally {
+      console.error = orig
+    }
   })
 })
 
@@ -275,6 +335,43 @@ test('CLI render --instances-dir --dry-run passes through', async () => {
       })
       assert.ok(logs2.some(l => l.length > 0))
     } finally { r2() }
+  } finally {
+    try { process.chdir(origCwd) } catch {}
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+test('CLI validate: a valid definition reports valid, --json and plain text both', async () => {
+  const { logs, restore } = captureLog()
+  try {
+    await program.parseAsync(['node', 'gantry.js', 'validate', 'design'])
+    assert.ok(logs.some((l) => /Definition is valid/.test(l)))
+  } finally {
+    restore()
+  }
+
+  const { logs: jsonLogs, restore: jsonRestore } = captureLog()
+  try {
+    await program.parseAsync(['node', 'gantry.js', 'validate', 'design', '--json'])
+    assert.deepEqual(JSON.parse(jsonLogs[0]), [])
+  } finally {
+    jsonRestore()
+  }
+})
+
+test('CLI backfill-numeric-refs: reports nothing to backfill against a scratch dir with no legacy data', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'gantry-cli-'))
+  const origCwd = process.cwd()
+  try {
+    process.chdir(tmp)
+    mkdirSync('instances')
+    const { logs, restore } = captureLog()
+    try {
+      await program.parseAsync(['node', 'gantry.js', 'backfill-numeric-refs'])
+      assert.ok(logs.some((l) => /Nothing to backfill/.test(l)))
+    } finally {
+      restore()
+    }
   } finally {
     try { process.chdir(origCwd) } catch {}
     rmSync(tmp, { recursive: true, force: true })

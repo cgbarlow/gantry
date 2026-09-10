@@ -195,7 +195,7 @@ test('User Guide: screenshots fit the content column and open in a click-to-expa
 // `instances/` directory itself.
 function withRunningExamplesServer(fn) {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
-  cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+  cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
   rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
   return new Promise((resolve, reject) => {
     const server = createServer({ instancesDir, migrateWorkspacesOnStart: true })

@@ -50,19 +50,19 @@ export function withRunningServer(options, fn) {
 }
 
 /**
- * `withRunningServer`, pre-seeded with a scratch copy of the real bundled `instances/examples`
- * fixture (WI #356: this repo's real `instances/` directory must never be read as a live server
- * root by the test suite — it's still bare/pre-migration until Feature #358 moves it under
- * `workspaces/examples/`, and pointing a real server at it directly would migrate it in place,
- * leaving the checked-out working tree dirty). A read-only `cpSync` into a fresh temp directory
- * gives every caller the fixture's full real content with none of that risk; auto-migration then
- * runs on it exactly as `withRunningServer` already does for any other explicit `instancesDir`.
- * `fn` receives the running server's base URL, same as `withRunningServer` itself.
+ * `withRunningServer`, pre-seeded with a scratch copy of the real bundled Kiwi Cover Mutual fixture
+ * (`workspaces/examples/kiwi-cover-mutual`, WI #358). This repo's real `workspaces/` directory must
+ * never be read as a live server root by the test suite — pointing a real server at it directly
+ * would run its startup migration/registration against the checked-out working tree, leaving it
+ * dirty. A read-only `cpSync` into a fresh temp directory (kept at the scratch slug `examples`,
+ * matching this helper's own pre-#358 name and every existing caller's assertions) gives every
+ * caller the fixture's full real content with none of that risk. `fn` receives the running server's
+ * base URL, same as `withRunningServer` itself.
  */
 export async function withRunningExamplesServer(options, fn) {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     await withRunningServer({ slug: 'examples', ...options, instancesDir }, fn)
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })

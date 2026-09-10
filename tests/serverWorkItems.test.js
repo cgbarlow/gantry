@@ -45,7 +45,7 @@ function withScratchGantryServer(fn) {
 
 function fillShapeStage(instancesDir, slug) {
   for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
-    cpSync(join('instances', 'examples', 'modules', `${moduleId}.md`), join(instancesDir, 'default', slug, 'modules', `${moduleId}.md`))
+    cpSync(join('workspaces', 'examples', 'kiwi-cover-mutual', 'modules', `${moduleId}.md`), join(instancesDir, 'default', slug, 'modules', `${moduleId}.md`))
   }
 }
 
@@ -387,7 +387,7 @@ test('GET /api/instance/check now actually checks an Azure-DevOps-backed instanc
 
   const seedFiles = { '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n' }
   for (const moduleId of ['background', 'introduction', 'solution-definition', 'team-and-estimates']) {
-    seedFiles[`/gantry-workspace/my-initiative/modules/${moduleId}.md`] = readFileSync(join('instances', 'examples', 'modules', `${moduleId}.md`), 'utf8')
+    seedFiles[`/gantry-workspace/my-initiative/modules/${moduleId}.md`] = readFileSync(join('workspaces', 'examples', 'kiwi-cover-mutual', 'modules', `${moduleId}.md`), 'utf8')
   }
 
   await withFakeAzureDevOpsServer(

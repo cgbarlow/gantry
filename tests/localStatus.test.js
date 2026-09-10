@@ -155,12 +155,12 @@ describe('getLocalStatus matches getStatus', () => {
   })
 
   test('the examples fixture is complete', async () => {
-    const serverStatus = getStatus('examples')
-    // instances/examples is pinned to `definitionVersion: 2` (WI #348) — the
+    const serverStatus = getStatus('kiwi-cover-mutual', { instancesDir: 'workspaces/examples' })
+    // workspaces/examples/kiwi-cover-mutual is pinned to `definitionVersion: 2` (WI #348) — the
     // projection must match, or the local and server views would diverge.
     const structure = projectionFor('design', { version: 2 })
-    const handle = await memHandleFromInstance('instances', 'examples')
-    const localStatus = await getLocalStatus(handle, 'examples', structure, serverStatus.stage.id)
+    const handle = await memHandleFromInstance('workspaces/examples', 'kiwi-cover-mutual')
+    const localStatus = await getLocalStatus(handle, 'kiwi-cover-mutual', structure, serverStatus.stage.id)
 
     assert.deepEqual(localStatus, serverStatus)
     assert.equal(localStatus.complete, true)
@@ -188,8 +188,8 @@ describe('getLocalStatus matches getStatus', () => {
 
   test('an unknown stageId throws', async () => {
     const structure = projectionFor('design')
-    const handle = await memHandleFromInstance('instances', 'examples')
-    await assert.rejects(() => getLocalStatus(handle, 'examples', structure, 'not-a-real-stage'), /has no stage/)
+    const handle = await memHandleFromInstance('workspaces/examples', 'kiwi-cover-mutual')
+    await assert.rejects(() => getLocalStatus(handle, 'kiwi-cover-mutual', structure, 'not-a-real-stage'), /has no stage/)
   })
 })
 
@@ -294,12 +294,12 @@ describe('checkLocalGate matches checkGate', () => {
   })
 
   test('the identical SAD and SSAD requirements still pass both artefacts together', async () => {
-    const serverResult = checkGate('examples', { gate: 'build-ready-checklist' })
+    const serverResult = checkGate('kiwi-cover-mutual', { instancesDir: 'workspaces/examples', gate: 'build-ready-checklist' })
 
-    // instances/examples is pinned to `definitionVersion: 2` (WI #348).
+    // workspaces/examples/kiwi-cover-mutual is pinned to `definitionVersion: 2` (WI #348).
     const structure = projectionFor('design', { version: 2 })
-    const handle = await memHandleFromInstance('instances', 'examples')
-    const localResult = await checkLocalGate(handle, 'examples', structure, 'shape', { gate: 'build-ready-checklist' })
+    const handle = await memHandleFromInstance('workspaces/examples', 'kiwi-cover-mutual')
+    const localResult = await checkLocalGate(handle, 'kiwi-cover-mutual', structure, 'shape', { gate: 'build-ready-checklist' })
 
     assert.deepEqual(localResult, serverResult)
     assert.equal(localResult.pass, true)
@@ -309,11 +309,11 @@ describe('checkLocalGate matches checkGate', () => {
   test('identical SAD and SSAD requirements still fail together when their shared module data is missing', async () => {
     const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
     try {
-      cpSync('instances/examples', join(instancesDir, 'examples'), { recursive: true })
+      cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
       unlinkSync(join(instancesDir, 'examples', 'modules', 'architecture.md'))
       const serverResult = checkGate('examples', { instancesDir, gate: 'build-ready-checklist' })
 
-      // Copied from instances/examples, so pinned to v2 like the fixture (WI #348).
+      // Copied from workspaces/examples/kiwi-cover-mutual, so pinned to v2 like the fixture (WI #348).
       const structure = projectionFor('design', { version: 2 })
       const handle = await memHandleFromInstance(instancesDir, 'examples')
       const localResult = await checkLocalGate(handle, 'examples', structure, 'shape', { gate: 'build-ready-checklist' })
@@ -350,12 +350,12 @@ describe('checkLocalGate matches checkGate', () => {
   })
 
   test('passes the examples fixture against its current stage', async () => {
-    const serverResult = checkGate('examples')
-    // instances/examples has no `definitionVersion`, so it resolves to v1 —
+    const serverResult = checkGate('kiwi-cover-mutual', { instancesDir: 'workspaces/examples' })
+    // workspaces/examples/kiwi-cover-mutual has no `definitionVersion`, so it resolves to v1 —
     // pinned here to match (WI #318).
     const structure = projectionFor('design', { version: 2 })
-    const handle = await memHandleFromInstance('instances', 'examples')
-    const localResult = await checkLocalGate(handle, 'examples', structure, 'shape')
+    const handle = await memHandleFromInstance('workspaces/examples', 'kiwi-cover-mutual')
+    const localResult = await checkLocalGate(handle, 'kiwi-cover-mutual', structure, 'shape')
 
     assert.deepEqual(localResult, serverResult)
     assert.equal(localResult.pass, true)
@@ -363,12 +363,12 @@ describe('checkLocalGate matches checkGate', () => {
   })
 
   test('--gate resolves the stage owning that gate, even when it is not the instance\'s current stage', async () => {
-    const serverResult = checkGate('examples', { gate: 'hld-tac-approved' })
-    // instances/examples has no `definitionVersion`, so it resolves to v1 —
+    const serverResult = checkGate('kiwi-cover-mutual', { instancesDir: 'workspaces/examples', gate: 'hld-tac-approved' })
+    // workspaces/examples/kiwi-cover-mutual has no `definitionVersion`, so it resolves to v1 —
     // pinned here to match (WI #318).
     const structure = projectionFor('design', { version: 2 })
-    const handle = await memHandleFromInstance('instances', 'examples')
-    const localResult = await checkLocalGate(handle, 'examples', structure, 'shape', { gate: 'hld-tac-approved' })
+    const handle = await memHandleFromInstance('workspaces/examples', 'kiwi-cover-mutual')
+    const localResult = await checkLocalGate(handle, 'kiwi-cover-mutual', structure, 'shape', { gate: 'hld-tac-approved' })
 
     assert.deepEqual(localResult, serverResult)
     assert.equal(localResult.stage.gate, 'hld-tac-approved')
@@ -376,18 +376,18 @@ describe('checkLocalGate matches checkGate', () => {
 
   test('an unknown --gate throws', async () => {
     const structure = projectionFor('design')
-    const handle = await memHandleFromInstance('instances', 'examples')
+    const handle = await memHandleFromInstance('workspaces/examples', 'kiwi-cover-mutual')
     await assert.rejects(
-      () => checkLocalGate(handle, 'examples', structure, 'shape', { gate: 'not-a-real-gate' }),
+      () => checkLocalGate(handle, 'kiwi-cover-mutual', structure, 'shape', { gate: 'not-a-real-gate' }),
       /has no stage with gate/
     )
   })
 
   test('an unknown current stage throws', async () => {
     const structure = projectionFor('design')
-    const handle = await memHandleFromInstance('instances', 'examples')
+    const handle = await memHandleFromInstance('workspaces/examples', 'kiwi-cover-mutual')
     await assert.rejects(
-      () => checkLocalGate(handle, 'examples', structure, 'not-a-real-stage'),
+      () => checkLocalGate(handle, 'kiwi-cover-mutual', structure, 'not-a-real-stage'),
       /is at unknown stage/
     )
   })

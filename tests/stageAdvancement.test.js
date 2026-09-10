@@ -19,7 +19,7 @@ import { withScratchInstances } from './helpers/lifecycle.js'
 // tests/workItemLink.test.js's own `fillShapeStage` helper.
 function fillStageModules(instancesDir, slug, moduleIds) {
   for (const moduleId of moduleIds) {
-    cpSync(join('instances', 'examples', 'modules', `${moduleId}.md`), join(instancesDir, slug, 'modules', `${moduleId}.md`))
+    cpSync(join('workspaces', 'examples', 'kiwi-cover-mutual', 'modules', `${moduleId}.md`), join(instancesDir, slug, 'modules', `${moduleId}.md`))
   }
 }
 
