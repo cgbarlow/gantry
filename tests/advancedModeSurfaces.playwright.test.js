@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
-import { createInstance } from '../lib/instance.js'
+import { createInstance, recordInstanceWorkItemLink } from '../lib/instance.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import {
@@ -48,6 +48,14 @@ function withMixedDashboard(fn) {
     async (adoBaseUrl) => {
       await withScratchInstances(async (instancesDir) => {
         createInstance('design', LOCAL_SLUG, { instancesDir, assignee: 'c.barlow' })
+        // Gives the local instance's Manage sub-card real content (a Track Work Item link) so the
+        // "advanced mode gates the Manage card" test below exercises the toggle itself rather than
+        // the separate "Manage is hidden when it has nothing to show" behavior.
+        recordInstanceWorkItemLink(
+          LOCAL_SLUG,
+          { organization: ORGANIZATION, project: PROJECT, workItemType: 'Task', parentId: 99, stages: { shape: 100 } },
+          { instancesDir }
+        )
         registerInstance(
           ADO_SLUG,
           { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
