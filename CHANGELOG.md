@@ -17,6 +17,25 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.4.4-beta — 2026-09-10
+
+### Changed
+
+- **The built-in "Gantry hosting" example now says what Gantry's own build
+  pipeline does and does not check for security** (WI #365). This is the
+  example text the Solution Design editor offers at the SOAP stage, so it is
+  the wording other people start from. It previously said nothing about the
+  assurance behind the container image the proposal runs, which invited the
+  assumption that a pipeline-built image had been security reviewed. It has
+  not been: the build gates every merge on the full test suite, coverage
+  thresholds and a successful render, and performs no static analysis, no
+  dependency vulnerability scan and no image scan. The example now states
+  that plainly — including the hardening that *is* real (production
+  dependencies only, non-root runtime, no public endpoint) — carries the
+  missing scanning as an estimate caveat, and raises it as an open question
+  owned by the network and security team rather than presenting it as
+  something already done.
+
 ## 0.4.3-beta — 2026-09-10
 
 ### Fixed
@@ -32,6 +51,7 @@ commit on `main`.
   the file loads and you keep your place — and your unsaved edits — in the
   module editor. Any other link in a module's text behaves the same way; only
   in-page links to a heading still jump within the page.
+
 
 ## 0.4.2-beta — 2026-09-10
 
