@@ -144,7 +144,7 @@ test('top-of-page Insert ▾ prepends Section and List as first field, survives 
     })
 
     const definition = loadDefinition('design')
-    const data = readModule(definition, 'examples', 'background', { instancesDir })
+    const data = readModule(definition, 'examples', 'background', { instancesDir: join(instancesDir, 'default') })
     // Both custom fields persisted in layout order, prepended first.
     const layoutIds = data.layout.map((entry) => (entry.custom ? entry.custom.title : entry.field))
     assert.equal(layoutIds[0], 'Prepended List')
@@ -372,7 +372,7 @@ test('the ported module editor page loads with no errors and a markdown field sa
     })
 
     const definition = loadDefinition('design')
-    const data = readModule(definition, 'examples', 'background', { instancesDir })
+    const data = readModule(definition, 'examples', 'background', { instancesDir: join(instancesDir, 'default') })
     assert.equal(data.fields.problem, 'Edited by the Playwright smoke test.')
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
@@ -882,7 +882,7 @@ test("Image is a direct formatting-toolbar action and Insert offers only Section
     })
 
     const definition = loadDefinition('design')
-    const data = readModule(definition, 'examples', 'solution-definition', { instancesDir })
+    const data = readModule(definition, 'examples', 'solution-definition', { instancesDir: join(instancesDir, 'default') })
     assert.match(data.fields['high-level-requirements'], /asset:/)
     // Second markdown field of the `soap`-scoped solution-definition module:
     // high-level requirements, then process flow. The "Choose existing" / hand-typed inserts target it.
@@ -988,7 +988,7 @@ test('toolbar Table opens a size grid whose pick inserts a live table with the c
     })
 
     const definition = loadDefinition('design')
-    const data = readModule(definition, 'examples', 'background', { instancesDir })
+    const data = readModule(definition, 'examples', 'background', { instancesDir: join(instancesDir, 'default') })
     // Blank-line hygiene kept the lead-in separated, and the fresh table is
     // padded to the header's width.
     assert.match(
@@ -1313,7 +1313,7 @@ test('Insert ▾ → Section adds a titled custom field below the requesting fie
     })
 
     const definition = loadDefinition('design')
-    const data = readModule(definition, 'examples', 'background', { instancesDir })
+    const data = readModule(definition, 'examples', 'background', { instancesDir: join(instancesDir, 'default') })
     assert.deepEqual(data.customFields, [
       { id: 'custom:risks-we-carry', title: 'Risks we carry', value: 'The June deadline.' },
     ])
@@ -1594,7 +1594,7 @@ test('task list, blockquote, and horizontal rule write real markdown to disk (#1
     })
 
     const definition = loadDefinition('design')
-    const data = readModule(definition, 'examples', 'background', { instancesDir })
+    const data = readModule(definition, 'examples', 'background', { instancesDir: join(instancesDir, 'default') })
     assert.equal(data.fields.problem, '> - [ ] first\n> - [ ] second\n\n---')
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })

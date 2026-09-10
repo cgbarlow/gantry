@@ -9,7 +9,7 @@ import { registerInstance } from '../lib/instanceRegistry.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { stageBranchName } from '../lib/stageBranch.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
-import { withRunningServer, basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
+import { withRunningServer, withRunningExamplesServer, basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 import { exampleModuleText } from './helpers/fixtureModules.js'
 
 // Server-level credential gating (#86), now driven by per-request resolution against the instance registry (#89/#92) rather than a fixed `createServer({ azureDevOps })` location: a slug the registry says is Azure-DevOps-backed marks that one request's single-instance routes (GET /api/instance, PUT /api/instance/modules/:id, POST /api/instance/render/:artefact) as such. These tests exercise that gating with real HTTP requests against a running gantry server (mirroring tests/server.test.js's existing `withRunningServer` pattern), backed by the same fake in-process Azure DevOps server tests/instance.test.js and tests/azureDevOpsClient.test.js use — never the real dev.azure.com.
@@ -435,7 +435,7 @@ test('rendering the same artefact against an Azure-DevOps-backed instance twice 
 // ---------- Local instances are unaffected ----------
 
 test('local instances (a slug the registry has never seen, or resolves as local) never require a credential, even against the examples fixture', async () => {
-  await withRunningServer({ slug: 'examples' }, async (base) => {
+  await withRunningExamplesServer({}, async (base) => {
     const res = await fetch(`${base}/api/instance`)
     assert.equal(res.status, 200)
     const body = await res.json()

@@ -128,7 +128,7 @@ test('a linked instance\'s Work Item panel confirms a gate-pass state push', asy
       await assert.doesNotReject(panel.locator('text=Parent work item').waitFor({ timeout: 5_000 }))
 
       // Genuinely recorded server-side too, not just rendered client-side.
-      const instance = readInstance('my-initiative', { instancesDir })
+      const instance = readInstance('my-initiative', { instancesDir: join(instancesDir, 'default') })
       assert.equal(instance.workItem.parentId, parentId)
 
       // "Check gate & sync work item" — the Shape stage's modules were pre-filled, so the check genuinely passes and the confirm modal opens (never auto-pushing without it).
@@ -178,7 +178,7 @@ test('declining the confirmation leaves the linked work item\'s state unchanged'
       const panel = page.locator('.synced-fields-panel')
       await panel.locator(`text=#${parentId}`).waitFor({ timeout: DEFAULT_TIMEOUT * 2 })
 
-      const instance = readInstance('my-initiative', { instancesDir })
+      const instance = readInstance('my-initiative', { instancesDir: join(instancesDir, 'default') })
       const shapeWorkItemId = instance.workItem.stages.shape
 
       const client = createAzureDevOpsWorkItemsClient({ organization: WI_ORGANIZATION, project: WI_PROJECT, pat: VALID_PAT, baseUrl: wiBaseUrl })

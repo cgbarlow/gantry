@@ -207,8 +207,10 @@ test('POST /api/instances/adopt is idempotent for a slug already adopted to this
 
 test('POST /api/instances/adopt reports 409 when the found slug is already registered to a different location, and does not repoint the registry', async () => {
   await withFakeAzureDevOpsAndGantryServer(SEED_FILES, {}, async (gantryBase, adoBaseUrl, instancesDir) => {
-    // "my-initiative" already exists as a genuine *local* instance under this same slug before the adopt is ever attempted.
-    createInstance('design', 'my-initiative', { instancesDir, assignee: 'local-assignee' })
+    // "my-initiative" already exists as a genuine *local* instance under this same slug before the
+    // adopt is ever attempted. WI #356: lands in the reserved `default` server workspace, the same
+    // as everything else this server creates.
+    createInstance('design', 'my-initiative', { instancesDir: join(instancesDir, 'default'), assignee: 'local-assignee' })
 
     const res = await fetch(`${gantryBase}/api/instances/adopt`, {
       method: 'POST',

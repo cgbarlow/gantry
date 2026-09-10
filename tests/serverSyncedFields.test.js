@@ -64,8 +64,9 @@ test('PUT synced-fields overrides the title and assignee per stage, and clearing
       assert.equal(body.assignee, 'Grace Hopper')
       assert.equal(body.assigneeInherited, false)
 
-      // Genuinely persisted on the instance record, not just echoed back.
-      const stored = readInstance('my-initiative', { instancesDir })
+      // Genuinely persisted on the instance record, not just echoed back. WI #356: the server's own
+      // startup migration moved this scratch instance into the reserved `default` server workspace.
+      const stored = readInstance('my-initiative', { instancesDir: join(instancesDir, 'default') })
       assert.deepEqual(stored.syncedFields.shape, { title: 'Shape it', assignee: 'Grace Hopper' })
 
       // Clearing an override with an empty string restores the default/inherited value.

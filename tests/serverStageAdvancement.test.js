@@ -34,7 +34,8 @@ test('POST /api/instance/advance-stage rejects a local instance whose current ga
       assert.match(body.error, /has not passed/)
     })
 
-    const instance = readInstance('my-initiative', { instancesDir })
+    // WI #356: the server's own startup migration moved this scratch instance into the reserved `default` server workspace.
+    const instance = readInstance('my-initiative', { instancesDir: join(instancesDir, 'default') })
     assert.equal(instance.stage, 'shape')
   })
 })
@@ -52,7 +53,8 @@ test('POST /api/instance/advance-stage advances a local instance whose current g
       assert.equal(body.toStage.id, 'hld-define')
     })
 
-    const instance = readInstance('my-initiative', { instancesDir })
+    // WI #356: the server's own startup migration moved this scratch instance into the reserved `default` server workspace.
+    const instance = readInstance('my-initiative', { instancesDir: join(instancesDir, 'default') })
     assert.equal(instance.stage, 'hld-define')
   })
 })
