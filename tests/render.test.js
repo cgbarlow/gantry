@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, wri
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { renderArtefact, renderStageArtefacts, prepareAzureDevOpsWasmRender, finishAzureDevOpsWasmRender } from '../lib/render.js'
+import { renderArtefact, renderStageArtefacts, prepareAzureDevOpsWasmRender, finishAzureDevOpsWasmRender, externaliseImagesForWasm } from '../lib/render.js'
 import { createAsset } from '../lib/assets.js'
 import { loadDefinition } from '../lib/definition.js'
 import { readModule, writeModule } from '../lib/instance.js'
@@ -1061,4 +1061,58 @@ test('renderStageArtefacts propagates AzureDevOpsAuthenticationError rather than
       )
     }
   )
+})
+
+// ---------- WI #367: images for the browser-side (pandoc-wasm) render leg ----------
+//
+// The compiled markdown points every image at an absolute path on the machine running `gantry
+// serve`. The native leg hands that straight to a local `pandoc`, which reads it; the WASM leg hands
+// it to pandoc-wasm in the browser, whose virtual filesystem has no such file — so Pandoc dropped
+// the image with no warning and no failed render. These pin the rewrite that lets the bytes travel.
+
+test('externaliseImagesForWasm rewrites absolute image paths to virtual names and returns their bytes', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gantry-wasm-images-'))
+  try {
+    const imagePath = join(dir, 'diagram.png')
+    writeFileSync(imagePath, Buffer.from('not-really-a-png-but-real-bytes'))
+
+    const { markdown, files } = externaliseImagesForWasm(`intro\n\n![A diagram](${imagePath})\n\ntail\n`)
+
+    const names = Object.keys(files)
+    assert.equal(names.length, 1)
+    assert.match(names[0], /^gantry-asset-1\.png$/)
+    assert.match(markdown, new RegExp(`!\\[A diagram\\]\\(${names[0]}\\)`))
+    assert.doesNotMatch(markdown, /\/tmp\//, 'no absolute server path may survive into the browser-bound markdown')
+    assert.equal(Buffer.from(files[names[0]], 'base64').toString(), 'not-really-a-png-but-real-bytes')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('externaliseImagesForWasm ships one copy of an image referenced twice, and leaves unresolvable refs alone', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gantry-wasm-images-'))
+  try {
+    const imagePath = join(dir, 'shared.jpeg')
+    writeFileSync(imagePath, Buffer.from('shared-bytes'))
+
+    const { markdown, files } = externaliseImagesForWasm(
+      `![one](${imagePath})\n\n![two](${imagePath})\n\n![gone](${join(dir, 'missing.png')})\n\n![relative](assets/kept.png)\n`
+    )
+
+    assert.equal(Object.keys(files).length, 1, 'the same file referenced twice is shipped once')
+    const name = Object.keys(files)[0]
+    assert.equal((markdown.match(new RegExp(name, 'g')) ?? []).length, 2, 'both references point at the one virtual name')
+    // A reference that resolves to nothing was never going to embed; rewriting it would only make
+    // the resulting document harder to explain, so it is left exactly as the author wrote it.
+    assert.match(markdown, /!\[gone\]\(.*missing\.png\)/)
+    assert.match(markdown, /!\[relative\]\(assets\/kept\.png\)/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('externaliseImagesForWasm is a no-op for markdown with no images', async () => {
+  const { markdown, files } = externaliseImagesForWasm('# Heading\n\nJust prose, no pictures.\n')
+  assert.deepEqual(files, {})
+  assert.equal(markdown, '# Heading\n\nJust prose, no pictures.\n')
 })

@@ -17,6 +17,22 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.4.6-beta — 2026-09-11
+
+### Fixed
+
+- **Diagrams you upload are no longer missing from rendered Word documents**
+  (WI #367). An image looked right in the Gantry preview but came out of the
+  .docx blank — silently, with the render reporting success. Mermaid diagrams
+  were unaffected, which made it look like a content problem rather than a
+  rendering one. The cause was the browser-based render engine: it was told
+  where each image lived on the *server's* disk, which means nothing inside a
+  browser, so Word documents were built with the pictures left out. The images
+  now travel to the browser with the document text. Nothing to change in your
+  own instances, and anything you rendered without its diagrams just needs
+  rendering again. This affected server-hosted instances from 0.4.1-beta
+  onward, and Azure DevOps-backed instances for longer.
+
 ## 0.4.5-beta — 2026-09-11
 
 ### Fixed

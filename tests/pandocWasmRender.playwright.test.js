@@ -366,6 +366,23 @@ test('a server-hosted instance Render produces a real, well-formed .docx via cli
         assert.match(markdown, /Document Control/)
         assert.match(markdown, /Kiwi Cover Mutual/)
 
+        // WI #367 — the author's own uploaded images must actually be embedded. They were not:
+        // the prepare route handed the browser markdown pointing at absolute paths on the *server's*
+        // filesystem, which pandoc-wasm (a virtual filesystem in the browser) resolves to nothing, so
+        // Pandoc dropped every image silently — no warning, no failed render, just a .docx with the
+        // pictures missing. Mermaid diagrams masked it, since those are rendered browser-side and
+        // handed to Pandoc as bytes already. This asserts the embedded media directly out of the
+        // .docx zip rather than via the markdown round-trip, so it cannot pass on a stray mention.
+        // The SOAP carries two images (`solution-definition`'s two `asset:` references).
+        // Anchored on the extension: an unanchored name match runs straight into the next zip
+        // record's `PK` signature and counts one real file twice.
+        const embeddedMedia = [...new Set(docxBytes.toString('latin1').match(/word\/media\/[A-Za-z0-9_-]+\.(?:png|jpe?g|gif|emf|wmf)/gi) ?? [])]
+        assert.equal(
+          embeddedMedia.length >= 2,
+          true,
+          `expected the SOAP's two asset images to be embedded, found: ${embeddedMedia.join(', ') || '(none)'}`
+        )
+
         // WI #356: the server's own startup migration moved this scratch instance into the
         // reserved `default` server workspace. WI #360 — nothing was ever written there.
         assert.equal(existsSync(join(instancesDir, 'default', 'examples', 'out')), false)
