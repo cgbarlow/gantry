@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync, existsSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, existsSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { program } from '../bin/gantry.js'
@@ -413,4 +413,84 @@ test('WI #370: gantry --version still reports the running build', () => {
   const result = runCli(['--version'], process.cwd())
   assert.equal(result.status, 0)
   assert.match(result.stdout.trim(), /^\d+\.\d+\.\d+/)
+})
+
+// ── The deprecated flat layout, which `--instances-dir` still promises to read ───────────────────
+
+// `resolveEffectiveWorkspacesDir`'s contract in bin/gantry.js is explicit that "a pre-0.4 flat data
+// directory is still just a directory gantry can point at". That path has no workspace and no registry
+// entry, so it is reached by the bare-directory scan rather than the registry — worth its own test,
+// since every *other* test here now goes through the registry.
+test('WI #370: a pre-0.4 flat directory still lists, reported as belonging to no workspace', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'gantry-wi370-flat-'))
+  const origCwd = process.cwd()
+  try {
+    symlinkSync(resolve('definitions'), join(cwd, 'definitions'))
+    const flatDir = join(cwd, 'legacy')
+    mkdirSync(flatDir, { recursive: true })
+    // No workspace.json, no registerInstance — exactly what a pre-0.4 directory looks like.
+    createInstance('design', 'legacy-thing', { instancesDir: flatDir, definitionsDir: join(cwd, 'definitions') })
+    process.chdir(cwd)
+
+    const cap = captureLog()
+    try {
+      await program.parseAsync(['node', 'gantry.js', 'instances', '--workspaces-dir', flatDir, '--json'])
+    } finally {
+      cap.restore()
+    }
+    const rows = JSON.parse(cap.output())
+    assert.deepEqual(
+      rows.map((r) => [r.workspace, r.slug]),
+      [[null, 'legacy-thing']],
+      'a bare instance has no workspace, and saying so is more honest than inventing one'
+    )
+
+    // And it still resolves for the slug-taking commands, which is the actual promise.
+    const status = captureLog()
+    try {
+      await program.parseAsync(['node', 'gantry.js', 'status', 'legacy-thing', '--workspaces-dir', flatDir])
+    } finally {
+      status.restore()
+    }
+    assert.match(status.output(), /legacy-thing — design/)
+  } finally {
+    try {
+      process.chdir(origCwd)
+    } catch {
+      /* ignore */
+    }
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test('WI #370: an unreadable instance registry degrades to the directory scan instead of reporting nothing', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'gantry-wi370-badreg-'))
+  const origCwd = process.cwd()
+  try {
+    symlinkSync(resolve('definitions'), join(cwd, 'definitions'))
+    const dir = join(cwd, 'workspaces')
+    mkdirSync(dir, { recursive: true })
+    createInstance('design', 'survivor', { instancesDir: dir, definitionsDir: join(cwd, 'definitions') })
+    writeFileSync(join(dir, 'instance-registry.json'), '{ this is not valid json')
+    process.chdir(cwd)
+
+    const cap = captureLog()
+    try {
+      await program.parseAsync(['node', 'gantry.js', 'instances', '--json'])
+    } finally {
+      cap.restore()
+    }
+    // A broken registry must not read as "you have no instances" — the instance is right there on disk.
+    assert.deepEqual(
+      JSON.parse(cap.output()).map((r) => r.slug),
+      ['survivor']
+    )
+  } finally {
+    try {
+      process.chdir(origCwd)
+    } catch {
+      /* ignore */
+    }
+    rmSync(cwd, { recursive: true, force: true })
+  }
 })
