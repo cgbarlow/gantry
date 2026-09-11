@@ -422,6 +422,18 @@ async function renderLocalArtefactViaEngine(instance, artefact, slug, format = '
 // status line rather than rejecting, so `handleRenderBatch` doesn't need its own try/catch
 // here (it never had one for this branch).
 //
+// WI #367 — the images the prepare route shipped alongside the markdown, decoded into the byte
+// arrays `renderDocxWithWasm` puts in Pandoc's virtual filesystem. Keyed by the same virtual
+// filenames the markdown now references (see lib/render.js's externaliseImagesForWasm). Absent or
+// empty for a render with no images, in which case this contributes nothing.
+function decodeWasmImageFiles(imageFilesBase64) {
+  const files = {}
+  for (const [name, base64] of Object.entries(imageFilesBase64 ?? {})) {
+    files[name] = base64ToBytes(base64)
+  }
+  return files
+}
+
 // `workspaceBacked` (WI #317 fix): the WASM leg only exists server-side for an
 // Azure-DevOps-hosted instance (`render-wasm-prepare`/`-finish`, gated on
 // `resolveAzureDevOpsLocation`) — this function's own callers previously assumed "not an
@@ -455,7 +467,10 @@ async function renderAzureArtefactViaEngine(artefact, slug, workspaceBacked = fa
       if (!prepRes.ok) throw new Error(prep.message ?? prep.error ?? `Prepare failed (${prepRes.status})`)
       const referenceDocBytes = prep.referenceDocBase64 ? base64ToBytes(prep.referenceDocBase64) : null
       const docxInput = await prepareMermaidForDocx(prep.markdown)
-      const docxBytes = await renderDocxWithWasm({ markdown: docxInput.markdown, referenceDocBytes, files: docxInput.files })
+      // WI #367: the author's own images ride along from the prepare route as bytes; mermaid's
+      // browser-rendered PNGs keep their existing names and win any collision.
+      const files = { ...decodeWasmImageFiles(prep.imageFilesBase64), ...docxInput.files }
+      const docxBytes = await renderDocxWithWasm({ markdown: docxInput.markdown, referenceDocBytes, files })
       const finishRes = await apiFetchForInstance(
         slug,
         `/api/instance/render-wasm-finish/${artefact.id}?slug=${encodeURIComponent(slug)}`,
@@ -482,7 +497,10 @@ async function renderAzureArtefactViaEngine(artefact, slug, workspaceBacked = fa
 
       const referenceDocBytes = prep.referenceDocBase64 ? base64ToBytes(prep.referenceDocBase64) : null
       const docxInput = await prepareMermaidForDocx(prep.markdown)
-      const docxBytes = await renderDocxWithWasm({ markdown: docxInput.markdown, referenceDocBytes, files: docxInput.files })
+      // WI #367: the author's own images ride along from the prepare route as bytes; mermaid's
+      // browser-rendered PNGs keep their existing names and win any collision.
+      const files = { ...decodeWasmImageFiles(prep.imageFilesBase64), ...docxInput.files }
+      const docxBytes = await renderDocxWithWasm({ markdown: docxInput.markdown, referenceDocBytes, files })
 
       const finishRes = await apiFetchForInstance(
         slug,
