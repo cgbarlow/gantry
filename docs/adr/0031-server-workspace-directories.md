@@ -97,6 +97,30 @@ every workspace still resolves (logging a deprecation note); one present in
 more than one workspace is rejected, naming every `<workspace>/<slug>`
 candidate so the caller can disambiguate.
 
+**Amended by WI #366.** As first shipped, this section described an intent the
+addressing layer did not yet implement: `lib/server.js` resolved a numeric ref
+with `resolveSlugForRef` (discarding the scope the ref had already pinned down)
+and passed no workspace to the registry, so *every* request took the deprecated
+search-every-workspace path — and `isValidSlug`'s single-segment rule meant the
+`<workspace>/<slug>` form the rejection message recommends could not be supplied
+in the first place. An instance route now carries the workspace it resolved
+within, by any of three routes, in precedence order:
+
+1. `?scope=<scope id>` — the opaque token `GET /api/instance/workspace` returns.
+   This is what the web client sends, applied once in `apiFetchForInstance`
+   rather than at each call site, and it covers an Azure DevOps workspace
+   (keyed by uuid) as well as a directory one.
+2. `?slug=<workspace>/<slug>` — the qualified form this section already names.
+   Parsed by `parseInstanceAddress` (`lib/slug.js`), which validates *each half*
+   with the same single-segment rule, so `isValidSlug`'s traversal guard over
+   `join(instancesDir, slug, ...)` is unchanged and no slug reaching the
+   filesystem is ever a path.
+3. `?ref=w<N>i<M>` — via `resolveScopeAndSlugForRef`, which was written for this
+   caller and until now had none.
+
+The bare slug remains supported and still warns, per this ADR's own backward
+compatibility requirement — it is now the exception rather than the only path.
+
 ### What stayed unchanged, deliberately
 
 The lower-level functions that actually read and write an instance's files

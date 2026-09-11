@@ -23,7 +23,7 @@ test('GET /api/instance/workspace?slug=<local> reports workspaceId: null, with n
 
     const res = await fetch(`${base}/api/instance/workspace?slug=my-initiative`)
     assert.equal(res.status, 200)
-    assert.deepEqual(await res.json(), { workspaceId: null })
+    assert.deepEqual(await res.json(), { workspaceId: null, scope: null })
   })
 })
 
@@ -39,6 +39,9 @@ test('GET /api/instance/workspace?slug=<azureDevOps> reports the real workspace 
     assert.equal(res.status, 200)
     const body = await res.json()
     assert.equal(typeof body.workspaceId, 'string')
+    // WI #366: `scope` is the addressing token the web client echoes back as `?scope=`; for an Azure
+    // DevOps instance it is that workspace's uuid, the same value `workspaceId` reports.
+    assert.equal(body.scope, body.workspaceId)
   })
 })
 
@@ -46,7 +49,7 @@ test('GET /api/instance/workspace?slug=<unknown> reports workspaceId: null rathe
   await withScratchServer(async (base) => {
     const res = await fetch(`${base}/api/instance/workspace?slug=never-heard-of-it`)
     assert.equal(res.status, 200)
-    assert.deepEqual(await res.json(), { workspaceId: null })
+    assert.deepEqual(await res.json(), { workspaceId: null, scope: null })
   })
 })
 

@@ -13,7 +13,7 @@ import { indentWithTab } from '@codemirror/commands'
 import { syntaxTree } from '@codemirror/language'
 import { markdown } from '@codemirror/lang-markdown'
 import { promptContext, promptOpen, resolvePromptWith } from './lib/credential.js'
-import { apiFetch, apiFetchForInstance } from './lib/apiFetch.js'
+import { apiFetch, apiFetchForInstance, cachedScopeForSlug } from './lib/apiFetch.js'
 import { renderMarkdown } from './lib/markdown.js'
 import { Dropdown } from './lib/dropdown.js'
 import { apply as applyMarkdownCommand, HEADING_LEVELS, findTable } from './lib/markdownCommands.js'
@@ -145,6 +145,10 @@ function assetFileUrl(assetId, slug, stageId) {
   const params = new URLSearchParams()
   if (slug) params.set('slug', slug)
   if (stageId) params.set('stage', stageId)
+  // WI #366: the browser fetches this URL itself (an <img src>, or the "Source:" citation link), so
+  // it never passes through `apiFetchForInstance` and has to carry the workspace token on its own.
+  const scope = slug ? cachedScopeForSlug(slug) : null
+  if (scope) params.set('scope', scope)
   const qs = params.toString()
   const base = `/api/instance/assets/${encodeURIComponent(assetId)}/file`
   return qs ? `${base}?${qs}` : base
@@ -3092,7 +3096,7 @@ function AdvanceStagePanel({ instance }) {
       }
       return
     }
-    const res = await apiFetch(`/api/instance/check?slug=${encodeURIComponent(currentSlug.value)}`)
+    const res = await apiFetchForInstance(currentSlug.value, `/api/instance/check?slug=${encodeURIComponent(currentSlug.value)}`)
     const body = await res.json().catch(() => ({}))
     if (!res.ok) {
       setStatus(`Check failed: ${body.message ?? body.error}`)
@@ -3151,7 +3155,7 @@ function AdvanceStagePanel({ instance }) {
     }
     setConfirming(false)
     setStatus('Advancing…')
-    const res = await apiFetch(`/api/instance/advance-stage?slug=${encodeURIComponent(currentSlug.value)}`, {
+    const res = await apiFetchForInstance(currentSlug.value, `/api/instance/advance-stage?slug=${encodeURIComponent(currentSlug.value)}`, {
       method: 'POST',
     })
     const body = await res.json().catch(() => ({}))
