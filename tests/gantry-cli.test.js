@@ -377,3 +377,48 @@ test('CLI backfill-numeric-refs: reports nothing to backfill against a scratch d
     rmSync(tmp, { recursive: true, force: true })
   }
 })
+
+// WI #369 — `gantry --version`.
+//
+// There was no root version flag at all, so the only way to answer "which build is this actually
+// running?" was to trace the binary on PATH back to a working copy by hand. That question came up
+// for real during a UAT upgrade, where a symlinked `gantry` and a stale browser tab made it
+// genuinely ambiguous whether a release had taken effect.
+test('gantry --version reports the running install\'s own package version, not a hardcoded literal', async () => {
+  const packageVersion = JSON.parse(readFileSync(resolve('package.json'), 'utf8')).version
+  // Run the real binary in a child process: commander's version flag exits the process, which is
+  // precisely the behaviour being pinned.
+  const { execFileSync } = await import('node:child_process')
+  const stdout = execFileSync(process.execPath, [resolve('bin/gantry.js'), '--version'], { encoding: 'utf8' })
+  assert.equal(stdout.trim(), packageVersion)
+  assert.equal(
+    execFileSync(process.execPath, [resolve('bin/gantry.js'), '-V'], { encoding: 'utf8' }).trim(),
+    packageVersion,
+    'the short form reports the same thing'
+  )
+})
+
+test('gantry --version answers for the install it runs from, not the directory it is invoked in', async () => {
+  const { execFileSync } = await import('node:child_process')
+  const packageVersion = JSON.parse(readFileSync(resolve('package.json'), 'utf8')).version
+  const elsewhere = mkdtempSync(join(tmpdir(), 'gantry-cwd-'))
+  try {
+    // Invoked through a symlink from an unrelated working directory — the shape of a real install
+    // on PATH, and the case a naive `./package.json` read would get wrong.
+    const link = join(elsewhere, 'gantry-link.js')
+    symlinkSync(resolve('bin/gantry.js'), link)
+    const stdout = execFileSync(process.execPath, [link, '--version'], { cwd: elsewhere, encoding: 'utf8' })
+    assert.equal(stdout.trim(), packageVersion)
+  } finally {
+    rmSync(elsewhere, { recursive: true, force: true })
+  }
+})
+
+test("a subcommand's own --version still means the definition version, not gantry's", async () => {
+  // `new --version` and `validate --version` predate the root flag and mean something else
+  // entirely; commander scopes them to their subcommand, and this pins that they still do.
+  const newCommand = program.commands.find((c) => c.name() === 'new')
+  assert.ok(newCommand.options.some((o) => o.long === '--version'), 'new --version must survive')
+  const validateCommand = program.commands.find((c) => c.name() === 'validate')
+  assert.ok(validateCommand.options.some((o) => o.long === '--version'), 'validate --version must survive')
+})

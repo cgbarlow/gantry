@@ -17,6 +17,18 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.4.8-beta — 2026-09-11
+
+### Added
+
+- **`gantry --version`** (WI #369). There was no way to ask Gantry which build
+  you were running — the flag simply didn't exist — which made "did my upgrade
+  take effect?" surprisingly hard to answer. `gantry --version` (or `-V`) now
+  reports it, and reports it for the install actually being run, even when
+  that's a symlink on your PATH invoked from somewhere else entirely.
+  `gantry new --version` and `gantry validate --version` are unchanged and
+  still refer to a *definition* version.
+
 ## 0.4.7-beta — 2026-09-11
 
 ### Fixed
