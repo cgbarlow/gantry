@@ -194,7 +194,7 @@ test('CLI instances --instances-dir uses flag dir (flag > env)', async () => {
       await withEnv({ GANTRY_INSTANCES_DIR: tmpEnv }, async () => {
         await program.parseAsync(['node', 'gantry.js', 'instances', '--instances-dir', tmp])
       })
-      assert.ok(logs.some(l => l.includes('No instances found.')), `expected empty flag dir to report none, got ${logs.join('\n')}`)
+      assert.ok(logs.some(l => l.includes('No instances found in')), `expected empty flag dir to report none, got ${logs.join('\n')}`)
     } finally { restore() }
   } finally {
     rmSync(tmp, { recursive: true, force: true })
@@ -210,7 +210,7 @@ test('CLI instances uses GANTRY_INSTANCES_DIR env when --instances-dir omitted',
       await withEnv({ GANTRY_INSTANCES_DIR: tmp }, async () => {
         await program.parseAsync(['node', 'gantry.js', 'instances'])
       })
-      assert.ok(logs.some(l => l.includes('No instances found.')))
+      assert.ok(logs.some(l => l.includes('No instances found in')))
     } finally { restore() }
     // also test --json on empty dir emits []
     const { logs: logs2, restore: restore2 } = captureLog()
@@ -239,7 +239,9 @@ test('CLI new --instances-dir creates instance in custom dir', async () => {
       })
       assert.ok(logs.some(l => l.includes('Created instance "cli-pass-test"')))
     } finally { restore() }
-    assert.ok(existsSync(join(tmp, 'instances', 'cli-pass-test', 'instance.yaml')))
+    // WI #370: created into the reserved `default` server workspace under the given root, not
+    // directly at the root — see bin/gantry.js's `new` action.
+    assert.ok(existsSync(join(tmp, 'instances', 'default', 'cli-pass-test', 'instance.yaml')))
   } finally {
     try { process.chdir(origCwd) } catch {}
     rmSync(tmp, { recursive: true, force: true })
