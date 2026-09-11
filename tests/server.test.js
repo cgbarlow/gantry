@@ -603,10 +603,38 @@ test('slugs containing ".." or a path separator are rejected outright, even with
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     await withRunningServer({ instancesDir }, async (base) => {
-      for (const badSlug of ['..', '.', 'foo/bar', 'foo\\bar', '../../etc']) {
+      // WI #366 made "<workspace>/<slug>" a real address, so a single separator is no longer
+      // rejected by shape — see the test below. Everything here still is: a traversal token on
+      // either side, a backslash, or more separators than the grammar has a meaning for. Each half
+      // of a qualified address is validated by the same single-segment rule as a bare slug, so
+      // nothing that reaches `join(instancesDir, slug, ...)` is ever a path.
+      for (const badSlug of ['..', '.', 'foo\\bar', '../../etc', 'a/b/c', 'foo/..', '../x', '/x', 'x/']) {
         const res = await fetch(`${base}/api/instance?slug=${encodeURIComponent(badSlug)}`)
         assert.equal(res.status, 400, `expected 400 for slug ${JSON.stringify(badSlug)}`)
       }
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// WI #366: "<workspace>/<slug>" is the workspace-qualified address form the registry's own
+// deprecation notice tells callers to prefer, so it must be understood rather than refused as a
+// malformed slug. Naming a workspace that holds no such instance is an ordinary "unknown instance",
+// answered exactly as a bare unknown slug is — not a 400 rejection on shape, and not a traversal.
+test('a workspace-qualified slug is a real address, answered the same way an unknown bare slug is', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    await withRunningServer({ instancesDir }, async (base) => {
+      const qualified = await fetch(`${base}/api/instance?slug=${encodeURIComponent('foo/bar')}`)
+      const bare = await fetch(`${base}/api/instance?slug=${encodeURIComponent('bar')}`)
+      assert.notEqual(qualified.status, 400, 'a qualified address must not be rejected as a malformed slug')
+      assert.equal(qualified.status, bare.status)
+      // The workspace half never widens what the slug half can reach: the path it looked for is the
+      // instance's own directory name, not anything assembled from the address.
+      const body = await qualified.json()
+      assert.match(body.error ?? '', /"bar"/)
+      assert.doesNotMatch(body.error ?? '', /foo/)
     })
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })

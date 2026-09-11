@@ -58,26 +58,51 @@ export async function apiFetch(url, options = {}, { workspaceId, silent } = {}) 
 // Resolves, and caches for the lifetime of the page, which workspace a given instance slug belongs to (`null` for a local instance, or one gantry has never heard of) — a plain, uncredentialed registry lookup (`GET /api/instance/workspace`, no PAT required or consulted), not an Azure DevOps call itself. This has to happen *before* the actual Azure-DevOps-touching request goes out, not merely on a 401 retry: resolving it only after a first, credential-less attempt would mean a workspace whose *override* PAT is the only one that's actually valid would need to fail once (a real 401 round-trip against the caller's Azure DevOps org, not just this server) before this module could even learn which workspace to resolve that override for.
 //
 // Only a *successful* resolution is cached — a failed attempt (network error, non-2xx response, malformed JSON) is deliberately left uncached, so the very next call for that slug tries again instead of permanently treating a transient hiccup the same as "definitely no workspace" for the rest of the page's life. A review pass on this ticket flagged the earlier "cache every outcome, including failures" version as a real regression risk: one bad lookup would silently and irrecoverably fall back to the global default PAT for that instance until a full page reload, defeating the override this ticket exists to support.
-const workspaceIdBySlug = new Map()
+const instanceScopeBySlug = new Map()
 
-async function resolveWorkspaceIdForSlug(slug) {
-  if (!slug) return null
-  if (workspaceIdBySlug.has(slug)) return workspaceIdBySlug.get(slug)
+const NO_SCOPE = { workspaceId: null, scope: null }
+
+async function resolveInstanceScopeForSlug(slug) {
+  if (!slug) return NO_SCOPE
+  if (instanceScopeBySlug.has(slug)) return instanceScopeBySlug.get(slug)
   const res = await fetch(`/api/instance/workspace?slug=${encodeURIComponent(slug)}`).catch(() => null)
-  if (!res || !res.ok) return null
+  if (!res || !res.ok) return NO_SCOPE
   // `undefined` (never a real parsed JSON value — valid JSON can't parse to `undefined`) distinguishes "the response body itself was malformed" from a well-formed `{ workspaceId: null }` (a genuinely local/unknown slug) — only the latter is a real, cacheable answer; the former is just another flavor of failed lookup and must not be cached either.
   const body = await res.json().catch(() => undefined)
-  if (body === undefined) return null
-  const workspaceId = body?.workspaceId ?? null
+  if (body === undefined) return NO_SCOPE
+  const resolved = { workspaceId: body?.workspaceId ?? null, scope: body?.scope ?? null }
   // Cache only now, once the lookup is known-good — see this function's own doc comment above.
-  workspaceIdBySlug.set(slug, workspaceId)
-  return workspaceId
+  instanceScopeBySlug.set(slug, resolved)
+  return resolved
+}
+
+/**
+ * The cached workspace token for `slug`, or `null` when nothing has looked it up yet (WI #366).
+ * Synchronous on purpose: it serves the URLs the *browser* fetches rather than this module —
+ * an `<img src>` or a citation link (`assetFileUrl` in web/app.js) — which have to be built during
+ * render with no chance to await. Anything the module editor displays has already been loaded
+ * through `apiFetchForInstance`, so by then the entry is warm; a miss just yields the bare-slug URL,
+ * which still resolves and still warns, exactly as before.
+ */
+export function cachedScopeForSlug(slug) {
+  return instanceScopeBySlug.get(slug)?.scope ?? null
+}
+
+// WI #366: carries the instance's workspace on the request, so the server resolves the slug within
+// that one workspace rather than searching every workspace for it (the deprecated path, which warns
+// on every call and breaks outright once two workspaces share a slug). Done here, once, rather than
+// at each of this module's ~27 instance-scoped call sites — every one of them already routes through
+// `apiFetchForInstance`, and every one of them wants the same answer. An existing `scope=` on the URL
+// is left alone so a deliberate caller-supplied one always wins.
+function withScope(url, scope) {
+  if (!scope || /[?&]scope=/.test(url)) return url
+  return `${url}${url.includes('?') ? '&' : '?'}scope=${encodeURIComponent(scope)}`
 }
 
 /**
  * `apiFetch`, but resolving which workspace `slug` belongs to first, so a workspace-specific PAT override (set from the Settings screen's Workspace tab, #104) is used from the very first request rather than only after an initial 401 against the wrong credential. Every call site that already knows which instance slug a request targets (loading/saving/rendering/checking an instance) should use this instead of calling `apiFetch` directly.
  */
 export async function apiFetchForInstance(slug, url, options = {}, { silent } = {}) {
-  const workspaceId = await resolveWorkspaceIdForSlug(slug)
-  return apiFetch(url, options, { workspaceId, silent })
+  const { workspaceId, scope } = await resolveInstanceScopeForSlug(slug)
+  return apiFetch(withScope(url, scope), options, { workspaceId, silent })
 }

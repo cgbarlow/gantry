@@ -138,7 +138,13 @@ test('listRegisteredInstances lists every entry, sorted by slug then workspace, 
     createInstance('design', 'zebra-initiative', { instancesDir: workspaceDir })
     registerInstance('alpha-remote', { kind: 'azureDevOps', organization: 'org', project: 'proj', repository: 'repo' }, { instancesDir })
 
-    assert.deepEqual(listRegisteredInstances({ instancesDir }), [
+    const rows = listRegisteredInstances({ instancesDir })
+    // WI #366: every row carries the raw scope id it is stored under. A directory workspace's is its
+    // own folder-derived scope id; an Azure DevOps workspace's is a generated uuid, so it is checked
+    // for shape rather than value.
+    assert.equal(typeof rows[0].scopeId, 'string')
+    assert.equal(rows[1].scopeId, 'acme')
+    assert.deepEqual(rows.map(({ scopeId, ...row }) => row), [
       { slug: 'alpha-remote', workspace: undefined, location: { kind: 'azureDevOps', organization: 'org', project: 'proj', repository: 'repo' } },
       { slug: 'zebra-initiative', workspace: 'acme', location: { kind: 'directory', workspace: 'acme' } },
     ])
@@ -479,11 +485,11 @@ test('listRegisteredInstances excludes archived by default, includes them (with 
     archiveInstance('beta', { instancesDir, workspace: 'acme' })
 
     assert.deepEqual(listRegisteredInstances({ instancesDir }), [
-      { slug: 'alpha', workspace: 'acme', location: { kind: 'directory', workspace: 'acme' } },
+      { slug: 'alpha', scopeId: 'acme', workspace: 'acme', location: { kind: 'directory', workspace: 'acme' } },
     ])
     assert.deepEqual(listRegisteredInstances({ instancesDir, includeArchived: true }), [
-      { slug: 'alpha', workspace: 'acme', location: { kind: 'directory', workspace: 'acme' }, archived: false },
-      { slug: 'beta', workspace: 'acme', location: { kind: 'directory', workspace: 'acme' }, archived: true },
+      { slug: 'alpha', scopeId: 'acme', workspace: 'acme', location: { kind: 'directory', workspace: 'acme' }, archived: false },
+      { slug: 'beta', scopeId: 'acme', workspace: 'acme', location: { kind: 'directory', workspace: 'acme' }, archived: true },
     ])
   })
 })

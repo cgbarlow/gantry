@@ -33,7 +33,7 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal, effect } from '@preact/signals'
-import { apiFetch } from '../lib/apiFetch.js'
+import { apiFetch, apiFetchForInstance } from '../lib/apiFetch.js'
 import { renderMarkdown } from '../lib/markdown.js'
 import { TICKETING_SYSTEMS, defaultTicketingSystem } from '../lib/ticketingSystem.js'
 import { IdentityPicker } from '../lib/identityPicker.js'
@@ -1291,7 +1291,7 @@ async function createInstanceAndMaybeLink() {
     linkStatus.value = 'linking'
     linkError.value = ''
     try {
-      const res = await apiFetch(`/api/instance/work-items/link?slug=${encodeURIComponent(actualSlug)}`, {
+      const res = await apiFetchForInstance(actualSlug, `/api/instance/work-items/link?slug=${encodeURIComponent(actualSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

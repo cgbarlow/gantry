@@ -17,6 +17,26 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.4.5-beta — 2026-09-11
+
+### Fixed
+
+- **Instances in different workspaces can now share a slug** (WI #366). Two
+  workspaces each holding an instance with the same name used to break: the
+  server looked a slug up by searching every workspace for it, and when more
+  than one matched it gave up rather than choosing, so that instance could not
+  be opened at all and there was no way to say which one you meant. The server
+  now resolves an instance within the workspace it actually belongs to, so
+  identical slugs in different workspaces are no longer a collision. Nothing to
+  change in your own workspaces — existing links, bookmarks and numbered
+  references keep working exactly as before.
+- **The log no longer fills with deprecation notices you could not act on**
+  (WI #366). Running Gantry logged `resolved via a bare, workspace-unqualified
+  slug (deprecated, WI #356)` on essentially every request, recommending a
+  `<workspace>/<slug>` form that the server did not actually accept. That form
+  now works, the app uses it, and the notice is back to meaning what it says —
+  something addressed the old way and can be moved to the new one.
+
 ## 0.4.4-beta — 2026-09-10
 
 ### Changed
