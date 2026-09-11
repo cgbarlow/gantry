@@ -17,6 +17,51 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.4.9-beta — 2026-09-11
+
+### Fixed
+
+- **The command line can see your instances again** (WI #370). `gantry
+  instances` reported "No instances found." in a directory that plainly had
+  them, and `gantry status`, `gantry check` and `gantry render` failed outright
+  on any instance you hadn't pointed them at by hand. Gantry 0.4 moved where
+  instance data is stored — into a workspace folder, one level deeper than
+  before — and the web app was taught the new layout while the command line was
+  not, so the two disagreed about the very same directory. They now share one
+  answer, and the command line lists exactly what the dashboard does.
+- **An instance you create on the command line survives starting the web app**
+  (WI #370). `gantry new` wrote its instance in the old location; the first
+  `gantry serve` moved it to the new one; after that the command line could no
+  longer find the instance it had just made. `gantry new` now creates instances
+  where the web app already puts them, so nothing is moved and nothing goes
+  missing. Instances made before this change are picked up automatically.
+- **`gantry validate --version` and `gantry new --version` work again**
+  (WI #370). Since 0.4.8-beta these were being read as a request for Gantry's
+  own version number: the command printed `0.4.8-beta` and did nothing else.
+  They once again mean the *definition* version, and `gantry --version` still
+  reports the build you're running.
+- **`gantry backfill-numeric-refs` now runs against the directory you point it
+  at** (WI #370). It always used the pre-0.4 location regardless of
+  `--workspaces-dir` or `GANTRY_WORKSPACES_DIR`, so it reported nothing to do
+  while leaving real instances unnumbered.
+- **Errors read like errors** (WI #370). A mistyped instance or definition name
+  printed a page of internal Node detail. It now prints one line saying what
+  was wrong — and, when an instance isn't found, which ones do exist. Set
+  `GANTRY_DEBUG=1` if you want the full technical detail back.
+- **`gantry serve` no longer leaves uncommitted changes behind** in a Git
+  checkout of Gantry itself (WI #370).
+
+### Added
+
+- **`gantry definitions`** (WI #370) — previously a placeholder that printed
+  "not yet implemented". It lists the definitions available to you with their
+  stages and versions, and takes `--json` like the other listing commands.
+- **Workspace-qualified names on the command line** (WI #370). Instances are
+  now listed as `workspace/slug`, and any command taking an instance name
+  accepts that form. It matters when the same name exists in two workspaces:
+  previously one was picked silently, and now Gantry says which two it found
+  and asks you to be specific.
+
 ## 0.4.8-beta — 2026-09-11
 
 ### Added

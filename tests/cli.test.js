@@ -21,7 +21,11 @@ test('gantry new creates an instance with blank Shape-stage module files', () =>
     // module now mount adjacent, immediately after `background`.
     assert.match(output, /background, introduction, design-basis, solution-definition, team-and-estimates/)
 
-    const backgroundPath = join(cwd, 'workspaces', 'cli-test', 'modules', 'background.md')
+    // WI #370: `gantry new` creates into the reserved `default` server workspace, not the
+    // workspaces root — the same placement `POST /api/instances` uses, so an instance lands in the
+    // same directory whichever way it was made and `gantry serve` never has to migrate it.
+    assert.match(output, /Workspace: default/)
+    const backgroundPath = join(cwd, 'workspaces', 'default', 'cli-test', 'modules', 'background.md')
     assert.ok(existsSync(backgroundPath))
     assert.match(readFileSync(backgroundPath, 'utf8'), /owner: c\.barlow/)
   } finally {
@@ -40,11 +44,11 @@ test('gantry new --assignee records the instance record\'s own assignee, indepen
       { cwd, encoding: 'utf8' }
     )
 
-    const instanceYaml = readFileSync(join(cwd, 'workspaces', 'cli-test', 'instance.yaml'), 'utf8')
+    const instanceYaml = readFileSync(join(cwd, 'workspaces', 'default', 'cli-test', 'instance.yaml'), 'utf8')
     const instance = parseYAML(instanceYaml)
     assert.equal(instance.assignee, 'j.smith')
 
-    const backgroundPath = join(cwd, 'workspaces', 'cli-test', 'modules', 'background.md')
+    const backgroundPath = join(cwd, 'workspaces', 'default', 'cli-test', 'modules', 'background.md')
     assert.match(readFileSync(backgroundPath, 'utf8'), /owner: c\.barlow/)
   } finally {
     rmSync(cwd, { recursive: true, force: true })
