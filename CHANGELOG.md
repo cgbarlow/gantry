@@ -17,6 +17,20 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.4.7-beta — 2026-09-11
+
+### Fixed
+
+- **Upgrading Gantry no longer leaves an open browser tab running the old
+  version** (WI #368). If you had Gantry open in a tab, upgraded the server and
+  carried on in that same tab, the page could keep running the *previous*
+  version's code against the new server — with no sign anything was wrong, and
+  no fix other than a hard reload nobody knew to do. It also made "did my
+  upgrade actually take effect?" impossible to answer from the outside. Pages
+  and scripts now tell the browser to check with the server before reusing
+  them, so an upgrade is picked up on the next navigation. Unchanged files are
+  still not re-downloaded, so this costs nothing in day-to-day use.
+
 ## 0.4.6-beta — 2026-09-11
 
 ### Fixed

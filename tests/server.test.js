@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { createServer } from '../lib/server.js'
@@ -1965,5 +1965,52 @@ test('PUT template valid source round-trips via GET; broken source 422; publishe
   } finally {
     rmSync(definitionsDir, { recursive: true, force: true })
     rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// WI #368 — static responses must carry a validator so a browser revalidates instead of guessing.
+//
+// With no `Cache-Control`, `ETag` or `Last-Modified` at all — the previous behaviour — a browser
+// falls back to heuristic caching and may reuse a stored response without asking. That is how a tab
+// left open across a Gantry upgrade keeps running the previous `app.js` against a restarted server:
+// front end and back end silently disagree, and only a manual hard reload fixes it.
+test('static files and the app shell carry an ETag and revalidate, so an upgrade is picked up without a hard reload', async () => {
+  await withRunningServer({}, async (base) => {
+    for (const path of ['/', '/app.js', '/style.css']) {
+      const first = await fetch(`${base}${path}`)
+      assert.equal(first.status, 200, path)
+      const etag = first.headers.get('etag')
+      assert.ok(etag, `${path} must carry an ETag`)
+      // `no-cache` means "you may store this, but ask before reusing it" — not `no-store`.
+      assert.equal(first.headers.get('cache-control'), 'no-cache', path)
+
+      const revalidated = await fetch(`${base}${path}`, { headers: { 'If-None-Match': etag } })
+      assert.equal(revalidated.status, 304, `${path} should revalidate to 304 while unchanged`)
+      assert.equal(revalidated.headers.get('etag'), etag, 'a 304 must still carry the validator')
+    }
+  })
+})
+
+test('a changed static file invalidates its ETag, so the browser is served the new bytes', async () => {
+  const webDir = mkdtempSync(join(tmpdir(), 'gantry-web-'))
+  try {
+    const assetPath = join(webDir, 'thing.css')
+    writeFileSync(assetPath, 'body { color: red }')
+    await withRunningServer({ webDir }, async (base) => {
+      const first = await fetch(`${base}/thing.css`)
+      assert.equal(first.status, 200)
+      const etag = first.headers.get('etag')
+      assert.equal((await fetch(`${base}/thing.css`, { headers: { 'If-None-Match': etag } })).status, 304)
+
+      // Exactly what a `git pull` does to a file the running server is serving.
+      writeFileSync(assetPath, 'body { color: blue }')
+      utimesSync(assetPath, new Date(), new Date(Date.now() + 60_000))
+
+      const afterChange = await fetch(`${base}/thing.css`, { headers: { 'If-None-Match': etag } })
+      assert.equal(afterChange.status, 200, 'a changed file must not revalidate as unchanged')
+      assert.match(await afterChange.text(), /blue/)
+    })
+  } finally {
+    rmSync(webDir, { recursive: true, force: true })
   }
 })
