@@ -7,7 +7,7 @@ import { renderArtefact } from '../lib/render.js'
 import { getStatus } from '../lib/status.js'
 import { checkGate } from '../lib/check.js'
 import { validateDefinition } from '../lib/validate.js'
-import { listDefinitions } from '../lib/definition.js'
+import { listDefinitions, resolveDefinitionsDir } from '../lib/definition.js'
 import { createServer } from '../lib/server.js'
 import { createInstance } from '../lib/instance.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
@@ -107,9 +107,21 @@ function resolveInstanceArgument(address, workspacesDir) {
 
 // Every instance command resolves its data directory the same way, from the same two flags.
 function withInstanceOptions(command) {
-  return command
+  return withDefinitionsOption(command)
     .option('--workspaces-dir <path>', 'workspaces directory (default: workspaces; or GANTRY_WORKSPACES_DIR env)')
     .option('--instances-dir <path>', 'deprecated alias for --workspaces-dir')
+}
+
+// WI #371: every command that loads a definition — which is all of them except `serve`, since even
+// `status`/`check`/`render` have to load the instance's own definition to say anything about it —
+// takes the same escape hatch, and resolves the same way when it isn't given (see
+// `resolveDefinitionsDir`). Data directory and definitions directory are separate flags on purpose:
+// one is deployment data that stays cwd-relative, the other a packaged asset that does not.
+function withDefinitionsOption(command) {
+  return command.option(
+    '--definitions-dir <path>',
+    'definitions directory (default: ./definitions if present, else the ones packaged with gantry)'
+  )
 }
 
 export const program = new Command()
@@ -141,37 +153,36 @@ program
   // collide — but a short `-v` would read as the same thing and invite the confusion.
   .version(gantryVersion(), '-V, --version', "Report gantry's own version")
 
-program
-  .command('definitions')
-  .description('List definitions available in this repo')
-  .option('--json', 'emit structured JSON output')
-  .action((options) => {
-    // WI #370: previously a `console.log('not yet implemented')` stub. The engine was never the missing
-    // part — `listDefinitions` has backed the server's own `GET /api/definitions` and the Definition
-    // Editor for several tickets; only the CLI was never wired to it.
-    const definitions = listDefinitions()
-    if (options.json) {
-      console.log(JSON.stringify(definitions, null, 2))
-      return
-    }
-    if (definitions.length === 0) {
-      console.log('No definitions found.')
-      return
-    }
-    for (const definition of definitions) {
-      const versions = definition.versions?.length
-        ? ` (versions: ${definition.versions.map((v) => (v.status === 'published' ? v.version : `${v.version} ${v.status}`)).join(', ')})`
-        : ''
-      console.log(`${definition.id} — ${definition.title}${versions}`)
-      console.log(`      stages: ${definition.stages.map((stage) => stage.title).join(' → ')}`)
-    }
-  })
+withDefinitionsOption(
+  program.command('definitions').description('List definitions available in this repo').option('--json', 'emit structured JSON output')
+).action((options) => {
+  // WI #370: previously a `console.log('not yet implemented')` stub. The engine was never the missing
+  // part — `listDefinitions` has backed the server's own `GET /api/definitions` and the Definition
+  // Editor for several tickets; only the CLI was never wired to it.
+  const definitionsDir = resolveDefinitionsDir(options.definitionsDir)
+  const definitions = listDefinitions({ definitionsDir })
+  if (options.json) {
+    console.log(JSON.stringify(definitions, null, 2))
+    return
+  }
+  if (definitions.length === 0) {
+    console.log(`No definitions found in ${definitionsDir}.`)
+    return
+  }
+  for (const definition of definitions) {
+    const versions = definition.versions?.length
+      ? ` (versions: ${definition.versions.map((v) => (v.status === 'published' ? v.version : `${v.version} ${v.status}`)).join(', ')})`
+      : ''
+    console.log(`${definition.id} — ${definition.title}${versions}`)
+    console.log(`      stages: ${definition.stages.map((stage) => stage.title).join(' → ')}`)
+  }
+})
 
 withInstanceOptions(
   program.command('instances').description('List instances available in this repo').option('--json', 'emit structured JSON output')
 ).action((options) => {
   const workspacesDir = resolveEffectiveWorkspacesDir(options)
-  const instances = listWorkspaceInstances(workspacesDir)
+  const instances = listWorkspaceInstances(workspacesDir, { definitionsDir: resolveDefinitionsDir(options.definitionsDir) })
   if (options.json) {
     console.log(JSON.stringify(instances, null, 2))
     return
@@ -209,6 +220,7 @@ withInstanceOptions(
   const instancesDir = ensureDefaultWorkspace(workspacesDir)
   const result = createInstance(definition, slug, {
     instancesDir,
+    definitionsDir: resolveDefinitionsDir(options.definitionsDir),
     owner: options.owner,
     assignee: options.assignee,
     definitionVersion: version ?? undefined,
@@ -229,7 +241,7 @@ withInstanceOptions(
     .option('--json', 'emit structured JSON output')
 ).action((address, options) => {
   const { slug, instancesDir } = resolveInstanceArgument(address, resolveEffectiveWorkspacesDir(options))
-  const status = getStatus(slug, { instancesDir })
+  const status = getStatus(slug, { instancesDir, definitionsDir: resolveDefinitionsDir(options.definitionsDir) })
   if (options.json) {
     console.log(JSON.stringify(status, null, 2))
     return
@@ -247,7 +259,7 @@ withInstanceOptions(
     .option('--json', 'emit structured JSON output')
 ).action((address, options) => {
   const { slug, instancesDir } = resolveInstanceArgument(address, resolveEffectiveWorkspacesDir(options))
-  const result = checkGate(slug, { gate: options.gate, instancesDir })
+  const result = checkGate(slug, { gate: options.gate, instancesDir, definitionsDir: resolveDefinitionsDir(options.definitionsDir) })
   if (options.json) {
     console.log(JSON.stringify(result, null, 2))
     if (!result.pass) process.exitCode = 1
@@ -279,7 +291,7 @@ withInstanceOptions(
     .option('--dry-run', 'resolve the template without writing')
 ).action((address, artefact, options) => {
   const { slug, instancesDir } = resolveInstanceArgument(address, resolveEffectiveWorkspacesDir(options))
-  const result = renderArtefact(slug, artefact, { dryRun: options.dryRun, instancesDir })
+  const result = renderArtefact(slug, artefact, { dryRun: options.dryRun, instancesDir, definitionsDir: resolveDefinitionsDir(options.definitionsDir) })
   if (result.dryRun) {
     console.log(result.markdown)
   } else {
@@ -314,29 +326,33 @@ withInstanceOptions(
   })
 })
 
-program
-  .command('validate <definition>')
-  .description('Validate a definition against the schema')
-  .option('--json', 'emit structured JSON output')
-  .option('--version <version>', 'definition version to validate (default latest published)')
-  .option('--definition-version <version>', 'alias for --version')
-  .action((definition, options) => {
-    const version = options.version ?? options.definitionVersion ?? null
-    const result = validateDefinition(definition, { version: version ? Number(version) : undefined })
-    if (options.json) {
-      console.log(JSON.stringify(result.problems, null, 2))
-      if (!result.valid) process.exitCode = 1
-      return
-    }
-    if (result.valid) {
-      console.log('Definition is valid.')
-      return
-    }
-    for (const problem of result.problems) {
-      console.log(`  [${problem.type}] ${problem.message}`)
-    }
-    process.exitCode = 1
+withDefinitionsOption(
+  program
+    .command('validate <definition>')
+    .description('Validate a definition against the schema')
+    .option('--json', 'emit structured JSON output')
+    .option('--version <version>', 'definition version to validate (default latest published)')
+    .option('--definition-version <version>', 'alias for --version')
+).action((definition, options) => {
+  const version = options.version ?? options.definitionVersion ?? null
+  const result = validateDefinition(definition, {
+    version: version ? Number(version) : undefined,
+    definitionsDir: resolveDefinitionsDir(options.definitionsDir),
   })
+  if (options.json) {
+    console.log(JSON.stringify(result.problems, null, 2))
+    if (!result.valid) process.exitCode = 1
+    return
+  }
+  if (result.valid) {
+    console.log('Definition is valid.')
+    return
+  }
+  for (const problem of result.problems) {
+    console.log(`  [${problem.type}] ${problem.message}`)
+  }
+  process.exitCode = 1
+})
 
 withInstanceOptions(
   program
