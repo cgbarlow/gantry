@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { realpathSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { realpathSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { Command } from 'commander'
 import { renderArtefact } from '../lib/render.js'
@@ -49,9 +50,23 @@ export function resolvePort(cliPort) {
 
 export const program = new Command()
 
+// WI #369 — read from package.json rather than a literal, so a release bump can never leave the CLI
+// reporting a version it isn't. Resolved against this file's own location, not the working
+// directory, so it reports the version of the gantry that is *running* — the question it exists to
+// answer — even when invoked from another repo or through a symlink on PATH (`realpathSync` below is
+// what makes the symlink case resolve to the real install rather than to `/usr/bin`).
+function gantryVersion() {
+  const packageJsonPath = join(dirname(dirname(realpathSync(fileURLToPath(import.meta.url)))), 'package.json')
+  return JSON.parse(readFileSync(packageJsonPath, 'utf8')).version
+}
+
 program
   .name('gantry')
   .description('A repo-driven pipeline for staged, gated processes.')
+  // `-V`, not `-v`: several subcommands already use `--version` for a *definition* version
+  // (`new --version`, `validate --version`), and commander scopes those to their own subcommand, so
+  // the two never collide — but a short `-v` would read as the same thing and invite the confusion.
+  .version(gantryVersion(), '-V, --version', "Report gantry's own version")
 
 program
   .command('definitions')
