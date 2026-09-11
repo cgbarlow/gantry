@@ -363,6 +363,8 @@ Instances live inside a **workspace** under the workspaces root, so a listing na
 
 Every command that reads instance data takes `--workspaces-dir <path>` (or `GANTRY_WORKSPACES_DIR`) to point at a workspaces root other than `./workspaces`. A failure prints a single line explaining it; set `GANTRY_DEBUG=1` to get the full stack as well.
 
+**Where definitions come from.** Definitions ship with Gantry, so every command finds them wherever you run it — you don't have to be standing in a Gantry checkout. If the working directory has a `definitions/` of its own it wins, so a checkout keeps working on its own definitions; `--definitions-dir <path>` names one explicitly. Instance data is the opposite and stays relative to where you are, which is why the two have separate flags.
+
 ## Definition schema
 
 **`definitions/design/1/definition.yaml`** — `definitions/<id>/<n>/definition.yaml`

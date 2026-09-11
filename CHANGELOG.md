@@ -17,6 +17,24 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.4.10-beta — 2026-09-11
+
+### Fixed
+
+- **Gantry's commands now work wherever you run them** (WI #371). `gantry
+  definitions` reported "No definitions found." and `gantry new design
+  my-initiative` failed with "Definition "design" has no version 1" unless the
+  directory you happened to be standing in was a copy of the Gantry source
+  repository. The definitions that ship with Gantry are now found from any
+  directory, the way `gantry serve` already found them. If the directory you're
+  in has a `definitions/` folder of its own it still takes precedence, so
+  working inside a Gantry checkout is unchanged, and `--definitions-dir <path>`
+  names one explicitly.
+- **A missing definitions folder says so** (WI #371), instead of reporting the
+  definition itself as having no version 1 — which sent you looking at the
+  definition when the problem was that Gantry never found a definitions folder
+  at all.
+
 ## 0.4.9-beta — 2026-09-11
 
 ### Fixed
