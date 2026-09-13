@@ -4,26 +4,27 @@ import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import { signal, effect, batch } from '@preact/signals'
 import { LocationProvider, Router, Route } from 'preact-iso'
 import { EditorView, basicSetup } from 'codemirror'
-import { EditorState, Compartment } from '@codemirror/state'
+import { EditorState, Compartment, Annotation, Transaction } from '@codemirror/state'
 // `keymap` lives in @codemirror/view (the same module 'codemirror' re-exports
 // EditorView from); imported directly so the toolbar's shortcut layer sits in
 // one obvious place next to the command transforms it drives.
 import { keymap } from '@codemirror/view'
-import { indentWithTab } from '@codemirror/commands'
+import { indentWithTab, undo, redo, undoDepth, redoDepth, isolateHistory } from '@codemirror/commands'
 import { syntaxTree } from '@codemirror/language'
 import { markdown } from '@codemirror/lang-markdown'
 import { promptContext, promptOpen, resolvePromptWith } from './lib/credential.js'
 import { apiFetch, apiFetchForInstance, cachedScopeForSlug } from './lib/apiFetch.js'
 import { renderMarkdown } from './lib/markdown.js'
 import { Dropdown } from './lib/dropdown.js'
-import { apply as applyMarkdownCommand, HEADING_LEVELS, findTable } from './lib/markdownCommands.js'
+import { apply as applyMarkdownCommand, HEADING_LEVELS, findTable, diffRange } from './lib/markdownCommands.js'
 import { NewWorkspaceWizardPage } from './pages/new-workspace-wizard.js'
 import { UserGuidePage } from './pages/user-guide.js'
 import { DefinitionViewerPage } from './pages/definition-viewer.js'
 import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, workspaceRepoUrl } from './pages/settings.js'
-// Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79) markdown/split/rendered toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
+// Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79, #374) visual/split/markdown toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
+import { visualMode, refreshVisual, clearActiveCell, restoreActiveCell, activeCellSelection, focusTableCellAt } from './lib/visualMode.js'
 import { advancedMode } from './lib/advancedMode.js'
 import { renderEngine } from './lib/renderEngine.js'
 import { warmLoadPandocWasm, renderDocxWithWasm } from './lib/pandocWasm.js'
@@ -796,16 +797,18 @@ effect(() => {
   }
 })
 
-// A Rendered-mode editor must be genuinely read-only (#79's acceptance criteria: "no edits possible, none saved"), not just visually hidden by CSS — `EditorState.readOnly` rejects direct-edit transactions and `EditorView.editable` drops `contenteditable`, so neither typing nor paste nor drag-drop can land a change while Rendered is active.
-function editableExtension(mode) {
-  const editable = mode !== 'rendered'
-  return [EditorState.readOnly.of(!editable), EditorView.editable.of(editable)]
+// An archived instance is read-only in every view (#374 — this replaced the retired read-only Rendered view). Genuinely read-only, not just visually hidden: `EditorState.readOnly` rejects direct-edit transactions and `EditorView.editable` drops `contenteditable` (and with it every Visual grid cell and table handle), so neither typing nor paste nor drag-drop can land a change.
+const isArchived = () => !!instanceData.value?.archived
+
+function editableExtension(readOnly) {
+  return [EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]
 }
 
 // ---------- Formatting toolbar (#133) ----------
 //
 // One slim toolbar per markdown field, mounted only while that field has
-// focus and never in Rendered mode. Every button (and every shortcut) funnels
+// focus and never on an archived instance. In Split it is the one row for
+// both panes and acts on whichever pane the author is working in (#374). Every button (and every shortcut) funnels
 // through `runMarkdownCommand`, which reads doc/selection/lezer-tree off the
 // live EditorView, hands them to web/lib/markdownCommands.js's deterministic
 // transforms (docs/adr/0017), and dispatches the returned (text, selection)
@@ -834,14 +837,23 @@ const markdownToolbarKeymap = keymap.of([
   indentWithTab,
 ])
 
+// While a Visual grid cell has focus only inline formatting applies — a
+// heading, list, quote or table dropped into a cell would break its row apart.
+const CELL_COMMANDS = new Set(['bold', 'italic', 'strikethrough', 'inlineCode', 'link'])
+
 function runMarkdownCommand(view, name, extra = {}) {
-  // Belt-and-braces against Rendered mode: the keymap can't fire there (no
-  // contenteditable), but a toolbar click racing a mode switch still could.
-  if (!view.state.facet(EditorView.editable)) return false
-  const range = view.state.selection.main
+  // Belt-and-braces against read-only: the keymap can't fire there (no
+  // contenteditable), but a toolbar click racing an archive still could.
+  if (!view || !view.state.facet(EditorView.editable)) return false
+  // Focus in a Visual grid cell is invisible to CodeMirror's selection; the
+  // cell's own selection stands in for it (#374).
+  const cell = activeCellSelection(view)
+  if (cell && !CELL_COMMANDS.has(name)) return false
+  const range = cell ?? view.state.selection.main
+  const text = view.state.doc.toString()
   const result = applyMarkdownCommand(name, {
     tree: syntaxTree(view.state),
-    text: view.state.doc.toString(),
+    text,
     from: range.from,
     to: range.to,
     ...extra,
@@ -849,11 +861,16 @@ function runMarkdownCommand(view, name, extra = {}) {
   // A null result is the transform's way of saying "not my table" — swallow
   // the keystroke's claim on it and let whatever's underneath have a go.
   if (!result) return false
+  // The transform hands back a whole document; only the part that differs is
+  // dispatched, so everything around it (and its Visual drawing) stays put.
   view.dispatch({
-    changes: { from: 0, to: view.state.doc.length, insert: result.text },
+    changes: diffRange(text, result.text),
     selection: { anchor: result.from, head: result.to },
-    scrollIntoView: true,
+    // Each command is exactly one undo step, never merged into typing either side of it.
+    annotations: isolateHistory.of('full'),
+    scrollIntoView: !cell,
   })
+  if (cell) requestAnimationFrame(() => restoreActiveCell(view))
   return true
 }
 
@@ -954,6 +971,19 @@ const ICONS = {
       <path d="M13.33 6.67h-4v-4M9.33 6.67L14 2M2.67 9.33h4v4M6.67 9.33L2 14" />
     <//>
   `,
+  // Undo / Redo (#374): one history per field, shared by all three views.
+  undo: html`
+    <${ToolbarIcon}>
+      <path d="M5.5 3.5L2.5 6.5l3 3" />
+      <path d="M2.5 6.5h7a4 4 0 0 1 0 8H7" />
+    <//>
+  `,
+  redo: html`
+    <${ToolbarIcon}>
+      <path d="M10.5 3.5l3 3-3 3" />
+      <path d="M13.5 6.5h-7a4 4 0 0 0 0 8H9" />
+    <//>
+  `,
 }
 
 function MarkdownToolbar({
@@ -969,15 +999,20 @@ function MarkdownToolbar({
   expanded,
   onToggleFullscreen,
   onImage,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
 }) {
   const keepEditorFocus = (e) => e.preventDefault()
   // Formatting buttons with keyboard shortcuts are shortcut-only by design
   // (tabindex="-1" below). Direct insertion actions stay in the tab order.
-  const button = (name, label, shortcut, content, onClick, tabIndex = -1, menuOpen, popupRole = 'menu') =>
+  const button = (name, label, shortcut, content, onClick, tabIndex = -1, menuOpen, popupRole = 'menu', disabled) =>
     html`
       <button
         type="button"
         class="md-btn"
+        disabled=${disabled}
         data-command=${name}
         aria-label=${label}
         title=${shortcut ? `${label} (${shortcut})` : label}
@@ -1099,6 +1134,8 @@ function MarkdownToolbar({
         trigger=${button('insertTable', 'Table', null, ICONS.table, () => setPickerOpen(!pickerOpen), 0, pickerOpen, 'grid')}
       />
       <span class="md-sep" />
+      ${button('undo', 'Undo', 'Ctrl/Cmd+Z', ICONS.undo, onUndo, -1, undefined, undefined, !canUndo)}
+      ${button('redo', 'Redo', 'Ctrl/Cmd+Y', ICONS.redo, onRedo, -1, undefined, undefined, !canRedo)}
       ${button(
         'fullscreen',
         expanded ? 'Exit full screen' : 'Full screen',
@@ -1111,9 +1148,9 @@ function MarkdownToolbar({
 }
 
 // ---------- Markdown field ----------
-// EditorView.updateListener -> markdown-it -> DOMPurify -> sibling preview pane, per docs/adr/0004-markdown-editor-codemirror.md. The CodeMirror instance is the source of truth for the field's value, so getValue/setValue read and write it directly rather than duplicating it into component state.
+// One CodeMirror editor per field is the source of truth for its value (docs/adr/0004), so getValue/setValue read and write it directly rather than duplicating it into component state. Visual view (#374, docs/adr/0033) is a decoration layer swapped onto that same editor through a compartment — never a remount, which would lose undo history — and Split adds a second editor beside it carrying the Visual layer, kept in step change by change. Images and diagrams inside Visual are drawn through the same markdown-it -> DOMPurify -> Mermaid path (renderPreview) the old preview pane used.
 //
-// Every markdown field carries its own generic **Insert ▾** dropdown (#132) — Section (a new custom field appended below this one) and List (a new custom list field) — replacing the single per-module "+ Insert asset" button that preceded it. Image and Table live on the formatting toolbar (#180). Hidden in Rendered view along with every other editing affordance, since that view is read-only.
+// Every markdown field carries its own generic **Insert ▾** dropdown (#132) — Section (a new custom field appended below this one) and List (a new custom list field) — replacing the single per-module "+ Insert asset" button that preceded it. Image and Table live on the formatting toolbar (#180). Hidden on an archived instance along with every other editing affordance, since that is read-only.
 
 // The remaining two-item menu behind every field's Insert ▾ (#132, #144, #180). Openness is controlled (the shared Dropdown's contract); each item closes the menu before acting, matching how SwimlaneChip's items dismiss through their parent.
 function InsertDropdown({ onSection, onList, flipOnOverflow }) {
@@ -1234,18 +1271,42 @@ function TableControlStrip({ run }) {
   `
 }
 
+// Split's two panes are two editors over one document: a change made in one is
+// replayed into the other, tagged so it is not bounced straight back, and
+// carrying its user event so the source editor's history groups it as typing.
+const paneSync = Annotation.define()
+
+function forwardChanges(transactions, target) {
+  if (!target) return
+  for (const tr of transactions) {
+    if (tr.changes.empty || tr.annotation(paneSync)) continue
+    const userEvent = tr.annotation(Transaction.userEvent)
+    target.dispatch({
+      changes: tr.changes,
+      annotations: userEvent ? [paneSync.of(true), Transaction.userEvent.of(userEvent)] : [paneSync.of(true)],
+    })
+  }
+}
+
 function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestSection, onRequestList }) {
   const hostRef = useRef(null)
-  const previewRef = useRef(null)
+  // Split view's Visual pane (#374) mounts its own editor here.
+  const visualHostRef = useRef(null)
   // The editor-control methods registered up to ModuleCard (getValue/setValue/insertAtCursor) are captured here too, so this field's own Insert ▾ items act on its own cursor without round-tripping through the module.
   const controlRef = useRef(null)
   // The toolbar lives inside this wrapper, so focus never actually leaves the
   // field when a button is pressed — see the focusin/focusout pair below.
   const wrapperRef = useRef(null)
+  // The field's main editor: always mounted, and the keeper of its one undo
+  // history. Split's Visual pane undoes through it.
   const viewRef = useRef(null)
+  const splitViewRef = useRef(null)
+  // Whichever pane the author last worked in — the toolbar acts on that one.
+  const activeViewRef = useRef(null)
   const [focused, setFocused] = useState(false)
   const [headingsOpen, setHeadingsOpen] = useState(false)
   const [listsOpen, setListsOpen] = useState(false)
+  const [history, setHistory] = useState({ undo: 0, redo: 0 })
   // True while THIS field's wrapper is the document's full-screen element (#135). State follows the native `fullscreenchange` event — not the toggling click alone — so a browser-driven exit (Esc, F11-ish browser chrome, or the element leaving the DOM) un-expands us exactly when the platform does.
   const [expanded, setExpanded] = useState(false)
 
@@ -1292,14 +1353,19 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
       wrapperRef.current.requestFullscreen().catch(() => {})
     }
   }
-  // Table awareness (#134): the control strip and its gating ride on this
+  // Table awareness (#134): the Markdown view's control strip rides on this
   // flag, refreshed from every selection/doc update below.
   const [inTable, setInTable] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const readOnly = isArchived()
 
   useEffect(() => {
     const editableCompartment = new Compartment()
+    const splitEditableCompartment = new Compartment()
     const wrapCompartment = new Compartment()
+    const visualCompartment = new Compartment()
+    const visualLayer = () => visualMode({ renderMarkdown: renderPreview, historyView: () => view })
+    let hideToolbarTimer = null
     const state = EditorState.create({
       doc: field.value ?? '',
       extensions: [
@@ -1308,60 +1374,129 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
         markdownToolbarKeymap,
         basicSetup,
         markdown(),
-        editableCompartment.of(editableExtension(viewMode.value)),
+        editableCompartment.of(editableExtension(isArchived())),
         wrapCompartment.of(wrap.value ? EditorView.lineWrapping : []),
+        visualCompartment.of(viewMode.value === 'visual' ? visualLayer() : []),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) renderPreview(previewRef.current, update.state.doc.toString())
           // Selection moves count too — Tab-walking cells must flip the strip
           // on/off as the caret crosses the table's edge.
           if (update.docChanged || update.selectionSet) {
             setInTable(!!findTable(update.state.doc.toString(), update.state.selection.main.head))
           }
+          const undoCount = undoDepth(update.state)
+          const redoCount = redoDepth(update.state)
+          setHistory((h) => (h.undo === undoCount && h.redo === redoCount ? h : { undo: undoCount, redo: redoCount }))
         }),
       ],
     })
-    const view = new EditorView({ state, parent: hostRef.current })
+    const view = new EditorView({
+      state,
+      parent: hostRef.current,
+      dispatchTransactions: (transactions, target) => {
+        target.update(transactions)
+        forwardChanges(transactions, splitViewRef.current)
+      },
+    })
     viewRef.current = view
-    renderPreview(previewRef.current, field.value ?? '')
+    activeViewRef.current = view
 
-    // Track the global view-mode signal for as long as this editor is mounted, so switching into/out of Rendered toggles read-only live — the ticket requires it enforced immediately, not just on next mount.
+    function createSplitView() {
+      const split = new EditorView({
+        state: EditorState.create({
+          doc: view.state.doc.toString(),
+          extensions: [
+            // One timeline per field: undo in either pane walks the main editor's history.
+            keymap.of([
+              { key: 'Mod-z', run: () => undo(view), preventDefault: true },
+              { key: 'Mod-y', run: () => redo(view), preventDefault: true },
+              { key: 'Mod-Shift-z', run: () => redo(view), preventDefault: true },
+            ]),
+            markdownToolbarKeymap,
+            basicSetup,
+            markdown(),
+            splitEditableCompartment.of(editableExtension(isArchived())),
+            visualLayer(),
+          ],
+        }),
+        parent: visualHostRef.current,
+        dispatchTransactions: (transactions, target) => {
+          target.update(transactions)
+          forwardChanges(transactions, view)
+        },
+      })
+      split.dom.addEventListener('focusin', handleFocusIn)
+      split.dom.addEventListener('focusout', handleFocusOut)
+      splitViewRef.current = split
+    }
+
+    function destroySplitView() {
+      const split = splitViewRef.current
+      if (!split) return
+      splitViewRef.current = null
+      if (activeViewRef.current === split) activeViewRef.current = view
+      split.dom.removeEventListener('focusin', handleFocusIn)
+      split.dom.removeEventListener('focusout', handleFocusOut)
+      split.destroy()
+    }
+
+    // Track the global view-mode signal for as long as this editor is mounted. Visual swaps the decoration layer onto this same editor; Split adds the Visual pane beside it; Markdown is the bare text. The editor itself is never torn down, so history survives every switch.
     const stopViewModeSync = effect(() => {
-      view.dispatch({ effects: editableCompartment.reconfigure(editableExtension(viewMode.value)) })
+      const mode = viewMode.value
+      clearActiveCell(view)
+      // A view switch also closes the current undo step, so an edit either side of it undoes on its own.
+      view.dispatch({
+        effects: visualCompartment.reconfigure(mode === 'visual' ? visualLayer() : []),
+        annotations: isolateHistory.of('full'),
+      })
+      if (mode === 'split') {
+        if (!splitViewRef.current) createSplitView()
+      } else {
+        destroySplitView()
+      }
+    })
+
+    // Archiving (or restoring) an instance while it is open flips read-only live.
+    const stopEditableSync = effect(() => {
+      const archived = isArchived()
+      view.dispatch({ effects: editableCompartment.reconfigure(editableExtension(archived)) })
+      splitViewRef.current?.dispatch({ effects: splitEditableCompartment.reconfigure(editableExtension(archived)) })
     })
 
     const stopWrapSync = effect(() => {
       view.dispatch({ effects: wrapCompartment.reconfigure(wrap.value ? EditorView.lineWrapping : []) })
     })
 
-    // Re-render when the asset source map becomes available (initial async load) — citations depend on it, but the preview was already rendered once without them (#147). Also re-renders once a local-workspace asset's object URL resolves (WI #297) — the first render of an `asset:<id>` reference in a local instance has no URL yet (readBinaryFile is async), so this fires again once localAssetUrls picks it up.
+    // Redraw Visual images when the asset source map becomes available (initial async load) — citations depend on it, but the field was already drawn once without them (#147). Also redraws once a local-workspace asset's object URL resolves (WI #297) — the first render of an `asset:<id>` reference in a local instance has no URL yet (readBinaryFile is async), so this fires again once localAssetUrls picks it up.
     const stopAssetSourceSync = effect(() => {
       const _sources = assetSources.value
       const _localUrls = localAssetUrls.value
-      if (viewRef.current && previewRef.current) renderPreview(previewRef.current, viewRef.current.state.doc.toString())
+      view.dispatch({ effects: refreshVisual.of(null) })
+      splitViewRef.current?.dispatch({ effects: refreshVisual.of(null) })
     })
 
-    // Inserts a snippet at the current cursor position (or over the current selection), on its own line — "clicking one inserts its reference at the trigger point" (#80). The preview updates via the same updateListener/docChanged path a normal edit takes.
+    // Inserts a snippet at the current cursor position (or over the current selection) of the pane the author is working in, on its own line — "clicking one inserts its reference at the trigger point" (#80).
     function insertAtCursor(snippet) {
-      const { from, to } = view.state.selection.main
-      const needsLeadingNewline = from > 0 && view.state.doc.sliceString(from - 1, from) !== '\n'
+      const target = activeViewRef.current ?? view
+      const { from, to } = target.state.selection.main
+      const needsLeadingNewline = from > 0 && target.state.doc.sliceString(from - 1, from) !== '\n'
       const insertText = `${needsLeadingNewline ? '\n' : ''}${snippet}\n`
-      view.dispatch({
+      target.dispatch({
         changes: { from, to, insert: insertText },
         selection: { anchor: from + insertText.length },
       })
-      view.focus()
+      target.focus()
     }
     controlRef.current = { insertAtCursor }
 
-    let hideToolbarTimer = null
-    function handleFocusIn() {
+    function handleFocusIn(e) {
       clearTimeout(hideToolbarTimer)
+      activeViewRef.current = splitViewRef.current?.dom.contains(e.target) ? splitViewRef.current : view
       setFocused(true)
     }
     // Toolbar visibility follows real focus, but moving focus *within* the
-    // field (to a toolbar button or the headings menu) must not flash the
-    // bar away — hence checking where focus is headed rather than hiding
-    // unconditionally. Rendered mode hides the bar regardless via the render.
+    // field (to a toolbar button, the headings menu, or the other Split pane)
+    // must not flash the bar away — hence checking where focus is headed
+    // rather than hiding unconditionally.
     //
     // The hide itself must also wait out the mouse sequence that caused the
     // blur: focus moves during *mousedown*, and unmounting the bar right then
@@ -1381,7 +1516,6 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
       getValue: () => view.state.doc.toString(),
       setValue: (text) => {
         view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text ?? '' } })
-        renderPreview(previewRef.current, text ?? '')
       },
       insertAtCursor,
     })
@@ -1390,18 +1524,34 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
       view.dom.removeEventListener('focusin', handleFocusIn)
       view.dom.removeEventListener('focusout', handleFocusOut)
       clearTimeout(hideToolbarTimer)
-      viewRef.current = null
       stopViewModeSync()
+      stopEditableSync()
       stopWrapSync()
       stopAssetSourceSync()
+      destroySplitView()
+      viewRef.current = null
+      activeViewRef.current = null
       view.destroy()
     }
     // One editor per mount — the enclosing stage screen remounts wholesale (keyed by stage id) on stage switch, matching the old full-rebuild behaviour, so this never needs to react to `field` changing in place.
     // eslint-disable-next-line
   }, [])
 
-  const runCommand = useCallback((name, extra) => runMarkdownCommand(viewRef.current, name, extra), [])
-  const refocusEditor = useCallback(() => viewRef.current?.focus(), [])
+  const targetView = () => activeViewRef.current ?? viewRef.current
+  const runCommand = useCallback((name, extra) => runMarkdownCommand(targetView(), name, extra), [])
+  // Back to where the author was: their grid cell if they were in one, else the editor.
+  const refocusEditor = useCallback(() => {
+    const target = targetView()
+    if (!restoreActiveCell(target)) target?.focus()
+  }, [])
+  const runHistory = useCallback(
+    (command) => {
+      if (!viewRef.current) return
+      command(viewRef.current)
+      requestAnimationFrame(refocusEditor)
+    },
+    [refocusEditor]
+  )
   const handlePickerOpenChange = useCallback(
     (open) => {
       setPickerOpen(open)
@@ -1412,20 +1562,27 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
   // Visible while the field holds focus, and stays up while the headings or
   // lists menu is open (a menu click moves focus to its trigger button). While
   // the field is full-screen the bar is unconditional (#135): the expanded
-  // panel must keep its toolbar even if focus wanders into the preview.
+  // panel must keep its toolbar even if focus wanders.
   const showToolbar = focused || headingsOpen || listsOpen || expanded
-  const showTableStrip = showToolbar && inTable
+  // The contextual strip is Markdown view's table cue; Visual and Split use
+  // the grid's own handles instead (#374).
+  const showTableStrip = showToolbar && inTable && viewMode.value === 'markdown'
   // The grid picker inserts straight through the command dispatcher, so the
   // new table arrives with blank-line hygiene and a parked caret for free.
   // The grid's rectangle counts the header row, the engine's `rows` counts
   // body rows — hence the -1 (and a floor of one body row, since a header
-  // alone can't take the caret).
+  // alone can't take the caret). In Visual the author lands in the new grid's
+  // first body cell.
   const pickTable = useCallback(
     (rows, cols) => {
-      runMarkdownCommand(viewRef.current, 'insertTable', { rows: Math.max(rows - 1, 1), cols })
-      viewRef.current?.focus()
+      const target = targetView()
+      if (!runMarkdownCommand(target, 'insertTable', { rows: Math.max(rows - 1, 1), cols })) {
+        refocusEditor()
+        return
+      }
+      if (!focusTableCellAt(target, target.state.selection.main.head)) target.focus()
     },
-    []
+    [refocusEditor]
   )
 
   const headingIdForField = moduleId ? headingId(moduleId, field.title) : null
@@ -1435,32 +1592,38 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
         ? html`<h3 id=${headingIdForField} class="field-heading">${field.title}${field.required ? ' *' : ''}</h3><label class="visually-hidden" style="display:none">${field.title}${field.required ? ' *' : ''}</label>`
         : html`<label>${field.title}${field.required ? ' *' : ''}</label>`}
       ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
+      ${!readOnly && showToolbar
+        ? html`
+            ${showTableStrip ? html`<${TableControlStrip} run=${runCommand} />` : null}
+            <${MarkdownToolbar}
+              run=${runCommand}
+              refocus=${refocusEditor}
+              headingsOpen=${headingsOpen}
+              setHeadingsOpen=${setHeadingsOpen}
+              listsOpen=${listsOpen}
+              setListsOpen=${setListsOpen}
+              pickerOpen=${pickerOpen}
+              setPickerOpen=${handlePickerOpenChange}
+              pickTable=${pickTable}
+              expanded=${expanded}
+              onToggleFullscreen=${toggleFullscreen}
+              onImage=${() => onRequestImage?.()}
+              onUndo=${() => runHistory(undo)}
+              onRedo=${() => runHistory(redo)}
+              canUndo=${history.undo > 0}
+              canRedo=${history.redo > 0}
+            />
+          `
+        : null}
       <div class="split">
         <div class="editor-pane">
-          ${viewMode.value !== 'rendered' && showToolbar
-            ? html`
-                ${showTableStrip ? html`<${TableControlStrip} run=${runCommand} />` : null}
-                <${MarkdownToolbar}
-                  run=${runCommand}
-                  refocus=${refocusEditor}
-                  headingsOpen=${headingsOpen}
-                  setHeadingsOpen=${setHeadingsOpen}
-                  listsOpen=${listsOpen}
-                  setListsOpen=${setListsOpen}
-                  pickerOpen=${pickerOpen}
-                  setPickerOpen=${handlePickerOpenChange}
-                  pickTable=${pickTable}
-                  expanded=${expanded}
-                  onToggleFullscreen=${toggleFullscreen}
-                  onImage=${() => onRequestImage?.()}
-                />
-              `
-            : null}
           <div class="editor-host" ref=${hostRef}></div>
         </div>
-        <div class="preview" ref=${previewRef}></div>
+        <div class="visual-pane">
+          <div class="editor-host" ref=${visualHostRef}></div>
+        </div>
       </div>
-      ${viewMode.value !== 'rendered' && !expanded
+      ${!readOnly && !expanded
         ? html`
             <div class="insert-bar">
               <${InsertDropdown}
@@ -1534,21 +1697,22 @@ function ListField({ field, moduleId, onRegister, onRemove, onRequestSection, on
               <textarea
                 rows="1"
                 value=${value}
+                readOnly=${isArchived()}
                 ref=${autosizeTextarea}
                 onInput=${(e) => {
                   autosizeTextarea(e.currentTarget)
                   updateRow(i, e.currentTarget.value)
                 }}
               ></textarea>
-              ${viewMode.value !== 'rendered'
+              ${!isArchived()
                 ? html`<button type="button" class="btn small" onClick=${() => removeRow(i)}>Remove</button>`
                 : null}
             </div>
           `
         )}
       </div>
-      ${viewMode.value !== 'rendered' ? html`<button type="button" class="btn small" onClick=${addRow}>Add</button>` : null}
-      ${viewMode.value !== 'rendered'
+      ${!isArchived() ? html`<button type="button" class="btn small" onClick=${addRow}>Add</button>` : null}
+      ${!isArchived()
         ? html`
             <div class="insert-bar">
               <${InsertDropdown}
@@ -1736,7 +1900,7 @@ function ModuleCard({ mod, stageId, onFieldRegistered, visibleFieldIds }) {
             />`
       })}
       <div class="save-status">${status}</div>
-      ${viewMode.value !== 'rendered'
+      ${!isArchived()
         ? html`<button type="button" class="btn primary" onClick=${handleSave}>Save ${mod.title}</button>`
         : null}
       ${imageFieldId !== null
@@ -3282,13 +3446,10 @@ function ReopenStagePanel({ instance }) {
   const viewedIdx = instance.stages.findIndex((s) => s.id === instance.stage.id)
   const currentIdx = instance.stages.findIndex((s) => s.id === instance.currentStageId)
   const isCompleted = viewedIdx !== -1 && currentIdx !== -1 && viewedIdx < currentIdx
-  const show = instance.workspaceBacked && isCompleted && viewMode.value !== 'rendered'
+  const show = instance.workspaceBacked && isCompleted && !isArchived()
   const [confirming, setConfirming] = useState(false)
   const [status, setStatus] = useState('')
   const [loading, setLoading] = useState(false)
-
-  // Track viewMode signal so we hide in Rendered view live
-  const _mode = viewMode.value
 
   if (!show) return null
 
@@ -3415,7 +3576,7 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
         ? html`<${SyncedFieldsPanel} key=${instance.workItem ? 'linked' : 'unlinked'} instance=${instance} />`
         : null}
       ${modules.length > 0
-        ? html`<div class="insert-bar top-insert-bar" data-testid="top-insert" hidden=${viewMode.value === 'rendered'}>
+        ? html`<div class="insert-bar top-insert-bar" data-testid="top-insert" hidden=${isArchived()}>
             <${InsertDropdown} onSection=${() => setTopSectionOpen(true)} onList=${() => setTopListOpen(true)} />
           </div>`
         : null}
@@ -3437,9 +3598,9 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
   `
 }
 
-// ---------- View-mode toolbar: Markdown/Split/Rendered segmented control ----------
+// ---------- View-mode toolbar: the Mode dropdown (Visual / Split / Markdown) ----------
 // One toolbar for the whole editor screen (see web/lib/viewMode.js) — sits below AppHeader, above the viewed stage's screen, and (like AppHeader) is never remounted by a stage switch, so `viewMode` reads back the same value the author left it in after navigating fields/modules/stages.
-const VIEW_MODE_LABELS = { markdown: 'Markdown', split: 'Split', rendered: 'Rendered' }
+const VIEW_MODE_LABELS = { visual: 'Visual', split: 'Split', markdown: 'Markdown' }
 const VIEW_MODE_HOTKEY = { ctrlKey: true, shiftKey: true, key: 'v' }
 
 // `instance` and `onClearAllFields` back the "Clear all fields" + "Render"
@@ -3460,6 +3621,7 @@ function ViewModeToolbar({
   onArtefactChange,
 }) {
   const [renderOpen, setRenderOpen] = useState(false)
+  const [modeOpen, setModeOpen] = useState(false)
   const artefacts = sortArtefacts(instance.artefacts)
   const showArtefactSelector = artefactsHaveDifferentRequirements(instance.modules, artefacts)
   const navModules = visibleFieldIds
@@ -3530,21 +3692,32 @@ function ViewModeToolbar({
   return html`
     <div class="toolbar">
       <div class="toolbar-left">
-        <div class="segmented" role="group" aria-label="View mode">
+        <${Dropdown}
+          className="view-mode-dropdown"
+          triggerLabel=${`Mode: ${VIEW_MODE_LABELS[viewMode.value]} ▾`}
+          triggerClass="btn small"
+          menuRole="menu"
+          open=${modeOpen}
+          onOpenChange=${setModeOpen}
+        >
           ${VIEW_MODES.map(
             (mode) => html`
               <button
                 type="button"
                 key=${mode}
-                class=${'btn small' + (viewMode.value === mode ? ' active' : '')}
-                aria-pressed=${viewMode.value === mode}
-                onClick=${() => (viewMode.value = mode)}
+                role="menuitemradio"
+                class="nav-item"
+                aria-checked=${viewMode.value === mode}
+                onClick=${() => {
+                  setModeOpen(false)
+                  viewMode.value = mode
+                }}
               >
                 ${VIEW_MODE_LABELS[mode]}
               </button>
             `
           )}
-        </div>
+        <//>
         ${artefacts.length > 0
           ? html`
               <label class="artefact-selector">

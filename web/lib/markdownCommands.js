@@ -706,6 +706,123 @@ export function tableCycleAlignment({ text, from, to }) {
   return { text: nextText, from: pos, to: pos }
 }
 
+// ---------- whole-table structure (#374) ----------
+//
+// The Visual view's table handles drag columns and rows around and delete the
+// whole table. Positions come from the handle, not the caret — `fromIndex` /
+// `toIndex` are column or row indices into the parsed table under `from` —
+// and every command returns null on a malformed table or an index that names
+// nothing, exactly like the commands above.
+
+// Reorder a column. Each row is rebuilt from its segments the way the column
+// commands do it: interior padding verbatim, outer pipes normalised.
+export function tableMoveColumn({ text, from, fromIndex, toIndex }) {
+  const t = findTable(text, from)
+  if (!t) return null
+  const valid = (c) => Number.isInteger(c) && c >= 0 && c < t.colCount
+  if (fromIndex === toIndex || !valid(fromIndex) || !valid(toIndex)) return null
+  const rebuilt = t.segs.map((segs) => {
+    const next = segs.slice()
+    const [moved] = next.splice(fromIndex, 1)
+    next.splice(toIndex, 0, moved)
+    return rebuildLine(next)
+  })
+  const nextText = text.slice(0, t.start) + rebuilt.join('\n') + text.slice(t.end)
+  return { text: nextText, from: t.start, to: t.start }
+}
+
+// Reorder a body row. Whole raw lines swap places, so this is byte-preserving:
+// no row's text changes, only the order. The header and delimiter never move.
+export function tableMoveRow({ text, from, fromIndex, toIndex }) {
+  const t = findTable(text, from)
+  if (!t) return null
+  const body = (r) => Number.isInteger(r) && r > t.delimIndex && r < t.lines.length
+  if (fromIndex === toIndex || !body(fromIndex) || !body(toIndex)) return null
+  const raw = t.lines.map((line) => text.slice(line.start, line.end))
+  const [moved] = raw.splice(fromIndex, 1)
+  raw.splice(toIndex, 0, moved)
+  const nextText = text.slice(0, t.start) + raw.join('\n') + text.slice(t.end)
+  return { text: nextText, from: t.start, to: t.start }
+}
+
+// Remove the whole table, its own line break, and one of the blank lines that
+// framed it, so the prose either side is left one blank line apart.
+export function tableDelete({ text, from }) {
+  const t = findTable(text, from)
+  if (!t) return null
+  let before = text.slice(0, t.start)
+  let after = text.slice(t.end)
+  if (after.startsWith('\n')) {
+    after = after.slice(1)
+    if (after.startsWith('\n') && (before === '' || before.endsWith('\n\n'))) after = after.slice(1)
+  } else if (before.endsWith('\n\n')) {
+    before = before.slice(0, -2)
+  } else if (before.endsWith('\n')) {
+    before = before.slice(0, -1)
+  }
+  const pos = before.length
+  return { text: before + after, from: pos, to: pos }
+}
+
+// Every table in the document, top to bottom, via the same strict parse.
+export function findAllTables(text) {
+  const tables = []
+  let pos = 0
+  while (pos <= text.length) {
+    const t = findTable(text, pos)
+    if (t && t.start >= pos) {
+      tables.push(t)
+      pos = t.end + 1
+      continue
+    }
+    const nl = text.indexOf('\n', pos)
+    if (nl === -1) break
+    pos = nl + 1
+  }
+  return tables
+}
+
+// A cell as an author reads it: `\|` is how the source spells a literal pipe.
+export const tableCellText = (seg) => seg.text.replace(/\\\|/g, '|')
+
+// Offset into a cell's source text for an offset into its displayed text —
+// each `\|` is two source characters behind one displayed pipe.
+export function tableCellSourceOffset(sourceText, displayOffset) {
+  let source = 0
+  for (let shown = 0; source < sourceText.length && shown < displayOffset; shown++) {
+    source += sourceText.startsWith('\\|', source) ? 2 : 1
+  }
+  return source
+}
+
+// The one change that writes an author's cell text back: only that cell's
+// segment, padded one space each side (the only tidying a cell edit may do),
+// with line breaks flattened and pipes escaped so the row stays a row.
+export function tableCellEdit({ text, from, row, col, value }) {
+  const t = findTable(text, from)
+  if (!t || row === t.delimIndex) return null
+  const seg = t.segs[row]?.[col]
+  if (!seg) return null
+  const clean = String(value).replace(/[\r\n]+/g, ' ').trim().replace(/\|/g, '\\|')
+  return { from: seg.start, to: seg.end, insert: ' ' + clean + ' ' }
+}
+
+// The smallest single replacement turning `before` into `after` — so a
+// command that returns a whole new document lands as a change to the part
+// that differs, leaving everything around it (and its rendering) untouched.
+export function diffRange(before, after) {
+  const max = Math.min(before.length, after.length)
+  let start = 0
+  while (start < max && before.charCodeAt(start) === after.charCodeAt(start)) start++
+  let endBefore = before.length
+  let endAfter = after.length
+  while (endBefore > start && endAfter > start && before.charCodeAt(endBefore - 1) === after.charCodeAt(endAfter - 1)) {
+    endBefore--
+    endAfter--
+  }
+  return { from: start, to: endBefore, insert: after.slice(start, endAfter) }
+}
+
 // Cell-to-cell walking skips the delimiter row — it's furniture, not a cell.
 // Forward off the last cell appends a row (Loop behaviour); backward off the
 // first reports null so the caller decides whether to consume the keypress.
@@ -785,6 +902,12 @@ export function apply(command, state) {
       return tableDeleteColumn(state)
     case 'tableCycleAlignment':
       return tableCycleAlignment(state)
+    case 'tableMoveColumn':
+      return tableMoveColumn(state)
+    case 'tableMoveRow':
+      return tableMoveRow(state)
+    case 'tableDelete':
+      return tableDelete(state)
     case 'tableNextCell':
       return tableNextCell(state)
     case 'tablePrevCell':

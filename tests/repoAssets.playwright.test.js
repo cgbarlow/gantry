@@ -87,8 +87,8 @@ test('workspace-backed repo asset renders in preview (WI #260)', async () => {
 
               await page.goto(`${gantryBase}/instance/preview-asset-test`)
               await page.waitForSelector('.module', { timeout: 10_000 })
-              // Wait for preview pane to render the markdown with image
-              const previewImg = page.locator('.preview img').first()
+              // Wait for Visual view (#374) to draw the markdown's image
+              const previewImg = page.locator('.cm-visual-image img').first()
               await previewImg.waitFor({ timeout: 10_000 })
               // naturalWidth >0 means image loaded, not broken
               const naturalWidth = await previewImg.evaluate((el) => el.naturalWidth)
@@ -180,12 +180,12 @@ test('workspace-backed repo asset renders in preview for a COMPLETED stage (WI #
             // Free-browse to the completed `shape` stage (title "SOAP") via the stage switcher.
             await page.locator('#stage-nav button', { hasText: 'SOAP' }).click()
 
-            const previewImg = page.locator('.preview img').first()
+            const previewImg = page.locator('.cm-visual-image img').first()
             await previewImg.waitFor({ timeout: 10_000 })
             // Wait until the preview img is pinned to the completed stage and has finished loading.
             await page.waitForFunction(
               () => {
-                const img = document.querySelector('.preview img')
+                const img = document.querySelector('.cm-visual-image img')
                 return img && img.getAttribute('src')?.includes('stage=shape') && img.complete
               },
               { timeout: 15_000 }

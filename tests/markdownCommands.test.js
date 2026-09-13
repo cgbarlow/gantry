@@ -11,6 +11,11 @@ import {
   toggleFencedCode,
   findTable,
   insertTable,
+  findAllTables,
+  tableCellText,
+  tableCellSourceOffset,
+  tableCellEdit,
+  diffRange,
 } from '../web/lib/markdownCommands.js'
 
 // Fake syntax-tree pieces honouring the same contract as @lezer/common's
@@ -443,9 +448,103 @@ test('malformed tables no-op through the dispatcher instead of rewriting text', 
     'tableCycleAlignment',
     'tableNextCell',
     'tablePrevCell',
+    'tableDelete',
   ]) {
     assert.equal(dispatch(cmd, ragged, 3), null, cmd)
   }
+})
+
+// ---------- whole-table structure (#374) ----------
+
+const WIDE = '| A  | B |   C   |\n| -- | :-: | --: |\n| a1 |b1| c1 |\n| a2 | b2 | c2 |'
+
+test('tableMoveColumn moves a column in every row, keeping each cell\'s padding byte-for-byte', () => {
+  const res = dispatch('tableMoveColumn', WIDE, posOf(WIDE, 'a1'), { fromIndex: 2, toIndex: 0 })
+  assert.equal(res.text, '|   C   | A  | B |\n| --: | -- | :-: |\n| c1 | a1 |b1|\n| c2 | a2 | b2 |')
+  // Alignment travels with its column because the delimiter cell moves too.
+  assert.deepEqual(findTable(res.text, 0).alignments, ['right', 'left', 'center'])
+  assert.equal(res.from, 0)
+})
+
+test('tableMoveColumn normalises outer pipes like the other column commands and leaves text around the table alone', () => {
+  const doc = 'intro\n\nA | B\n--|--\nx | y\n\noutro'
+  const res = dispatch('tableMoveColumn', doc, posOf(doc, 'x'), { fromIndex: 0, toIndex: 1 })
+  assert.equal(res.text, 'intro\n\n| B|A |\n|--|--|\n| y|x |\n\noutro')
+})
+
+test('tableMoveColumn refuses the same index, an out-of-range index, and a malformed table', () => {
+  const at = posOf(WIDE, 'a1')
+  assert.equal(dispatch('tableMoveColumn', WIDE, at, { fromIndex: 1, toIndex: 1 }), null)
+  assert.equal(dispatch('tableMoveColumn', WIDE, at, { fromIndex: 0, toIndex: 3 }), null)
+  assert.equal(dispatch('tableMoveColumn', WIDE, at, { fromIndex: -1, toIndex: 0 }), null)
+  assert.equal(dispatch('tableMoveColumn', WIDE, at, {}), null)
+  assert.equal(dispatch('tableMoveColumn', '| a | b |\n| - |', 3, { fromIndex: 0, toIndex: 1 }), null)
+})
+
+test('tableMoveRow swaps whole raw lines, so every row stays byte-identical', () => {
+  const doc = 'before\n\n' + TABLE + '\n| five |six|\n\nafter'
+  const res = dispatch('tableMoveRow', doc, posOf(doc, 'one'), { fromIndex: 4, toIndex: 2 })
+  assert.equal(res.text, 'before\n\n| A | B |\n| --- | :--: |\n| five |six|\n| one | two |\n| three | four |\n\nafter')
+  assert.deepEqual(res.text.split('\n').sort(), doc.split('\n').sort(), 'same lines, new order')
+})
+
+test('tableMoveRow refuses the header, the delimiter, the same row, out-of-range rows and malformed tables', () => {
+  const at = posOf(TABLE, 'one')
+  assert.equal(dispatch('tableMoveRow', TABLE, at, { fromIndex: 0, toIndex: 2 }), null, 'header')
+  assert.equal(dispatch('tableMoveRow', TABLE, at, { fromIndex: 2, toIndex: 0 }), null, 'into the header')
+  assert.equal(dispatch('tableMoveRow', TABLE, at, { fromIndex: 1, toIndex: 3 }), null, 'delimiter')
+  assert.equal(dispatch('tableMoveRow', TABLE, at, { fromIndex: 2, toIndex: 2 }), null, 'same row')
+  assert.equal(dispatch('tableMoveRow', TABLE, at, { fromIndex: 2, toIndex: 4 }), null, 'past the end')
+  assert.equal(dispatch('tableMoveRow', '| a | b |\n| - |', 3, { fromIndex: 2, toIndex: 3 }), null, 'malformed')
+})
+
+test('tableDelete removes the table and one framing blank line wherever it sits', () => {
+  const at = (doc) => posOf(doc, 'one')
+  assert.deepEqual(dispatch('tableDelete', 'a\n\n' + TABLE + '\n\nb', at('a\n\n' + TABLE)), { text: 'a\n\nb', from: 3, to: 3 })
+  assert.equal(dispatch('tableDelete', TABLE + '\n\nb', at(TABLE)).text, 'b', 'at the start')
+  assert.equal(dispatch('tableDelete', 'a\n\n' + TABLE, at('a\n\n' + TABLE)).text, 'a', 'at the end')
+  assert.equal(dispatch('tableDelete', 'a\n' + TABLE + '\nb', at('a\n' + TABLE)).text, 'a\nb', 'glued to its neighbours')
+  assert.equal(dispatch('tableDelete', TABLE, at(TABLE)).text, '', 'the whole document')
+  assert.equal(dispatch('tableDelete', 'x\n\n| a | b |\n| - |', 5), null, 'malformed')
+})
+
+test('findAllTables lists every well-formed table in order and skips ragged runs', () => {
+  const doc = TABLE + '\n\nprose | with a pipe\n\n| a | b |\n| - |\n\n' + WIDE
+  const tables = findAllTables(doc)
+  assert.equal(tables.length, 2)
+  assert.equal(tables[0].start, 0)
+  assert.equal(tables[1].start, doc.indexOf(WIDE))
+  assert.deepEqual(findAllTables(''), [])
+  assert.deepEqual(findAllTables('no tables here'), [])
+})
+
+test('a cell reads with its pipes unescaped and maps display offsets back to the source', () => {
+  const doc = '| a \\| b | c |\n| --- | --- |\n| x | y |'
+  const seg = findTable(doc, 0).segs[0][0]
+  assert.equal(tableCellText(seg), 'a | b')
+  assert.equal(tableCellSourceOffset(seg.text, 2), 2)
+  assert.equal(tableCellSourceOffset(seg.text, 3), 4, 'past the pipe is two source characters on')
+  assert.equal(tableCellSourceOffset(seg.text, 99), seg.text.length)
+})
+
+test('tableCellEdit rewrites one segment only, flattening breaks and escaping pipes', () => {
+  const at = posOf(WIDE, 'b1')
+  const edit = tableCellEdit({ text: WIDE, from: at, row: 2, col: 1, value: 'new | value\nhere ' })
+  assert.deepEqual(edit, { from: WIDE.indexOf('b1'), to: WIDE.indexOf('b1') + 2, insert: ' new \\| value here ' })
+  const next = WIDE.slice(0, edit.from) + edit.insert + WIDE.slice(edit.to)
+  const before = WIDE.split('\n')
+  const after = next.split('\n')
+  assert.deepEqual(after.filter((line, i) => line !== before[i]).length, 1, 'exactly one line differs')
+  assert.equal(tableCellEdit({ text: WIDE, from: at, row: 1, col: 0, value: 'x' }), null, 'the delimiter is not a cell')
+  assert.equal(tableCellEdit({ text: WIDE, from: at, row: 9, col: 0, value: 'x' }), null)
+  assert.equal(tableCellEdit({ text: 'no table', from: 0, row: 0, col: 0, value: 'x' }), null)
+})
+
+test('diffRange finds the one replacement between two texts', () => {
+  assert.deepEqual(diffRange('hello world', 'hello brave world'), { from: 6, to: 6, insert: 'brave ' })
+  assert.deepEqual(diffRange('abc', 'abc'), { from: 3, to: 3, insert: '' })
+  assert.deepEqual(diffRange('aXa', 'aa'), { from: 1, to: 2, insert: '' })
+  assert.deepEqual(diffRange('', 'new'), { from: 0, to: 0, insert: 'new' })
 })
 
 // ---------- dispatcher ----------

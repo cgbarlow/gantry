@@ -267,16 +267,17 @@ test('local-workspace instance: assets/<name> markdown image renders via a blob:
       await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}`)
       await page.waitForSelector('.module', { timeout: 10_000 })
 
-      const previewImg = page.locator('.preview img').first()
+      // Visual view (#374) draws the image in place of its markdown.
+      const previewImg = page.locator('.cm-visual-image img').first()
       await previewImg.waitFor({ timeout: 10_000 })
       // The first render has no object URL yet (readBinaryFile is async) — wait for the re-render that picks it up (see the effect's own doc comment above).
-      await page.waitForFunction(() => document.querySelector('.preview img')?.getAttribute('src')?.startsWith('blob:'), {
+      await page.waitForFunction(() => document.querySelector('.cm-visual-image img')?.getAttribute('src')?.startsWith('blob:'), {
         timeout: 10_000,
       })
       const src = await previewImg.getAttribute('src')
       assert.ok(src && src.startsWith('blob:'), `expected a blob: object URL, got ${src}`)
 
-      await page.waitForFunction(() => document.querySelector('.preview img')?.complete, { timeout: 10_000 })
+      await page.waitForFunction(() => document.querySelector('.cm-visual-image img')?.complete, { timeout: 10_000 })
       const naturalWidth = await previewImg.evaluate((el) => el.naturalWidth)
       assert.ok(naturalWidth > 0, `expected naturalWidth >0, got ${naturalWidth}`)
 
