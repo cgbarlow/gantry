@@ -29,6 +29,12 @@
 import { useEffect, useLayoutEffect, useRef } from 'preact/hooks'
 import { html } from 'htm/preact'
 
+// The dropdowns currently open. Opening one closes the others (WI #379): each
+// trigger stops its own click reaching the window, so without this a second
+// dropdown's click never reaches the first one's click-outside listener. A
+// dropdown opened inside another's menu leaves that outer one open.
+const openDropdowns = new Set()
+
 export function Dropdown({
   className,
   body,
@@ -74,6 +80,16 @@ export function Dropdown({
     window.addEventListener('resize', updatePlacement)
     return () => window.removeEventListener('resize', updatePlacement)
   }, [open, flipOnOverflow])
+
+  useEffect(() => {
+    if (!open) return
+    const self = { root: rootRef.current, close: () => onOpenChange(false) }
+    for (const other of openDropdowns) {
+      if (!other.root?.contains(self.root)) other.close()
+    }
+    openDropdowns.add(self)
+    return () => openDropdowns.delete(self)
+  }, [open, onOpenChange])
 
   useEffect(() => {
     if (!open) return

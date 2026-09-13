@@ -495,10 +495,20 @@ test('artefact selector filters Shape and Detailed Design fields, persists per s
         await page.goto(`${base}/instance/examples`)
         await page.waitForSelector('.module', { timeout: 10_000 })
 
-        const selector = page.getByRole('combobox', { name: 'Artefact' })
-        await selector.waitFor({ state: 'visible', timeout: 5_000 })
-        assert.deepEqual(await selector.locator('option').allTextContents(), ['Solution on a Page', 'Full Solution on a Page'])
-        assert.equal(await selector.inputValue(), 'soap')
+        const artefactTrigger = () => page.locator('.artefact-dropdown').getByRole('button', { name: /^Artefact/ })
+        const artefactShown = async () => (await artefactTrigger().textContent()).replace('▾', '').trim()
+        const chooseArtefact = async (title) => {
+          await artefactTrigger().click()
+          await page.getByRole('menuitemradio', { name: title, exact: true }).click()
+        }
+        await artefactTrigger().waitFor({ state: 'visible', timeout: 5_000 })
+        await artefactTrigger().click()
+        assert.deepEqual(
+          (await page.locator('.artefact-dropdown .menu [role=menuitemradio]').allTextContents()).map((s) => s.trim()),
+          ['Solution on a Page', 'Full Solution on a Page']
+        )
+        await page.keyboard.press('Escape')
+        assert.equal(await artefactShown(), 'Solution on a Page')
 
         // The lightweight SOAP uses the whole shared Shape modules, but not
         // Full SOAP's extra dependencies/details modules.
@@ -507,7 +517,7 @@ test('artefact selector filters Shape and Detailed Design fields, persists per s
         assert.equal(await page.locator('.field label', { hasText: 'Affected domains' }).count(), 1)
         assert.equal(await page.locator('.field label', { hasText: 'Problem statement *' }).count(), 1)
 
-        await selector.selectOption('soap-full')
+        await chooseArtefact('Full Solution on a Page')
         assert.equal(await page.locator('.module h2', { hasText: 'Dependencies' }).count(), 1)
         assert.equal(await page.locator('.module h2', { hasText: 'Full SOAP Details' }).count(), 1)
         assert.equal(await page.locator('.field label', { hasText: 'Affected domains' }).count(), 0)
@@ -519,21 +529,21 @@ test('artefact selector filters Shape and Detailed Design fields, persists per s
         // A reload restores the selected artefact for this instance/stage.
         await page.reload()
         await page.waitForSelector('.module', { timeout: 10_000 })
-        assert.equal(await page.getByRole('combobox', { name: 'Artefact' }).inputValue(), 'soap-full')
+        assert.equal(await artefactShown(), 'Full Solution on a Page')
         assert.equal(await page.locator('.field label', { hasText: 'Affected domains' }).count(), 0)
 
         // Drafts in fields hidden by the selected artefact survive switching
         // away and back, even before the module is saved.
-        await selector.selectOption('soap')
+        await chooseArtefact('Solution on a Page')
         const processField = page.locator('.field-markdown', { has: page.locator('label', { hasText: 'Process flow' }) })
         await processField.locator('.cm-content').click()
         await page.keyboard.press('ControlOrMeta+a')
         await page.keyboard.type('An unsaved process-flow draft.')
-        await selector.selectOption('soap-full')
+        await chooseArtefact('Full Solution on a Page')
         assert.equal(await page.locator('.field label', { hasText: 'Process flow' }).count(), 0)
-        await selector.selectOption('soap')
+        await chooseArtefact('Solution on a Page')
         assert.match(await processField.locator('.cm-content').textContent(), /An unsaved process-flow draft\./)
-        await selector.selectOption('soap-full')
+        await chooseArtefact('Full Solution on a Page')
 
         // Detailed Design defaults independently to its alphanumeric-first
         // artefact and exposes the selector because SAD/SSAD differ.
@@ -541,14 +551,13 @@ test('artefact selector filters Shape and Detailed Design fields, persists per s
         // That draft was never saved, so leaving the stage asks first (WI #376).
         await page.locator('.modal[aria-label="Unsaved changes"]').getByRole('button', { name: 'Discard' }).click()
         await page.waitForSelector('.module', { timeout: 10_000 })
-        const detailedSelector = page.getByRole('combobox', { name: 'Artefact' })
-        await detailedSelector.waitFor({ state: 'visible', timeout: 5_000 })
-        assert.equal(await detailedSelector.inputValue(), 'sad')
+        await artefactTrigger().waitFor({ state: 'visible', timeout: 5_000 })
+        assert.equal(await artefactShown(), 'Solution Architecture Document')
         assert.equal(await page.locator('.field label', { hasText: 'Design decisions' }).count(), 1)
         // design v2 wires `support-and-operations.operational-accounts-and-licenses?` into the SAD too (optional), so it shows for both artefacts; `Design decisions` is the SAD-only discriminator.
         assert.equal(await page.locator('.field label', { hasText: 'Operational accounts and licenses' }).count(), 1)
 
-        await detailedSelector.selectOption('ssad')
+        await chooseArtefact('Solution Support Architecture Document')
         assert.equal(await page.locator('.field label', { hasText: 'Design decisions' }).count(), 0)
         assert.equal(await page.locator('.field label', { hasText: 'Operational accounts and licenses' }).count(), 1)
         assert.equal(await page.locator('.field label', { hasText: 'Network and infrastructure' }).count(), 0)
@@ -557,7 +566,7 @@ test('artefact selector filters Shape and Detailed Design fields, persists per s
         // HLD has one artefact, so the active artefact is shown as fixed text, not as an interactive selector.
         await page.locator('#stage-nav button', { hasText: 'High-level Design' }).click()
         await page.waitForSelector('.module', { timeout: 10_000 })
-        assert.equal(await page.getByRole('combobox', { name: 'Artefact' }).count(), 0)
+        assert.equal(await page.locator('.artefact-dropdown').count(), 0)
         const fixedArtefact = page.locator('.artefact-selector .artefact-value')
         assert.equal(await fixedArtefact.getAttribute('aria-label'), 'Artefact')
         assert.equal(await fixedArtefact.textContent(), 'High Level Design')
@@ -566,7 +575,7 @@ test('artefact selector filters Shape and Detailed Design fields, persists per s
         // rather than carrying the earlier soap-full selection across stages.
         await page.locator('#stage-nav button', { hasText: 'SOAP' }).click()
         await page.waitForSelector('.module', { timeout: 10_000 })
-        assert.equal(await page.getByRole('combobox', { name: 'Artefact' }).inputValue(), 'soap')
+        assert.equal(await artefactShown(), 'Solution on a Page')
 
         assert.deepEqual(pageErrors, [])
       } finally {

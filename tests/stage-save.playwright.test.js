@@ -94,7 +94,7 @@ test('the Save button sits beside Mode, is ghosted until something changes, and 
     const fields = page.locator('.toolbar-left > .toolbar-field')
     const modeField = await fields.nth(0).boundingBox()
     const artefactField = await fields.nth(1).boundingBox()
-    for (const selector of ['.view-mode-dropdown button', '.toolbar-select select', '.stage-navigation button']) {
+    for (const selector of ['.view-mode-dropdown button', '.artefact-dropdown > button', '.stage-navigation button']) {
       const control = await page.locator(selector).first().boundingBox()
       assert.ok(Math.abs(save.y - control.y) <= 1 && Math.abs(save.height - control.height) <= 1, `Save lines up with ${selector}`)
     }
@@ -210,9 +210,11 @@ test('in-app links and browser back ask before leaving; the Artefact selector an
     // Changing what's shown is not leaving.
     await page.locator('.view-mode-dropdown').getByRole('button', { name: /^Mode/ }).click()
     await page.getByRole('menuitemradio', { name: 'Markdown', exact: true }).click()
-    const artefact = page.getByRole('combobox', { name: 'Artefact' })
-    await artefact.selectOption('soap-full')
-    await artefact.selectOption('soap')
+    const artefact = page.locator('.artefact-dropdown').getByRole('button', { name: /^Artefact/ })
+    await artefact.click()
+    await page.getByRole('menuitemradio', { name: 'Full Solution on a Page', exact: true }).click()
+    await artefact.click()
+    await page.getByRole('menuitemradio', { name: 'Solution on a Page', exact: true }).click()
     assert.equal(await unsavedDialog(page).count(), 0)
 
     await page.getByRole('link', { name: '← Workspaces' }).click()
@@ -291,4 +293,40 @@ test('an archived instance has no Save button', async () => {
       },
     }
   )
+})
+
+test('Mode, Artefact and Navigation open the same kind of menu at one font size, and only one is open at a time (WI #379)', async () => {
+  await withEditor(async ({ page, pageErrors }) => {
+    const triggers = {
+      Mode: page.locator('.view-mode-dropdown > button'),
+      Artefact: page.locator('.artefact-dropdown > button'),
+      Navigation: page.locator('.stage-navigation-dropdown > button'),
+    }
+    const css = (locator, prop) => locator.evaluate((el, p) => getComputedStyle(el)[p], prop)
+    const openMenus = page.locator('.toolbar .menu')
+    const triggerSizes = new Set()
+    const itemSizes = new Set()
+
+    for (const [name, trigger] of Object.entries(triggers)) {
+      triggerSizes.add(await css(trigger, 'fontSize'))
+      await trigger.click()
+      await eventually(async () => assert.equal(await openMenus.count(), 1, `opening ${name} leaves only ${name} open`))
+      const button = await trigger.boundingBox()
+      const menu = await openMenus.first().boundingBox()
+      assert.ok(menu.y - (button.y + button.height) >= 4, `${name}'s menu opens below its button with a gap`)
+      itemSizes.add(await css(openMenus.first().locator('.nav-item').first(), 'fontSize'))
+    }
+    assert.equal(triggerSizes.size, 1, `one button font size, got ${[...triggerSizes]}`)
+    assert.equal(itemSizes.size, 1, `one menu font size, got ${[...itemSizes]}`)
+
+    // Navigation is open from the loop; opening Mode closes it.
+    await triggers.Mode.click()
+    await eventually(async () => {
+      assert.equal(await openMenus.count(), 1)
+      assert.equal(await page.locator('.stage-navigation-dropdown .menu').count(), 0)
+    })
+    await page.keyboard.press('Escape')
+    await eventually(async () => assert.equal(await openMenus.count(), 0))
+    assert.deepEqual(pageErrors, [])
+  })
 })
