@@ -470,9 +470,11 @@ test('the pane being edited is unmistakable: a thick focus frame, and in Split t
       })
     const framed = (f) => f.shadow !== 'none' && /2px/.test(f.shadow)
 
-    // Visual: clicking into the text frames the editor.
+    // Visual: clicking into the text frames the editor. Seeding the table can leave focus in the
+    // field (a grid cell may take it), so start from nothing focused.
     const host = field.locator('.editor-pane .editor-host')
-    assert.equal(framed(await frame(host)), false, 'no frame before the field is used')
+    await page.evaluate(() => document.activeElement?.blur())
+    await eventually(async () => assert.equal(framed(await frame(host)), false, 'no frame while the field is not in use'))
     await field.locator('.cm-line', { hasText: 'After.' }).click()
     await eventually(async () => assert.equal(framed(await frame(host)), true))
 
