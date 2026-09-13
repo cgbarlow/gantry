@@ -1110,6 +1110,13 @@ main.dashboard {
 }
 .field-markdown .md-rendered .asset-source em { font-style: italic; }
 
+/* Visual view (#148, restored after #374 dropped it) — images fill the content width,
+ * representative of the exported .docx, which scales them to the page's text width.
+ * Split view keeps the 260px thumbnail cap above for editing convenience. */
+main[data-view-mode='visual'] .field-markdown .md-rendered img.asset-thumb {
+  max-width: 100%;
+}
+
 
 .modal-backdrop {
   display: flex;
