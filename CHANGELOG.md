@@ -17,7 +17,7 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
-## 0.4.11-beta — 2026-09-13
+## 0.5.0-beta — 2026-09-13
 
 ### Added
 
