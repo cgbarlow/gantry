@@ -246,7 +246,7 @@ test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance with
   })
 })
 
-test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance also renders and commits the stage\'s own artefact(s) to the same stage branch (#123, ADR-0014)', async () => {
+test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance saves the module without rendering any artefact (WI #376, ADR-0034)', async () => {
   const fullFiles = {
     ...SEED_FILES,
     '/gantry-workspace/my-initiative/modules/solution-definition.md': exampleModuleText('solution-definition'),
@@ -264,40 +264,77 @@ test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance also
     })
     assert.equal(res.status, 200)
     const body = await res.json()
-    assert.deepEqual(
-      body.rendered.map((r) => r.artefactId),
-      ['soap', 'soap-full']
-    )
-    assert.equal(body.rendered[0].rendered, true)
-    assert.equal(body.rendered[0].azureDevOpsPath, 'gantry-workspace/my-initiative/out/MY Initiative - Solution on a Page.docx')
+    assert.equal(body.rendered, undefined)
 
-    // The rendered artefact actually landed on the "shape" stage's own branch, not 'main' — the same write path (#122) the module save itself used.
+    // Enough data to render "soap" is on the branch, yet nothing was rendered: only Render does that now.
     const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
     const stageBranch = stageBranchName('my-initiative', 'shape')
-    const pushedContent = await client.getFileContent('gantry-workspace/my-initiative/out/MY Initiative - Solution on a Page.docx', { branch: stageBranch })
-    const pushedBytes = Buffer.from(pushedContent, 'base64')
-    assert.equal(pushedBytes.subarray(0, 2).toString(), 'PK')
+    await assert.rejects(() =>
+      client.getFileContent('gantry-workspace/my-initiative/out/MY Initiative - Solution on a Page.docx', { branch: stageBranch })
+    )
   })
 })
 
-test('PUT /api/instance/modules/:id against an Azure-DevOps-backed instance still saves and reports success even when the stage\'s artefact(s) can\'t be rendered yet', async () => {
-  // SEED_FILES seeds only "context" — "soap" also requires solution-definition and team-and-estimates, so this save's own follow-up render has nothing complete enough to render.
-  await withAzureDevOpsBackedServer(SEED_FILES, {}, async (base) => {
-    const res = await fetch(`${base}/api/instance/modules/background`, {
+test('PUT /api/instance/modules against an Azure-DevOps-backed instance saves several modules as one commit on the stage branch (WI #376)', async () => {
+  const fullFiles = {
+    ...SEED_FILES,
+    '/gantry-workspace/my-initiative/modules/solution-definition.md': exampleModuleText('solution-definition'),
+    '/gantry-workspace/my-initiative/modules/team-and-estimates.md': exampleModuleText('team-and-estimates'),
+  }
+  await withAzureDevOpsBackedServer(fullFiles, {}, async (base, adoBaseUrl) => {
+    const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
+    const stageBranch = stageBranchName('my-initiative', 'shape')
+    // A first save starts the stage branch, so the count below measures the second save alone.
+    const first = await fetch(`${base}/api/instance/modules?stage=shape`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
-      body: JSON.stringify({ status: 'agreed', owner: 'c.barlow', fields: { problem: 'Still just getting started.' } }),
+      body: JSON.stringify({ modules: { background: { status: 'draft', owner: 'c.barlow', fields: { problem: 'First save.' } } } }),
+    })
+    assert.equal(first.status, 200)
+    const commitsBefore = (await client.listBranchCommits(stageBranch)).length
+
+    const res = await fetch(`${base}/api/instance/modules?stage=shape`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+      body: JSON.stringify({
+        modules: {
+          background: { status: 'agreed', owner: 'c.barlow', fields: { problem: 'Saved in one commit.', 'affected-domains': ['Payments'], opportunity: '' } },
+          'solution-definition': { status: 'draft', owner: '', fields: { 'high-level-requirements': 'Same commit.' } },
+        },
+      }),
     })
     assert.equal(res.status, 200)
     const body = await res.json()
-    // The save itself still succeeded and is reported as such (this is not a save-failure test) — only the follow-up render is what's incomplete.
+    assert.deepEqual(body.saved, ['background', 'solution-definition'])
     assert.ok(body.modules.find((m) => m.id === 'background'))
-    assert.deepEqual(
-      body.rendered.map((r) => r.artefactId),
-      ['soap', 'soap-full']
+
+    const commits = await client.listBranchCommits(stageBranch)
+    assert.equal(commits.length, commitsBefore + 1, 'one Save is one commit')
+    assert.equal(commits[0].commitId, body.commit)
+    assert.match(commits[0].comment, /^Save .+: Background and context, Solution Definition$/)
+    assert.match(await client.getFileContent('gantry-workspace/my-initiative/modules/background.md', { branch: stageBranch }), /Saved in one commit\./)
+    assert.match(await client.getFileContent('gantry-workspace/my-initiative/modules/solution-definition.md', { branch: stageBranch }), /Same commit\./)
+    // An unchanged module isn't rewritten, and no document is rendered.
+    assert.equal(
+      await client.getFileContent('gantry-workspace/my-initiative/modules/team-and-estimates.md', { branch: stageBranch }),
+      exampleModuleText('team-and-estimates')
     )
-    assert.equal(body.rendered[0].rendered, false)
-    assert.equal(body.rendered[0].skipped, true)
+    await assert.rejects(() =>
+      client.getFileContent('gantry-workspace/my-initiative/out/MY Initiative - Solution on a Page.docx', { branch: stageBranch })
+    )
+  })
+})
+
+test('PUT /api/instance/modules against an Azure-DevOps-backed instance with no PAT asks for authentication and writes nothing', async () => {
+  await withAzureDevOpsBackedServer(SEED_FILES, {}, async (base, adoBaseUrl) => {
+    const res = await fetch(`${base}/api/instance/modules`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ modules: { background: { fields: { problem: 'Should not land.' } } } }),
+    })
+    assert.equal(res.status, 401)
+    const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
+    assert.doesNotMatch(await client.getFileContent('gantry-workspace/my-initiative/modules/background.md'), /Should not land/)
   })
 })
 

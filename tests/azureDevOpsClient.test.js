@@ -53,6 +53,42 @@ test('getLatestCommit returns the newest commit for the requested branch', async
   })
 })
 
+test('writeFiles writes several files as one commit in one push, detecting add vs edit per file (WI #376)', async () => {
+  await withFakeAzureDevOpsServer({ '/modules/context.md': 'old\n' }, async (baseUrl) => {
+    const c = client(baseUrl)
+    const before = await c.getLatestCommit()
+    const { changes, push } = await c.writeFiles(
+      [
+        { path: '/modules/context.md', content: 'new\n' },
+        { path: 'modules/scope.md', content: 'scope\n' },
+      ],
+      { message: 'Save Shape: Context, Scope' }
+    )
+    assert.deepEqual(changes, [
+      { path: '/modules/context.md', changeType: 'edit' },
+      { path: '/modules/scope.md', changeType: 'add' },
+    ])
+    assert.equal(push.commits.length, 1)
+    const latest = await c.getLatestCommit()
+    assert.notEqual(latest.commitId, before.commitId)
+    assert.equal(latest.comment, 'Save Shape: Context, Scope')
+    assert.equal(await c.getFileContent('/modules/context.md'), 'new\n')
+    assert.equal(await c.getFileContent('/modules/scope.md'), 'scope\n')
+  })
+})
+
+test('writeFiles is all or nothing: a rejected push leaves every file as it was', async () => {
+  await withFakeServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: { '/a.md': 'a\n' }, failAfterPushes: 0 },
+    async (baseUrl) => {
+      const c = client(baseUrl)
+      await assert.rejects(() => c.writeFiles([{ path: '/a.md', content: 'A\n' }, { path: '/b.md', content: 'B\n' }]), AzureDevOpsRequestError)
+      assert.equal(await c.getFileContent('/a.md'), 'a\n')
+      await assert.rejects(() => c.getFileContent('/b.md'), AzureDevOpsNotFoundError)
+    }
+  )
+})
+
 test('getFileContent throws AzureDevOpsNotFoundError for a path with no item', async () => {
   await withFakeAzureDevOpsServer({}, async (baseUrl) => {
     await assert.rejects(() => client(baseUrl).getFileContent('/missing.md'), AzureDevOpsNotFoundError)

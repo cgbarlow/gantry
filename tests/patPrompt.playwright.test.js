@@ -117,7 +117,7 @@ test('a stored PAT is attached automatically on every subsequent request — no 
       await page.locator('.field-markdown .cm-content').first().click()
       await page.keyboard.press('ControlOrMeta+a')
       await page.keyboard.type(newText)
-      await page.getByRole('button', { name: 'Save Background and context' }).click()
+      await page.getByRole('button', { name: 'Save', exact: true }).click()
       await page.waitForSelector('text=Saved', { timeout: 5_000 })
 
       assert.deepEqual(pageErrors, [])
@@ -199,7 +199,7 @@ test('the Settings screen\'s "Replace Azure DevOps PAT" control (#101) opens the
       await page.locator('.field-markdown .cm-content').first().click()
       await page.keyboard.press('ControlOrMeta+a')
       await page.keyboard.type('Edited after replacing the PAT.')
-      await page.getByRole('button', { name: 'Save Background and context' }).click()
+      await page.getByRole('button', { name: 'Save', exact: true }).click()
       await page.waitForSelector('text=Saved', { timeout: 5_000 })
     } finally {
       await browser.close()

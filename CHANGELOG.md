@@ -17,6 +17,33 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.6.0-beta — 2026-09-13
+
+### Changed
+
+- **One Save button for the whole stage** (WI #376). A disk button now sits at
+  the top left of the editor toolbar, beside **Mode**, and saves every module
+  on the stage that has changed. It turns blue only while something differs
+  from what's saved — undo back to the saved text and it greys out again.
+  `Ctrl+S` (`⌘S` on a Mac) does the same. The Save button at the bottom of each
+  module card is gone; each card still shows its "Saved — complete" or
+  "Saved — outstanding" line.
+- **You are asked before unsaved work is lost.** Switching stage, switching
+  instance, following a header link or pressing browser Back with unsaved
+  changes asks **Save / Discard / Cancel**, and so do **Render**, **Advance**
+  and **Request Sign-off**. Closing or refreshing the tab shows the browser's
+  own warning.
+- **Saving no longer re-renders documents** on Azure DevOps-backed instances
+  (ADR-0034). One Save is now one commit containing just the changed module
+  files, instead of a commit per module plus two per document. Documents are
+  rendered and committed only when you click **Render**, so render before
+  requesting sign-off if the Pull Request should include up-to-date documents.
+
+### Fixed
+
+- **Horizontal rules show as a rule in Visual view** instead of `---`. The
+  markdown still appears on the line your caret is on, so you can edit it.
+
 ## 0.5.1-beta — 2026-09-13
 
 ### Changed

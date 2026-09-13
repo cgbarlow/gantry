@@ -754,6 +754,18 @@ class MermaidWidget extends WidgetType {
   }
 }
 
+class RuleWidget extends WidgetType {
+  eq() {
+    return true
+  }
+  toDOM() {
+    const rule = document.createElement('span')
+    rule.className = 'cm-visual-hr'
+    rule.setAttribute('role', 'separator')
+    return rule
+  }
+}
+
 // ---------- the decoration set: what Visual view is ----------
 
 function buildVisual(state, generation) {
@@ -824,6 +836,14 @@ function buildVisual(state, generation) {
         case 'CodeMark':
           if (node.node.parent?.name === 'InlineCode') hide(from, to)
           return undefined
+        case 'HorizontalRule': {
+          // Shown as a rule off the caret's line; `---` is still typed and edited as text.
+          const line = state.doc.lineAt(from)
+          if (line.number !== caretLine.number) {
+            replaces.push({ from, to, value: Decoration.replace({ widget: new RuleWidget() }) })
+          }
+          return false
+        }
         case 'QuoteMark': {
           const after = state.doc.sliceString(to, to + 1) === ' ' ? to + 1 : to
           hide(from, after)

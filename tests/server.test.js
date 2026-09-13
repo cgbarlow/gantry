@@ -177,6 +177,65 @@ test('PUT /api/instance/modules/:id writes the same file format the CLI reads, a
   }
 })
 
+test('PUT /api/instance/modules saves several modules in one request, writing only those modules, and reports each one\'s completeness (WI #376)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+    const definition = loadDefinition('design')
+    const moduleFile = (id) => join(instancesDir, 'default', 'examples', 'modules', `${id}.md`)
+    let untouchedBefore
+
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      untouchedBefore = readFileSync(moduleFile('introduction'), 'utf8')
+      const res = await fetch(`${base}/api/instance/modules?slug=examples&stage=shape`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          modules: {
+            background: { status: 'agreed', owner: 'c.barlow', fields: { problem: 'Saved together.', 'affected-domains': ['Payments'], opportunity: '' } },
+            'solution-definition': { status: 'draft', owner: '', fields: { 'high-level-requirements': 'Also saved.' } },
+          },
+        }),
+      })
+      assert.equal(res.status, 200)
+      const body = await res.json()
+      assert.deepEqual(body.saved, ['background', 'solution-definition'])
+      assert.equal(body.modules.find((m) => m.id === 'background').complete, true)
+    })
+
+    const read = (id) => readModule(definition, 'examples', id, { instancesDir: join(instancesDir, 'default') })
+    assert.equal(read('background').fields.problem, 'Saved together.')
+    assert.equal(read('solution-definition').fields['high-level-requirements'], 'Also saved.')
+    assert.equal(readFileSync(moduleFile('introduction'), 'utf8'), untouchedBefore)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('PUT /api/instance/modules rejects an unknown module or an empty save with 400, writing nothing', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'my-initiative', { instancesDir })
+    await withRunningServer({ slug: 'my-initiative', instancesDir }, async (base) => {
+      const put = (modules) =>
+        fetch(`${base}/api/instance/modules?slug=my-initiative`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ modules }),
+        })
+      const unknown = await put({ background: { fields: { problem: 'Should not land.' } }, 'not-a-module': { fields: {} } })
+      assert.equal(unknown.status, 400)
+      assert.match((await unknown.json()).error, /not-a-module/)
+      assert.equal((await put({})).status, 400)
+    })
+    const data = readModule(loadDefinition('design'), 'my-initiative', 'background', { instancesDir: join(instancesDir, 'default') })
+    assert.notEqual(data.fields.problem, 'Should not land.')
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
 test('PUT /api/instance/modules/:id?stage=<id> reports status against the browsed stage, not the instance\'s current one', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {

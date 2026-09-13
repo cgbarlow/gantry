@@ -1593,6 +1593,15 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .cm-visual .cm-vlink { text-decoration: underline; text-underline-offset: 2px; }
 .cm-visual .cm-vquote { color: var(--text-muted); font-style: italic; }
 .cm-visual .cm-vcodeblock { font-family: var(--font-mono); font-size: 13px; background: var(--bg); }
+/* A horizontal rule off the caret's line (WI #376). */
+.cm-visual .cm-visual-hr { display: inline-block; width: 100%; height: 0; border-top: 2px solid var(--line-strong); vertical-align: middle; }
+
+/* Centralised Save (WI #376): blue only while something is unsaved. */
+.stage-save { display: inline-flex; align-items: center; gap: 8px; }
+.stage-save-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 8px; }
+.stage-save-btn.primary { background: #1F5FBF; border-color: #1F5FBF; color: #FFFFFF; }
+.stage-save-state { font-size: 0.85rem; color: var(--text-muted); white-space: nowrap; }
+.stage-save-state.error { color: var(--stamp-error-bg); white-space: normal; }
 .cm-visual .cm-visual-image { display: block; }
 .cm-visual .cm-visual-image p { margin: 0; }
 .cm-visual .cm-visual-mermaid { margin: 6px 0; }

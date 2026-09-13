@@ -88,7 +88,7 @@ async function seedTable(page) {
 }
 
 async function saveBackground(page) {
-  await page.locator('.module').first().getByRole('button', { name: 'Save Background and context' }).click()
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
   await page.waitForSelector('text=Saved', { timeout: 5_000 })
 }
 
@@ -121,15 +121,12 @@ test('Visual is the default view; the Mode dropdown and hotkey run Visual → Sp
   })
 })
 
-// Clicks every module's Save on the current stage and waits for each to confirm.
+// Saves the whole stage with the toolbar's Save (WI #376) and waits for it to confirm.
 async function saveAllModules(page) {
-  const modules = page.locator('.module')
-  for (let m = 0; m < (await modules.count()); m++) {
-    const save = modules.nth(m).locator('button.btn.primary', { hasText: /^Save / })
-    if (!(await save.count())) continue
-    await save.click()
-    await modules.nth(m).locator('.save-status', { hasText: 'Saved' }).waitFor({ timeout: 5_000 })
-  }
+  const save = page.locator('.toolbar .stage-save-btn')
+  if (await save.isDisabled()) return
+  await save.click()
+  await page.locator('.stage-save-state', { hasText: 'Saved' }).waitFor({ timeout: 5_000 })
 }
 
 async function visitStage(page, i) {
@@ -563,7 +560,7 @@ test('an archived instance is read-only in Visual view: no toolbar, no editable 
       assert.equal(await field.locator('.cm-content').textContent(), before)
       assert.equal(await page.locator('.md-toolbar').count(), 0)
       assert.equal(await page.locator('.insert-bar:visible').count(), 0)
-      assert.equal(await page.locator('.module button', { hasText: /^Save / }).count(), 0)
+      assert.equal(await page.locator('.stage-save-btn').count(), 0)
       assert.deepEqual(pageErrors, [])
     },
     {
@@ -573,4 +570,25 @@ test('an archived instance is read-only in Visual view: no toolbar, no editable 
       },
     }
   )
+})
+
+test('a horizontal rule shows as a rule in Visual view, and as --- on the caret\'s own line (#376)', async () => {
+  await withEditor(async ({ page, pageErrors }) => {
+    const field = page.locator('.module').first().locator('.field-markdown').first()
+    await chooseMode(page, 'Markdown')
+    await field.locator('.cm-content').click()
+    await page.keyboard.press('ControlOrMeta+a')
+    await page.keyboard.insertText('Above.\n\n---\n\nBelow.')
+    await chooseMode(page, 'Visual')
+    await field.locator('.cm-line', { hasText: 'Below.' }).click()
+    await field.locator('.cm-visual-hr').waitFor({ timeout: 5_000 })
+    assert.doesNotMatch(await field.locator('.cm-content').textContent(), /---/)
+
+    await field.locator('.cm-line', { hasText: 'Above.' }).click()
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('ArrowDown')
+    await eventually(async () => assert.match(await field.locator('.cm-content').textContent(), /---/))
+    assert.equal(await field.locator('.cm-visual-hr').count(), 0)
+    assert.deepEqual(pageErrors, [])
+  })
 })

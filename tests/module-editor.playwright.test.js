@@ -94,7 +94,7 @@ test('top-of-page Insert ▾ prepends Section and List as first field, survives 
         const newSectionField = contextModule.locator('.field-markdown').first()
         await newSectionField.locator('.cm-content').click()
         await page.keyboard.type('Top section content.')
-        await contextModule.getByRole('button', { name: 'Save Background and context' }).click()
+        await page.getByRole('button', { name: 'Save', exact: true }).click()
         await page.waitForSelector('text=Saved', { timeout: 5_000 })
 
         // Survives reload in that position.
@@ -124,7 +124,7 @@ test('top-of-page Insert ▾ prepends Section and List as first field, survives 
         assert.ok(await firstField.locator('.list-rows').isVisible(), 'prepended List should render as list field')
         // Add an item so the list has content before saving.
         await firstField.locator('textarea').first().fill('First list item')
-        await page.locator('.module').first().getByRole('button', { name: 'Save Background and context' }).click()
+        await page.getByRole('button', { name: 'Save', exact: true }).click()
         await page.waitForSelector('text=Saved', { timeout: 5_000 })
 
         await page.reload()
@@ -360,7 +360,7 @@ test('the ported module editor page loads with no errors and a markdown field sa
         await page.locator('.field-markdown .cm-content').first().click()
         await page.keyboard.press('ControlOrMeta+a')
         await page.keyboard.type(newText)
-        await page.getByRole('button', { name: 'Save Background and context' }).click()
+        await page.getByRole('button', { name: 'Save', exact: true }).click()
         await page.waitForSelector('text=Saved', { timeout: 5_000 })
 
         assert.deepEqual(pageErrors, [])
@@ -538,6 +538,8 @@ test('artefact selector filters Shape and Detailed Design fields, persists per s
         // Detailed Design defaults independently to its alphanumeric-first
         // artefact and exposes the selector because SAD/SSAD differ.
         await page.locator('#stage-nav button', { hasText: 'Detailed Design' }).click()
+        // That draft was never saved, so leaving the stage asks first (WI #376).
+        await page.locator('.modal[aria-label="Unsaved changes"]').getByRole('button', { name: 'Discard' }).click()
         await page.waitForSelector('.module', { timeout: 10_000 })
         const detailedSelector = page.getByRole('combobox', { name: 'Artefact' })
         await detailedSelector.waitFor({ state: 'visible', timeout: 5_000 })
@@ -853,7 +855,7 @@ test("Image is a direct formatting-toolbar action and Insert offers only Section
         assert.deepEqual(pageErrors, [])
 
         // Usage is computed from the saved module file on disk, so save before checking the library reflects it as used.
-        await contextModule.getByRole('button', { name: 'Save Solution Definition' }).click()
+        await page.getByRole('button', { name: 'Save', exact: true }).click()
         await page.waitForSelector('text=Saved', { timeout: 5_000 })
 
         // Asset library screen: the inserted asset shows USED IN >= 1; uploading one more, never referenced, shows UNUSED. Navigated to directly — the toolbar's "View asset library" link was removed as redundant once assets are insertable inline from the editor.
@@ -971,7 +973,7 @@ test('toolbar Table opens a size grid whose pick inserts a live table with the c
         assert.equal(await firstField.locator('.table-toolbar').count(), 0)
 
         // Round-trip: save, then read the module file back off disk.
-        await contextModule.getByRole('button', { name: 'Save Background and context' }).click()
+        await page.getByRole('button', { name: 'Save', exact: true }).click()
         await page.waitForSelector('text=Saved', { timeout: 5_000 })
         assert.deepEqual(pageErrors, [])
       } finally {
@@ -1300,7 +1302,7 @@ test('Insert ▾ → Section adds a titled custom field below the requesting fie
         const newField = contextModule.locator('.field-markdown').nth(1)
         await newField.locator('.cm-content').click()
         await page.keyboard.type('The June deadline.')
-        await contextModule.getByRole('button', { name: 'Save Background and context' }).click()
+        await page.getByRole('button', { name: 'Save', exact: true }).click()
         await page.waitForSelector('text=Saved', { timeout: 5_000 })
         assert.deepEqual(pageErrors, [])
 
@@ -1586,7 +1588,7 @@ test('task list, blockquote, and horizontal rule write real markdown to disk (#1
         await page.keyboard.press('ControlOrMeta+End')
         await toolbar.getByRole('button', { name: 'Horizontal rule', exact: true }).click()
 
-        await page.locator('.module').first().getByRole('button', { name: 'Save Background and context' }).click()
+        await page.getByRole('button', { name: 'Save', exact: true }).click()
         await page.waitForSelector('text=Saved', { timeout: 5_000 })
         assert.deepEqual(pageErrors, [])
       } finally {
