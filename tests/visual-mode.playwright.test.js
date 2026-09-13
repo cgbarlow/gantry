@@ -463,6 +463,56 @@ test('Split: one toolbar row acts on the pane in use, edits reach the other pane
   })
 })
 
+test('the pane being edited is unmistakable: a thick focus frame, and in Split the other pane recedes (#374)', async () => {
+  await withEditor(async ({ page, pageErrors }) => {
+    const field = await seedTable(page)
+    const frame = (loc) =>
+      loc.evaluate((el) => {
+        const s = getComputedStyle(el)
+        return { shadow: s.boxShadow, opacity: Number(s.opacity) }
+      })
+    const framed = (f) => f.shadow !== 'none' && /2px/.test(f.shadow)
+
+    // Visual: clicking into the text frames the editor.
+    const host = field.locator('.editor-pane .editor-host')
+    assert.equal(framed(await frame(host)), false, 'no frame before the field is used')
+    await field.locator('.cm-line', { hasText: 'After.' }).click()
+    await eventually(async () => assert.equal(framed(await frame(host)), true))
+
+    await chooseMode(page, 'Split')
+    const source = field.locator('.editor-pane .editor-host')
+    const visual = field.locator('.visual-pane .editor-host')
+
+    // Editing the source: the source is framed, the Visual pane recedes.
+    await source.locator('.cm-line', { hasText: 'After.' }).click()
+    await eventually(async () => {
+      const [s, v] = [await frame(source), await frame(visual)]
+      assert.equal(framed(s), true, 'source pane framed')
+      assert.equal(framed(v), false, 'Visual pane not framed')
+      assert.ok(v.opacity < 1 && s.opacity === 1, 'the pane not being edited recedes')
+    })
+
+    // A Visual table cell counts as editing the Visual pane.
+    await visual.locator('[data-row="2"][data-col="0"]').click()
+    await eventually(async () => {
+      const [s, v] = [await frame(source), await frame(visual)]
+      assert.equal(framed(v), true, 'Visual pane framed while a cell is being edited')
+      assert.equal(framed(s), false)
+      assert.ok(s.opacity < 1 && v.opacity === 1)
+    })
+
+    // Leaving the field clears both.
+    await page.locator('header h1').click()
+    await eventually(async () => {
+      const [s, v] = [await frame(source), await frame(visual)]
+      assert.equal(framed(s) || framed(v), false)
+      assert.equal(s.opacity, 1)
+      assert.equal(v.opacity, 1)
+    })
+    assert.deepEqual(pageErrors, [])
+  })
+})
+
 test('images and Mermaid diagrams draw in Visual; the Source line is never stored; the pop-over edits only the diagram text (#374)', async () => {
   await withEditor(async ({ page, pageErrors, instancesDir }) => {
     // The example's own asset references draw as images with their automatic citation.
