@@ -555,6 +555,20 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
   min-height: 100px;
 }
 .field-markdown .editor-host .cm-editor { height: 100%; }
+/* The pane being edited (#374 follow-up): unmistakable in Split, where source
+ * and Visual panes sit side by side. The whole host takes a thick focus-ring
+ * frame — whether focus is in its text or in one of its Visual table cells —
+ * and CodeMirror's own faint dotted focus outline is retired in its favour. */
+.field-markdown .editor-host .cm-editor.cm-focused { outline: none; }
+.field-markdown .editor-host { transition: box-shadow 0.12s, border-color 0.12s; }
+.field-markdown .editor-host:focus-within {
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+/* In Split the pane not being edited recedes, so the active one reads at a glance. */
+main[data-view-mode='split'] .field-markdown .split:focus-within .editor-host:not(:focus-within) {
+  opacity: 0.72;
+}
 .field-markdown .editor-host .cm-content,
 .field-markdown .editor-host .cm-gutters {
   font-family: var(--font-mono);

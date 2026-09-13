@@ -17,6 +17,16 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.5.1-beta — 2026-09-13
+
+### Changed
+
+- **You can always see which pane you are typing in** (WI #375). The editor
+  pane that has focus now carries a thick frame — including while you are
+  typing in one of its Visual table cells — and in Split view the other pane
+  fades back, so it is obvious whether you are editing the Markdown or the
+  Visual side.
+
 ## 0.5.0-beta — 2026-09-13
 
 ### Added
