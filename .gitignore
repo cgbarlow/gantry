@@ -16,3 +16,9 @@ workspaces/*/*/out/
 workspaces/instance-registry.json
 workspaces/workspace-registry.json
 workspaces/number-registry.json
+
+# WI #370: the reserved `default` server workspace is created on demand by `gantry serve` and
+# `gantry new` to hold instances created on this machine — a deployment's own data, never repo
+# content (the bundled fixtures live in workspaces/examples/). Without this, merely starting the
+# server left a clean checkout dirty.
+workspaces/default/

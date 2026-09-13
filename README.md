@@ -339,7 +339,7 @@ gantry serve my-initiative                      # fill it in via the form, or ed
 gantry render my-initiative soap                # produce the artefact
 ```
 
-> `gantry definitions` is not yet implemented. Everything else in the CLI reference below is live.
+Instances live inside a **workspace** under the workspaces root, so a listing names both: `default/my-initiative`. Every command that takes a `<slug>` accepts either the bare slug or that workspace-qualified form — the qualified one matters only when the same slug exists in two workspaces, where a bare slug reports the ambiguity rather than guessing.
 
 ---
 
@@ -349,9 +349,9 @@ gantry render my-initiative soap                # produce the artefact
 
 | Command | Does | Status |
 |---|---|---|
-| `gantry definitions` | List definitions available in this repo | Not yet implemented |
-| `gantry instances [--json]` | List instances available in this repo, with definition and current stage | Implemented |
-| `gantry new <definition> <slug> [--owner <name>] [--assignee <name>]` | Create an instance — `--owner` seeds each first-stage module file's own frontmatter `owner`; `--assignee` sets the instance record's own stored assignee | Implemented |
+| `gantry definitions [--json]` | List definitions available in this repo, with their stages and versions | Implemented |
+| `gantry instances [--json]` | List instances available in this repo, with the workspace each lives in, its definition and current stage | Implemented |
+| `gantry new <definition> <slug> [--owner <name>] [--assignee <name>]` | Create an instance, in the reserved `default` workspace — `--owner` seeds each first-stage module file's own frontmatter `owner`; `--assignee` sets the instance record's own stored assignee | Implemented |
 | `gantry status <slug> [--json]` | Current stage, module completeness, what's outstanding | Implemented |
 | `gantry check <slug> [--gate <id>] [--json]` | Validate an instance against a gate's requirements — any gate, not just the instance's current stage | Implemented |
 | `gantry render <slug> <artefact> [--dry-run]` | Render an artefact to `out/` | Implemented |
@@ -359,7 +359,11 @@ gantry render my-initiative soap                # produce the artefact
 | `gantry validate <definition> [--json]` | Report every structural problem with a definition in one pass | Implemented |
 | `gantry backfill-numeric-refs` | One-time (idempotent) backfill of scoped numeric workspace/instance references (ADR-0024) for workspaces/instances that predate the feature | Implemented |
 
-`status`, `check` and `validate` all emit structured output with `--json` for scripting and agent use.
+`definitions`, `instances`, `status`, `check` and `validate` all emit structured output with `--json` for scripting and agent use.
+
+Every command that reads instance data takes `--workspaces-dir <path>` (or `GANTRY_WORKSPACES_DIR`) to point at a workspaces root other than `./workspaces`. A failure prints a single line explaining it; set `GANTRY_DEBUG=1` to get the full stack as well.
+
+**Where definitions come from.** Definitions ship with Gantry, so every command finds them wherever you run it — you don't have to be standing in a Gantry checkout. If the working directory has a `definitions/` of its own it wins, so a checkout keeps working on its own definitions; `--definitions-dir <path>` names one explicitly. Instance data is the opposite and stays relative to where you are, which is why the two have separate flags.
 
 ## Definition schema
 
