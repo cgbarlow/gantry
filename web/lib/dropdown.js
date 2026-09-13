@@ -56,6 +56,12 @@ export function Dropdown({
   children,
 }) {
   const rootRef = useRef(null)
+  // Whether this render has the dropdown open. Read when another dropdown asks
+  // this one to close: menus that share one open-state owner (the header's
+  // Settings and Switch instance) may already be closing in the same update,
+  // and closing them again would close the one just opened.
+  const openRef = useRef(open)
+  openRef.current = open
 
   useLayoutEffect(() => {
     if (!open || !flipOnOverflow) return
@@ -83,7 +89,12 @@ export function Dropdown({
 
   useEffect(() => {
     if (!open) return
-    const self = { root: rootRef.current, close: () => onOpenChange(false) }
+    const self = {
+      root: rootRef.current,
+      close: () => {
+        if (openRef.current) onOpenChange(false)
+      },
+    }
     for (const other of openDropdowns) {
       if (!other.root?.contains(self.root)) other.close()
     }
