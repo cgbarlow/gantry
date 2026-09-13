@@ -38,12 +38,12 @@ test('Navigation dropdown renders below Work item details card, lists headings i
         })
         assert.ok(isInsideToolbar, '.stage-navigation should be a descendant of .toolbar .toolbar-left')
         const navBox = await nav.boundingBox()
-        const segmentedBox = await page.locator('.toolbar .toolbar-left .segmented').boundingBox()
-        assert.ok(navBox && segmentedBox, 'Navigation and segmented should have bounding boxes')
-        // Same row as segmented: y overlaps
+        const segmentedBox = await page.locator('.toolbar .toolbar-left .view-mode-dropdown').boundingBox()
+        assert.ok(navBox && segmentedBox, 'Navigation and the Mode dropdown should have bounding boxes')
+        // Same row as the Mode dropdown: y overlaps
         const yOverlaps = navBox.y < segmentedBox.y + segmentedBox.height && navBox.y + navBox.height > segmentedBox.y
-        assert.ok(yOverlaps, 'Navigation should be on the same row as .segmented (y overlaps)')
-        assert.ok(navBox.x > segmentedBox.x, 'Navigation should be to the right of .segmented')
+        assert.ok(yOverlaps, 'Navigation should be on the same row as the Mode dropdown (y overlaps)')
+        assert.ok(navBox.x > segmentedBox.x, 'Navigation should be to the right of the Mode dropdown')
         const artefactCount = await page.locator('.artefact-selector').count()
         if (artefactCount > 0) {
           const artefactBox = await page.locator('.artefact-selector').boundingBox()

@@ -17,6 +17,34 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.4.11-beta — 2026-09-13
+
+### Added
+
+- **Visual view: edit a field the way it reads** (WI #374). Markdown fields now
+  open in a new **Visual** view, where headings, bold and italic, code, quotes,
+  links, images and Mermaid diagrams are drawn as they will appear and edited in
+  place. Tables are real grids: click any cell to type, Tab between cells (Tab
+  from the last cell adds a row), hover a table's top or left edge for column
+  and row handles that insert, delete, re-align and — by dragging — move columns
+  and rows, and use the corner handle to delete the whole table. A diagram's
+  text is edited from an **Edit diagram text** pop-over. Nothing about how your
+  content is stored changes: a field you open and save without editing is
+  written back byte for byte, and editing one table cell changes only that row.
+- **Undo and Redo on the formatting toolbar**, covering every change in a field
+  whichever view it was made in.
+
+### Changed
+
+- **The view switcher is now a Mode ▾ dropdown: Visual, Split, Markdown**, with
+  Visual the default. Split now shows the raw Markdown beside the Visual view,
+  both editable, with one formatting toolbar that acts on whichever side you are
+  working in. `Ctrl+Shift+V` cycles the three views in that order.
+- **Rendered view is gone** — Visual replaces it. Editing controls are now hidden
+  only on an archived instance, which is read-only in every view.
+- In **Markdown** view the table button strip still appears while the caret is
+  in a table; Visual and Split use the table's own handles instead.
+
 ## 0.4.10-beta — 2026-09-11
 
 ### Fixed

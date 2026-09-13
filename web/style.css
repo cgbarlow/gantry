@@ -248,12 +248,9 @@ header {
   color: var(--text);
 }
 
-/* View-mode visibility, driven by data-view-mode on main#modules (#79). */
-main[data-view-mode='markdown'] .field-markdown .preview { display: none; }
-main[data-view-mode='markdown'] .field-markdown .editor-host { flex: 1 1 auto; }
-main[data-view-mode='markdown'] .field-markdown .editor-pane { flex: 1 1 100%; }
-main[data-view-mode='rendered'] .field-markdown .editor-pane { display: none; }
-main[data-view-mode='rendered'] .field-markdown .preview { flex: 1 1 100%; }
+/* View-mode visibility, driven by data-view-mode on main#modules (#79, #374).
+ * Visual and Markdown are one editor; Split adds the Visual pane beside the source. */
+main:not([data-view-mode='split']) .field-markdown .visual-pane { display: none; }
 
 @media (max-width: 680px) {
   .toolbar { align-items: stretch; flex-direction: column; gap: 10px; }
@@ -496,8 +493,11 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 /* Neutralise .btn's default 0.5rem top/right margin so the trigger sits on the
    same baseline as the segmented view-mode buttons (which reset it too). */
 .stage-navigation .btn { margin: 0; }
-.stage-navigation-dropdown { position: relative; display: inline-flex; }
-.stage-navigation-dropdown .menu {
+.stage-navigation-dropdown,
+.view-mode-dropdown { position: relative; display: inline-flex; }
+.view-mode-dropdown .btn { margin: 0; }
+.stage-navigation-dropdown .menu,
+.view-mode-dropdown .menu {
   display: none;
   position: absolute;
   left: 0;
@@ -514,8 +514,14 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
   overflow-y: auto;
   padding: 6px 0;
 }
-.stage-navigation-dropdown.menu-open .menu { display: block; }
-.stage-navigation-dropdown .nav-item {
+.stage-navigation-dropdown.menu-open .menu,
+.view-mode-dropdown.menu-open .menu { display: block; }
+.view-mode-dropdown .menu { min-width: 140px; }
+/* The current view: weight and a leading bar, not generated text — a CSS
+ * ::before glyph would join the option's accessible name. */
+.view-mode-dropdown .nav-item[aria-checked='true'] { font-weight: 600; box-shadow: inset 3px 0 0 var(--text); }
+.stage-navigation-dropdown .nav-item,
+.view-mode-dropdown .nav-item {
   display: block;
   width: 100%;
   text-align: left;
@@ -531,20 +537,19 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.stage-navigation-dropdown .nav-item:hover { background: var(--bg); }
+.stage-navigation-dropdown .nav-item:hover,
+.view-mode-dropdown .nav-item:hover { background: var(--bg); }
 .stage-navigation-dropdown .nav-item-h3 { padding-left: 24px; }
 
 .field-markdown .split { display: flex; gap: 16px; align-items: stretch; }
 /* The toolbar mounts inside this pane above the editor host, so the pair
  * reads as one attached control (#133): toolbar flush on top, editor below. */
-.field-markdown .editor-pane { display: flex; flex-direction: column; min-width: 0; flex: 1 1 0; }
-.field-markdown .editor-host,
-.field-markdown .preview {
+.field-markdown .editor-pane,
+.field-markdown .visual-pane { display: flex; flex-direction: column; min-width: 0; flex: 1 1 0; }
+.field-markdown .editor-host {
   flex: 1;
   min-width: 0;
   border-radius: var(--radius);
-}
-.field-markdown .editor-host {
   border: var(--border-strong) solid var(--line-strong);
   background: var(--bg-raised);
   min-height: 100px;
@@ -555,23 +560,10 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
   font-family: var(--font-mono);
   font-size: 13px;
 }
-.field-markdown .preview {
-  border: var(--hairline) solid var(--line);
-  background: var(--bg);
-  padding: 10px 12px;
-  overflow: auto;
-  color: var(--text);
-}
-.field-markdown .preview code {
-  font-family: var(--font-mono);
-  background: var(--bg-raised);
-  padding: 1px 4px;
-  border-radius: var(--radius);
-}
 /* WI #353: a ```mermaid fence rendered in place (web/lib/mermaid.js). The
- * figure is a plain block so the diagram sizes to the preview's width; a
+ * figure is a plain block so the diagram sizes to the field's width; a
  * diagram that failed to parse keeps its <pre> and gains a muted note. */
-.field-markdown .preview figure.mermaid-diagram {
+.field-markdown .md-rendered figure.mermaid-diagram {
   margin: 12px 0;
   overflow-x: auto;
   background: #fff;
@@ -579,29 +571,9 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
   border-radius: var(--radius);
   padding: 8px;
 }
-.field-markdown .preview figure.mermaid-diagram svg { max-width: 100%; height: auto; }
-.field-markdown .preview pre.mermaid-error { border-left: 3px solid var(--danger, #b00020); }
-.field-markdown .preview .mermaid-error-note { color: var(--text-muted, #666); font-size: 12px; margin: -6px 0 12px; }
-/* GFM tables in the preview (#134): hairline rules on every cell edge so
- * column structure reads at a glance; header row raised and muted-bold like
- * the app's other table-ish surfaces. All token-driven, so light/dark/hc
- * themes dress it without per-theme rules. */
-.field-markdown .preview table {
-  border-collapse: collapse;
-  margin: 6px 0;
-  font-size: 13px;
-}
-.field-markdown .preview th,
-.field-markdown .preview td {
-  border: var(--hairline) solid var(--line);
-  padding: 4px 10px;
-  text-align: left;
-}
-.field-markdown .preview th {
-  background: var(--bg-raised);
-  font-family: var(--font-display);
-  font-weight: 600;
-}
+.field-markdown .md-rendered figure.mermaid-diagram svg { max-width: 100%; height: auto; }
+.field-markdown .md-rendered pre.mermaid-error { border-left: 3px solid var(--danger, #b00020); }
+.field-markdown .md-rendered .mermaid-error-note { color: var(--text-muted, #666); font-size: 12px; margin: -6px 0 12px; }
 
 /*
  * Formatting toolbar (#133) — one slim strip per focused markdown field.
@@ -623,11 +595,11 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
   border-bottom: none;
   border-radius: var(--radius) var(--radius) 0 0;
 }
-.md-toolbar + .editor-host {
+.md-toolbar + .split .editor-host {
   border-top-left-radius: 0;
   border-top-right-radius: 0;
 }
-/* The table strip (#134) stacks above the formatting toolbar as one attached
+/* The table strip (#134, Markdown view only) stacks above the formatting toolbar as one attached
  * unit: it carries the top radius, and the toolbar beneath it squares off. */
 .md-toolbar.table-toolbar + .md-toolbar {
   border-top-left-radius: 0;
@@ -1106,7 +1078,7 @@ main.dashboard {
   text-align: center;
 }
 
-.field-markdown .preview img.asset-thumb {
+.field-markdown .md-rendered img.asset-thumb {
   display: block;
   width: 100%;
   max-width: 260px;
@@ -1116,24 +1088,15 @@ main.dashboard {
   margin: 6px 0 4px;
 }
 
-.field-markdown .preview .asset-source {
+.field-markdown .md-rendered .asset-source {
   font-size: 11px;
   color: var(--text-muted);
   font-style: italic;
   margin: 2px 0 8px;
   overflow-wrap: anywhere;
 }
-.field-markdown .preview .asset-source em { font-style: italic; }
+.field-markdown .md-rendered .asset-source em { font-style: italic; }
 
-/* Rendered view (#148) — images fill the content width (representative of the
- * exported .docx, which scales them to the page's text width) rather than the
- * 260px thumbnail cap the editor's split-preview reuses for editing convenience.
- * `height: auto` preserves aspect ratio while `max-width: 100%` lets the image
- * scale to the preview container that is itself `flex: 1 1 100%` in rendered
- * mode. Split/markdown previews keep the 260px cap above. */
-main[data-view-mode='rendered'] .field-markdown .preview img.asset-thumb {
-  max-width: 100%;
-}
 
 .modal-backdrop {
   display: flex;
@@ -1585,3 +1548,133 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-template-error { margin-top: 6px; }
 .defn-template-saved { color: var(--stamp-agreed-bg); font-weight: 600; }
 @media (max-width: 700px) { .defn-viewer-layout { grid-template-columns: 1fr; } }
+
+/* ---------- Visual view (#374, docs/adr/0033) ----------
+ * The same CodeMirror editor drawn the way the content reads (web/lib/visualMode.js):
+ * body type, no gutters, markdown markers hidden except on the caret's line. */
+.field-markdown .cm-editor.cm-visual .cm-content {
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 8px 10px;
+}
+.field-markdown .cm-editor.cm-visual .cm-gutters { display: none; }
+.field-markdown .cm-editor.cm-visual .cm-activeLine { background: transparent; }
+.cm-visual .cm-vh { font-family: var(--font-display); font-weight: 600; line-height: 1.35; }
+.cm-visual .cm-vh1 { font-size: 1.75em; }
+.cm-visual .cm-vh2 { font-size: 1.5em; }
+.cm-visual .cm-vh3 { font-size: 1.3em; }
+.cm-visual .cm-vh4 { font-size: 1.15em; }
+.cm-visual .cm-vh5 { font-size: 1.05em; }
+.cm-visual .cm-vh6 { font-size: 1em; color: var(--text-muted); }
+.cm-visual .cm-vstrong { font-weight: 700; }
+.cm-visual .cm-vem { font-style: italic; }
+.cm-visual .cm-vcode {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--bg);
+  padding: 1px 4px;
+  border-radius: var(--radius);
+}
+.cm-visual .cm-vlink { text-decoration: underline; text-underline-offset: 2px; }
+.cm-visual .cm-vquote { color: var(--text-muted); font-style: italic; }
+.cm-visual .cm-vcodeblock { font-family: var(--font-mono); font-size: 13px; background: var(--bg); }
+.cm-visual .cm-visual-image { display: block; }
+.cm-visual .cm-visual-image p { margin: 0; }
+.cm-visual .cm-visual-mermaid { margin: 6px 0; }
+.cm-visual .cm-visual-mermaid > .btn { margin: 4px 0 0; }
+
+/* The table grid: a real table over the pipe text. Columns share the width
+ * evenly — GFM has nowhere to store one, so there is deliberately no resize. */
+.vgrid-wrap { margin: 8px 0; position: relative; overflow-x: auto; padding-bottom: 2px; }
+table.vgrid { border-collapse: collapse; table-layout: fixed; width: 100%; font-size: 13px; }
+table.vgrid .vgrid-cell {
+  border: var(--hairline) solid var(--line);
+  padding: 4px 8px;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  background: var(--bg-raised);
+  cursor: text;
+}
+table.vgrid .vgrid-header .vgrid-cell { font-family: var(--font-display); font-weight: 600; background: var(--bg); }
+table.vgrid .vgrid-text { outline: none; min-height: 1.4em; white-space: pre-wrap; }
+.vgrid-wrap.readonly table.vgrid .vgrid-cell { cursor: default; }
+/* The whole cell is the editing target, so the whole cell lights up. */
+table.vgrid .vgrid-cell:focus-within { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+table.vgrid .vgrid-cell.selected,
+.vgrid-wrap.sel-all table.vgrid .vgrid-cell { background: color-mix(in srgb, var(--focus-ring) 14%, var(--bg-raised)); }
+.vgrid-wrap.sel-all table.vgrid { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+table.vgrid col.vgrid-handlecol { width: 20px; }
+table.vgrid .vgrid-handles th { border: none; padding: 0; height: 18px; position: relative; background: transparent; }
+table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; background: transparent; }
+/* Handles: invisible until the pointer nears their edge, or a menu pins them. */
+.vgrid-handle {
+  position: absolute;
+  background: var(--line);
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.12s;
+  cursor: grab;
+  touch-action: none;
+}
+.vgrid-colh .vgrid-handle { left: 2px; right: 2px; top: 3px; height: 11px; }
+.vgrid-rowh .vgrid-handle { top: 2px; bottom: 2px; left: 4px; width: 11px; }
+.vgrid-corner .vgrid-handle { left: 4px; top: 3px; width: 11px; height: 11px; cursor: pointer; }
+.vgrid-handle:hover { background: var(--line-strong); }
+.vgrid-wrap.show-cols .vgrid-colh .vgrid-handle,
+.vgrid-wrap.show-rows .vgrid-rowh .vgrid-handle,
+.vgrid-wrap.show-cols .vgrid-corner .vgrid-handle,
+.vgrid-wrap.show-rows .vgrid-corner .vgrid-handle,
+.vgrid-wrap.pinned .vgrid-handle { opacity: 1; }
+.vgrid-handle.on,
+.vgrid-colh.drop .vgrid-handle,
+.vgrid-rowh.drop .vgrid-handle { background: var(--focus-ring); opacity: 1; }
+.vgrid-wrap .vgrid-handle.dragging { cursor: grabbing; opacity: 0.5 !important; }
+
+.vgrid-menu {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 210px;
+  padding: 4px 0;
+  background: var(--bg-raised);
+  border: var(--border-strong) solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+}
+.vgrid-menu button {
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 7px 12px;
+  font: 12px var(--font-body);
+  color: var(--text);
+  cursor: pointer;
+}
+.vgrid-menu button:hover { background: var(--bg); }
+.vgrid-menu button.danger { color: var(--stamp-error-bg); }
+.vgrid-menu hr { border: none; border-top: var(--hairline) solid var(--line); margin: 4px 0; }
+.vgrid-popover {
+  position: fixed;
+  z-index: 20;
+  width: min(440px, 90vw);
+  padding: 10px;
+  background: var(--bg-raised);
+  border: var(--border-strong) solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+}
+.vgrid-popover textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 140px;
+  padding: 8px;
+  font: 12px/1.5 var(--font-mono);
+  color: var(--text);
+  background: var(--bg);
+  border: var(--hairline) solid var(--line);
+  resize: vertical;
+}
+.vgrid-popover-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.vgrid-popover-actions .btn { margin: 0; }

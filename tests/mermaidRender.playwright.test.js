@@ -96,14 +96,16 @@ test('a ```mermaid fence renders as an SVG in the preview, and a WASM Render emb
       await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}`)
       await page.waitForSelector('.module', { timeout: 10_000 })
 
-      // Preview: the fence is swapped for a figure holding a real <svg> once the bundle loads.
-      const figure = page.locator('.field-markdown .preview figure.mermaid-diagram svg').first()
+      // Visual view (#374): the fence is swapped for a figure holding a real <svg> once the bundle loads.
+      // The editor only draws what is on screen, and the diagram sits at the end of a long field.
+      await page.locator('.field-markdown').first().evaluate((el) => el.scrollIntoView({ block: 'end' }))
+      const figure = page.locator('.field-markdown .md-rendered figure.mermaid-diagram svg').first()
       await figure.waitFor({ state: 'visible', timeout: 30_000 })
       assert.ok(
         await page.evaluate(() => performance.getEntriesByType('resource').some((r) => r.name.includes('/node_modules/mermaid/dist/mermaid.esm.min.mjs'))),
         'the mermaid bundle must be served from node_modules, never a CDN'
       )
-      assert.equal(await page.locator('.field-markdown .preview pre > code.language-mermaid').count(), 0, 'no raw mermaid code block should remain in the preview')
+      assert.equal(await page.locator('.field-markdown .md-rendered pre > code.language-mermaid').count(), 0, 'no raw mermaid code block should remain in the drawing')
       assert.match(await figure.innerHTML(), /Gantry/, 'the rendered SVG should carry the diagram text')
 
       // The docx preparation step on its own, so a rasterisation failure is reported as itself
@@ -194,11 +196,11 @@ test('a Mermaid block with a syntax error keeps its source in the preview with a
       }, { slug })
       await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}`)
       await page.waitForSelector('.module', { timeout: 10_000 })
-      const note = page.locator('.field-markdown .preview .mermaid-error-note').first()
+      const note = page.locator('.field-markdown .md-rendered .mermaid-error-note').first()
       await note.waitFor({ state: 'visible', timeout: 30_000 })
       assert.match(await note.textContent(), /^Mermaid: /)
-      assert.equal(await page.locator('.field-markdown .preview pre.mermaid-error code.language-mermaid').count(), 1, 'the source stays visible')
-      const previewText = await page.locator('.field-markdown .preview').first().textContent()
+      assert.equal(await page.locator('.field-markdown .md-rendered pre.mermaid-error code.language-mermaid').count(), 1, 'the source stays visible')
+      const previewText = await page.locator('.field-markdown .cm-content').first().textContent()
       assert.ok(previewText.includes('Before.') && previewText.includes('After.'), 'surrounding prose still renders')
     } finally {
       await browser.close()

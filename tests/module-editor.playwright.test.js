@@ -12,12 +12,18 @@ import { withRunningServer } from './helpers/lifecycle.js'
 const ONE_PX_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
+// Picks a view from the editor's Mode ▾ dropdown (#374): Visual, Split or Markdown.
+async function chooseMode(page, label) {
+  await page.locator('.view-mode-dropdown').getByRole('button', { name: /^Mode/ }).click()
+  await page.getByRole('menuitemradio', { name: label, exact: true }).click()
+}
+
 // Minimal browser smoke test for the Preact/HTM-ported module editor (docs/adr/0006-preact-frontend-framework.md): confirms the real page loads with no console/page errors, and that a markdown field's edit -> save round-trips to the module file on disk — the same guarantee tests/server.test.js checks at the HTTP layer, exercised here through an actual rendered page and a real CodeMirror 6 editor instance.
 //
 // The module editor now lives at /instance/<slug> — the instance dashboard (#77) is the landing screen at / — so this navigates straight there rather than relying on a server-pinned default slug being shown at /. See tests/dashboard.playwright.test.js for the dashboard's own smoke test.
 
 // Coverage for WI259 — top-of-page Insert control that prepends a first section/list.
-test('top-of-page Insert ▾ prepends Section and List as first field, survives Save + reload, hidden in Rendered (WI259)', async () => {
+test('top-of-page Insert ▾ prepends Section and List as first field, survives Save + reload, and stays in every view (WI259)', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
@@ -61,15 +67,11 @@ test('top-of-page Insert ▾ prepends Section and List as first field, survives 
         await topTrigger.click()
         await topMenu.waitFor({ state: 'hidden', timeout: 5_000 })
 
-        // Hidden in Rendered view, like the per-field Insert.
-        await page.locator('.segmented').getByRole('button', { name: 'Rendered' }).click()
-        await topInsert.waitFor({ state: 'hidden', timeout: 5_000 })
-        assert.equal(await page.locator('[data-testid="top-insert"]').count(), 1, 'bar stays in DOM but hidden')
-        // Per-field inserts also hidden there.
-        const anyPerFieldInsert = page.locator('.field-markdown .insert-dropdown').first()
-        await anyPerFieldInsert.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
-        await page.locator('.segmented').getByRole('button', { name: 'Split' }).click()
-        await topInsert.waitFor({ state: 'visible', timeout: 5_000 })
+        // Every view is an editing view (#374), so the bar stays in all three.
+        for (const mode of ['Split', 'Markdown', 'Visual']) {
+          await chooseMode(page, mode)
+          await topInsert.waitFor({ state: 'visible', timeout: 5_000 })
+        }
 
         // Choosing Section prepends before the previously-first field.
         const beforeTitles = await contextModule.locator('.field > label').allTextContents()
@@ -132,10 +134,10 @@ test('top-of-page Insert ▾ prepends Section and List as first field, survives 
         assert.equal(reloadedAfterList[1].replace(/ \*$/, ''), 'Prepended Section')
         assert.equal(reloadedAfterList[2].replace(/ \*$/, ''), previouslyFirst)
 
-        // Still hidden in Rendered after reload.
-        await page.locator('.segmented').getByRole('button', { name: 'Rendered' }).click()
-        await page.locator('[data-testid="top-insert"]').waitFor({ state: 'hidden', timeout: 5_000 })
-        await page.locator('.segmented').getByRole('button', { name: 'Split' }).click()
+        // Still there in Markdown view after reload.
+        await chooseMode(page, 'Markdown')
+        await page.locator('[data-testid="top-insert"]').waitFor({ state: 'visible', timeout: 5_000 })
+        await chooseMode(page, 'Visual')
 
         assert.deepEqual(pageErrors, [])
       } finally {
@@ -160,7 +162,7 @@ test('top-of-page Insert ▾ prepends Section and List as first field, survives 
 
 // Coverage for WI263 — every per-field Insert ▾ now uses the same dashed
 // insertion-point bar as the top-of-page Insert from WI259.
-test('per-field Insert ▾ uses the shared dashed insert-bar and both bars hide in Rendered (WI263)', async () => {
+test('per-field Insert ▾ uses the shared dashed insert-bar and both bars stay in every view (WI263)', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
@@ -226,16 +228,12 @@ test('per-field Insert ▾ uses the shared dashed insert-bar and both bars hide 
         if (lightBorder !== darkBorder) assert.notEqual(darkBorder, lightBorder)
         await page.evaluate(() => document.documentElement.removeAttribute('data-theme'))
 
-        // Both hidden in Rendered view, like every other editing affordance.
-        await page.locator('.segmented').getByRole('button', { name: 'Rendered' }).click()
-        await topInsert.waitFor({ state: 'hidden', timeout: 5_000 })
-        // Per-field bars are conditionally removed in Rendered, so the locator is detached — waitFor hidden succeeds for both hidden and detached.
-        await perFieldBar.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
-        assert.equal(await page.locator('.insert-bar').evaluateAll((els) => els.filter((el) => getComputedStyle(el).display !== 'none' && el.offsetParent !== null).length), 0, 'no insert-bar should be visible in Rendered')
-        // Back to Split both reappear.
-        await page.locator('.segmented').getByRole('button', { name: 'Split' }).click()
-        await topInsert.waitFor({ state: 'visible', timeout: 5_000 })
-        await perFieldBar.waitFor({ state: 'visible', timeout: 5_000 })
+        // Every view is an editing view (#374): both bars stay put in all three.
+        for (const mode of ['Split', 'Markdown', 'Visual']) {
+          await chooseMode(page, mode)
+          await topInsert.waitFor({ state: 'visible', timeout: 5_000 })
+          await perFieldBar.waitFor({ state: 'visible', timeout: 5_000 })
+        }
 
         assert.deepEqual(pageErrors, [])
       } finally {
@@ -403,8 +401,8 @@ test('module editor: the header no longer has its own theme toggle (moved to Set
   }
 })
 
-// Coverage for #79 — the Markdown/Split/Rendered toolbar toggle, its keyboard hotkey, the state's global/session-only scope, and Rendered's enforced read-only behaviour.
-test('the 3-way view-mode toggle switches modes, cycles via hotkey, stays global across stage switches, and enforces read-only in Rendered', async () => {
+// Coverage for #79 and #374 — the Visual/Split/Markdown Mode dropdown, its keyboard hotkey, and the state's global/session-only scope. Read-only now belongs to archived instances only (tests/visual-mode.playwright.test.js).
+test('the Mode dropdown switches views, cycles via hotkey, and stays global across stage switches', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
@@ -425,36 +423,25 @@ test('the 3-way view-mode toggle switches modes, cycles via hotkey, stays global
         await page.waitForSelector('.module', { timeout: 10_000 })
 
         const main = page.locator('#modules')
-        const segmented = page.locator('.segmented')
+        const trigger = page.locator('.view-mode-dropdown').getByRole('button', { name: /^Mode/ })
 
-        // Defaults to Split on a fresh visit.
-        assert.equal(await main.getAttribute('data-view-mode'), 'split')
-        assert.equal(await segmented.locator('button.active').textContent(), 'Split')
+        // Defaults to Visual on a fresh visit.
+        assert.equal(await main.getAttribute('data-view-mode'), 'visual')
+        assert.equal((await trigger.textContent()).trim(), 'Mode: Visual ▾')
 
-        // Toolbar segmented control switches modes.
-        await segmented.getByRole('button', { name: 'Markdown' }).click()
+        // The dropdown switches views.
+        await chooseMode(page, 'Markdown')
         assert.equal(await main.getAttribute('data-view-mode'), 'markdown')
-        assert.equal(await segmented.locator('button.active').textContent(), 'Markdown')
+        assert.equal((await trigger.textContent()).trim(), 'Mode: Markdown ▾')
 
-        await segmented.getByRole('button', { name: 'Rendered' }).click()
-        assert.equal(await main.getAttribute('data-view-mode'), 'rendered')
-
-        // Rendered mode is enforced read-only: typing must not change the underlying CodeMirror doc (the editor pane is hidden, but the enforcement itself must not depend on that — verify the doc is unaffected even though the host element still exists in the DOM).
-        const firstField = page.locator('.field-markdown').first()
-        const before = await firstField.locator('.cm-content').textContent()
-        await firstField.locator('.cm-content').click({ force: true, timeout: 2000 }).catch(() => {})
-        await page.keyboard.type('should not land')
-        const after = await firstField.locator('.cm-content').textContent()
-        assert.equal(after, before, 'Rendered mode must reject direct edits')
-
-        // The hotkey (Ctrl+Shift+V) cycles: rendered -> markdown -> split.
+        // The hotkey (Ctrl+Shift+V) cycles in dropdown order: markdown -> visual -> split.
         await page.keyboard.press('Control+Shift+V')
-        assert.equal(await main.getAttribute('data-view-mode'), 'markdown')
+        assert.equal(await main.getAttribute('data-view-mode'), 'visual')
         await page.keyboard.press('Control+Shift+V')
         assert.equal(await main.getAttribute('data-view-mode'), 'split')
 
         // Switch to Markdown, then navigate to a different stage via the free-browse stage nav — the view-mode state is global to the whole editor screen, so it must hold steady, not reset per-stage.
-        await segmented.getByRole('button', { name: 'Markdown' }).click()
+        await chooseMode(page, 'Markdown')
         assert.equal(await main.getAttribute('data-view-mode'), 'markdown')
         const otherStageButton = page.locator('#stage-nav button').nth(1)
         await otherStageButton.click()
@@ -467,7 +454,7 @@ test('the 3-way view-mode toggle switches modes, cycles via hotkey, stays global
       }
     })
 
-    // A fresh visit (new page load) resets to Split, not persisted from the previous session.
+    // A fresh visit (new page load) resets to Visual, not persisted from the previous session.
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
       const browser = await launchBrowser()
       try {
@@ -475,7 +462,7 @@ test('the 3-way view-mode toggle switches modes, cycles via hotkey, stays global
         page.setDefaultTimeout(DEFAULT_TIMEOUT)
         await page.goto(`${base}/instance/examples`)
         await page.waitForSelector('.module', { timeout: 10_000 })
-        assert.equal(await page.locator('#modules').getAttribute('data-view-mode'), 'split')
+        assert.equal(await page.locator('#modules').getAttribute('data-view-mode'), 'visual')
       } finally {
         await browser.close()
       }
@@ -794,12 +781,7 @@ test("Image is a direct formatting-toolbar action and Insert offers only Section
         const firstField = contextModule.locator('.field-markdown').nth(0)
         const secondField = contextModule.locator('.field-markdown').nth(1)
 
-        // Hidden once the screen switches to Rendered-only view (that view is read-only).
         await assert.doesNotReject(firstTrigger.waitFor({ state: 'visible', timeout: 5_000 }))
-        await page.locator('.segmented').getByRole('button', { name: 'Rendered' }).click()
-        await assert.doesNotReject(firstTrigger.waitFor({ state: 'hidden', timeout: 5_000 }))
-        await page.locator('.segmented').getByRole('button', { name: 'Split' }).click()
-        await firstTrigger.waitFor({ state: 'visible', timeout: 5_000 })
 
         // The remaining Insert menu offers exactly Section / List.
         await firstTrigger.click()
@@ -811,7 +793,8 @@ test("Image is a direct formatting-toolbar action and Insert offers only Section
         )
         await firstTrigger.click()
 
-        // Image now opens from the FIRST field's formatting toolbar.
+        // Image now opens from the FIRST field's formatting toolbar — placed from Markdown view, where a click puts the caret in plain text.
+        await chooseMode(page, 'Markdown')
         await firstField.locator('.cm-content').click()
         await firstField.locator('.md-toolbar').getByRole('button', { name: 'Image', exact: true }).click()
 
@@ -837,12 +820,15 @@ test("Image is a direct formatting-toolbar action and Insert offers only Section
         await modal.getByRole('button', { name: 'Insert' }).click()
         await modal.waitFor({ state: 'hidden', timeout: 5_000 })
 
-        const firstPreview = contextModule.locator('.field-markdown .preview').nth(0)
-        await assert.doesNotReject(firstPreview.locator('img.asset-thumb').waitFor({ timeout: 5_000 }))
-        assert.equal(await firstPreview.locator('img.asset-thumb').count(), 1)
+        // Visual view (#374) draws the inserted image in place.
+        await chooseMode(page, 'Visual')
+        const firstPreview = contextModule.locator('.field-markdown').nth(0)
+        await assert.doesNotReject(firstPreview.locator('.cm-visual-image img.asset-thumb').waitFor({ timeout: 5_000 }))
+        assert.equal(await firstPreview.locator('.cm-visual-image img.asset-thumb').count(), 1)
 
         // "Choose existing" via the SECOND field's own toolbar — the insert
         // must land in the second field, not whichever one was focused last.
+        await chooseMode(page, 'Markdown')
         await secondField.locator('.cm-content').click()
         await secondField.locator('.md-toolbar').getByRole('button', { name: 'Image', exact: true }).click()
         await modal.waitFor({ state: 'visible', timeout: 5_000 })
@@ -850,16 +836,19 @@ test("Image is a direct formatting-toolbar action and Insert offers only Section
         await modal.locator('.grid-library .card').first().waitFor({ timeout: 5_000 })
         await modal.locator('.grid-library .card').first().click()
         await modal.waitFor({ state: 'hidden', timeout: 5_000 })
-        await assert.doesNotReject(secondField.locator('.preview img.asset-thumb').first().waitFor({ timeout: 5_000 }))
-        assert.equal(await firstPreview.locator('img.asset-thumb').count(), 1, 'the first field must be untouched')
+        await chooseMode(page, 'Visual')
+        await assert.doesNotReject(secondField.locator('.cm-visual-image img.asset-thumb').first().waitFor({ timeout: 5_000 }))
+        assert.equal(await firstPreview.locator('.cm-visual-image img.asset-thumb').count(), 1, 'the first field must be untouched')
 
         // Hand-typing the same `asset:<id>` convention directly into the markdown (bypassing the modal entirely) renders identically.
-        const assetHref = await firstPreview.locator('img.asset-thumb').first().getAttribute('src')
+        const assetHref = await firstPreview.locator('.cm-visual-image img.asset-thumb').first().getAttribute('src')
         const assetId = assetHref.match(/\/api\/instance\/assets\/([^/]+)\/file/)[1]
+        await chooseMode(page, 'Markdown')
         await secondField.locator('.cm-content').click()
         // insertText (one input event), not type (key-by-key) — CodeMirror's auto-close-brackets extension would otherwise pair every "(" typed with an immediate ")", making each intermediate keystroke briefly resolve to its own (broken, 404ing) partial image URL.
         await page.keyboard.insertText(`![Hand-typed](asset:${assetId})`)
-        await assert.doesNotReject(secondField.locator('.preview img.asset-thumb').nth(1).waitFor({ timeout: 5_000 }))
+        await chooseMode(page, 'Visual')
+        await assert.doesNotReject(secondField.locator('.cm-visual-image img.asset-thumb').nth(1).waitFor({ timeout: 5_000 }))
 
         assert.deepEqual(pageErrors, [])
 
@@ -971,12 +960,15 @@ test('toolbar Table opens a size grid whose pick inserts a live table with the c
         })
 
         await grid.locator('[data-row="2"][data-col="3"]').click()
-        await assert.doesNotReject(firstField.locator('.preview table').waitFor({ timeout: 5_000 }))
-        assert.equal(await firstField.locator('.preview table th').count(), 3)
-
-        // The caret landed in the first body cell, so the contextual strip
-        // is up without any further interaction.
-        await assert.doesNotReject(firstField.locator('.table-toolbar').waitFor({ state: 'visible', timeout: 5_000 }))
+        // Visual view (#374) draws the new table as a grid and puts the author
+        // straight into its first body cell; the grid's own handles replace
+        // Markdown view's contextual strip.
+        await assert.doesNotReject(firstField.locator('.vgrid-wrap').waitFor({ timeout: 5_000 }))
+        assert.equal(await firstField.locator('.vgrid-header .vgrid-cell').count(), 3)
+        await eventually(async () => {
+          assert.equal(await page.evaluate(() => document.activeElement?.dataset?.row), '2')
+        })
+        assert.equal(await firstField.locator('.table-toolbar').count(), 0)
 
         // Round-trip: save, then read the module file back off disk.
         await contextModule.getByRole('button', { name: 'Save Background and context' }).click()
@@ -1020,6 +1012,8 @@ test('Tab walks the cells, Enter appends a row from the last one, Shift-Tab retr
         await page.waitForSelector('.module', { timeout: 10_000 })
 
         const firstField = page.locator('.field-markdown').nth(0)
+        // The raw-text table flow is Markdown view's (#374).
+        await chooseMode(page, 'Markdown')
         await firstField.locator('.cm-content').click()
         await page.keyboard.press('ControlOrMeta+a')
 
@@ -1028,7 +1022,7 @@ test('Tab walks the cells, Enter appends a row from the last one, Shift-Tab retr
         const grid = firstField.locator('.table-picker-grid')
         await grid.waitFor({ state: 'visible', timeout: 5_000 })
         await grid.locator('[data-row="2"][data-col="2"]').click()
-        await assert.doesNotReject(firstField.locator('.preview table').waitFor({ timeout: 5_000 }))
+        await eventually(async () => assert.match(await docText(firstField), /\| Header 1 \| Header 2 \|/))
 
         // Walk the four cells with Tab, dropping a letter in each; the walk
         // skips the delimiter row by construction.
@@ -1049,7 +1043,9 @@ test('Tab walks the cells, Enter appends a row from the last one, Shift-Tab retr
           text,
           /\| Header 1 \| Header 2 \|\n\| -{8} \| -{8} \|\n\| {5}a {5}\| {5}b {5}\|\n\| {2}c \| {2}D \|\n\| {2}e \| {3}\|$/
         )
-        assert.equal(await firstField.locator('.preview td').count(), 6, 'three body rows × two columns')
+        // The same table in Visual view: three body rows × two columns.
+        await chooseMode(page, 'Visual')
+        assert.equal(await firstField.locator('.vgrid-body .vgrid-cell').count(), 6, 'three body rows × two columns')
         assert.deepEqual(pageErrors, [])
       } finally {
         await browser.close()
@@ -1080,6 +1076,8 @@ test('the contextual strip adds/removes rows and columns and cycles alignment (#
         await page.waitForSelector('.module', { timeout: 10_000 })
 
         const firstField = page.locator('.field-markdown').nth(0)
+        // The raw-text table flow is Markdown view's (#374).
+        await chooseMode(page, 'Markdown')
         await firstField.locator('.cm-content').click()
         await page.keyboard.press('ControlOrMeta+a')
 
@@ -1106,21 +1104,20 @@ test('the contextual strip adds/removes rows and columns and cycles alignment (#
         await strip.getByRole('button', { name: 'Add column right' }).click()
         await page.keyboard.type('y')
         await eventually(async () => {
-          assert.equal(await firstField.locator('.preview table th').count(), 3)
+          assert.equal((await docText(firstField)).split('\n')[0].split('|').length - 2, 3)
           assert.match(await docText(firstField), /\| {2}x \| ?y/)
         })
 
         // Alignment cycles on the caret's column: left -> centre.
         await strip.getByRole('button', { name: 'Cycle column alignment' }).click()
         await eventually(async () => {
-          assert.equal(await firstField.locator('.preview table th').nth(1).getAttribute('style'), 'text-align:center')
           assert.match(await docText(firstField), /\| -{8} \| :--+: \|/)
         })
 
         // Delete column takes the caret's column back out everywhere.
         await strip.getByRole('button', { name: 'Delete column' }).click()
         await eventually(async () => {
-          assert.equal(await firstField.locator('.preview table th').count(), 2)
+          assert.equal((await docText(firstField)).split('\n')[0].split('|').length - 2, 2)
         })
 
         // Delete row removes the caret's row (the one holding x/y).
@@ -1160,6 +1157,8 @@ test('a malformed pseudo-table degrades gracefully: no strip, no corruption (#13
         await page.waitForSelector('.module', { timeout: 10_000 })
 
         const firstField = page.locator('.field-markdown').nth(0)
+        // The raw-text table flow is Markdown view's (#374).
+        await chooseMode(page, 'Markdown')
         await firstField.locator('.cm-content').click()
         await page.keyboard.press('ControlOrMeta+a')
         // Ragged: two pipes up top, one below, no valid delimiter run.
@@ -1195,9 +1194,9 @@ test('a malformed pseudo-table degrades gracefully: no strip, no corruption (#13
   }
 })
 
-// Per #134's styling requirement: preview tables dress themselves purely from
+// Per #134's styling requirement: Visual grids (#374) dress themselves purely from
 // design tokens, so the same rules hold across light/dark/high-contrast.
-test('preview tables are token-styled in all three themes (#134)', async () => {
+test('Visual table grids are token-styled in all three themes (#134, #374)', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
@@ -1211,13 +1210,16 @@ test('preview tables are token-styled in all three themes (#134)', async () => {
         await page.waitForSelector('.module', { timeout: 10_000 })
 
         const firstField = page.locator('.field-markdown').nth(0)
+        // The raw-text table flow is Markdown view's (#374).
+        await chooseMode(page, 'Markdown')
         await firstField.locator('.cm-content').click()
         await page.keyboard.press('ControlOrMeta+a')
         await firstField.locator('.md-toolbar').getByRole('button', { name: 'Table', exact: true }).click()
         const grid = firstField.locator('.table-picker-grid')
         await grid.waitFor({ state: 'visible', timeout: 5_000 })
         await grid.locator('[data-row="2"][data-col="2"]').click()
-        const cell = firstField.locator('.preview td').first()
+        await chooseMode(page, 'Visual')
+        const cell = firstField.locator('.vgrid-body .vgrid-cell').first()
         await cell.waitFor({ timeout: 5_000 })
 
         let lightBorder = null
@@ -1331,8 +1333,8 @@ test('Insert ▾ → Section adds a titled custom field below the requesting fie
 
 // Coverage for #133 — the per-field formatting toolbar: it mounts only while
 // its own markdown field holds focus, moves with focus between fields,
-// vanishes on blur, and never appears in Rendered mode.
-test('formatting toolbar follows field focus, hides on blur, and never shows in Rendered (#133)', async () => {
+// and vanishes on blur — in every view (#374).
+test('formatting toolbar follows field focus and hides on blur, in every view (#133)', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
@@ -1374,6 +1376,8 @@ test('formatting toolbar follows field focus, hides on blur, and never shows in 
           'Image',
           'Table',
           'Headings',
+          'Undo',
+          'Redo',
         ]) {
           assert.equal(await toolbar.getByRole('button', { name, exact: true }).count(), 1, `${name} button`)
         }
@@ -1396,17 +1400,14 @@ test('formatting toolbar follows field focus, hides on blur, and never shows in 
         await page.locator('header h1').click()
         await toolbar.waitFor({ state: 'detached', timeout: 5_000 })
 
-        // Refocus brings it back; Rendered mode keeps it away even though the
-        // hidden editor still exists in the DOM.
+        // Refocus brings it back — in Split too, as one row for both panes (#374).
         await content.click()
         await toolbar.waitFor({ state: 'visible', timeout: 5_000 })
-        await page.locator('.segmented').getByRole('button', { name: 'Rendered' }).click()
-        await toolbar.waitFor({ state: 'detached', timeout: 5_000 })
-        await field.locator('.cm-content').click({ force: true }).catch(() => {})
-        await page.keyboard.type('no toolbar here')
-        assert.equal(await page.locator('.md-toolbar').count(), 0)
-
-        await page.locator('.segmented').getByRole('button', { name: 'Split' }).click()
+        await chooseMode(page, 'Split')
+        await field.locator('.visual-pane .cm-content').click()
+        await toolbar.waitFor({ state: 'visible', timeout: 5_000 })
+        assert.equal(await page.locator('.md-toolbar').count(), 1, 'one toolbar row for both panes')
+        await chooseMode(page, 'Visual')
         assert.deepEqual(pageErrors, [])
       } finally {
         await browser.close()
@@ -1601,9 +1602,9 @@ test('task list, blockquote, and horizontal rule write real markdown to disk (#1
   }
 })
 
-// Coverage for #133 — inline code, link, and code block produce previews the
-// renderer understands (the user-visible point of the raw markers).
-test("inline code, link, and code block buttons render real preview output (#133)", async () => {
+// Coverage for #133 — inline code, link, and code block produce markdown that
+// Visual view (#374) draws as code, a link and a code block.
+test("inline code, link, and code block buttons read as such in Visual view (#133, #374)", async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
@@ -1624,15 +1625,15 @@ test("inline code, link, and code block buttons render real preview output (#133
 
         const field = page.locator('.field-markdown').first()
         const toolbar = field.locator('.md-toolbar')
-        const preview = field.locator('.preview')
+        const preview = field.locator('.cm-visual')
         await field.locator('.cm-content').click()
 
-        // Inline code wraps the selection; the preview shows it as <code>.
+        // Inline code wraps the selection; Visual view draws it as code.
         await page.keyboard.press('ControlOrMeta+a')
         await page.keyboard.type('run gantry now')
         for (let i = 0; i < 11; i++) await page.keyboard.press('Shift+ArrowLeft')
         await toolbar.getByRole('button', { name: 'Inline code', exact: true }).click()
-        await assert.doesNotReject(preview.locator('code', { hasText: 'gantry now' }).waitFor({ timeout: 5_000 }))
+        await assert.doesNotReject(preview.locator('.cm-vcode', { hasText: 'gantry now' }).waitFor({ timeout: 5_000 }))
 
         // Link turns prose into [text](url) with the URL slot pre-selected,
         // so typing the address completes the link.
@@ -1642,16 +1643,16 @@ test("inline code, link, and code block buttons render real preview output (#133
         await toolbar.getByRole('button', { name: 'Link', exact: true }).click()
         await page.keyboard.type('https://example.dev/guide')
         await assert.doesNotReject(
-          preview.locator('a[href="https://example.dev/guide"]').waitFor({ timeout: 5_000 })
+          preview.locator('.cm-vlink', { hasText: 'see the docs' }).waitFor({ timeout: 5_000 })
         )
 
-        // Code block fences every line of the selection; preview shows <pre>.
+        // Code block fences every line of the selection; Visual draws it as a code block.
         await page.keyboard.press('ControlOrMeta+a')
         await page.keyboard.type('npm install\nnpm test')
         await page.keyboard.press('ControlOrMeta+a')
         await toolbar.getByRole('button', { name: 'Code block', exact: true }).click()
         await assert.doesNotReject(
-          preview.locator('pre', { hasText: 'npm install' }).waitFor({ timeout: 5_000 })
+          preview.locator('.cm-vcodeblock', { hasText: 'npm install' }).waitFor({ timeout: 5_000 })
         )
 
         assert.deepEqual(pageErrors, [])
@@ -1705,7 +1706,7 @@ test('B/I/S toolbar letters are visually self-demonstrating across all three the
   }
 })
 
-// Coverage for #135 — the sticky view bar: the Markdown/Split/Rendered bar
+// Coverage for #135 — the sticky view bar: the bar holding the Mode dropdown
 // pins to the top of the viewport once scrolled past (so view switching stays
 // reachable over long modules), and sits back below the header again at the
 // top of the page.
@@ -1786,7 +1787,9 @@ test('⤢ expands a field full-screen with both split panes and its toolbar; Esc
         await page.waitForSelector('.module', { timeout: 10_000 })
 
         const field = page.locator('.field-markdown').first()
-        const content = field.locator('.cm-content')
+        // Split view: source and Visual panes side by side (#374).
+        await chooseMode(page, 'Split')
+        const content = field.locator('.editor-pane .cm-content')
         const toolbar = field.locator('.md-toolbar')
 
         // The toolbar (and hence ⤢) mounts on focus.
@@ -1838,11 +1841,11 @@ test('⤢ expands a field full-screen with both split panes and its toolbar; Esc
         // all the way down to the row's bottom edge beneath it.
         const splitBox = await field.locator('.split').boundingBox()
         const paneBox = await field.locator('.editor-pane').boundingBox()
-        const previewBox = await field.locator('.preview').boundingBox()
+        const previewBox = await field.locator('.visual-pane').boundingBox()
         assert.ok(await field.locator('.editor-pane').isVisible(), 'editor pane visible while expanded')
-        assert.ok(await field.locator('.preview').isVisible(), 'preview pane visible while expanded')
+        assert.ok(await field.locator('.visual-pane').isVisible(), 'Visual pane visible while expanded')
         near(paneBox.height, splitBox.height, 2, 'editor pane fill')
-        near(previewBox.height, splitBox.height, 2, 'preview pane fill')
+        near(previewBox.height, splitBox.height, 2, 'Visual pane fill')
         near(paneBox.y + paneBox.height, splitBox.y + splitBox.height, 2, 'editor pane reaches the row bottom')
         assert.ok(splitBox.height > vp.height / 3, 'panes must genuinely fill most of the screen')
 
@@ -1850,8 +1853,8 @@ test('⤢ expands a field full-screen with both split panes and its toolbar; Esc
         await toolbar.waitFor({ state: 'visible', timeout: 5_000 })
         const tbBox = await toolbar.boundingBox()
         assert.ok(tbBox.y >= 0 && tbBox.y + tbBox.height <= vp.height, 'toolbar inside the viewport')
-        // …even once focus wanders into the preview pane — expansion pins it.
-        await field.locator('.preview').click()
+        // …even once focus wanders into the Visual pane — expansion pins it.
+        await field.locator('.visual-pane .cm-content').click()
         await toolbar.waitFor({ state: 'visible', timeout: 5_000 })
 
         // Insert is absent while the field is full-screen; its Section/List
@@ -1916,12 +1919,6 @@ test('⤢ expands a field full-screen with both split panes and its toolbar; Esc
           { timeout: 5_000 }
         )
 
-        // Rendered mode stays exactly as before: no formatting/full-screen
-        // affordances anywhere, read-only rules untouched.
-        await page.locator('.segmented').getByRole('button', { name: 'Rendered' }).click()
-        assert.equal(await page.locator('.md-toolbar').count(), 0)
-        await page.locator('.segmented').getByRole('button', { name: 'Split' }).click()
-
         assert.deepEqual(pageErrors, [])
       } finally {
         await browser.close()
@@ -1960,7 +1957,7 @@ test('asset source citation opens the served file rather than being swallowed by
         await page.waitForSelector('.module', { timeout: 10_000 })
 
         // The citation only appears once the asset manifest fetch resolves, so wait for it.
-        const citation = page.locator('.preview p.asset-source a').first()
+        const citation = page.locator('.cm-visual-image p.asset-source a').first()
         await assert.doesNotReject(citation.waitFor({ state: 'attached', timeout: 10_000 }))
 
         // A local source (the instance's own copy) is labelled by its stored path but linked to
@@ -1978,7 +1975,7 @@ test('asset source citation opens the served file rather than being swallowed by
 
         // In-page anchors stay in-page — a new tab would break heading navigation.
         const anchorTargets = await page.evaluate(() =>
-          [...document.querySelectorAll('.preview a[href^="#"]')].map((a) => a.getAttribute('target'))
+          [...document.querySelectorAll('.md-rendered a[href^="#"]')].map((a) => a.getAttribute('target'))
         )
         assert.ok(
           anchorTargets.every((t) => t === null),
