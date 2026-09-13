@@ -17,6 +17,14 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.6.1-beta — 2026-09-13
+
+### Fixed
+
+- **The Save button lines up with Mode** (WI #377). It sat lower than the
+  **Mode** dropdown beside it, with an oversized gap between them; it is now
+  level with it, spaced like the rest of the toolbar.
+
 ## 0.6.0-beta — 2026-09-13
 
 ### Changed

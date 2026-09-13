@@ -1598,7 +1598,10 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 
 /* Centralised Save (WI #376): blue only while something is unsaved. */
 .stage-save { display: inline-flex; align-items: center; gap: 8px; }
-.stage-save-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 8px; }
+/* No .btn margin here: it would drop the button below Mode and push Mode away. */
+.stage-save-btn { display: inline-flex; align-items: center; justify-content: center; margin: 0; padding: 4px 8px; }
+.stage-save-btn svg { display: block; width: 14px; height: 14px; }
+.stage-save-state:empty { display: none; }
 .stage-save-btn.primary { background: #1F5FBF; border-color: #1F5FBF; color: #FFFFFF; }
 .stage-save-state { font-size: 0.85rem; color: var(--text-muted); white-space: nowrap; }
 .stage-save-state.error { color: var(--stamp-error-bg); white-space: normal; }

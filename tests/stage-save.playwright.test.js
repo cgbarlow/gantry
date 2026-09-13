@@ -89,6 +89,12 @@ test('the Save button sits beside Mode, is ghosted until something changes, and 
     const toolbarLeft = page.locator('.toolbar-left')
     assert.equal(await toolbarLeft.locator('> *').first().locator('.stage-save-btn').count(), 1, 'Save comes first, left of the Mode dropdown')
     assert.equal(await saveButton(page).getAttribute('aria-label'), 'Save')
+    // Level with Mode, and no further from it than the toolbar's other controls are from each other (WI #377).
+    const save = await saveButton(page).boundingBox()
+    const mode = await page.locator('.view-mode-dropdown button').first().boundingBox()
+    const artefact = await page.locator('.artefact-selector').boundingBox()
+    assert.ok(Math.abs(save.y - mode.y) <= 1 && Math.abs(save.height - mode.height) <= 1, 'Save lines up with Mode')
+    assert.ok(Math.abs((mode.x - (save.x + save.width)) - (artefact.x - (mode.x + mode.width))) <= 1, 'Save sits one toolbar gap from Mode')
     await expectSaveButton(page, 'ghost')
     assert.match(await saveButton(page).getAttribute('title'), /nothing to save/)
 
