@@ -2,7 +2,7 @@
 import { html, render } from 'htm/preact'
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import { signal, effect, batch } from '@preact/signals'
-import { LocationProvider, Router, Route } from 'preact-iso'
+import { LocationProvider, Router, Route, useLocation } from 'preact-iso'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState, Compartment, Annotation, Transaction } from '@codemirror/state'
 // `keymap` lives in @codemirror/view (the same module 'codemirror' re-exports
@@ -26,6 +26,7 @@ import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } fro
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
 import { visualMode, refreshVisual, clearActiveCell, restoreActiveCell, activeCellSelection, focusTableCellAt } from './lib/visualMode.js'
 import { advancedMode } from './lib/advancedMode.js'
+import { modulePayload, payloadKey, savedFields, saveStatusLine } from './lib/stageSave.js'
 import { renderEngine } from './lib/renderEngine.js'
 import { warmLoadPandocWasm, renderDocxWithWasm } from './lib/pandocWasm.js'
 import { hydrateMermaidPreview, prepareMermaidForDocx } from './lib/mermaid.js'
@@ -1276,6 +1277,102 @@ function TableControlStrip({ run }) {
 // carrying its user event so the source editor's history groups it as typing.
 const paneSync = Annotation.define()
 
+// ---------- Centralised Save (WI #376) ----------
+// One Save for the whole stage. ModuleEditorPage owns the behaviour and
+// installs it in `stageSaveActions`; the toolbar button, the stage buttons,
+// Render, Advance and sign-off all go through it.
+
+// Bumped at most once per task whenever a field's text changes, so the stage's
+// unsaved state is re-checked without re-rendering the page on every key.
+const contentEdits = signal(0)
+let contentEditQueued = false
+function noteContentEdit() {
+  if (contentEditQueued) return
+  contentEditQueued = true
+  queueMicrotask(() => {
+    contentEditQueued = false
+    contentEdits.value += 1
+  })
+}
+
+// `dirtyModuleIds`: the stage's modules whose content differs from what's saved.
+// `phase`: 'idle' | 'saving' | 'saved' | 'error' (with `message`).
+const IDLE_STAGE_SAVE = { dirtyModuleIds: [], phase: 'idle', message: '' }
+const stageSave = signal(IDLE_STAGE_SAVE)
+// Each module card's "Saved — …" line, by module id.
+const moduleSaveStatus = signal({})
+const NO_STAGE_SAVE = { save: async () => true, confirmLeave: async () => true }
+let stageSaveActions = NO_STAGE_SAVE
+// Browser back/forward fires popstate on the window itself, where listeners run
+// in the order they were added — so this one is added now, before the router
+// mounts its own, letting the editor's guard stop the router seeing the event.
+let popStateGuard = null
+window.addEventListener('popstate', (e) => popStateGuard?.(e))
+
+// For actions that must not run over unsaved edits (Render, Advance, sign-off):
+// asks Save / Discard / Cancel first, and runs the action unless the author
+// cancelled or their save failed.
+function afterUnsavedCheck(action) {
+  return async (...args) => {
+    if (await stageSaveActions.confirmLeave()) return action(...args)
+  }
+}
+
+function DiskIcon() {
+  return html`
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M5 3h11l5 5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+      <path d="M7 3v5h8V3" />
+      <rect x="7" y="13" width="10" height="8" />
+    </svg>
+  `
+}
+
+// The disk button at the top left of the editor toolbar: blue only while
+// something differs from what's saved.
+function StageSaveButton() {
+  const { dirtyModuleIds, phase, message } = stageSave.value
+  const count = dirtyModuleIds.length
+  const shortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘S' : 'Ctrl+S'
+  const title = count
+    ? `Save (${shortcut}) — ${count} module${count === 1 ? '' : 's'} with changes`
+    : `Save (${shortcut}) — nothing to save`
+  const state = { saving: 'Saving…', saved: 'Saved', error: message }[phase] ?? ''
+  return html`
+    <span class="stage-save">
+      <button
+        type="button"
+        class=${'btn small stage-save-btn' + (count ? ' primary' : ' ghost')}
+        aria-label="Save"
+        title=${title}
+        disabled=${!count || phase === 'saving'}
+        onClick=${() => stageSaveActions.save()}
+      >
+        <${DiskIcon} />
+      </button>
+      <span class=${'stage-save-state' + (phase === 'error' ? ' error' : '')} role="status">${state}</span>
+    </span>
+  `
+}
+
+function UnsavedChangesDialog({ count, onAnswer }) {
+  const saveRef = useRef(null)
+  useEffect(() => saveRef.current?.focus(), [])
+  return html`
+    <${Modal} ariaLabel="Unsaved changes" onClose=${() => onAnswer('cancel')}>
+      <h3>Save your changes?</h3>
+      <p class="guidance">
+        ${count === 1 ? 'One module on this stage has' : `${count} modules on this stage have`} unsaved changes.
+      </p>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" onClick=${() => onAnswer('cancel')}>Cancel</button>
+        <button type="button" class="btn" onClick=${() => onAnswer('discard')}>Discard</button>
+        <button type="button" class="btn primary" ref=${saveRef} onClick=${() => onAnswer('save')}>Save</button>
+      </div>
+    <//>
+  `
+}
+
 function forwardChanges(transactions, target) {
   if (!target) return
   for (const tr of transactions) {
@@ -1378,6 +1475,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
         wrapCompartment.of(wrap.value ? EditorView.lineWrapping : []),
         visualCompartment.of(viewMode.value === 'visual' ? visualLayer() : []),
         EditorView.updateListener.of((update) => {
+          if (update.docChanged) noteContentEdit()
           // Selection moves count too — Tab-walking cells must flip the strip
           // on/off as the caret crosses the table's edge.
           if (update.docChanged || update.selectionSet) {
@@ -1650,7 +1748,10 @@ function autosizeTextarea(el) {
 function ListField({ field, moduleId, onRegister, onRemove, onRequestSection, onRequestList }) {
   const rowsRef = useRef(field.value?.length ? [...field.value] : [''])
   const [, bump] = useState(0)
-  const rerender = () => bump((n) => n + 1)
+  const rerender = () => {
+    bump((n) => n + 1)
+    noteContentEdit()
+  }
 
   useEffect(() => {
     onRegister({
@@ -1727,9 +1828,10 @@ function ListField({ field, moduleId, onRegister, onRemove, onRequestSection, on
   `
 }
 
-// ---------- One module's card: fields + its own Save button/status ----------
-function ModuleCard({ mod, stageId, onFieldRegistered, visibleFieldIds }) {
-  const [status, setStatus] = useState('')
+// ---------- One module's card: fields + its save status line ----------
+// Saving is stage-wide (WI #376, the toolbar's Save); the card keeps only the
+// "Saved — complete / outstanding" line for its own module.
+function ModuleCard({ mod, onFieldRegistered, visibleFieldIds }) {
   // Which markdown field the image-insert modal targets: the one whose own
   // toolbar Image action was clicked (#180 — no more module-level affordance
   // guessing from focus). Null = closed.
@@ -1740,73 +1842,6 @@ function ModuleCard({ mod, stageId, onFieldRegistered, visibleFieldIds }) {
   const [listAfterId, setListAfterId] = useState(null)
   // Editor controls keyed by FIELD ID (not array index): inserting a Section shifts every later field's display index without remounting it (components are keyed by field id), so index-keyed lookups would go stale mid-session. Ids never shift.
   const controlsRef = useRef({})
-
-  async function handleSave() {
-    const fields = {}
-    // The document's section sequence, replayed for the writer (#132): defined fields and custom fields in exactly the displayed order, so a Section inserted below its neighbour stays there across save/reload.
-    const layout = []
-    mod.fields.forEach((field) => {
-      // Hidden fields are not mounted while an artefact is selected. Keep
-      // their current value instead of clearing them on a save from the
-      // filtered view.
-      const value = !visibleFieldIds || visibleFieldIds.has(`${mod.id}.${field.id}`)
-        ? controlsRef.current[field.id]?.getValue() ?? field.value
-        : field.value
-      fields[field.id] = value
-      layout.push(
-        field.custom ? { custom: { id: field.id, title: field.title, type: field.type, value } } : { field: field.id }
-      )
-    })
-    setStatus('Saving…')
-
-    // A local-workspace instance (ADR-0029, WI #297) saves straight through
-    // the directory handle — no server round-trip, so this keeps working
-    // with the gantry server unreachable (ADR-0029's "Offline" section).
-    // Completeness is now the real `getLocalStatus` (`web/lib/localStatus.js`,
-    // WI #313) — the same gate-aware, artefact-aware computation the
-    // server-hosted path's `getStatus` runs below, ported to run client-side
-    // — not the field's-own-`required`-flag approximation this used before
-    // that port existed.
-    const instanceForSave = instanceData.value
-    if (instanceForSave?.isLocalWorkspace) {
-      try {
-        const handle = localDirHandle.value
-        if (!handle) throw new Error('Local workspace folder is not open.')
-        const moduleSpec = {
-          id: mod.id,
-          title: mod.title,
-          fields: mod.fields.filter((f) => !f.custom).map((f) => ({ id: f.id, title: f.title, type: f.type })),
-        }
-        const text = renderLocalModuleInstanceFile(mod.id, moduleSpec, { status: mod.status, owner: mod.owner, fields, layout })
-        await writeLocalTextFile(handle, localModuleFilesPath(instanceForSave.slug, mod.id), text)
-        const localStatus = await getLocalStatus(handle, instanceForSave.slug, instanceForSave.localDefinitionStructure, stageId)
-        const thisModule = localStatus.modules.find((m) => m.id === mod.id)
-        setStatus(
-          thisModule?.complete ? 'Saved — complete.' : `Saved — outstanding: ${thisModule?.outstanding.join(', ') || 'none'}`
-        )
-      } catch (err) {
-        setStatus(`Save failed: ${err.message}`)
-      }
-      return
-    }
-
-    // `slug` is required here (not just `stage`) now that a server can host any number of instances at once with no fixed default (#88/#92) — without it, this PUT only ever resolved against whichever slug (if any) the server happened to be started with, silently 400ing for every other instance a multi-instance deployment serves. Surfaced by #94's own "Open instance ... allows editing end-to-end" acceptance criterion once a freshly adopted/created instance had no such server-pinned default to fall back on.
-    const params = new URLSearchParams({ stage: stageId, slug: currentSlug.value })
-    const res = await apiFetchForInstance(currentSlug.value, `/api/instance/modules/${mod.id}?${params}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: mod.status, owner: mod.owner, fields, layout }),
-    })
-    if (!res.ok) {
-      setStatus('Save failed.')
-      return
-    }
-    const instanceStatus = await res.json()
-    const thisModule = instanceStatus.modules.find((m) => m.id === mod.id)
-    setStatus(
-      thisModule?.complete ? 'Saved — complete.' : `Saved — outstanding: ${thisModule?.outstanding.join(', ') || 'none'}`
-    )
-  }
 
   function handleInsertImage(asset) {
     // Prime the source map so the just-inserted image's citation renders immediately, without waiting for the next async fetchAssets round-trip.
@@ -1899,10 +1934,7 @@ function ModuleCard({ mod, stageId, onFieldRegistered, visibleFieldIds }) {
               onRequestList=${() => setListAfterId(field.id)}
             />`
       })}
-      <div class="save-status">${status}</div>
-      ${!isArchived()
-        ? html`<button type="button" class="btn primary" onClick=${handleSave}>Save ${mod.title}</button>`
-        : null}
+      <div class="save-status">${moduleSaveStatus.value[mod.id] ?? ''}</div>
       ${imageFieldId !== null
         ? html`<${AssetInsertModal} onInsert=${handleInsertImage} onClose=${() => setImageFieldId(null)} />`
         : null}
@@ -2287,7 +2319,7 @@ function RenderDialog({ instance, onClose }) {
     if (!artefacts.length) return
     setRendering(true)
     const lines = []
-    // See ModuleCard's handleSave for why `?slug=` is required here now — the same gap, for the module editor's own "Render" action.
+    // See the stage save (ModuleEditorPage's saveStage) for why `?slug=` is required here now — the same gap, for the module editor's own "Render" action.
     const slug = currentSlug.value
     for (const artefact of artefacts) {
       setStatus([...lines, { text: `Rendering ${artefact.title}…` }])
@@ -3087,7 +3119,7 @@ function SyncedFieldsPanel({ instance }) {
                 <div class="review-signoff-header">
                   <span class="field-label">Sign-off</span>
                   ${!openPullRequestId && isCurrentStage
-                    ? html`<button type="button" class="btn small" onClick=${handleCheckAndMaybeRequestSignoff}>Request Sign-off</button>`
+                    ? html`<button type="button" class="btn small" onClick=${afterUnsavedCheck(handleCheckAndMaybeRequestSignoff)}>Request Sign-off</button>`
                     : null}
                 </div>
                 ${openPullRequestId
@@ -3120,7 +3152,7 @@ function SyncedFieldsPanel({ instance }) {
                       ${pullRequestIsActive && isCurrentStage && approvalInvalidated
                         ? html`
                             <div class="signoff-actions">
-                              <button type="button" class="btn small" onClick=${handleConfirmSignoffRequest}>Request Sign-off again</button>
+                              <button type="button" class="btn small" onClick=${afterUnsavedCheck(handleConfirmSignoffRequest)}>Request Sign-off again</button>
                             </div>
                           `
                         : null}
@@ -3375,7 +3407,7 @@ function AdvanceStagePanel({ instance }) {
   return html`
     <section class="advance-stage-panel">
       <h2>Stage advancement</h2>
-      <button type="button" class="btn" onClick=${handleCheckAndMaybeConfirm}>Advance to next stage</button>
+      <button type="button" class="btn" onClick=${afterUnsavedCheck(handleCheckAndMaybeConfirm)}>Advance to next stage</button>
       <div class="save-status">${status}</div>
       ${confirming
         ? html`
@@ -3692,6 +3724,7 @@ function ViewModeToolbar({
   return html`
     <div class="toolbar">
       <div class="toolbar-left">
+        ${!isArchived() ? html`<${StageSaveButton} />` : null}
         <${Dropdown}
           className="view-mode-dropdown"
           triggerLabel=${`Mode: ${VIEW_MODE_LABELS[viewMode.value]} ▾`}
@@ -3737,7 +3770,7 @@ function ViewModeToolbar({
       <div class="toolbar-actions">
         <button type="button" class=${'btn small' + (wrap.value ? ' active' : '')} aria-pressed=${wrap.value} onClick=${() => (wrap.value = !wrap.value)}>Wrap</button>
         <button type="button" class="btn" onClick=${onClearAllFields}>Clear all fields</button>
-        <button type="button" class="btn primary" onClick=${() => setRenderOpen(true)}>Render</button>
+        <button type="button" class="btn primary" onClick=${afterUnsavedCheck(() => setRenderOpen(true))}>Render</button>
         ${requestApprovalSlug
           ? html`<button type="button" class="btn request-approval-btn" onClick=${scrollToApprovalPanel}>Review / Sign-off</button>`
           : null}
@@ -3992,7 +4025,7 @@ function AppHeader({ instance }) {
               type="button"
               key=${stage.id}
               class=${'btn small' + (isViewed ? ' active' : '') + (isCurrent ? ' stage-current' : '')}
-              onClick=${() => (viewedStage.value = stage.id)}
+              onClick=${isViewed ? undefined : afterUnsavedCheck(() => (viewedStage.value = stage.id))}
             >
               ${stage.title}${isCurrent ? ' (current)' : ''}
             </button>
@@ -4095,8 +4128,249 @@ function ModuleEditorPage({ slug: routeRef }) {
   // wiping them out) — registerField itself detects a stage change and
   // resets synchronously before recording the new field, so there's no
   // window where a genuinely-current registration can be discarded.
-  const registryRef = useRef({ stageId: null, entries: [] })
+  const registryRef = useRef({ stageKey: null, entries: [] })
   const selectionContextRef = useRef({ slug: null, stageId: null })
+
+  // ---- Centralised Save (WI #376) ----
+  // A module is unsaved while its fields and layout differ from what was
+  // loaded or last saved — a comparison, not an edit flag, so undoing back to
+  // the saved text makes it clean again. Everything here reads signals and
+  // refs, never this render's `instance`, because the listeners below are
+  // installed once.
+  const savedRef = useRef({ key: null, payloads: new Map(), keys: new Map() })
+  const [leavePrompt, setLeavePrompt] = useState(null)
+  const locationRef = useRef(null)
+  locationRef.current = useLocation()
+  const editorUrlRef = useRef(null)
+  const stageKey = (inst) => `${inst.slug}|${inst.stage.id}`
+
+  // Live field values for one module, from the editors mounted for this stage.
+  function liveValues(inst, moduleId) {
+    if (registryRef.current.stageKey !== stageKey(inst)) return () => undefined
+    const controls = new Map()
+    for (const entry of registryRef.current.entries) {
+      if (entry.moduleId === moduleId) controls.set(entry.field.id, entry.control)
+    }
+    return (field) => controls.get(field.id)?.getValue()
+  }
+
+  function currentPayload(inst, mod) {
+    return modulePayload(mod, liveValues(inst, mod.id))
+  }
+
+  // The saved baseline comes from the loaded data itself, so it never depends
+  // on when the editors mount.
+  function captureSaved(inst) {
+    if (savedRef.current.key === stageKey(inst)) return
+    const payloads = new Map(inst.modules.map((mod) => [mod.id, modulePayload(mod)]))
+    savedRef.current = {
+      key: stageKey(inst),
+      payloads,
+      keys: new Map([...payloads].map(([id, payload]) => [id, payloadKey(payload)])),
+    }
+    batch(() => {
+      moduleSaveStatus.value = {}
+      stageSave.value = IDLE_STAGE_SAVE
+    })
+  }
+
+  function refreshDirty() {
+    const inst = instanceData.value
+    if (!inst?.stage || inst.slug !== currentSlug.peek()) return
+    captureSaved(inst)
+    const ids = inst.modules
+      .filter((mod) => payloadKey(currentPayload(inst, mod)) !== savedRef.current.keys.get(mod.id))
+      .map((mod) => mod.id)
+    const current = stageSave.peek()
+    if (ids.join('\n') !== current.dirtyModuleIds.join('\n')) stageSave.value = { ...current, dirtyModuleIds: ids }
+  }
+
+  // Writes only the changed modules: through the folder handle for a local
+  // workspace (works offline, ADR-0029), otherwise one request — one commit on
+  // an Azure-DevOps-backed stage branch. Resolves true when the save worked.
+  async function saveStage() {
+    refreshDirty()
+    const inst = instanceData.peek()
+    const { dirtyModuleIds, phase } = stageSave.peek()
+    if (!inst?.stage || isArchived() || phase === 'saving') return false
+    if (dirtyModuleIds.length === 0) return true
+    const key = stageKey(inst)
+    const payloads = Object.fromEntries(
+      dirtyModuleIds.map((id) => [id, currentPayload(inst, inst.modules.find((mod) => mod.id === id))])
+    )
+    stageSave.value = { ...stageSave.peek(), phase: 'saving', message: '' }
+    try {
+      let statusModules
+      if (inst.isLocalWorkspace) {
+        const handle = localDirHandle.peek()
+        if (!handle) throw new Error('Local workspace folder is not open.')
+        for (const id of dirtyModuleIds) {
+          const mod = inst.modules.find((m) => m.id === id)
+          const moduleSpec = {
+            id: mod.id,
+            title: mod.title,
+            fields: mod.fields.filter((f) => !f.custom).map((f) => ({ id: f.id, title: f.title, type: f.type })),
+          }
+          await writeLocalTextFile(handle, localModuleFilesPath(inst.slug, id), renderLocalModuleInstanceFile(id, moduleSpec, payloads[id]))
+        }
+        statusModules = (await getLocalStatus(handle, inst.slug, inst.localDefinitionStructure, inst.stage.id)).modules
+      } else {
+        const params = new URLSearchParams({ stage: inst.stage.id, slug: inst.slug })
+        const res = await apiFetchForInstance(inst.slug, `/api/instance/modules?${params}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ modules: payloads }),
+        })
+        const body = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(body.message ?? body.error ?? `the server answered ${res.status}`)
+        statusModules = body.modules ?? []
+      }
+      if (savedRef.current.key === key) {
+        for (const id of dirtyModuleIds) {
+          savedRef.current.payloads.set(id, payloads[id])
+          savedRef.current.keys.set(id, payloadKey(payloads[id]))
+        }
+      }
+      batch(() => {
+        moduleSaveStatus.value = {
+          ...moduleSaveStatus.peek(),
+          ...Object.fromEntries(dirtyModuleIds.map((id) => [id, saveStatusLine(statusModules.find((m) => m.id === id))])),
+        }
+        stageSave.value = { ...stageSave.peek(), phase: 'saved', message: '' }
+      })
+      refreshDirty()
+      setTimeout(() => {
+        if (stageSave.peek().phase === 'saved') stageSave.value = { ...stageSave.peek(), phase: 'idle' }
+      }, 2500)
+      return true
+    } catch (err) {
+      stageSave.value = { ...stageSave.peek(), phase: 'error', message: `Save failed: ${err.message}` }
+      return false
+    }
+  }
+
+  // Puts every unsaved module back to what's saved: editor text, list rows,
+  // and any sections or lists inserted or removed since.
+  function discardDrafts() {
+    const inst = instanceData.peek()
+    const { dirtyModuleIds } = stageSave.peek()
+    if (!inst?.stage || savedRef.current.key !== stageKey(inst) || dirtyModuleIds.length === 0) return
+    if (registryRef.current.stageKey === stageKey(inst)) {
+      const latest = new Map(registryRef.current.entries.map((entry) => [`${entry.moduleId}.${entry.field.id}`, entry]))
+      for (const { field, control, moduleId } of latest.values()) {
+        const saved = dirtyModuleIds.includes(moduleId) ? savedRef.current.payloads.get(moduleId) : null
+        if (!saved || !(field.id in saved.fields)) continue
+        if (JSON.stringify(control.getValue()) !== JSON.stringify(saved.fields[field.id])) control.setValue(saved.fields[field.id])
+      }
+    }
+    instanceData.value = {
+      ...inst,
+      modules: inst.modules.map((mod) =>
+        dirtyModuleIds.includes(mod.id) ? { ...mod, fields: savedFields(mod, savedRef.current.payloads.get(mod.id)) } : mod
+      ),
+    }
+  }
+
+  // Save / Discard / Cancel when there's unsaved work; resolves true to go ahead.
+  function confirmLeave() {
+    refreshDirty()
+    if (stageSave.peek().dirtyModuleIds.length === 0) return Promise.resolve(true)
+    return new Promise((resolve) =>
+      setLeavePrompt((previous) => {
+        previous?.resolve(false)
+        return { resolve }
+      })
+    )
+  }
+
+  async function answerLeavePrompt(choice) {
+    const prompt = leavePrompt
+    setLeavePrompt(null)
+    if (!prompt) return
+    if (choice === 'save') {
+      prompt.resolve(await saveStage())
+    } else if (choice === 'discard') {
+      discardDrafts()
+      prompt.resolve(true)
+    } else {
+      prompt.resolve(false)
+    }
+  }
+
+  stageSaveActions = { save: saveStage, confirmLeave }
+
+  useEffect(() => {
+    editorUrlRef.current = window.location.pathname + window.location.search
+  })
+
+  useEffect(() => {
+    const stopDirtyTracking = effect(() => {
+      void contentEdits.value
+      refreshDirty()
+    })
+    const hasUnsaved = () => stageSave.peek().dirtyModuleIds.length > 0
+    let returningFromPrompt = false
+
+    // In-app links (← Workspaces, Switch instance, User Guide, Settings…) are
+    // caught before the router sees them.
+    function onClick(e) {
+      if (!hasUnsaved() || e.button !== 0 || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+      const link = e.composedPath().find((node) => node.nodeName === 'A' && node.href)
+      if (!link || link.origin !== window.location.origin || link.download) return
+      if (link.target && !/^_?self$/i.test(link.target)) return
+      if (/^#/.test(link.getAttribute('href') ?? '')) return
+      if (link.pathname === window.location.pathname && link.search === window.location.search) return
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      const url = link.href.replace(window.location.origin, '')
+      stageSaveActions.confirmLeave().then((ok) => ok && locationRef.current.route(url))
+    }
+
+    // Browser back/forward has already moved by the time popstate fires: put
+    // the editor's entry back, ask, and only then really go.
+    function onPopState(e) {
+      if (returningFromPrompt) {
+        returningFromPrompt = false
+        return
+      }
+      const here = window.location.pathname + window.location.search
+      if (!hasUnsaved() || here === editorUrlRef.current) return
+      e.stopImmediatePropagation()
+      history.pushState(null, '', editorUrlRef.current)
+      stageSaveActions.confirmLeave().then((ok) => {
+        if (!ok) return
+        returningFromPrompt = true
+        history.back()
+      })
+    }
+
+    function onBeforeUnload(e) {
+      if (!hasUnsaved()) return
+      e.preventDefault()
+      e.returnValue = ''
+    }
+
+    // Captured at the window so it also works inside editors and table cells.
+    function onKeyDown(e) {
+      if (e.key?.toLowerCase() !== 's' || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return
+      e.preventDefault()
+      if (hasUnsaved()) stageSaveActions.save()
+    }
+
+    window.addEventListener('click', onClick, true)
+    popStateGuard = onPopState
+    window.addEventListener('beforeunload', onBeforeUnload)
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      stopDirtyTracking()
+      window.removeEventListener('click', onClick, true)
+      popStateGuard = null
+      window.removeEventListener('beforeunload', onBeforeUnload)
+      window.removeEventListener('keydown', onKeyDown, true)
+      stageSaveActions = NO_STAGE_SAVE
+      stageSave.value = IDLE_STAGE_SAVE
+    }
+  }, [])
 
   useEffect(() => {
     if (!instance) return
@@ -4109,8 +4383,8 @@ function ModuleEditorPage({ slug: routeRef }) {
   }, [instance?.slug, instance?.stage?.id])
 
   function registerField(field, control, moduleId) {
-    if (registryRef.current.stageId !== instance.stage.id) {
-      registryRef.current = { stageId: instance.stage.id, entries: [] }
+    if (registryRef.current.stageKey !== stageKey(instance)) {
+      registryRef.current = { stageKey: stageKey(instance), entries: [] }
     }
     registryRef.current.entries.push({ field, control, moduleId })
   }
@@ -4165,6 +4439,8 @@ function ModuleEditorPage({ slug: routeRef }) {
       }
       setSyncStatus('Synced — refreshing…')
       const data = await loadInstance(instance.slug, instance.stage.id)
+      // What's saved just changed underneath the editors.
+      savedRef.current = { key: null, payloads: new Map(), keys: new Map() }
       instanceData.value = data
       setSyncStatus('')
     } catch (err) {
@@ -4236,6 +4512,9 @@ function ModuleEditorPage({ slug: routeRef }) {
       visibleFieldIds=${visibleFieldIds}
       onFieldRegistered=${registerField}
     />
+    ${leavePrompt
+      ? html`<${UnsavedChangesDialog} count=${stageSave.value.dirtyModuleIds.length} onAnswer=${answerLeavePrompt} />`
+      : null}
   `
 }
 

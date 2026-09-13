@@ -31,6 +31,8 @@ established, now gating "open the PR" instead of "push a work-item state").
 Gantry renders the artefact and commits it to the branch automatically on
 every save throughout the stage, so the PR's diff always includes both the
 module files and the actual generated document, not just markdown.
+(Superseded by ADR-0034: documents are now rendered and committed only when
+the author clicks Render, never on save.)
 
 Detecting the Owner's approval still uses the same shape ADR-0012 chose —
 an explicit, user-triggered "Check status" action, never polling or a

@@ -141,7 +141,7 @@ test('local-workspace instance: loads, saves offline-safe, gate-checks, advances
       await page.goto(`${base}/instance/${slug}?local=${encodeURIComponent(workspaceId)}`)
       await page.waitForSelector('.module', { timeout: 10_000 })
       const contextModule = page.locator('.module').first()
-      await assert.doesNotReject(contextModule.getByRole('button', { name: /^Save /, exact: false }).first().waitFor({ timeout: 5_000 }))
+      await assert.doesNotReject(page.locator('.toolbar .stage-save-btn').waitFor({ timeout: 5_000 }))
 
       // A real field value from the seeded module file shows in the editor.
       const problemField = page.locator('.field-markdown .cm-content').first()
@@ -157,7 +157,7 @@ test('local-workspace instance: loads, saves offline-safe, gate-checks, advances
       // ---- Save: edits the first field and writes straight through the handle, no server round-trip ----
       await problemField.click()
       await page.keyboard.type(' — edited locally.')
-      await page.locator('.module').first().getByRole('button', { name: 'Save Background and context' }).click()
+      await page.getByRole('button', { name: 'Save', exact: true }).click()
       await page.waitForSelector('.save-status:has-text("Saved")', { timeout: 5_000 })
 
       const backgroundOnDisk = await readOpfsFile(page, `gantry-workspace/${slug}/modules/background.md`)
@@ -324,7 +324,7 @@ test('local-workspace instance: status, gate check and advance run entirely clie
       const problemField = page.locator('.field-markdown .cm-content').first()
       await problemField.click()
       await page.keyboard.type(' — saved while offline.')
-      await page.locator('.module').first().getByRole('button', { name: 'Save Background and context' }).click()
+      await page.getByRole('button', { name: 'Save', exact: true }).click()
       await page.waitForSelector('.save-status:has-text("Saved")', { timeout: 5_000 })
 
       const backgroundOnDisk = await readOpfsFile(page, `gantry-workspace/${slug}/modules/background.md`)
