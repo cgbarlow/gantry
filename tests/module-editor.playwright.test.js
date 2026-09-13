@@ -427,12 +427,12 @@ test('the Mode dropdown switches views, cycles via hotkey, and stays global acro
 
         // Defaults to Visual on a fresh visit.
         assert.equal(await main.getAttribute('data-view-mode'), 'visual')
-        assert.equal((await trigger.textContent()).trim(), 'Mode: Visual ▾')
+        assert.equal((await trigger.textContent()).trim(), 'Visual ▾')
 
         // The dropdown switches views.
         await chooseMode(page, 'Markdown')
         assert.equal(await main.getAttribute('data-view-mode'), 'markdown')
-        assert.equal((await trigger.textContent()).trim(), 'Mode: Markdown ▾')
+        assert.equal((await trigger.textContent()).trim(), 'Markdown ▾')
 
         // The hotkey (Ctrl+Shift+V) cycles in dropdown order: markdown -> visual -> split.
         await page.keyboard.press('Control+Shift+V')

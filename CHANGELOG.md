@@ -25,6 +25,13 @@ commit on `main`.
   **Mode** dropdown beside it, with an oversized gap between them; it is now
   level with it, spaced like the rest of the toolbar.
 
+### Changed
+
+- **Mode, Artefact and Navigation look like one set of controls** (WI #378).
+  Mode now has an upper-case **MODE** label to its left, like **ARTEFACT**, and
+  its button shows just the current view (for example "Visual ▾"). The Artefact
+  selector has the same button style as Mode and Navigation.
+
 ## 0.6.0-beta — 2026-09-13
 
 ### Changed
