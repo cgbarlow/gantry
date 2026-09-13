@@ -3654,6 +3654,7 @@ function ViewModeToolbar({
 }) {
   const [renderOpen, setRenderOpen] = useState(false)
   const [modeOpen, setModeOpen] = useState(false)
+  const [artefactOpen, setArtefactOpen] = useState(false)
   const artefacts = sortArtefacts(instance.artefacts)
   const showArtefactSelector = artefactsHaveDifferentRequirements(instance.modules, artefacts)
   const navModules = visibleFieldIds
@@ -3757,16 +3758,40 @@ function ViewModeToolbar({
         </div>
         ${artefacts.length > 0
           ? html`
-              <label class="toolbar-field artefact-selector">
+              <div class="toolbar-field artefact-selector">
                 <span>Artefact</span>
                 ${showArtefactSelector
                   ? html`
-                      <span class="toolbar-select"><select aria-label="Artefact" value=${selectedArtefactId ?? ''} onChange=${(e) => onArtefactChange(e.currentTarget.value)}>
-                        ${artefacts.map((artefact) => html`<option value=${artefact.id} key=${artefact.id}>${artefact.title}</option>`)}
-                      </select></span>
+                      <${Dropdown}
+                        className="artefact-dropdown"
+                        triggerLabel=${`${selectedArtefact?.title ?? ''} ▾`}
+                        triggerAriaLabel=${`Artefact: ${selectedArtefact?.title ?? ''}`}
+                        triggerClass="btn small"
+                        menuRole="menu"
+                        open=${artefactOpen}
+                        onOpenChange=${setArtefactOpen}
+                      >
+                        ${artefacts.map(
+                          (artefact) => html`
+                            <button
+                              type="button"
+                              key=${artefact.id}
+                              role="menuitemradio"
+                              class="nav-item"
+                              aria-checked=${artefact.id === selectedArtefactId}
+                              onClick=${() => {
+                                setArtefactOpen(false)
+                                onArtefactChange(artefact.id)
+                              }}
+                            >
+                              ${artefact.title}
+                            </button>
+                          `
+                        )}
+                      <//>
                     `
                   : html`<span class="artefact-value" aria-label="Artefact">${selectedArtefact?.title ?? ''}</span>`}
-              </label>
+              </div>
             `
           : null}
         <${StageNavigation} modules=${navModules} visibleFieldIds=${visibleFieldIds} />

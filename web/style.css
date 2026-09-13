@@ -234,26 +234,8 @@ header {
 .toolbar-actions .btn { margin: 0 0 0 8px; }
 .toolbar-field { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
 .toolbar-field > span:first-child { text-transform: uppercase; letter-spacing: 0.08em; }
-/* The Artefact select wears the same small-button look as Mode and Navigation (WI #378),
-   with the ▾ drawn in the text colour so it follows the theme. */
-.toolbar-select { position: relative; display: inline-flex; }
-.toolbar-select select {
-  appearance: none;
-  -webkit-appearance: none;
-  font: 600 12px var(--font-body);
-  line-height: normal;
-  color: var(--text);
-  background: var(--bg-raised);
-  border: var(--border-strong) solid var(--line-strong);
-  border-radius: var(--radius);
-  padding: 5px 24px 5px 10px;
-  margin: 0;
-  max-width: 280px;
-  cursor: pointer;
-}
-.toolbar-select::after { content: '▾'; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font: 600 12px var(--font-body); color: var(--text); pointer-events: none; }
 .artefact-selector .artefact-value {
-  font: 600 13px var(--font-body);
+  font: 600 12px var(--font-body);
   color: var(--text);
 }
 
@@ -265,7 +247,7 @@ main:not([data-view-mode='split']) .field-markdown .visual-pane { display: none;
   .toolbar { align-items: stretch; flex-direction: column; gap: 10px; }
   .toolbar-left { flex-wrap: wrap; }
   .toolbar-actions { justify-content: flex-end; flex-wrap: wrap; }
-  .toolbar-select select { max-width: min(280px, 65vw); }
+  .artefact-dropdown > .btn { max-width: min(280px, 65vw); overflow: hidden; text-overflow: ellipsis; }
 }
 
 main#modules, .load-error, .loading {
@@ -502,11 +484,16 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 /* Neutralise .btn's default 0.5rem top/right margin so the trigger sits on the
    same baseline as the segmented view-mode buttons (which reset it too). */
 .stage-navigation .btn { margin: 0; }
+/* Mode, Artefact and Navigation open one kind of menu, at one font size (WI #379). */
 .stage-navigation-dropdown,
-.view-mode-dropdown { position: relative; display: inline-flex; }
-.view-mode-dropdown .btn { margin: 0; }
+.view-mode-dropdown,
+.artefact-dropdown { position: relative; display: inline-flex; }
+.view-mode-dropdown .btn,
+.artefact-dropdown .btn { margin: 0; }
+.artefact-dropdown > .btn { max-width: 280px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stage-navigation-dropdown .menu,
-.view-mode-dropdown .menu {
+.view-mode-dropdown .menu,
+.artefact-dropdown .menu {
   display: none;
   position: absolute;
   left: 0;
@@ -524,13 +511,15 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
   padding: 6px 0;
 }
 .stage-navigation-dropdown.menu-open .menu,
-.view-mode-dropdown.menu-open .menu { display: block; }
-.view-mode-dropdown .menu { min-width: 140px; }
+.view-mode-dropdown.menu-open .menu,
+.artefact-dropdown.menu-open .menu { display: block; }
 /* The current view: weight and a leading bar, not generated text — a CSS
  * ::before glyph would join the option's accessible name. */
-.view-mode-dropdown .nav-item[aria-checked='true'] { font-weight: 600; box-shadow: inset 3px 0 0 var(--text); }
+.view-mode-dropdown .nav-item[aria-checked='true'],
+.artefact-dropdown .nav-item[aria-checked='true'] { font-weight: 600; box-shadow: inset 3px 0 0 var(--text); }
 .stage-navigation-dropdown .nav-item,
-.view-mode-dropdown .nav-item {
+.view-mode-dropdown .nav-item,
+.artefact-dropdown .nav-item {
   display: block;
   width: 100%;
   text-align: left;
@@ -547,7 +536,8 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
   text-overflow: ellipsis;
 }
 .stage-navigation-dropdown .nav-item:hover,
-.view-mode-dropdown .nav-item:hover { background: var(--bg); }
+.view-mode-dropdown .nav-item:hover,
+.artefact-dropdown .nav-item:hover { background: var(--bg); }
 .stage-navigation-dropdown .nav-item-h3 { padding-left: 24px; }
 
 .field-markdown .split { display: flex; gap: 16px; align-items: stretch; }

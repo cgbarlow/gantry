@@ -17,6 +17,20 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.6.2-beta — 2026-09-13
+
+### Fixed
+
+- **Mode, Artefact and Navigation open the same kind of list** (WI #379).
+  Artefact used the browser's own list, which sat flush against the box and
+  looked different; it now opens Gantry's menu, below its button with the same
+  gap, border and shadow as Navigation, and Mode's list matches it too. The
+  current choice is marked the same way in Mode and Artefact.
+- **One text size across all three dropdowns**, both the buttons and their
+  lists.
+- **Only one dropdown is open at a time.** Opening one now closes any other,
+  instead of leaving Navigation's list open underneath.
+
 ## 0.6.1-beta — 2026-09-13
 
 ### Fixed
