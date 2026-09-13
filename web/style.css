@@ -232,17 +232,26 @@ header {
 .toolbar-left, .toolbar-actions { display: flex; align-items: center; }
 .toolbar-left { gap: 14px; min-width: 0; }
 .toolbar-actions .btn { margin: 0 0 0 8px; }
-.artefact-selector { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
-.artefact-selector > span:first-child { text-transform: uppercase; letter-spacing: 0.08em; }
-.artefact-selector select {
-  font: 600 13px var(--font-body);
+.toolbar-field { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.toolbar-field > span:first-child { text-transform: uppercase; letter-spacing: 0.08em; }
+/* The Artefact select wears the same small-button look as Mode and Navigation (WI #378),
+   with the ▾ drawn in the text colour so it follows the theme. */
+.toolbar-select { position: relative; display: inline-flex; }
+.toolbar-select select {
+  appearance: none;
+  -webkit-appearance: none;
+  font: 600 12px var(--font-body);
+  line-height: normal;
   color: var(--text);
   background: var(--bg-raised);
   border: var(--border-strong) solid var(--line-strong);
   border-radius: var(--radius);
-  padding: 6px 28px 6px 9px;
+  padding: 5px 24px 5px 10px;
+  margin: 0;
   max-width: 280px;
+  cursor: pointer;
 }
+.toolbar-select::after { content: '▾'; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font: 600 12px var(--font-body); color: var(--text); pointer-events: none; }
 .artefact-selector .artefact-value {
   font: 600 13px var(--font-body);
   color: var(--text);
@@ -256,7 +265,7 @@ main:not([data-view-mode='split']) .field-markdown .visual-pane { display: none;
   .toolbar { align-items: stretch; flex-direction: column; gap: 10px; }
   .toolbar-left { flex-wrap: wrap; }
   .toolbar-actions { justify-content: flex-end; flex-wrap: wrap; }
-  .artefact-selector select { max-width: min(280px, 65vw); }
+  .toolbar-select select { max-width: min(280px, 65vw); }
 }
 
 main#modules, .load-error, .loading {
@@ -1597,8 +1606,14 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .cm-visual .cm-visual-hr { display: inline-block; width: 100%; height: 0; border-top: 2px solid var(--line-strong); vertical-align: middle; }
 
 /* Centralised Save (WI #376): blue only while something is unsaved. */
-.stage-save { display: inline-flex; align-items: center; gap: 8px; }
-.stage-save-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 8px; }
+.stage-save { display: inline-flex; align-items: stretch; gap: 8px; }
+/* No .btn margin here: it would drop the button below Mode and push Mode away. The
+   button takes its height from the row (the text buttons beside it) rather than from
+   its icon, so it stays level with Mode whatever font the browser has. */
+.stage-save-btn { display: inline-flex; align-items: center; justify-content: center; margin: 0; padding: 0 8px; }
+.toolbar-left > .stage-save { align-self: stretch; }
+.stage-save-btn svg { display: block; width: 14px; height: 14px; }
+.stage-save-state:empty { display: none; }
 .stage-save-btn.primary { background: #1F5FBF; border-color: #1F5FBF; color: #FFFFFF; }
 .stage-save-state { font-size: 0.85rem; color: var(--text-muted); white-space: nowrap; }
 .stage-save-state.error { color: var(--stamp-error-bg); white-space: normal; }

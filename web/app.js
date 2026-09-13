@@ -3725,9 +3725,12 @@ function ViewModeToolbar({
     <div class="toolbar">
       <div class="toolbar-left">
         ${!isArchived() ? html`<${StageSaveButton} />` : null}
-        <${Dropdown}
+        <div class="toolbar-field">
+          <span>Mode</span>
+          <${Dropdown}
           className="view-mode-dropdown"
-          triggerLabel=${`Mode: ${VIEW_MODE_LABELS[viewMode.value]} ▾`}
+          triggerLabel=${`${VIEW_MODE_LABELS[viewMode.value]} ▾`}
+          triggerAriaLabel=${`Mode: ${VIEW_MODE_LABELS[viewMode.value]}`}
           triggerClass="btn small"
           menuRole="menu"
           open=${modeOpen}
@@ -3751,15 +3754,16 @@ function ViewModeToolbar({
             `
           )}
         <//>
+        </div>
         ${artefacts.length > 0
           ? html`
-              <label class="artefact-selector">
+              <label class="toolbar-field artefact-selector">
                 <span>Artefact</span>
                 ${showArtefactSelector
                   ? html`
-                      <select aria-label="Artefact" value=${selectedArtefactId ?? ''} onChange=${(e) => onArtefactChange(e.currentTarget.value)}>
+                      <span class="toolbar-select"><select aria-label="Artefact" value=${selectedArtefactId ?? ''} onChange=${(e) => onArtefactChange(e.currentTarget.value)}>
                         ${artefacts.map((artefact) => html`<option value=${artefact.id} key=${artefact.id}>${artefact.title}</option>`)}
-                      </select>
+                      </select></span>
                     `
                   : html`<span class="artefact-value" aria-label="Artefact">${selectedArtefact?.title ?? ''}</span>`}
               </label>
