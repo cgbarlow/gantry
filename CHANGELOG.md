@@ -17,6 +17,21 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.6.4-beta — 2026-09-14
+
+### Added
+
+- **Replace and Download for an artefact's reference `.docx`**, from the
+  artefact focus pane in the Definitions editor (WI #385). Previously the
+  only way to change the Word styling template an artefact renders into was
+  to edit the file directly in the definitions folder. Replace checks the
+  upload really is a `.docx` (not just its file extension) before accepting
+  it, and — like every other edit in the Definitions editor — only works on
+  a draft; a published version offers Download only, with a clear error if
+  something tries to replace it anyway. Currently covers definitions in the
+  server library; workspace-hosted definitions (server/Azure DevOps and
+  local) get the same treatment once those homes exist (WI #383/#384).
+
 ## 0.6.3-beta — 2026-09-14
 
 ### Added

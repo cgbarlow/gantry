@@ -1605,6 +1605,12 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-template-row { display: flex; gap: 8px; align-items: center; }
 .defn-editor-inline { display: flex; gap: 8px; margin-top: 8px; }
 
+/* Reference docx Replace/Download (WI #385) */
+.defn-docx-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.defn-docx-row input[type="file"] { max-width: 220px; font-size: 12px; }
+.defn-docx-status { margin-top: 6px; }
+.defn-docx-saved { color: var(--stamp-agreed-bg); font-weight: 600; }
+
 /* Chips + droplists (module refs, requires) */
 .defn-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .defn-chip { display: inline-flex; align-items: center; gap: 6px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); padding: 3px 8px; font-size: 12px; background: var(--bg-raised); }

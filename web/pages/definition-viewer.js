@@ -113,6 +113,11 @@ export function DefinitionViewerPage() {
   const templateHostRef = useRef(null)
   const templateCmRef = useRef(null)
 
+  // Reference docx Replace/Download (WI #385), keyed by artefact id — several artefacts' rows can
+  // carry independent in-flight state as the author moves between them without one clobbering
+  // another's error/status message.
+  const [docxStatus, setDocxStatus] = useState({}) // { [artefactId]: { uploading, error, message } }
+
   // Drag and drop — every kind here has a button-route equivalent (reorder ↑/↓; "Add module"/"Add
   // requirement" pickers; a field's own "Move to module" control).
   const [dragPayload, setDragPayload] = useState(null)
@@ -566,6 +571,66 @@ export function DefinitionViewerPage() {
     }
     // eslint-disable-next-line
   }, [templateView?.artefactId, templateView?.loading, isEditable])
+
+  // ---------------------------------------------------------------- reference docx (Replace/Download)
+  function setDocxArtefactStatus(artefactId, patch) {
+    setDocxStatus((prev) => ({ ...prev, [artefactId]: { ...(prev[artefactId] ?? {}), ...patch } }))
+  }
+  // btoa/Uint8Array chunking mirrors web/app.js's bytesToBase64 — kept local here rather than
+  // shared, since a definition editor page has no reason to import from the instance-viewer entry
+  // point (or vice versa).
+  function bytesToBase64(bytes) {
+    const CHUNK = 0x8000
+    let binary = ''
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+    }
+    return btoa(binary)
+  }
+  async function handleReplaceReferenceDocx(artefactId, file) {
+    setDocxArtefactStatus(artefactId, { uploading: true, error: null, message: null })
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      const docxBase64 = bytesToBase64(bytes)
+      const res = await fetch(
+        `/api/definitions/${encodeURIComponent(selectedId)}/versions/${encodeURIComponent(String(selectedVersion))}/artefacts/${encodeURIComponent(artefactId)}/reference-docx`,
+        { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ docxBase64 }) }
+      )
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setDocxArtefactStatus(artefactId, { uploading: false, error: body.error ?? `Replace failed (${res.status})` })
+        return
+      }
+      setDocxArtefactStatus(artefactId, { uploading: false, error: null, message: 'Replaced ✓' })
+      setTimeout(() => setDocxArtefactStatus(artefactId, { message: null }), 2000)
+    } catch (err) {
+      setDocxArtefactStatus(artefactId, { uploading: false, error: err.message })
+    }
+  }
+  async function handleDownloadReferenceDocx(artefactId) {
+    setDocxArtefactStatus(artefactId, { error: null })
+    try {
+      const res = await fetch(
+        `/api/definitions/${encodeURIComponent(selectedId)}/versions/${encodeURIComponent(String(selectedVersion))}/artefacts/${encodeURIComponent(artefactId)}/reference-docx`
+      )
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setDocxArtefactStatus(artefactId, { error: body.error ?? `Download failed (${res.status})` })
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `reference-${artefactId}.docx`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setDocxArtefactStatus(artefactId, { error: err.message })
+    }
+  }
 
   // ---------------------------------------------------------------- drag and drop
   function startReorderDrag(e, listPath, index) {
@@ -1235,6 +1300,38 @@ export function DefinitionViewerPage() {
     `
   }
 
+  // Reference docx Replace/Download row (WI #385) — Download is always offered (viewing a
+  // published version's reference doc is fine, same posture as "View template"); Replace only
+  // when `editable` (a draft), matching the server's own draft-only guard so the UI never offers
+  // an action the API would 409 straight back.
+  function renderReferenceDocxRow(artefactId, editable) {
+    const status = docxStatus[artefactId] ?? {}
+    return html`
+      <div class="defn-docx-row">
+        <button class="btn small ghost" onClick=${() => handleDownloadReferenceDocx(artefactId)}>Download</button>
+        ${editable
+          ? html`
+              <input
+                type="file"
+                class="wizard-input"
+                accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                aria-label="Replace reference docx"
+                disabled=${status.uploading}
+                onChange=${(e) => {
+                  const file = e.currentTarget.files?.[0]
+                  e.currentTarget.value = ''
+                  if (file) handleReplaceReferenceDocx(artefactId, file)
+                }}
+              />
+            `
+          : null}
+        ${status.uploading ? html`<span class="muted">Replacing…</span>` : null}
+      </div>
+      ${status.message ? html`<p class="save-status defn-docx-status defn-docx-saved">${status.message}</p>` : null}
+      ${status.error ? html`<p class="inline-error defn-docx-status">${status.error}</p>` : null}
+    `
+  }
+
   function renderArtefactFocus(d) {
     const ai = d.artefacts.findIndex((a) => a.id === selection.id)
     const a = d.artefacts[ai]
@@ -1274,12 +1371,16 @@ export function DefinitionViewerPage() {
                   <input class="wizard-input mono" value=${a.template ?? ''} onInput=${(e) => updateDraft((dd) => { dd.artefacts[ai].template = e.currentTarget.value })} />
                   <button class="btn small" onClick=${() => handleOpenTemplate(a.id)}>Edit template</button>
                 </div>
+                <label class="field-label">Reference docx</label>
+                ${renderReferenceDocxRow(a.id, true)}
               </div>
             `
           : html`
               <h2>${a.title} <span class="defn-id">${a.id}</span>${hasProblem('artefact', a.id) ? html` <span class="stamp small error">problem</span>` : null}</h2>
               ${a.purpose ? html`<p class="guidance">${a.purpose}</p>` : null}
               <p><span class="field-label">Template</span> <code>${a.template}</code> <button class="btn small ghost" onClick=${() => handleOpenTemplate(a.id)}>View template</button></p>
+              <p><span class="field-label">Reference docx</span></p>
+              ${renderReferenceDocxRow(a.id, false)}
             `}
         <div class="defn-focus-section">
           <div class="defn-focus-section-head">
