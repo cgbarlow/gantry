@@ -1605,6 +1605,12 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-template-row { display: flex; gap: 8px; align-items: center; }
 .defn-editor-inline { display: flex; gap: 8px; margin-top: 8px; }
 
+/* Reference docx Replace/Download (WI #385) */
+.defn-docx-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.defn-docx-row input[type="file"] { max-width: 220px; font-size: 12px; }
+.defn-docx-status { margin-top: 6px; }
+.defn-docx-saved { color: var(--stamp-agreed-bg); font-weight: 600; }
+
 /* Chips + droplists (module refs, requires) */
 .defn-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .defn-chip { display: inline-flex; align-items: center; gap: 6px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); padding: 3px 8px; font-size: 12px; background: var(--bg-raised); }
@@ -1643,13 +1649,37 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-template-saved { color: var(--stamp-agreed-bg); font-weight: 600; }
 .defn-template-actions { display: flex; gap: 8px; margin-top: 10px; }
 
-/* Library panel (docked, read-only in WI #381; Copy arrives in WI #382) */
+/* Library panel (docked, read-only shell in WI #381; Copy wired up in WI #382) */
 .defn-library { padding: 8px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
-.defn-library-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.defn-library-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.defn-library-source-row { display: flex; gap: 6px; }
+.defn-library-source { flex: 1; min-width: 0; }
+.defn-library-version { flex: 0 0 auto; max-width: 130px; }
 .defn-library-tree { overflow: auto; }
 .defn-library-group { margin-bottom: 10px; }
-.defn-library-node { padding: 3px 6px; font-size: 12px; border-radius: var(--radius); }
+.defn-library-node { padding: 3px 6px; font-size: 12px; border-radius: var(--radius); display: flex; align-items: center; gap: 6px; }
+.defn-library-node .defn-drag-handle { padding: 0 2px; }
+.defn-library-node span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.defn-library-copy-btn { flex: none; padding: 1px 6px; font-size: 11px; }
 .defn-library-field { color: var(--text-muted); padding-left: 16px; }
+
+/* "From another definition…" pickers (WI #382) — sit beside the existing "+ Add …" controls */
+.defn-library-picker { max-width: 220px; }
+
+/* Copy provenance badge — "from <id> v<n>" (WI #382) */
+.defn-from-badge { white-space: nowrap; }
+
+/* Copy confirm panel (WI #382) — blocks interaction with the rest of the page until every id
+ * clash is resolved (Confirm) or the copy is abandoned (Cancel); see CopyPlanner's isResolved. */
+.defn-copy-modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); display: flex; align-items: center; justify-content: center; z-index: 40; padding: 16px; }
+.defn-copy-modal { background: var(--bg-raised); border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius); padding: 18px 20px; max-width: 480px; width: 100%; max-height: 85vh; overflow: auto; }
+.defn-copy-modal h3 { font-family: var(--font-display); font-weight: 600; font-size: 15px; margin: 0 0 10px; }
+.defn-copy-section { margin-top: 10px; }
+.defn-copy-section ul { margin: 4px 0 0 18px; padding: 0; font-size: 13px; }
+.defn-copy-collision { border-top: var(--hairline) solid var(--line); padding: 8px 0; font-size: 13px; }
+.defn-copy-collision label { display: inline-flex; align-items: center; gap: 4px; margin-right: 14px; cursor: pointer; }
+.defn-copy-rename { margin-top: 6px; display: flex; align-items: center; gap: 8px; }
+.defn-copy-modal-actions { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
 @media (max-width: 700px) { .defn-toolbar { flex-direction: column; align-items: stretch; } }
 
 /* ---------- Visual view (#374, docs/adr/0033) ----------

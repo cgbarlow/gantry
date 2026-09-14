@@ -531,6 +531,84 @@ test('A published version has no template editing controls', async () => {
   })
 })
 
+// WI #385 — Replace (upload) and Download for an artefact's reference .docx, from the artefact
+// focus pane. `definitions/design/1/templates/reference-soap.docx` (the real fixture the `soap`
+// artefact already ships with) doubles as "a real .docx" for the upload — round-tripping the
+// exact same bytes a real author would replace it with, not a synthetic stand-in.
+const REAL_REFERENCE_DOCX = readFileSync('definitions/design/1/templates/reference-soap.docx')
+
+test('Replace and Download round-trip an artefact reference docx on a draft', async () => {
+  await withDraftDesignV2()(async (base) => {
+    await withPage(base, async (page) => {
+      await page.goto(`${base}/definitions`)
+      await page.waitForSelector('#defn-version-select', { timeout: 10_000 })
+      await page.locator('#defn-version-select').selectOption('2')
+      await page.waitForSelector('.defn-outline', { timeout: 10_000 })
+
+      const artefactNode = page.locator('.defn-outline-node').filter({ hasText: 'Solution on a Page' }).first()
+      await artefactNode.click()
+      await page.waitForSelector('.defn-docx-row', { timeout: 10_000 })
+
+      // Download before any Replace — the fixture already ships with reference-soap.docx, so this
+      // covers Download on its own, not merely as a check after Replace.
+      const [firstDownload] = await Promise.all([
+        page.waitForEvent('download', { timeout: 10_000 }),
+        page.locator('.defn-docx-row').getByRole('button', { name: 'Download' }).click(),
+      ])
+      assert.equal(firstDownload.suggestedFilename(), 'reference-soap.docx')
+      const firstBytes = readFileSync(await firstDownload.path())
+      assert.deepEqual(firstBytes, REAL_REFERENCE_DOCX, 'downloaded bytes should match the definition\'s on-disk reference docx')
+
+      // Replace with the same real .docx bytes under a different upload filename — proves the
+      // upload path, not just that the file happened to already be there.
+      await page.locator('.defn-docx-row input[type="file"]').setInputFiles({
+        name: 'my-new-styles.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        buffer: REAL_REFERENCE_DOCX,
+      })
+      const saved = page.locator('.defn-docx-saved')
+      await saved.waitFor({ state: 'visible', timeout: 10_000 })
+      assert.match(await saved.textContent(), /Replaced/)
+
+      const [secondDownload] = await Promise.all([
+        page.waitForEvent('download', { timeout: 10_000 }),
+        page.locator('.defn-docx-row').getByRole('button', { name: 'Download' }).click(),
+      ])
+      const secondBytes = readFileSync(await secondDownload.path())
+      assert.deepEqual(secondBytes, REAL_REFERENCE_DOCX, 'downloaded bytes should match what was just replaced')
+    })
+  })
+})
+
+test('Replacing a reference docx is refused with a clear error on a published version', async () => {
+  await withDraftDesignV2()(async (base) => {
+    await withPage(base, async (page) => {
+      await page.goto(`${base}/definitions`)
+      await page.waitForSelector('#defn-version-select', { timeout: 10_000 })
+      await page.locator('#defn-version-select').selectOption('1')
+      await page.waitForSelector('.defn-outline', { timeout: 10_000 })
+
+      const artefactNode = page.locator('.defn-outline-node').filter({ hasText: 'Solution on a Page' }).first()
+      await artefactNode.click()
+      await page.waitForSelector('.defn-docx-row', { timeout: 10_000 })
+
+      // Same posture as the template row on a published version: Download stays, Replace's file
+      // input is not offered at all — the UI never dangles a control the API would only 409 back.
+      assert.equal(await page.locator('.defn-docx-row input[type="file"]').count(), 0)
+
+      // The server's own draft-only guard, exercised directly (WI #385: "same draft-only guard as
+      // template edits" for a published version) — the same 409 + clear error a workspace-home
+      // implementation will get from this endpoint once WI #383/#384 route through it.
+      const res = await page.request.put(`${base}/api/definitions/design/versions/1/artefacts/soap/reference-docx`, {
+        data: { docxBase64: REAL_REFERENCE_DOCX.toString('base64') },
+      })
+      assert.equal(res.status(), 409)
+      const body = await res.json()
+      assert.match(body.error, /not a draft/)
+    })
+  })
+})
+
 test('Leaving a dirty draft asks Save / Discard / Cancel', async () => {
   await withDraftDesignV2()(async (base) => {
     await withPage(base, async (page) => {
