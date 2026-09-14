@@ -35,8 +35,13 @@ function isValidSlugClient(slug) {
 // though every row briefly passes through this same flat `definitions` array. `currentDef` being a
 // library definition itself (or `home` not yet loaded) narrows this to library-only sources — the
 // pre-existing behavior from before this ticket, unchanged.
+//
+// WI #386: a library-repo-sourced definition (`kind: 'library-repo'`) is a server-library source too
+// — "viewable, copyable-from, clonable into a workspace" — eligible from anywhere, the same as a
+// packaged-library definition, never scoped to one workspace the way a server-workspace source is.
 function isEligibleCopySource(def, currentDef) {
-  if ((def.home?.kind ?? 'library') === 'library') return true
+  const kind = def.home?.kind ?? 'library'
+  if (kind === 'library' || kind === 'library-repo') return true
   return currentDef?.home?.kind === 'server-workspace' && def.home.kind === 'server-workspace' && def.home.id === currentDef.home.id
 }
 
@@ -45,13 +50,18 @@ function isEligibleCopySource(def, currentDef) {
 // `definitions` (already sorted by workspace id, since `listDefinitionsAcrossHomes` builds it that
 // way). A row with no `home` at all (shouldn't happen once `includeWorkspaces=1` is always sent, but
 // keeps this defensive rather than throwing) groups with the library.
+//
+// WI #386: a library-repo-sourced row gets its own group, labelled by the repo — kept distinct from
+// "Server library" (the packaged directory) so the switcher always shows *where* a read-only
+// definition actually comes from, not just that it's read-only.
 function groupDefinitionsByHome(definitions) {
   const groups = new Map()
   for (const def of definitions ?? []) {
     const home = def.home ?? { kind: 'library' }
-    const key = home.kind === 'library' ? 'library' : `server-workspace:${home.id}`
+    const key = home.kind === 'library' ? 'library' : home.kind === 'library-repo' ? `library-repo:${home.id}` : `server-workspace:${home.id}`
     if (!groups.has(key)) {
-      groups.set(key, { key, label: home.kind === 'library' ? 'Server library' : `Workspace: ${home.name}`, defs: [] })
+      const label = home.kind === 'library' ? 'Server library' : home.kind === 'library-repo' ? `Library repo: ${home.name}` : `Workspace: ${home.name}`
+      groups.set(key, { key, label, defs: [] })
     }
     groups.get(key).defs.push(def)
   }
@@ -124,11 +134,22 @@ export function DefinitionViewerPage() {
   const [saving, setSaving] = useState(false)
   const [validationProblems, setValidationProblems] = useState([])
   const [showArchived, setShowArchived] = useState(false)
+  // WI #386 — library repos' id-clash problems ("Definition home: server library ... library repos
+  // ... a clash is reported as a problem on the Definitions page and the clashing repo copy is
+  // ignored"), and the explicit Refresh button's own busy/error state.
+  const [libraryProblems, setLibraryProblems] = useState([])
+  const [refreshingLibrary, setRefreshingLibrary] = useState(false)
+  const [refreshLibraryError, setRefreshLibraryError] = useState(null)
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [newDefMode, setNewDefMode] = useState(null) // null | 'blank' | 'clone'
   const [newBlankId, setNewBlankId] = useState('')
   const [newBlankTitle, setNewBlankTitle] = useState('')
   const [newCloneId, setNewCloneId] = useState('')
+  // WI #386 — only used (and only shown) when the definition being cloned is library-repo-sourced:
+  // that source has no home of its own for the clone to land in (it's read-only), so the author must
+  // pick a target workspace explicitly, unlike every other source (library, server workspace) which
+  // always clones into its own home.
+  const [newCloneHomeId, setNewCloneHomeId] = useState('')
   // WI #383 (ADR-0036) — Definition home: server library or a server workspace's own `definitions/`
   // folder. `newBlankHomeId` is `''` for the library, else a server workspace's own id (its folder
   // name). `workspaceHomes` is fetched once from `/api/server-workspaces` (not derived from
@@ -208,6 +229,42 @@ export function DefinitionViewerPage() {
       .then(setWorkspaceHomes)
       .catch(() => setWorkspaceHomes([]))
   }, [])
+
+  // WI #386 — the current library-repo id-clash problems, on load (independent of ever clicking
+  // Refresh: a clash can already be sitting in the cache from an earlier server startup).
+  useEffect(() => {
+    fetch('/api/library-repos')
+      .then((res) => (res.ok ? res.json() : { problems: [] }))
+      .then((body) => setLibraryProblems(body.problems ?? []))
+      .catch(() => {})
+  }, [])
+
+  // The Definitions page's explicit Refresh (ADR-0036) — re-reads every configured library repo now,
+  // then reloads the definitions list and the problems banner so newly-fetched (or newly-stale)
+  // content shows up immediately.
+  async function handleRefreshLibrary() {
+    setRefreshingLibrary(true)
+    setRefreshLibraryError(null)
+    try {
+      const res = await fetch('/api/library-repos/refresh', { method: 'POST' })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setRefreshLibraryError(body.error ?? `Refresh failed (${res.status})`)
+        return
+      }
+      setLibraryProblems(body.problems ?? [])
+      const failed = (body.results ?? []).filter((r) => !r.ok)
+      if (failed.length) {
+        setRefreshLibraryError(`${failed.length} librar${failed.length === 1 ? 'y repo' : 'y repos'} could not be read — showing cached content.`)
+      }
+      const defs = await fetchDefinitions(showArchived)
+      setDefinitions(defs)
+    } catch (err) {
+      setRefreshLibraryError(err.message)
+    } finally {
+      setRefreshingLibrary(false)
+    }
+  }
 
   useEffect(() => {
     fetchDefinitions(showArchived)
@@ -476,14 +533,26 @@ export function DefinitionViewerPage() {
       setNewDefError('Invalid slug — single segment, no slashes or ".."')
       return
     }
+    // WI #386: a library-repo-sourced definition is read-only and has no home of its own to clone
+    // back into — the author must pick a real (writable) target workspace instead.
+    const sourceHomeKind = definitions?.find((d) => d.id === selectedId)?.home?.kind
+    if (sourceHomeKind === 'library-repo' && !newCloneHomeId) {
+      setNewDefError('Pick a workspace to clone this library-repo definition into.')
+      return
+    }
     setNewDefBusy(true)
     setNewDefError(null)
     try {
       // WI #383 review: the clone has to land in the *source* definition's own home — a
       // workspace-homed definition has no counterpart in the library for `cloneDefinition` to read
       // from, so omitting `home` here always 400'd with "Unknown definition" for anything but a
-      // library definition.
-      const sourceHome = definitions?.find((d) => d.id === selectedId)?.home ?? { kind: 'library' }
+      // library definition. WI #386: a library-repo source is the one exception — it has no home of
+      // its own to land in, so the author-picked `newCloneHomeId` (always a real workspace) is used
+      // instead.
+      const sourceHome =
+        sourceHomeKind === 'library-repo'
+          ? { kind: 'server-workspace', id: newCloneHomeId }
+          : (definitions?.find((d) => d.id === selectedId)?.home ?? { kind: 'library' })
       const res = await fetch('/api/definitions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -502,6 +571,7 @@ export function DefinitionViewerPage() {
       })
       setNewDefMode(null)
       setNewCloneId('')
+      setNewCloneHomeId('')
       setSwitcherOpen(false)
     } catch (err) {
       setNewDefError(err.message)
@@ -1131,6 +1201,16 @@ export function DefinitionViewerPage() {
           ` : html`
             <label class="field-label" for="defn-newdef-clone-id">New id (cloned from ${selectedId})</label>
             <input id="defn-newdef-clone-id" class="wizard-input" placeholder="e.g. procurement" value=${newCloneId} onInput=${(e) => setNewCloneId(e.currentTarget.value)} />
+            ${definitions?.find((d) => d.id === selectedId)?.home?.kind === 'library-repo'
+              ? html`
+                  <label class="field-label" for="defn-newdef-clone-home">Clone into workspace</label>
+                  <select id="defn-newdef-clone-home" class="wizard-input" value=${newCloneHomeId} onChange=${(e) => setNewCloneHomeId(e.currentTarget.value)}>
+                    <option value="">Select a workspace…</option>
+                    ${workspaceHomes.map((w) => html`<option value=${w.id}>Workspace: ${w.name}</option>`)}
+                  </select>
+                  <p class="guidance">This definition comes from a read-only library repo — it can only be cloned into a workspace, never edited in place.</p>
+                `
+              : null}
           `}
           ${newDefError ? html`<p class="inline-error">${newDefError}</p>` : null}
           <div class="defn-clone-actions">
@@ -1163,9 +1243,11 @@ export function DefinitionViewerPage() {
                     <div class="defn-rail-badges">
                       ${def.versions.map((v) => html`<span class=${'stamp small' + (v.status === 'published' ? ' agreed' : ' draft')} key=${v.version}>v${v.version} · ${v.status}</span>`)}
                     </div>
-                    ${def.archived
-                      ? html`<button class="btn small ghost" onClick=${(e) => handleRestore(def.id, e)}>Restore</button>`
-                      : html`<button class="btn small ghost" onClick=${(e) => handleArchive(def.id, e)}>Archive</button>`}
+                    ${def.home?.kind === 'library-repo'
+                      ? null
+                      : def.archived
+                        ? html`<button class="btn small ghost" onClick=${(e) => handleRestore(def.id, e)}>Restore</button>`
+                        : html`<button class="btn small ghost" onClick=${(e) => handleArchive(def.id, e)}>Archive</button>`}
                   </div>
                 `
               )}
@@ -1188,6 +1270,14 @@ export function DefinitionViewerPage() {
       <div class="defn-toolbar">
         <div class="defn-toolbar-left">
           <a class="btn small ghost" href="/" onClick=${handleGoHome}>← Workspaces</a>
+          <button
+            class="btn small ghost"
+            title="Re-read every configured library repo now"
+            disabled=${refreshingLibrary}
+            onClick=${handleRefreshLibrary}
+          >
+            ${refreshingLibrary ? 'Refreshing…' : 'Refresh'}
+          </button>
           <${Dropdown}
             className="dd defn-switcher"
             open=${switcherOpen}
@@ -1208,7 +1298,9 @@ export function DefinitionViewerPage() {
                 >
                   ${selectedDef.versions.map((v) => html`<option value=${String(v.version)}>v${v.version} — ${v.status}</option>`)}
                 </select>
-                <button class="btn small" onClick=${handleNewDraft}>New draft version</button>
+                ${selectedDef.home?.kind === 'library-repo'
+                  ? null
+                  : html`<button class="btn small" onClick=${handleNewDraft}>New draft version</button>`}
               `
             : null}
           ${detail ? html`<span class=${'stamp small ' + (detail.status === 'published' ? 'agreed' : 'draft')}>v${detail.version} ${detail.status}</span>` : null}
@@ -1982,6 +2074,16 @@ export function DefinitionViewerPage() {
     </header>
     <main class="defn-viewer">
       ${renderToolbar()}
+      ${refreshLibraryError ? html`<p class="inline-error defn-library-problem">${refreshLibraryError}</p>` : null}
+      ${libraryProblems.length
+        ? html`
+            <div class="defn-library-problems">
+              ${libraryProblems.map(
+                (p) => html`<p class="inline-error defn-library-problem" key=${`${p.repoId}:${p.id}`}>${p.message}</p>`
+              )}
+            </div>
+          `
+        : null}
       ${!selectedId ? html`<p class="loading">Select a definition.</p>` : null}
       ${detailLoading ? html`<p class="loading">Loading…</p>` : null}
       ${detailError ? html`<p class="load-error">${detailError}</p>` : null}
