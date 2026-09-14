@@ -55,6 +55,7 @@ import {
   listDir,
 } from '../lib/localWorkspace.js'
 import { renderInstanceYaml, renderModuleFile as renderLocalModuleFile, parseInstanceYaml } from '../lib/localInstanceFiles.js'
+import { listLocalDefinitionRows, resolveDefinitionStructure } from '../lib/localDefinitionFiles.js'
 
 // The work item type used when nothing more specific is looked up or
 // chosen — mirrors lib/workItemLink.js's own `DEFAULT_WORK_ITEM_TYPE`
@@ -655,14 +656,10 @@ async function createLocalInstance() {
   const handle = localRegHandle.value
   try {
     if (!handle) throw new Error('No local workspace folder is open.')
-    const res = await fetch(
-      `/api/definitions/${encodeURIComponent(defId)}/versions/${encodeURIComponent(String(version))}`
-    )
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      throw new Error(body.error ?? body.message ?? `Failed to load definition structure (${res.status})`)
-    }
-    const structure = await res.json()
+    // WI #384: checks this workspace's own definitions/ folder before the
+    // library — lets a local workspace pin a definition it authored itself,
+    // not only one from the library.
+    const structure = await resolveDefinitionStructure(handle, defId, version)
     const firstStage = structure.stages?.[0]
     if (!firstStage) throw new Error(`Definition "${defId}" has no stages`)
     const modulesById = new Map((structure.modules ?? []).map((m) => [m.id, m]))
@@ -2088,6 +2085,24 @@ function InstanceStep() {
       .catch(() => {})
   }, [ws?.id])
 
+  // WI #384 — a local (File System Access API) workspace's own
+  // `definitions/` folder joins the library set the same way an Azure
+  // DevOps workspace's own definitions do just above: merged in by id once
+  // the workspace's folder handle is actually open (no credential needed —
+  // it's already-open local disk, unlike the ADO case above which needs a
+  // PAT). Re-runs whenever the open handle changes (a fresh Register/Pick),
+  // not on every render.
+  useEffect(() => {
+    if (!ws?.isLocal || !localRegHandle.value) return
+    listLocalDefinitionRows(localRegHandle.value)
+      .then((rows) => {
+        const existingIds = new Set(definitions.value.map((d) => d.id))
+        const merged = rows.filter((d) => !existingIds.has(d.id))
+        if (merged.length) definitions.value = [...definitions.value, ...merged]
+      })
+      .catch(() => {})
+  }, [ws?.isLocal, localRegHandle.value])
+
   return html`
     <div class="result-card">
       <h3><span class="stamp agreed">Workspace</span></h3>
@@ -2457,8 +2472,18 @@ export function NewWorkspaceWizardPage({ query }) {
     fetch('/api/definitions?includeWorkspaces=1')
       .then((res) => res.json())
       .then((body) => {
-        definitions.value = body
-        if (!selectedDefinitionId.value) selectedDefinitionId.value = body[0]?.id ?? ''
+        // WI #384: a same-tick race against InstanceStep's own local-workspace-definitions
+        // merge effect below (reachable via the `?local=<id>` shortcut, which can resolve this
+        // library fetch's own local-disk read before this network round trip returns) means
+        // `definitions.value` may already hold a merged-in local-workspace row by the time this
+        // resolves — a bare `definitions.value = body` would silently overwrite it. Merged the
+        // same "library rows first, anything else already accumulated after, de-duplicated by
+        // id" way every other contributor to this signal (the Azure DevOps and local-workspace
+        // merges just below) already treats it, rather than a wholesale replace.
+        const bodyIds = new Set(body.map((d) => d.id))
+        const already = definitions.value.filter((d) => !bodyIds.has(d.id))
+        definitions.value = [...body, ...already]
+        if (!selectedDefinitionId.value) selectedDefinitionId.value = definitions.value[0]?.id ?? ''
       })
       .catch(() => (definitions.value = []))
   }, [])
