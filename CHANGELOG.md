@@ -17,6 +17,26 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.6.6-beta — 2026-09-14
+
+### Added
+
+- **Library repos** (WI #386): Global Settings can now list additional Azure
+  DevOps repos as read-only sources for the server library, alongside the
+  built-in `definitions/` directory. A definition from a library repo shows
+  up everywhere the packaged library's own definitions do — the Definitions
+  switcher (grouped by repo), the docked Library panel as a copy source, and
+  as a pinnable target for a new instance — but it can't be edited directly:
+  it's viewable, copyable-from, and clonable into a workspace, never
+  archivable or publishable in place. Content is read with the server's own
+  PAT and cached to disk; the cache is re-read at server startup, the moment
+  a repo is added, and on the Definitions page's new Refresh button — never
+  polled. If a library repo goes unreachable, anything already cached
+  (including a running instance pinned to one of its definitions) keeps
+  working from that cache rather than failing. If two sources define the
+  same id, the first one configured wins and the clash is reported as a
+  problem on the Definitions page rather than blocking everything else.
+
 ## 0.6.5-beta — 2026-09-14
 
 ### Added

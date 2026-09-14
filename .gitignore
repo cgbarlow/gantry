@@ -17,6 +17,13 @@ workspaces/instance-registry.json
 workspaces/workspace-registry.json
 workspaces/number-registry.json
 
+# WI #386: Global Settings' library repos and their on-disk cache — deployment data, never repo
+# content, the same as the registries above.
+instances/library-repos.json
+instances/library-cache/
+workspaces/library-repos.json
+workspaces/library-cache/
+
 # WI #370: the reserved `default` server workspace is created on demand by `gantry serve` and
 # `gantry new` to hold instances created on this machine — a deployment's own data, never repo
 # content (the bundled fixtures live in workspaces/examples/). Without this, merely starting the

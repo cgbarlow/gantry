@@ -223,6 +223,130 @@ function RenderEngineSection() {
   `
 }
 
+// WI #386 (Feature #380 phase 6, ADR-0036) — the server library's list of library repos: any
+// number of Azure DevOps repos, read (with the server's own PAT — `GANTRY_LIBRARY_PAT`, never this
+// browser's own) and cached, unioned into the server library the Definitions page shows. Adding one
+// here triggers an immediate best-effort read (ADR-0036: "re-read ... when a repo is added"); the
+// Definitions page's own Refresh button re-reads every configured repo on demand thereafter. Gated
+// behind advancedMode alongside the other Azure-DevOps-specific sections above — a local-only user
+// never sees this.
+function LibraryReposSection() {
+  const [repos, setRepos] = useState(null)
+  const [loadError, setLoadError] = useState(null)
+  const [organization, setOrganization] = useState('')
+  const [project, setProject] = useState('')
+  const [repository, setRepository] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [addError, setAddError] = useState(null)
+  const [addStatus, setAddStatus] = useState('')
+
+  function load() {
+    fetch('/api/library-repos')
+      .then(async (res) => {
+        const body = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(body.error ?? `Failed to load library repos (${res.status})`)
+        return body
+      })
+      .then((body) => {
+        setRepos(body.repos ?? [])
+        setLoadError(null)
+      })
+      .catch((err) => setLoadError(err.message))
+  }
+
+  useEffect(() => {
+    load()
+  }, [])
+
+  async function handleAdd() {
+    if (!organization.trim() || !project.trim() || !repository.trim()) {
+      setAddError('Organization, project and repository are all required.')
+      return
+    }
+    setAdding(true)
+    setAddError(null)
+    setAddStatus('')
+    try {
+      const res = await fetch('/api/library-repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          organization: organization.trim(),
+          project: project.trim(),
+          repository: repository.trim(),
+          ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
+        }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setAddError(body.error ?? `Failed to add library repo (${res.status})`)
+        return
+      }
+      setOrganization('')
+      setProject('')
+      setRepository('')
+      setBaseUrl('')
+      setAddStatus(body.refresh?.ok ? `Added — ${body.refresh.definitionCount} definition${body.refresh.definitionCount === 1 ? '' : 's'} found.` : `Added — ${body.refresh?.error ?? 'could not be read yet; try Refresh on the Definitions page.'}`)
+      load()
+    } catch (err) {
+      setAddError(err.message)
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  return html`
+    <section class="settings-section">
+      <h2>Library repos</h2>
+      <p class="guidance">
+        Azure DevOps repos read as additional sources for the server library, alongside the packaged
+        <code>definitions/</code> directory — read-only in the editor (viewable, copyable-from,
+        clonable into a workspace), read with this server's own PAT (<code>GANTRY_LIBRARY_PAT</code>),
+        cached on disk. Re-read at server startup, when a repo is added below, and on the Definitions
+        page's Refresh button — never polled.
+      </p>
+      ${loadError ? html`<p class="load-error">${loadError}</p>` : null}
+      ${repos === null && !loadError ? html`<p class="loading">Loading…</p>` : null}
+      ${repos?.length
+        ? html`
+            <div class="result-card">
+              ${repos.map(
+                (repo) => html`
+                  <div class="result-row" key=${repo.id}>
+                    <span class="k">${repo.organization}/${repo.project}/${repo.repository}</span>
+                    <span class="v">
+                      ${repo.definitionCount == null
+                        ? 'Not read yet'
+                        : `${repo.definitionCount} definition${repo.definitionCount === 1 ? '' : 's'} · as of ${repo.fetchedAt}`}
+                    </span>
+                  </div>
+                `
+              )}
+            </div>
+          `
+        : repos?.length === 0
+          ? html`<p class="guidance">No library repos configured.</p>`
+          : null}
+      <div class="wizard-field">
+        <label class="field-label" for="library-repo-organization">Organization</label>
+        <input id="library-repo-organization" class="wizard-input" value=${organization} onInput=${(e) => setOrganization(e.currentTarget.value)} />
+        <label class="field-label" for="library-repo-project">Project</label>
+        <input id="library-repo-project" class="wizard-input" value=${project} onInput=${(e) => setProject(e.currentTarget.value)} />
+        <label class="field-label" for="library-repo-repository">Repository</label>
+        <input id="library-repo-repository" class="wizard-input" value=${repository} onInput=${(e) => setRepository(e.currentTarget.value)} />
+        <label class="field-label" for="library-repo-baseurl">Base URL (optional — on-premises Azure DevOps Server only)</label>
+        <input id="library-repo-baseurl" class="wizard-input" value=${baseUrl} onInput=${(e) => setBaseUrl(e.currentTarget.value)} />
+      </div>
+      ${addError ? html`<p class="inline-error">${addError}</p>` : null}
+      <div class="settings-actions">
+        <button type="button" class="btn primary" disabled=${adding} onClick=${handleAdd}>${adding ? 'Adding…' : 'Add library repo'}</button>
+      </div>
+      ${addStatus ? html`<p class="save-status">${addStatus}</p>` : null}
+    </section>
+  `
+}
+
 export function GlobalSettingsPage({ query }) {
   return html`
     <${SettingsHeader} title="Settings" backHref=${backHrefFrom(query)} />
@@ -231,6 +355,7 @@ export function GlobalSettingsPage({ query }) {
       <${RenderEngineSection} />
       ${advancedMode.value ? html`<${GlobalPatSection} />` : null}
       ${advancedMode.value ? html`<${TicketingSystemSection} />` : null}
+      ${advancedMode.value ? html`<${LibraryReposSection} />` : null}
     </main>
   `
 }
