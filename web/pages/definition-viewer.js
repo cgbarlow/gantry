@@ -164,6 +164,18 @@ export function DefinitionViewerPage() {
   const [publishProblems, setPublishProblems] = useState([])
   const [publishError, setPublishError] = useState(null)
 
+  // Promote (WI #387, ADR-0036's Promote section) — one Pull Request per selected library repo,
+  // from a published workspace definition version. `promotions` is this version's persisted
+  // per-repo PR link/status (`GET .../promotions`), refreshed by a promote or an explicit Check —
+  // never polled.
+  const [promoteOpen, setPromoteOpen] = useState(false)
+  const [promoteRepos, setPromoteRepos] = useState(null)
+  const [promoteSelectedIds, setPromoteSelectedIds] = useState([])
+  const [promoting, setPromoting] = useState(false)
+  const [promoteError, setPromoteError] = useState(null)
+  const [promotions, setPromotions] = useState([])
+  const [checkingPromotions, setCheckingPromotions] = useState(false)
+
   // Focus pane: which element is shown, and (for a module) which field row is expanded — "fields are
   // compact rows, one expanded at a time" (Feature #380).
   const [selection, setSelection] = useState({ type: 'stage', id: null })
@@ -323,6 +335,26 @@ export function DefinitionViewerPage() {
       })
       .finally(() => setDetailLoading(false))
   }, [selectedId, selectedVersion])
+
+  // WI #387: this version's persisted per-repo promotion PR link/status — reloaded whenever the
+  // selected definition/version changes, never polled thereafter (a promote or an explicit Check is
+  // what refreshes it from here on). `[]` for anything that isn't a published server-workspace
+  // version — the only home Promote is available on.
+  useEffect(() => {
+    if (!selectedId || selectedVersion == null || detail?.status !== 'published') {
+      setPromotions([])
+      return
+    }
+    const def = definitions?.find((d) => d.id === selectedId)
+    if (def?.home?.kind !== 'server-workspace') {
+      setPromotions([])
+      return
+    }
+    fetch(`/api/definitions/${encodeURIComponent(selectedId)}/versions/${encodeURIComponent(String(selectedVersion))}/promotions`)
+      .then((res) => (res.ok ? res.json() : { promotions: [] }))
+      .then((body) => setPromotions(body.promotions ?? []))
+      .catch(() => setPromotions([]))
+  }, [selectedId, selectedVersion, detail?.status, definitions])
 
   // Live validation markers, sharing findDefinitionProblemsInStructure with the server (WI #381) via
   // POST .../validate — debounced so it runs once per pause in typing, not on every keystroke.
@@ -642,6 +674,69 @@ export function DefinitionViewerPage() {
       setPublishError(err.message)
     } finally {
       setPublishing(false)
+    }
+  }
+
+  // WI #387 — opens the Promote dialog, loading the configured library repos fresh each time (a
+  // repo added or edited in Settings since the page loaded must show up without a reload).
+  function handleOpenPromote() {
+    setPromoteError(null)
+    setPromoteSelectedIds([])
+    setPromoteOpen(true)
+    setPromoteRepos(null)
+    fetch('/api/library-repos')
+      .then(async (res) => {
+        const body = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(body.error ?? `Failed to load library repos (${res.status})`)
+        return body
+      })
+      .then((body) => setPromoteRepos(body.repos ?? []))
+      .catch((err) => setPromoteError(err.message))
+  }
+
+  function togglePromoteRepo(repoId) {
+    setPromoteSelectedIds((prev) => (prev.includes(repoId) ? prev.filter((id) => id !== repoId) : [...prev, repoId]))
+  }
+
+  async function handlePromote() {
+    if (!selectedId || selectedVersion == null || promoteSelectedIds.length === 0) return
+    setPromoting(true)
+    setPromoteError(null)
+    try {
+      const res = await fetch(`/api/definitions/${encodeURIComponent(selectedId)}/versions/${encodeURIComponent(String(selectedVersion))}/promote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repoIds: promoteSelectedIds }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(body.error ?? `Promote failed (${res.status})`)
+      }
+      setPromotions(body.promotions ?? [])
+      const failed = (body.results ?? []).filter((r) => !r.ok)
+      if (failed.length) {
+        setPromoteError(failed.map((r) => `${r.repoName}: ${r.error}`).join(' · '))
+      } else {
+        setPromoteOpen(false)
+      }
+    } catch (err) {
+      setPromoteError(err.message)
+    } finally {
+      setPromoting(false)
+    }
+  }
+
+  // The explicit "Check" action (WI #387: "status is read on an explicit Check, not polled — same
+  // posture as sign-off") — re-reads every promotion's Pull Request status/review from Azure DevOps.
+  async function handleCheckPromotions() {
+    if (!selectedId || selectedVersion == null) return
+    setCheckingPromotions(true)
+    try {
+      const res = await fetch(`/api/definitions/${encodeURIComponent(selectedId)}/versions/${encodeURIComponent(String(selectedVersion))}/promotions/check`, { method: 'POST' })
+      const body = await res.json().catch(() => ({}))
+      if (res.ok) setPromotions(body.promotions ?? [])
+    } finally {
+      setCheckingPromotions(false)
     }
   }
 
@@ -1329,6 +1424,7 @@ export function DefinitionViewerPage() {
                     <button class=${'btn small' + (defnView.value === 'map' ? ' primary' : ' ghost')} aria-pressed=${defnView.value === 'map'} onClick=${() => setDefnView('map')}>Map</button>
                   </div>
                   <p class="guidance">Read-only — published.</p>
+                  ${selectedDef?.home?.kind === 'server-workspace' ? html`<button class="btn small" onClick=${handleOpenPromote}>Promote…</button>` : null}
                 `
               : null}
         </div>
@@ -1338,6 +1434,62 @@ export function DefinitionViewerPage() {
       ${publishError ? html`<p class="load-error">${publishError}</p>` : null}
       ${saveProblems.length ? html`<div class="load-error"><p><strong>Validation failed:</strong></p><ul>${saveProblems.map((p) => html`<li>${p.message}</li>`)}</ul></div>` : null}
       ${saveError ? html`<p class="load-error">${saveError}</p>` : null}
+      ${!isEditable && detail && selectedDef?.home?.kind === 'server-workspace' && promotions.length
+        ? html`
+            <div class="defn-promotions">
+              <div class="defn-promotion-row">
+                <strong>Promoted to</strong>
+                <button class="btn small ghost" onClick=${handleCheckPromotions} disabled=${checkingPromotions}>${checkingPromotions ? 'Checking…' : 'Check status'}</button>
+              </div>
+              ${promotions.map(
+                (p) => html`
+                  <div class="defn-promotion-row" key=${p.repoId}>
+                    <span class="defn-promotion-repo">${p.repoName}</span>
+                    <a href=${p.pullRequestUrl} target="_blank" rel="noreferrer">PR #${p.pullRequestId}</a>
+                    <span class="stamp small">${p.status}</span>
+                    <span class=${'stamp small ' + (p.review?.state === 'approved' ? 'agreed' : 'draft')}>${p.review?.state ?? 'pending'}</span>
+                    ${p.reviewerError ? html`<span class="muted">${p.reviewerError}</span>` : null}
+                  </div>
+                `
+              )}
+            </div>
+          `
+        : null}
+      ${promoteOpen
+        ? html`
+            <div class="defn-promote-modal-backdrop" onClick=${() => !promoting && setPromoteOpen(false)}>
+              <div class="defn-promote-modal" role="dialog" aria-label="Promote" onClick=${(e) => e.stopPropagation()}>
+                <h3>Promote v${detail?.version} of ${selectedDef?.title} to a library repo</h3>
+                <p class="guidance">
+                  Opens one Pull Request per repo you select below, into that repo's own reviewers to
+                  approve and merge — gantry never writes to a library repo directly.
+                </p>
+                ${promoteRepos === null
+                  ? html`<p class="loading">Loading library repos…</p>`
+                  : promoteRepos.length === 0
+                    ? html`<p class="guidance">No library repos configured — add one in Settings first.</p>`
+                    : html`
+                        <div class="defn-promote-repo-list">
+                          ${promoteRepos.map(
+                            (repo) => html`
+                              <label key=${repo.id}>
+                                <input type="checkbox" checked=${promoteSelectedIds.includes(repo.id)} onChange=${() => togglePromoteRepo(repo.id)} />
+                                ${repo.organization}/${repo.project}/${repo.repository}
+                                ${repo.codeOwner ? html`<span class="muted"> — code owner: ${repo.codeOwner}</span>` : null}
+                              </label>
+                            `
+                          )}
+                        </div>
+                      `}
+                ${promoteError ? html`<p class="inline-error">${promoteError}</p>` : null}
+                <div class="defn-promote-modal-actions">
+                  <button class="btn small ghost" onClick=${() => setPromoteOpen(false)} disabled=${promoting}>Cancel</button>
+                  <button class="btn small primary" onClick=${handlePromote} disabled=${promoting || promoteSelectedIds.length === 0}>${promoting ? 'Promoting…' : 'Promote'}</button>
+                </div>
+              </div>
+            </div>
+          `
+        : null}
       ${pendingNav
         ? html`
             <div class="defn-leave-guard" role="alertdialog" aria-label="Unsaved changes">

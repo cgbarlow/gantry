@@ -17,6 +17,26 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.6.8-beta — 2026-09-14
+
+### Added
+
+- **Promote** (WI #387): a published workspace definition version can now be
+  promoted back to any number of configured library repos in one step. For
+  each repo you pick, Gantry opens a new `definition/<id>-v<n>` branch off
+  its default branch, pushes the full version folder (definition, modules,
+  templates, reference document, changelog) as a single commit, and opens a
+  Pull Request with that repo's configured code owner attached as a required
+  reviewer — Gantry never writes to a library repo directly; the code
+  owner's own review and merge in Azure DevOps is what actually publishes
+  it. Promoting to several repos at once is independent per repo, so one
+  repo being unreachable doesn't stop the others. The Definitions page shows
+  each promotion's Pull Request link and status underneath the definition,
+  refreshed by a new **Check status** button rather than polled. Each
+  library repo can now carry an optional **code owner** in Settings,
+  editable at any time. This completes Feature #380 (First-class Definition
+  Editor) across all seven phases.
+
 ## 0.6.7-beta — 2026-09-14
 
 ### Added
