@@ -518,6 +518,8 @@ test('images and Mermaid diagrams draw in Visual; the Source line is never store
     const image = page.locator('.cm-visual-image img.asset-thumb').first()
     await image.waitFor({ timeout: 10_000 })
     await page.locator('.cm-visual-image p.asset-source').first().waitFor({ timeout: 10_000 })
+    // In Visual an image fills the text width, as it will in the .docx (#148), not the 260px thumbnail cap.
+    await eventually(async () => assert.ok((await image.boundingBox()).width > 260, 'Visual image wider than the thumbnail cap'))
 
     const field = page.locator('.module').first().locator('.field-markdown').first()
     const fence = 'Intro.\n\n```mermaid\nflowchart LR\n  Author --> Gantry\n```\n\nOutro.'
