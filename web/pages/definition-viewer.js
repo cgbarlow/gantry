@@ -562,6 +562,14 @@ export function DefinitionViewerPage() {
     return c?.choice === 'rename' ? c.renameTo : plan.ref.id
   }
 
+  // Same idea as landedModuleId, for an 'artefact' ref — needed so a renamed-on-collision artefact
+  // still receives its brought-along template and reference docx under the id it actually landed as.
+  function landedArtefactId(plan) {
+    if (plan.ref.kind !== 'artefact') return plan.ref.id
+    const c = plan.collisions.find((x) => x.kind === 'artefact')
+    return c?.choice === 'rename' ? c.renameTo : plan.ref.id
+  }
+
   async function applyCopyFlow() {
     if (!copyFlow || !isResolved(copyFlow.plan) || !libDetail) return
     const { plan, afterLand, sourceId, sourceVersion } = copyFlow
@@ -585,13 +593,16 @@ export function DefinitionViewerPage() {
     }
     setDraft(target)
     setCopyFlow(null)
-    // An artefact copy's "brings" a template (CopyPlanner's 'template' entry) — the artefact's
-    // `template` YAML path lands as part of the plan above, but the .md.tmpl *content* is a
-    // separate file, written through the same read/write-template endpoints the focus pane's own
-    // "Edit template" already uses (lib/definition.js's readDefinitionTemplate/writeDefinitionTemplate
-    // — templates live outside the draft/Save cycle, same as that button). Best-effort: the artefact
-    // itself has already landed regardless, so a failed fetch just leaves the template to be added
-    // by hand, same as any brand-new artefact starts out.
+    // An artefact copy "brings" a template (CopyPlanner's 'template' entry) — the artefact's
+    // `template` YAML path lands as part of the plan above, but the .md.tmpl *content*, and its
+    // paired reference .docx (WI #385) if it has one, are separate files, written through the same
+    // read/write-template and reference-docx endpoints the focus pane's own "Edit template" and
+    // Replace/Download already use (lib/definition.js's readDefinitionTemplate/writeDefinitionTemplate
+    // and readDefinitionReferenceDocx/writeDefinitionReferenceDocx — both live outside the
+    // draft/Save cycle, same as those buttons). Both fetches are best-effort: the artefact itself has
+    // already landed regardless, so a failure just leaves the template and/or docx to be added by
+    // hand, same as any brand-new artefact starts out. A missing docx (404 — the common case, most
+    // artefacts don't have a custom one) is not a failure and is silently skipped.
     const templateBring = plan.brings.find((b) => b.kind === 'template')
     const name = templateBring && templateBasename(templateBring.id)
     if (name && selectedId && selectedVersion != null) {
@@ -604,6 +615,22 @@ export function DefinitionViewerPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ source: body.source ?? '' }),
           })
+        }
+      } catch {
+        // best-effort — see comment above
+      }
+      const sourceArtefactId = plan.ref.id
+      const targetArtefactId = landedArtefactId(plan)
+      try {
+        const docxRes = await fetch(
+          `/api/definitions/${encodeURIComponent(sourceId)}/versions/${encodeURIComponent(String(sourceVersion))}/artefacts/${encodeURIComponent(sourceArtefactId)}/reference-docx`
+        )
+        if (docxRes.ok) {
+          const bytes = new Uint8Array(await docxRes.arrayBuffer())
+          await fetch(
+            `/api/definitions/${encodeURIComponent(selectedId)}/versions/${encodeURIComponent(String(selectedVersion))}/artefacts/${encodeURIComponent(targetArtefactId)}/reference-docx`,
+            { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ docxBase64: bytesToBase64(bytes) }) }
+          )
         }
       } catch {
         // best-effort — see comment above

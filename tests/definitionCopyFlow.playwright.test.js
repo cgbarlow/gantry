@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'yaml'
@@ -18,9 +18,12 @@ import { withRunningServer } from './helpers/lifecycle.js'
 // `background.problem`), module `background` (field `problem`).
 // "source" offers: stage `shape` (clashes; modules `background`+`extra-module`) and stage
 // `handover` (no clash; brings module `glossary`), artefact `soap` (clashes) and artefact
-// `as-built` (no clash; requires `glossary.terms`), module `background` (clashes; fields
-// `problem`+`opportunity`) and module `extra-module` (no clash; field `note`), module `glossary`
-// (field `terms`).
+// `as-built` (no clash; requires `glossary.terms`, and — WI #385 — its own template plus a
+// reference `.docx`, to exercise the artefact-copy "brings" step end to end), module `background`
+// (clashes; fields `problem`+`opportunity`) and module `extra-module` (no clash; field `note`),
+// module `glossary` (field `terms`).
+
+const REAL_REFERENCE_DOCX = readFileSync('definitions/design/1/templates/reference-soap.docx')
 
 function withCopyFixtures(fn) {
   return async () => {
@@ -52,7 +55,7 @@ function withCopyFixtures(fn) {
         ],
         artefacts: [
           { id: 'soap', title: 'Source SOAP', purpose: '', template: 'templates/soap.md.tmpl', gate: 'business-case', requires: ['background.problem'] },
-          { id: 'as-built', title: 'As Built', purpose: '', template: '', gate: 'ops-gate', requires: ['glossary.terms'] },
+          { id: 'as-built', title: 'As Built', purpose: '', template: 'templates/as-built.md.tmpl', gate: 'ops-gate', requires: ['glossary.terms'] },
         ],
       }))
       writeFileSync(join(sourceDir, 'modules', 'background.yaml'), yaml.stringify({
@@ -69,6 +72,8 @@ function withCopyFixtures(fn) {
         id: 'glossary', title: 'Glossary', purpose: '', fields: [{ id: 'terms', title: 'Terms', type: 'markdown' }],
       }))
       writeFileSync(join(sourceDir, 'templates', 'soap.md.tmpl'), '# Source SOAP\n')
+      writeFileSync(join(sourceDir, 'templates', 'as-built.md.tmpl'), '# As Built\n')
+      writeFileSync(join(sourceDir, 'templates', 'reference-as-built.docx'), REAL_REFERENCE_DOCX)
       writeFileSync(join(sourceDir, 'CHANGELOG.md'), '## v1\n\nPublished.\n')
 
       await withRunningServer({ definitionsDir, instancesDir }, fn)
@@ -351,6 +356,36 @@ test('Artefact id clash — replace overwrites the artefact wholesale', withCopy
     const replaced = page.locator('.defn-outline-node').filter({ hasText: 'Source SOAP' })
     await replaced.waitFor({ state: 'visible', timeout: 10_000 })
     assert.match(await replaced.textContent(), /from source v1/)
+  })
+}))
+
+test('Copying an artefact with no id clash brings its template text and reference .docx along, not just the plan', withCopyFixtures(async (base) => {
+  await withPage(base, async (page) => {
+    await openTargetDefinition(page, base)
+    await libraryNode(page, 'As Built').locator('.defn-library-copy-btn').click()
+    await page.waitForSelector('.defn-copy-modal', { timeout: 10_000 })
+    const bringsText = await page.locator('.defn-copy-section').filter({ hasText: 'Comes along' }).textContent()
+    assert.match(bringsText, /templates\/as-built\.md\.tmpl/)
+    assert.match(bringsText, /templates\/as-built reference \.docx/)
+    assert.equal(await page.locator('.defn-copy-collision').count(), 0, 'a fresh id copies straight through, nothing to resolve')
+    await confirmCopy(page)
+
+    const landed = page.locator('.defn-outline-node').filter({ hasText: 'As Built' })
+    await landed.waitFor({ state: 'visible', timeout: 10_000 })
+    assert.match(await landed.textContent(), /from source v1/)
+
+    // The plan landing the artefact is one thing; the .md.tmpl *content* and its paired reference
+    // .docx are separate files, written through the template and reference-docx routes right after
+    // (web/pages/definition-viewer.js's applyCopyFlow) — assert both actually arrived, not just that
+    // the confirm panel promised them.
+    const templateRes = await fetch(`${base}/api/definitions/target/versions/1/templates/as-built.md.tmpl`)
+    assert.equal(templateRes.status, 200)
+    assert.equal((await templateRes.json()).source, '# As Built\n')
+
+    const docxRes = await fetch(`${base}/api/definitions/target/versions/1/artefacts/as-built/reference-docx`)
+    assert.equal(docxRes.status, 200)
+    const docxBytes = Buffer.from(await docxRes.arrayBuffer())
+    assert.deepEqual(docxBytes, REAL_REFERENCE_DOCX)
   })
 }))
 
