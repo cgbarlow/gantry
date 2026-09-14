@@ -5594,7 +5594,7 @@ function DashboardPage() {
         <div class="dashboard-controls">
           ${visibleInstances?.length ? html`<${ViewToggle} />` : null}
           <a class="btn small ghost" href="/new-workspace">+ New Workspace</a>
-          <a class="btn small ghost" href="/definitions">Definition Editor (experimental)</a>
+          <a class="btn small ghost" href="/definitions">Definitions</a>
           <a class="btn small ghost" href="/user-guide">User Guide</a>
           <a class="btn small ghost" href=${`/settings?from=${encodeURIComponent('/')}`}>Settings</a>
         </div>
@@ -5690,7 +5690,6 @@ function App() {
         <${Route} path="/assets" component=${AssetLibraryPage} />
         <${Route} path="/user-guide" component=${UserGuidePage} />
         <${Route} path="/definitions" component=${DefinitionViewerPage} />
-        <${Route} path="/definition-editor" component=${DefinitionViewerPage} />
         <${Route} path="/settings" component=${GlobalSettingsPage} />
         <${Route} path="/settings/workspace" component=${WorkspaceSettingsPage} />
         <${Route} path="/settings/instance" component=${InstanceSettingsPage} />

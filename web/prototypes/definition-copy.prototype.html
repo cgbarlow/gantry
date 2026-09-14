@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — throwaway. Not wired into gantry's app, not linked from web/index.html.
+  Logic demo for the first-class Definition Editor plan (grilling session 2026-09-14,
+  phase 2 "Copy from other definitions"; glossary terms Copy, Element, Field visibility
+  per artefact in CONTEXT.md).
+
+  Question this answers: does the copy model hold up when pushed through awkward cases?
+  Copying an Element (Stage / Artefact / Module / Field) from a source definition into
+  the definition being edited must (1) bring missing dependencies along after a confirm,
+  (2) stop on id collisions and offer rename / replace / merge, (3) record provenance on
+  every copied element, and (4) never create a live link back to the source.
+
+  Tracked as Feature #380, phase 2 = #382 (the CopyPlanner module lifts into lib/ there).
+
+  The pure module in <script id="copy-planner"> is the liftable part — plan a copy,
+  resolve collisions, apply. The page around it is a thin shell.
+-->
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gantry — Definition copy model (prototype)</title>
+<style>
+  :root { --font-display:'Space Grotesk','Segoe UI',system-ui,sans-serif; --font-body:'IBM Plex Sans','Segoe UI',system-ui,sans-serif; --font-mono:'IBM Plex Mono',ui-monospace,Menlo,monospace; --radius:2px; --hairline:1px; --border-strong:1px;
+    --bg:#EDEBE6; --bg-raised:#F5F3EE; --text:#1B1E22; --text-muted:#4A4740; --line:#B9B3A4; --line-strong:#5B5648; --focus-ring:#1B1E22;
+    --stamp-draft-bg:#8A5A1F; --stamp-draft-fg:#F5F1E8; --stamp-agreed-bg:#295C40; --stamp-agreed-fg:#F5F1E8; --stamp-review-bg:#4A4740; --stamp-review-fg:#F5F1E8; --stamp-error-bg:#8C3A2B; --stamp-error-fg:#F5F1E8; }
+  * { box-sizing:border-box }
+  html { background:var(--bg) }
+  body { margin:0; font:14px/1.5 var(--font-body); color:var(--text); }
+  header { border-bottom:var(--hairline) solid var(--line); padding:18px 32px; background:var(--bg-raised) }
+  header h1 { font:600 20px var(--font-display); margin:0 }
+  header p { margin:6px 0 0; color:var(--text-muted); max-width:900px }
+  .proto { display:inline-block; font:700 10px var(--font-display); letter-spacing:.08em; background:var(--stamp-error-bg); color:var(--stamp-error-fg); padding:3px 8px; border-radius:var(--radius); margin-left:10px; vertical-align:middle }
+  main { display:grid; grid-template-columns:minmax(0,1.1fr) minmax(0,1fr); gap:24px; padding:24px 32px 120px; max-width:1400px; margin:0 auto }
+  @media (max-width:900px){ main { grid-template-columns:1fr } }
+  section.panel { border:var(--hairline) solid var(--line); background:var(--bg-raised); border-radius:var(--radius); padding:16px 20px }
+  section.panel h2 { font:600 12px var(--font-display); letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); margin:0 0 12px }
+  .btn { font:600 13px var(--font-body); padding:7px 12px; border-radius:var(--radius); border:var(--border-strong) solid var(--line-strong); background:var(--bg-raised); color:var(--text); cursor:pointer; margin:0 8px 8px 0 }
+  .btn.primary { background:var(--text); color:var(--bg); border-color:var(--text) }
+  .btn.small { padding:4px 9px; font-size:12px }
+  .btn:disabled { opacity:.4; cursor:not-allowed }
+  .btn.done { border-style:dashed; opacity:.6 }
+  .stamp { display:inline-block; padding:2px 7px; border-radius:var(--radius); font:700 10px var(--font-display); letter-spacing:.07em; vertical-align:middle }
+  .stamp.from { background:var(--stamp-review-bg); color:var(--stamp-review-fg) }
+  .stamp.new { background:var(--stamp-agreed-bg); color:var(--stamp-agreed-fg) }
+  .stamp.warn { background:var(--stamp-draft-bg); color:var(--stamp-draft-fg) }
+  .stamp.error { background:var(--stamp-error-bg); color:var(--stamp-error-fg) }
+  .tree { list-style:none; margin:0; padding:0 }
+  .tree > li { padding:6px 0; border-top:var(--hairline) solid var(--line) }
+  .tree > li:first-child { border-top:0 }
+  .tree .kind { font:600 11px var(--font-display); letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); display:block; margin-bottom:4px }
+  .row { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; padding:3px 0 }
+  .row code { font:12px var(--font-mono) }
+  .row.changed { background:#e6efe9; outline:2px solid var(--stamp-agreed-bg); outline-offset:1px }
+  .sub { margin:0 0 0 18px; padding:0; list-style:none; color:var(--text-muted); font-size:13px }
+  .sub li { padding:1px 0 }
+  .plan { border:var(--border-strong) solid var(--line-strong); padding:14px 16px; background:var(--bg); margin-top:8px }
+  .plan h3 { font:600 14px var(--font-display); margin:0 0 8px }
+  .plan ul { margin:4px 0 10px 18px; padding:0 }
+  .collision { border-top:var(--hairline) solid var(--line); padding:10px 0 }
+  .collision label { margin-right:14px; cursor:pointer }
+  .collision input[type=text] { font:13px var(--font-mono); padding:4px 6px; border:var(--hairline) solid var(--line-strong); border-radius:var(--radius); width:180px }
+  .tabs { display:flex; gap:0; border-bottom:var(--hairline) solid var(--line); margin-bottom:12px; flex-wrap:wrap }
+  .tabs button { font:600 13px var(--font-body); background:none; border:0; border-bottom:3px solid transparent; padding:8px 12px; cursor:pointer; color:var(--text-muted) }
+  .tabs button.active { color:var(--text); border-bottom-color:var(--text) }
+  .scenario p { margin:0 0 10px }
+  .steps { counter-reset:s; list-style:none; margin:0; padding:0 }
+  .steps li { counter-increment:s; display:flex; gap:10px; align-items:flex-start; padding:6px 0; border-top:var(--hairline) solid var(--line) }
+  .steps li::before { content:counter(s); font:700 12px var(--font-display); width:22px; height:22px; border:var(--hairline) solid var(--line-strong); border-radius:50%; display:inline-flex; align-items:center; justify-content:center; flex:none; margin-top:4px }
+  .steps li.done::before { background:var(--text); color:var(--bg) }
+  .steps li .why { color:var(--text-muted); font-size:13px }
+  .log { font:12px var(--font-mono); background:var(--bg); border:var(--hairline) solid var(--line); padding:10px 12px; max-height:220px; overflow:auto; white-space:pre-wrap }
+  .muted { color:var(--text-muted) }
+  .free { display:flex; flex-wrap:wrap; gap:0 }
+  details summary { cursor:pointer; font-weight:600 }
+</style>
+</head>
+<body>
+<header>
+  <h1>Definition copy model <span class="proto">PROTOTYPE</span></h1>
+  <p>You are editing a small <strong>Procurement</strong> definition (draft v1) and pulling elements in from the real <strong>Solution Design v2</strong> definition. Press the buttons and watch what lands, what comes along with it, what stops on a name clash, and what provenance is recorded. Nothing here is saved anywhere.</p>
+</header>
+<main>
+  <div>
+    <section class="panel">
+      <h2>Your definition · Procurement, draft v1</h2>
+      <div id="target"></div>
+    </section>
+    <section class="panel" style="margin-top:16px">
+      <h2>What just happened</h2>
+      <div class="log" id="log">Ready.</div>
+    </section>
+  </div>
+  <div>
+    <section class="panel">
+      <h2>Guided walkthroughs</h2>
+      <div class="tabs" id="tabs"></div>
+      <div id="scenario"></div>
+    </section>
+    <section class="panel" style="margin-top:16px">
+      <h2>Free play · copy from Solution Design v2</h2>
+      <div class="free" id="free"></div>
+    </section>
+    <section class="panel" style="margin-top:16px" id="planPanel" hidden>
+      <h2>Pending copy · confirm before it lands</h2>
+      <div id="plan"></div>
+    </section>
+  </div>
+</main>
+
+<script id="source-data" type="application/json">{"id":"design","version":2,"status":"published","title":"Solution Design","description":"Design content for an initiative, from shaping through HLD approval, build-ready detailed design, and operational handover.","stages":[{"id":"shape","title":"SOAP","purpose":"Describe the initiative's context, proposed solution, team, estimates and dependencies in enough detail to support a business case decision.","gate":"business-case","modules":["background","introduction","design-basis","solution-definition","team-and-estimates","dependencies","soap-full-details","open-questions"]},{"id":"hld-define","title":"High-level Design","purpose":"Describe the proposed solution in enough detail to be approved before detailed design begins. Cover what is needed to decide whether to proceed.","gate":"hld-tac-approved","modules":["hld-submission","background","introduction","proposed-solution","alternatives-considered","open-questions","nfrs","risks","security","dependencies"]},{"id":"detailed-design","title":"Detailed Design","purpose":"Describe the architecture, integration, data, quality, security, risk, dependency and operational details needed to build the solution.","gate":"build-ready-checklist","modules":["introduction","design-basis","architecture","integration","data","nfrs","security","risks","dependencies","support-and-operations","glossary","recovery-plan","data-security-controls","solution-definition","team-and-estimates"]},{"id":"handover","title":"Operational Handover","purpose":"Record what was built and the information needed to hand it over for operation.","gate":"operational-handover","modules":["glossary","introduction","design-basis","as-built-notes","recovery-plan","data-security-controls","nfrs"]}],"artefacts":[{"id":"soap","title":"Solution on a Page","purpose":"Summarise the initiative's context, solution, team and estimates for the business case decision.","template":"templates/soap.md.tmpl","gate":"business-case","requires":["background.problem","background.affected-domains","solution-definition.high-level-requirements","solution-definition.process-flow","solution-definition.high-level-solution-overview","design-basis.assumptions?","solution-definition.feature-breakdown","team-and-estimates.teams-required","team-and-estimates.estimates","team-and-estimates.references?"]},{"id":"soap-full","title":"Full Solution on a Page","purpose":"Provide a fuller summary with detailed scope, dependencies, sequencing, dates and open questions.","template":"templates/soap-full.md.tmpl","gate":"business-case","requires":["soap-full-details.epic-project","soap-full-details.requested-lead-by","soap-full-details.request-date","soap-full-details.draft-agreed-date","soap-full-details.delivered-date","introduction.overview?","background.problem","background.opportunity","introduction.in-scope","introduction.out-of-scope","design-basis.assumptions?","design-basis.constraints?","solution-definition.high-level-requirements","solution-definition.high-level-solution-overview","solution-definition.alternatives-sketch?","team-and-estimates.teams-required","dependencies.dependencies-overview","team-and-estimates.estimates","soap-full-details.sequencing","open-questions.questions","soap-full-details.caveats","team-and-estimates.references"]},{"id":"hld","title":"High Level Design","purpose":"Present the proposed solution, alternatives, risks and open questions for approval before detailed design.","template":"templates/hld.md.tmpl","gate":"hld-tac-approved","requires":["hld-submission.purpose-statement","hld-submission.authors-and-contributors?","hld-submission.decision-requested","hld-submission.next-steps?","hld-submission.consultation","background.problem","background.opportunity","introduction.in-scope","introduction.out-of-scope","background.success-criteria","nfrs.performance","nfrs.availability-and-continuity","proposed-solution.guardrails","proposed-solution.strategy-alignment","dependencies.dependencies-overview","proposed-solution.implications?","proposed-solution.trade-offs","risks.risk-register","security.privacy-and-confidentiality","proposed-solution.cost-benefit","proposed-solution.delivery-approach","alternatives-considered.alternatives","open-questions.questions?","hld-submission.attachments?"]},{"id":"sad","title":"Solution Architecture Document","purpose":"Describe the complete solution architecture and its requirements, security, dependencies and support handover readiness for build.","template":"templates/sad.md.tmpl","gate":"build-ready-checklist","requires":["introduction.executive-summary?","introduction.overview","introduction.purpose","introduction.in-scope","introduction.out-of-scope","design-basis.assumptions?","design-basis.constraints?","support-and-operations.stakeholders?","architecture.business-context","architecture.solution-users?","solution-definition.process-flow?","solution-definition.high-level-requirements?","architecture.solution-description","dependencies.dependencies-overview","dependencies.dependency-list","architecture.design-decisions","architecture.architectural-risks","architecture.constraints","architecture.standards","risks.open-issues","risks.risk-register","architecture.logical-components","nfrs.requirements-traceability","integration.interfaces","integration.network-and-infrastructure","integration.software-and-licences?","integration.hardware?","integration.bandwidth?","integration.network-devices?","integration.communication-and-network-protocols?","integration.san?","recovery-plan.recovery-approach","recovery-plan.resiliency?","recovery-plan.test-scenarios?","recovery-plan.raci?","nfrs.disaster-recovery-and-backup","data.logical-data-model","data.data-classification","data.data-replication","data.data-retention-and-archiving","data.data-migration","support-and-operations.environments-and-domains","security.identity-and-access","security.security-architecture","security.regulations-and-standards","security.privacy-and-confidentiality","data-security-controls.controls","data-security-controls.inheritance-and-dependencies?","support-and-operations.operational-accounts-and-licenses?","nfrs.scalability-and-capacity","nfrs.performance","nfrs.availability-and-continuity","support-and-operations.monitoring-and-alerting?","nfrs.other-nfrs","support-and-operations.decommission?","support-and-operations.support-handover-readiness","glossary.terms-and-definitions","team-and-estimates.references?"]},{"id":"ssad","title":"Solution Support Architecture Document","purpose":"Describe the solution's design and operational readiness for the teams that will support it after build.","template":"templates/ssad.md.tmpl","gate":"build-ready-checklist","requires":["architecture.logical-components","architecture.architectural-risks","risks.risk-register","risks.open-issues","introduction.executive-summary?","introduction.purpose","introduction.in-scope","introduction.out-of-scope","introduction.content-standards?","architecture.solution-description","support-and-operations.stakeholders","support-and-operations.environments-and-domains","dependencies.dependency-list","integration.interfaces","data.data-classification","nfrs.availability-and-continuity","nfrs.disaster-recovery-and-backup","nfrs.scalability-and-capacity","support-and-operations.operational-accounts-and-licenses","security.identity-and-access","security.privacy-and-confidentiality","data-security-controls.controls","data-security-controls.inheritance-and-dependencies?","support-and-operations.monitoring-and-alerting","support-and-operations.release-procedures","support-and-operations.support-handover-readiness","glossary.terms-and-definitions","team-and-estimates.references?"]},{"id":"as-built","title":"As-built","purpose":"Record what was built and the final handover information needed for operational use.","template":"templates/as-built.md.tmpl","gate":"operational-handover","requires":["glossary.terms-and-definitions","introduction.overview","introduction.purpose","introduction.in-scope","introduction.out-of-scope","design-basis.constraints?","design-basis.assumptions?","design-basis.caveats?","design-basis.design-principles?","design-basis.outcomes-and-deliverables?","as-built-notes.design-overview","as-built-notes.architecture-decisions?","as-built-notes.process-flows","as-built-notes.infrastructure-and-configuration","nfrs.disaster-recovery-and-backup","recovery-plan.recovery-approach","recovery-plan.resiliency?","recovery-plan.test-scenarios?","recovery-plan.raci?","data-security-controls.controls","data-security-controls.inheritance-and-dependencies?","as-built-notes.appendix?","as-built-notes.changes-from-design","as-built-notes.acceptance-criteria","as-built-notes.operational-notes?","as-built-notes.handover-confirmation"]}],"modules":[{"id":"alternatives-considered","title":"Alternatives considered","purpose":"Describe the other options that were on the table and why they were not chosen. Include \"do nothing\" where it helps show the proposed approach was compared, not just asserted.","fields":[{"id":"alternatives","title":"Alternatives","type":"markdown","required":true,"guidance":"For each alternative: what it was, and the specific reason it lost out to the proposed solution. \"Do nothing\" counts as an alternative and is often worth including explicitly."}]},{"id":"architecture","title":"Architecture","purpose":"Describe the solution's structure in enough detail to build from — components, layers, and the design decisions behind them. Explain what was chosen and why, and how the parts fit together.","fields":[{"id":"business-context","title":"Business context","type":"markdown","required":false,"guidance":"Describe the business processes, users and regulatory context this architecture sits within — the background the rest of this section assumes. Already approved at earlier stages — see `background` and the HLD's `proposed-solution`; do not re-derive, summarise for builders. Carries the reference SAD's \"Background\" / \"Context\" / \"Business Concept View\" / \"Wider Government Context\" sub-sections.\nKept deliberately separate from `background.problem`: the HLD frames the problem for TAC, this frames the setting for builders. Confirmed as a decision, not an oversight — see CHANGES.md."},{"id":"solution-users","title":"Solution users","type":"list","required":false,"guidance":"The roles that use this system, internal and external, each with a short description of what they do with it. The reference SAD asks for a User / Description table here and points at the requirements document's use-case model. This is the business user catalogue — the security roles and how they authenticate belong in `security.identity-and-access`, and the people to contact about the running system belong in `support-and-operations.stakeholders`."},{"id":"design-decisions","title":"Design decisions","type":"markdown","required":true,"guidance":"The decisions that shaped this architecture and why — not just what was decided, but what else was on the table. Deepen the `solution-definition.high-level-solution-overview` sketch to build-ready depth rather than starting over."},{"id":"architectural-risks","title":"Architectural risks","type":"markdown","required":false,"guidance":"Risks specific to this architecture's shape. Broader project risk belongs in the `risks` module — this is for risk that's a direct consequence of a structural choice made here."},{"id":"solution-description","title":"Solution description","type":"markdown","required":true,"guidance":"The components and how they fit together. Reference a diagram if you have one, but describe the structure in words too. Expands the `solution-definition` `high-level-solution-overview` / `process-flow` sketch — the original stays at `modules/solution-definition.md`."},{"id":"constraints","title":"Constraints and goals","type":"markdown","required":false,"guidance":"Architecture-specific constraints and goals only — the boundaries and objectives that shaped this structure (e.g. a fixed platform, a latency budget, a \"reuse existing services\" goal). Solution-wide assumptions belong in `design-basis.assumptions` (WI #331: was `introduction.assumptions`); list here only what is particular to the architecture and cross-reference that field."},{"id":"standards","title":"Applicable standards","type":"list","required":false,"guidance":"Architectural or solution standards this design follows (e.g. messaging, security, UI, development framework) — and any it deliberately departs from. Carries both the reference SAD's \"Solution Standards\" and \"Architectural Standards\" sub-sections."},{"id":"logical-components","title":"Logical components","type":"list","required":true,"guidance":"The solution's logical components, and for each, whether it's new or existing. Renders as its own section, after `risks.open-issues` — it carries the reference SAD's whole \"Logical Components View\", including its layered / product / application-usage / service-realisation viewpoints."}]},{"id":"as-built-notes","title":"As-Built Notes","purpose":"Describe what was actually built in enough detail that a skilled engineer could rebuild it. Include how it differs from the approved design and how it was shown to meet its requirements.","fields":[{"id":"design-overview","title":"Design overview","type":"markdown","required":true,"guidance":"Describe the key architecture and technology as actually implemented and how it aligns to the approved design. Reference a diagram if you have one, but describe the structure in words too."},{"id":"architecture-decisions","title":"Architecture decisions","type":"markdown","required":false,"guidance":"List the key design decisions as implemented — for each, what was decided and what it means in practice. Note any that changed from the approved design."},{"id":"process-flows","title":"Data migration and process flows","type":"markdown","required":true,"guidance":"Describe the detailed process and data flows step by step, as the system actually behaves — not the intended flows from design."},{"id":"infrastructure-and-configuration","title":"Infrastructure and configuration","type":"markdown","required":true,"guidance":"Provide environment and infrastructure detail sufficient to rebuild — services, IP addresses, ports, network configuration, resource names, roles and permissions, and equivalent build-time values."},{"id":"appendix","title":"Appendix","type":"markdown","required":false,"guidance":"Include supporting reference material that would clutter the body, such as firewall rules, test cases and the security control register."},{"id":"changes-from-design","title":"Changes from the agreed design","type":"markdown","required":true,"guidance":"Describe where the built solution diverges from the approved design and why."},{"id":"acceptance-criteria","title":"Acceptance criteria","type":"markdown","required":true,"guidance":"Detailed acceptance criteria confirming the build meets requirements — the bar a rebuild should be tested against."},{"id":"operational-notes","title":"Operational notes","type":"markdown","required":false,"guidance":"Anything a support engineer would need that isn't already captured in `support-and-operations`, the shared `recovery-plan`, or the shared `data-security-controls` module — quirks, workarounds, known limitations."},{"id":"handover-confirmation","title":"Handover confirmation","type":"markdown","required":true,"guidance":"Record who received the handover and when. Note that handover of the document does not transfer responsibility for keeping it updated."}]},{"id":"background","title":"Background and context","purpose":"Describe why this initiative exists and what it is responding to. Give a reader with no prior knowledge enough context to understand the situation quickly, stated clearly enough that a reviewer can judge the fit of the solution without inferring it.\nOne module used at SOAP and at HLD — fill it progressively: at SOAP state the current problem and the domains it touches for the business case; by HLD add the opportunity and success criteria in the depth TAC needs.","fields":[{"id":"problem","title":"Problem statement","type":"markdown","requiredAt":["business-case","hld-tac-approved"],"guidance":"The current state — what is wrong, missing, or binding right now: the legislative, operational, commercial, or technical constraint that makes this necessary. Open with a one-line summary before the fuller narrative. Describe only the present situation here; the desired end state belongs in `opportunity`.\nThe HLD's `background` framing and the SAD's `introduction` framing are intentionally separate (TAC vs Design Authority audiences) — do not expect `introduction.overview` to pre-fill from this field. See the reconciliation doc §5.\nThis field and `architecture.business-context` are also deliberately separate: the problem stated here is what TAC decides on, while the business context there is the setting a builder needs. Reviewed and confirmed as a decision in v2, not an unresolved duplicate."},{"id":"affected-domains","title":"Affected domains","type":"list","required":true,"guidance":""},{"id":"opportunity","title":"Opportunity","type":"markdown","requiredAt":["hld-tac-approved"],"guidance":"The desired future state — the better outcome, service, or capability this initiative creates once the problem is addressed. Describe what \"good\" looks like when the work is done, not how it will be built."},{"id":"success-criteria","title":"Success criteria","type":"markdown","requiredAt":["hld-tac-approved"],"guidance":"How you'll know the desired future state has actually been reached — observable, not aspirational."}]},{"id":"data-security-controls","title":"Data Security Controls","purpose":"Describe the security controls that protect the solution's data in operation and what they depend on. Cover how data is protected in transit and at rest and how access is managed.\nTwo-layer model with the shared `security` module: `security` carries the design-time posture (identity model, security architecture, regulations, privacy) and opens at high-level design; this module carries the concrete control set the solution runs under, opens at detailed design and re-opens at handover with the as-built values. There is no third home — the operational posture a support team must maintain (restricted developer access, connectivity restrictions, read-only postures) is part of this control set and the SSAD renders it from here. The Security Risk Assessment (SRA) control register itself is evidence about the built system and lives with the as-built `appendix` field. Wired into the `detailed-design` / `sad` and `handover` / `as-built` artefacts; `controls` is required at both gates (see the reconciliation doc §5).","fields":[{"id":"controls","title":"Controls","type":"markdown","requiredAt":["build-ready-checklist","operational-handover"],"guidance":"The security controls in force, grouped (e.g. Encryption, Incident management, Networking, Virtual machines, Availability, Access management, Application security, Documentation). For each, the concern it addresses and how it is implemented. A Service / Definition / Controls table works well.\nIncludes the controls a support team must keep true in production — developer and repository access restrictions, permitted outbound connectivity, dependency and vulnerability scanning, framework security configuration. Required at `build-ready-checklist` as designed and again at `operational-handover` as built."},{"id":"inheritance-and-dependencies","title":"Inheritance and dependencies","type":"markdown","required":false,"guidance":"What the solution's security posture inherits from an underlying platform (e.g. the cloud platform's own controls), the services relied on, data locality, and the security regulations/standards it is held to."}]},{"id":"data","title":"Data","purpose":"Describe the solution's data — what it holds, how sensitive it is, and what happens to it over its lifetime. Cover where it is stored, how long it is kept, and any movement between systems.","fields":[{"id":"logical-data-model","title":"Logical data model","type":"markdown","required":true,"guidance":"The solution's key data entities and how they relate — enough for a reader to understand what data exists without reading the schema."},{"id":"data-classification","title":"Data classification","type":"markdown","required":true,"guidance":"The sensitivity classification of the data this solution holds (e.g. personal, health, confidential), and what that classification requires of how it's handled."},{"id":"data-replication","title":"Data replication","type":"markdown","required":false,"guidance":"Where this data is copied or synchronised to (e.g. across environments, regions, or into a reporting store), and how."},{"id":"data-retention-and-archiving","title":"Data retention, archiving and records management","type":"markdown","required":true,"guidance":"How long data is kept, when/how it's archived, and any records- management obligations that apply to it."},{"id":"data-migration","title":"Data migration","type":"markdown","required":false,"guidance":"Data that needs to move from an existing system into this one, and the approach for doing so. Omit if there's nothing to migrate."}]},{"id":"dependencies","title":"Dependencies","purpose":"List what this solution depends on and what depends on it — systems, teams and decisions still in progress. This is one module used in both high-level design and detailed design — fill it progressively: during high-level design a narrative overview is enough to support the decision; the full structured dependency list is needed before build readiness.","fields":[{"id":"dependencies-overview","title":"Dependencies","type":"markdown","requiredAt":["business-case","hld-tac-approved"],"guidance":"Describe what this solution depends on and what depends on it — other initiatives, platforms, teams or decisions still in progress. Give enough for a reviewer to judge the proposal without a full dependency list yet."},{"id":"dependency-list","title":"Dependency list","type":"list","requiredAt":["build-ready-checklist"],"guidance":"Every system, service or team this solution depends on to function, and what it depends on them for — the complete list needed to build against."}]},{"id":"design-basis","title":"Design Basis","purpose":"Capture the conditions this solution was designed under — the fixed limits it had to work within, what was taken as given, qualifications a reader should carry forward, the principles used to weigh options, and what the work actually produces.\nMounted from the `shape` stage onward, immediately after `introduction`: each field here is entered once and refined at every later stage, never re-entered.","fields":[{"id":"constraints","title":"Constraints","type":"markdown","required":false,"guidance":"Fixed limits the design had to work within — deployment tooling, pre-existing infrastructure it cannot change, other in-flight work it is bound by. Capture from SOAP onward — this file re-opens at every later stage. Constraints particular to the architecture's shape belong in `architecture.constraints`."},{"id":"assumptions","title":"Assumptions","type":"markdown","required":false,"guidance":"What was taken as given for the design to hold. Things that would change the shape of the solution if they turned out false. Capture from SOAP onward — this file re-opens at every later stage, and carries the SOAP's \"Assumptions and considerations\", the Full SOAP's \"Assumptions\" and the SAD's \"Architectural Assumptions\" sections."},{"id":"caveats","title":"Caveats","type":"markdown","required":false,"guidance":"Qualifications a reader should carry into the rest of the document — e.g. a short-lived workload, a known-incomplete area, a time-bound exception. Capture from SOAP onward — this file re-opens at every later stage.\nVerified distinct from `soap-full-details.caveats`, which qualifies the *estimate* rather than the design. Evidence: the approved ATLAS design's Caveats section reads \"the migration infrastructure is expected to be a short-lived workload, with an expected life span of up to 24 months\" (a fact about the solution), while every one of the JEDI Full SOAP's eight caveats qualifies estimate reliability (\"the actual effort will differ once the IT requirements are elaborated\"). The two are not interchangeable, so both fields are kept; the Full SOAP renders only `soap-full-details.caveats`."},{"id":"design-principles","title":"Design principles","type":"markdown","required":false,"guidance":"The principles used as a guide when weighing options — e.g. common services shared where possible, least privilege, separation of concerns. A table (Ref / Principle / How it is achieved) works well."},{"id":"outcomes-and-deliverables","title":"Outcomes and deliverables","type":"markdown","required":false,"guidance":"The concrete outputs this work produces and who owns each — by phase where that helps (Design / Triage / Build / Handover)."}]},{"id":"glossary","title":"Glossary","purpose":"Define the terms, acronyms and abbreviations a reader needs to follow this document.","fields":[{"id":"terms-and-definitions","title":"Terms and definitions","type":"markdown","requiredAt":["build-ready-checklist","operational-handover"],"guidance":"A table of the acronyms, abbreviations and domain terms used in this solution's design and as-built documents, each with a one-line definition. The SAD, SSAD and as-built reference documents all carry this section, so it is required from `build-ready-checklist` onward — a reader unfamiliar with Contoso's systems must be able to follow the document unaided."}]},{"id":"hld-submission","title":"HLD Submission","purpose":"Provide the cover information for this submission — what is being asked, who has been consulted and what happens next.","fields":[{"id":"purpose-statement","title":"Purpose statement","type":"markdown","required":true,"guidance":"Summarise in one sentence what this document proposes and what decision is being asked for."},{"id":"authors-and-contributors","title":"Authors and contributors","type":"list","required":false,"guidance":"List who wrote or contributed to this paper — name and role (for example, \"J. Smith — Architect\"). Carries both the reference template's \"Author\" and \"Contributors\" cover rows."},{"id":"decision-requested","title":"Decision requested","type":"markdown","required":true,"guidance":"State the decision being asked for — Approve, Endorse, Discuss or Note — and a short summary of the ask."},{"id":"next-steps","title":"Next steps","type":"markdown","required":false,"guidance":"Describe where this paper goes next, if anywhere — for example, which governance step follows."},{"id":"consultation","title":"Consultation","type":"markdown","required":true,"guidance":"List who was consulted before this submission and whether they endorsed it or raised disagreement."},{"id":"attachments","title":"Attachments","type":"list","required":false,"guidance":"List any supplementary documents attached to this submission, with a name and reference or link, such as a diagram export or spreadsheet needed alongside the paper. Renders as the final section of the HLD, matching the reference template's \"Attachment/s\"."}]},{"id":"integration","title":"Integration","purpose":"Describe how this solution connects to surrounding systems and the infrastructure those connections run on. Cover interfaces, networks and hosting.\nEnvironments are not held here — see `support-and-operations.environments-and-domains`, the single environment / URL / domain list shared by the SAD and the SSAD.","fields":[{"id":"interfaces","title":"Interfaces","type":"markdown","required":true,"guidance":"The integration points themselves — protocol, direction, and what crosses the boundary."},{"id":"network-and-infrastructure","title":"Network and infrastructure architecture","type":"markdown","required":false,"guidance":"Describe the network and infrastructure the solution is deployed on and how it is reached, including hosting and sites. Keep hardware, bandwidth, network devices, protocols and storage details in the dedicated fields below."},{"id":"software-and-licences","title":"Software and licences","type":"markdown","required":false,"guidance":"The software the solution deploys and what it costs to licence — software, version, total count, and licences per environment. This is the build-time deployment inventory (the reference SAD's \"Application Software View\"). The accounts and subscriptions a support team must hold to run the solution once it is live belong in `support-and-operations.operational-accounts-and-licenses`."},{"id":"hardware","title":"Hardware","type":"markdown","required":false,"guidance":"Whether new hardware is needed and how it is sized — environment, OS / version / 32-64-bit, hypervisor, memory and CPU per guest, virtualization approach, and any licensing tied to cores or memory. Include batch-processing RAM needs where relevant."},{"id":"bandwidth","title":"Bandwidth","type":"markdown","required":false,"guidance":"Whether the current LAN / WAN / cloud network can handle the new data flows — link capacities, anticipated data volumes, and utilisation over time (e.g. MAN link, ExpressRoute circuit, AzCopy parallelism and wave sizing)."},{"id":"network-devices","title":"Network Devices","type":"markdown","required":false,"guidance":"Network devices the solution depends on or changes — DNS servers, reverse proxies, switches / routers — including IPv6 support where relevant."},{"id":"communication-and-network-protocols","title":"Communication & Network Protocols","type":"markdown","required":false,"guidance":"New logical communication paths and protocols for the solution — one row per path with environment, protocol, from / to (system or device), port, path direction (unidirectional / bidirectional), and any other comments. Only new or changed protocols, not every existing enabled one."},{"id":"san","title":"SAN (Database, Application Server, Backup, DR)","type":"markdown","required":false,"guidance":"Storage-area-network and disk requirements — database, application server, backup and DR — per environment and disk-tier type. Refer to service catalogues where relevant."}]},{"id":"introduction","title":"Overview","purpose":"Introduce the solution — what it is, why it exists, and what it covers.\nMounted from the `shape` stage onward, immediately before `design-basis`. `in-scope` / `out-of-scope` are the canonical cross-stage scope statement — entered once and refined, never re-entered. The ongoing conditions this solution was designed under (constraints, assumptions, caveats, design principles, outcomes/deliverables) live in the adjacent `design-basis` module, not here — see that module's `purpose` for why they're kept separate from this framing content.","fields":[{"id":"executive-summary","title":"Executive summary","type":"markdown","required":false,"guidance":"A standalone summary for a reader who will not read the rest of the document — what the solution is, what was decided, and what is being asked of them. The SAD and SSAD references both open with this section. Distinct from `overview`, which introduces the document's subject rather than summarising its conclusions; the SAD carries both."},{"id":"overview","title":"Overview","type":"markdown","requiredAt":["build-ready-checklist","operational-handover"],"guidance":"A short plain-language description of the solution and the change it delivers — enough for a reader with no prior knowledge to understand what this document is about. Also renders as the Full SOAP's opening \"Introduction\" section when filled at SOAP.\nThe HLD's `background` framing and this SAD `introduction` framing are intentionally separate (TAC vs Design Authority audiences) — do not expect this to pre-fill from `background.problem`. See the reconciliation doc §5."},{"id":"purpose","title":"Purpose","type":"markdown","requiredAt":["build-ready-checklist","operational-handover"],"guidance":"What this document is for and who is expected to use it (e.g. security teams for C&A sign-off, engineers to build or rebuild from)."},{"id":"in-scope","title":"In scope","type":"markdown","requiredAt":["hld-tac-approved","build-ready-checklist","operational-handover"],"guidance":"The features, functionality, and deliverables inside the boundaries of this design. This is the canonical scope statement — it re-opens and is refined at every later stage."},{"id":"out-of-scope","title":"Out of scope","type":"markdown","requiredAt":["hld-tac-approved","build-ready-checklist","operational-handover"],"guidance":"What this design explicitly does not cover. Silence on out-of-scope is the most common cause of a design being sent back with questions."},{"id":"content-standards","title":"Content standards","type":"markdown","required":false,"guidance":"Conventions a reader needs to interpret this document — e.g. that diagrams are collated from several parties and so vary in style, which notation is used, or how this document relates to the fuller SAD. Only the SSAD renders this field (the \"Content Standards\" sub-section of the FV Help Tool SSAD's Introduction); the SAD and as-built templates leave it out, so filling it does not affect them."}]},{"id":"nfrs","title":"Non-Functional Requirements","purpose":"Describe the quality attributes the solution must meet, such as performance, availability and scalability. State the targets clearly enough to design and test against. This is one module used in both high-level design and detailed design — fill it progressively: during high-level design include only the NFRs that shape that decision; before build readiness it should be complete enough to design and test against.\nFor concrete operational controls (encryption, networking, incident management) see `data-security-controls.controls` — this module carries the targets, not the control set.","fields":[{"id":"scalability-and-capacity","title":"Scalability and capacity","type":"markdown","requiredAt":["build-ready-checklist"],"guidance":""},{"id":"performance","title":"Performance","type":"markdown","requiredAt":["hld-tac-approved","build-ready-checklist"],"guidance":"Keep this to a headline target at high-level design — the TAC reference template asks only for the performance requirements that bear on the decision. Deepen to testable figures before build readiness."},{"id":"availability-and-continuity","title":"Availability and continuity","type":"markdown","requiredAt":["hld-tac-approved","build-ready-checklist"],"guidance":"Keep this to a headline target at high-level design; deepen to a testable availability target and continuity approach before build readiness."},{"id":"disaster-recovery-and-backup","title":"Disaster recovery and backup","type":"markdown","requiredAt":["build-ready-checklist","operational-handover"],"guidance":"The recovery *targets*, and only the targets: recovery time and point objectives, the scenarios that would satisfy them, backup type, method, schedule and retention, and the archiving policy. This field owns RTO and RPO — state them here once and reference them from `recovery-plan`.\nThe recovery *mechanism* that meets these targets (failover model, resiliency design, tested scenarios, RACI) belongs in the `recovery-plan` module. Both render under the single \"Failure and recovery\" section, so state each fact in one place only. Carried through to handover so the as-built recovery plan can be read against the targets it was built to."},{"id":"other-nfrs","title":"Other non-functional requirements","type":"markdown","required":false,"guidance":"Anything that doesn't fit the categories above but still constrains the solution — accessibility, Te Tiriti obligations, data sovereignty, compliance-driven quality attributes, contractual obligations, or future-considerations notes. End-of-life commitments are not an NFR; they belong in `support-and-operations.decommission`."},{"id":"requirements-traceability","title":"Requirements traceability","type":"markdown","requiredAt":["build-ready-checklist"],"guidance":"Describe how the design maps back to the agreed functional and non-functional requirements — enough for a reviewer to check nothing was quietly dropped. Map back to `solution-definition.high-level-requirements`, the agreed set captured at SOAP, rather than restating the requirements here. You can keep this light during high-level design; it should be complete before build readiness."}]},{"id":"open-questions","title":"Open Questions","purpose":"List the questions that are still open and what needs to happen to resolve them.\nOpen from the `shape` stage onward: the Full SOAP's \"Questions\" section and the HLD's \"Open questions\" section render from this one field, so a question raised at SOAP carries into the HLD rather than being re-typed.","fields":[{"id":"questions","title":"Open questions","type":"markdown","required":false,"guidance":"List each open question, who needs to resolve it and when it needs resolving. Questions that mature into risks migrate to `risks` (`open-issues` -> `risk-register`) at detailed design."}]},{"id":"proposed-solution","title":"Proposed Solution","purpose":"Describe the proposed solution and why it is the right choice. Cover how it aligns with strategy, its costs and benefits, implications and what you are trading off.\nThe solution's shape itself is not re-entered here — the `hld` artefact renders `solution-definition.high-level-solution-overview` from SOAP as the section's opening. Deepen or correct that sketch there rather than restating it.","fields":[{"id":"guardrails","title":"Guardrails","type":"markdown","required":true,"guidance":"List which guardrails this solution follows. If it seeks an exemption or introduces a new guardrail, say so explicitly."},{"id":"strategy-alignment","title":"Alignment with strategy","type":"markdown","required":true,"guidance":"Builds on the SOAP sketch — see `solution-definition` (`high-level-solution-overview`, `feature-breakdown`). Do not re-derive; show how that shape aligns with strategy for TAC."},{"id":"implications","title":"Implications","type":"markdown","required":false,"guidance":""},{"id":"trade-offs","title":"Trade-offs","type":"markdown","required":true,"guidance":"What you're giving up by choosing this solution over the alternatives recorded in `alternatives-considered` (seeded by `solution-definition.alternatives-sketch` at SOAP)."},{"id":"cost-benefit","title":"Cost-benefit analysis","type":"markdown","required":true,"guidance":"Cost versus benefit, including recurring costs and non-monetary comparisons (e.g. person-hours saved) where a dollar figure isn't meaningful. Start from `team-and-estimates.estimates` — refine, don't restate."},{"id":"delivery-approach","title":"Delivery approach and indicative timeline","type":"markdown","required":true,"guidance":"Traceable to `team-and-estimates.estimates` — refine the SOAP T-shirt sizes into an indicative timeline rather than re-deriving them."}]},{"id":"recovery-plan","title":"Recovery Plan","purpose":"Describe how the solution recovers from failure — how it fails over, how it stays resilient, what has been tested and who is responsible.","fields":[{"id":"recovery-approach","title":"Recovery approach","type":"markdown","requiredAt":["build-ready-checklist","operational-handover"],"guidance":"The failover model for each layer of the solution (platform, workloads) — active-active vs active-passive, the availability tier, and the tool used to redeploy on failover. Reference the recovery targets in `nfrs.disaster-recovery-and-backup` rather than restating RTO/RPO here: this field describes how the solution meets them."},{"id":"resiliency","title":"Resiliency","type":"markdown","required":false,"guidance":"How the solution stays available through a zone or component failure — redundancy, availability zones, network/peering design."},{"id":"test-scenarios","title":"Test scenarios","type":"markdown","required":false,"guidance":"The recovery scenarios that are tested, the failover type for each, and a link to the technical recovery plan / runbook that covers it."},{"id":"raci","title":"RACI","type":"markdown","required":false,"guidance":"Who is Responsible, Accountable, Consulted and Informed for each recovery and ongoing-support task."}]},{"id":"risks","title":"Risks","purpose":"List the risks to delivering and operating this solution and how each will be mitigated. Include who owns each risk and its likelihood and impact before and after mitigation. This is one module used in both high-level design and detailed design — fill it progressively: during high-level design include the risks that could affect that decision; before build readiness include the fuller register needed to build against.","fields":[{"id":"risk-register","title":"Risks and mitigations","type":"markdown","required":true,"guidance":"Each risk with an owner, its likelihood/impact, its mitigation, and — where a mitigation is already underway — the current risk rating versus the projected rating once the mitigation lands. Not just a list of concerns with no response attached."},{"id":"open-issues","title":"Open issues","type":"markdown","required":false,"guidance":"List unresolved issues that are not yet risks with a clear mitigation but need tracking before the design is approved for build."}]},{"id":"security","title":"Security","purpose":"Describe the solution's security and privacy posture — how users are authenticated and authorised, the security architecture and the regulations and standards that apply. This is one module used in both high-level design and detailed design — fill it progressively: during high-level design include the security implications that inform that decision; before build readiness include the full posture needed to build against.\nDesign-time claims (who can do what, threat model, regulations). For the concrete controls the built solution runs under (encryption, networking, incident management) use `data-security-controls.controls`; for the posture a support team must keep true in production use `support-and-operations.operational-security-controls`.","fields":[{"id":"identity-and-access","title":"Identity and access management","type":"markdown","requiredAt":["build-ready-checklist"],"guidance":"Authentication, authorisation, and the security roles involved. Carries the reference SAD's \"Identity & Access Management\", \"Security Roles\", \"Authentication\" and \"User Roles\" sub-sections."},{"id":"security-architecture","title":"Security architecture","type":"markdown","requiredAt":["build-ready-checklist"],"guidance":"Goals, constraints and assumptions specific to security — not a restatement of the general architecture."},{"id":"regulations-and-standards","title":"Regulations and standards","type":"list","requiredAt":["build-ready-checklist"],"guidance":"The regulations and standards this solution is held to, including the acts and regulations that govern the business process it supports."},{"id":"privacy-and-confidentiality","title":"Privacy and confidentiality concerns","type":"markdown","requiredAt":["hld-tac-approved","build-ready-checklist"],"guidance":"Whether the solution affects anyone's personal information, and any privacy or confidentiality concern it raises. State this at high-level design in enough depth for TAC to judge whether a security assessment is needed; deepen before build readiness."}]},{"id":"soap-full-details","title":"Full SOAP Details","purpose":"Provide the supporting details that complete the fuller summary — dates, sequencing and estimate caveats — without repeating content held elsewhere.","fields":[{"id":"epic-project","title":"Epic/Project","type":"markdown","required":false,"guidance":"Name or identifier of the Epic or project this SOAP and estimate belong to."},{"id":"requested-lead-by","title":"Requested/lead by","type":"markdown","required":false,"guidance":"The person or group that requested the work and, where known, the lead accountable for shaping it."},{"id":"request-date","title":"Request date","type":"markdown","required":false,"guidance":"The date the SOAP or estimate was requested. Use the date format your organisation uses consistently."},{"id":"draft-agreed-date","title":"Draft agreed date","type":"markdown","required":false,"guidance":"The date the draft SOAP or estimate was agreed for circulation or review."},{"id":"delivered-date","title":"SOAP/estimate delivered date","type":"markdown","required":false,"guidance":"The date the SOAP or estimate was delivered to its intended audience."},{"id":"sequencing","title":"Sequencing","type":"markdown","required":false,"guidance":"A possible sequence based on the estimates, not a commitment of team capacity. Use a markdown table with exactly `Requirement`, `Team`, `Estimate`, and `Notes` columns."},{"id":"caveats","title":"Caveats","type":"markdown","required":false,"guidance":"The standing caveats that qualify a high-level estimate — what the figures do and do not account for. Defaults to the JEDI Full SOAP template's eight caveat bullets; edit only if an initiative needs to add or vary one. Qualifications about the design rather than the estimate belong in `design-basis.caveats`, which carries forward to the SAD and as-built."}]},{"id":"solution-definition","title":"Solution Definition","purpose":"Outline what the solution is and how it will work end to end, at a level that shows the shape without committing to the full architecture. Include the key requirements, process flow and who delivers each part.","fields":[{"id":"high-level-requirements","title":"High-level requirements","type":"markdown","required":true,"guidance":"The high-level requirements this solution must address. Use a markdown table with `Section` and `Requirement` columns when the work has several requirement groups; keep each requirement brief but specific enough to define the expected functionality and its scope. This is the agreed set that `nfrs.requirements-traceability` maps back to at detailed design — capture it here so nothing agreed can be quietly dropped."},{"id":"process-flow","title":"Process flow","type":"markdown","required":true,"guidance":"How work or data moves through the solution, step by step. A narrative walk-through is fine; a diagram reference is fine too, but describe what the diagram shows in words as well. Reused and deepened at `architecture.solution-description` — write the SOAP-level flow once."},{"id":"high-level-solution-overview","title":"High level solution overview","type":"markdown","required":true,"guidance":"The shape of the solution in outline — the main components and how they relate. This is a sketch, not the Detailed Design stage's `architecture` module; go only as deep as a SOAP-stage reader needs."},{"id":"feature-breakdown","title":"Feature breakdown and involved teams","type":"markdown","required":true,"guidance":"The solution broken into the features or workstreams that deliver it, and which teams are involved in each."},{"id":"alternatives-sketch","title":"Alternatives sketch","type":"markdown","required":false,"guidance":"Brief alternative(s) considered at SOAP, including \"do nothing\" — expanded at `modules/alternatives-considered.md` for TAC; do not re-derive there."}]},{"id":"support-and-operations","title":"Support and Operations","purpose":"Describe what a support team needs to operate and hand over this solution — who to contact, where it runs, how it is released and what 'ready to hand over' means.","fields":[{"id":"stakeholders","title":"Stakeholders and support contacts","type":"list","required":true,"guidance":"Who owns this solution operationally once it's live, who to contact for each part of it, and the escalation path/support map between them — not just a flat contact list. Also carries the reference SAD's \"Stakeholder Mapping\" sub-section."},{"id":"environments-and-domains","title":"Environments, URLs and domains","type":"list","required":true,"guidance":"Every environment this solution runs in, and the URLs/domains (including redirects) associated with each. This is the single environment list — the SAD's \"Environments\" section and the SSAD's \"Solution Domains\" / \"URL's, Domains and redirections\" sections both render from here, so enter it once."},{"id":"operational-accounts-and-licenses","title":"Operational accounts and licenses","type":"list","required":false,"guidance":"Third-party accounts, subscriptions or licenses the support team must hold to operate this solution once it's live (e.g. a CI provider, a hosted API) — distinct from the build-time dependencies in `integration`. Carries the reference SAD's \"Terms & Conditions and Contracts\" sub-section."},{"id":"monitoring-and-alerting","title":"Monitoring and alerting","type":"markdown","required":false,"guidance":"What's monitored once this solution is live — dashboards, alert thresholds (e.g. request volume, 4xx/5xx rates) — and who gets notified when they trip. Carries the reference SAD's \"Systems Management & Monitoring\" sub-section."},{"id":"release-procedures","title":"Release procedures","type":"markdown","required":false,"guidance":""},{"id":"support-handover-readiness","title":"Support handover readiness","type":"markdown","required":true,"guidance":"What \"ready to hand over to support\" means for this solution specifically — what the support team needs in hand before they own it."},{"id":"decommission","title":"Decommission","type":"markdown","required":false,"guidance":"What happens at end of life — who turns the solution off, what becomes of its data, which accounts, licences and contracts end, and any notice period. Cross-reference `data.data-retention-and-archiving` for what must be kept after the service stops."}]},{"id":"team-and-estimates","title":"Teams, contact persons, and high-level estimates","purpose":"List the teams involved and the order-of-magnitude sizing for the work. This is a signal for planning, not a commitment.","fields":[{"id":"teams-required","title":"Teams required","type":"list","required":true,"guidance":"Every team touched by this solution and a named contact for each — not just the obvious delivery team."},{"id":"estimates","title":"Estimates","type":"markdown","required":true,"guidance":"T-shirt size (or equivalent order-of-magnitude estimate) per team or workstream. This is a sizing signal for planning, not a commitment."},{"id":"references","title":"References","type":"list","required":false,"guidance":"Links to supporting material — prior art, related initiatives, source documents, or the sizing methodology used for `estimates` — that informed this instance but don't belong inline."}]}]}</script>
+
+<!-- ======================= PURE MODULE: liftable into lib/ ======================= -->
+<script id="copy-planner">
+/**
+ * Copy planner for definition elements. Pure: no DOM, no I/O.
+ *
+ * Definition shape (matches lib/definition.js's loaded structure):
+ *   { id, version, stages:[{id,title,gate,modules:[moduleId]}],
+ *     artefacts:[{id,title,gate,template,requires:[req]}],
+ *     modules:[{id,title,fields:[{id,title,type,...}]}] }
+ * A req is "module", "module.field" or "module.field?" (optional-in-scope).
+ *
+ * A ref names the element to copy:
+ *   {kind:'module', id}                            module with all fields
+ *   {kind:'field',  moduleId, id, targetModuleId}  one field into a target module
+ *   {kind:'stage',  id}                            stage + its missing modules
+ *   {kind:'artefact', id}                          artefact + template + missing modules
+ *   {kind:'requirement', artefactId, req}          field/module onto an artefact's requires
+ */
+const CopyPlanner = (() => {
+  const clone = (x) => JSON.parse(JSON.stringify(x))
+  const reqModule = (req) => req.replace(/\?$/, '').split('.')[0]
+  const byId = (list, id) => list.find((x) => x.id === id)
+
+  function provenance(source, kind, id) {
+    return { definition: source.id, version: source.version, element: `${kind}:${id}` }
+  }
+
+  /** Which modules `ref` needs that `target` lacks. */
+  function missingModules(target, source, moduleIds) {
+    const missing = []
+    for (const id of moduleIds) {
+      if (byId(target.modules, id)) continue
+      if (!byId(source.modules, id)) continue // source itself is broken; validator's problem, not ours
+      if (!missing.includes(id)) missing.push(id)
+    }
+    return missing
+  }
+
+  /** Build a plan. Never mutates. Collisions start unresolved (choice: null). */
+  function planCopy(target, source, ref) {
+    const plan = { ref, adds: [], brings: [], collisions: [], errors: [] }
+    const push = (list, kind, id, extra = {}) => list.push({ kind, id, ...extra })
+
+    if (ref.kind === 'module') {
+      const m = byId(source.modules, ref.id)
+      if (!m) return { ...plan, errors: [`Source has no module "${ref.id}"`] }
+      if (byId(target.modules, ref.id)) plan.collisions.push({ kind: 'module', id: ref.id, options: ['rename', 'replace', 'merge'], choice: null, renameTo: nextFreeId(target.modules, ref.id) })
+      else push(plan.adds, 'module', ref.id)
+    }
+
+    if (ref.kind === 'field') {
+      const m = byId(source.modules, ref.moduleId)
+      const f = m && byId(m.fields, ref.id)
+      const tm = byId(target.modules, ref.targetModuleId)
+      if (!f) return { ...plan, errors: [`Source has no field "${ref.moduleId}.${ref.id}"`] }
+      if (!tm) return { ...plan, errors: [`Your definition has no module "${ref.targetModuleId}" to receive the field`] }
+      if (byId(tm.fields, ref.id)) plan.collisions.push({ kind: 'field', id: ref.id, moduleId: tm.id, options: ['rename', 'replace'], choice: null, renameTo: nextFreeId(tm.fields, ref.id) })
+      else push(plan.adds, 'field', ref.id, { moduleId: tm.id })
+    }
+
+    if (ref.kind === 'stage') {
+      const s = byId(source.stages, ref.id)
+      if (!s) return { ...plan, errors: [`Source has no stage "${ref.id}"`] }
+      if (byId(target.stages, ref.id)) plan.collisions.push({ kind: 'stage', id: ref.id, options: ['rename', 'replace', 'merge'], choice: null, renameTo: nextFreeId(target.stages, ref.id) })
+      else push(plan.adds, 'stage', ref.id)
+      for (const id of missingModules(target, source, s.modules)) push(plan.brings, 'module', id)
+    }
+
+    if (ref.kind === 'artefact') {
+      const a = byId(source.artefacts, ref.id)
+      if (!a) return { ...plan, errors: [`Source has no artefact "${ref.id}"`] }
+      if (byId(target.artefacts, ref.id)) plan.collisions.push({ kind: 'artefact', id: ref.id, options: ['rename', 'replace'], choice: null, renameTo: nextFreeId(target.artefacts, ref.id) })
+      else push(plan.adds, 'artefact', ref.id)
+      push(plan.brings, 'template', a.template, { docx: a.template.replace(/\.md\.tmpl$/, '') + ' reference .docx' })
+      for (const id of missingModules(target, source, a.requires.map(reqModule))) push(plan.brings, 'module', id)
+    }
+
+    if (ref.kind === 'requirement') {
+      const a = byId(target.artefacts, ref.artefactId)
+      if (!a) return { ...plan, errors: [`Your definition has no artefact "${ref.artefactId}"`] }
+      if (a.requires.includes(ref.req)) return { ...plan, errors: [`"${a.title}" already requires ${ref.req}`] }
+      push(plan.adds, 'requirement', ref.req, { artefactId: a.id })
+      for (const id of missingModules(target, source, [reqModule(ref.req)])) push(plan.brings, 'module', id)
+    }
+    return plan
+  }
+
+  function nextFreeId(list, id) {
+    let n = 2
+    while (byId(list, `${id}-${n}`)) n++
+    return `${id}-${n}`
+  }
+
+  function resolveCollision(plan, id, choice, renameTo) {
+    const next = clone(plan)
+    const c = next.collisions.find((x) => x.id === id)
+    if (!c) return next
+    if (!c.options.includes(choice)) throw new Error(`"${choice}" is not offered for ${c.kind} ${c.id}`)
+    c.choice = choice
+    if (renameTo) c.renameTo = renameTo
+    return next
+  }
+
+  const isResolved = (plan) => plan.errors.length === 0 && plan.collisions.every((c) => c.choice)
+
+  /** Apply a fully resolved plan. Returns a new target; the source is never touched. */
+  function applyPlan(target, source, plan) {
+    if (!isResolved(plan)) throw new Error('Plan has unresolved collisions')
+    const t = clone(target)
+    const changed = []
+    const stamp = (obj, kind, id) => { obj.copiedFrom = provenance(source, kind, id); return obj }
+
+    const landModule = (id, asId = id) => {
+      const m = stamp(clone(byId(source.modules, id)), 'module', id)
+      m.id = asId
+      for (const f of m.fields) stamp(f, 'field', `${id}.${f.id}`)
+      const i = t.modules.findIndex((x) => x.id === asId)
+      if (i >= 0) t.modules[i] = m; else t.modules.push(m)
+      changed.push(`module:${asId}`)
+    }
+    const mergeModule = (id) => {
+      const src = byId(source.modules, id), dst = byId(t.modules, id)
+      for (const f of src.fields) if (!byId(dst.fields, f.id)) { dst.fields.push(stamp(clone(f), 'field', `${id}.${f.id}`)); changed.push(`field:${id}.${f.id}`) }
+    }
+
+    for (const b of plan.brings) if (b.kind === 'module') landModule(b.id)
+
+    for (const a of plan.adds) {
+      if (a.kind === 'module') landModule(a.id)
+      if (a.kind === 'field') {
+        const f = stamp(clone(byId(byId(source.modules, plan.ref.moduleId).fields, a.id)), 'field', `${plan.ref.moduleId}.${a.id}`)
+        byId(t.modules, a.moduleId).fields.push(f); changed.push(`field:${a.moduleId}.${a.id}`)
+      }
+      if (a.kind === 'stage') { t.stages.push(stamp(clone(byId(source.stages, a.id)), 'stage', a.id)); changed.push(`stage:${a.id}`) }
+      if (a.kind === 'artefact') { t.artefacts.push(stamp(clone(byId(source.artefacts, a.id)), 'artefact', a.id)); changed.push(`artefact:${a.id}`) }
+      if (a.kind === 'requirement') { byId(t.artefacts, a.artefactId).requires.push(a.id); changed.push(`requirement:${a.artefactId}:${a.id}`) }
+    }
+
+    for (const c of plan.collisions) {
+      if (c.kind === 'module') {
+        if (c.choice === 'rename') landModule(c.id, c.renameTo)
+        if (c.choice === 'replace') landModule(c.id)
+        if (c.choice === 'merge') mergeModule(c.id)
+      }
+      if (c.kind === 'field') {
+        const src = stamp(clone(byId(byId(source.modules, plan.ref.moduleId).fields, c.id)), 'field', `${plan.ref.moduleId}.${c.id}`)
+        const dst = byId(t.modules, c.moduleId)
+        if (c.choice === 'rename') { src.id = c.renameTo; dst.fields.push(src); changed.push(`field:${dst.id}.${src.id}`) }
+        if (c.choice === 'replace') { dst.fields[dst.fields.findIndex((f) => f.id === c.id)] = src; changed.push(`field:${dst.id}.${c.id}`) }
+      }
+      if (c.kind === 'stage') {
+        const src = stamp(clone(byId(source.stages, c.id)), 'stage', c.id)
+        const i = t.stages.findIndex((s) => s.id === c.id)
+        if (c.choice === 'rename') { src.id = c.renameTo; t.stages.push(src); changed.push(`stage:${src.id}`) }
+        if (c.choice === 'replace') { t.stages[i] = src; changed.push(`stage:${c.id}`) }
+        if (c.choice === 'merge') { for (const m of src.modules) if (!t.stages[i].modules.includes(m)) t.stages[i].modules.push(m); changed.push(`stage:${c.id}`) }
+      }
+      if (c.kind === 'artefact') {
+        const src = stamp(clone(byId(source.artefacts, c.id)), 'artefact', c.id)
+        if (c.choice === 'rename') { src.id = c.renameTo; t.artefacts.push(src); changed.push(`artefact:${src.id}`) }
+        if (c.choice === 'replace') { t.artefacts[t.artefacts.findIndex((a) => a.id === c.id)] = src; changed.push(`artefact:${c.id}`) }
+      }
+    }
+    return { target: t, changed }
+  }
+
+  return { planCopy, resolveCollision, applyPlan, isResolved }
+})()
+</script>
+
+<!-- ======================= THROWAWAY SHELL ======================= -->
+<script>
+const SOURCE = JSON.parse(document.getElementById('source-data').textContent)
+const { planCopy, resolveCollision, applyPlan, isResolved } = CopyPlanner
+
+function initialTarget() {
+  return {
+    id: 'procurement', version: 1, status: 'draft', title: 'Procurement',
+    stages: [
+      { id: 'shape', title: 'Shape the need', gate: 'business-case', modules: ['background', 'risks'] },
+    ],
+    artefacts: [
+      { id: 'soap', title: 'Procurement on a Page', gate: 'business-case', template: 'templates/soap.md.tmpl', requires: ['background.problem', 'risks.risk-register'] },
+    ],
+    modules: [
+      { id: 'background', title: 'Background', fields: [{ id: 'problem', title: 'Problem', type: 'markdown' }, { id: 'sponsor', title: 'Sponsor', type: 'markdown' }] },
+      { id: 'risks', title: 'Procurement risks', fields: [{ id: 'risk-register', title: 'Risk register', type: 'markdown' }, { id: 'appetite', title: 'Risk appetite', type: 'markdown' }] },
+    ],
+  }
+}
+
+let state = { target: initialTarget(), plan: null, changed: [], scenario: 0, step: 0 }
+const el = (id) => document.getElementById(id)
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
+
+function badge(obj) { return obj.copiedFrom ? ` <span class="stamp from" title="${esc(obj.copiedFrom.element)}">from ${esc(obj.copiedFrom.definition)} v${obj.copiedFrom.version}</span>` : '' }
+function chg(key) { return state.changed.includes(key) ? ' changed' : '' }
+
+function renderTarget() {
+  const t = state.target
+  const stages = t.stages.map((s) => `<div class="row${chg('stage:' + s.id)}"><code>${esc(s.id)}</code> ${esc(s.title)} <span class="muted">gate ${esc(s.gate)} · modules: ${s.modules.map(esc).join(', ')}</span>${badge(s)}</div>`).join('')
+  const arts = t.artefacts.map((a) => `<div class="row${chg('artefact:' + a.id)}"><code>${esc(a.id)}</code> ${esc(a.title)} <span class="muted">${esc(a.template)}</span>${badge(a)}</div><ul class="sub">${a.requires.map((r) => `<li class="${chg('requirement:' + a.id + ':' + r)}">requires ${esc(r)}</li>`).join('')}</ul>`).join('')
+  const mods = t.modules.map((m) => `<div class="row${chg('module:' + m.id)}"><code>${esc(m.id)}</code> ${esc(m.title)}${badge(m)}</div><ul class="sub">${m.fields.map((f) => `<li class="${chg('field:' + m.id + '.' + f.id)}">· <code>${esc(f.id)}</code> ${esc(f.title)}${badge(f)}</li>`).join('')}</ul>`).join('')
+  el('target').innerHTML = `<ul class="tree"><li><span class="kind">Stages</span>${stages}</li><li><span class="kind">Artefacts</span>${arts}</li><li><span class="kind">Modules</span>${mods}</li></ul>`
+}
+
+function describeRef(ref) {
+  if (ref.kind === 'module') return `module "${ref.id}"`
+  if (ref.kind === 'field') return `field "${ref.moduleId}.${ref.id}" into module "${ref.targetModuleId}"`
+  if (ref.kind === 'stage') return `stage "${ref.id}"`
+  if (ref.kind === 'artefact') return `artefact "${ref.id}"`
+  if (ref.kind === 'requirement') return `"${ref.req}" onto artefact "${ref.artefactId}"`
+}
+
+function renderPlan() {
+  const p = state.plan
+  el('planPanel').hidden = !p
+  if (!p) return
+  let h = `<div class="plan"><h3>Copy ${esc(describeRef(p.ref))} from Solution Design v2</h3>`
+  if (p.errors.length) h += `<p><span class="stamp error">CANNOT COPY</span> ${p.errors.map(esc).join('; ')}</p>`
+  if (p.adds.length) h += `<p><strong>Will add</strong></p><ul>${p.adds.map((a) => `<li>${a.kind} <code>${esc(a.id)}</code>${a.moduleId ? ` in module ${esc(a.moduleId)}` : ''}${a.artefactId ? ` to ${esc(a.artefactId)}` : ''}</li>`).join('')}</ul>`
+  if (p.brings.length) h += `<p><strong>Comes along</strong> <span class="muted">(you don't have these yet)</span></p><ul>${p.brings.map((b) => `<li>${b.kind} <code>${esc(b.id)}</code>${b.docx ? ` + ${esc(b.docx)}` : ''}</li>`).join('')}</ul>`
+  if (p.collisions.length) {
+    h += `<p><strong>Already exists</strong> <span class="stamp warn">DECIDE</span></p>`
+    for (const c of p.collisions) {
+      h += `<div class="collision">${c.kind} <code>${esc(c.id)}</code>${c.moduleId ? ` in ${esc(c.moduleId)}` : ''} is already in your definition.<br>`
+      for (const o of c.options) {
+        const label = { rename: 'Keep both, rename the copy', replace: 'Replace mine with the copy', merge: c.kind === 'stage' ? 'Merge: add its modules to mine' : 'Merge: add only the fields I lack' }[o]
+        h += `<label><input type="radio" name="c-${esc(c.id)}" ${c.choice === o ? 'checked' : ''} onchange="choose('${esc(c.id)}','${o}')"> ${label}</label>`
+      }
+      if (c.choice === 'rename') h += `<div style="margin-top:6px">New id <input type="text" value="${esc(c.renameTo)}" onchange="choose('${esc(c.id)}','rename',this.value)"></div>`
+      h += `</div>`
+    }
+  }
+  const ok = isResolved(p)
+  h += `<div style="margin-top:12px"><button class="btn primary" ${ok ? '' : 'disabled'} onclick="confirmPlan()">Confirm copy</button><button class="btn" onclick="cancelPlan()">Cancel</button>${ok ? '' : '<span class="muted">Resolve every clash to confirm.</span>'}</div></div>`
+  el('plan').innerHTML = h
+}
+
+function log(msg) { el('log').textContent = msg }
+
+window.startCopy = (ref) => {
+  state.plan = planCopy(state.target, SOURCE, ref)
+  state.changed = []
+  const p = state.plan
+  log(p.errors.length ? `Refused: ${p.errors.join('; ')}` : `Planned copy of ${describeRef(ref)}. Adds ${p.adds.length}, brings ${p.brings.length}, clashes ${p.collisions.length}. Nothing has landed yet.`)
+  render()
+}
+window.choose = (id, choice, renameTo) => { state.plan = resolveCollision(state.plan, id, choice, renameTo); render() }
+window.confirmPlan = () => {
+  const { target, changed } = applyPlan(state.target, SOURCE, state.plan)
+  state.target = target; state.changed = changed
+  const ref = state.plan.ref
+  state.plan = null
+  log(`Landed ${describeRef(ref)}.\nChanged: ${changed.join(', ')}\nEvery copied element now carries copiedFrom {definition: design, version: 2, element}. Solution Design v2 itself is untouched.`)
+  advanceStep()
+  render()
+}
+window.cancelPlan = () => { state.plan = null; log('Cancelled. Nothing changed.'); render() }
+window.resetTarget = () => { state.target = initialTarget(); state.plan = null; state.changed = []; log('Reset to the starting Procurement draft.'); render() }
+
+// ---- free play ----
+function renderFree() {
+  const b = (label, ref) => `<button class="btn small" onclick='startCopy(${JSON.stringify(ref)})'>${esc(label)}</button>`
+  el('free').innerHTML = [
+    b('Module: glossary', { kind: 'module', id: 'glossary' }),
+    b('Module: risks (clashes)', { kind: 'module', id: 'risks' }),
+    b('Module: security', { kind: 'module', id: 'security' }),
+    b('Field: risks.open-issues → my risks', { kind: 'field', moduleId: 'risks', id: 'open-issues', targetModuleId: 'risks' }),
+    b('Field: risks.risk-register → my risks (clashes)', { kind: 'field', moduleId: 'risks', id: 'risk-register', targetModuleId: 'risks' }),
+    b('Field: nfrs.performance → my background', { kind: 'field', moduleId: 'nfrs', id: 'performance', targetModuleId: 'background' }),
+    b('Stage: handover (brings 7 modules)', { kind: 'stage', id: 'handover' }),
+    b('Stage: shape (clashes)', { kind: 'stage', id: 'shape' }),
+    b('Artefact: as-built (template + docx + modules)', { kind: 'artefact', id: 'as-built' }),
+    b('Artefact: soap (clashes)', { kind: 'artefact', id: 'soap' }),
+    b('Onto my soap: security.privacy-and-confidentiality', { kind: 'requirement', artefactId: 'soap', req: 'security.privacy-and-confidentiality' }),
+    b('Onto my soap: risks.risk-register (already there)', { kind: 'requirement', artefactId: 'soap', req: 'risks.risk-register' }),
+    `<button class="btn small" onclick="resetTarget()">↺ Reset my definition</button>`,
+  ].join('')
+}
+
+// ---- guided scenarios ----
+const SCENARIOS = [
+  { title: 'Plain copy', intro: 'The happy path. Copy the Glossary module. Nothing clashes, nothing else is needed, and the module lands with a "from design v2" badge on itself and on each of its fields.',
+    steps: [
+      { label: 'Copy module glossary', why: 'Watch the pending panel: one add, nothing comes along.', ref: { kind: 'module', id: 'glossary' } },
+      { label: 'Confirm copy', why: 'The module lands. Note the provenance badges.', confirm: true },
+    ] },
+  { title: 'Stage brings its modules', intro: 'Copy the Operational Handover stage. Your definition has none of its seven modules, so the confirm lists all of them. You always see what is about to arrive before it does.',
+    steps: [
+      { label: 'Copy stage handover', why: 'Seven modules are listed under "Comes along". The stage itself is one add.', ref: { kind: 'stage', id: 'handover' } },
+      { label: 'Confirm copy', why: 'Stage and all seven modules land, each with provenance.', confirm: true },
+      { label: 'Copy stage handover again (clashes)', why: 'Now the stage exists. Rename, replace or merge are offered; nothing comes along, since every module is already here.', ref: { kind: 'stage', id: 'handover' } },
+      { label: 'Cancel', why: 'Cancelling leaves everything as it was.', cancel: true },
+    ] },
+  { title: 'Name clash: merge', intro: 'You already have a Risks module with two fields (risk-register, appetite). Solution Design also has Risks, with risk-register and open-issues. Merge should add only the field you lack and leave your own fields, title and existing risk-register untouched.',
+    steps: [
+      { label: 'Copy module risks', why: 'The panel stops with DECIDE. Confirm is disabled until you choose.', ref: { kind: 'module', id: 'risks' } },
+      { label: 'Choose "Merge"', why: 'Only fields you lack will be added.', choose: { id: 'risks', choice: 'merge' } },
+      { label: 'Confirm copy', why: 'open-issues appears in your Risks with a badge. Your title "Procurement risks" and appetite field survive. risk-register is not marked changed.', confirm: true },
+    ] },
+  { title: 'Name clash: rename', intro: 'Same clash, different answer. Keep both by renaming the copy. The default new id is risks-2; you can type your own.',
+    steps: [
+      { label: 'Copy module risks', why: '', ref: { kind: 'module', id: 'risks' } },
+      { label: 'Choose "Keep both", id risks-design', why: 'The copy will land under the new id.', choose: { id: 'risks', choice: 'rename', renameTo: 'risks-design' } },
+      { label: 'Confirm copy', why: 'Two Risks modules now. Provenance still says element module:risks, so the trail survives the rename.', confirm: true },
+    ] },
+  { title: 'Artefact brings template and docx', intro: 'Copy the As-Built artefact. Its template and reference docx always come along, plus every module its requires list names that you do not have.',
+    steps: [
+      { label: 'Copy artefact as-built', why: 'One add, one template + docx, and a list of modules. Notice risks and background are not listed: you already have them.', ref: { kind: 'artefact', id: 'as-built' } },
+      { label: 'Confirm copy', why: 'The artefact lands with its full requires list intact.', confirm: true },
+    ] },
+  { title: 'Field onto an artefact', intro: 'Field visibility per artefact is the requires list. Drop a Security field onto your Procurement on a Page. You do not have a Security module yet, so the module comes along; the artefact simply gains one requirement.',
+    steps: [
+      { label: 'Onto soap: security.privacy-and-confidentiality', why: 'One add (a requirement) and one module comes along.', ref: { kind: 'requirement', artefactId: 'soap', req: 'security.privacy-and-confidentiality' } },
+      { label: 'Confirm copy', why: 'Your soap artefact now requires the field; Security is in your modules.', confirm: true },
+      { label: 'Onto soap: risks.risk-register (already there)', why: 'Refused outright: no plan, nothing to confirm.', ref: { kind: 'requirement', artefactId: 'soap', req: 'risks.risk-register' } },
+    ] },
+]
+
+function renderScenario() {
+  el('tabs').innerHTML = SCENARIOS.map((s, i) => `<button class="${i === state.scenario ? 'active' : ''}" onclick="pickScenario(${i})">${esc(s.title)}</button>`).join('')
+  const s = SCENARIOS[state.scenario]
+  el('scenario').innerHTML = `<div class="scenario"><p>${esc(s.intro)}</p><ol class="steps">${s.steps.map((st, i) => {
+    const done = i < state.step, current = i === state.step
+    return `<li class="${done ? 'done' : ''}"><div><button class="btn small ${done ? 'done' : ''}" ${current ? '' : 'disabled'} onclick="runStep(${i})">${esc(st.label)}</button><div class="why">${esc(st.why)}</div></div></li>`
+  }).join('')}</ol><p class="muted" style="margin-top:8px">Starting a walkthrough resets your definition so it runs the same every time.</p></div>`
+}
+window.pickScenario = (i) => { state.scenario = i; state.step = 0; state.target = initialTarget(); state.plan = null; state.changed = []; log(`Walkthrough "${SCENARIOS[i].title}" ready. Your definition was reset.`); render() }
+window.runStep = (i) => {
+  const st = SCENARIOS[state.scenario].steps[i]
+  if (st.ref) { startCopy(st.ref); if (state.plan && state.plan.errors.length) advanceStep(); else if (!state.plan) advanceStep(); render(); return }
+  if (st.choose) { choose(st.choose.id, st.choose.choice, st.choose.renameTo); advanceStep(); render(); return }
+  if (st.confirm) { confirmPlan(); return } // confirmPlan advances
+  if (st.cancel) { cancelPlan(); advanceStep(); render() }
+}
+function advanceStep() { state.step = Math.min(state.step + 1, SCENARIOS[state.scenario].steps.length) }
+// steps that open a plan advance when the plan is opened
+const _startCopy = window.startCopy
+window.startCopy = (ref) => { _startCopy(ref); const st = SCENARIOS[state.scenario].steps[state.step]; if (st && st.ref && JSON.stringify(st.ref) === JSON.stringify(ref) && state.plan && !state.plan.errors.length) advanceStep(); render() }
+
+function render() { renderTarget(); renderPlan(); renderScenario(); renderFree() }
+render()
+</script>
+</body>
+</html>
