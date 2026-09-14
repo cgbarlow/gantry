@@ -924,6 +924,7 @@ export function DefinitionViewerPage() {
         <div class="defn-outline-group">
           <div class="defn-outline-group-head">
             <span class="kicker">Stages · ${d.stages.length}</span>
+            ${isEditable ? html`<button class="btn small ghost" aria-label="Add stage" onClick=${() => updateDraft((dd) => { const id = `new-stage-${dd.stages.length + 1}`; dd.stages.push({ id, title: 'New Stage', purpose: '', gate: '', modules: [] }); select('stage', id) })}>+</button>` : null}
           </div>
           ${d.stages.map((s, si) =>
             html`<div key=${s.id} ...${reorderZone('stages', si)}>${outlineNode({
@@ -941,6 +942,7 @@ export function DefinitionViewerPage() {
         <div class="defn-outline-group">
           <div class="defn-outline-group-head">
             <span class="kicker">Artefacts · ${d.artefacts.length}</span>
+            ${isEditable ? html`<button class="btn small ghost" aria-label="Add artefact" onClick=${() => updateDraft((dd) => { const id = `new-artefact-${dd.artefacts.length + 1}`; dd.artefacts.push({ id, title: 'New Artefact', purpose: '', template: '', gate: '', requires: [] }); select('artefact', id) })}>+</button>` : null}
           </div>
           ${d.artefacts.map((a, ai) =>
             html`<div key=${a.id} ...${reorderZone('artefacts', ai)}>${outlineNode({
@@ -958,6 +960,7 @@ export function DefinitionViewerPage() {
         <div class="defn-outline-group">
           <div class="defn-outline-group-head">
             <span class="kicker" role="button" tabindex="0" onClick=${() => toggleGroup('modules')}>${modulesCollapsed ? '▸' : '▾'} Modules · ${d.modules.length}</span>
+            ${isEditable ? html`<button class="btn small ghost" aria-label="Add module" onClick=${() => updateDraft((dd) => { const id = `new-module-${dd.modules.length + 1}`; dd.modules.push({ id, title: 'New Module', purpose: '', fields: [] }); select('module', id) })}>+</button>` : null}
           </div>
           ${!modulesCollapsed && d.modules.map((m, mi) =>
             html`<div key=${m.id}>
@@ -1035,6 +1038,13 @@ export function DefinitionViewerPage() {
           <div class="defn-map-col-head"><span class="t muted">Not in any stage</span></div>
           ${unused.map((m) => html`<div key=${m.id} class=${'defn-map-chip' + (selection.type === 'module' && selection.id === m.id ? ' selected' : '')} role="button" tabindex="0" onClick=${() => select('module', m.id)} ...${isEditable ? dragHandleProps({ id: m.id }, 'module') : {}}>${m.title}</div>`)}
           ${unused.length === 0 ? html`<span class="muted">—</span>` : null}
+          ${isEditable ? html`
+            <div class="defn-map-add-row">
+              <button class="btn small ghost" onClick=${() => updateDraft((dd) => { const id = `new-stage-${dd.stages.length + 1}`; dd.stages.push({ id, title: 'New Stage', purpose: '', gate: '', modules: [] }); select('stage', id) })}>+ Stage</button>
+              <button class="btn small ghost" onClick=${() => updateDraft((dd) => { const id = `new-module-${dd.modules.length + 1}`; dd.modules.push({ id, title: 'New Module', purpose: '', fields: [] }); select('module', id) })}>+ Module</button>
+              <button class="btn small ghost" onClick=${() => updateDraft((dd) => { const id = `new-artefact-${dd.artefacts.length + 1}`; dd.artefacts.push({ id, title: 'New Artefact', purpose: '', template: '', gate: '', requires: [] }); select('artefact', id) })}>+ Artefact</button>
+            </div>
+          ` : null}
         </div>
       </div>
     `

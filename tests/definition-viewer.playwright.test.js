@@ -618,3 +618,32 @@ test('New definition: Clone current creates a copy selectable from the switcher'
     })
   })
 })
+
+test('The "+" on each outline group creates a brand-new stage, artefact and module', async () => {
+  await withDraftDesignV2()(async (base) => {
+    await withPage(base, async (page) => {
+      await page.goto(`${base}/definitions`)
+      await page.waitForSelector('#defn-version-select', { timeout: 10_000 })
+      await page.locator('#defn-version-select').selectOption('2')
+      await page.waitForSelector('.defn-outline', { timeout: 10_000 })
+
+      const stagesGroup = page.locator('.defn-outline-group').nth(0)
+      const beforeStages = await stagesGroup.locator('.defn-outline-node').count()
+      await stagesGroup.getByRole('button', { name: 'Add stage' }).click()
+      await page.waitForFunction((n) => document.querySelectorAll('.defn-outline-group')[0].querySelectorAll('.defn-outline-node').length === n, beforeStages + 1, { timeout: 5000 })
+      assert.equal(await page.locator('.defn-focus .kicker').first().textContent(), 'Stage', 'the new stage should be focused')
+
+      const artefactsGroup = page.locator('.defn-outline-group').nth(1)
+      const beforeArtefacts = await artefactsGroup.locator('.defn-outline-node').count()
+      await artefactsGroup.getByRole('button', { name: 'Add artefact' }).click()
+      await page.waitForFunction((n) => document.querySelectorAll('.defn-outline-group')[1].querySelectorAll('.defn-outline-node').length === n, beforeArtefacts + 1, { timeout: 5000 })
+      assert.equal(await page.locator('.defn-focus .kicker').first().textContent(), 'Artefact')
+
+      const modulesGroup = page.locator('.defn-outline-group').nth(2)
+      const beforeModules = await modulesGroup.locator('.defn-outline-node').count()
+      await modulesGroup.getByRole('button', { name: 'Add module' }).click()
+      await page.waitForFunction((n) => document.querySelectorAll('.defn-outline-group')[2].querySelectorAll('.defn-outline-node').length === n, beforeModules + 1, { timeout: 5000 })
+      assert.equal(await page.locator('.defn-focus .kicker').first().textContent(), 'Module')
+    })
+  })
+})

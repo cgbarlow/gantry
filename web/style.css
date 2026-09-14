@@ -1569,7 +1569,7 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 /* Outline nav */
 .defn-outline { padding: 8px; }
 .defn-outline-group { margin-bottom: 10px; }
-.defn-outline-group-head { padding: 4px 6px; }
+.defn-outline-group-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 6px; }
 .defn-outline-node { display: flex; align-items: center; gap: 6px; padding: 5px 7px; border-radius: var(--radius); cursor: pointer; }
 .defn-outline-node:hover { background: var(--bg); }
 .defn-outline-node.selected { background: var(--text); color: var(--bg); }
@@ -1585,6 +1585,7 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-map-col { flex: 0 0 220px; border: var(--hairline) solid var(--line); background: var(--bg-raised); border-radius: var(--radius); padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 4px; }
 .defn-map-col.selected { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
 .defn-map-col-unused { border-style: dashed; }
+.defn-map-add-row { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .defn-map-col-head { display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 2px 0 4px; }
 .defn-map-col-head .t { font-family: var(--font-display); font-weight: 600; font-size: 13px; }
 .defn-map-chip { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg); font-size: 12px; cursor: pointer; }
