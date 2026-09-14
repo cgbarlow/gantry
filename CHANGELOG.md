@@ -17,6 +17,28 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.6.7-beta — 2026-09-14
+
+### Added
+
+- **Local-workspace definitions** (WI #384): a local workspace (one opened
+  straight from a folder on your own machine, with no gantry server
+  involved in storing it) can now hold its own definitions alongside its
+  instances, the same way a server or Azure DevOps workspace already could.
+  Open a local workspace on the dashboard and follow its "Local
+  definitions" link to create, edit and publish one — saved straight to
+  that workspace's own `definitions/` folder as you go, never sent to or
+  stored by the gantry server. The "+ New Instance" wizard now offers a
+  local workspace's own definitions alongside the library when you pin an
+  instance to one, and that instance's status, gate checks and renders all
+  work exactly as they would for a library definition — validation,
+  publish checks and rendering run through the same stateless, nothing-
+  stored request the server already uses for local-workspace instances.
+  Because the server can't see what other local workspaces are doing, a new
+  definition's id is only checked against the shared library at creation
+  time, not against other people's local workspaces — pick a distinctive
+  id to avoid a same-id collision nobody but you can be warned about.
+
 ## 0.6.6-beta — 2026-09-14
 
 ### Added

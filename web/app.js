@@ -20,6 +20,7 @@ import { apply as applyMarkdownCommand, HEADING_LEVELS, findTable, diffRange } f
 import { NewWorkspaceWizardPage } from './pages/new-workspace-wizard.js'
 import { UserGuidePage } from './pages/user-guide.js'
 import { DefinitionViewerPage } from './pages/definition-viewer.js'
+import { LocalDefinitionEditorPage } from './pages/local-definition-editor.js'
 import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, workspaceRepoUrl } from './pages/settings.js'
 // Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79, #374) visual/split/markdown toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
@@ -73,6 +74,13 @@ import {
   buildLocalModuleEntry,
 } from './lib/localInstanceFiles.js'
 import { getLocalStatus, checkLocalGate } from './lib/localStatus.js'
+import {
+  resolveDefinitionStructure,
+  localDefinitionExists,
+  readLocalDefinitionStructure,
+  readLocalDefinitionTemplate,
+  readLocalDefinitionReferenceDocx,
+} from './lib/localDefinitionFiles.js'
 
 // ---------- Local workspace instances (WI #297, ADR-0029, A6) ----------
 // A local-workspace instance's data lives in a folder on the browser user's
@@ -184,14 +192,11 @@ async function loadLocalInstance(workspaceId, slug, requestedStageId) {
   const record = parseInstanceYaml(instanceYamlText)
   const definitionId = record.definition
   const definitionVersion = record.definitionVersion ?? 1
-  const res = await fetch(
-    `/api/definitions/${encodeURIComponent(definitionId)}/versions/${encodeURIComponent(String(definitionVersion))}`
-  )
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.error ?? body.message ?? `Failed to load definition "${definitionId}" (${res.status})`)
-  }
-  const structure = await res.json()
+  // WI #384 — checks this workspace's own definitions/ folder before the
+  // library, so a local instance pinned to a local-workspace-authored
+  // definition loads it straight off disk instead of 404ing against the
+  // server library it was never in.
+  const structure = await resolveDefinitionStructure(handle, definitionId, definitionVersion)
 
   const stageId = requestedStageId ?? record.stage
   const stage = structure.stages.find((s) => s.id === stageId)
@@ -276,7 +281,47 @@ async function buildLocalComputePayload(instance) {
     const moduleId = entry.name.slice(0, -'.md'.length)
     moduleFiles[moduleId] = await readLocalTextFile(handle, `gantry-workspace/${slug}/modules/${entry.name}`)
   }
-  return { definitionId: instance.definition, definitionVersion: instance.localDefinitionVersion, instanceYaml, moduleFiles }
+  const payload = { definitionId: instance.definition, definitionVersion: instance.localDefinitionVersion, instanceYaml, moduleFiles }
+  // WI #384 — a local-workspace-authored definition never lives in this
+  // server's bundled definitionsDir, so a render/compile of an instance
+  // pinned to one has to ship the definition's own content alongside the
+  // instance's — the inline `definition` payload `lib/localWorkspace.js`'s
+  // `runLocalWorkspaceCompute` already knows how to materialize into a
+  // throwaway sandbox next to the instance files (see
+  // `buildInlineLocalDefinitionPayload` below). A library-pinned instance
+  // (the common case) leaves `payload.definition` unset, unchanged from
+  // before this ticket.
+  if (await localDefinitionExists(handle, instance.definition, instance.localDefinitionVersion)) {
+    payload.definition = await buildInlineLocalDefinitionPayload(handle, instance.definition, instance.localDefinitionVersion)
+  }
+  return payload
+}
+
+// The `{ structure, templates, referenceDocs }` shape
+// `lib/localWorkspace.js`'s `validateInlineDefinition` expects on an
+// `/api/local/*` request body, read straight off this workspace's own
+// `definitions/<id>/<version>/` folder — the same files
+// `web/pages/local-definition-editor.js` saves. `referenceDocs` values are
+// base64 (the wire shape a JSON body can carry); `templates` stay plain
+// text. Only an artefact's own template — named off `artefact.template`,
+// e.g. `templates/soap.md.tmpl` — and reference docx (if any) are read;
+// every other artefact's are skipped, same "read only what this render
+// actually needs" restraint `runLocalWorkspaceCompute` itself is under no
+// obligation to but this keeps the request body small regardless.
+async function buildInlineLocalDefinitionPayload(handle, definitionId, version) {
+  const structure = await readLocalDefinitionStructure(handle, definitionId, version)
+  const templates = {}
+  const referenceDocs = {}
+  for (const artefact of structure.artefacts ?? []) {
+    const name = String(artefact.template ?? '').split('/').pop()
+    if (name) {
+      const text = await readLocalDefinitionTemplate(handle, definitionId, version, name)
+      if (text != null) templates[name] = text
+    }
+    const docxBytes = await readLocalDefinitionReferenceDocx(handle, definitionId, version, artefact.id)
+    if (docxBytes) referenceDocs[artefact.id] = bytesToBase64(new Uint8Array(docxBytes))
+  }
+  return { structure, templates, referenceDocs }
 }
 
 // The message shown wherever a local-workspace action needs the gantry
@@ -4793,17 +4838,14 @@ function groupStatusClass(group) {
 // immediately from the one already-loaded `instances` list — matching the
 // "pop in asynchronously, don't block the page" requirement.
 // Fetches (and caches, per resolve() call) a definition version's projection — the same
-// `/api/definitions/:id/versions/:n` route `loadLocalInstance` already uses — so a local
-// workspace holding several instances of the same definition/version fetches it once, not once
+// `resolveDefinitionStructure` (web/lib/localDefinitionFiles.js) `loadLocalInstance` already
+// uses (WI #384: this workspace's own definitions/ folder first, else the library) — so a local
+// workspace holding several instances of the same definition/version reads it once, not once
 // per instance.
-async function fetchLocalDefinitionStructure(cache, definitionId, definitionVersion) {
+async function fetchLocalDefinitionStructure(handle, cache, definitionId, definitionVersion) {
   const cacheKey = `${definitionId}:${definitionVersion}`
   if (cache.has(cacheKey)) return cache.get(cacheKey)
-  const res = await fetch(
-    `/api/definitions/${encodeURIComponent(definitionId)}/versions/${encodeURIComponent(String(definitionVersion))}`
-  )
-  if (!res.ok) throw new Error(`Failed to load definition "${definitionId}" (${res.status})`)
-  const structure = await res.json()
+  const structure = await resolveDefinitionStructure(handle, definitionId, definitionVersion)
   cache.set(cacheKey, structure)
   return structure
 }
@@ -4820,7 +4862,7 @@ async function buildLocalInstanceRow(handle, slug, structureCache) {
   const record = parseInstanceYaml(instanceYamlText)
   const definitionId = record.definition
   const definitionVersion = record.definitionVersion ?? 1
-  const structure = await fetchLocalDefinitionStructure(structureCache, definitionId, definitionVersion)
+  const structure = await fetchLocalDefinitionStructure(handle, structureCache, definitionId, definitionVersion)
   const localStatus = await getLocalStatus(handle, slug, structure, record.stage)
   const stageIndex = structure.stages.findIndex((s) => s.id === localStatus.stage.id)
 
@@ -5238,6 +5280,9 @@ function MasterDetailView({ instances, localGroups }) {
                   : null}
                 ${selectedGroup.state === 'granted'
                   ? html`
+                      <p class="workspace-settings-link">
+                        <a href=${`/definitions/local?ws=${encodeURIComponent(selectedGroup.entry.id)}`}>Local definitions →</a>
+                      </p>
                       <div class="workspace-instances">
                         ${selectedGroup.instances.length === 0
                           ? html`<p class="loading">No instances in this workspace yet.</p>`
@@ -5690,6 +5735,7 @@ function App() {
         <${Route} path="/assets" component=${AssetLibraryPage} />
         <${Route} path="/user-guide" component=${UserGuidePage} />
         <${Route} path="/definitions" component=${DefinitionViewerPage} />
+        <${Route} path="/definitions/local" component=${LocalDefinitionEditorPage} />
         <${Route} path="/settings" component=${GlobalSettingsPage} />
         <${Route} path="/settings/workspace" component=${WorkspaceSettingsPage} />
         <${Route} path="/settings/instance" component=${InstanceSettingsPage} />

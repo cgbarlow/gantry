@@ -101,10 +101,23 @@ durable.
 
 ### Definitions
 
-A local workspace uses the server's bundled `definitions/` only. It
-references a definition by id and version, resolved server-side exactly
-like every other instance. It cannot ship its own definition in the picked
-folder.
+A local workspace can either pin an instance to the server's bundled
+`definitions/` (resolved server-side exactly like every other instance) or
+ship its own definition inside the picked folder, at
+`definitions/<id>/<version>/definition.yaml` + `modules/*.yaml` +
+`templates/*.md.tmpl` + `templates/reference-<artefactId>.docx` (WI #384).
+A workspace-authored definition is created, edited, validated and published
+entirely client-side — `/definitions/local?ws=<id>` (`web/pages/local-
+definition-editor.js`) reads and writes those files straight through the
+File System Access API, calling the stateless `POST
+/api/local/definition/validate` round trip only to reuse the server's
+existing structural-validation rules; the definition itself is never
+uploaded or persisted server-side. Because such a definition never lives in
+the server's bundled `definitionsDir`, an instance pinned to one carries its
+content inline on every `/api/local/*` request that needs it (render,
+compile, gate check), materialized into that request's throwaway sandbox
+next to the instance's own files — a library-pinned instance is unaffected
+and leaves that inline payload unset.
 
 ### Addressing
 

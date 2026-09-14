@@ -1826,3 +1826,28 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 }
 .vgrid-popover-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
 .vgrid-popover-actions .btn { margin: 0; }
+
+/* WI #384 — the local-workspace definition editor (web/pages/local-definition-editor.js).
+   Deliberately minimal, mirroring the wizard's own .definition-card/.wizard-input rhythm rather
+   than definition-viewer.js's richer drag-and-drop layout — see that page's own header comment
+   on why it's a smaller editor. */
+.local-definition-create,
+.local-definition-editor { max-width: 760px; margin: 0 auto; }
+.local-def-element {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: var(--bg-raised);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+}
+.local-def-element-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.local-def-element-header input.wizard-input { flex: 1 1 160px; }
+.local-def-field-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: 16px; }
+.local-def-field-row input.wizard-input { flex: 1 1 140px; }
+.local-def-template { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.local-def-template-source { font: 13px/1.5 var(--font-mono); min-height: 160px; }
+.local-def-validation { margin: 20px 0; }
+.local-def-problems { padding-left: 20px; color: var(--text-error, #b3261e); }
