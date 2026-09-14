@@ -218,6 +218,43 @@ test('writeDefinitionVersion with missing module reference returns problems and 
   })
 })
 
+// WI #381 adversarial-review fix: two modules sharing an id used to save silently — writeProposedFilesToDir
+// (one file per module id) collapsed them to a single file with the second module's fields winning, and
+// writeDefinitionVersion returned success (no problems, no thrown error) because its validate-then-write
+// pass reads the result back off disk *after* the collision has already been collapsed away. The check
+// must run against the incoming structure before any file is written.
+test('writeDefinitionVersion rejects two modules sharing an id and writes no files', () => {
+  withVersionedFixture(({ definitionsDir }) => {
+    const def = loadDefinition('design', { definitionsDir, version: 2 })
+    const proj = definitionVersionProjection(def)
+    const survivor = proj.modules.find((m) => m.id === 'background')
+    const clobbered = proj.modules.find((m) => m.id === 'extra-module')
+    clobbered.id = 'background' // now two modules both claim id "background"
+    const beforeSurvivor = readFileSync(join(definitionsDir, 'design/2/modules/background.yaml'), 'utf8')
+    const beforeExtra = readFileSync(join(definitionsDir, 'design/2/modules/extra-module.yaml'), 'utf8')
+    const result = writeDefinitionVersion('design', 2, proj, { definitionsDir })
+    assert.ok(result && Array.isArray(result.problems) && result.problems.length > 0)
+    assert.ok(result.problems.some((p) => p.type === 'duplicate-module-id'))
+    // Neither module's file was touched — the survivor's real content was not clobbered by the loser's.
+    assert.equal(readFileSync(join(definitionsDir, 'design/2/modules/background.yaml'), 'utf8'), beforeSurvivor)
+    assert.equal(readFileSync(join(definitionsDir, 'design/2/modules/extra-module.yaml'), 'utf8'), beforeExtra)
+    assert.notEqual(survivor.fields.length, 0) // sanity: the survivor module really did have real content
+  })
+})
+
+test('writeDefinitionVersion rejects duplicate stage ids and writes no files', () => {
+  withVersionedFixture(({ definitionsDir }) => {
+    const def = loadDefinition('design', { definitionsDir, version: 2 })
+    const proj = definitionVersionProjection(def)
+    proj.stages.push({ ...proj.stages[0] }) // duplicate an existing stage id
+    const beforeDef = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    const result = writeDefinitionVersion('design', 2, proj, { definitionsDir })
+    assert.ok(result && Array.isArray(result.problems) && result.problems.length > 0)
+    assert.ok(result.problems.some((p) => p.type === 'duplicate-stage-id'))
+    assert.equal(readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8'), beforeDef)
+  })
+})
+
 test('writeDefinitionVersion against published version throws', () => {
   withVersionedFixture(({ definitionsDir }) => {
     const def = loadDefinition('design', { definitionsDir, version: 1 })

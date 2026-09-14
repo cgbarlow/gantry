@@ -55,6 +55,46 @@ test('findDefinitionProblemsInStructure: an unreferenced module is never checked
   assert.deepEqual(problems, [])
 })
 
+// WI #381 adversarial-review fix: two modules sharing an id used to save silently — writeProposedFilesToDir
+// writes one file per module id, so the second module's fields clobbered the first's on disk with no 422
+// and no problems array. A duplicate module id must be caught even when neither module is referenced yet
+// (e.g. right after the editor's own "+ Add module" auto-naming collides post add/remove/add), which is
+// exactly the case an unreferenced module is otherwise never checked for.
+test('findDefinitionProblemsInStructure: reports duplicate module ids even when neither module is referenced', () => {
+  const problems = findDefinitionProblemsInStructure({
+    stages: [],
+    artefacts: [],
+    modules: [
+      { id: 'dup', title: 'First', fields: [{ id: 'a', type: 'markdown' }] },
+      { id: 'dup', title: 'Second', fields: [{ id: 'a', type: 'markdown' }] },
+    ],
+  })
+  assert.deepEqual(problems, [
+    { type: 'duplicate-module-id', message: 'Module "dup" is used by 2 modules — module ids must be unique' },
+  ])
+})
+
+test('findDefinitionProblemsInStructure: reports duplicate stage ids, artefact ids, and field ids within a module', () => {
+  const problems = findDefinitionProblemsInStructure({
+    stages: [
+      { id: 'shape', modules: [] },
+      { id: 'shape', modules: [] },
+    ],
+    artefacts: [
+      { id: 'soap', requires: [] },
+      { id: 'soap', requires: [] },
+    ],
+    modules: [
+      { id: 'background', fields: [{ id: 'problem', type: 'markdown' }, { id: 'problem', type: 'markdown' }] },
+    ],
+  })
+  const types = problems.map((p) => p.type).sort()
+  assert.deepEqual(types, ['duplicate-artefact-id', 'duplicate-field-id', 'duplicate-stage-id'])
+  assert.ok(problems.some((p) => p.message === 'Stage "shape" is used by 2 stages — stage ids must be unique'))
+  assert.ok(problems.some((p) => p.message === 'Artefact "soap" is used by 2 artefacts — artefact ids must be unique'))
+  assert.ok(problems.some((p) => p.message === 'Module "background" field "problem" is used by 2 fields — field ids must be unique within a module'))
+})
+
 test('findDefinitionProblemsInStructure: tolerates a bare structure with no stages/artefacts/modules', () => {
   assert.deepEqual(findDefinitionProblemsInStructure({}), [])
 })
