@@ -479,10 +479,15 @@ export function DefinitionViewerPage() {
     setNewDefBusy(true)
     setNewDefError(null)
     try {
+      // WI #383 review: the clone has to land in the *source* definition's own home — a
+      // workspace-homed definition has no counterpart in the library for `cloneDefinition` to read
+      // from, so omitting `home` here always 400'd with "Unknown definition" for anything but a
+      // library definition.
+      const sourceHome = definitions?.find((d) => d.id === selectedId)?.home ?? { kind: 'library' }
       const res = await fetch('/api/definitions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceId: selectedId, newId: newCloneId }),
+        body: JSON.stringify({ sourceId: selectedId, newId: newCloneId, home: sourceHome }),
       })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) {

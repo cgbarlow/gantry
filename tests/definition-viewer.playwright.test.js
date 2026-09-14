@@ -1,10 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, cpSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, cpSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { withRunningServer } from './helpers/lifecycle.js'
+import { writeWorkspaceJson } from '../lib/workspaceDirectory.js'
+import { createBlankDefinition } from '../lib/definition.js'
+import { serverWorkspaceDefinitionsDir } from '../lib/definitionHome.js'
 
 // WI #381: the Definitions page rebuilt as a first-class editor — one '/definitions' route, an
 // Outline/Map view switch over one focus pane and a docked (read-only for now) Library panel, drag
@@ -695,6 +698,46 @@ test('New definition: Clone current creates a copy selectable from the switcher'
       assert.ok(await page.locator('.defn-outline-node').count() > 0, 'a clone should carry over the source definition\'s elements')
     })
   })
+})
+
+// WI #383 review: "Clone current" used to always POST with no `home`, so cloning a definition whose
+// selected source lives in a server workspace (not the library) always 400'd — `cloneDefinition`
+// looked for the source in the library, where it doesn't exist. It must clone within the source's own
+// workspace instead.
+test('New definition: Clone current clones a workspace-homed definition within that workspace', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-viewer-ws-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-ws-'))
+  try {
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    mkdirSync(join(instancesDir, 'acme'), { recursive: true })
+    writeWorkspaceJson(instancesDir, 'acme', { name: 'Acme', kind: 'local', createdAt: new Date().toISOString() })
+    createBlankDefinition('ws-process', { definitionsDir: serverWorkspaceDefinitionsDir(instancesDir, 'acme'), title: 'WS Process' })
+
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      await withPage(base, async (page) => {
+        await page.goto(`${base}/definitions`)
+        await page.waitForSelector('.defn-toolbar', { timeout: 10_000 })
+        await openSwitcher(page)
+        await page.locator('.defn-switcher-row', { hasText: 'ws-process' }).click()
+        await page.waitForFunction(() => document.querySelector('.defn-switcher .defn-id')?.textContent === 'ws-process', { timeout: 10_000 })
+
+        await openSwitcher(page)
+        await page.getByRole('button', { name: '+ New definition…' }).click()
+        await page.getByRole('button', { name: 'Clone current', exact: true }).click()
+        await page.locator('#defn-newdef-clone-id').fill('ws-process-clone')
+        await page.getByRole('button', { name: 'Create', exact: true }).click()
+        await page.waitForFunction(() => document.querySelector('.defn-switcher .defn-id')?.textContent === 'ws-process-clone', { timeout: 10_000 })
+
+        assert.ok(
+          existsSync(join(instancesDir, 'acme', 'definitions', 'ws-process-clone', '1', 'definition.yaml')),
+          'the clone must land inside the source workspace, not the library'
+        )
+      })
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
 })
 
 test('The "+" on each outline group creates a brand-new stage, artefact and module', async () => {

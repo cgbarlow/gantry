@@ -183,6 +183,86 @@ test('a server workspace definition can be saved and published through the ordin
   }
 })
 
+// ---------- no shadowing across Azure DevOps workspaces (review finding on WI #383) ----------
+
+test('creating a library definition with an id that already exists in an Azure DevOps workspace is refused 409, no shadowing', async () => {
+  await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT }, async (baseUrl) => {
+    const instancesDir = mkdtempSync(join(tmpdir(), 'defs-p3-ado-shadow-'))
+    const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-p3-ado-shadow-lib-'))
+    try {
+      cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+      const workspace = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl, owner: '' }, { instancesDir })
+
+      await withRunningServer({ definitionsDir, instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+        const auth = basicAuthHeader(VALID_PAT)
+
+        const createAdoRes = await fetch(`${base}/api/workspaces/${workspace.id}/definitions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: auth },
+          body: JSON.stringify({ newId: 'shadow-process' }),
+        })
+        assert.equal(createAdoRes.status, 201, await createAdoRes.text())
+
+        // The browser attaches the same PAT to every request (lib/credential.js), including this
+        // plain library create — it must see the Azure DevOps workspace's own id and refuse.
+        const collideRes = await fetch(`${base}/api/definitions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: auth },
+          body: JSON.stringify({ newId: 'shadow-process' }),
+        })
+        assert.equal(collideRes.status, 409)
+
+        // With no PAT on the request at all, the check is best-effort and skipped — an ordinary
+        // library create for a caller that has never configured Azure DevOps is unaffected.
+        const noAuthRes = await fetch(`${base}/api/definitions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ newId: 'no-pat-process' }),
+        })
+        assert.equal(noAuthRes.status, 201, await noAuthRes.text())
+      })
+    } finally {
+      rmSync(instancesDir, { recursive: true, force: true })
+      rmSync(definitionsDir, { recursive: true, force: true })
+    }
+  })
+})
+
+test('creating a definition in one Azure DevOps workspace with an id that already exists in a different Azure DevOps workspace is refused 409, no shadowing', async () => {
+  await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT }, async (baseUrlA) => {
+    await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: 'fake-repo-2', validPat: VALID_PAT }, async (baseUrlB) => {
+      const instancesDir = mkdtempSync(join(tmpdir(), 'defs-p3-ado-multi-'))
+      const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-p3-ado-multi-lib-'))
+      try {
+        cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+        const workspaceA = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: baseUrlA, owner: '' }, { instancesDir })
+        const workspaceB = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: 'fake-repo-2', baseUrl: baseUrlB, owner: '' }, { instancesDir })
+
+        await withRunningServer({ definitionsDir, instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+          const auth = basicAuthHeader(VALID_PAT)
+
+          const createA = await fetch(`${base}/api/workspaces/${workspaceA.id}/definitions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: auth },
+            body: JSON.stringify({ newId: 'multi-ado-process' }),
+          })
+          assert.equal(createA.status, 201, await createA.text())
+
+          const createB = await fetch(`${base}/api/workspaces/${workspaceB.id}/definitions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: auth },
+            body: JSON.stringify({ newId: 'multi-ado-process' }),
+          })
+          assert.equal(createB.status, 409)
+        })
+      } finally {
+        rmSync(instancesDir, { recursive: true, force: true })
+        rmSync(definitionsDir, { recursive: true, force: true })
+      }
+    })
+  })
+})
+
 // ---------- Azure DevOps workspace: the commit path ----------
 
 test('Azure DevOps workspace definitions: create, save and publish each land as exactly one commit straight to main', async () => {
