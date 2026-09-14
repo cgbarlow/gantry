@@ -318,3 +318,43 @@ test(
     })
   })
 )
+
+test(
+  'POST /api/local/definitions/promote refuses a caller-supplied file set whose definition.yaml is not published, without touching any repo',
+  withScratchDirs(async (definitionsDir, instancesDir) => {
+    await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: 'promote-local-draft-repo', validPat: VALID_PAT, files: { 'README.md': '# repo' } }, async (baseUrl) => {
+      await withRunningServer({ definitionsDir, instancesDir, libraryPat: VALID_PAT, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+        const added = addLibraryRepo({ organization: ORGANIZATION, project: PROJECT, repository: 'promote-local-draft-repo', baseUrl }, { instancesDir })
+
+        const draftFiles = [
+          { path: 'definition.yaml', content: 'id: local-draft\nversion: 1\nstatus: draft\ntitle: Local Draft\n', contentType: 'rawtext' },
+        ]
+        const draftAttempt = await fetchJson(`${base}/api/local/definitions/promote`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: 'local-draft', version: 1, files: draftFiles, repoIds: [added.id] }),
+        })
+        assert.equal(draftAttempt.status, 400)
+        assert.match(draftAttempt.body.error, /published/)
+
+        const missingDefinitionYamlAttempt = await fetchJson(`${base}/api/local/definitions/promote`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: 'local-draft', version: 1, files: [{ path: 'CHANGELOG.md', content: '## v1\n', contentType: 'rawtext' }], repoIds: [added.id] }),
+        })
+        assert.equal(missingDefinitionYamlAttempt.status, 400)
+        assert.match(missingDefinitionYamlAttempt.body.error, /definition\.yaml/)
+
+        // Neither refused attempt reached the fan-out — no `definition/...` branch was ever
+        // created against the configured repo (only the repo's own pre-existing `main`).
+        const branchesRes = await fetch(
+          `${baseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/promote-local-draft-repo/refs?api-version=7.1`,
+          { headers: { Authorization: `Basic ${Buffer.from(`:${VALID_PAT}`).toString('base64')}` } }
+        )
+        assert.equal(branchesRes.status, 200)
+        const branches = await branchesRes.json()
+        assert.deepEqual(branches.value.map((b) => b.name).filter((name) => name.startsWith('refs/heads/definition')), [])
+      })
+    })
+  })
+)
