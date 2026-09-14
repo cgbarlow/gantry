@@ -528,40 +528,58 @@ export function LocalDefinitionEditorPage() {
   const version = Number(params.get('version') ?? '1')
 
   const [handle, setHandle] = useState(null)
-  const [permissionState, setPermissionState] = useState('loading') // loading | granted | denied | missing
+  const [permissionState, setPermissionState] = useState('loading') // loading | granted | prompt | denied | missing
+  const [reconnectBusy, setReconnectBusy] = useState(false)
   const [loadError, setLoadError] = useState(null)
   const [structure, setStructure] = useState(null)
 
-  useEffect(() => {
-    let cancelled = false
+  // Mirrors the dashboard's own local-workspace row (LocalGroupResolver in
+  // web/app.js): 'prompt' (a handle restored from IndexedDB across a reload,
+  // permission not yet re-confirmed) and 'denied' (the user said no, or this
+  // browser's storage lost the grant) are distinct states with the same
+  // fix — a user-gesture-backed re-request via ensurePermission, wired to
+  // the "Reconnect" button below — not one dead-end message.
+  async function resolvePermission() {
     if (!workspaceId) {
       setLoadError('No workspace specified — open this page from a local workspace on the dashboard.')
       setPermissionState('missing')
       return
     }
-    getWorkspaceHandle(workspaceId)
-      .then(async (h) => {
-        if (cancelled) return
-        if (!h) {
-          setPermissionState('missing')
-          return
-        }
-        const granted = await ensurePermission(h)
-        if (cancelled) return
-        if (granted !== 'granted') {
-          setPermissionState('denied')
-          return
-        }
-        setHandle(h)
-        setPermissionState('granted')
-      })
-      .catch((err) => {
-        if (!cancelled) setLoadError(err.message)
-      })
-    return () => {
-      cancelled = true
+    setPermissionState('loading')
+    let h
+    try {
+      h = await getWorkspaceHandle(workspaceId)
+    } catch (err) {
+      setLoadError(err.message)
+      setPermissionState('missing')
+      return
     }
+    if (!h) {
+      setPermissionState('missing')
+      return
+    }
+    const granted = await ensurePermission(h)
+    if (granted === 'granted') {
+      setHandle(h)
+      setPermissionState('granted')
+      return
+    }
+    setPermissionState(granted === 'prompt' ? 'prompt' : 'denied')
+  }
+
+  useEffect(() => {
+    resolvePermission()
+    // eslint-disable-next-line
   }, [workspaceId])
+
+  async function reconnect() {
+    setReconnectBusy(true)
+    try {
+      await resolvePermission()
+    } finally {
+      setReconnectBusy(false)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -579,8 +597,27 @@ export function LocalDefinitionEditorPage() {
   }, [handle, definitionId, version])
 
   if (permissionState === 'loading') return html`<main class="dashboard"><p class="loading">Opening workspace…</p></main>`
-  if (permissionState === 'missing' || permissionState === 'denied') {
-    return html`<main class="dashboard"><p class="load-error">${loadError ?? 'This local workspace needs permission again in this browser — open it from the dashboard first.'}</p></main>`
+  if (permissionState === 'prompt') {
+    return html`<main class="dashboard">
+      <div class="local-workspace-recovery">
+        <p>This local workspace needs permission again in this browser.</p>
+        <div class="detail-actions">
+          <button type="button" class="btn primary" disabled=${reconnectBusy} onClick=${reconnect}>${reconnectBusy ? 'Reconnecting…' : 'Reconnect'}</button>
+        </div>
+      </div>
+    </main>`
+  }
+  if (permissionState === 'denied' || permissionState === 'missing') {
+    return html`<main class="dashboard">
+      <div class="local-workspace-recovery">
+        <p>${loadError ?? "Can't use this local workspace in this browser — reconnect, or open it from the dashboard first."}</p>
+        ${workspaceId
+          ? html`<div class="detail-actions">
+              <button type="button" class="btn primary" disabled=${reconnectBusy} onClick=${reconnect}>${reconnectBusy ? 'Reconnecting…' : 'Reconnect'}</button>
+            </div>`
+          : null}
+      </div>
+    </main>`
   }
 
   if (!definitionId) {
