@@ -17,6 +17,32 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.6.5-beta — 2026-09-14
+
+### Added
+
+- **Workspace definitions** (WI #383): a server workspace or an Azure DevOps
+  workspace can now hold its own definitions, alongside — never instead of —
+  the server library. A definition's home works exactly like the library
+  already does: draft/published versions, an archive marker, the same
+  editor. Definition ids are unique across the library and every workspace,
+  so creating one with an id already in use elsewhere is refused rather than
+  silently shadowing it. Saving or publishing a definition in an Azure
+  DevOps workspace commits straight to that workspace's `main` — one commit
+  per save, no review branch.
+- The Definitions page switcher now groups definitions by home ("Server
+  library" / "Workspace: `<name>`"), and creating a new definition lets you
+  choose which one to create it in. Copying stages, artefacts, modules and
+  fields between definitions (WI #382) now also offers other definitions in
+  the *same* workspace as sources, alongside the library — other workspaces
+  stay private. The "+ New Workspace" wizard's definition picker now also
+  lists the definitions already available in the workspace you're creating
+  an instance in.
+- An instance pinned to a workspace definition resolves it from that
+  workspace first, falling back to the library only if it isn't found
+  there — matching how the server has always resolved an instance's own
+  data.
+
 ## 0.6.4-beta — 2026-09-14
 
 ### Added

@@ -2069,6 +2069,25 @@ function InstanceStep() {
   const ws = selectedWorkspace.value
   const ticketingEnabled = Boolean(ws?.ticketingSystem)
 
+  // WI #383 (ADR-0036): once an Azure DevOps workspace is picked, its own definitions join the
+  // library/server-workspace set the top-level fetch above already loaded — merged by id (definition
+  // ids are unique across every home, so there's nothing to de-duplicate beyond "don't add it twice"
+  // if this effect re-runs). `silent: true` — a missing/expired PAT here just means this workspace's
+  // own definitions don't show up yet, not a page-wide prompt interrupting whichever step of the
+  // wizard the architect is actually on; the credential gets asked for anyway the moment something
+  // that actually needs it (registering the workspace, creating the instance) runs.
+  useEffect(() => {
+    if (!ws || ws.isLocal || !ws.id) return
+    apiFetch(`/api/workspaces/${encodeURIComponent(ws.id)}/definitions`, {}, { workspaceId: ws.id, silent: true })
+      .then((res) => (res.ok ? res.json() : []))
+      .then((rows) => {
+        const existingIds = new Set(definitions.value.map((d) => d.id))
+        const merged = rows.filter((d) => !existingIds.has(d.id))
+        if (merged.length) definitions.value = [...definitions.value, ...merged]
+      })
+      .catch(() => {})
+  }, [ws?.id])
+
   return html`
     <div class="result-card">
       <h3><span class="stamp agreed">Workspace</span></h3>
@@ -2428,7 +2447,14 @@ export function NewWorkspaceWizardPage({ query }) {
     if (local) {
       preselectedLocalWorkspaceId.value = local
     }
-    fetch('/api/definitions')
+    // WI #383 (ADR-0036): `includeWorkspaces=1` unions the library with every server workspace's own
+    // definitions (no credential needed — a server workspace's `definitions/` folder is plain local
+    // disk) — this is what makes the reserved "default" server workspace's own definitions available
+    // to pick here, alongside the library, with no further wiring: `POST /api/instances`'s local
+    // branch always creates in that one workspace. An Azure DevOps workspace's own definitions are
+    // merged in separately, once one is picked (see `InstanceStep`'s own effect below) — they need the
+    // architect's PAT, which isn't necessarily available yet at this point in the flow.
+    fetch('/api/definitions?includeWorkspaces=1')
       .then((res) => res.json())
       .then((body) => {
         definitions.value = body
