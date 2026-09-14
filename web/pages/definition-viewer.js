@@ -29,6 +29,35 @@ function isValidSlugClient(slug) {
   return typeof slug === 'string' && slug !== '' && slug !== '.' && slug !== '..' && /^[^\\/]+$/.test(slug)
 }
 
+// WI #383 (ADR-0036): copy sources are "server library + same workspace" — a library definition
+// (`kind: 'library'`, including one being edited that has no `home` yet) or a definition in the exact
+// same server workspace as `currentDef`; a definition from a *different* workspace stays private, even
+// though every row briefly passes through this same flat `definitions` array. `currentDef` being a
+// library definition itself (or `home` not yet loaded) narrows this to library-only sources — the
+// pre-existing behavior from before this ticket, unchanged.
+function isEligibleCopySource(def, currentDef) {
+  if ((def.home?.kind ?? 'library') === 'library') return true
+  return currentDef?.home?.kind === 'server-workspace' && def.home.kind === 'server-workspace' && def.home.id === currentDef.home.id
+}
+
+// WI #383: the switcher's own grouping key/label for a row's `home` — "Server library" first, then
+// one group per server workspace, in the order the workspace's own definitions first appear in
+// `definitions` (already sorted by workspace id, since `listDefinitionsAcrossHomes` builds it that
+// way). A row with no `home` at all (shouldn't happen once `includeWorkspaces=1` is always sent, but
+// keeps this defensive rather than throwing) groups with the library.
+function groupDefinitionsByHome(definitions) {
+  const groups = new Map()
+  for (const def of definitions ?? []) {
+    const home = def.home ?? { kind: 'library' }
+    const key = home.kind === 'library' ? 'library' : `server-workspace:${home.id}`
+    if (!groups.has(key)) {
+      groups.set(key, { key, label: home.kind === 'library' ? 'Server library' : `Workspace: ${home.name}`, defs: [] })
+    }
+    groups.get(key).defs.push(def)
+  }
+  return [...groups.values()]
+}
+
 function templateBasename(tmpl) {
   if (!tmpl) return ''
   const parts = String(tmpl).split('/')
@@ -100,6 +129,13 @@ export function DefinitionViewerPage() {
   const [newBlankId, setNewBlankId] = useState('')
   const [newBlankTitle, setNewBlankTitle] = useState('')
   const [newCloneId, setNewCloneId] = useState('')
+  // WI #383 (ADR-0036) — Definition home: server library or a server workspace's own `definitions/`
+  // folder. `newBlankHomeId` is `''` for the library, else a server workspace's own id (its folder
+  // name). `workspaceHomes` is fetched once from `/api/server-workspaces` (not derived from
+  // `definitions`, which never lists a workspace that has no definitions of its own yet) so a
+  // brand-new, still-empty workspace can be picked as a target too.
+  const [workspaceHomes, setWorkspaceHomes] = useState([])
+  const [newBlankHomeId, setNewBlankHomeId] = useState('')
   const [newDefError, setNewDefError] = useState(null)
   const [newDefBusy, setNewDefBusy] = useState(false)
   const [newDraftError, setNewDraftError] = useState(null)
@@ -153,13 +189,25 @@ export function DefinitionViewerPage() {
   const isDirty = Boolean(isEditable && draft && detail && JSON.stringify(editableStructure(draft)) !== JSON.stringify(editableStructure(detail)))
   const working = isEditable ? draft : detail
 
+  // WI #383: `includeWorkspaces=1` unions the library with every server workspace's own definitions,
+  // each row carrying `home` — `{ kind: 'library' }` or `{ kind: 'server-workspace', id, name }` —
+  // which the switcher groups by and the copy-sources picker filters by. Without this the response is
+  // byte-for-byte the pre-existing library-only shape (`GET /api/definitions` unchanged).
   function fetchDefinitions(showArchivedFlag) {
-    const qs = showArchivedFlag ? '?archived=1' : ''
-    return fetch(`/api/definitions${qs}`).then((res) => {
+    const params = new URLSearchParams({ includeWorkspaces: '1' })
+    if (showArchivedFlag) params.set('archived', '1')
+    return fetch(`/api/definitions?${params}`).then((res) => {
       if (!res.ok) throw new Error(`Failed to load definitions (${res.status})`)
       return res.json()
     })
   }
+
+  useEffect(() => {
+    fetch('/api/server-workspaces')
+      .then((res) => (res.ok ? res.json() : []))
+      .then(setWorkspaceHomes)
+      .catch(() => setWorkspaceHomes([]))
+  }, [])
 
   useEffect(() => {
     fetchDefinitions(showArchived)
@@ -258,9 +306,10 @@ export function DefinitionViewerPage() {
   // Library must never end up aimed at the same definition the workbench is editing.
   useEffect(() => {
     if (!definitions) return
-    if (libSourceId && libSourceId !== selectedId && definitions.some((d) => d.id === libSourceId)) return
-    const other = definitions.find((d) => d.id !== selectedId) ?? null
-    setLibSourceId(other?.id ?? null)
+    const currentDef = definitions.find((d) => d.id === selectedId) ?? null
+    const eligible = definitions.filter((d) => d.id !== selectedId && isEligibleCopySource(d, currentDef))
+    if (libSourceId && libSourceId !== selectedId && eligible.some((d) => d.id === libSourceId)) return
+    setLibSourceId(eligible[0]?.id ?? null)
   }, [definitions, selectedId])
 
   useEffect(() => {
@@ -392,7 +441,11 @@ export function DefinitionViewerPage() {
       const res = await fetch('/api/definitions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newId: newBlankId, title: newBlankTitle || newBlankId }),
+        body: JSON.stringify({
+          newId: newBlankId,
+          title: newBlankTitle || newBlankId,
+          home: newBlankHomeId ? { kind: 'server-workspace', id: newBlankHomeId } : { kind: 'library' },
+        }),
       })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -408,6 +461,7 @@ export function DefinitionViewerPage() {
       setNewDefMode(null)
       setNewBlankId('')
       setNewBlankTitle('')
+      setNewBlankHomeId('')
       setSwitcherOpen(false)
     } catch (err) {
       setNewDefError(err.message)
@@ -1064,6 +1118,11 @@ export function DefinitionViewerPage() {
             <input id="defn-newdef-blank-id" class="wizard-input" placeholder="e.g. procurement" value=${newBlankId} onInput=${(e) => setNewBlankId(e.currentTarget.value)} />
             <label class="field-label" for="defn-newdef-blank-title">Title</label>
             <input id="defn-newdef-blank-title" class="wizard-input" value=${newBlankTitle} onInput=${(e) => setNewBlankTitle(e.currentTarget.value)} />
+            <label class="field-label" for="defn-newdef-blank-home">Home</label>
+            <select id="defn-newdef-blank-home" class="wizard-input" value=${newBlankHomeId} onChange=${(e) => setNewBlankHomeId(e.currentTarget.value)}>
+              <option value="">Server library</option>
+              ${workspaceHomes.map((w) => html`<option value=${w.id}>Workspace: ${w.name}</option>`)}
+            </select>
           ` : html`
             <label class="field-label" for="defn-newdef-clone-id">New id (cloned from ${selectedId})</label>
             <input id="defn-newdef-clone-id" class="wizard-input" placeholder="e.g. procurement" value=${newCloneId} onInput=${(e) => setNewCloneId(e.currentTarget.value)} />
@@ -1081,35 +1140,39 @@ export function DefinitionViewerPage() {
         ${loadError ? html`<p class="load-error">${loadError}</p>` : null}
         ${!definitions ? html`<p class="loading">Loading…</p>` : null}
         ${definitions?.length === 0 ? html`<p class="load-error">No definitions found.</p>` : null}
-        <div class="defn-switcher-group">
-          <div class="kicker">Server library</div>
-          ${definitions?.map(
-            (def) => html`
-              <div
-                key=${def.id}
-                class=${'defn-switcher-row' + (def.id === selectedId ? ' selected' : '') + (def.archived ? ' archived' : '')}
-                role="button"
-                tabindex="0"
-                onClick=${() => handleSelectDefinition(def)}
-                onKeyDown=${(e) => { if (e.key === 'Enter') handleSelectDefinition(def) }}
-              >
-                <div class="defn-switcher-row-title">${def.title} <span class="defn-id">${def.id}</span>${def.archived ? html` <span class="stamp small error">archived</span>` : null}</div>
-                <div class="defn-rail-badges">
-                  ${def.versions.map((v) => html`<span class=${'stamp small' + (v.status === 'published' ? ' agreed' : ' draft')} key=${v.version}>v${v.version} · ${v.status}</span>`)}
-                </div>
-                ${def.archived
-                  ? html`<button class="btn small ghost" onClick=${(e) => handleRestore(def.id, e)}>Restore</button>`
-                  : html`<button class="btn small ghost" onClick=${(e) => handleArchive(def.id, e)}>Archive</button>`}
-              </div>
-            `
-          )}
-        </div>
+        ${groupDefinitionsByHome(definitions).map(
+          (group) => html`
+            <div class="defn-switcher-group" key=${group.key}>
+              <div class="kicker">${group.label}</div>
+              ${group.defs.map(
+                (def) => html`
+                  <div
+                    key=${def.id}
+                    class=${'defn-switcher-row' + (def.id === selectedId ? ' selected' : '') + (def.archived ? ' archived' : '')}
+                    role="button"
+                    tabindex="0"
+                    onClick=${() => handleSelectDefinition(def)}
+                    onKeyDown=${(e) => { if (e.key === 'Enter') handleSelectDefinition(def) }}
+                  >
+                    <div class="defn-switcher-row-title">${def.title} <span class="defn-id">${def.id}</span>${def.archived ? html` <span class="stamp small error">archived</span>` : null}</div>
+                    <div class="defn-rail-badges">
+                      ${def.versions.map((v) => html`<span class=${'stamp small' + (v.status === 'published' ? ' agreed' : ' draft')} key=${v.version}>v${v.version} · ${v.status}</span>`)}
+                    </div>
+                    ${def.archived
+                      ? html`<button class="btn small ghost" onClick=${(e) => handleRestore(def.id, e)}>Restore</button>`
+                      : html`<button class="btn small ghost" onClick=${(e) => handleArchive(def.id, e)}>Archive</button>`}
+                  </div>
+                `
+              )}
+            </div>
+          `
+        )}
         <div class="defn-switcher-footer">
           <label class="defn-show-archived">
             <input type="checkbox" checked=${showArchived} onChange=${(e) => setShowArchived(e.currentTarget.checked)} />
             Show archived
           </label>
-          <button class="btn small" onClick=${() => { setNewDefMode('blank'); setNewBlankId(''); setNewBlankTitle(''); setNewDefError(null) }}>+ New definition…</button>
+          <button class="btn small" onClick=${() => { setNewDefMode('blank'); setNewBlankId(''); setNewBlankTitle(''); setNewBlankHomeId(''); setNewDefError(null) }}>+ New definition…</button>
         </div>
       </div>
     `
@@ -1807,7 +1870,8 @@ export function DefinitionViewerPage() {
   }
 
   function renderLibraryPanel() {
-    const otherDefs = definitions?.filter((d) => d.id !== selectedId) ?? []
+    const currentDef = definitions?.find((d) => d.id === selectedId) ?? null
+    const otherDefs = definitions?.filter((d) => d.id !== selectedId && isEligibleCopySource(d, currentDef)) ?? []
     const sourceDef = otherDefs.find((d) => d.id === libSourceId)
     return html`
       <aside class="defn-library">

@@ -1,6 +1,6 @@
 {
   "name": "gantry",
-  "version": "0.6.4-beta",
+  "version": "0.6.5-beta",
   "private": true,
   "description": "A repo-driven pipeline for staged, gated processes.",
   "type": "module",
