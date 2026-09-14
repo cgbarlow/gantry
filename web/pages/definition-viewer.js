@@ -7,6 +7,7 @@ import { renderMarkdown } from '../lib/markdown.js'
 import { reorder } from '../lib/reorder.js'
 import { Dropdown } from '../lib/dropdown.js'
 import { defnView, setDefnView } from '../lib/definitionView.js'
+import { planCopy, resolveCollision, applyPlan, isResolved } from '../lib/copyPlanner.js'
 
 // The rebuilt Definitions page (WI #381, Feature #380's grilling session). Primary source:
 // web/prototypes/definition-editor.prototype.html — variant A (Outline) and C (Map) both wanted,
@@ -17,7 +18,12 @@ import { defnView, setDefnView } from '../lib/definitionView.js'
 // Field. **Field visibility per artefact** is an artefact-`requires` fact (`module.field`, or
 // `module.field?` for optional-in-scope) — a stage lists whole modules only.
 //
-// Scope note: the docked Library panel here is read-only — WI #382 wires up Copy (with provenance).
+// WI #382 (Feature #380 phase 2): the docked Library panel — read-only in phase 1 — now supports
+// Copy (with provenance, ADR-0035): drag a stage/artefact/module/field from it onto an outline/map
+// node or a focus-pane drop list, or use the "From another definition…" picker next to any "+ add"
+// affordance, to build a `CopyPlanner` plan (web/lib/copyPlanner.js, ported from
+// web/prototypes/definition-copy.prototype.html and canonical at lib/copyPlanner.js). A copy never
+// lands until every id clash is resolved and the confirm panel is accepted — see `renderCopyFlow`.
 
 function isValidSlugClient(slug) {
   return typeof slug === 'string' && slug !== '' && slug !== '.' && slug !== '..' && /^[^\\/]+$/.test(slug)
@@ -123,10 +129,21 @@ export function DefinitionViewerPage() {
   const [dragPayload, setDragPayload] = useState(null)
   const [dropTarget, setDropTarget] = useState(null)
 
-  // Docked, read-only Library panel (WI #381 scope — Copy itself is WI #382).
+  // Docked Library panel (WI #381 built the browse-only shell; WI #382 wires up Copy). Sources are
+  // "any server-library definition (published or draft)" (WI #382) — libSourceVersion defaults to
+  // latest-published (else the max version) but can be pointed at a specific draft explicitly.
   const [libSourceId, setLibSourceId] = useState(null)
+  const [libSourceVersion, setLibSourceVersion] = useState(null)
   const [libDetail, setLibDetail] = useState(null)
   const [libError, setLibError] = useState(null)
+
+  // Copy flow (WI #382): a plan built by CopyPlanner, from either a Library drag or a "From
+  // another definition…" picker, pending confirmation before it lands. `afterLand` carries a
+  // follow-on local edit `applyCopyFlow` performs once the plan's own elements have landed — e.g.
+  // "and add the module this landed as to stage 2's module list" — for the composite drops
+  // CopyPlanner's own single-element refs don't cover by themselves (a whole module dropped onto a
+  // stage or an artefact).
+  const [copyFlow, setCopyFlow] = useState(null) // { plan, sourceId, sourceVersion, afterLand } | null
 
   // Save / Discard / Cancel leave guard (web/lib/stageSave.js's pattern): `pendingNav` holds the
   // navigation to run once the guard is resolved.
@@ -234,28 +251,37 @@ export function DefinitionViewerPage() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
   }, [isDirty])
 
-  // Docked Library panel: whichever other definition is picked, read-only.
+  // Docked Library panel: whichever other definition is picked. Re-picks whenever the current
+  // libSourceId is no longer valid *or* has come to equal the definition now being edited (e.g. the
+  // editor's own default-selection effect briefly selects whichever definition sorts first, which
+  // this effect — running before that settles — may have already pointed the Library at) — the
+  // Library must never end up aimed at the same definition the workbench is editing.
   useEffect(() => {
     if (!definitions) return
-    if (libSourceId && definitions.some((d) => d.id === libSourceId)) return
+    if (libSourceId && libSourceId !== selectedId && definitions.some((d) => d.id === libSourceId)) return
     const other = definitions.find((d) => d.id !== selectedId) ?? null
     setLibSourceId(other?.id ?? null)
   }, [definitions, selectedId])
 
   useEffect(() => {
-    if (!libSourceId) { setLibDetail(null); return }
+    if (!libSourceId) { setLibSourceVersion(null); return }
     const def = definitions?.find((d) => d.id === libSourceId)
     if (!def) return
-    const v = def.latestPublished ?? Math.max(...def.versions.map((x) => x.version))
+    if (libSourceVersion && def.versions.some((v) => v.version === libSourceVersion)) return
+    setLibSourceVersion(def.latestPublished ?? Math.max(...def.versions.map((x) => x.version)))
+  }, [libSourceId, definitions])
+
+  useEffect(() => {
+    if (!libSourceId || libSourceVersion == null) { setLibDetail(null); return }
     setLibError(null)
-    fetch(`/api/definitions/${encodeURIComponent(libSourceId)}/versions/${encodeURIComponent(String(v))}`)
+    fetch(`/api/definitions/${encodeURIComponent(libSourceId)}/versions/${encodeURIComponent(String(libSourceVersion))}`)
       .then(async (res) => {
         if (!res.ok) throw new Error(`Failed to load (${res.status})`)
         return res.json()
       })
       .then(setLibDetail)
       .catch((err) => setLibError(err.message))
-  }, [libSourceId, definitions])
+  }, [libSourceId, libSourceVersion])
 
   function guardedNav(action) {
     if (isDirty) {
@@ -498,6 +524,93 @@ export function DefinitionViewerPage() {
     })
   }
 
+  // ---------------------------------------------------------------- copy from another definition (WI #382)
+  // `startLibraryCopy` builds a CopyPlanner ref from a Library drag or picker choice and opens the
+  // confirm panel; nothing lands until `applyCopyFlow` runs on a fully resolved plan (isResolved).
+  function copyRequirementRef(fromField, targetArtefactId) {
+    const artefact = working.artefacts.find((a) => a.id === targetArtefactId)
+    return { kind: 'requirement', artefactId: targetArtefactId, req: `${fromField.moduleId}.${fromField.fieldId}`, artefactTitle: artefact?.title }
+  }
+
+  function startLibraryCopy(elementKind, payload, afterLand) {
+    if (!libDetail || !working) return
+    let ref
+    if (elementKind === 'module') ref = { kind: 'module', id: payload.id }
+    else if (elementKind === 'stage') ref = { kind: 'stage', id: payload.id }
+    else if (elementKind === 'artefact') ref = { kind: 'artefact', id: payload.id }
+    else if (elementKind === 'field-into-module') ref = { kind: 'field', moduleId: payload.moduleId, id: payload.fieldId, targetModuleId: payload.targetModuleId }
+    else if (elementKind === 'field-into-artefact') ref = copyRequirementRef(payload, payload.targetArtefactId)
+    else return
+    const plan = planCopy(working, libDetail, ref)
+    setCopyFlow({ plan, sourceId: libDetail.id, sourceVersion: libDetail.version, afterLand: afterLand ?? null })
+  }
+
+  function resolveCopyFlowCollision(id, choice, renameTo) {
+    setCopyFlow((prev) => (prev ? { ...prev, plan: resolveCollision(prev.plan, id, choice, renameTo) } : prev))
+  }
+
+  function cancelCopyFlow() {
+    setCopyFlow(null)
+  }
+
+  // The final id a landed 'module' ref settles under — its own id, unless a rename collision chose
+  // a different one — so a caller's `afterLand` step (add-to-stage, add-all-fields-to-artefact) can
+  // find the module that just landed inside the freshly applied target.
+  function landedModuleId(plan) {
+    if (plan.ref.kind !== 'module') return plan.ref.id
+    const c = plan.collisions.find((x) => x.kind === 'module')
+    return c?.choice === 'rename' ? c.renameTo : plan.ref.id
+  }
+
+  async function applyCopyFlow() {
+    if (!copyFlow || !isResolved(copyFlow.plan) || !libDetail) return
+    const { plan, afterLand, sourceId, sourceVersion } = copyFlow
+    const { target } = applyPlan(working, libDetail, plan)
+    if (afterLand) {
+      const modId = landedModuleId(plan)
+      const mod = target.modules.find((m) => m.id === modId)
+      if (afterLand.stageIndexAddModule !== undefined && mod) {
+        const stage = target.stages[afterLand.stageIndexAddModule]
+        if (stage && !stage.modules.includes(mod.id)) stage.modules.push(mod.id)
+      }
+      if (afterLand.artefactIndexAddAllFields !== undefined && mod) {
+        const artefact = target.artefacts[afterLand.artefactIndexAddAllFields]
+        if (artefact) {
+          for (const f of mod.fields) {
+            const req = `${mod.id}.${f.id}`
+            if (!artefact.requires.includes(req) && !artefact.requires.includes(`${req}?`)) artefact.requires.push(req)
+          }
+        }
+      }
+    }
+    setDraft(target)
+    setCopyFlow(null)
+    // An artefact copy's "brings" a template (CopyPlanner's 'template' entry) — the artefact's
+    // `template` YAML path lands as part of the plan above, but the .md.tmpl *content* is a
+    // separate file, written through the same read/write-template endpoints the focus pane's own
+    // "Edit template" already uses (lib/definition.js's readDefinitionTemplate/writeDefinitionTemplate
+    // — templates live outside the draft/Save cycle, same as that button). Best-effort: the artefact
+    // itself has already landed regardless, so a failed fetch just leaves the template to be added
+    // by hand, same as any brand-new artefact starts out.
+    const templateBring = plan.brings.find((b) => b.kind === 'template')
+    const name = templateBring && templateBasename(templateBring.id)
+    if (name && selectedId && selectedVersion != null) {
+      try {
+        const res = await fetch(`/api/definitions/${encodeURIComponent(sourceId)}/versions/${encodeURIComponent(String(sourceVersion))}/templates/${encodeURIComponent(name)}`)
+        if (res.ok) {
+          const body = await res.json()
+          await fetch(`/api/definitions/${encodeURIComponent(selectedId)}/versions/${encodeURIComponent(String(selectedVersion))}/templates/${encodeURIComponent(name)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source: body.source ?? '' }),
+          })
+        }
+      } catch {
+        // best-effort — see comment above
+      }
+    }
+  }
+
   // ---------------------------------------------------------------- template editing (focus pane)
   async function handleOpenTemplate(artefactId) {
     const artefact = working?.artefacts.find((a) => a.id === artefactId)
@@ -651,6 +764,27 @@ export function DefinitionViewerPage() {
     e.dataTransfer.effectAllowed = 'copyMove'
     setDragPayload(payload)
   }
+  // WI #382: dragging a stage/artefact/module/field out of the docked Library panel. Distinct
+  // `kind: 'library'` payload (vs. `module`/`field` above, which move something already inside this
+  // definition) so every drop zone below can tell "reorder/move within my own definition" apart from
+  // "copy in from elsewhere" and route to CopyPlanner instead of a plain array splice.
+  function startLibraryDrag(e, elementKind, payload) {
+    const dragPayloadObj = { kind: 'library', elementKind, ...payload }
+    try { e.dataTransfer.setData('text/plain', JSON.stringify(dragPayloadObj)) } catch {}
+    e.dataTransfer.effectAllowed = 'copy'
+    setDragPayload(dragPayloadObj)
+  }
+  function libraryDragHandleProps(elementKind, payload, title) {
+    return {
+      class: 'defn-drag-handle',
+      draggable: true,
+      role: 'button',
+      title,
+      'aria-label': title,
+      onDragStart: (e) => startLibraryDrag(e, elementKind, payload),
+      onDragEnd: endDrag,
+    }
+  }
   function endDrag() {
     setDragPayload(null)
     setDropTarget(null)
@@ -708,7 +842,8 @@ export function DefinitionViewerPage() {
       }
     })
   }
-  // module onto stage
+  // module onto stage (a local module just adds its id; a Library module opens a copy plan that
+  // also adds it to this stage once it lands — see applyCopyFlow's `afterLand.stageIndexAddModule`)
   function stageDropZone(stageIndex) {
     return zoneProps(`stage-drop:${stageIndex}`, (payload) => {
       if (payload.kind === 'module') {
@@ -716,10 +851,14 @@ export function DefinitionViewerPage() {
           const s = d.stages[stageIndex]
           if (!s.modules.includes(payload.id)) s.modules.push(payload.id)
         })
+      } else if (payload.kind === 'library' && payload.elementKind === 'module') {
+        startLibraryCopy('module', { id: payload.id }, { stageIndexAddModule: stageIndex })
       }
     })
   }
-  // module or field onto artefact
+  // module or field onto artefact (a Library module opens a copy plan that adds every field it
+  // lands with as a requirement — same shape as the local-module branch — a Library field opens a
+  // 'requirement' copy plan directly, which brings its module along if the target lacks it)
   function artefactDropZone(artefactIndex) {
     return zoneProps(`artefact-drop:${artefactIndex}`, (payload) => {
       if (payload.kind === 'module') {
@@ -738,13 +877,22 @@ export function DefinitionViewerPage() {
           const ref = `${payload.moduleId}.${payload.fieldId}`
           if (!a.requires.includes(ref) && !a.requires.includes(`${ref}?`)) a.requires.push(ref)
         })
+      } else if (payload.kind === 'library' && payload.elementKind === 'module') {
+        startLibraryCopy('module', { id: payload.id }, { artefactIndexAddAllFields: artefactIndex })
+      } else if (payload.kind === 'library' && payload.elementKind === 'field') {
+        startLibraryCopy('field-into-artefact', { moduleId: payload.moduleId, fieldId: payload.id, targetArtefactId: working.artefacts[artefactIndex].id }, null)
       }
     })
   }
   // field between modules (dropped on a *different* module's field list moves it there; dropped
-  // within its own module's list is handled by reorderFieldZone below)
+  // within its own module's list is handled by reorderFieldZone below). A Library field opens a
+  // 'field' copy plan targeting this module instead of a plain splice.
   function moduleFieldsDropZone(moduleIndex, moduleId) {
     return zoneProps(`module-drop:${moduleIndex}`, (payload) => {
+      if (payload.kind === 'library' && payload.elementKind === 'field') {
+        startLibraryCopy('field-into-module', { moduleId: payload.moduleId, fieldId: payload.id, targetModuleId: moduleId }, null)
+        return
+      }
       if (payload.kind === 'module') return // dropping a module id onto a module isn't a defined move
       if (payload.kind !== 'field') return
       if (payload.moduleId === moduleId) return // same module: use reorderFieldZone instead
@@ -759,6 +907,15 @@ export function DefinitionViewerPage() {
         dst.fields.push(field)
       })
       if (openFieldKey === `${payload.moduleId}.${payload.fieldId}`) setOpenFieldKey(`${moduleId}.${payload.fieldId}`)
+    })
+  }
+  // Top-level copy from the Library: drop a stage/artefact/module (no specific target node — e.g.
+  // the outline's "Stages"/"Artefacts"/"Modules" group heads) to copy it in as its own new element.
+  function topLevelLibraryDropZone(elementKind) {
+    return zoneProps(`library-drop:${elementKind}`, (payload) => {
+      if (payload.kind === 'library' && payload.elementKind === elementKind) {
+        startLibraryCopy(elementKind, { id: payload.id }, null)
+      }
     })
   }
   function reorderFieldZone(moduleIndex, moduleId, fieldIndex) {
@@ -812,6 +969,59 @@ export function DefinitionViewerPage() {
   }
 
   const selectedDef = definitions?.find((d) => d.id === selectedId) ?? null
+
+  // -------------------------------------------------------------------------------- copy provenance badge
+  // "from <id> v<n>" (WI #382) — shown on every element that carries `copiedFrom`, in both the
+  // outline/map and the focus pane. `element` (e.g. "module:risks.risk-register") is the tooltip,
+  // not the visible label — the visible label only ever needs to answer "where did this come from".
+  function copiedFromBadge(obj) {
+    if (!obj?.copiedFrom) return null
+    return html`<span class="stamp small review defn-from-badge" title=${`Copied from ${obj.copiedFrom.element}`}>from ${obj.copiedFrom.definition} v${obj.copiedFrom.version}</span>`
+  }
+
+  // "From another definition…" — the non-drag route WI #382 requires next to every "+ add"
+  // affordance, sourced from whichever definition/version is currently picked in the Library panel.
+  // A plain <select> reset to its placeholder after each pick, same convention as the existing
+  // "+ Add module…"/"+ Add requirement…" selects it sits beside.
+  function libraryPicker(elementKind, onPick, disabledHint) {
+    if (!libDetail) return null
+    const list = elementKind === 'stage' ? libDetail.stages : elementKind === 'artefact' ? libDetail.artefacts : libDetail.modules
+    if (!list.length) return null
+    return html`
+      <select class="wizard-input defn-library-picker" aria-label=${`From another definition: ${elementKind}`} onChange=${(e) => { const val = e.currentTarget.value; if (!val) return; onPick(val); e.currentTarget.value = '' }}>
+        <option value="">From another definition…</option>
+        ${list.map((x) => html`<option value=${x.id}>${x.title} (${libDetail.id})</option>`)}
+      </select>
+    `
+  }
+  // Same idea, one level deeper: every field across the Library source's modules, for the field-level
+  // "+ Add field" (into a module) and "+ Add requirement" (onto an artefact) pickers.
+  function libraryFieldPicker(onPick) {
+    if (!libDetail) return null
+    const options = libDetail.modules.flatMap((m) => m.fields.map((f) => ({ value: `${m.id}.${f.id}`, label: `${m.title} · ${f.title} (${libDetail.id})` })))
+    if (!options.length) return null
+    return html`
+      <select class="wizard-input defn-library-picker" aria-label="From another definition: field" onChange=${(e) => {
+        const val = e.currentTarget.value
+        if (!val) return
+        const dot = val.indexOf('.')
+        onPick({ moduleId: val.slice(0, dot), fieldId: val.slice(dot + 1) })
+        e.currentTarget.value = ''
+      }}>
+        <option value="">From another definition…</option>
+        ${options.map((o) => html`<option value=${o.value}>${o.label}</option>`)}
+      </select>
+    `
+  }
+
+  function describeCopyRef(ref) {
+    if (ref.kind === 'module') return `module "${ref.id}"`
+    if (ref.kind === 'field') return `field "${ref.moduleId}.${ref.id}"`
+    if (ref.kind === 'stage') return `stage "${ref.id}"`
+    if (ref.kind === 'artefact') return `artefact "${ref.id}"`
+    if (ref.kind === 'requirement') return `"${ref.req}" onto artefact "${ref.artefactTitle ?? ref.artefactId}"`
+    return ''
+  }
 
   // ==================================================================================== rendering
   function renderSwitcherMenu() {
@@ -955,7 +1165,7 @@ export function DefinitionViewerPage() {
   }
 
   // -------------------------------------------------------------------------------- Outline nav
-  function outlineNode({ type, id, label, draggable, dropZone, extra, moveButtons }) {
+  function outlineNode({ type, id, label, draggable, dropZone, extra, moveButtons, badge }) {
     const selected = selection.type === type && selection.id === id
     const key = draggable ? dragHandleProps(draggable.payload, draggable.kind) : null
     return html`
@@ -970,6 +1180,7 @@ export function DefinitionViewerPage() {
         ${key ? html`<span ...${key}>⠿</span>` : null}
         ${extra ?? null}
         <span class="defn-outline-label">${label}</span>
+        ${badge ?? null}
         ${hasProblem(type, id) ? html`<span class="defn-problem-dot" title="Has a validation problem"></span>` : null}
         ${moveButtons ? html`
           <span class="defn-move-btns">
@@ -987,15 +1198,17 @@ export function DefinitionViewerPage() {
     return html`
       <nav class="defn-outline" aria-label="Definition outline">
         <div class="defn-outline-group">
-          <div class="defn-outline-group-head">
+          <div class=${'defn-outline-group-head' + (isEditable && dropTarget === 'library-drop:stage' ? ' defn-drop-target' : '')} ...${isEditable ? topLevelLibraryDropZone('stage') : {}}>
             <span class="kicker">Stages · ${d.stages.length}</span>
             ${isEditable ? html`<button class="btn small ghost" aria-label="Add stage" onClick=${() => updateDraft((dd) => { const id = `new-stage-${dd.stages.length + 1}`; dd.stages.push({ id, title: 'New Stage', purpose: '', gate: '', modules: [] }); select('stage', id) })}>+</button>` : null}
+            ${isEditable ? libraryPicker('stage', (id) => startLibraryCopy('stage', { id }, null)) : null}
           </div>
           ${d.stages.map((s, si) =>
             html`<div key=${s.id} ...${reorderZone('stages', si)}>${outlineNode({
               type: 'stage', id: s.id, label: s.title,
               draggable: isEditable ? { payload: { listPath: 'stages', index: si }, kind: 'reorder' } : null,
               dropZone: isEditable ? { key: `stage-drop:${si}`, props: stageDropZone(si) } : null,
+              badge: copiedFromBadge(s),
               moveButtons: isEditable ? {
                 kind: 'stage', upDisabled: si === 0, downDisabled: si === d.stages.length - 1,
                 onUp: () => updateDraft((dd) => { dd.stages = reorder(dd.stages, si, si - 1) }),
@@ -1005,15 +1218,17 @@ export function DefinitionViewerPage() {
           )}
         </div>
         <div class="defn-outline-group">
-          <div class="defn-outline-group-head">
+          <div class=${'defn-outline-group-head' + (isEditable && dropTarget === 'library-drop:artefact' ? ' defn-drop-target' : '')} ...${isEditable ? topLevelLibraryDropZone('artefact') : {}}>
             <span class="kicker">Artefacts · ${d.artefacts.length}</span>
             ${isEditable ? html`<button class="btn small ghost" aria-label="Add artefact" onClick=${() => updateDraft((dd) => { const id = `new-artefact-${dd.artefacts.length + 1}`; dd.artefacts.push({ id, title: 'New Artefact', purpose: '', template: '', gate: '', requires: [] }); select('artefact', id) })}>+</button>` : null}
+            ${isEditable ? libraryPicker('artefact', (id) => startLibraryCopy('artefact', { id }, null)) : null}
           </div>
           ${d.artefacts.map((a, ai) =>
             html`<div key=${a.id} ...${reorderZone('artefacts', ai)}>${outlineNode({
               type: 'artefact', id: a.id, label: a.title,
               draggable: isEditable ? { payload: { listPath: 'artefacts', index: ai }, kind: 'reorder' } : null,
               dropZone: isEditable ? { key: `artefact-drop:${ai}`, props: artefactDropZone(ai) } : null,
+              badge: copiedFromBadge(a),
               moveButtons: isEditable ? {
                 kind: 'artefact', upDisabled: ai === 0, downDisabled: ai === d.artefacts.length - 1,
                 onUp: () => updateDraft((dd) => { dd.artefacts = reorder(dd.artefacts, ai, ai - 1) }),
@@ -1023,9 +1238,10 @@ export function DefinitionViewerPage() {
           )}
         </div>
         <div class="defn-outline-group">
-          <div class="defn-outline-group-head">
+          <div class=${'defn-outline-group-head' + (isEditable && dropTarget === 'library-drop:module' ? ' defn-drop-target' : '')} ...${isEditable ? topLevelLibraryDropZone('module') : {}}>
             <span class="kicker" role="button" tabindex="0" onClick=${() => toggleGroup('modules')}>${modulesCollapsed ? '▸' : '▾'} Modules · ${d.modules.length}</span>
             ${isEditable ? html`<button class="btn small ghost" aria-label="Add module" onClick=${() => updateDraft((dd) => { const id = `new-module-${dd.modules.length + 1}`; dd.modules.push({ id, title: 'New Module', purpose: '', fields: [] }); select('module', id) })}>+</button>` : null}
+            ${isEditable ? libraryPicker('module', (id) => startLibraryCopy('module', { id }, null)) : null}
           </div>
           ${!modulesCollapsed && d.modules.map((m, mi) =>
             html`<div key=${m.id}>
@@ -1034,6 +1250,7 @@ export function DefinitionViewerPage() {
                 draggable: isEditable ? { payload: { listPath: 'modules', index: mi }, kind: 'reorder' } : null,
                 dropZone: isEditable ? { key: `module-drop:${mi}`, props: moduleFieldsDropZone(mi, m.id) } : null,
                 extra: isEditable ? html`<span ...${dragHandleProps({ id: m.id }, 'module')} title="Drag onto a stage or artefact">⠿</span>` : null,
+                badge: copiedFromBadge(m),
                 moveButtons: isEditable ? {
                   kind: 'module', upDisabled: mi === 0, downDisabled: mi === d.modules.length - 1,
                   onUp: () => updateDraft((dd) => { dd.modules = reorder(dd.modules, mi, mi - 1) }),
@@ -1044,7 +1261,7 @@ export function DefinitionViewerPage() {
                 ? html`<div class="defn-outline-fields">
                     ${m.fields.map((f) => html`
                       <div key=${f.id} class=${'defn-outline-field-node' + (openFieldKey === `${m.id}.${f.id}` ? ' selected' : '')} role="button" tabindex="0" onClick=${() => selectField(m.id, f.id)}>
-                        · ${f.title}
+                        · ${f.title} ${copiedFromBadge(f)}
                       </div>
                     `)}
                   </div>`
@@ -1082,7 +1299,7 @@ export function DefinitionViewerPage() {
                 <div key=${mid} class=${'defn-map-chip' + (selection.type === 'module' && selection.id === mid ? ' selected' : '')}
                   role="button" tabindex="0" onClick=${() => select('module', mid)}
                   ...${isEditable ? dragHandleProps({ id: mid }, 'module') : {}}>
-                  ${mod?.title ?? mid}${hasProblem('module', mid) ? html`<span class="defn-problem-dot"></span>` : null}
+                  ${mod?.title ?? mid} ${copiedFromBadge(mod)}${hasProblem('module', mid) ? html`<span class="defn-problem-dot"></span>` : null}
                 </div>
               `
             })}
@@ -1092,22 +1309,25 @@ export function DefinitionViewerPage() {
                 ? html`
                     <div key=${a.id} class=${'defn-map-achip' + (selection.type === 'artefact' && selection.id === a.id ? ' selected' : '') + (dropTarget === `artefact-drop:${ai}` ? ' defn-drop-target' : '')}
                       role="button" tabindex="0" onClick=${() => select('artefact', a.id)} ...${artefactDropZone(ai)}>
-                      ◇ ${a.title} <span class="mono muted">${a.requires.length}</span>${hasProblem('artefact', a.id) ? html`<span class="defn-problem-dot"></span>` : null}
+                      ◇ ${a.title} <span class="mono muted">${a.requires.length}</span> ${copiedFromBadge(a)}${hasProblem('artefact', a.id) ? html`<span class="defn-problem-dot"></span>` : null}
                     </div>
                   `
                 : null)}
             </div>
           </div>
         `)}
-        <div class="defn-map-col defn-map-col-unused">
+        <div class=${'defn-map-col defn-map-col-unused' + (isEditable && dropTarget === 'library-drop:module' ? ' defn-drop-target' : '')} ...${isEditable ? topLevelLibraryDropZone('module') : {}}>
           <div class="defn-map-col-head"><span class="t muted">Not in any stage</span></div>
-          ${unused.map((m) => html`<div key=${m.id} class=${'defn-map-chip' + (selection.type === 'module' && selection.id === m.id ? ' selected' : '')} role="button" tabindex="0" onClick=${() => select('module', m.id)} ...${isEditable ? dragHandleProps({ id: m.id }, 'module') : {}}>${m.title}</div>`)}
+          ${unused.map((m) => html`<div key=${m.id} class=${'defn-map-chip' + (selection.type === 'module' && selection.id === m.id ? ' selected' : '')} role="button" tabindex="0" onClick=${() => select('module', m.id)} ...${isEditable ? dragHandleProps({ id: m.id }, 'module') : {}}>${m.title} ${copiedFromBadge(m)}</div>`)}
           ${unused.length === 0 ? html`<span class="muted">—</span>` : null}
           ${isEditable ? html`
             <div class="defn-map-add-row">
               <button class="btn small ghost" onClick=${() => updateDraft((dd) => { const id = `new-stage-${dd.stages.length + 1}`; dd.stages.push({ id, title: 'New Stage', purpose: '', gate: '', modules: [] }); select('stage', id) })}>+ Stage</button>
               <button class="btn small ghost" onClick=${() => updateDraft((dd) => { const id = `new-module-${dd.modules.length + 1}`; dd.modules.push({ id, title: 'New Module', purpose: '', fields: [] }); select('module', id) })}>+ Module</button>
               <button class="btn small ghost" onClick=${() => updateDraft((dd) => { const id = `new-artefact-${dd.artefacts.length + 1}`; dd.artefacts.push({ id, title: 'New Artefact', purpose: '', template: '', gate: '', requires: [] }); select('artefact', id) })}>+ Artefact</button>
+              ${libraryPicker('module', (id) => startLibraryCopy('module', { id }, null))}
+              ${libraryPicker('stage', (id) => startLibraryCopy('stage', { id }, null))}
+              ${libraryPicker('artefact', (id) => startLibraryCopy('artefact', { id }, null))}
             </div>
           ` : null}
         </div>
@@ -1127,6 +1347,7 @@ export function DefinitionViewerPage() {
           <span class="defn-field-row-title">${f.title} <code>${f.id}</code></span>
           <span class="mono muted">${f.type}</span>
           <span class="defn-required">${req}</span>
+          ${copiedFromBadge(f)}
         </div>
         ${open ? (isEditable ? fieldRowEditBody(mIndex, m, f, fi) : fieldRowViewBody(f)) : null}
       </div>
@@ -1241,7 +1462,7 @@ export function DefinitionViewerPage() {
         <span class="kicker">Stage</span>
         ${isEditable
           ? html`
-              <h2><input class="wizard-input defn-focus-title-input" value=${s.title} onInput=${(e) => updateDraft((dd) => { dd.stages[si].title = e.currentTarget.value })} /></h2>
+              <h2><input class="wizard-input defn-focus-title-input" value=${s.title} onInput=${(e) => updateDraft((dd) => { dd.stages[si].title = e.currentTarget.value })} /> ${copiedFromBadge(s)}</h2>
               <div class="defn-focus-row">
                 <label class="field-label">Id</label>
                 <input class="wizard-input mono" value=${s.id} onInput=${(e) => { const val = e.currentTarget.value; if (selection.id === s.id) setSelection({ type: 'stage', id: val }); updateDraft((dd) => { dd.stages[si].id = val }) }} />
@@ -1252,7 +1473,7 @@ export function DefinitionViewerPage() {
               </div>
             `
           : html`
-              <h2>${s.title} <span class="defn-id">${s.id}</span></h2>
+              <h2>${s.title} <span class="defn-id">${s.id}</span> ${copiedFromBadge(s)}</h2>
               ${s.purpose ? html`<p class="guidance">${s.purpose}</p>` : null}
               <p><span class="field-label">Gate</span> <code>${s.gate}</code></p>
             `}
@@ -1285,6 +1506,7 @@ export function DefinitionViewerPage() {
                 <option value="">+ Add module…</option>
                 ${d.modules.filter((m) => !s.modules.includes(m.id)).map((m) => html`<option value=${m.id}>${m.title}</option>`)}
               </select>
+              ${libraryPicker('module', (id) => startLibraryCopy('module', { id }, { stageIndexAddModule: si }))}
             </div>
           ` : null}
         </div>
@@ -1358,7 +1580,7 @@ export function DefinitionViewerPage() {
         <span class="kicker">Artefact</span>
         ${isEditable
           ? html`
-              <h2><input class="wizard-input defn-focus-title-input" value=${a.title} onInput=${(e) => updateDraft((dd) => { dd.artefacts[ai].title = e.currentTarget.value })} /></h2>
+              <h2><input class="wizard-input defn-focus-title-input" value=${a.title} onInput=${(e) => updateDraft((dd) => { dd.artefacts[ai].title = e.currentTarget.value })} /> ${copiedFromBadge(a)}</h2>
               <div class="defn-focus-row">
                 <label class="field-label">Id</label>
                 <input class="wizard-input mono" value=${a.id} onInput=${(e) => { const val = e.currentTarget.value; if (selection.id === a.id) setSelection({ type: 'artefact', id: val }); updateDraft((dd) => { dd.artefacts[ai].id = val }) }} />
@@ -1376,7 +1598,7 @@ export function DefinitionViewerPage() {
               </div>
             `
           : html`
-              <h2>${a.title} <span class="defn-id">${a.id}</span>${hasProblem('artefact', a.id) ? html` <span class="stamp small error">problem</span>` : null}</h2>
+              <h2>${a.title} <span class="defn-id">${a.id}</span>${hasProblem('artefact', a.id) ? html` <span class="stamp small error">problem</span>` : null} ${copiedFromBadge(a)}</h2>
               ${a.purpose ? html`<p class="guidance">${a.purpose}</p>` : null}
               <p><span class="field-label">Template</span> <code>${a.template}</code> <button class="btn small ghost" onClick=${() => handleOpenTemplate(a.id)}>View template</button></p>
               <p><span class="field-label">Reference docx</span></p>
@@ -1415,6 +1637,8 @@ export function DefinitionViewerPage() {
                 <option value="">+ Add requirement…</option>
                 ${allFieldOptions.map((o) => html`<option value=${o.value}>${o.label}</option>`)}
               </select>
+              ${libraryFieldPicker((f) => startLibraryCopy('field-into-artefact', { moduleId: f.moduleId, fieldId: f.fieldId, targetArtefactId: a.id }, null))}
+              ${libraryPicker('module', (id) => startLibraryCopy('module', { id }, { artefactIndexAddAllFields: ai }))}
             </div>
           ` : null}
         </div>
@@ -1434,7 +1658,7 @@ export function DefinitionViewerPage() {
         <span class="kicker">Module</span>
         ${isEditable
           ? html`
-              <h2><input class="wizard-input defn-focus-title-input" value=${m.title ?? ''} onInput=${(e) => updateDraft((dd) => { dd.modules[mi].title = e.currentTarget.value })} /></h2>
+              <h2><input class="wizard-input defn-focus-title-input" value=${m.title ?? ''} onInput=${(e) => updateDraft((dd) => { dd.modules[mi].title = e.currentTarget.value })} /> ${copiedFromBadge(m)}</h2>
               <div class="defn-focus-row">
                 <label class="field-label">Id</label>
                 <input class="wizard-input mono" value=${m.id} onInput=${(e) => { const val = e.currentTarget.value; if (selection.id === m.id) setSelection({ type: 'module', id: val }); updateDraft((dd) => { dd.modules[mi].id = val }) }} />
@@ -1444,7 +1668,7 @@ export function DefinitionViewerPage() {
               </div>
             `
           : html`
-              <h2>${m.title} <span class="defn-id">${m.id}</span></h2>
+              <h2>${m.title} <span class="defn-id">${m.id}</span> ${copiedFromBadge(m)}</h2>
               ${m.purpose ? html`<p class="guidance">${m.purpose}</p>` : null}
             `}
         <div class="defn-focus-section">
@@ -1463,7 +1687,12 @@ export function DefinitionViewerPage() {
           <div class=${'defn-field-rows' + (dropTarget === `module-drop:${mi}` ? ' defn-drop-target' : '')}>
             ${m.fields.map((f, fi) => fieldRow(mi, m, f, fi))}
           </div>
-          ${isEditable ? html`<button class="btn small" onClick=${() => updateDraft((dd) => { dd.modules[mi].fields.push({ id: `new-field-${dd.modules[mi].fields.length + 1}`, title: 'New Field', type: 'markdown', guidance: '' }) })}>+ Add field</button>` : null}
+          ${isEditable ? html`
+            <div class="defn-editor-inline">
+              <button class="btn small" onClick=${() => updateDraft((dd) => { dd.modules[mi].fields.push({ id: `new-field-${dd.modules[mi].fields.length + 1}`, title: 'New Field', type: 'markdown', guidance: '' }) })}>+ Add field</button>
+              ${libraryFieldPicker((f) => startLibraryCopy('field-into-module', { moduleId: f.moduleId, fieldId: f.fieldId, targetModuleId: m.id }, null))}
+            </div>
+          ` : null}
         </div>
         ${isEditable ? html`<button class="btn small ghost" onClick=${() => updateDraft((dd) => { dd.modules.splice(mi, 1) })}>Remove module ✕</button>` : null}
       </div>
@@ -1492,40 +1721,134 @@ export function DefinitionViewerPage() {
   }
 
   // -------------------------------------------------------------------------------- Library panel
+  // -------------------------------------------------------------------------------- Copy confirm (WI #382)
+  const COLLISION_CHOICE_LABEL = { rename: 'Keep both, rename the copy', replace: 'Replace mine with the copy', merge: 'Merge' }
+  function collisionMergeLabel(kind) {
+    return kind === 'stage' ? 'Merge: add its modules to mine' : 'Merge: add only the fields I lack'
+  }
+  function renderCopyFlow() {
+    if (!copyFlow) return null
+    const { plan, sourceId, sourceVersion } = copyFlow
+    const ok = isResolved(plan)
+    return html`
+      <div class="defn-copy-modal-backdrop">
+        <div class="defn-copy-modal" role="alertdialog" aria-label="Confirm copy">
+          <h3>Copy ${describeCopyRef(plan.ref)} from <span class="defn-id">${sourceId} v${sourceVersion}</span></h3>
+          ${plan.errors.length ? html`<p class="inline-error">${plan.errors.join('; ')}</p>` : null}
+          ${plan.adds.length ? html`
+            <div class="defn-copy-section">
+              <span class="kicker">Will add</span>
+              <ul>${plan.adds.map((a) => html`<li key=${`${a.kind}:${a.id}`}>${a.kind} <code>${a.id}</code>${a.moduleId ? ` in module ${a.moduleId}` : ''}${a.artefactId ? ` to ${a.artefactId}` : ''}</li>`)}</ul>
+            </div>
+          ` : null}
+          ${plan.brings.length ? html`
+            <div class="defn-copy-section">
+              <span class="kicker">Comes along <span class="muted">(you don't have these yet)</span></span>
+              <ul>${plan.brings.map((b) => html`<li key=${`${b.kind}:${b.id}`}>${b.kind} <code>${b.id}</code>${b.docx ? ` + ${b.docx}` : ''}</li>`)}</ul>
+            </div>
+          ` : null}
+          ${plan.collisions.length ? html`
+            <div class="defn-copy-section">
+              <span class="kicker">Already exists — decide</span>
+              ${plan.collisions.map((c) => html`
+                <div key=${c.id} class="defn-copy-collision">
+                  <p>${c.kind} <code>${c.id}</code>${c.moduleId ? ` in ${c.moduleId}` : ''} is already in your definition.</p>
+                  ${c.options.map((o) => html`
+                    <label key=${o}>
+                      <input type="radio" name=${`copy-collision-${c.id}`} checked=${c.choice === o} onChange=${() => resolveCopyFlowCollision(c.id, o)} />
+                      ${o === 'merge' ? collisionMergeLabel(c.kind) : COLLISION_CHOICE_LABEL[o]}
+                    </label>
+                  `)}
+                  ${c.choice === 'rename' ? html`
+                    <div class="defn-copy-rename">
+                      <label class="field-label" for=${`copy-rename-${c.id}`}>New id</label>
+                      <input id=${`copy-rename-${c.id}`} class="wizard-input mono" value=${c.renameTo} onInput=${(e) => resolveCopyFlowCollision(c.id, 'rename', e.currentTarget.value)} />
+                    </div>
+                  ` : null}
+                </div>
+              `)}
+            </div>
+          ` : null}
+          <div class="defn-copy-modal-actions">
+            <button class="btn primary" disabled=${!ok} onClick=${applyCopyFlow}>Confirm copy</button>
+            <button class="btn ghost" onClick=${cancelCopyFlow}>Cancel</button>
+            ${!ok && !plan.errors.length ? html`<span class="muted">Resolve every clash to confirm.</span>` : null}
+          </div>
+        </div>
+      </div>
+    `
+  }
+
   function renderLibraryPanel() {
     const otherDefs = definitions?.filter((d) => d.id !== selectedId) ?? []
+    const sourceDef = otherDefs.find((d) => d.id === libSourceId)
     return html`
       <aside class="defn-library">
         <div class="defn-library-head">
           <span class="kicker">Library</span>
-          <span class="muted defn-hint">read-only for now</span>
+          ${isEditable ? html`<span class="muted defn-hint">drag onto the definition, or use "From another definition…"</span>` : html`<span class="muted defn-hint">read-only — published</span>`}
         </div>
         ${otherDefs.length
           ? html`
-              <select class="wizard-input defn-library-source" value=${libSourceId ?? ''} onChange=${(e) => setLibSourceId(e.currentTarget.value)}>
-                ${otherDefs.map((d) => html`<option value=${d.id}>${d.title} (${d.id})</option>`)}
-              </select>
+              <div class="defn-library-source-row">
+                <select class="wizard-input defn-library-source" value=${libSourceId ?? ''} onChange=${(e) => setLibSourceId(e.currentTarget.value)}>
+                  ${otherDefs.map((d) => html`<option value=${d.id}>${d.title} (${d.id})</option>`)}
+                </select>
+                ${sourceDef ? html`
+                  <select class="wizard-input defn-library-version" aria-label="Library source version" value=${String(libSourceVersion ?? '')} onChange=${(e) => setLibSourceVersion(Number(e.currentTarget.value))}>
+                    ${sourceDef.versions.map((v) => html`<option value=${String(v.version)}>v${v.version} · ${v.status}</option>`)}
+                  </select>
+                ` : null}
+              </div>
             `
           : html`<p class="muted">No other definitions in the library yet.</p>`}
         ${libError ? html`<p class="inline-error">${libError}</p>` : null}
         ${libDetail
           ? html`
               <div class="defn-library-tree">
-                <div class="defn-library-group"><span class="kicker">Stages</span>${libDetail.stages.map((s) => html`<div key=${s.id} class="defn-library-node">${s.title}</div>`)}</div>
-                <div class="defn-library-group"><span class="kicker">Artefacts</span>${libDetail.artefacts.map((a) => html`<div key=${a.id} class="defn-library-node">${a.title}</div>`)}</div>
+                <div class="defn-library-group">
+                  <span class="kicker">Stages</span>
+                  ${libDetail.stages.map((s) => html`
+                    <div key=${s.id} class="defn-library-node">
+                      ${isEditable ? html`<span ...${libraryDragHandleProps('stage', { id: s.id }, `Drag "${s.title}" onto the outline or map`)}>⠿</span>` : null}
+                      <span>${s.title}</span>
+                      ${isEditable ? html`<button class="btn small ghost defn-library-copy-btn" onClick=${() => startLibraryCopy('stage', { id: s.id }, null)}>Copy</button>` : null}
+                    </div>
+                  `)}
+                </div>
+                <div class="defn-library-group">
+                  <span class="kicker">Artefacts</span>
+                  ${libDetail.artefacts.map((a) => html`
+                    <div key=${a.id} class="defn-library-node">
+                      ${isEditable ? html`<span ...${libraryDragHandleProps('artefact', { id: a.id }, `Drag "${a.title}" onto the outline or map`)}>⠿</span>` : null}
+                      <span>${a.title}</span>
+                      ${isEditable ? html`<button class="btn small ghost defn-library-copy-btn" onClick=${() => startLibraryCopy('artefact', { id: a.id }, null)}>Copy</button>` : null}
+                    </div>
+                  `)}
+                </div>
                 <div class="defn-library-group">
                   <span class="kicker">Modules</span>
                   ${libDetail.modules.map((m) => html`
                     <div key=${m.id}>
-                      <div class="defn-library-node">${m.title}</div>
-                      ${m.fields.map((f) => html`<div key=${f.id} class="defn-library-node defn-library-field">· ${f.title}</div>`)}
+                      <div class="defn-library-node">
+                        ${isEditable ? html`<span ...${libraryDragHandleProps('module', { id: m.id }, `Drag "${m.title}" onto a stage, an artefact, or the outline/map`)}>⠿</span>` : null}
+                        <span>${m.title}</span>
+                        ${isEditable ? html`<button class="btn small ghost defn-library-copy-btn" onClick=${() => startLibraryCopy('module', { id: m.id }, null)}>Copy</button>` : null}
+                      </div>
+                      ${m.fields.map((f) => html`
+                        <div key=${f.id} class="defn-library-node defn-library-field">
+                          ${isEditable ? html`<span ...${libraryDragHandleProps('field', { moduleId: m.id, id: f.id }, `Drag "${f.title}" onto a module or an artefact`)}>⠿</span>` : null}
+                          <span>· ${f.title}</span>
+                        </div>
+                      `)}
                     </div>
                   `)}
                 </div>
               </div>
-              <p class="defn-hint muted">Copying elements from the Library arrives in a later release (WI #382).</p>
+              <p class="defn-hint muted">Copying always shows what's coming along, and stops for you to resolve any name clash, before anything lands.</p>
             `
           : null}
+        ${renderCopyFlow()}
       </aside>
     `
   }
