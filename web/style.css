@@ -1682,6 +1682,18 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-copy-modal-actions { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
 @media (max-width: 700px) { .defn-toolbar { flex-direction: column; align-items: stretch; } }
 
+/* Promote (WI #387, ADR-0036's Promote section) — one PR per selected library repo, opened from a
+ * published workspace definition version; status is read on an explicit Check, never polled. */
+.defn-promote-modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); display: flex; align-items: center; justify-content: center; z-index: 40; padding: 16px; }
+.defn-promote-modal { background: var(--bg-raised); border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius); padding: 18px 20px; max-width: 480px; width: 100%; max-height: 85vh; overflow: auto; }
+.defn-promote-modal h3 { font-family: var(--font-display); font-weight: 600; font-size: 15px; margin: 0 0 10px; }
+.defn-promote-repo-list { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.defn-promote-repo-list label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
+.defn-promote-modal-actions { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.defn-promotions { border: var(--hairline) solid var(--line); border-radius: var(--radius); padding: 10px 14px; margin: 10px 0; display: flex; flex-direction: column; gap: 8px; }
+.defn-promotion-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.defn-promotion-repo { font-weight: 600; }
+
 /* ---------- Visual view (#374, docs/adr/0033) ----------
  * The same CodeMirror editor drawn the way the content reads (web/lib/visualMode.js):
  * body type, no gutters, markdown markers hidden except on the caret's line. */

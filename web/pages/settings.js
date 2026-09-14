@@ -237,9 +237,12 @@ function LibraryReposSection() {
   const [project, setProject] = useState('')
   const [repository, setRepository] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
+  const [codeOwner, setCodeOwner] = useState('')
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState(null)
   const [addStatus, setAddStatus] = useState('')
+  const [ownerEdits, setOwnerEdits] = useState({}) // { [repoId]: string } — in-progress edits, keyed by repo
+  const [savingOwner, setSavingOwner] = useState(null) // repoId currently saving, or null
 
   function load() {
     fetch('/api/library-repos')
@@ -276,6 +279,7 @@ function LibraryReposSection() {
           project: project.trim(),
           repository: repository.trim(),
           ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
+          ...(codeOwner.trim() ? { codeOwner: codeOwner.trim() } : {}),
         }),
       })
       const body = await res.json().catch(() => ({}))
@@ -287,12 +291,42 @@ function LibraryReposSection() {
       setProject('')
       setRepository('')
       setBaseUrl('')
+      setCodeOwner('')
       setAddStatus(body.refresh?.ok ? `Added — ${body.refresh.definitionCount} definition${body.refresh.definitionCount === 1 ? '' : 's'} found.` : `Added — ${body.refresh?.error ?? 'could not be read yet; try Refresh on the Definitions page.'}`)
       load()
     } catch (err) {
       setAddError(err.message)
     } finally {
       setAdding(false)
+    }
+  }
+
+  // WI #387 (Feature #380 phase 7, ADR-0036's Promote section): a repo's code owner is the identity
+  // Promote attaches as a required reviewer on every Pull Request it opens against this repo —
+  // editable in place after the repo is added (unlike organization/project/repository/baseUrl, see
+  // `lib/librarySettings.js`'s `updateLibraryRepoCodeOwner` doc comment).
+  async function handleSaveOwner(repoId) {
+    setSavingOwner(repoId)
+    try {
+      const res = await fetch(`/api/library-repos/${encodeURIComponent(repoId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ codeOwner: ownerEdits[repoId] ?? '' }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error ?? `Failed to save code owner (${res.status})`)
+      }
+      setOwnerEdits((prev) => {
+        const next = { ...prev }
+        delete next[repoId]
+        return next
+      })
+      load()
+    } catch (err) {
+      setAddError(err.message)
+    } finally {
+      setSavingOwner(null)
     }
   }
 
@@ -321,6 +355,26 @@ function LibraryReposSection() {
                         : `${repo.definitionCount} definition${repo.definitionCount === 1 ? '' : 's'} · as of ${repo.fetchedAt}`}
                     </span>
                   </div>
+                  <div class="result-row" key=${`${repo.id}-owner`}>
+                    <label class="k" for=${`library-repo-owner-${repo.id}`}>Code owner (Promote's required reviewer)</label>
+                    <span class="v">
+                      <input
+                        id=${`library-repo-owner-${repo.id}`}
+                        class="wizard-input"
+                        placeholder="Name, unique name, or email"
+                        value=${ownerEdits[repo.id] ?? repo.codeOwner ?? ''}
+                        onInput=${(e) => setOwnerEdits((prev) => ({ ...prev, [repo.id]: e.currentTarget.value }))}
+                      />
+                      <button
+                        type="button"
+                        class="btn small"
+                        disabled=${savingOwner === repo.id || (ownerEdits[repo.id] ?? repo.codeOwner ?? '') === (repo.codeOwner ?? '')}
+                        onClick=${() => handleSaveOwner(repo.id)}
+                      >
+                        ${savingOwner === repo.id ? 'Saving…' : 'Save'}
+                      </button>
+                    </span>
+                  </div>
                 `
               )}
             </div>
@@ -337,6 +391,8 @@ function LibraryReposSection() {
         <input id="library-repo-repository" class="wizard-input" value=${repository} onInput=${(e) => setRepository(e.currentTarget.value)} />
         <label class="field-label" for="library-repo-baseurl">Base URL (optional — on-premises Azure DevOps Server only)</label>
         <input id="library-repo-baseurl" class="wizard-input" value=${baseUrl} onInput=${(e) => setBaseUrl(e.currentTarget.value)} />
+        <label class="field-label" for="library-repo-codeowner">Code owner (optional — Promote's required reviewer)</label>
+        <input id="library-repo-codeowner" class="wizard-input" placeholder="Name, unique name, or email" value=${codeOwner} onInput=${(e) => setCodeOwner(e.currentTarget.value)} />
       </div>
       ${addError ? html`<p class="inline-error">${addError}</p>` : null}
       <div class="settings-actions">
