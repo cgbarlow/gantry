@@ -52,9 +52,9 @@ Git is the audit trail. Who changed what, when, and why is a `git log`, not a ve
 
 The key rule: **artefacts are derived, modules are authored.** If you find yourself editing a rendered artefact, something is wrong with the module spec.
 
-### Definition Editor (experimental)
+### The Definitions page
 
-Definitions are versioned (numbered `definitions/<id>/<n>/` dirs — see "Definition schema" below). An experimental **Definition Editor** screen at `/definitions` — linked from the Workspaces page header as "Definition Editor (experimental)" — shows any definition version read-only and, on a *draft* version, allows editing its structure, modules, fields and `.md.tmpl` templates, reordering stages/modules/fields, and creating a new draft version, cloning a definition, archiving/restoring, and publishing a draft. It is experimental and may change without notice.
+Definitions are versioned (numbered `definitions/<id>/<n>/` dirs — see "Definition schema" below). The **Definitions** page at `/definitions` — linked from the Workspaces page header as "Definitions" — is a first-class editor: an Outline/Map view switch over one focus pane (stage/artefact/module, with compact one-at-a-time field rows) and a docked, read-only Library panel. A published version is read-only, with a **View template source** button per artefact; a *draft* version is directly editable — every element can be reordered or moved between a stage, an artefact and a module by drag or an equivalent button, template editing opens as its own focus-pane view, and the toolbar shows a live problems count sharing the server's own validation rules (`findDefinitionProblemsInStructure`, WI #381). Also: creating a new draft version, a new definition (Blank or Clone), archiving/restoring, and publishing a draft. Save follows the stage Save convention: one Save for everything changed, with a Save/Discard/Cancel prompt on leaving with unsaved changes.
 
 ## Principles
 
@@ -218,7 +218,7 @@ gantry/
     ├── pages/new-workspace-wizard.js # "+ New Workspace" — pick/register a workspace, then instance fields
     ├── pages/settings.js         # /settings, /settings/workspace, /settings/instance — tab-free
     ├── pages/user-guide.js       # /user-guide — the in-product, end-user-facing User Guide (separate surface from this README)
-    ├── pages/definition-viewer.js # /definitions — Definition Editor (experimental)
+    ├── pages/definition-viewer.js # /definitions — the Definitions page
     ├── lib/credential.js         # client-side PAT storage/prompt, incl. per-workspace overrides
     ├── lib/ticketingSystem.js    # client-side default-ticketing-system setting
     ├── lib/apiFetch.js           # fetch wrapper: attaches the right PAT, retries once on 401
@@ -355,7 +355,7 @@ Instances live inside a **workspace** under the workspaces root, so a listing na
 | `gantry status <slug> [--json]` | Current stage, module completeness, what's outstanding | Implemented |
 | `gantry check <slug> [--gate <id>] [--json]` | Validate an instance against a gate's requirements — any gate, not just the instance's current stage | Implemented |
 | `gantry render <slug> <artefact> [--dry-run]` | Render an artefact to `out/` | Implemented |
-| `gantry serve [slug] [--port <port>]` | Serve the web app (default port 3000): a dashboard of every registered instance at `/`, local or Azure DevOps-backed, and the stage-by-stage form at `/instance/<slug>`. `[slug]` only sets a fallback default for API requests made with no `?slug=<slug>` of their own — it doesn't change what the dashboard shows or require picking one instance up front. `/new-workspace` is the "+ New Workspace" wizard, `/settings` the Settings screens, `/user-guide` the in-product User Guide, `/definitions` the Definition Editor (experimental) (see "Backing an instance with Azure DevOps" above) | Implemented |
+| `gantry serve [slug] [--port <port>]` | Serve the web app (default port 3000): a dashboard of every registered instance at `/`, local or Azure DevOps-backed, and the stage-by-stage form at `/instance/<slug>`. `[slug]` only sets a fallback default for API requests made with no `?slug=<slug>` of their own — it doesn't change what the dashboard shows or require picking one instance up front. `/new-workspace` is the "+ New Workspace" wizard, `/settings` the Settings screens, `/user-guide` the in-product User Guide, `/definitions` the Definitions page (see "Backing an instance with Azure DevOps" above) | Implemented |
 | `gantry validate <definition> [--json]` | Report every structural problem with a definition in one pass | Implemented |
 | `gantry backfill-numeric-refs` | One-time (idempotent) backfill of scoped numeric workspace/instance references (ADR-0024) for workspaces/instances that predate the feature | Implemented |
 

@@ -17,6 +17,39 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.6.3-beta — 2026-09-14
+
+### Added
+
+- **Definitions page rebuilt as a first-class editor** (WI #381), replacing the
+  old rudimentary screen. One `/definitions` route (the "experimental"
+  `/definition-editor` alias is gone) opens straight into an editor built
+  around two switchable navigation views over one focus pane: **Outline**
+  (the default) lists Stages, Artefacts and Modules as three flat groups;
+  **Map** lays the pipeline out spatially, with each stage as a column of
+  module chips and its gate's artefacts hanging underneath. Your choice is
+  remembered next time.
+- **Every field is directly editable on a draft** — no separate Edit mode.
+  A module's fields are compact rows; click one to expand, edit and collapse
+  it again, one at a time. Stages, artefacts, modules and fields can all be
+  reordered, or moved between a stage/artefact/module, either by dragging or
+  with an equivalent button (Move up/down, "+ Add module…", "+ Add
+  requirement…", "Move to module…") — every drag has a working button next
+  to it.
+- **Live validation markers.** The toolbar shows a running problems count —
+  checked against the exact same rules Save and Publish already enforce — and
+  clicking it jumps straight to the affected stage, artefact or module, which
+  also carries its own marker in the Outline or Map.
+- **Template editing opens as its own view**, on a proper markdown editor
+  instead of a plain textarea.
+- **New definition: Blank or Clone**, from the definition switcher.
+- **Save now follows the stage-editor convention**: one Save for everything
+  changed since the last save, and a Save / Discard / Cancel prompt if you
+  try to switch definition or version with unsaved changes still on screen.
+- A docked **Library** panel lists another definition's elements for
+  reference alongside whatever you're editing (still read-only — pulling
+  items from it arrives in a later release).
+
 ## 0.6.2-beta — 2026-09-13
 
 ### Fixed

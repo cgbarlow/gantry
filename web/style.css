@@ -1516,58 +1516,140 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 }
 .settings-menu .menu a:hover { background: var(--bg); }
 
-/* ---------- Definition Viewer (#235) ---------- */
-.defn-viewer { max-width: 1120px; margin: 0 auto; padding: 32px 32px 140px; }
-.defn-experimental-note { margin: 0 0 20px; padding: 10px 14px; border: var(--hairline) solid var(--line); border-left: 3px solid var(--stamp-draft-bg); border-radius: var(--radius); background: var(--bg-raised); color: var(--text-muted); font-size: 12px; }
-.defn-viewer-layout { display: grid; grid-template-columns: 320px 1fr; gap: 24px; align-items: start; }
-.defn-viewer-rail { border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg-raised); padding: 16px; }
-.defn-viewer-rail h2 { font-family: var(--font-display); font-weight: 600; font-size: 15px; margin: 0 0 12px; }
-.defn-rail-row { padding: 10px 8px; border-radius: var(--radius); cursor: pointer; border: var(--hairline) solid transparent; margin-bottom: 8px; }
-.defn-rail-row:hover { background: var(--bg); }
-.defn-rail-row.selected { border-color: var(--line-strong); background: var(--bg); }
-.defn-rail-title { font-family: var(--font-display); font-weight: 600; font-size: 13px; }
-.defn-rail-desc { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
-.defn-rail-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+/* ---------- Definition Editor (WI #381) ----------
+ * Rebuilt on web/prototypes/definition-editor.prototype.html's variant A (Outline) / variant C
+ * (Map) verdict — one toolbar, an Outline-or-Map nav switch over one focus pane, a docked
+ * (read-only-for-now, WI #382 wires up Copy) Library panel. `.kicker`/`.mono`/`.muted`/`.pane`
+ * are small layout-only helpers scoped to this page rather than promoted to globals. */
+.defn-viewer { max-width: 1320px; margin: 0 auto; padding: 20px 24px 60px; }
+.defn-viewer .kicker { font-family: var(--font-display); font-weight: 600; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+.defn-viewer .mono { font-family: var(--font-mono); }
+.defn-viewer .muted { color: var(--text-muted); }
+.defn-viewer .pane { min-height: 0; overflow: auto; }
+.defn-id { font-family: var(--font-mono); font-weight: 400; font-size: 12px; color: var(--text-muted); }
+.defn-hint { font-size: 11px; }
+
+/* Toolbar */
+.defn-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 10px 14px; border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg-raised); margin-bottom: 14px; }
+.defn-toolbar-left, .defn-toolbar-right { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.defn-toolbar #defn-version-select { max-width: 200px; }
+.defn-switcher .defname { font-family: var(--font-display); font-weight: 600; }
+.defn-switcher .menu { display: none; position: absolute; top: calc(100% + 4px); left: 0; min-width: 320px; max-width: 90vw; background: var(--bg-raised); border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18); z-index: 20; padding: 8px; max-height: 70vh; overflow: auto; }
+.defn-switcher.menu-open .menu { display: block; }
+.defn-switcher-menu { display: flex; flex-direction: column; gap: 8px; }
+.defn-switcher-group .kicker { display: block; margin: 4px 0; }
+.defn-switcher-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 7px 8px; border-radius: var(--radius); cursor: pointer; border: var(--hairline) solid transparent; }
+.defn-switcher-row:hover { background: var(--bg); }
+.defn-switcher-row.selected { border-color: var(--line-strong); background: var(--bg); }
+.defn-switcher-row.archived { opacity: 0.6; border-style: dashed; }
+.defn-switcher-row-title { font-family: var(--font-display); font-weight: 600; font-size: 13px; flex: 1; min-width: 0; }
+.defn-rail-badges { display: flex; flex-wrap: wrap; gap: 6px; }
 .defn-rail-badges .stamp.small { font-size: 10px; }
-.defn-latest-tag { font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; margin-left: 4px; }
-.defn-viewer-detail { min-width: 0; }
-.defn-version-switcher { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
-.defn-version-switcher label { font-family: var(--font-display); font-weight: 600; font-size: 13px; }
-.defn-version-switcher .wizard-input { max-width: 260px; }
-.defn-viewer-header { margin-bottom: 20px; }
-.defn-viewer-header h2 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 0 0 6px; }
-.defn-id { font-family: var(--font-mono); font-weight: 400; font-size: 14px; color: var(--text-muted); }
-.defn-section { margin-bottom: 28px; }
-.defn-section h3 { font-family: var(--font-display); font-weight: 600; font-size: 15px; margin: 0 0 12px; border-bottom: var(--hairline) solid var(--line); padding-bottom: 6px; }
-.defn-card { border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg-raised); padding: 12px 14px; margin-bottom: 10px; }
-.defn-card h4 { font-family: var(--font-display); font-weight: 600; font-size: 13px; margin: 0 0 6px; }
-.defn-meta { font-family: var(--font-mono); font-weight: 400; font-size: 11px; color: var(--text-muted); }
-.defn-modules-list ul, .defn-requires-list ul, .defn-fields-list { list-style: none; margin: 6px 0 0; padding: 0; }
-.defn-modules-list li, .defn-requires-list li { font-family: var(--font-mono); font-size: 12px; margin: 2px 0; }
-.defn-field { padding: 8px 0; border-top: var(--hairline) solid var(--line); }
-.defn-field:first-child { border-top: none; }
-.defn-field-heading { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
-.defn-required { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
-.defn-rail-row.archived { opacity: 0.6; border-style: dashed; }
-.defn-rail-actions { margin-top: 6px; display: flex; gap: 6px; }
-.defn-rail-controls { margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px; }
+.defn-switcher-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: var(--hairline) solid var(--line); padding-top: 8px; margin-top: 4px; }
 .defn-show-archived { font-size: 12px; display: flex; align-items: center; gap: 6px; }
-.defn-clone-control { display: flex; flex-direction: column; gap: 6px; }
-.defn-clone-input { display: flex; flex-direction: column; gap: 6px; }
+.defn-newdef-panel { display: flex; flex-direction: column; gap: 8px; min-width: 260px; }
+.defn-newdef-tabs { display: flex; gap: 6px; }
 .defn-clone-actions { display: flex; gap: 6px; }
-.defn-header-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.defn-view-toggle { display: inline-flex; gap: 4px; }
+.defn-problems { color: var(--stamp-error-bg); font-weight: 600; }
+.defn-no-problems { font-size: 12px; }
+.defn-leave-guard { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 14px; border: var(--border-strong) solid var(--stamp-draft-bg); border-radius: var(--radius); background: var(--bg-raised); margin-bottom: 14px; }
+
+/* Workbench layout: Outline = nav | focus | library ; Map = map (top) then focus | library (bottom) */
+.defn-workbench-outline { display: grid; grid-template-columns: 260px minmax(0, 1fr) 280px; gap: 14px; align-items: start; min-height: 60vh; }
+.defn-workbench-map { display: grid; grid-template-rows: minmax(180px, 40vh) minmax(0, 1fr); gap: 14px; min-height: 60vh; }
+.defn-workbench-map .defn-bottom { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 14px; min-height: 0; }
+.defn-outline, .defn-focus-pane, .defn-library, .defn-map-pane { border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg-raised); }
+.defn-focus-pane { background: var(--bg); padding: 4px 4px 20px; }
+@media (max-width: 960px) {
+  .defn-workbench-outline { grid-template-columns: 1fr; }
+  .defn-workbench-map .defn-bottom { grid-template-columns: 1fr; }
+}
+
+/* Outline nav */
+.defn-outline { padding: 8px; }
+.defn-outline-group { margin-bottom: 10px; }
+.defn-outline-group-head { padding: 4px 6px; }
+.defn-outline-node { display: flex; align-items: center; gap: 6px; padding: 5px 7px; border-radius: var(--radius); cursor: pointer; }
+.defn-outline-node:hover { background: var(--bg); }
+.defn-outline-node.selected { background: var(--text); color: var(--bg); }
+.defn-outline-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.defn-outline-fields { padding-left: 26px; }
+.defn-outline-field-node { padding: 3px 6px; font-size: 12px; color: var(--text-muted); cursor: pointer; border-radius: var(--radius); }
+.defn-outline-field-node:hover { background: var(--bg); }
+.defn-outline-field-node.selected { color: var(--text); font-weight: 600; }
+.defn-problem-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--stamp-error-bg); flex: none; }
+
+/* Map nav */
+.defn-map { display: flex; gap: 12px; align-items: flex-start; padding: 12px; overflow: auto; height: 100%; }
+.defn-map-col { flex: 0 0 220px; border: var(--hairline) solid var(--line); background: var(--bg-raised); border-radius: var(--radius); padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 4px; }
+.defn-map-col.selected { border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
+.defn-map-col-unused { border-style: dashed; }
+.defn-map-col-head { display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 2px 0 4px; }
+.defn-map-col-head .t { font-family: var(--font-display); font-weight: 600; font-size: 13px; }
+.defn-map-chip { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg); font-size: 12px; cursor: pointer; }
+.defn-map-chip.selected { background: var(--text); color: var(--bg); border-color: var(--text); }
+.defn-map-gate { margin-top: 6px; padding-top: 6px; border-top: var(--hairline) solid var(--line); }
+.defn-map-achip { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: var(--radius); font-size: 12px; cursor: pointer; margin-top: 3px; border: var(--hairline) solid transparent; }
+.defn-map-achip.selected { background: var(--text); color: var(--bg); }
+
+/* Focus pane */
+.defn-focus { padding: 14px 18px 30px; }
+.defn-focus h2 { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin: 2px 0 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.defn-focus-title-input { font-family: var(--font-display); font-weight: 600; font-size: 16px; max-width: 360px; }
+.defn-focus-row { display: grid; grid-template-columns: 110px 1fr; gap: 8px 12px; align-items: center; margin-bottom: 12px; }
+.defn-focus-row label { margin-bottom: 0; }
+.defn-focus-section { margin-top: 18px; }
+.defn-focus-section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.defn-template-row { display: flex; gap: 8px; align-items: center; }
+.defn-editor-inline { display: flex; gap: 8px; margin-top: 8px; }
+
+/* Chips + droplists (module refs, requires) */
+.defn-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.defn-chip { display: inline-flex; align-items: center; gap: 6px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); padding: 3px 8px; font-size: 12px; background: var(--bg-raised); }
+.defn-chip.optional { border-style: dashed; }
+.defn-droplist { border: var(--hairline) dashed var(--line); padding: 8px; border-radius: var(--radius); min-height: 38px; }
+.defn-requires-group { margin: 8px 0; }
+.defn-requires-group .kicker { display: block; margin-bottom: 4px; cursor: pointer; }
+
+/* Field rows: compact, one expanded at a time */
+.defn-field-rows { border-top: var(--hairline) solid var(--line); }
+.defn-field-row { border-bottom: var(--hairline) solid var(--line); }
+.defn-field-row-head { display: flex; align-items: center; gap: 8px; padding: 7px 4px; cursor: pointer; }
+.defn-field-row-head:hover { background: var(--bg); }
+.defn-field-row.open .defn-field-row-head { background: var(--bg); }
+.defn-field-row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.defn-field-row-title code { color: var(--text-muted); margin-left: 6px; }
+.defn-required { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.defn-field-row-body { padding: 10px 4px 14px 26px; background: var(--bg); }
+.defn-field-row-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.defn-move-to-module { max-width: 200px; }
+.defn-gate-checks { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; }
+.defn-gate-checks label { display: flex; align-items: center; gap: 4px; }
+
+/* Drag and drop */
 .defn-drag-handle { cursor: grab; user-select: none; padding: 2px 6px; font-size: 14px; color: var(--text-muted); border: var(--hairline) solid transparent; border-radius: var(--radius); }
 .defn-drag-handle:active { cursor: grabbing; }
 .defn-dragging { opacity: 0.5; }
-.defn-drop-target { outline: 2px dashed var(--line-strong); outline-offset: 2px; background: var(--bg); }
+.defn-drop-target { outline: 2px dashed var(--stamp-agreed-bg); outline-offset: 2px; background: var(--bg); }
 .defn-move-btns { display: inline-flex; gap: 4px; align-items: center; }
 .defn-move-btns .btn { margin: 0; padding: 2px 6px; font-size: 11px; line-height: 1; }
-.defn-template-editor { font-family: var(--font-mono); font-size: 13px; min-height: 240px; white-space: pre; overflow: auto; }
-.defn-template-view { font-family: var(--font-mono); font-size: 13px; white-space: pre-wrap; background: var(--bg-raised); border: var(--hairline) solid var(--line); padding: 8px; max-height: 400px; overflow: auto; }
-.defn-template-editor-block, .defn-template-view-block { margin-top: 10px; }
+
+/* Template focus view (CodeMirror) */
+.defn-template-editor { border: var(--hairline) solid var(--line); border-radius: var(--radius); min-height: 320px; }
+.defn-template-editor .cm-editor { height: 100%; min-height: 320px; font-family: var(--font-mono); font-size: 13px; }
 .defn-template-error { margin-top: 6px; }
 .defn-template-saved { color: var(--stamp-agreed-bg); font-weight: 600; }
-@media (max-width: 700px) { .defn-viewer-layout { grid-template-columns: 1fr; } }
+.defn-template-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+/* Library panel (docked, read-only in WI #381; Copy arrives in WI #382) */
+.defn-library { padding: 8px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.defn-library-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.defn-library-tree { overflow: auto; }
+.defn-library-group { margin-bottom: 10px; }
+.defn-library-node { padding: 3px 6px; font-size: 12px; border-radius: var(--radius); }
+.defn-library-field { color: var(--text-muted); padding-left: 16px; }
+@media (max-width: 700px) { .defn-toolbar { flex-direction: column; align-items: stretch; } }
 
 /* ---------- Visual view (#374, docs/adr/0033) ----------
  * The same CodeMirror editor drawn the way the content reads (web/lib/visualMode.js):
