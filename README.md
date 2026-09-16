@@ -58,6 +58,8 @@ The key rule: **artefacts are derived, modules are authored.** If you find yours
 
 Definitions are versioned (numbered `definitions/<id>/<n>/` dirs — see "Definition schema" below). The **Definitions** page at `/definitions` — linked from the Workspaces page header as "Definitions" — is a first-class editor: an Outline/Map view switch over one focus pane (stage/artefact/module, with compact one-at-a-time field rows) and a docked, read-only Library panel. A published version is read-only, with a **View template source** button per artefact; a *draft* version is directly editable — every element can be reordered or moved between a stage, an artefact and a module by drag or an equivalent button, template editing opens as its own focus-pane view, and the toolbar shows a live problems count sharing the server's own validation rules (`findDefinitionProblemsInStructure`, WI #381). Also: creating a new draft version, a new definition (Blank or Clone), archiving/restoring, and publishing a draft. Save follows the stage Save convention: one Save for everything changed, with a Save/Discard/Cancel prompt on leaving with unsaved changes.
 
+<img width="1613" height="844" alt="image" src="https://github.com/user-attachments/assets/67141d7a-c613-4ae6-9ff8-1d6b7dd44eba" />
+
 ## Principles
 
 **Data over documents.** If content lives in two places, one of them is a rendering.
