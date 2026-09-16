@@ -10,6 +10,8 @@ Gantry itself knows nothing about design, procurement or anything else. Every us
 
 Jump to [Executive Summary](docs/exec-summary.md)
 
+<img width="1438" height="882" alt="image" src="https://github.com/user-attachments/assets/5a5d7010-30ba-47bf-987c-acc902bbd766" />
+
 ## The problem this solves
 
 Most governance processes accrete documents. Each gate demands its own artefact, each artefact re-states 60% of the last one in a slightly different shape, and every one of them is a separate Office file living in a separate library with a separate owner. Six months in, nobody can tell you which version is true.
