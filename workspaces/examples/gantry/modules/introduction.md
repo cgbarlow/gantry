@@ -7,7 +7,7 @@ owner: c.barlow
 
 ## Overview
 
-This SOAP proposes hosting Gantry as an internal service on **Azure Container Apps** in the Contoso UAT and Production tenancies. Each environment is one Container Apps environment, created internal-only inside an Contoso virtual network, running the published Gantry container image with an Azure Files share mounted for persistent data. UAT runs one replica. Production runs a minimum of two replicas behind the environment's built-in ingress, which load-balances across them under a common DNS name, so the loss of one replica does not take the service down and no separate load balancer is provisioned.
+This SOAP proposes hosting Gantry as an internal service on **Azure Container Apps** in the Contoso UAT and Production tenancies. Each environment is one Container Apps environment, created internal-only inside a Contoso virtual network, running the published Gantry container image with an Azure Files share mounted for persistent data. UAT runs one replica. Production runs a minimum of two replicas behind the environment's built-in ingress, which load-balances across them under a common DNS name, so the loss of one replica does not take the service down and no separate load balancer is provisioned.
 
 In both environments every instance's data lives in an Azure DevOps workspace repository, not in the container. The share holds only the workspace registry and configuration, which keeps replicas disposable and lets several replicas share one volume safely.
 
@@ -36,7 +36,7 @@ flowchart LR
 
 ## In scope
 
-- A UAT environment in the Contoso UAT tenancy: one internal-only Container Apps environment in an Contoso virtual network, the Gantry container app at one replica, one Azure Files share, an internal DNS name and certificate.
+- A UAT environment in the Contoso UAT tenancy: one internal-only Container Apps environment in a Contoso virtual network, the Gantry container app at one replica, one Azure Files share, an internal DNS name and certificate.
 - A Production environment in the Contoso Production tenancy: the same shape with a minimum of two replicas, so the service tolerates the loss of one.
 - Network reachability from the Contoso network and VPN only. No public endpoint; the environment is created internal-only.
 - Outbound HTTPS from the container app to Azure DevOps for workspace repositories and to the container registry for image pulls.
