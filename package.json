@@ -1,6 +1,7 @@
 {
   "name": "gantry",
   "version": "0.6.8-beta",
+  "license": "MIT",
   "private": true,
   "description": "A repo-driven pipeline for staged, gated processes.",
   "type": "module",
