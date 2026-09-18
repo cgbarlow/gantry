@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   registerWorkspace,
@@ -20,8 +20,9 @@ import { withScratchInstances } from './helpers/lifecycle.js'
 
 
 const LOCATION = { organization: 'fake-org', project: 'fake-project', repository: 'fake-repo' }
+const GITHUB_LOCATION = { owner: 'octocat', repository: 'fake-repo' }
 
-// ---------- registerWorkspace ----------
+// ---------- registerWorkspace (pre-#3 flat shape — no consumer of this shape is migrated) ----------
 
 test('registerWorkspace persists organization/project/repository/owner/ticketingSystem, and generates an id', async () => {
   await withScratchInstances((instancesDir) => {
@@ -87,6 +88,85 @@ test('registerWorkspace always creates a fresh id, even for a repeated organizat
   })
 })
 
+// ---------- provider + nested location (#3, ADR-0037) ----------
+
+test('registerWorkspace accepts the nested {provider, location} shape for an Azure DevOps workspace, and emits both the nested and flat shapes', async () => {
+  await withScratchInstances((instancesDir) => {
+    const workspace = registerWorkspace({ provider: 'azure-devops', location: LOCATION, owner: 'c.barlow' }, { instancesDir })
+    assert.equal(workspace.provider, 'azure-devops')
+    assert.deepEqual(workspace.location, LOCATION)
+    assert.equal(workspace.organization, 'fake-org')
+    assert.equal(workspace.project, 'fake-project')
+    assert.equal(workspace.repository, 'fake-repo')
+    assert.equal(workspace.ticketingSystem, 'azure-devops')
+    assert.equal(workspace.owner, 'c.barlow')
+  })
+})
+
+test('registerWorkspace accepts a GitHub {provider, location} — owner/repository, no project required', async () => {
+  await withScratchInstances((instancesDir) => {
+    const workspace = registerWorkspace({ provider: 'github', location: GITHUB_LOCATION, owner: 'c.barlow' }, { instancesDir })
+    assert.equal(workspace.provider, 'github')
+    assert.deepEqual(workspace.location, GITHUB_LOCATION)
+    assert.equal(workspace.owner, 'c.barlow')
+    // No pre-#3 flat organization/project accessors for a provider that never had them.
+    assert.equal(workspace.organization, undefined)
+    assert.equal(workspace.project, undefined)
+    assert.equal(workspace.ticketingSystem, undefined)
+  })
+})
+
+test('registerWorkspace persists a GitHub workspace\'s optional baseUrl (GitHub Enterprise Server)', async () => {
+  await withScratchInstances((instancesDir) => {
+    const workspace = registerWorkspace(
+      { provider: 'github', location: { ...GITHUB_LOCATION, baseUrl: 'https://ghe.example.internal' } },
+      { instancesDir }
+    )
+    assert.equal(workspace.location.baseUrl, 'https://ghe.example.internal')
+  })
+})
+
+test('registerWorkspace rejects a GitHub location missing owner or repository — never requires a project', async () => {
+  await withScratchInstances((instancesDir) => {
+    assert.throws(
+      () => registerWorkspace({ provider: 'github', location: { owner: 'octocat' } }, { instancesDir }),
+      /missing: repository/
+    )
+    assert.throws(
+      () => registerWorkspace({ provider: 'github', location: { repository: 'fake-repo' } }, { instancesDir }),
+      /missing: owner/
+    )
+  })
+})
+
+test('registerWorkspace rejects an unknown provider', async () => {
+  await withScratchInstances((instancesDir) => {
+    assert.throws(
+      () => registerWorkspace({ provider: 'trello', location: GITHUB_LOCATION }, { instancesDir }),
+      /Unknown provider/
+    )
+  })
+})
+
+test('registerWorkspace rejects "atlassian" — modeled, but not built yet', async () => {
+  await withScratchInstances((instancesDir) => {
+    assert.throws(
+      () => registerWorkspace({ provider: 'atlassian', location: {} }, { instancesDir }),
+      /not supported yet/
+    )
+  })
+})
+
+test('a stray field for the wrong provider is dropped, not persisted — a GitHub location is never required to carry a project', async () => {
+  await withScratchInstances((instancesDir) => {
+    const workspace = registerWorkspace(
+      { provider: 'github', location: { ...GITHUB_LOCATION, project: 'should-be-dropped' } },
+      { instancesDir }
+    )
+    assert.deepEqual(workspace.location, GITHUB_LOCATION)
+  })
+})
+
 // ---------- resolveWorkspace / listWorkspaces ----------
 
 test('resolveWorkspace round-trips a registered workspace by id', async () => {
@@ -117,6 +197,15 @@ test('listWorkspaces lists every workspace, sorted by id', async () => {
   })
 })
 
+test('listWorkspaces lists Azure DevOps and GitHub workspaces side by side', async () => {
+  await withScratchInstances((instancesDir) => {
+    const ado = registerWorkspace(LOCATION, { instancesDir })
+    const gh = registerWorkspace({ provider: 'github', location: GITHUB_LOCATION }, { instancesDir })
+    const providers = listWorkspaces({ instancesDir }).map((w) => [w.id, w.provider])
+    assert.deepEqual(new Map(providers), new Map([[ado.id, 'azure-devops'], [gh.id, 'github']]))
+  })
+})
+
 test('the workspace registry survives across separate calls (a fresh call sees a previous call\'s registration)', async () => {
   await withScratchInstances((instancesDir) => {
     const created = registerWorkspace(LOCATION, { instancesDir })
@@ -126,17 +215,15 @@ test('the workspace registry survives across separate calls (a fresh call sees a
   })
 })
 
-test('the registered workspace is actually written to disk as JSON, keyed by id', async () => {
+test('the registered workspace is written to disk in the canonical nested {provider, location, owner} shape', async () => {
   await withScratchInstances((instancesDir) => {
     const created = registerWorkspace(LOCATION, { instancesDir })
     const registryPath = join(instancesDir, 'workspace-registry.json')
     const persisted = JSON.parse(readFileSync(registryPath, 'utf8'))
     assert.deepEqual(persisted[created.id], {
-      organization: 'fake-org',
-      project: 'fake-project',
-      repository: 'fake-repo',
+      provider: 'azure-devops',
+      location: { organization: 'fake-org', project: 'fake-project', repository: 'fake-repo' },
       owner: '',
-      ticketingSystem: 'azure-devops',
     })
   })
 })
@@ -170,6 +257,23 @@ test('findWorkspaceByLocation treats baseUrl as part of the match — same org/p
   })
 })
 
+test('findWorkspaceByLocation matches within a provider only — a GitHub workspace sharing a repository name with an Azure DevOps one is distinct', async () => {
+  await withScratchInstances((instancesDir) => {
+    const ado = registerWorkspace({ organization: 'shared', project: 'shared', repository: 'shared-repo' }, { instancesDir })
+    const gh = registerWorkspace({ provider: 'github', location: { owner: 'shared', repository: 'shared-repo' } }, { instancesDir })
+
+    assert.deepEqual(
+      findWorkspaceByLocation({ organization: 'shared', project: 'shared', repository: 'shared-repo' }, { instancesDir }),
+      ado
+    )
+    assert.deepEqual(
+      findWorkspaceByLocation({ provider: 'github', location: { owner: 'shared', repository: 'shared-repo' } }, { instancesDir }),
+      gh
+    )
+    assert.notEqual(ado.id, gh.id)
+  })
+})
+
 test('getOrCreateWorkspace reuses an existing workspace for the same tuple rather than creating a duplicate', async () => {
   await withScratchInstances((instancesDir) => {
     const first = getOrCreateWorkspace(LOCATION, { instancesDir })
@@ -183,6 +287,15 @@ test('getOrCreateWorkspace creates a new workspace when nothing matches yet', as
   await withScratchInstances((instancesDir) => {
     const workspace = getOrCreateWorkspace(LOCATION, { instancesDir })
     assert.deepEqual(resolveWorkspace(workspace.id, { instancesDir }), workspace)
+  })
+})
+
+test('getOrCreateWorkspace creates distinct workspaces for the same repository name on different providers', async () => {
+  await withScratchInstances((instancesDir) => {
+    const ado = getOrCreateWorkspace({ organization: 'shared', project: 'shared', repository: 'shared-repo' }, { instancesDir })
+    const gh = getOrCreateWorkspace({ provider: 'github', location: { owner: 'shared', repository: 'shared-repo' } }, { instancesDir })
+    assert.notEqual(ado.id, gh.id)
+    assert.equal(listWorkspaces({ instancesDir }).length, 2)
   })
 })
 
@@ -206,6 +319,14 @@ test('updateWorkspace rejects setting ticketingSystem to "jira"', async () => {
     )
     // The rejected update must not have been persisted.
     assert.equal(resolveWorkspace(created.id, { instancesDir }).ticketingSystem, 'azure-devops')
+  })
+})
+
+test('updateWorkspace merges a partial nested location correction onto the existing one', async () => {
+  await withScratchInstances((instancesDir) => {
+    const created = registerWorkspace({ provider: 'github', location: GITHUB_LOCATION }, { instancesDir })
+    const updated = updateWorkspace(created.id, { location: { repository: 'renamed-repo' } }, { instancesDir })
+    assert.deepEqual(updated.location, { owner: 'octocat', repository: 'renamed-repo' })
   })
 })
 
@@ -268,12 +389,9 @@ test('archiveWorkspace writes canonical JSON with archived last, and restore rew
 
     archiveWorkspace(created.id, { instancesDir })
     assert.deepEqual(Object.keys(JSON.parse(readFileSync(registryPath, 'utf8'))[created.id]), [
-      'organization',
-      'project',
-      'repository',
-      'baseUrl',
+      'provider',
+      'location',
       'owner',
-      'ticketingSystem',
       'archived',
     ])
 
@@ -324,5 +442,95 @@ test('updateWorkspace preserves an archived flag through an unrelated owner edit
     assert.equal(updated.owner, 'c.barlow')
     assert.equal(updated.archived, true)
     assert.equal(isWorkspaceArchived(created.id, { instancesDir }), true)
+  })
+})
+
+// ---------- read-forward: a pre-#3 flat record is lifted into {provider, location}, rewritten on next write ----------
+
+function writeLegacyFlatRegistry(instancesDir, entries) {
+  mkdirSync(instancesDir, { recursive: true })
+  writeFileSync(join(instancesDir, 'workspace-registry.json'), JSON.stringify(entries, null, 2) + '\n')
+}
+
+test('a pre-#3 flat record is read forward as provider: "azure-devops" with its fields lifted into location', async () => {
+  await withScratchInstances((instancesDir) => {
+    const legacyId = 'legacy-uuid-1'
+    writeLegacyFlatRegistry(instancesDir, {
+      [legacyId]: { organization: 'legacy-org', project: 'legacy-project', repository: 'legacy-repo', owner: 'a.person', ticketingSystem: 'azure-devops' },
+    })
+
+    const resolved = resolveWorkspace(legacyId, { instancesDir })
+    assert.equal(resolved.provider, 'azure-devops')
+    assert.deepEqual(resolved.location, { organization: 'legacy-org', project: 'legacy-project', repository: 'legacy-repo' })
+    // Flat accessors survive read-forward unchanged.
+    assert.equal(resolved.organization, 'legacy-org')
+    assert.equal(resolved.project, 'legacy-project')
+    assert.equal(resolved.repository, 'legacy-repo')
+    assert.equal(resolved.owner, 'a.person')
+    assert.equal(resolved.ticketingSystem, 'azure-devops')
+  })
+})
+
+test('a pre-#3 flat record\'s archived flag survives read-forward unchanged', async () => {
+  await withScratchInstances((instancesDir) => {
+    const legacyId = 'legacy-uuid-2'
+    writeLegacyFlatRegistry(instancesDir, {
+      [legacyId]: { organization: 'legacy-org', project: 'legacy-project', repository: 'legacy-repo', owner: '', ticketingSystem: 'azure-devops', archived: true },
+    })
+
+    assert.equal(isWorkspaceArchived(legacyId, { instancesDir }), true)
+    assert.equal(resolveWorkspace(legacyId, { instancesDir }).archived, true)
+  })
+})
+
+test('a pre-#3 flat record is rewritten to the nested shape on disk the first time it is read', async () => {
+  await withScratchInstances((instancesDir) => {
+    const legacyId = 'legacy-uuid-3'
+    writeLegacyFlatRegistry(instancesDir, {
+      [legacyId]: { organization: 'legacy-org', project: 'legacy-project', repository: 'legacy-repo', owner: '', ticketingSystem: 'azure-devops' },
+    })
+
+    resolveWorkspace(legacyId, { instancesDir })
+
+    const registryPath = join(instancesDir, 'workspace-registry.json')
+    const persisted = JSON.parse(readFileSync(registryPath, 'utf8'))
+    assert.deepEqual(persisted[legacyId], {
+      provider: 'azure-devops',
+      location: { organization: 'legacy-org', project: 'legacy-project', repository: 'legacy-repo' },
+      owner: '',
+    })
+  })
+})
+
+test('read-forward is idempotent — reading an already-migrated record twice produces the same result and does not rewrite again', async () => {
+  await withScratchInstances((instancesDir) => {
+    const legacyId = 'legacy-uuid-4'
+    writeLegacyFlatRegistry(instancesDir, {
+      [legacyId]: { organization: 'legacy-org', project: 'legacy-project', repository: 'legacy-repo', owner: '', ticketingSystem: 'azure-devops' },
+    })
+
+    const first = resolveWorkspace(legacyId, { instancesDir })
+    const registryPath = join(instancesDir, 'workspace-registry.json')
+    const afterFirstRead = readFileSync(registryPath, 'utf8')
+
+    const second = resolveWorkspace(legacyId, { instancesDir })
+    const afterSecondRead = readFileSync(registryPath, 'utf8')
+
+    assert.deepEqual(first, second)
+    assert.equal(afterFirstRead, afterSecondRead)
+  })
+})
+
+test('a flat record with no workspaceId-style scoping and a sibling already-nested record both resolve correctly in one registry', async () => {
+  await withScratchInstances((instancesDir) => {
+    const legacyId = 'legacy-uuid-5'
+    writeLegacyFlatRegistry(instancesDir, {
+      [legacyId]: { organization: 'legacy-org', project: 'legacy-project', repository: 'legacy-repo', owner: '', ticketingSystem: 'azure-devops' },
+    })
+    const fresh = registerWorkspace({ provider: 'github', location: GITHUB_LOCATION }, { instancesDir })
+
+    assert.equal(resolveWorkspace(legacyId, { instancesDir }).provider, 'azure-devops')
+    assert.equal(resolveWorkspace(fresh.id, { instancesDir }).provider, 'github')
+    assert.equal(listWorkspaces({ instancesDir }).length, 2)
   })
 })
