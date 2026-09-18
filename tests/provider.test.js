@@ -6,6 +6,7 @@ import {
   assertValidProvider,
   normalizeProviderLocation,
   providerLocationsMatch,
+  describeProviderLocation,
 } from '../lib/provider.js'
 
 // ---------- provider enum (ADR-0037) ----------
@@ -97,4 +98,18 @@ test('providerLocationsMatch does not confuse a GitHub owner/repository tuple wi
   const githubLocation = { owner: 'shared', repository: 'shared-repo' }
   const azureDevOpsShaped = { organization: 'shared', project: 'shared', repository: 'shared-repo' }
   assert.equal(providerLocationsMatch('github', githubLocation, azureDevOpsShaped), false)
+})
+
+// ---------- describeProviderLocation (#4: a display name any lib consumer can build without ----------
+// ---------- knowing each provider's own field names) ----------------------------------------------
+
+test('describeProviderLocation renders an Azure DevOps location as organization/project/repository', () => {
+  assert.equal(
+    describeProviderLocation('azure-devops', { organization: 'org', project: 'proj', repository: 'repo' }),
+    'org/proj/repo'
+  )
+})
+
+test('describeProviderLocation renders a GitHub location as owner/repository — never "undefined/undefined/repo"', () => {
+  assert.equal(describeProviderLocation('github', { owner: 'octocat', repository: 'repo' }), 'octocat/repo')
 })
