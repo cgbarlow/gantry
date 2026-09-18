@@ -8,7 +8,8 @@ import { renderArtefact, renderStageArtefacts, prepareAzureDevOpsWasmRender, fin
 import { createAsset } from '../lib/assets.js'
 import { loadDefinition } from '../lib/definition.js'
 import { readModule, writeModule } from '../lib/instance.js'
-import { createAzureDevOpsClient, AzureDevOpsNotFoundError, AzureDevOpsAuthenticationError } from '../lib/azureDevOpsClient.js'
+import { NotFoundError, AuthenticationError } from '../lib/providerErrors.js'
+import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { exampleModuleText } from './helpers/fixtureModules.js'
 
@@ -612,7 +613,7 @@ test('a render against Azure DevOps reads instance/module data from, and pushes 
 
       // 'main' has no ref at all — nothing was ever read from or pushed to
       // it by this render.
-      await assert.rejects(() => client.getFileContent(result.azureDevOpsPath), AzureDevOpsNotFoundError)
+      await assert.rejects(() => client.getFileContent(result.azureDevOpsPath), NotFoundError)
     }
   )
 })
@@ -965,7 +966,7 @@ test('renderStageArtefacts reports an artefact as skipped, not failed, when its 
       const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl })
       await assert.rejects(
         () => client.getFileContent('gantry-workspace/examples/out/Examples - Solution on a Page.docx', { branch }),
-        AzureDevOpsNotFoundError
+        NotFoundError
       )
     }
   )
@@ -1032,7 +1033,7 @@ test('renderStageArtefacts only considers artefacts belonging to the given stage
 })
 
 // A rejected PAT is not "a genuine render problem to report per-artefact" — it must propagate exactly like it does from every other Azure-DevOps-backed aggregation in this codebase (e.g. lib/status.js's evaluateStageFromAzureDevOps), so the server's credential-gating layer can still turn it into the structured "authentication required" response instead of it being silently folded into a 200 alongside an unrelated per-artefact error string.
-test('renderStageArtefacts propagates AzureDevOpsAuthenticationError rather than swallowing it as a per-artefact error', async () => {
+test('renderStageArtefacts propagates AuthenticationError rather than swallowing it as a per-artefact error', async () => {
   const branch = 'gantry-workspace/examples/shape'
   await withFakeAzureDevOpsServer(
     {
@@ -1057,7 +1058,7 @@ test('renderStageArtefacts propagates AzureDevOpsAuthenticationError rather than
 
       await assert.rejects(
         () => renderStageArtefacts('examples', definition, stage, { azureDevOps }),
-        AzureDevOpsAuthenticationError
+        AuthenticationError
       )
     }
   )

@@ -1,64 +1,65 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { AuthenticationError, NotFoundError, RepoNotFoundError, RequestError } from '../lib/providerErrors.js'
-import {
-  AzureDevOpsAuthenticationError,
-  AzureDevOpsNotFoundError,
-  AzureDevOpsRepoNotFoundError,
-  AzureDevOpsRequestError,
-} from '../lib/azureDevOpsClient.js'
+import { AuthenticationError, NotFoundError, RepoNotFoundError, RequestError, providerDisplayName } from '../lib/providerErrors.js'
+import * as azureDevOpsClient from '../lib/azureDevOpsClient.js'
+import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
+import { withFakeAzureDevOpsServer as withFakeServer } from './helpers/fakeAzureDevOpsServer.js'
+import { ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
-// #2, docs/adr/0039: the vendor-named Azure DevOps error classes must extend
-// the provider-neutral ones (the expand half of an expand-contract) while
-// keeping every existing `instanceof AzureDevOps*Error` catch site working
-// unchanged, and every instance must carry a 'azure-devops' provider tag.
+// #7, docs/adr/0039: the contract half of #2's expand-contract. Azure DevOps throws these four
+// neutral classes directly (no more AzureDevOps*Error vendor subclasses — every catch site across
+// the codebase now catches the neutral type), each tagged `provider: 'azure-devops'` at the point of
+// construction. This file is the one place that exercises the taxonomy itself; per-client behaviour
+// (which HTTP status maps to which class) stays covered by tests/azureDevOpsClient.test.js and its
+// three siblings.
 
-test('AzureDevOpsAuthenticationError extends the neutral AuthenticationError and is tagged "azure-devops"', () => {
-  const err = new AzureDevOpsAuthenticationError('rejected', { status: 401 })
-  assert.ok(err instanceof AuthenticationError)
-  assert.ok(err instanceof AzureDevOpsAuthenticationError)
-  assert.ok(err instanceof Error)
-  assert.equal(err.name, 'AzureDevOpsAuthenticationError')
-  assert.equal(err.provider, 'azure-devops')
-  assert.equal(err.status, 401)
-})
-
-test('AzureDevOpsNotFoundError extends the neutral NotFoundError and is tagged "azure-devops"', () => {
-  const err = new AzureDevOpsNotFoundError('missing', { status: 404 })
-  assert.ok(err instanceof NotFoundError)
-  assert.ok(err instanceof AzureDevOpsNotFoundError)
-  assert.equal(err.provider, 'azure-devops')
-})
-
-test('AzureDevOpsRepoNotFoundError extends the neutral RepoNotFoundError and is tagged "azure-devops"', () => {
-  const err = new AzureDevOpsRepoNotFoundError('no such repo', { status: 404 })
-  assert.ok(err instanceof RepoNotFoundError)
-  assert.ok(err instanceof AzureDevOpsRepoNotFoundError)
-  assert.equal(err.provider, 'azure-devops')
-})
-
-test('AzureDevOpsRequestError extends the neutral RequestError, is tagged "azure-devops", and keeps its body', () => {
-  const err = new AzureDevOpsRequestError('failed', { status: 500, body: 'raw response text' })
-  assert.ok(err instanceof RequestError)
-  assert.ok(err instanceof AzureDevOpsRequestError)
-  assert.equal(err.provider, 'azure-devops')
-  assert.equal(err.body, 'raw response text')
-})
-
-test('a neutral error catch site catches the vendor-named subclass without naming a provider', () => {
-  const thrown = new AzureDevOpsNotFoundError('missing')
-  let caught
-  try {
-    throw thrown
-  } catch (err) {
-    if (err instanceof NotFoundError) caught = err
+test('the four neutral error classes are Errors, distinct from each other, and correctly named', () => {
+  const classes = [AuthenticationError, NotFoundError, RepoNotFoundError, RequestError]
+  for (const Cls of classes) {
+    const err = new Cls('x', { provider: 'azure-devops' })
+    assert.ok(err instanceof Error)
+    assert.equal(err.name, Cls.name)
   }
-  assert.equal(caught, thrown)
-})
-
-test('the four neutral error classes are distinct from each other', () => {
   assert.notEqual(AuthenticationError, NotFoundError)
   assert.notEqual(NotFoundError, RepoNotFoundError)
   assert.notEqual(RepoNotFoundError, RequestError)
-  assert.ok(!(new AzureDevOpsAuthenticationError('x') instanceof NotFoundError))
+  assert.ok(!(new AuthenticationError('x', { provider: 'azure-devops' }) instanceof NotFoundError))
+})
+
+test('RequestError keeps its status/body alongside the provider tag', () => {
+  const err = new RequestError('failed', { status: 500, body: 'raw response text', provider: 'azure-devops' })
+  assert.equal(err.provider, 'azure-devops')
+  assert.equal(err.status, 500)
+  assert.equal(err.body, 'raw response text')
+})
+
+test('providerDisplayName maps known provider ids to a human-readable name and falls back to the raw id otherwise', () => {
+  assert.equal(providerDisplayName('azure-devops'), 'Azure DevOps')
+  assert.equal(providerDisplayName('github'), 'GitHub')
+  assert.equal(providerDisplayName('atlassian'), 'Atlassian')
+  assert.equal(providerDisplayName('some-future-provider'), 'some-future-provider')
+})
+
+test('lib/azureDevOpsClient.js no longer exports any Azure-DevOps-named error class', () => {
+  for (const name of ['AzureDevOpsAuthenticationError', 'AzureDevOpsNotFoundError', 'AzureDevOpsRepoNotFoundError', 'AzureDevOpsRequestError']) {
+    assert.equal(name in azureDevOpsClient, false, `${name} should have been deleted (#7)`)
+  }
+})
+
+test('a real Azure DevOps failure (over the fake server) throws the neutral class tagged "azure-devops"', async () => {
+  await withFakeServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {} }, async (baseUrl) => {
+    const badClient = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: 'wrong-pat', baseUrl })
+    await assert.rejects(() => badClient.getFileContent('/instance.yaml'), (err) => {
+      assert.ok(err instanceof AuthenticationError)
+      assert.equal(err.provider, 'azure-devops')
+      return true
+    })
+
+    const goodClient = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl })
+    await assert.rejects(() => goodClient.getFileContent('/does-not-exist.md'), (err) => {
+      assert.ok(err instanceof NotFoundError)
+      assert.equal(err.provider, 'azure-devops')
+      return true
+    })
+  })
 })
