@@ -476,9 +476,18 @@ async function patchWorkspace(id, updates) {
 }
 
 // The standard `https://dev.azure.com/{organization}/{project}/_git/{repository}` shape — the reverse of web/lib/validateRepo.js's `parseRepoUrl` — with `baseUrl` (an on-premises Azure DevOps Server location) substituted in place of `https://dev.azure.com` when a workspace carries one.
+//
+// Shared by two different "workspace" shapes (ticket #5): a workspace-registry record's own nested
+// `{ provider, location: { organization, project, repository, baseUrl? } }` (this file's own callers
+// below), and `lib/instanceRegistry.js`'s unrelated, still-flat per-instance `instance.workspace`
+// (`{ kind: 'azureDevOps', organization, project, repository, baseUrl? }`, passed in from web/app.js's
+// `instanceFilesUrl`) — the two registries are independent and only one of them was nested by ADR-0037.
+// Reading `workspace.location` when present, and falling back to `workspace` itself otherwise, serves
+// both without either caller needing to know which shape it holds.
 export function workspaceRepoUrl(workspace) {
-  const base = workspace.baseUrl ?? 'https://dev.azure.com'
-  return `${base}/${encodeURIComponent(workspace.organization)}/${encodeURIComponent(workspace.project)}/_git/${encodeURIComponent(workspace.repository)}`
+  const location = workspace.location ?? workspace
+  const base = location.baseUrl ?? 'https://dev.azure.com'
+  return `${base}/${encodeURIComponent(location.organization)}/${encodeURIComponent(location.project)}/_git/${encodeURIComponent(location.repository)}`
 }
 
 // One workspace's editable fields: owner (server-persisted, identity-picker), a PAT override (client-only, never touches the server), and a ticketing-system override (server-persisted) — the same three fields #104's old Workspace overrides tab exposed per row, now rendered for exactly one workspace (the instance's own) rather than one row per registered workspace. The owner field is now an identity picker (#145 Part 2).
@@ -544,7 +553,7 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
   return html`
     <div class="workspace-row" data-workspace-id=${workspace.id}>
       <a class="workspace-repo-url" href=${workspaceRepoUrl(workspace)} target="_blank" rel="noreferrer">
-        ${workspace.organization}/${workspace.project}/${workspace.repository}
+        ${workspace.location.organization}/${workspace.location.project}/${workspace.location.repository}
       </a>
 
       <div class="workspace-field workspace-owner">
@@ -600,7 +609,7 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
         <div
           class="settings-radio-group"
           role="radiogroup"
-          aria-label=${`Ticketing system for ${workspace.organization}/${workspace.project}/${workspace.repository}`}
+          aria-label=${`Ticketing system for ${workspace.location.organization}/${workspace.location.project}/${workspace.location.repository}`}
         >
           ${TICKETING_SYSTEMS.map(
             (system) => html`

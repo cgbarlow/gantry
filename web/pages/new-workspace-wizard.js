@@ -464,13 +464,16 @@ async function registerWorkspace() {
     // web/lib/validateRepo.js's own repo-check (there's nothing more
     // specific to resolve a PAT override against until the Workspace
     // itself exists).
+    // Sent as the #37 nested `{ provider, location }` shape rather than flat
+    // organization/project/repository — this wizard still only offers Azure
+    // DevOps fields, so `provider` is always 'azure-devops' here, but the
+    // wire shape matches what a workspace record is now stored as.
     const res = await apiFetch('/api/workspaces', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        organization: organization.trim(),
-        project: project.trim(),
-        repository: repository.trim(),
+        provider: 'azure-devops',
+        location: { organization: organization.trim(), project: project.trim(), repository: repository.trim() },
         owner: owner.trim(),
         ticketingSystem: registerTicketingSystem.value,
       }),
@@ -560,9 +563,8 @@ async function adoptCheckedRepo() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        organization: loc.organization,
-        project: loc.project,
-        repository: loc.repository,
+        provider: 'azure-devops',
+        location: { organization: loc.organization, project: loc.project, repository: loc.repository },
         owner: '',
         ticketingSystem: registerTicketingSystem.value,
       }),
@@ -1077,7 +1079,7 @@ async function loadWorkItemTypes() {
   if (!ws) return
   workItemTypesLoadError.value = ''
   try {
-    const qs = new URLSearchParams({ organization: ws.organization, project: ws.project })
+    const qs = new URLSearchParams({ organization: ws.location.organization, project: ws.location.project })
     const res = await apiFetch(`/api/azure-devops/work-item-types?${qs}`, {}, { workspaceId: ws.id })
     const body = await res.json().catch(() => ([]))
     if (!res.ok) {
@@ -1099,7 +1101,7 @@ async function lookUpParentWorkItem() {
   lookupStatus.value = 'looking-up'
   lookupError.value = ''
   try {
-    const qs = new URLSearchParams({ organization: ws.organization, project: ws.project })
+    const qs = new URLSearchParams({ organization: ws.location.organization, project: ws.location.project })
     const res = await apiFetch(`/api/azure-devops/work-items/${encodeURIComponent(id)}?${qs}`, {}, { workspaceId: ws.id })
     if (res.status === 404) {
       lookupStatus.value = 'not-found'
@@ -1158,7 +1160,7 @@ async function createInstanceAndMaybeLink() {
           slug,
           assignee: assigneeField.value.trim(),
           definitionVersion: versionToSend,
-          azureDevOps: { organization: ws.organization, project: ws.project, repository: ws.repository, ...(ws.baseUrl ? { baseUrl: ws.baseUrl } : {}) },
+          azureDevOps: { organization: ws.location.organization, project: ws.location.project, repository: ws.location.repository, ...(ws.location.baseUrl ? { baseUrl: ws.location.baseUrl } : {}) },
           stage: importPayload.value.stage,
           modules: importPayload.value.modules,
           assets: importPayload.value.assets,
@@ -1181,8 +1183,8 @@ async function createInstanceAndMaybeLink() {
     // C4 — check whether this repo already holds instance data for this slug
     let shouldAdopt = false
     try {
-      const qs = new URLSearchParams({ organization: ws.organization, project: ws.project, repository: ws.repository })
-      if (ws.baseUrl) qs.set('baseUrl', ws.baseUrl)
+      const qs = new URLSearchParams({ organization: ws.location.organization, project: ws.location.project, repository: ws.location.repository })
+      if (ws.location.baseUrl) qs.set('baseUrl', ws.location.baseUrl)
       const checkRes = await apiFetch(`/api/azure-devops/repo-check?${qs}`, {}, { workspaceId: ws.id })
       const checkBody = await checkRes.json().catch(() => ({}))
       if (checkRes.ok) {
@@ -1199,7 +1201,7 @@ async function createInstanceAndMaybeLink() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            azureDevOps: { organization: ws.organization, project: ws.project, repository: ws.repository, ...(ws.baseUrl ? { baseUrl: ws.baseUrl } : {}) },
+            azureDevOps: { organization: ws.location.organization, project: ws.location.project, repository: ws.location.repository, ...(ws.location.baseUrl ? { baseUrl: ws.location.baseUrl } : {}) },
           }),
         }, { workspaceId: ws.id })
         const body = await res.json().catch(() => ({}))
@@ -1226,7 +1228,7 @@ async function createInstanceAndMaybeLink() {
             slug,
             assignee: assigneeField.value.trim(),
             definitionVersion: versionToSend,
-            azureDevOps: { organization: ws.organization, project: ws.project, repository: ws.repository, ...(ws.baseUrl ? { baseUrl: ws.baseUrl } : {}) },
+            azureDevOps: { organization: ws.location.organization, project: ws.location.project, repository: ws.location.repository, ...(ws.location.baseUrl ? { baseUrl: ws.location.baseUrl } : {}) },
           }),
         }, { workspaceId: ws.id })
         const body = await res.json().catch(() => ({}))
@@ -1260,11 +1262,11 @@ async function createInstanceAndMaybeLink() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            organization: ws.organization,
-            project: ws.project,
+            organization: ws.location.organization,
+            project: ws.location.project,
             workItemType: workItemTypeField.value,
             title: newWorkItemTitle.value.trim(),
-            ...(ws.baseUrl ? { baseUrl: ws.baseUrl } : {}),
+            ...(ws.location.baseUrl ? { baseUrl: ws.location.baseUrl } : {}),
           }),
         }, { workspaceId: ws.id })
         const body = await res.json().catch(() => ({}))
@@ -1292,8 +1294,8 @@ async function createInstanceAndMaybeLink() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          organization: ws.organization,
-          project: ws.project,
+          organization: ws.location.organization,
+          project: ws.location.project,
           parentId: parentIdToLink,
           workItemType: workItemTypeField.value,
         }),
@@ -1769,8 +1771,8 @@ function ImportDestinationPanel() {
                           class=${'definition-card' + (pickedWorkspaceId.value === w.id ? ' selected' : '')}
                           onClick=${() => (pickedWorkspaceId.value = w.id)}
                         >
-                          <div class="name">${w.organization}/${w.project}/${w.repository}</div>
-                          <div class="stages">owner: ${w.owner || '—'} · ticketing: ${w.ticketingSystem || 'none'}</div>
+                          <div class="name">${w.location.organization}/${w.location.project}/${w.location.repository}</div>
+                          <div class="stages">owner: ${w.owner || '—'} · ticketing: ${w.provider || 'none'}</div>
                         </div>
                       `
                     )}
@@ -1871,8 +1873,8 @@ function WorkspaceStep() {
                           class=${'definition-card' + (pickedWorkspaceId.value === w.id ? ' selected' : '')}
                           onClick=${() => (pickedWorkspaceId.value = w.id)}
                         >
-                          <div class="name">${w.organization}/${w.project}/${w.repository}</div>
-                          <div class="stages">owner: ${w.owner || '—'} · ticketing: ${w.ticketingSystem || 'none'}</div>
+                          <div class="name">${w.location.organization}/${w.location.project}/${w.location.repository}</div>
+                          <div class="stages">owner: ${w.owner || '—'} · ticketing: ${w.provider || 'none'}</div>
                         </div>
                       `
                     )}
@@ -2055,7 +2057,7 @@ function WorkspaceStep() {
 // This step is shared by both the Server-hosted and Local flows — see the
 // Assignee field below for WI #306 item 2's local-flow-specific branch: a
 // plain text input there, not <${IdentityPicker}>, since a local workspace
-// has no Azure DevOps organization/project (`ws.organization`/`ws.project`
+// has no Azure DevOps organization/project (`ws.location.organization`/`ws.location.project`
 // are both undefined) for IdentityPicker's search() to scope its
 // `/api/identities` lookup to — it would otherwise still fire that request
 // against whatever org/project the server falls back to, a real Azure
@@ -2108,7 +2110,7 @@ function InstanceStep() {
       <h3><span class="stamp agreed">Workspace</span></h3>
       ${ws.isLocal
         ? html`<div class="result-row"><span class="k">Local workspace</span><span class="v">${ws.name}</span></div>`
-        : html`<div class="result-row"><span class="k">Organization/Project/Repository</span><span class="v">${ws.organization}/${ws.project}/${ws.repository}</span></div>`}
+        : html`<div class="result-row"><span class="k">Organization/Project/Repository</span><span class="v">${ws.location.organization}/${ws.location.project}/${ws.location.repository}</span></div>`}
     </div>
 
     <h3>New Instance</h3>
@@ -2221,8 +2223,8 @@ function InstanceStep() {
               value=${assigneeField.value}
               onChange=${(uniqueName) => (assigneeField.value = uniqueName)}
               placeholder="Unassigned"
-              organization=${ws?.organization}
-              project=${ws?.project}
+              organization=${ws?.location?.organization}
+              project=${ws?.location?.project}
             />
           `}
     </div>
@@ -2291,11 +2293,11 @@ function LinkStep() {
 
     <div class="wizard-field">
       <label for="link-organization">Organization</label>
-      <input class="wizard-input" id="link-organization" type="text" value=${ws.organization} disabled />
+      <input class="wizard-input" id="link-organization" type="text" value=${ws.location.organization} disabled />
     </div>
     <div class="wizard-field">
       <label for="link-project">Project</label>
-      <input class="wizard-input" id="link-project" type="text" value=${ws.project} disabled />
+      <input class="wizard-input" id="link-project" type="text" value=${ws.location.project} disabled />
     </div>
 
     ${linkMode.value === 'create'
@@ -2334,7 +2336,7 @@ function LinkStep() {
             ${lookupStatus.value === 'found'
               ? html`<p class="wizard-field-hint">Found: #${lookupResult.value.id} "${lookupResult.value.title}" (${lookupResult.value.workItemType}, ${lookupResult.value.state})</p>`
               : null}
-            ${lookupStatus.value === 'not-found' ? html`<div class="inline-error">No work item #${parentIdField.value} found in ${ws.organization}/${ws.project}.</div>` : null}
+            ${lookupStatus.value === 'not-found' ? html`<div class="inline-error">No work item #${parentIdField.value} found in ${ws.location.organization}/${ws.location.project}.</div>` : null}
             ${lookupStatus.value === 'error' ? html`<div class="inline-error">${lookupError.value}</div>` : null}
           </div>
         `}
