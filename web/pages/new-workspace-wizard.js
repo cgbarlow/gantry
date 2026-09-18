@@ -36,6 +36,7 @@ import { signal, effect } from '@preact/signals'
 import { apiFetch, apiFetchForInstance } from '../lib/apiFetch.js'
 import { renderMarkdown } from '../lib/markdown.js'
 import { TICKETING_SYSTEMS, defaultTicketingSystem } from '../lib/ticketingSystem.js'
+import { PROVIDERS, DEFAULT_PROVIDER } from '../lib/provider.js'
 import { IdentityPicker } from '../lib/identityPicker.js'
 import { parseRepoUrl } from '../lib/validateRepo.js'
 import { advancedMode } from '../lib/advancedMode.js'
@@ -180,8 +181,24 @@ const workspaces = signal(null) // fetched GET /api/workspaces list, null while 
 const workspacesLoadError = signal('')
 const pickedWorkspaceId = signal('')
 
-const registerForm = signal({ organization: 'Contoso-Production', project: 'Default', repository: '', owner: '' })
+// #8, docs/adr/0037 — Provider is chosen first because it decides which of the fields below apply:
+// azure-devops reads organization/project (github ignores both); github reads repoOwner (azure-devops
+// ignores it); repository and owner (the workspace's Owner *person*, not a GitHub repo's own owner)
+// are shared by both. Kept as one signal, like the fields it replaces, so "Import from local
+// workspace"'s destination panel (which never renders a Provider picker of its own, and is forced back
+// to 'azure-devops' below since GitHub's content store isn't built yet, #11) shares the exact same
+// state shape without needing one of its own.
+const registerProvider = signal(DEFAULT_PROVIDER)
+const registerForm = signal({ organization: 'Contoso-Production', project: 'Default', repository: '', repoOwner: '', owner: '' })
 const registerTicketingSystem = signal(defaultTicketingSystem.value)
+
+// Import's destination-picker has no Provider control of its own (#8: GitHub's content store — the
+// thing an import destination actually writes into — is #11's job, not this ticket's), so switching
+// into that flow always resets the shared registerProvider back to the only provider it can target,
+// regardless of what a prior "Start blank" visit in the same wizard session left it as.
+effect(() => {
+  if (registerDataSource.value === 'import') registerProvider.value = DEFAULT_PROVIDER
+})
 const registerStatus = signal('idle') // idle | registering | failed
 const registerError = signal('')
 const registerNotice = signal('')
@@ -238,6 +255,19 @@ const linkMode = signal('create') // 'create' | 'existing'
 const newWorkItemTitle = signal('')
 const newWorkItemCreateStatus = signal('idle') // idle | creating | failed
 const newWorkItemCreateError = signal('')
+
+// A registered workspace's own location, rendered per its provider (#8) — azure-devops keeps the
+// existing organization/project/repository form; github shows owner/repository, with no project of
+// its own to show. Shared by both Pick-workspace lists (top-level and the Import destination panel's).
+function workspaceLocationLabel(w) {
+  return w.provider === 'github' ? `${w.repoOwner}/${w.repository}` : `${w.organization}/${w.project}/${w.repository}`
+}
+
+// Same workspace's ticketing/tracker line, provider-aware — GitHub has no ticketing-system choice of
+// its own (ADR-0037: the provider itself is the suite), so this reads "GitHub" rather than "ticketing: none".
+function workspaceTrackerLabel(w) {
+  return w.provider === 'github' ? 'GitHub' : w.ticketingSystem || 'none'
+}
 
 function slugify(name) {
   return (name ?? '')
@@ -398,7 +428,8 @@ function resetWizard() {
   workspaces.value = null
   workspacesLoadError.value = ''
   pickedWorkspaceId.value = ''
-  registerForm.value = { organization: 'Contoso-Production', project: 'Default', repository: '', owner: '' }
+  registerProvider.value = DEFAULT_PROVIDER
+  registerForm.value = { organization: 'Contoso-Production', project: 'Default', repository: '', repoOwner: '', owner: '' }
   registerTicketingSystem.value = defaultTicketingSystem.value
   registerStatus.value = 'idle'
   registerError.value = ''
@@ -453,11 +484,16 @@ function pickWorkspace() {
   step.value = 'instance'
 }
 
-async function registerWorkspace() {
+async function registerWorkspace(providerOverride) {
   registerStatus.value = 'registering'
   registerError.value = ''
   registerNotice.value = ''
-  const { organization, project, repository, owner } = registerForm.value
+  // `providerOverride` lets the Import destination panel force 'azure-devops' explicitly (belt and
+  // braces alongside the registerDataSource effect above) rather than trusting registerProvider's
+  // current value — this function is its only other caller.
+  const provider = providerOverride ?? registerProvider.value
+  const { organization, project, repository, repoOwner, owner } = registerForm.value
+  const isGitHub = provider === 'github'
   try {
     // A brand-new Workspace registration has no workspaceId yet — this
     // always uses the global default PAT, exactly like
@@ -468,11 +504,11 @@ async function registerWorkspace() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        organization: organization.trim(),
-        project: project.trim(),
-        repository: repository.trim(),
+        provider,
+        ...(isGitHub
+          ? { repoOwner: repoOwner.trim(), repository: repository.trim() }
+          : { organization: organization.trim(), project: project.trim(), repository: repository.trim(), ticketingSystem: registerTicketingSystem.value }),
         owner: owner.trim(),
-        ticketingSystem: registerTicketingSystem.value,
       }),
     })
     const body = await res.json().catch(() => ({}))
@@ -962,7 +998,9 @@ function applyImportPrefill() {
 // instance's own content to the Instance step the moment a destination
 // workspace is actually chosen, rather than leaving it blank.
 async function continueImportToNewWorkspace() {
-  await registerWorkspace()
+  // Explicit 'azure-devops' — see registerProvider's own doc comment on why an import destination
+  // can only ever target that provider today.
+  await registerWorkspace('azure-devops')
   if (selectedWorkspace.value) applyImportPrefill()
 }
 
@@ -1769,8 +1807,8 @@ function ImportDestinationPanel() {
                           class=${'definition-card' + (pickedWorkspaceId.value === w.id ? ' selected' : '')}
                           onClick=${() => (pickedWorkspaceId.value = w.id)}
                         >
-                          <div class="name">${w.organization}/${w.project}/${w.repository}</div>
-                          <div class="stages">owner: ${w.owner || '—'} · ticketing: ${w.ticketingSystem || 'none'}</div>
+                          <div class="name">${workspaceLocationLabel(w)}</div>
+                          <div class="stages">owner: ${w.owner || '—'} · ${workspaceTrackerLabel(w)}</div>
                         </div>
                       `
                     )}
@@ -1871,8 +1909,8 @@ function WorkspaceStep() {
                           class=${'definition-card' + (pickedWorkspaceId.value === w.id ? ' selected' : '')}
                           onClick=${() => (pickedWorkspaceId.value = w.id)}
                         >
-                          <div class="name">${w.organization}/${w.project}/${w.repository}</div>
-                          <div class="stages">owner: ${w.owner || '—'} · ticketing: ${w.ticketingSystem || 'none'}</div>
+                          <div class="name">${workspaceLocationLabel(w)}</div>
+                          <div class="stages">owner: ${w.owner || '—'} · ${workspaceTrackerLabel(w)}</div>
                         </div>
                       `
                     )}
@@ -1970,77 +2008,134 @@ function WorkspaceStep() {
     ${workspaceLocation.value === 'server' && workspaceMode.value === 'register' && registerDataSource.value === 'blank'
       ? html`
           <div class="wizard-field">
-            <label for="ws-organization">Organization</label>
-            <input
-              class="wizard-input"
-              id="ws-organization"
-              type="text"
-              value=${registerForm.value.organization}
-              onInput=${(e) => (registerForm.value = { ...registerForm.value, organization: e.currentTarget.value })}
-            />
-          </div>
-          <div class="wizard-field">
-            <label for="ws-project">Project</label>
-            <input
-              class="wizard-input"
-              id="ws-project"
-              type="text"
-              value=${registerForm.value.project}
-              onInput=${(e) => (registerForm.value = { ...registerForm.value, project: e.currentTarget.value })}
-            />
-          </div>
-          <div class="wizard-field">
-            <label for="ws-repository">Repository</label>
-            <input
-              class="wizard-input"
-              id="ws-repository"
-              type="text"
-              value=${registerForm.value.repository}
-              onInput=${(e) => (registerForm.value = { ...registerForm.value, repository: e.currentTarget.value })}
-            />
-            <p class="wizard-field-hint">Create the repository in Azure DevOps (or your Git host) first — gantry links to an existing repository, it does not create one.</p>
-          </div>
-          <div class="wizard-field">
-            <label for="ws-owner">Owner</label>
-            <${IdentityPicker}
-              id="ws-owner"
-              value=${registerForm.value.owner}
-              onChange=${(uniqueName) => (registerForm.value = { ...registerForm.value, owner: uniqueName })}
-              placeholder="Search by name…"
-              organization=${registerForm.value.organization}
-              project=${registerForm.value.project}
-            />
-          </div>
-          <div class="wizard-field">
-            <label>Ticketing system</label>
-            <div class="settings-radio-group" role="radiogroup" aria-label="Ticketing system">
-              ${TICKETING_SYSTEMS.map(
-                (system) => html`
-                  <label key=${system.id} class=${'settings-radio' + (system.disabled ? ' disabled' : '')}>
+            <label>Provider</label>
+            <div class="settings-radio-group" role="radiogroup" aria-label="Provider">
+              ${PROVIDERS.map(
+                (provider) => html`
+                  <label key=${provider.id} class=${'settings-radio' + (provider.disabled ? ' disabled' : '')}>
                     <input
                       type="radio"
-                      name="ws-ticketing-system"
-                      value=${system.id}
-                      checked=${registerTicketingSystem.value === system.id}
-                      disabled=${system.disabled}
-                      onChange=${() => (registerTicketingSystem.value = system.id)}
+                      name="ws-provider"
+                      value=${provider.id}
+                      checked=${registerProvider.value === provider.id}
+                      disabled=${provider.disabled}
+                      onChange=${() => (registerProvider.value = provider.id)}
                     />
-                    ${system.label}
-                    ${system.disabled ? html`<span class="stamp review">${system.disabledReason}</span>` : null}
+                    ${provider.label}
+                    ${provider.disabled ? html`<span class="stamp review">${provider.disabledReason}</span>` : null}
                   </label>
                 `
               )}
             </div>
           </div>
+          ${registerProvider.value === 'github'
+            ? html`
+                <div class="wizard-field">
+                  <label for="ws-repo-owner">Owner</label>
+                  <input
+                    class="wizard-input"
+                    id="ws-repo-owner"
+                    type="text"
+                    placeholder="The GitHub user or organization the repository belongs to"
+                    value=${registerForm.value.repoOwner}
+                    onInput=${(e) => (registerForm.value = { ...registerForm.value, repoOwner: e.currentTarget.value })}
+                  />
+                </div>
+                <div class="wizard-field">
+                  <label for="ws-repository">Repository</label>
+                  <input
+                    class="wizard-input"
+                    id="ws-repository"
+                    type="text"
+                    value=${registerForm.value.repository}
+                    onInput=${(e) => (registerForm.value = { ...registerForm.value, repository: e.currentTarget.value })}
+                  />
+                  <p class="wizard-field-hint">Create the repository on GitHub first — gantry links to an existing repository, it does not create one.</p>
+                </div>
+                <div class="wizard-field">
+                  <label for="ws-github-owner">Owner</label>
+                  <${IdentityPicker}
+                    id="ws-github-owner"
+                    value=${registerForm.value.owner}
+                    onChange=${(uniqueName) => (registerForm.value = { ...registerForm.value, owner: uniqueName })}
+                    placeholder="Search by name…"
+                  />
+                </div>
+              `
+            : html`
+                <div class="wizard-field">
+                  <label for="ws-organization">Organization</label>
+                  <input
+                    class="wizard-input"
+                    id="ws-organization"
+                    type="text"
+                    value=${registerForm.value.organization}
+                    onInput=${(e) => (registerForm.value = { ...registerForm.value, organization: e.currentTarget.value })}
+                  />
+                </div>
+                <div class="wizard-field">
+                  <label for="ws-project">Project</label>
+                  <input
+                    class="wizard-input"
+                    id="ws-project"
+                    type="text"
+                    value=${registerForm.value.project}
+                    onInput=${(e) => (registerForm.value = { ...registerForm.value, project: e.currentTarget.value })}
+                  />
+                </div>
+                <div class="wizard-field">
+                  <label for="ws-repository">Repository</label>
+                  <input
+                    class="wizard-input"
+                    id="ws-repository"
+                    type="text"
+                    value=${registerForm.value.repository}
+                    onInput=${(e) => (registerForm.value = { ...registerForm.value, repository: e.currentTarget.value })}
+                  />
+                  <p class="wizard-field-hint">Create the repository in Azure DevOps (or your Git host) first — gantry links to an existing repository, it does not create one.</p>
+                </div>
+                <div class="wizard-field">
+                  <label for="ws-owner">Owner</label>
+                  <${IdentityPicker}
+                    id="ws-owner"
+                    value=${registerForm.value.owner}
+                    onChange=${(uniqueName) => (registerForm.value = { ...registerForm.value, owner: uniqueName })}
+                    placeholder="Search by name…"
+                    organization=${registerForm.value.organization}
+                    project=${registerForm.value.project}
+                  />
+                </div>
+                <div class="wizard-field">
+                  <label>Ticketing system</label>
+                  <div class="settings-radio-group" role="radiogroup" aria-label="Ticketing system">
+                    ${TICKETING_SYSTEMS.map(
+                      (system) => html`
+                        <label key=${system.id} class=${'settings-radio' + (system.disabled ? ' disabled' : '')}>
+                          <input
+                            type="radio"
+                            name="ws-ticketing-system"
+                            value=${system.id}
+                            checked=${registerTicketingSystem.value === system.id}
+                            disabled=${system.disabled}
+                            onChange=${() => (registerTicketingSystem.value = system.id)}
+                          />
+                          ${system.label}
+                          ${system.disabled ? html`<span class="stamp review">${system.disabledReason}</span>` : null}
+                        </label>
+                      `
+                    )}
+                  </div>
+                </div>
+              `}
           <div class="wizard-field">
             <button
               type="button"
               class="btn primary"
               disabled=${registerStatus.value === 'registering' ||
-              !registerForm.value.organization.trim() ||
-              !registerForm.value.project.trim() ||
-              !registerForm.value.repository.trim()}
-              onClick=${registerWorkspace}
+              (registerProvider.value === 'github'
+                ? !registerForm.value.repoOwner.trim() || !registerForm.value.repository.trim()
+                : !registerForm.value.organization.trim() || !registerForm.value.project.trim() || !registerForm.value.repository.trim())}
+              onClick=${() => registerWorkspace()}
             >
               ${registerStatus.value === 'registering' ? 'Registering…' : 'Register workspace'}
             </button>

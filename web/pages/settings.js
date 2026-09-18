@@ -475,10 +475,22 @@ async function patchWorkspace(id, updates) {
   return body
 }
 
-// The standard `https://dev.azure.com/{organization}/{project}/_git/{repository}` shape — the reverse of web/lib/validateRepo.js's `parseRepoUrl` — with `baseUrl` (an on-premises Azure DevOps Server location) substituted in place of `https://dev.azure.com` when a workspace carries one.
+// The standard `https://dev.azure.com/{organization}/{project}/_git/{repository}` shape — the reverse of web/lib/validateRepo.js's `parseRepoUrl` — with `baseUrl` (an on-premises Azure DevOps Server location) substituted in place of `https://dev.azure.com` when a workspace carries one. For a github workspace (#8), the same `baseUrl` override plays the GitHub Enterprise Server host's own role, substituted in place of `https://github.com`.
 export function workspaceRepoUrl(workspace) {
+  if (workspace.provider === 'github') {
+    const base = workspace.baseUrl ?? 'https://github.com'
+    return `${base}/${encodeURIComponent(workspace.repoOwner)}/${encodeURIComponent(workspace.repository)}`
+  }
   const base = workspace.baseUrl ?? 'https://dev.azure.com'
   return `${base}/${encodeURIComponent(workspace.organization)}/${encodeURIComponent(workspace.project)}/_git/${encodeURIComponent(workspace.repository)}`
+}
+
+// The workspace's own location, rendered per its Provider (#8, docs/adr/0037) — azure-devops keeps
+// organization/project/repository; github has no project of its own, so owner/repository instead.
+function workspaceLocationLabel(workspace) {
+  return workspace.provider === 'github'
+    ? `${workspace.repoOwner}/${workspace.repository}`
+    : `${workspace.organization}/${workspace.project}/${workspace.repository}`
 }
 
 // One workspace's editable fields: owner (server-persisted, identity-picker), a PAT override (client-only, never touches the server), and a ticketing-system override (server-persisted) — the same three fields #104's old Workspace overrides tab exposed per row, now rendered for exactly one workspace (the instance's own) rather than one row per registered workspace. The owner field is now an identity picker (#145 Part 2).
@@ -506,6 +518,11 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
   //
   // In practice, today, it can't: `jira` is rejected by validation everywhere a ticketing system can be chosen (globally, per-workspace, and at workspace creation — see workspaceRegistry.js's `assertValidTicketingSystem` and this file's own `TICKETING_SYSTEMS` enum), so `defaultTicketingSystem.value` and every workspace's `ticketingSystem` can only ever be `'azure-devops'` — there is no reachable state where the two sides of this comparison differ. This only becomes a real, visible misreporting risk once genuine Jira support ships (explicitly out of scope for this ticket, per spec #95's own "Out of Scope" list) and a real fix (an explicit override flag on the workspace record, intersecting the already-closed #96 ticket's schema) is worth building then, against real second-system requirements, rather than speculatively now.
   const hasTicketingOverride = workspace.ticketingSystem !== defaultTicketingSystem.value
+  // #8, docs/adr/0037 — GitHub has no ticketing-system choice of its own (the provider itself is the
+  // suite), so the Ticketing system radio group below is azure-devops-only; a github workspace's
+  // tracker is simply "GitHub", not a configurable option.
+  const isGitHub = workspace.provider === 'github'
+  const providerLabel = isGitHub ? 'GitHub' : 'Azure DevOps'
 
   async function handleSaveOwner() {
     const valueToSave = latestOwnerRef.current
@@ -543,8 +560,9 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
 
   return html`
     <div class="workspace-row" data-workspace-id=${workspace.id}>
+      <span class="stamp draft" title="Provider">${providerLabel}</span>
       <a class="workspace-repo-url" href=${workspaceRepoUrl(workspace)} target="_blank" rel="noreferrer">
-        ${workspace.organization}/${workspace.project}/${workspace.repository}
+        ${workspaceLocationLabel(workspace)}
       </a>
 
       <div class="workspace-field workspace-owner">
@@ -567,7 +585,7 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
       </div>
 
       <div class="workspace-field workspace-pat">
-        <label>Azure DevOps PAT override</label>
+        <label>${providerLabel} PAT override</label>
         <div class="workspace-pat-status">
           ${effectivePatStatus === 'rejected'
             ? html`<span class="stamp review">${hasPatOverride ? 'OVERRIDE REJECTED' : 'GLOBAL DEFAULT REJECTED'}</span>`
@@ -595,37 +613,41 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
         <div class="workspace-field-status">${patStatus}</div>
       </div>
 
-      <div class="workspace-field workspace-ticketing">
-        <label>Ticketing system</label>
-        <div
-          class="settings-radio-group"
-          role="radiogroup"
-          aria-label=${`Ticketing system for ${workspace.organization}/${workspace.project}/${workspace.repository}`}
-        >
-          ${TICKETING_SYSTEMS.map(
-            (system) => html`
-              <label key=${system.id} class=${'settings-radio' + (system.disabled ? ' disabled' : '')}>
-                <input
-                  type="radio"
-                  name=${`workspace-ticketing-${workspace.id}`}
-                  value=${system.id}
-                  checked=${workspace.ticketingSystem === system.id}
-                  disabled=${system.disabled}
-                  onChange=${() => handleTicketingChange(system.id)}
-                />
-                ${system.label}
-                ${system.disabled ? html`<span class="stamp review">${system.disabledReason}</span>` : null}
-              </label>
-            `
-          )}
-        </div>
-        <div class="workspace-ticketing-state">
-          ${hasTicketingOverride
-            ? html`<span class="stamp agreed">OVERRIDE</span>`
-            : html`<span class="stamp draft">USING GLOBAL DEFAULT</span>`}
-        </div>
-        <div class="workspace-field-status">${ticketingStatus}</div>
-      </div>
+      ${isGitHub
+        ? null
+        : html`
+            <div class="workspace-field workspace-ticketing">
+              <label>Ticketing system</label>
+              <div
+                class="settings-radio-group"
+                role="radiogroup"
+                aria-label=${`Ticketing system for ${workspaceLocationLabel(workspace)}`}
+              >
+                ${TICKETING_SYSTEMS.map(
+                  (system) => html`
+                    <label key=${system.id} class=${'settings-radio' + (system.disabled ? ' disabled' : '')}>
+                      <input
+                        type="radio"
+                        name=${`workspace-ticketing-${workspace.id}`}
+                        value=${system.id}
+                        checked=${workspace.ticketingSystem === system.id}
+                        disabled=${system.disabled}
+                        onChange=${() => handleTicketingChange(system.id)}
+                      />
+                      ${system.label}
+                      ${system.disabled ? html`<span class="stamp review">${system.disabledReason}</span>` : null}
+                    </label>
+                  `
+                )}
+              </div>
+              <div class="workspace-ticketing-state">
+                ${hasTicketingOverride
+                  ? html`<span class="stamp agreed">OVERRIDE</span>`
+                  : html`<span class="stamp draft">USING GLOBAL DEFAULT</span>`}
+              </div>
+              <div class="workspace-field-status">${ticketingStatus}</div>
+            </div>
+          `}
     </div>
   `
 }

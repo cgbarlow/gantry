@@ -2,6 +2,8 @@ import { mkdtempSync, rmSync, cpSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from '../../lib/server.js'
+import { withFakeAzureDevOpsServer } from './fakeAzureDevOpsServer.js'
+import { withFakeGitHubServer, GITHUB_OWNER, GITHUB_REPOSITORY, GITHUB_VALID_PAT } from './fakeGitHubServer.js'
 
 /**
  * Creates a temp directory under `os.tmpdir()`, runs `fn(instancesDir)`, and
@@ -81,3 +83,48 @@ export const ORGANIZATION = 'fake-org'
 export const PROJECT = 'fake-project'
 export const REPOSITORY = 'fake-repo'
 export const VALID_PAT = 'valid-test-pat'
+
+export { GITHUB_OWNER, GITHUB_REPOSITORY, GITHUB_VALID_PAT }
+
+/**
+ * Stands up a real gantry server (`withRunningServer`) alongside a real fake provider server
+ * (`withFakeAzureDevOpsServer` or `withFakeGitHubServer`) for the duration of `fn(ctx)`, closing both
+ * afterwards — the "provider-aware test lifecycle" #8's own acceptance criteria calls for, so a route
+ * suite can stand up the exact same shape of fixture against either provider rather than duplicating
+ * this wiring per provider. `provider` is `'azure-devops'` (default) or `'github'`.
+ *
+ * `ctx` passed to `fn` is `{ gantryBase, providerBaseUrl, provider, pat, ...location }` — `location`
+ * is `{ organization, project, repository }` for azure-devops, `{ owner, repository }` for github, so
+ * a caller writes `ctx.repository` either way and only branches on the fields that genuinely differ.
+ * The fake provider server's own `baseUrl` is pre-allowed on the gantry server it starts (via
+ * `allowedAzureDevOpsBaseUrls` / `allowGitHubBaseUrlOverride`, whichever the chosen provider needs) —
+ * a real deployment sets neither, so this is only ever exercised by tests. `options` is forwarded to
+ * `withRunningServer` (e.g. `instancesDir`); `fakeServerOptions` is forwarded to the fake provider
+ * server (e.g. `files` for azure-devops, `repoExists` for either).
+ */
+export function withRunningServerForProvider(provider, { options, fakeServerOptions } = {}, fn) {
+  if (provider === 'github') {
+    return withFakeGitHubServer(
+      { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, ...fakeServerOptions },
+      (providerBaseUrl) =>
+        withRunningServer({ allowGitHubBaseUrlOverride: true, ...options }, (gantryBase) =>
+          fn({ gantryBase, providerBaseUrl, provider, owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT })
+        )
+    )
+  }
+  return withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, ...fakeServerOptions },
+    (providerBaseUrl) =>
+      withRunningServer({ allowedAzureDevOpsBaseUrls: [providerBaseUrl], ...options }, (gantryBase) =>
+        fn({
+          gantryBase,
+          providerBaseUrl,
+          provider: 'azure-devops',
+          organization: ORGANIZATION,
+          project: PROJECT,
+          repository: REPOSITORY,
+          pat: VALID_PAT,
+        })
+      )
+  )
+}

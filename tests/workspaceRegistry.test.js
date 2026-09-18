@@ -15,6 +15,10 @@ import {
   assertValidTicketingSystem,
   TICKETING_SYSTEMS,
   DEFAULT_TICKETING_SYSTEM,
+  assertValidProvider,
+  PROVIDERS,
+  AVAILABLE_PROVIDERS,
+  DEFAULT_PROVIDER,
 } from '../lib/workspaceRegistry.js'
 import { withScratchInstances } from './helpers/lifecycle.js'
 
@@ -324,5 +328,123 @@ test('updateWorkspace preserves an archived flag through an unrelated owner edit
     assert.equal(updated.owner, 'c.barlow')
     assert.equal(updated.archived, true)
     assert.equal(isWorkspaceArchived(created.id, { instancesDir }), true)
+  })
+})
+
+// ---------- #8: Provider (docs/adr/0037) ----------
+
+const GITHUB_LOCATION = { provider: 'github', repoOwner: 'octocat', repository: 'hello-world' }
+
+test('PROVIDERS models azure-devops, github and atlassian; AVAILABLE_PROVIDERS is the narrower accepted set', () => {
+  assert.deepEqual(PROVIDERS, ['azure-devops', 'github', 'atlassian'])
+  assert.deepEqual(AVAILABLE_PROVIDERS, ['azure-devops', 'github'])
+  assert.equal(DEFAULT_PROVIDER, 'azure-devops')
+})
+
+test('assertValidProvider accepts azure-devops and github, rejects atlassian (modeled, not available) and anything unknown', () => {
+  assert.doesNotThrow(() => assertValidProvider('azure-devops'))
+  assert.doesNotThrow(() => assertValidProvider('github'))
+  assert.throws(() => assertValidProvider('atlassian'), /not available yet/)
+  assert.throws(() => assertValidProvider('bitbucket'), /Unknown provider/)
+})
+
+test('registerWorkspace omitting provider still defaults to azure-devops (unchanged pre-#8 behaviour)', async () => {
+  await withScratchInstances((instancesDir) => {
+    const workspace = registerWorkspace(LOCATION, { instancesDir })
+    assert.equal(workspace.provider, 'azure-devops')
+  })
+})
+
+test('registerWorkspace registers a github workspace with owner/repository, no organization/project/ticketingSystem required', async () => {
+  await withScratchInstances((instancesDir) => {
+    const workspace = registerWorkspace(GITHUB_LOCATION, { instancesDir })
+    assert.equal(workspace.provider, 'github')
+    assert.equal(workspace.repoOwner, 'octocat')
+    assert.equal(workspace.repository, 'hello-world')
+    assert.equal(workspace.organization, undefined)
+    assert.equal(workspace.ticketingSystem, undefined)
+  })
+})
+
+test('registerWorkspace persists a github workspace with no provider-specific ticketingSystem key on disk', async () => {
+  await withScratchInstances((instancesDir) => {
+    const created = registerWorkspace(GITHUB_LOCATION, { instancesDir })
+    const registryPath = join(instancesDir, 'workspace-registry.json')
+    const persisted = JSON.parse(readFileSync(registryPath, 'utf8'))
+    assert.deepEqual(persisted[created.id], {
+      provider: 'github',
+      repoOwner: 'octocat',
+      repository: 'hello-world',
+      owner: '',
+    })
+  })
+})
+
+test('an azure-devops workspace registered the pre-#8 way is still persisted with no explicit provider key at all', async () => {
+  await withScratchInstances((instancesDir) => {
+    const created = registerWorkspace(LOCATION, { instancesDir })
+    const registryPath = join(instancesDir, 'workspace-registry.json')
+    const persisted = JSON.parse(readFileSync(registryPath, 'utf8'))
+    assert.ok(!Object.hasOwn(persisted[created.id], 'provider'))
+    // ...but is still read forward as 'azure-devops' on the public object (ADR-0037's read-forward convention).
+    assert.equal(created.provider, 'azure-devops')
+  })
+})
+
+test('registerWorkspace rejects a github location missing owner/repository, naming the wizard-facing field name', async () => {
+  await withScratchInstances((instancesDir) => {
+    assert.throws(
+      () => registerWorkspace({ provider: 'github', repository: 'hello-world' }, { instancesDir }),
+      /missing: owner/
+    )
+    assert.throws(
+      () => registerWorkspace({ provider: 'github', repoOwner: 'octocat' }, { instancesDir }),
+      /missing: repository/
+    )
+  })
+})
+
+test('registerWorkspace rejects provider "atlassian" — modeled, but not available yet', async () => {
+  await withScratchInstances((instancesDir) => {
+    assert.throws(
+      () => registerWorkspace({ provider: 'atlassian', repoOwner: 'x', repository: 'y' }, { instancesDir }),
+      /not available yet/
+    )
+  })
+})
+
+test('findWorkspaceByLocation distinguishes an azure-devops workspace from a github workspace sharing the same repository name', async () => {
+  await withScratchInstances((instancesDir) => {
+    const ado = registerWorkspace({ organization: 'shared', project: 'shared', repository: 'shared-name' }, { instancesDir })
+    const gh = registerWorkspace({ provider: 'github', repoOwner: 'shared', repository: 'shared-name' }, { instancesDir })
+    assert.notEqual(ado.id, gh.id)
+
+    assert.equal(
+      findWorkspaceByLocation({ organization: 'shared', project: 'shared', repository: 'shared-name' }, { instancesDir }).id,
+      ado.id
+    )
+    assert.equal(
+      findWorkspaceByLocation({ provider: 'github', repoOwner: 'shared', repository: 'shared-name' }, { instancesDir }).id,
+      gh.id
+    )
+  })
+})
+
+test('getOrCreateWorkspace reuses an existing github workspace for the same owner/repository tuple rather than creating a duplicate', async () => {
+  await withScratchInstances((instancesDir) => {
+    const first = getOrCreateWorkspace(GITHUB_LOCATION, { instancesDir })
+    const second = getOrCreateWorkspace(GITHUB_LOCATION, { instancesDir })
+    assert.equal(first.id, second.id)
+    assert.equal(listWorkspaces({ instancesDir }).length, 1)
+  })
+})
+
+test('updateWorkspace updates a github workspace\'s owner (person) without requiring organization/project/ticketingSystem', async () => {
+  await withScratchInstances((instancesDir) => {
+    const created = registerWorkspace(GITHUB_LOCATION, { instancesDir })
+    const updated = updateWorkspace(created.id, { owner: 'c.barlow' }, { instancesDir })
+    assert.equal(updated.owner, 'c.barlow')
+    assert.equal(updated.provider, 'github')
+    assert.equal(updated.repoOwner, 'octocat')
   })
 })
