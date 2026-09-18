@@ -5577,8 +5577,8 @@ function ArchivedWorkspacesPanel({ onRestored }) {
         ${rows.map(
           (ws) => html`
             <div class="archived-row" key=${ws.id}>
-              <span class="name">${ws.repository}</span>
-              <span class="def">${ws.organization}/${ws.project}</span>
+              <span class="name">${ws.location.repository}</span>
+              <span class="def">${ws.location.organization}/${ws.location.project}</span>
               <button type="button" class="btn small" disabled=${busy[ws.id]} onClick=${() => restore(ws.id)}>
                 Restore
               </button>

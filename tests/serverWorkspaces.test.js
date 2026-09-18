@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { registerWorkspace } from '../lib/workspaceRegistry.js'
@@ -170,6 +170,101 @@ test('POST /api/workspaces with a valid PAT for the real location creates the wo
       )
     }
   )
+})
+
+// ---------- #5: nested `{ provider, location }` wire shape ----------
+
+test('GET /api/workspaces returns the nested provider/location shape alongside the flat aliases', async () => {
+  await withScratchServer({}, async (base, instancesDir) => {
+    registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, owner: 'c.barlow' }, { instancesDir })
+
+    const listing = await (await fetch(`${base}/api/workspaces`)).json()
+    assert.equal(listing.length, 1)
+    assert.equal(listing[0].provider, 'azure-devops')
+    assert.deepEqual(listing[0].location, { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY })
+    // Flat aliases still present too — no consumer relying on them breaks.
+    assert.equal(listing[0].organization, ORGANIZATION)
+  })
+})
+
+test('POST /api/workspaces accepts the nested { provider, location } body and returns the nested shape', async () => {
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {} },
+    async (adoBaseUrl) => {
+      await withScratchServer(
+        { allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true },
+        async (base) => {
+          const res = await fetch(`${base}/api/workspaces`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+            body: JSON.stringify({
+              provider: 'azure-devops',
+              location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+              owner: 'c.barlow',
+            }),
+          })
+          assert.equal(res.status, 201)
+          const created = await res.json()
+          assert.equal(created.provider, 'azure-devops')
+          assert.deepEqual(created.location, { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl })
+          assert.equal(created.owner, 'c.barlow')
+          // Flat aliases still round-trip for any consumer not yet migrated.
+          assert.equal(created.organization, ORGANIZATION)
+          assert.equal(created.repository, REPOSITORY)
+        }
+      )
+    }
+  )
+})
+
+test('POST /api/workspaces reports a nested location missing a required field as 400, matching the flat-body message shape', async () => {
+  await withScratchServer({}, async (base) => {
+    const res = await fetch(`${base}/api/workspaces`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'azure-devops', location: { organization: ORGANIZATION } }),
+    })
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.match(body.error, /missing: project, repository/)
+  })
+})
+
+test('POST /api/workspaces with a nested { provider: "github", ... } body is rejected as not-yet-supported, and persists nothing', async () => {
+  await withScratchServer({}, async (base) => {
+    const res = await fetch(`${base}/api/workspaces`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'github', location: { owner: 'octocat', repository: 'hello-world' } }),
+    })
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.match(body.error, /github/)
+    assert.match(body.error, /not supported yet/)
+
+    const listing = await (await fetch(`${base}/api/workspaces`)).json()
+    assert.equal(listing.length, 0)
+  })
+})
+
+test('a workspace registered before #3/#5 via the flat wire shape still loads through GET /api/workspaces with a nested location', async () => {
+  await withScratchServer({}, async (base, instancesDir) => {
+    // Simulates a pre-#3 record: written directly in the old flat shape, bypassing registerWorkspace's own current (already-nested) normalization.
+    const registryPath = join(instancesDir, 'workspace-registry.json')
+    const legacyId = 'legacy-workspace-id'
+    writeFileSync(
+      registryPath,
+      JSON.stringify({ [legacyId]: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, owner: 'c.barlow', ticketingSystem: 'azure-devops' } }, null, 2)
+    )
+
+    const listing = await (await fetch(`${base}/api/workspaces`)).json()
+    const found = listing.find((w) => w.id === legacyId)
+    assert.ok(found, 'the legacy-shaped workspace is still listed')
+    assert.equal(found.provider, 'azure-devops')
+    assert.deepEqual(found.location, { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY })
+    assert.equal(found.organization, ORGANIZATION)
+    assert.equal(found.owner, 'c.barlow')
+  })
 })
 
 test('POST /api/workspaces defaults ticketingSystem to "azure-devops" when omitted', async () => {

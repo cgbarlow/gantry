@@ -51,7 +51,11 @@ function installBaseUrlRoutes(page, adoBaseUrl) {
   routes.push(page.route('**/api/workspaces', async (route) => {
     if (route.request().method() !== 'POST') { await route.continue(); return }
     const body = JSON.parse(route.request().postData() ?? '{}')
-    body.baseUrl = adoBaseUrl
+    // The wizard now sends the #37 nested `{ provider, location }` body (ticket #5) — the injected
+    // baseUrl has to land in `location`, not the top level, or the server proves this workspace's PAT
+    // against real dev.azure.com instead of this test's own fake server.
+    if (body.location) body.location.baseUrl = adoBaseUrl
+    else body.baseUrl = adoBaseUrl
     await route.continue({ postData: JSON.stringify(body) })
   }))
   routes.push(page.route('**/api/instances', async (route) => {
