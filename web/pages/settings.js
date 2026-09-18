@@ -230,11 +230,23 @@ function RenderEngineSection() {
 // Definitions page's own Refresh button re-reads every configured repo on demand thereafter. Gated
 // behind advancedMode alongside the other Azure-DevOps-specific sections above — a local-only user
 // never sees this.
+// #19 (ADR-0037): the location fields collected change with the Provider picked, the same
+// "Provider drives which fields appear" convention the "+ New Workspace" wizard uses — Azure DevOps
+// needs Organization/Project/Repository, GitHub only Owner/Repository. Atlassian is deliberately
+// absent (not built, docs/adr/0037), unlike the wizard's own Provider picker (#8) which shows it as
+// known-but-unavailable — this form has no such row to add it to yet.
+const LIBRARY_REPO_PROVIDERS = [
+  { id: 'azure-devops', label: 'Azure DevOps' },
+  { id: 'github', label: 'GitHub' },
+]
+
 function LibraryReposSection() {
   const [repos, setRepos] = useState(null)
   const [loadError, setLoadError] = useState(null)
+  const [provider, setProvider] = useState('azure-devops')
   const [organization, setOrganization] = useState('')
   const [project, setProject] = useState('')
+  const [owner, setOwner] = useState('')
   const [repository, setRepository] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [codeOwner, setCodeOwner] = useState('')
@@ -263,7 +275,12 @@ function LibraryReposSection() {
   }, [])
 
   async function handleAdd() {
-    if (!organization.trim() || !project.trim() || !repository.trim()) {
+    if (provider === 'github') {
+      if (!owner.trim() || !repository.trim()) {
+        setAddError('Owner and repository are both required.')
+        return
+      }
+    } else if (!organization.trim() || !project.trim() || !repository.trim()) {
       setAddError('Organization, project and repository are all required.')
       return
     }
@@ -271,16 +288,14 @@ function LibraryReposSection() {
     setAddError(null)
     setAddStatus('')
     try {
+      const location =
+        provider === 'github'
+          ? { owner: owner.trim(), repository: repository.trim(), ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}) }
+          : { organization: organization.trim(), project: project.trim(), repository: repository.trim(), ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}) }
       const res = await fetch('/api/library-repos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          organization: organization.trim(),
-          project: project.trim(),
-          repository: repository.trim(),
-          ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
-          ...(codeOwner.trim() ? { codeOwner: codeOwner.trim() } : {}),
-        }),
+        body: JSON.stringify({ provider, location, ...(codeOwner.trim() ? { codeOwner: codeOwner.trim() } : {}) }),
       })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -289,6 +304,7 @@ function LibraryReposSection() {
       }
       setOrganization('')
       setProject('')
+      setOwner('')
       setRepository('')
       setBaseUrl('')
       setCodeOwner('')
@@ -334,11 +350,13 @@ function LibraryReposSection() {
     <section class="settings-section">
       <h2>Library repos</h2>
       <p class="guidance">
-        Azure DevOps repos read as additional sources for the server library, alongside the packaged
-        <code>definitions/</code> directory — read-only in the editor (viewable, copyable-from,
-        clonable into a workspace), read with this server's own PAT (<code>GANTRY_LIBRARY_PAT</code>),
-        cached on disk. Re-read at server startup, when a repo is added below, and on the Definitions
-        page's Refresh button — never polled.
+        Azure DevOps or GitHub repos read as additional sources for the server library, alongside the
+        packaged <code>definitions/</code> directory — read-only in the editor (viewable,
+        copyable-from, clonable into a workspace), read with this server's own PAT — one per Provider
+        (<code>GANTRY_LIBRARY_PAT_AZURE_DEVOPS</code> / <code>GANTRY_LIBRARY_PAT_GITHUB</code>, the
+        former also honouring the deprecated <code>GANTRY_LIBRARY_PAT</code>) — cached on disk.
+        Re-read at server startup, when a repo is added below, and on the Definitions page's Refresh
+        button — never polled.
       </p>
       ${loadError ? html`<p class="load-error">${loadError}</p>` : null}
       ${repos === null && !loadError ? html`<p class="loading">Loading…</p>` : null}
@@ -348,7 +366,10 @@ function LibraryReposSection() {
               ${repos.map(
                 (repo) => html`
                   <div class="result-row" key=${repo.id}>
-                    <span class="k">${repo.organization}/${repo.project}/${repo.repository}</span>
+                    <span class="k"
+                      >${repo.provider === 'github' ? 'GitHub' : 'Azure DevOps'}:
+                      ${repo.provider === 'github' ? `${repo.location.owner}/${repo.location.repository}` : `${repo.location.organization}/${repo.location.project}/${repo.location.repository}`}</span
+                    >
                     <span class="v">
                       ${repo.definitionCount == null
                         ? 'Not read yet'
@@ -383,14 +404,29 @@ function LibraryReposSection() {
           ? html`<p class="guidance">No library repos configured.</p>`
           : null}
       <div class="wizard-field">
-        <label class="field-label" for="library-repo-organization">Organization</label>
-        <input id="library-repo-organization" class="wizard-input" value=${organization} onInput=${(e) => setOrganization(e.currentTarget.value)} />
-        <label class="field-label" for="library-repo-project">Project</label>
-        <input id="library-repo-project" class="wizard-input" value=${project} onInput=${(e) => setProject(e.currentTarget.value)} />
-        <label class="field-label" for="library-repo-repository">Repository</label>
-        <input id="library-repo-repository" class="wizard-input" value=${repository} onInput=${(e) => setRepository(e.currentTarget.value)} />
-        <label class="field-label" for="library-repo-baseurl">Base URL (optional — on-premises Azure DevOps Server only)</label>
-        <input id="library-repo-baseurl" class="wizard-input" value=${baseUrl} onInput=${(e) => setBaseUrl(e.currentTarget.value)} />
+        <label class="field-label" for="library-repo-provider">Provider</label>
+        <select id="library-repo-provider" class="wizard-input" value=${provider} onChange=${(e) => setProvider(e.currentTarget.value)}>
+          ${LIBRARY_REPO_PROVIDERS.map((p) => html`<option value=${p.id}>${p.label}</option>`)}
+        </select>
+        ${provider === 'github'
+          ? html`
+              <label class="field-label" for="library-repo-owner">Owner</label>
+              <input id="library-repo-owner" class="wizard-input" value=${owner} onInput=${(e) => setOwner(e.currentTarget.value)} />
+              <label class="field-label" for="library-repo-repository">Repository</label>
+              <input id="library-repo-repository" class="wizard-input" value=${repository} onInput=${(e) => setRepository(e.currentTarget.value)} />
+              <label class="field-label" for="library-repo-baseurl">Base URL (optional — GitHub Enterprise Server only)</label>
+              <input id="library-repo-baseurl" class="wizard-input" value=${baseUrl} onInput=${(e) => setBaseUrl(e.currentTarget.value)} />
+            `
+          : html`
+              <label class="field-label" for="library-repo-organization">Organization</label>
+              <input id="library-repo-organization" class="wizard-input" value=${organization} onInput=${(e) => setOrganization(e.currentTarget.value)} />
+              <label class="field-label" for="library-repo-project">Project</label>
+              <input id="library-repo-project" class="wizard-input" value=${project} onInput=${(e) => setProject(e.currentTarget.value)} />
+              <label class="field-label" for="library-repo-repository">Repository</label>
+              <input id="library-repo-repository" class="wizard-input" value=${repository} onInput=${(e) => setRepository(e.currentTarget.value)} />
+              <label class="field-label" for="library-repo-baseurl">Base URL (optional — on-premises Azure DevOps Server only)</label>
+              <input id="library-repo-baseurl" class="wizard-input" value=${baseUrl} onInput=${(e) => setBaseUrl(e.currentTarget.value)} />
+            `}
         <label class="field-label" for="library-repo-codeowner">Code owner (optional — Promote's required reviewer)</label>
         <input id="library-repo-codeowner" class="wizard-input" placeholder="Name, unique name, or email" value=${codeOwner} onInput=${(e) => setCodeOwner(e.currentTarget.value)} />
       </div>
