@@ -199,14 +199,17 @@ function RenderEngineSection() {
 // Definitions page's own Refresh button re-reads every configured repo on demand thereafter. Gated
 // behind advancedMode alongside the other Azure-DevOps-specific sections above — a local-only user
 // never sees this.
-// #19 (ADR-0037): the location fields collected change with the Provider picked, the same
-// "Provider drives which fields appear" convention the "+ New Workspace" wizard uses — Azure DevOps
-// needs Organization/Project/Repository, GitHub only Owner/Repository. Atlassian is deliberately
-// absent (not built, docs/adr/0037), unlike the wizard's own Provider picker (#8) which shows it as
-// known-but-unavailable — this form has no such row to add it to yet.
+// #19/#27 (ADR-0037, ADR-0041): the location fields collected change with the Provider picked, the
+// same "Provider drives which fields appear" convention the "+ New Workspace" wizard uses — Azure
+// DevOps needs Organization/Project/Repository, GitHub only Owner/Repository, GitLab only
+// Namespace/Project (stored as `location.repository`, ADR-0041's own "wizard labels it Project;
+// only the internal key is neutral"). Atlassian is deliberately absent (not built, docs/adr/0037),
+// unlike the wizard's own Provider picker (#8) which shows it as known-but-unavailable — this form
+// has no such row to add it to yet.
 const LIBRARY_REPO_PROVIDERS = [
   { id: 'azure-devops', label: 'Azure DevOps' },
   { id: 'github', label: 'GitHub' },
+  { id: 'gitlab', label: 'GitLab' },
 ]
 
 function LibraryReposSection() {
@@ -216,6 +219,7 @@ function LibraryReposSection() {
   const [organization, setOrganization] = useState('')
   const [project, setProject] = useState('')
   const [owner, setOwner] = useState('')
+  const [namespace, setNamespace] = useState('')
   const [repository, setRepository] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [codeOwner, setCodeOwner] = useState('')
@@ -249,6 +253,11 @@ function LibraryReposSection() {
         setAddError('Owner and repository are both required.')
         return
       }
+    } else if (provider === 'gitlab') {
+      if (!namespace.trim() || !repository.trim()) {
+        setAddError('Namespace and project are both required.')
+        return
+      }
     } else if (!organization.trim() || !project.trim() || !repository.trim()) {
       setAddError('Organization, project and repository are all required.')
       return
@@ -260,7 +269,9 @@ function LibraryReposSection() {
       const location =
         provider === 'github'
           ? { owner: owner.trim(), repository: repository.trim(), ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}) }
-          : { organization: organization.trim(), project: project.trim(), repository: repository.trim(), ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}) }
+          : provider === 'gitlab'
+            ? { namespace: namespace.trim(), repository: repository.trim(), ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}) }
+            : { organization: organization.trim(), project: project.trim(), repository: repository.trim(), ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}) }
       const res = await fetch('/api/library-repos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -274,6 +285,7 @@ function LibraryReposSection() {
       setOrganization('')
       setProject('')
       setOwner('')
+      setNamespace('')
       setRepository('')
       setBaseUrl('')
       setCodeOwner('')
@@ -319,13 +331,14 @@ function LibraryReposSection() {
     <section class="settings-section">
       <h2>Library repos</h2>
       <p class="guidance">
-        Azure DevOps or GitHub repos read as additional sources for the server library, alongside the
-        packaged <code>definitions/</code> directory — read-only in the editor (viewable,
-        copyable-from, clonable into a workspace), read with this server's own PAT — one per Provider
-        (<code>GANTRY_LIBRARY_PAT_AZURE_DEVOPS</code> / <code>GANTRY_LIBRARY_PAT_GITHUB</code>, the
-        former also honouring the deprecated <code>GANTRY_LIBRARY_PAT</code>) — cached on disk.
-        Re-read at server startup, when a repo is added below, and on the Definitions page's Refresh
-        button — never polled.
+        Azure DevOps, GitHub or GitLab repos read as additional sources for the server library,
+        alongside the packaged <code>definitions/</code> directory — read-only in the editor
+        (viewable, copyable-from, clonable into a workspace), read with this server's own PAT — one
+        per Provider (<code>GANTRY_LIBRARY_PAT_AZURE_DEVOPS</code> /
+        <code>GANTRY_LIBRARY_PAT_GITHUB</code> / <code>GANTRY_LIBRARY_PAT_GITLAB</code>, the first
+        also honouring the deprecated <code>GANTRY_LIBRARY_PAT</code>) — cached on disk. Re-read at
+        server startup, when a repo is added below, and on the Definitions page's Refresh button —
+        never polled.
       </p>
       ${loadError ? html`<p class="load-error">${loadError}</p>` : null}
       ${repos === null && !loadError ? html`<p class="loading">Loading…</p>` : null}
@@ -336,8 +349,12 @@ function LibraryReposSection() {
                 (repo) => html`
                   <div class="result-row" key=${repo.id}>
                     <span class="k"
-                      >${repo.provider === 'github' ? 'GitHub' : 'Azure DevOps'}:
-                      ${repo.provider === 'github' ? `${repo.location.owner}/${repo.location.repository}` : `${repo.location.organization}/${repo.location.project}/${repo.location.repository}`}</span
+                      >${repo.provider === 'github' ? 'GitHub' : repo.provider === 'gitlab' ? 'GitLab' : 'Azure DevOps'}:
+                      ${repo.provider === 'github'
+                        ? `${repo.location.owner}/${repo.location.repository}`
+                        : repo.provider === 'gitlab'
+                          ? `${repo.location.namespace}/${repo.location.repository}`
+                          : `${repo.location.organization}/${repo.location.project}/${repo.location.repository}`}</span
                     >
                     <span class="v">
                       ${repo.definitionCount == null
@@ -386,16 +403,25 @@ function LibraryReposSection() {
               <label class="field-label" for="library-repo-baseurl">Base URL (optional — GitHub Enterprise Server only)</label>
               <input id="library-repo-baseurl" class="wizard-input" value=${baseUrl} onInput=${(e) => setBaseUrl(e.currentTarget.value)} />
             `
-          : html`
-              <label class="field-label" for="library-repo-organization">Organization</label>
-              <input id="library-repo-organization" class="wizard-input" value=${organization} onInput=${(e) => setOrganization(e.currentTarget.value)} />
-              <label class="field-label" for="library-repo-project">Project</label>
-              <input id="library-repo-project" class="wizard-input" value=${project} onInput=${(e) => setProject(e.currentTarget.value)} />
-              <label class="field-label" for="library-repo-repository">Repository</label>
-              <input id="library-repo-repository" class="wizard-input" value=${repository} onInput=${(e) => setRepository(e.currentTarget.value)} />
-              <label class="field-label" for="library-repo-baseurl">Base URL (optional — on-premises Azure DevOps Server only)</label>
-              <input id="library-repo-baseurl" class="wizard-input" value=${baseUrl} onInput=${(e) => setBaseUrl(e.currentTarget.value)} />
-            `}
+          : provider === 'gitlab'
+            ? html`
+                <label class="field-label" for="library-repo-namespace">Namespace</label>
+                <input id="library-repo-namespace" class="wizard-input" value=${namespace} onInput=${(e) => setNamespace(e.currentTarget.value)} />
+                <label class="field-label" for="library-repo-repository">Project</label>
+                <input id="library-repo-repository" class="wizard-input" value=${repository} onInput=${(e) => setRepository(e.currentTarget.value)} />
+                <label class="field-label" for="library-repo-baseurl">Base URL (optional — self-hosted GitLab CE/EE only)</label>
+                <input id="library-repo-baseurl" class="wizard-input" value=${baseUrl} onInput=${(e) => setBaseUrl(e.currentTarget.value)} />
+              `
+            : html`
+                <label class="field-label" for="library-repo-organization">Organization</label>
+                <input id="library-repo-organization" class="wizard-input" value=${organization} onInput=${(e) => setOrganization(e.currentTarget.value)} />
+                <label class="field-label" for="library-repo-project">Project</label>
+                <input id="library-repo-project" class="wizard-input" value=${project} onInput=${(e) => setProject(e.currentTarget.value)} />
+                <label class="field-label" for="library-repo-repository">Repository</label>
+                <input id="library-repo-repository" class="wizard-input" value=${repository} onInput=${(e) => setRepository(e.currentTarget.value)} />
+                <label class="field-label" for="library-repo-baseurl">Base URL (optional — on-premises Azure DevOps Server only)</label>
+                <input id="library-repo-baseurl" class="wizard-input" value=${baseUrl} onInput=${(e) => setBaseUrl(e.currentTarget.value)} />
+              `}
         <label class="field-label" for="library-repo-codeowner">Code owner (optional — Promote's required reviewer)</label>
         <input id="library-repo-codeowner" class="wizard-input" placeholder="Name, unique name, or email" value=${codeOwner} onInput=${(e) => setCodeOwner(e.currentTarget.value)} />
       </div>
