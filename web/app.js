@@ -2546,7 +2546,17 @@ function prWebUrlFor(instance, prId) {
 }
 
 function workItemWebUrlFor(workItem, wiId) {
-  if (!workItem?.organization || !workItem.project || !wiId) return null
+  if (!wiId) return null
+  // #15: a GitHub-linked instance's `workItem` carries `provider: 'github'` (`lib/workItemLink.js`) —
+  // `wiId` is an issue number (the parent, or a per-stage/per-review one), reached through
+  // `githubWebBaseUrl`'s own API-root-to-web-root derivation, never Azure DevOps' `_workitems/edit`
+  // convention.
+  if (workItem?.provider === 'github') {
+    if (!workItem.owner || !workItem.repository) return null
+    const base = githubWebBaseUrl(workItem)
+    return `${base}/${encodeURIComponent(workItem.owner)}/${encodeURIComponent(workItem.repository)}/issues/${wiId}`
+  }
+  if (!workItem?.organization || !workItem.project) return null
   const base = workItem.baseUrl ?? 'https://dev.azure.com'
   return `${base}/${encodeURIComponent(workItem.organization)}/${encodeURIComponent(workItem.project)}/_workitems/edit/${wiId}`
 }

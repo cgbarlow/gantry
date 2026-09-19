@@ -100,6 +100,49 @@ test('createChildIssue falls back to a task-list entry in the parent and a "Part
   })
 })
 
+// #15 — createIssue's assignees/labels support and ensureLabelsExist, backing Request Review.
+
+test('createIssue attaches assignees and labels, auto-creating any label the repo does not already define', async () => {
+  await withFakeServer({ collaborators: [{ login: 'ana', id: 1 }] }, async (baseUrl) => {
+    const c = client(baseUrl)
+    const issue = await c.createIssue({ title: 'Review requested', body: '', assignees: ['ana'], labels: ['gantry:review/requested'] })
+    assert.deepEqual(issue.assignees.map((a) => a.login), ['ana'])
+    assert.deepEqual(issue.labels.map((l) => l.name), ['gantry:review/requested'])
+    // Auto-created with real label-object shape, not just echoed strings.
+    assert.equal(issue.labels[0].color, 'ededed')
+  })
+})
+
+test('createIssue rejects an assignee without repo access with the same shape a real 422 carries', async () => {
+  await withFakeServer({ collaborators: [] }, async (baseUrl) => {
+    const c = client(baseUrl)
+    await assert.rejects(
+      () => c.createIssue({ title: 'x', body: '', assignees: ['nobody'] }),
+      (err) => {
+        assert.equal(err.status, 422)
+        return true
+      }
+    )
+  })
+})
+
+test('ensureLabelsExist creates every label it is given, and tolerates one that already exists', async () => {
+  await withFakeServer({}, async (baseUrl) => {
+    const c = client(baseUrl)
+    const labels = [
+      { name: 'gantry:review/requested', color: 'fbca04', description: 'Requested' },
+      { name: 'gantry:review/approved', color: '0e8a16', description: 'Approved' },
+    ]
+    await c.ensureLabelsExist(labels)
+    // Idempotent: creating the exact same set again must not throw over the 422 "already_exists".
+    await c.ensureLabelsExist(labels)
+
+    const created = await c.createIssue({ title: 'x', body: '', labels: ['gantry:review/requested'] })
+    assert.equal(created.labels[0].color, 'fbca04')
+    assert.equal(created.labels[0].description, 'Requested')
+  })
+})
+
 test('a second stage falling back appends a second checklist item under the same "## Stages" heading, not a duplicate one', async () => {
   await withFakeServer({ subIssuesEnabled: false }, async (baseUrl) => {
     const c = client(baseUrl)
