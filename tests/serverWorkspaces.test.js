@@ -251,6 +251,44 @@ test('POST /api/workspaces with a nested { provider: "github", ... } body and no
   })
 })
 
+// #24: `provider` validates (lib/provider.js's own SUPPORTED_PROVIDERS, ADR-0041) once gitlab is
+// added as a third supported-but-not-yet-registered provider — this route's own repo-check dispatch
+// used to be `provider === 'github' ? checkGitHubRepo(...) : checkAzureDevOpsRepo(...)`, which would
+// have silently run Azure DevOps's own repo check (and reused its own baseUrl-override flag) against
+// a GitLab-shaped `{ namespace, repository }` location — exactly the anti-pattern ADR-0039 rejected.
+// A real `gitlab` provider (rather than a fabricated stub) proves this: it is genuinely accepted by
+// `assertValidProvider` and `normalizeProviderLocation` (both correctly gitlab-aware after #24) but
+// has no registered capability yet (`lib/providerRegistry.js`, left for a later ticket per ADR-0041)
+// — this route must report that plainly rather than mis-running Azure DevOps's own client against it.
+test('POST /api/workspaces with a nested { provider: "gitlab", ... } body reports "not supported yet" rather than running Azure DevOps\'s own repo check against it', async () => {
+  await withScratchServer({}, async (base) => {
+    const res = await fetch(`${base}/api/workspaces`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+      body: JSON.stringify({ provider: 'gitlab', location: { namespace: 'group/subgroup', repository: 'repo' } }),
+    })
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.match(body.error, /"gitlab" workspace is not supported yet/)
+
+    const listing = await (await fetch(`${base}/api/workspaces`)).json()
+    assert.equal(listing.length, 0)
+  })
+})
+
+test('POST /api/workspaces rejects a gitlab.baseUrl override even when allowAzureDevOpsBaseUrlOverride is set — the two flags are not interchangeable', async () => {
+  await withScratchServer({ allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+    const res = await fetch(`${base}/api/workspaces`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+      body: JSON.stringify({ provider: 'gitlab', location: { namespace: 'group', repository: 'repo', baseUrl: 'https://gitlab.example.internal' } }),
+    })
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.match(body.error, /gitlab.baseUrl overrides are not permitted/)
+  })
+})
+
 test('a workspace registered before #3/#5 via the flat wire shape still loads through GET /api/workspaces with a nested location', async () => {
   await withScratchServer({}, async (base, instancesDir) => {
     // Simulates a pre-#3 record: written directly in the old flat shape, bypassing registerWorkspace's own current (already-nested) normalization.

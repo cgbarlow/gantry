@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, utimesSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInstance, writeModule } from '../lib/instance.js'
@@ -203,6 +203,36 @@ test('listRegistry does not discover a bare (workspace-unqualified) instance dir
   await withScratchInstances((instancesDir) => {
     createInstance('design', 'bare-initiative', { instancesDir })
     assert.deepEqual(listRegistry({ instancesDir }), [])
+  })
+})
+
+// #24: listRegistry's remote-row dispatch used to be an `if (kind === 'github') ... else` that
+// silently ran the Azure DevOps row builder against *any* other kind — exactly the anti-pattern
+// ADR-0039 rejected, and one a genuinely third-provider (e.g. GitLab, ADR-0041) entry would have hit
+// before that provider's own builder ever existed. A stub third-provider kind (never a real,
+// registered one — this registry has no `buildGitLabRow` yet) proves the dispatch table now reports
+// it cleanly and omits the row, rather than mis-running Azure DevOps's builder against fields it
+// doesn't understand (which would surface as a confusing network/validation error instead of a clean
+// omission) — other, known-kind rows are unaffected.
+test('listRegistry omits a row whose registry entry has an unregistered location kind, without mis-running another provider\'s builder against it', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    const workspaceDir = seedWorkspace(instancesDir)
+    createInstance('design', 'local-initiative', { instancesDir: workspaceDir })
+    // Backfills 'local-initiative' into the registry file, then injects a hand-crafted entry no real
+    // registration path can produce (registerInstance's own assertValidEntryKind already rejects any
+    // kind besides directory/azureDevOps/github) — the "stub third-provider case" this dispatch table
+    // must still route correctly rather than crash or silently misattribute.
+    listRegistry({ instancesDir })
+    const registryPath = join(instancesDir, 'instance-registry.json')
+    const entries = JSON.parse(readFileSync(registryPath, 'utf8'))
+    entries['stub-scope'] = { 'stub-initiative': { kind: 'stub-provider' } }
+    writeFileSync(registryPath, JSON.stringify(entries))
+
+    const registry = await listRegistry({ instancesDir })
+    assert.deepEqual(
+      registry.map((row) => row.slug),
+      ['local-initiative']
+    )
   })
 })
 
