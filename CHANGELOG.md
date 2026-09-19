@@ -17,6 +17,15 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.7.1-beta — 2026-09-19
+
+### Fixed
+
+- **Settings and the "+ New Workspace" wizard no longer assume every workspace is on Azure DevOps.** The Advanced-mode description, the Workspace Settings "no workspace" message, and the wizard's adopt-by-URL guidance now speak generically across all four Providers instead of naming only Azure DevOps.
+- **Removed the leftover "Default ticketing system" setting** (Settings, and its per-workspace override) — a pre-Provider-model control that only ever did anything for Azure DevOps and had become actively misleading now that Jira support genuinely exists through Atlassian. The Provider chosen per workspace has fully decided the work-item tracker since GitHub shipped; this setting was never cleaned up afterward.
+- **The "+ New Workspace" wizard's parent-work-item link step is now reachable for GitHub, GitLab and Atlassian workspaces.** It was silently skipped for every Provider except Azure DevOps due to a check against the setting removed above — a real gap, not just stale copy.
+- Removed the stale `Contoso-Production` placeholder pre-filled into the Organization field when registering a new Azure DevOps workspace.
+
 ## 0.7.0-beta — 2026-09-19
 
 ### Added
