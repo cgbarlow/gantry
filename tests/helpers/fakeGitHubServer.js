@@ -43,6 +43,13 @@ import { createServer } from 'node:http'
  * `'none'` for any login not listed, `'admin'|'write'|'read'` otherwise; this is the endpoint that
  * makes team-granted access resolve as access for a name that's an org member but not a direct
  * collaborator.
+ *
+ * Issues, per #14's `lib/githubWorkItemsClient.js`: `POST /repos/:owner/:repo/issues` (create),
+ * `GET .../issues/:number` (read), `PATCH .../issues/:number` (title/body/state update), and
+ * `POST .../issues/:number/sub_issues` (attach as a native sub-issue). `subIssuesEnabled` (default
+ * `true`) controls whether that last endpoint works at all — `false` makes it 404, reproducing the
+ * "feature unavailable" case docs/adr/0040's hierarchy fallback (a task-list entry in the parent's body
+ * plus a "Part of #<n>" line in the child) exists to handle.
  */
 export function createFakeGitHubServer({
   owner,
@@ -55,7 +62,13 @@ export function createFakeGitHubServer({
   collaborators = [],
   orgMembers = [],
   permissions = {},
+  subIssuesEnabled = true,
 } = {}) {
+  const issues = new Map() // number -> issue object
+  const issueIdToNumber = new Map() // internal id -> number
+  const subIssues = new Map() // parent number -> Set<child number>
+  let issueCounter = 0
+  let issueIdCounter = 1000
   const branches = new Map()
   const refs = new Map() // branch name -> commit sha
   const commits = new Map() // commit sha -> { treeSha, parents }
@@ -278,13 +291,81 @@ export function createFakeGitHubServer({
       return json(201, { ref: `refs/heads/${branchName}`, object: { sha: body.sha } })
     }
 
+    // POST /repos/:owner/:repo/issues — creates a new issue. Mirrors real GitHub's response shape
+    // closely enough for lib/githubWorkItemsClient.js: `number` (repo-scoped, user-visible) and `id`
+    // (opaque, global — what the sub_issues endpoint actually addresses a child by) are deliberately
+    // distinct counters, the same way real GitHub's are.
+    if (req.method === 'POST' && pathname === `${repoBasePath}/issues`) {
+      const body = await readJsonBody(req)
+      const number = ++issueCounter
+      const id = ++issueIdCounter
+      const issue = {
+        id,
+        number,
+        title: body.title ?? '',
+        body: body.body ?? '',
+        state: 'open',
+        state_reason: null,
+        html_url: `https://fake-github.invalid/${owner}/${repository}/issues/${number}`,
+      }
+      issues.set(number, issue)
+      issueIdToNumber.set(id, number)
+      return json(201, issue)
+    }
+
+    // GET /repos/:owner/:repo/issues/:number
+    const issueGetMatch = pathname.match(new RegExp(`^${repoBasePath}/issues/(\\d+)$`))
+    if (req.method === 'GET' && issueGetMatch) {
+      const issue = issues.get(Number(issueGetMatch[1]))
+      if (!issue) return json(404, { message: `No fake issue #${issueGetMatch[1]}` })
+      return json(200, issue)
+    }
+
+    // PATCH /repos/:owner/:repo/issues/:number — partial update (title/body/state/state_reason).
+    if (req.method === 'PATCH' && issueGetMatch) {
+      const issue = issues.get(Number(issueGetMatch[1]))
+      if (!issue) return json(404, { message: `No fake issue #${issueGetMatch[1]}` })
+      const body = await readJsonBody(req)
+      Object.assign(issue, body)
+      return json(200, issue)
+    }
+
+    // POST /repos/:owner/:repo/issues/:number/sub_issues — attaches an existing issue (by its internal
+    // `id`, per real GitHub's own contract) as a sub-issue of :number. 404s outright when
+    // `subIssuesEnabled` is false, simulating a repository (or GitHub Enterprise Server version)
+    // without the feature — indistinguishable, by design, from the parent issue not existing.
+    const subIssuesMatch = pathname.match(new RegExp(`^${repoBasePath}/issues/(\\d+)/sub_issues$`))
+    if (req.method === 'POST' && subIssuesMatch) {
+      if (!subIssuesEnabled) {
+        return json(404, { message: 'Not Found (fake: sub-issues is not enabled for this repository)' })
+      }
+      const parentNumber = Number(subIssuesMatch[1])
+      const parent = issues.get(parentNumber)
+      if (!parent) return json(404, { message: `No fake issue #${parentNumber}` })
+      const body = await readJsonBody(req)
+      const childNumber = issueIdToNumber.get(body.sub_issue_id)
+      if (!childNumber) return json(404, { message: `No fake issue with id ${body.sub_issue_id}` })
+      if (!subIssues.has(parentNumber)) subIssues.set(parentNumber, new Set())
+      subIssues.get(parentNumber).add(childNumber)
+      return json(201, parent)
+    }
+
+    // GET /repos/:owner/:repo/issues/:number/sub_issues — lists the sub-issues attached to :number
+    // (test-facing convenience, mirroring real GitHub's own read endpoint).
+    const subIssuesGetMatch = pathname.match(new RegExp(`^${repoBasePath}/issues/(\\d+)/sub_issues$`))
+    if (req.method === 'GET' && subIssuesGetMatch) {
+      const parentNumber = Number(subIssuesGetMatch[1])
+      const children = [...(subIssues.get(parentNumber) ?? [])].map((number) => issues.get(number))
+      return json(200, children)
+    }
+
     return json(404, { message: `No fake route for ${req.method} ${pathname}` })
   })
 }
 
 /** Starts a `createFakeGitHubServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/helpers/fakeAzureDevOpsServer.js`'s own `withFakeAzureDevOpsServer` shape. */
 export function withFakeGitHubServer(
-  { owner, repository, validPat, files, branchFiles, repoExists, ownerType, collaborators, orgMembers, permissions },
+  { owner, repository, validPat, files, branchFiles, repoExists, ownerType, collaborators, orgMembers, permissions, subIssuesEnabled },
   fn
 ) {
   return new Promise((resolve, reject) => {
@@ -299,6 +380,7 @@ export function withFakeGitHubServer(
       collaborators,
       orgMembers,
       permissions,
+      subIssuesEnabled,
     })
     server.listen(0, async () => {
       const { port } = server.address()
