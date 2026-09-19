@@ -68,9 +68,17 @@ export function createFakeGitHubServer({
   // initial commit/tree/ref, so `writeFiles`'s own `getBranchTip` finds a real tip (and a real
   // `base_tree` to build on) even for a repo seeded directly via `files`/`branchFiles`, not through a
   // prior write.
+  //
+  // #16: every stored file is a real `Buffer` — a fixture may pass either a plain string (a text
+  // file's UTF-8 content) or a `Buffer` (a binary file's real bytes, e.g. a seeded PNG), matching how
+  // a write via the Git Data API below also ends up storing real bytes. This is what makes the
+  // Contents API GET below byte-accurate for binary content, mirroring real GitHub rather than
+  // silently mangling it through a UTF-8 round trip.
   function seedBranch(name, seedFiles) {
     const entries = Object.entries(seedFiles)
-    const store = new Map(entries.map(([path, content]) => [path.startsWith('/') ? path : `/${path}`, content]))
+    const store = new Map(
+      entries.map(([path, content]) => [path.startsWith('/') ? path : `/${path}`, Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8')])
+    )
     branches.set(name, store)
     const treeSha = nextSha('tree')
     trees.set(treeSha, new Map(store))
@@ -154,14 +162,16 @@ export function createFakeGitHubServer({
       const scopePath = pathname.slice(`${repoBasePath}/contents`.length).replace(/^\/+/, '')
       const normalizedScope = scopePath === '' ? '' : scopePath.replace(/\/+$/, '')
 
-      // A single file at exactly this path.
+      // A single file at exactly this path. #16: `content` is always a real Buffer (see seedBranch
+      // and the tree-materialization handler below) — base64-encoding it directly, rather than
+      // assuming it's UTF-8 text first, is what makes this byte-accurate for a binary file.
       if (store.has(`/${normalizedScope}`)) {
         const content = store.get(`/${normalizedScope}`)
         return json(200, {
           type: 'file',
           name: normalizedScope.split('/').pop(),
           path: normalizedScope,
-          content: Buffer.from(content, 'utf8').toString('base64'),
+          content: content.toString('base64'),
           encoding: 'base64',
         })
       }
@@ -234,7 +244,11 @@ export function createFakeGitHubServer({
         }
         const blob = blobs.get(entry.sha)
         if (!blob) return json(422, { message: `No fake blob "${entry.sha}"` })
-        materialized.set(key, Buffer.from(blob.content, blob.encoding === 'base64' ? 'base64' : 'utf8').toString('utf8'))
+        // #16: decode to the blob's real bytes and keep them as a Buffer — real GitHub's blob store
+        // holds real bytes regardless of which encoding the caller used to submit them, and a prior
+        // version of this fake re-stringified them as UTF-8 here, silently mangling any binary
+        // (base64-submitted) content the moment it was written rather than only when it was read.
+        materialized.set(key, Buffer.from(blob.content, blob.encoding === 'base64' ? 'base64' : 'utf8'))
       }
       const sha = nextSha('tree')
       trees.set(sha, materialized)
@@ -242,12 +256,20 @@ export function createFakeGitHubServer({
     }
 
     // POST /repos/:owner/:repo/git/commits — records a new commit object pointing at `tree`.
+    // #16: real GitHub always returns `author`/`committer` (each `{ name, email, date }`) on a created
+    // commit — defaulted from the authenticated identity/current time when the request body omits them,
+    // exactly as `lib/githubClient.js`'s `writeFiles` does. This fake stamps a fresh ISO date per commit
+    // (rather than a fixed constant) so `lib/render.js`'s Document Control commit date reflects a real,
+    // if fake, moment, the same way a real GitHub commit would.
     if (req.method === 'POST' && pathname === `${repoBasePath}/git/commits`) {
       const body = await readJsonBody(req)
       if (!trees.has(body.tree)) return json(422, { message: `No fake tree "${body.tree}"` })
       const sha = nextSha('commit')
-      commits.set(sha, { treeSha: body.tree, parents: body.parents ?? [] })
-      return json(201, { sha })
+      const date = new Date().toISOString()
+      const committer = body.committer ?? { name: 'Fake Committer', email: 'fake-committer@example.invalid', date }
+      const author = body.author ?? { name: 'Fake Author', email: 'fake-author@example.invalid', date }
+      commits.set(sha, { treeSha: body.tree, parents: body.parents ?? [], committer, author })
+      return json(201, { sha, committer, author })
     }
 
     // PATCH /repos/:owner/:repo/git/refs/heads/:branch — fast-forwards an existing branch to a new
