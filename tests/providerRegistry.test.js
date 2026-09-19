@@ -8,8 +8,10 @@ import {
   resolveWorkItems,
   resolveIdentity,
 } from '../lib/providerRegistry.js'
+import { AuthenticationError } from '../lib/providerErrors.js'
 import { withFakeAzureDevOpsServer as withFakeServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withFakeGitHubServer, GITHUB_OWNER, GITHUB_REPOSITORY, GITHUB_VALID_PAT } from './helpers/fakeGitHubServer.js'
+import { withFakeGitLabServer, GITLAB_NAMESPACE, GITLAB_REPOSITORY, GITLAB_VALID_PAT } from './helpers/fakeGitLabServer.js'
 import { ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 import { runProviderContractTests } from './helpers/providerContractTests.js'
 
@@ -95,6 +97,40 @@ test('resolvePullRequests instantiates github\'s pull-requests client and opens 
       assert.deepEqual(fetched.reviews, [])
     }
   )
+})
+
+// #26: gitlab joins the registry the same incremental way github did, starting with content store
+// only — identity/work items/pull requests are later tickets' job (ADR-0041's own scope list).
+test('registeredProviders lists gitlab once its content store is registered', () => {
+  assert.ok(registeredProviders().includes('gitlab'))
+})
+
+test('getProviderCapabilities resolves gitlab to its content-store factory (no other capability registered yet)', () => {
+  const capabilities = getProviderCapabilities('gitlab')
+  assert.equal(typeof capabilities.contentStore, 'function')
+  assert.equal(capabilities.pullRequests, undefined)
+  assert.equal(capabilities.workItems, undefined)
+  assert.equal(capabilities.identity, undefined)
+})
+
+test('resolveContentStore instantiates gitlab\'s content-store client and reads/writes through it', async () => {
+  await withFakeGitLabServer({ namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, validPat: GITLAB_VALID_PAT }, async (baseUrl) => {
+    const contentStore = resolveContentStore('gitlab', { namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, pat: GITLAB_VALID_PAT, baseUrl })
+    assert.equal(await contentStore.repoExists(), true)
+    await contentStore.writeFile('/registry-smoke-test.md', 'x\n')
+    assert.equal(await contentStore.getFileContent('/registry-smoke-test.md'), 'x\n')
+  })
+})
+
+test('resolveContentStore\'s gitlab client surfaces a rejected PAT as the neutral AuthenticationError, tagged gitlab', async () => {
+  await withFakeGitLabServer({ namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, validPat: GITLAB_VALID_PAT }, async (baseUrl) => {
+    const contentStore = resolveContentStore('gitlab', { namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, pat: 'wrong-pat', baseUrl })
+    await assert.rejects(() => contentStore.getFileContent('/anything.md'), (err) => {
+      assert.ok(err instanceof AuthenticationError)
+      assert.equal(err.provider, 'gitlab')
+      return true
+    })
+  })
 })
 
 test('resolveContentStore/resolvePullRequests/resolveWorkItems/resolveIdentity instantiate azure-devops\'s existing clients', async () => {

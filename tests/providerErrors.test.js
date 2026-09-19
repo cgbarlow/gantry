@@ -36,6 +36,7 @@ test('RequestError keeps its status/body alongside the provider tag', () => {
 test('providerDisplayName maps known provider ids to a human-readable name and falls back to the raw id otherwise', () => {
   assert.equal(providerDisplayName('azure-devops'), 'Azure DevOps')
   assert.equal(providerDisplayName('github'), 'GitHub')
+  assert.equal(providerDisplayName('gitlab'), 'GitLab')
   assert.equal(providerDisplayName('atlassian'), 'Atlassian')
   assert.equal(providerDisplayName('some-future-provider'), 'some-future-provider')
 })
