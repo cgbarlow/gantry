@@ -6,7 +6,7 @@ import {
   GitHubNotFoundError,
   GitHubRepoNotFoundError,
 } from '../lib/githubClient.js'
-import { AuthenticationError, NotFoundError } from '../lib/providerErrors.js'
+import { AuthenticationError, NotFoundError, RequestError } from '../lib/providerErrors.js'
 import { withFakeGitHubServer, GITHUB_OWNER, GITHUB_REPOSITORY, GITHUB_VALID_PAT } from './helpers/fakeGitHubServer.js'
 
 // lib/githubClient.js's read-only subset: proving a PAT reaches a real repository (#8's
@@ -243,5 +243,72 @@ test('a rejected PAT on writeFile surfaces as the neutral AuthenticationError, t
       assert.equal(err.provider, 'github')
       return true
     })
+  })
+})
+
+// ---------- #12: getBranchObjectId / branchExists / createBranch (the per-stage branch lifecycle's own primitives) ----------
+
+test('branchExists is false for a branch that has never existed, and getBranchObjectId reports null for it', async () => {
+  await withFakeGitHubServer({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT }, async (baseUrl) => {
+    const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+    assert.equal(await client.branchExists('gantry-workspace/demo/shape'), false)
+    assert.equal(await client.getBranchObjectId('gantry-workspace/demo/shape'), null)
+  })
+})
+
+test('createBranch creates a new branch pointing at the source branch\'s current tip, and branchExists then reports it', async () => {
+  await withFakeGitHubServer({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: { 'instance.yaml': 'stage: shape\n' } }, async (baseUrl) => {
+    const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+    const mainObjectId = await client.getBranchObjectId('main')
+
+    const result = await client.createBranch('gantry-workspace/demo/shape')
+    assert.equal(result.name, 'gantry-workspace/demo/shape')
+    assert.equal(result.from, 'main')
+    assert.equal(result.objectId, mainObjectId)
+
+    assert.equal(await client.branchExists('gantry-workspace/demo/shape'), true)
+    // Stacked from main means it starts out carrying main's own content, no commit of its own.
+    assert.equal(await client.getFileContent('instance.yaml', { branch: 'gantry-workspace/demo/shape' }), 'stage: shape\n')
+  })
+})
+
+test('createBranch can stack a new branch on another (non-main) branch, not just on main', async () => {
+  await withFakeGitHubServer(
+    { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: { 'instance.yaml': 'stage: shape\n' } },
+    async (baseUrl) => {
+      const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+      await client.createBranch('gantry-workspace/demo/shape')
+      await client.writeFile('instance.yaml', 'stage: hld-define\n', { branch: 'gantry-workspace/demo/shape' })
+
+      await client.createBranch('gantry-workspace/demo/hld-define', { from: 'gantry-workspace/demo/shape' })
+      assert.equal(
+        await client.getFileContent('instance.yaml', { branch: 'gantry-workspace/demo/hld-define' }),
+        'stage: hld-define\n'
+      )
+      // main is untouched by either branch's own commits.
+      assert.equal(await client.getFileContent('instance.yaml', { branch: 'main' }), 'stage: shape\n')
+    }
+  )
+})
+
+test('createBranch throws NotFoundError when the source branch does not exist', async () => {
+  await withFakeGitHubServer({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT }, async (baseUrl) => {
+    const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+    await assert.rejects(() => client.createBranch('feature-x', { from: 'no-such-branch' }), NotFoundError)
+  })
+})
+
+test('createBranch throws RequestError when the branch name already exists', async () => {
+  await withFakeGitHubServer({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT }, async (baseUrl) => {
+    const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+    await client.createBranch('feature-x')
+    await assert.rejects(() => client.createBranch('feature-x'), RequestError)
+  })
+})
+
+test('createBranch surfaces a rejected PAT as AuthenticationError', async () => {
+  await withFakeGitHubServer({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT }, async (baseUrl) => {
+    const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: 'wrong-pat', baseUrl })
+    await assert.rejects(() => client.createBranch('feature-x'), AuthenticationError)
   })
 })

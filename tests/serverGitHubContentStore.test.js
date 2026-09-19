@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { loadDefinition } from '../lib/definition.js'
 import { createGitHubClient } from '../lib/githubClient.js'
+import { stageBranchName } from '../lib/githubStageBranch.js'
 import { archiveInstance } from '../lib/instanceRegistry.js'
 import {
   withRunningServerForProvider,
@@ -18,6 +19,10 @@ import {
 // coverage in tests/server.test.js (creation, load, single/bulk save, byte-identical round-trip),
 // exercised against a real fake GitHub server (tests/helpers/fakeGitHubServer.js) via real HTTP
 // requests to a real running gantry server — the primary seam per #1's Testing Decisions.
+//
+// #12 adds the stage-branch lifecycle on top: every save below lands on the stage's own branch
+// (`gantry-workspace/<slug>/<stageId>`), not `main` — mirrors tests/serverAzureDevOpsAuth.test.js's
+// own stage-branch assertions for Azure DevOps.
 
 function withScratchGitHubServer(fn, { fakeServerOptions } = {}) {
   return withScratchInstances((instancesDir) =>
@@ -150,11 +155,13 @@ test('GET /api/instance loads a GitHub-backed instance\'s stage content, matchin
   })
 })
 
-test('PUT /api/instance/modules/:id writes one module to the GitHub repo, and an unedited field round-trips byte-identical', async () => {
+test('PUT /api/instance/modules/:id creates the stage\'s own branch on first save, writes there (not main), and an unedited field round-trips byte-identical', async () => {
   await withScratchGitHubServer(async (ctx) => {
     const created = await createGitHubInstance(ctx, 'remote-initiative')
     assert.equal(created.status, 201)
     const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl: ctx.providerBaseUrl })
+    const stageBranch = stageBranchName('remote-initiative', 'shape')
+    assert.equal(await client.branchExists(stageBranch), false, 'no branch until the first real save')
     const untouchedBefore = await client.getFileContent('gantry-workspace/remote-initiative/modules/introduction.md')
 
     const res = await fetch(`${ctx.gantryBase}/api/instance/modules/background?slug=remote-initiative`, {
@@ -170,21 +177,26 @@ test('PUT /api/instance/modules/:id writes one module to the GitHub repo, and an
     const status = await res.json()
     assert.equal(status.modules.find((m) => m.id === 'background').complete, true)
 
-    const backgroundText = await client.getFileContent('gantry-workspace/remote-initiative/modules/background.md')
+    assert.equal(await client.branchExists(stageBranch), true, 'the first save creates the stage branch')
+    const backgroundText = await client.getFileContent('gantry-workspace/remote-initiative/modules/background.md', { branch: stageBranch })
     assert.match(backgroundText, /Updated via GitHub\./)
     assert.match(backgroundText, /owner: c\.barlow/)
 
     // Untouched module content is byte-identical after the save.
-    const untouchedAfter = await client.getFileContent('gantry-workspace/remote-initiative/modules/introduction.md')
+    const untouchedAfter = await client.getFileContent('gantry-workspace/remote-initiative/modules/introduction.md', { branch: stageBranch })
     assert.equal(untouchedAfter, untouchedBefore)
+
+    // The write never leaked onto main — main still carries the blank first-stage content.
+    assert.doesNotMatch(await client.getFileContent('gantry-workspace/remote-initiative/modules/background.md'), /Updated via GitHub\./)
   })
 })
 
-test('PUT /api/instance/modules saves several modules as one GitHub commit, and reports each one\'s completeness', async () => {
+test('PUT /api/instance/modules saves several modules as one GitHub commit on the stage branch, and reports each one\'s completeness', async () => {
   await withScratchGitHubServer(async (ctx) => {
     const created = await createGitHubInstance(ctx, 'remote-initiative')
     assert.equal(created.status, 201)
     const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl: ctx.providerBaseUrl })
+    const stageBranch = stageBranchName('remote-initiative', 'shape')
     const untouchedBefore = await client.getFileContent('gantry-workspace/remote-initiative/modules/introduction.md')
 
     const res = await fetch(`${ctx.gantryBase}/api/instance/modules?slug=remote-initiative&stage=shape`, {
@@ -203,12 +215,64 @@ test('PUT /api/instance/modules saves several modules as one GitHub commit, and 
     assert.ok(body.commit, 'expected a single commit id covering both modules')
     assert.equal(body.modules.find((m) => m.id === 'background').complete, true)
 
-    const background = await client.getFileContent('gantry-workspace/remote-initiative/modules/background.md')
+    const background = await client.getFileContent('gantry-workspace/remote-initiative/modules/background.md', { branch: stageBranch })
     assert.match(background, /Saved together\./)
-    const solutionDefinition = await client.getFileContent('gantry-workspace/remote-initiative/modules/solution-definition.md')
+    const solutionDefinition = await client.getFileContent('gantry-workspace/remote-initiative/modules/solution-definition.md', { branch: stageBranch })
     assert.match(solutionDefinition, /Also saved\./)
-    const untouchedAfter = await client.getFileContent('gantry-workspace/remote-initiative/modules/introduction.md')
+    const untouchedAfter = await client.getFileContent('gantry-workspace/remote-initiative/modules/introduction.md', { branch: stageBranch })
     assert.equal(untouchedAfter, untouchedBefore)
+
+    // main is untouched by this stage's own commit.
+    assert.doesNotMatch(await client.getFileContent('gantry-workspace/remote-initiative/modules/background.md'), /Saved together\./)
+  })
+})
+
+test('GET /api/instance reports the stage branch\'s own content once a save has begun it, not main\'s stale snapshot', async () => {
+  await withScratchGitHubServer(async (ctx) => {
+    const created = await createGitHubInstance(ctx, 'remote-initiative')
+    assert.equal(created.status, 201)
+
+    const saveRes = await fetch(`${ctx.gantryBase}/api/instance/modules/background?slug=remote-initiative`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(GITHUB_VALID_PAT) },
+      body: JSON.stringify({ status: 'agreed', owner: 'c.barlow', fields: { problem: 'On the stage branch.', 'affected-domains': ['Payments'], opportunity: '' } }),
+    })
+    assert.equal(saveRes.status, 200)
+
+    const res = await fetch(`${ctx.gantryBase}/api/instance?slug=remote-initiative`, { headers: { Authorization: basicAuthHeader(GITHUB_VALID_PAT) } })
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    const background = body.modules.find((m) => m.id === 'background')
+    const problem = background.fields.find((f) => f.id === 'problem')
+    assert.equal(problem.value, 'On the stage branch.')
+  })
+})
+
+test('a second stage\'s branch stacks on the first stage\'s still-open branch, not forked fresh from main', async () => {
+  await withScratchGitHubServer(async (ctx) => {
+    const created = await createGitHubInstance(ctx, 'remote-initiative')
+    assert.equal(created.status, 201)
+    const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl: ctx.providerBaseUrl })
+
+    // Real work on shape before hld-define begins — this write must be visible on hld-define's own
+    // branch (stacked), not main (which never sees it while shape's own "PR" is still open).
+    const shapeSave = await fetch(`${ctx.gantryBase}/api/instance/modules/background?slug=remote-initiative`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(GITHUB_VALID_PAT) },
+      body: JSON.stringify({ status: 'agreed', owner: 'c.barlow', fields: { problem: 'Shape stage work.', 'affected-domains': ['Payments'], opportunity: '' } }),
+    })
+    assert.equal(shapeSave.status, 200)
+
+    const hldSave = await fetch(`${ctx.gantryBase}/api/instance/modules/hld-submission?slug=remote-initiative&stage=hld-define`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(GITHUB_VALID_PAT) },
+      body: JSON.stringify({ status: 'draft', owner: '', fields: {} }),
+    })
+    assert.equal(hldSave.status, 200)
+
+    const hldBranch = stageBranchName('remote-initiative', 'hld-define')
+    const background = await client.getFileContent('gantry-workspace/remote-initiative/modules/background.md', { branch: hldBranch })
+    assert.match(background, /Shape stage work\./)
   })
 })
 
