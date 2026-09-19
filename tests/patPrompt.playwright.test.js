@@ -56,7 +56,10 @@ function withAzureDevOpsBackedServer(fn) {
           { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
           { instancesDir }
         )
-        const workspace = findWorkspaceByLocation({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl }, { instancesDir })
+        const workspace = findWorkspaceByLocation(
+          { location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl } },
+          { instancesDir }
+        )
         await withRunningServer({ slug: 'my-initiative', instancesDir }, (base) => fn(base, workspace.id))
       } finally {
         rmSync(instancesDir, { recursive: true, force: true })
