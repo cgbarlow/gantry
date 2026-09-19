@@ -170,9 +170,6 @@ test('the "+ New Workspace" wizard registers a workspace, creates an instance, a
       await page.locator('#ws-repository').fill(REPOSITORY)
       await page.locator('#ws-pat').fill(VALID_PAT)
       await page.locator('#ws-owner').fill('a.architect')
-      // Azure DevOps is the only enabled ticketing system — already
-      // selected by default; Jira's radio is present but disabled.
-      assert.equal(await page.locator('input[name="ws-ticketing-system"][value="jira"]').isDisabled(), true)
       await page.getByRole('button', { name: 'Register workspace' }).click()
 
       // ---------- Step 2: instance fields ----------

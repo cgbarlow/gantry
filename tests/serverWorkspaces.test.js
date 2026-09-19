@@ -55,23 +55,6 @@ test('POST /api/workspaces reports 400, not 500, for a location missing organiza
   })
 })
 
-test('POST /api/workspaces rejects ticketingSystem "jira" with 400 — modeled but not accepted yet, checked before any credential/network step', async () => {
-  await withScratchServer({}, async (base) => {
-    const res = await fetch(`${base}/api/workspaces`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: postWorkspaceBody({ ticketingSystem: 'jira' }),
-    })
-    assert.equal(res.status, 400)
-    const body = await res.json()
-    assert.match(body.error, /not supported yet/)
-
-    // Rejected globally, not just per-workspace — nothing was persisted.
-    const listing = await (await fetch(`${base}/api/workspaces`)).json()
-    assert.equal(listing.length, 0)
-  })
-})
-
 test('POST /api/workspaces with an azureDevOps.baseUrl reports 400 on a server that has not opted into allowAzureDevOpsBaseUrlOverride', async () => {
   await withScratchServer({}, async (base) => {
     const res = await fetch(`${base}/api/workspaces`, {
@@ -161,7 +144,6 @@ test('POST /api/workspaces with a valid PAT for the real location creates the wo
           assert.equal(created.location.repository, REPOSITORY)
           assert.equal(created.location.baseUrl, adoBaseUrl)
           assert.equal(created.owner, 'c.barlow')
-          assert.equal(created.ticketingSystem, 'azure-devops')
           assert.equal(typeof created.id, 'string')
 
           const listing = await (await fetch(`${base}/api/workspaces`)).json()
@@ -312,27 +294,6 @@ test('a workspace registered before #3/#5 via the flat wire shape still loads th
   })
 })
 
-test('POST /api/workspaces defaults ticketingSystem to "azure-devops" when omitted', async () => {
-  await withFakeAzureDevOpsServer(
-    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {} },
-    async (adoBaseUrl) => {
-      await withScratchServer(
-        { allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true },
-        async (base) => {
-          const res = await fetch(`${base}/api/workspaces`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
-            body: postWorkspaceBody({ baseUrl: adoBaseUrl }),
-          })
-          assert.equal(res.status, 201)
-          const body = await res.json()
-          assert.equal(body.ticketingSystem, 'azure-devops')
-        }
-      )
-    }
-  )
-})
-
 // ---------- Backfill via the instance-creation flow ----------
 
 test('registering a new Azure-DevOps-backed instance via POST /api/instances auto-creates its workspace, visible via GET /api/workspaces', async () => {
@@ -437,36 +398,6 @@ test('PATCH /api/workspaces/:id updates owner, with no PAT required', async () =
 
     const listing = await (await fetch(`${base}/api/workspaces`)).json()
     assert.equal(listing.find((w) => w.id === workspace.id).owner, 'c.barlow')
-  })
-})
-
-test('PATCH /api/workspaces/:id updates ticketingSystem to a supported value, overriding that workspace alone', async () => {
-  await withScratchServer({}, async (base, instancesDir) => {
-    const workspaceA = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY } }, { instancesDir })
-    const workspaceB = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: 'fake-repo-2' } }, { instancesDir })
-
-    const res = await patchWorkspace(base, workspaceA.id, { ticketingSystem: 'azure-devops' })
-    assert.equal(res.status, 200)
-    const updated = await res.json()
-    assert.equal(updated.ticketingSystem, 'azure-devops')
-
-    // The other workspace is unaffected — an override is per-workspace.
-    const listing = await (await fetch(`${base}/api/workspaces`)).json()
-    assert.equal(listing.find((w) => w.id === workspaceB.id).ticketingSystem, 'azure-devops')
-  })
-})
-
-test('PATCH /api/workspaces/:id rejects ticketingSystem "jira" with 400, and persists nothing', async () => {
-  await withScratchServer({}, async (base, instancesDir) => {
-    const workspace = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY } }, { instancesDir })
-
-    const res = await patchWorkspace(base, workspace.id, { ticketingSystem: 'jira' })
-    assert.equal(res.status, 400)
-    const body = await res.json()
-    assert.match(body.error, /not supported yet/)
-
-    const listing = await (await fetch(`${base}/api/workspaces`)).json()
-    assert.equal(listing.find((w) => w.id === workspace.id).ticketingSystem, 'azure-devops')
   })
 })
 

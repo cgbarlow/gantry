@@ -5,24 +5,17 @@
 // holds instance data, this wizard is explicit about what it's doing at
 // every step:
 //
-//   1. Pick an existing Workspace (an already-registered Azure DevOps
-//      organization/project/repository) or register a brand new one —
-//      setting that new Workspace's Owner and ticketing system in the same
-//      step, since nothing else asks for either ahead of an instance
-//      existing in it.
+//   1. Pick an existing Workspace (an already-registered remote repo, on
+//      whichever Provider it lives on) or register a brand new one — setting
+//      that new Workspace's Owner in the same step, since nothing else asks
+//      for it ahead of an instance existing in it.
 //   2. Instance Name + Directory (defaulting to a slugified Name,
 //      overridable) + initial Assignee.
-//   3. Only when the chosen Workspace has a ticketing system configured
-//      (today, every Workspace does — see workspaceRegistry.js's own
-//      `ticketingSystem` doc comment — but this step is written to react to
-//      that field rather than assume it, so a future "no ticketing system"
-//      Workspace needs no wizard change of its own): the Azure DevOps
-//      parent-work-item link (#126) — Organization and Project pinned
-//      read-only from the Workspace, Parent work item id and Work item type
-//      as real PAT-backed lookups against `GET
-//      /api/azure-devops/work-items/:id`/`GET
-//      /api/azure-devops/work-item-types` (#121's client capabilities),
-//      never freetext.
+//   3. Only for a Workspace whose Provider tracks work items (every built
+//      Provider does today — Azure Boards, GitHub/GitLab Issues, Jira): the
+//      parent-work-item link (#126) — the Workspace's own location pinned
+//      read-only, Parent work item id and (where the Provider has one) Work
+//      item type as real PAT-backed lookups, never freetext.
 //
 // State is kept as module-scope `@preact/signals` (not component-local
 // `useState`), matching the old wizard's own convention (ADR-0006 names
@@ -36,7 +29,6 @@ import { signal, effect } from '@preact/signals'
 import { apiFetch, apiFetchForInstance } from '../lib/apiFetch.js'
 import { basicAuthHeaderForValue, setPatForWorkspace } from '../lib/credential.js'
 import { renderMarkdown } from '../lib/markdown.js'
-import { TICKETING_SYSTEMS, defaultTicketingSystem } from '../lib/ticketingSystem.js'
 import { PROVIDERS, DEFAULT_PROVIDER } from '../lib/provider.js'
 import { IdentityPicker } from '../lib/identityPicker.js'
 import { parseRepoUrl } from '../lib/validateRepo.js'
@@ -197,7 +189,7 @@ const registerProvider = signal(DEFAULT_PROVIDER)
 // `jiraProjectKey` (#48, ADR-0042) are atlassian-only, the same way — `repoOwner`/`repository` are
 // reused for atlassian's own Bitbucket half (ADR-0042: identical `owner/repository` addressing).
 const registerForm = signal({
-  organization: 'Contoso-Production',
+  organization: '',
   project: 'Default',
   repository: '',
   repoOwner: '',
@@ -207,7 +199,6 @@ const registerForm = signal({
   jiraSite: '',
   jiraProjectKey: '',
 })
-const registerTicketingSystem = signal(defaultTicketingSystem.value)
 
 // #9 (ADR-0038): the PAT for a brand-new Workspace, held here in memory only — never persisted to any
 // storage slot until `registerWorkspace`'s own call to `POST /api/workspaces` actually succeeds, at
@@ -322,14 +313,15 @@ function workspaceLocationLabel(w) {
   return `${w.location.organization}/${w.location.project}/${w.location.repository}`
 }
 
-// Same workspace's ticketing/tracker line, provider-aware — neither GitHub nor GitLab has a
-// ticketing-system choice of its own (ADR-0037: the provider itself is the suite), so this reads
-// "GitHub" / "GitLab" rather than "ticketing: none".
+// Same workspace's ticketing/tracker line, provider-aware — no provider has a separate
+// ticketing-system choice of its own any more (ADR-0037: the provider itself is the suite), so this
+// just names the Provider ('none' only for a providerless server workspace, which has no tracker).
 function workspaceTrackerLabel(w) {
   if (w.provider === 'github') return 'GitHub'
   if (w.provider === 'gitlab') return 'GitLab'
   if (w.provider === 'atlassian') return 'Atlassian'
-  return w.ticketingSystem || 'none'
+  if (w.provider === 'azure-devops') return 'Azure DevOps'
+  return 'none'
 }
 
 function slugify(name) {
@@ -493,7 +485,7 @@ function resetWizard() {
   pickedWorkspaceId.value = ''
   registerProvider.value = DEFAULT_PROVIDER
   registerForm.value = {
-    organization: 'Contoso-Production',
+    organization: '',
     project: 'Default',
     repository: '',
     repoOwner: '',
@@ -503,7 +495,6 @@ function resetWizard() {
     jiraSite: '',
     jiraProjectKey: '',
   }
-  registerTicketingSystem.value = defaultTicketingSystem.value
   registerPat.value = ''
   registerJiraPat.value = ''
   registerJiraIssueTypes.value = []
@@ -737,7 +728,6 @@ async function adoptCheckedRepo() {
           provider: 'azure-devops',
           location: { organization: loc.organization, project: loc.project, repository: loc.repository },
           owner: '',
-          ticketingSystem: registerTicketingSystem.value,
         }),
       },
       { silent: true }
@@ -1230,7 +1220,11 @@ function continueFromInstanceStep() {
     createLocalInstance()
     return
   }
-  if (selectedWorkspace.value?.ticketingSystem) {
+  // Every built Provider tracks work items today (Azure Boards, GitHub/GitLab Issues, Jira) — a
+  // providerless server workspace (no `.provider`) is the only case with nowhere to link a work
+  // item to. Previously checked the now-removed `ticketingSystem` field, which was only ever set
+  // for azure-devops — silently skipping this step for every other Provider's workspace.
+  if (selectedWorkspace.value?.provider) {
     step.value = 'link'
     return
   }
@@ -1853,9 +1847,9 @@ function ImportSourcePanel() {
 }
 
 // ---------- Server-hosted + Register + Import: destination picker (#305) ----------
-// "New server workspace" reuses the exact same org/project/repository/owner/
-// ticketing form as the "Start blank" Register panel (registerForm/
-// registerTicketingSystem/registerWorkspace); "An already-registered server
+// "New server workspace" reuses the exact same org/project/repository/owner
+// form as the "Start blank" Register panel (registerForm/registerWorkspace);
+// "An already-registered server
 // workspace" reuses the exact same list as the top-level "Pick existing
 // workspace" mode (workspaces/pickedWorkspaceId/pickWorkspace) — #305 calls
 // for the same picker, not a new one.
@@ -1931,27 +1925,6 @@ function ImportDestinationPanel() {
               project=${registerForm.value.project}
               pat=${registerPat.value}
             />
-          </div>
-          <div class="wizard-field">
-            <label>Ticketing system</label>
-            <div class="settings-radio-group" role="radiogroup" aria-label="Ticketing system">
-              ${TICKETING_SYSTEMS.map(
-                (system) => html`
-                  <label key=${system.id} class=${'settings-radio' + (system.disabled ? ' disabled' : '')}>
-                    <input
-                      type="radio"
-                      name="import-ws-ticketing-system"
-                      value=${system.id}
-                      checked=${registerTicketingSystem.value === system.id}
-                      disabled=${system.disabled}
-                      onChange=${() => (registerTicketingSystem.value = system.id)}
-                    />
-                    ${system.label}
-                    ${system.disabled ? html`<span class="stamp review">${system.disabledReason}</span>` : null}
-                  </label>
-                `
-              )}
-            </div>
           </div>
           <div class="wizard-field">
             <label for="import-ws-pat">Personal Access Token</label>
@@ -2199,8 +2172,10 @@ function WorkspaceStep() {
                 </button>
               </div>
               <p class="wizard-field-hint">
-                Point at a repo that already holds a gantry workspace — gantry checks it and adopts the
-                existing instance data.
+                Point at an Azure DevOps repo that already holds a gantry workspace — gantry checks it
+                and adopts the existing instance data. On GitHub, GitLab or Atlassian instead, use
+                "Register new workspace" with that repo's own real details — gantry detects and adopts
+                existing instance data there too, no separate URL-paste step needed.
               </p>
               <label for="adopt-repo-pat">Personal Access Token</label>
               <input
@@ -2547,27 +2522,6 @@ function WorkspaceStep() {
                     pat=${registerPat.value}
                   />
                 </div>
-                <div class="wizard-field">
-                  <label>Ticketing system</label>
-                  <div class="settings-radio-group" role="radiogroup" aria-label="Ticketing system">
-                    ${TICKETING_SYSTEMS.map(
-                      (system) => html`
-                        <label key=${system.id} class=${'settings-radio' + (system.disabled ? ' disabled' : '')}>
-                          <input
-                            type="radio"
-                            name="ws-ticketing-system"
-                            value=${system.id}
-                            checked=${registerTicketingSystem.value === system.id}
-                            disabled=${system.disabled}
-                            onChange=${() => (registerTicketingSystem.value = system.id)}
-                          />
-                          ${system.label}
-                          ${system.disabled ? html`<span class="stamp review">${system.disabledReason}</span>` : null}
-                        </label>
-                      `
-                    )}
-                  </div>
-                </div>
               `}
           ${registerProvider.value === 'atlassian'
             ? null
@@ -2636,12 +2590,11 @@ function WorkspaceStep() {
 // the same call for the *Instance Settings* screen's own Assignee field.
 function InstanceStep() {
   const ws = selectedWorkspace.value
-  // A GitHub workspace always has a tracker (its own Issues, ADR-0037's suite model) even though it
-  // carries no `ticketingSystem` field (#3/#6 dropped that field for every provider but the legacy
-  // Azure DevOps one, ADR-0037's "ticketingSystem is absorbed into a single provider field") — so the
-  // parent-work-item link step is offered whenever the provider supplies one, not just when the
-  // now-vestigial `ticketingSystem` field happens to be set.
-  const ticketingEnabled = ws?.provider === 'github' || Boolean(ws?.ticketingSystem)
+  // Every built Provider tracks work items (Azure Boards, GitHub/GitLab Issues, Jira — ADR-0037's
+  // suite model), so the parent-work-item link step is offered whenever a Provider-backed workspace
+  // is selected at all — a providerless server workspace (`ws.provider` unset) is the only case
+  // with no tracker to link to.
+  const ticketingEnabled = Boolean(ws?.provider)
 
   // WI #383 (ADR-0036): once an Azure DevOps workspace is picked, its own definitions join the
   // library/server-workspace set the top-level fetch above already loaded — merged by id (definition

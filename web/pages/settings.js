@@ -10,7 +10,6 @@ import {
   setPatForWorkspace,
   clearPatForWorkspace,
 } from '../lib/credential.js'
-import { TICKETING_SYSTEMS, defaultTicketingSystem, setDefaultTicketingSystem } from '../lib/ticketingSystem.js'
 import { advancedMode, setAdvancedMode } from '../lib/advancedMode.js'
 import { renderEngine, setRenderEngine } from '../lib/renderEngine.js'
 import { pandocWasmState } from '../lib/pandocWasm.js'
@@ -68,40 +67,10 @@ function backHrefFrom(query) {
 // is no global-default PAT any more, and no screen-level control for one. Every workspace's own PAT is
 // managed from that workspace's own Workspace Settings screen (`WorkspaceEditor` below) instead.
 
-function TicketingSystemSection() {
-  return html`
-    <section class="settings-section">
-      <h2>Default ticketing system</h2>
-      <p class="guidance">
-        Which ticketing system new workspaces default to, until a workspace's own override (its Workspace Settings
-        screen) says otherwise.
-      </p>
-      <div class="settings-radio-group" role="radiogroup" aria-label="Default ticketing system">
-        ${TICKETING_SYSTEMS.map(
-          (system) => html`
-            <label key=${system.id} class=${'settings-radio' + (system.disabled ? ' disabled' : '')}>
-              <input
-                type="radio"
-                name="default-ticketing-system"
-                value=${system.id}
-                checked=${defaultTicketingSystem.value === system.id}
-                disabled=${system.disabled}
-                onChange=${() => setDefaultTicketingSystem(system.id)}
-              />
-              ${system.label}
-              ${system.disabled ? html`<span class="stamp review">${system.disabledReason}</span>` : null}
-            </label>
-          `
-        )}
-      </div>
-    </section>
-  `
-}
-
-// #300 — a client-only, sticky toggle. Off by default: a local-only user never sees the Azure
-// DevOps PAT section or the default-ticketing-system selector below it. On: this screen is
-// exactly as it always was. Later tickets (#301/#302) read the same signal to hide ticketing UI
-// on other surfaces; this screen is the only place the setting is changed.
+// #300 — a client-only, sticky toggle. Off by default: a local-only user never sees any Provider's
+// PAT section, library repos, or other remote-workspace UI. On: this screen is exactly as it always
+// was. Later tickets (#301/#302) read the same signal to hide this UI on other surfaces; this screen
+// is the only place the setting is changed.
 function AdvancedModeSection() {
   return html`
     <section class="settings-section">
@@ -115,7 +84,8 @@ function AdvancedModeSection() {
         Enable advanced mode
       </label>
       <p class="guidance">
-        Shows Azure DevOps repositories, work-item ticketing, and sign-off. Leave off for local-only use.
+        Shows Provider repositories (Azure DevOps, GitHub, GitLab, Atlassian), work-item ticketing, and
+        sign-off. Leave off for local-only use.
       </p>
     </section>
   `
@@ -480,7 +450,6 @@ export function GlobalSettingsPage({ query }) {
     <main class="settings-page">
       <${AdvancedModeSection} />
       <${RenderEngineSection} />
-      ${advancedMode.value ? html`<${TicketingSystemSection} />` : null}
       ${advancedMode.value ? html`<${LibraryReposSection} />` : null}
     </main>
   `
@@ -597,31 +566,37 @@ const PROVIDER_LABELS = {
   'azure-devops': 'Azure DevOps',
   github: 'GitHub',
   gitlab: 'GitLab',
+  atlassian: 'Atlassian',
 }
 
+// Atlassian (ADR-0042) is a split-suite provider needing two tokens (Bitbucket + Jira) — the single
+// password field below only ever sets/reads one (`credential.js`'s default, unspecified `product`),
+// so this scope text is Bitbucket's own for now. A real per-product PAT UI for Atlassian workspaces
+// is a known follow-up gap, not yet built here.
 const PAT_SCOPE_HELP = {
   'azure-devops': html`Needs <strong>Code (Read &amp; write)</strong>, <strong>Work Items (Read &amp; write)</strong> and <strong>Identity (Read)</strong> scope.`,
   github: html`A fine-grained token needs <strong>Contents</strong>, <strong>Issues</strong> and <strong>Pull requests</strong> permissions set to Read &amp; write, plus <strong>Metadata</strong> set to Read-only.`,
   gitlab: html`A Personal, Project or Group Access Token needs the <strong>api</strong> scope (or, narrower, <strong>read_repository</strong> and <strong>write_repository</strong> together with API access to Issues and Merge Requests).`,
+  atlassian: html`A Bitbucket API token needs <strong>Repositories (Read &amp; write)</strong>, <strong>Pull requests (Read &amp; write)</strong> scope. This workspace's separate Jira token isn't editable here yet.`,
 }
 
-// One workspace's editable fields: owner (server-persisted, identity-picker), its own Workspace PAT
-// (client-only, never touches the server — #9, ADR-0038: this is now the *only* place this
-// workspace's credential lives, there is no global default it could otherwise fall back to), and a
-// ticketing-system override (server-persisted). The owner field is an identity picker (#145 Part 2).
+// One workspace's editable fields: owner (server-persisted, identity-picker) and its own Workspace
+// PAT (client-only, never touches the server — #9, ADR-0038: this is now the *only* place this
+// workspace's credential lives, there is no global default it could otherwise fall back to). The
+// owner field is an identity picker (#145 Part 2).
 function WorkspaceEditor({ workspace, onUpdated, slug }) {
   const [ownerDraft, setOwnerDraft] = useState(workspace.owner ?? '')
   const [ownerStatus, setOwnerStatus] = useState('')
   const [patDraft, setPatDraft] = useState('')
   const [patStatus, setPatStatus] = useState('')
-  const [ticketingStatus, setTicketingStatus] = useState('')
   // A ref tracking the latest owner value — used by handleSaveOwner to read
   // the value that was set via IdentityPicker's onChange (which may not have
   // committed to state yet when the Save button is clicked immediately after
   // a .fill() + blur).
   const latestOwnerRef = useRef(workspace.owner ?? '')
 
-  // Keeps the owner draft in sync if this workspace's record is refreshed from elsewhere (e.g. a ticketing-system change on the same row calling `onUpdated` with the server's own merged record) — without this, a stale draft could silently overwrite a concurrent change on save.
+  // Keeps the owner draft in sync if this workspace's record is refreshed from elsewhere — without
+  // this, a stale draft could silently overwrite a concurrent change on save.
   useEffect(() => {
     setOwnerDraft(workspace.owner ?? '')
     latestOwnerRef.current = workspace.owner ?? ''
@@ -629,17 +604,9 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
 
   const hasOwnPat = hasPatForWorkspace(workspace.id)
   const patStatusForDisplay = credentialStatusForWorkspace(workspace.id)
-  // Known, low-risk gap (#104 review; re-assessed, not fixed here): this is a *heuristic* ("does this workspace's stored value currently differ from the global default"), not a stored "was this ever explicitly overridden" flag — the workspace registry (#96, unchanged by this ticket) always persists one concrete `ticketingSystem` value, with no distinct "unset, tracks the global default" state. In principle that means this label could drift out from under an untouched workspace if the global default ever changed to a different value later.
-  //
-  // In practice, today, it can't: `jira` is rejected by validation everywhere a ticketing system can be chosen (globally, per-workspace, and at workspace creation — see workspaceRegistry.js's `assertValidTicketingSystem` and this file's own `TICKETING_SYSTEMS` enum), so `defaultTicketingSystem.value` and every workspace's `ticketingSystem` can only ever be `'azure-devops'` — there is no reachable state where the two sides of this comparison differ. This only becomes a real, visible misreporting risk once genuine Jira support ships (explicitly out of scope for this ticket, per spec #95's own "Out of Scope" list) and a real fix (an explicit override flag on the workspace record, intersecting the already-closed #96 ticket's schema) is worth building then, against real second-system requirements, rather than speculatively now.
-  const hasTicketingOverride = workspace.ticketingSystem !== defaultTicketingSystem.value
-  // #8, docs/adr/0037; gitlab added #41, ADR-0041 — neither GitHub nor GitLab has a ticketing-system
-  // choice of its own (the provider itself is the suite), so the Ticketing system radio group below
-  // is azure-devops-only; a github or gitlab workspace's tracker is simply "GitHub Issues" / "GitLab
-  // Issues", not a configurable option. Keyed by provider rather than a github/else binary so a third
-  // provider's own label and PAT-scope help never silently fall back to Azure DevOps's.
+  // Keyed by provider rather than a github/else binary so a new provider's own label and PAT-scope
+  // help never silently fall back to Azure DevOps's.
   const providerLabel = PROVIDER_LABELS[workspace.provider] ?? PROVIDER_LABELS['azure-devops']
-  const showTicketingOverride = workspace.provider === 'azure-devops'
 
   async function handleSaveOwner() {
     const valueToSave = latestOwnerRef.current
@@ -662,17 +629,6 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
   function handleClearPat() {
     clearPatForWorkspace(workspace.id)
     setPatStatus('PAT cleared \u2014 the next request for this workspace will prompt for one.')
-  }
-
-  async function handleTicketingChange(systemId) {
-    setTicketingStatus('Saving\u2026')
-    try {
-      const updated = await patchWorkspace(workspace.id, { ticketingSystem: systemId })
-      onUpdated(updated)
-      setTicketingStatus('')
-    } catch (err) {
-      setTicketingStatus(err.message)
-    }
   }
 
   return html`
@@ -728,42 +684,6 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
         <p class="workspace-field-hint">${PAT_SCOPE_HELP[workspace.provider] ?? PAT_SCOPE_HELP['azure-devops']}</p>
         <div class="workspace-field-status">${patStatus}</div>
       </div>
-
-      ${!showTicketingOverride
-        ? null
-        : html`
-            <div class="workspace-field workspace-ticketing">
-              <label>Ticketing system</label>
-              <div
-                class="settings-radio-group"
-                role="radiogroup"
-                aria-label=${`Ticketing system for ${workspaceLocationLabel(workspace)}`}
-              >
-                ${TICKETING_SYSTEMS.map(
-                  (system) => html`
-                    <label key=${system.id} class=${'settings-radio' + (system.disabled ? ' disabled' : '')}>
-                      <input
-                        type="radio"
-                        name=${`workspace-ticketing-${workspace.id}`}
-                        value=${system.id}
-                        checked=${workspace.ticketingSystem === system.id}
-                        disabled=${system.disabled}
-                        onChange=${() => handleTicketingChange(system.id)}
-                      />
-                      ${system.label}
-                      ${system.disabled ? html`<span class="stamp review">${system.disabledReason}</span>` : null}
-                    </label>
-                  `
-                )}
-              </div>
-              <div class="workspace-ticketing-state">
-                ${hasTicketingOverride
-                  ? html`<span class="stamp agreed">OVERRIDE</span>`
-                  : html`<span class="stamp draft">USING GLOBAL DEFAULT</span>`}
-              </div>
-              <div class="workspace-field-status">${ticketingStatus}</div>
-            </div>
-          `}
     </div>
   `
 }
@@ -831,8 +751,8 @@ function WorkspaceArchiveSection({ workspace, onChanged }) {
 // after creation) and the dashboard's own "Remove"/"Reconnect" recovery
 // affordances (web/app.js's LocalGroupResolver, reworked by #306 — still the
 // same resolve/reconnect/remove lifecycle #296/A5 first wrote), reused here
-// rather than reinvented — never a PAT or ticketing-system override, which
-// don't apply to a workspace with no Azure DevOps repo behind it at all.
+// rather than reinvented — never a PAT, which doesn't apply to a workspace with no Provider-backed
+// repo behind it at all.
 function LocalWorkspaceSettingsPage({ query, workspaceId }) {
   const [state, setState] = useState('loading') // 'loading' | 'missing' | 'grant-needed' | 'ready' | 'error'
   const [handle, setHandle] = useState(null)
@@ -905,8 +825,8 @@ function LocalWorkspaceSettingsPage({ query, workspaceId }) {
         <p class="guidance">
           This instance's local workspace — a folder on this browser's own machine (ADR-0029), not a
           server-side workspace record. Its <code>workspace.json</code>, read straight from the folder, is
-          shown below; there is no PAT or ticketing-system override here — a local workspace has no Azure
-          DevOps repo behind it at all.
+          shown below; there is no PAT here — a local workspace has no Provider-backed repo behind it
+          at all.
         </p>
         ${state === 'loading' ? html`<p class="loading">Loading…</p>` : null}
         ${state === 'error' ? html`<p class="load-error">Failed to load: ${error}</p>` : null}
@@ -1017,15 +937,14 @@ function RemoteWorkspaceSettingsPage({ query }) {
       <section class="settings-section">
         <h2>Workspace</h2>
         <p class="guidance">
-          This instance's own workspace — its owner, repo URL, its own Workspace PAT, and (for Azure
-          DevOps) its ticketing-system override. Not a picker across every registered workspace: just
-          the one this instance belongs to.
+          This instance's own workspace — its owner, repo URL and its own Workspace PAT. Not a picker
+          across every registered workspace: just the one this instance belongs to.
         </p>
         ${state === 'no-slug' ? html`<p class="load-error">No instance was specified for these Workspace Settings.</p>` : null}
         ${state === 'loading' ? html`<p class="loading">Loading\u2026</p>` : null}
         ${state === 'error' ? html`<p class="load-error">Failed to load: ${error}</p>` : null}
         ${state === 'no-workspace'
-          ? html`<p class="workspace-empty">This instance has no Azure DevOps workspace — its data is stored locally.</p>`
+          ? html`<p class="workspace-empty">This instance has no remote workspace — its data is stored locally.</p>`
           : null}
         ${state === 'ready'
           ? html`
