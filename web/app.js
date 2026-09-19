@@ -56,7 +56,7 @@ import {
   getFileLastModified,
 } from './lib/localWorkspace.js'
 import { wrap } from './lib/editorWrap.js'
-import { assetReference, isLocalAssetSource, resolveAssetRefs, resolveRepoAssetRefs } from './lib/assetRefs.js'
+import { assetReference, repoAssetReference, isLocalAssetSource, resolveAssetRefs, resolveRepoAssetRefs } from './lib/assetRefs.js'
 import { IdentityPicker } from './lib/identityPicker.js'
 import {
   artefactFieldIds,
@@ -557,7 +557,11 @@ async function renderAzureArtefactViaEngine(artefact, slug, workspaceBacked = fa
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             docxBase64: bytesToBase64(docxBytes),
+            // #16: `prep` carries whichever provider's own out-path field the prepare route just
+            // used (`azureDevOpsPath` or `githubPath`) — sending both, one always undefined, lets
+            // this one request body work for either without branching on provider here.
             azureDevOpsPath: prep.azureDevOpsPath,
+            githubPath: prep.githubPath,
             branch: prep.branch,
             commit: prep.commit,
           }),
@@ -565,7 +569,11 @@ async function renderAzureArtefactViaEngine(artefact, slug, workspaceBacked = fa
       )
       const finish = await finishRes.json()
       if (!finishRes.ok) throw new Error(finish.message ?? finish.error ?? `Finish failed (${finishRes.status})`)
-      return { title: artefact.title, path: finish.azureDevOpsPath, url: finish.azureDevOpsUrl }
+      return {
+        title: artefact.title,
+        path: finish.azureDevOpsPath ?? finish.githubPath,
+        url: finish.azureDevOpsUrl ?? finish.githubUrl,
+      }
     } catch {
       // Falls through to the native leg below.
     }
@@ -582,9 +590,9 @@ async function renderAzureArtefactViaEngine(artefact, slug, workspaceBacked = fa
   }
   // Azure-DevOps-backed instances report `azureDevOpsPath` (where the render was pushed back
   // to, in the same repo the rest of the instance's data lives in, `.md` or `.docx` per
-  // `format`) — unchanged by WI #360.
-  if (body.azureDevOpsPath) {
-    return { title: artefact.title, path: body.azureDevOpsPath, url: body.azureDevOpsUrl }
+  // `format`) — unchanged by WI #360. GitHub-backed instances report the #16 twin, `githubPath`.
+  if (body.azureDevOpsPath || body.githubPath) {
+    return { title: artefact.title, path: body.azureDevOpsPath ?? body.githubPath, url: body.azureDevOpsUrl ?? body.githubUrl }
   }
   // WI #360 — a server-hosted (directory-backed) instance's render carries its bytes straight
   // in the response (`markdown` for `format: 'md'`, `docxBase64` for `format: 'docx'`) instead
@@ -738,6 +746,34 @@ function usesRepoAssetConvention(instance) {
   return Boolean(instance?.workspaceBacked || instance?.isLocalWorkspace)
 }
 
+// #16 — distinguishes a GitHub-backed instance from an Azure-DevOps-backed one without a `provider`
+// field on `buildInstanceResponse`'s `workspace` shape: a GitHub location is `{owner, repository,
+// baseUrl?}`, an Azure DevOps one is `{organization, project, repository, baseUrl?}` — `owner` only
+// ever appears on the former. Used to offer real asset upload (unlike Azure DevOps, which has none —
+// WI260 scoped that out) and an automatic, un-authored citation to the committed file's own GitHub
+// address, rather than the hand-typed `source` the `asset:<id>` manifest convention requires.
+function isGitHubBackedInstance(instance) {
+  return Boolean(instance?.workspace?.owner)
+}
+
+// #16 — client-side mirror of lib/githubFileUrl.js's own web-URL derivation (kept in sync by hand,
+// the same "server-side code can't import a browser-facing module, and vice versa" duplication
+// web/lib/theme.js vs. web/index.html's bootstrap script already uses): a GitHub location's `baseUrl`
+// is the API root (`https://api.github.com`, or `<host>/api/v3` for GitHub Enterprise Server), never
+// the web root a citation link needs.
+function githubWebBaseUrl(github) {
+  const raw = (github.baseUrl ?? 'https://api.github.com').replace(/\/+$/, '')
+  if (raw === 'https://api.github.com') return 'https://github.com'
+  return raw.replace(/\/api\/v3$/i, '')
+}
+
+function githubRepoAssetCitationUrl(workspace, slug, filename) {
+  if (!workspace?.owner || !workspace?.repository) return null
+  const base = githubWebBaseUrl(workspace)
+  const path = `gantry-workspace/${slug}/assets/${filename}`.split('/').map(encodeURIComponent).join('/')
+  return `${base}/${encodeURIComponent(workspace.owner)}/${encodeURIComponent(workspace.repository)}/blob/main/${path}`
+}
+
 // `asset:<id>` references are resolved to the real, fetchable asset-file URL before markdown-it ever sees the text — the *stored* markdown source keeps the portable `asset:<id>` convention (see web/lib/assetRefs.js), only the live preview's rendered HTML points at a real URL.
 // WI260 also resolves `../assets/<name>` / `assets/<name>` for instances using the repo-as-asset-store convention so a bare relative path shows in the preview.
 // WI264: stage-aware — when free-browsing a completed stage, the preview's asset URLs pin to that stage's ref so the server reads both modules and assets from the same ref (main for a completed stage, the stage branch for the current stage).
@@ -758,7 +794,14 @@ function renderPreview(node, text) {
   )
   // WI260 repo-as-asset-store: for instances that use the convention, also rewrite relative repo-asset refs to the fetchable file endpoint, the same way `asset:<id>` is rewritten. AB#343: this used to be gated on `workspaceBacked` alone, which missed local-workspace instances (ADR-0029) that use the identical on-disk convention.
   if (usesRepoAssetConvention(instanceData.value)) {
-    withSources = resolveRepoAssetRefs(withSources, (filename) => assetFileUrl(filename, slug, stageId))
+    // #16 — a GitHub-backed instance's repo-asset cites its own committed file's GitHub address, the
+    // same automatic citation the render pipeline emits into the rendered .docx (lib/render.js).
+    const instance = instanceData.value
+    withSources = resolveRepoAssetRefs(
+      withSources,
+      (filename) => assetFileUrl(filename, slug, stageId),
+      isGitHubBackedInstance(instance) ? (filename) => githubRepoAssetCitationUrl(instance.workspace, slug, filename) : undefined
+    )
   }
   node.innerHTML = renderMarkdown(withSources)
   // WI #353: ```mermaid fences render as diagrams in place. Async and fire-and-forget — a
@@ -1894,7 +1937,11 @@ function ModuleCard({ mod, onFieldRegistered, visibleFieldIds }) {
   function handleInsertImage(asset) {
     // Prime the source map so the just-inserted image's citation renders immediately, without waiting for the next async fetchAssets round-trip.
     if (asset?.id && asset?.source) assetSources.value = { ...assetSources.value, [asset.id]: asset.source }
-    controlsRef.current[imageFieldId]?.insertAtCursor?.(assetReference(asset))
+    // #16 — a GitHub-backed instance's asset is a real repo-committed file (WI260 convention), not a
+    // manifest entry, so it's referenced and cited the same way; its citation comes from the file's
+    // own GitHub address instead, computed by renderPreview/the render pipeline, not authored here.
+    const ref = isGitHubBackedInstance(instanceData.value) ? repoAssetReference(asset) : assetReference(asset)
+    controlsRef.current[imageFieldId]?.insertAtCursor?.(ref)
     setImageFieldId(null)
   }
 
@@ -2172,8 +2219,13 @@ function AssetInsertModal({ onInsert, onClose }) {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose])
 
+  // #16: a GitHub-backed instance's upload lands as a real committed file (WI260 convention) whose
+  // citation is the file's own GitHub address, computed automatically — unlike the `asset:<id>`
+  // manifest convention (every other instance kind), it has no separate `source` to hand-type.
+  const isGitHubBacked = isGitHubBackedInstance(instanceData.value)
+
   async function handleSubmitUpload() {
-    if (!source.trim()) {
+    if (!isGitHubBacked && !source.trim()) {
       setSourceError('Source location is required — link to the originating file (e.g. a Draw.io diagram).')
       return
     }
@@ -2238,7 +2290,7 @@ function AssetInsertModal({ onInsert, onClose }) {
                 />
               </div>
               <div class="upload-field">
-                <label class="field-label">Source location (required)</label>
+                <label class="field-label">Source location ${isGitHubBacked ? '(optional)' : '(required)'}</label>
                 <input
                   class=${'text-field' + (sourceError ? ' has-error' : '')}
                   type="text"
@@ -2250,6 +2302,9 @@ function AssetInsertModal({ onInsert, onClose }) {
                   }}
                 />
                 ${sourceError ? html`<div class="inline-error">${sourceError}</div>` : null}
+                ${isGitHubBacked
+                  ? html`<p class="wizard-field-hint">This image is committed to your GitHub repo — its citation links there automatically.</p>`
+                  : null}
               </div>
               <div class="modal-actions">
                 <button type="button" class="btn ghost" onClick=${onClose}>Cancel</button>
