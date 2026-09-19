@@ -266,11 +266,16 @@ export function createFakeGitHubServer({
     }
 
     // POST /repos/:owner/:repo/git/refs — creates a brand-new branch ref; writeFiles's path for the
-    // very first commit onto a branch that doesn't exist yet (mirrors a genuinely empty repo/branch).
+    // very first commit onto a branch that doesn't exist yet (mirrors a genuinely empty repo/branch),
+    // and lib/githubClient.js's createBranch's own path for stacking/forking a stage branch (#12).
+    // Real GitHub rejects creating a ref that already exists with 422 "Reference already exists" —
+    // mirrored here so createBranch's own "name already exists" failure mode is genuinely testable,
+    // the same way fakeAzureDevOpsServer.js's ref-update handler rejects a duplicate branch name.
     if (req.method === 'POST' && pathname === `${repoBasePath}/git/refs`) {
       const body = await readJsonBody(req)
       const branchName = String(body.ref ?? '').replace(/^refs\/heads\//, '')
       if (!branchName) return json(422, { message: 'Missing or malformed "ref"' })
+      if (refs.has(branchName)) return json(422, { message: `Reference already exists (fake: "refs/heads/${branchName}")` })
       const commit = commits.get(body.sha)
       if (!commit) return json(422, { message: `No fake commit "${body.sha}"` })
       refs.set(branchName, body.sha)
