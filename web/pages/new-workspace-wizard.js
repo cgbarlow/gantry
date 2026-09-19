@@ -2138,6 +2138,8 @@ function WorkspaceStep() {
                     value=${registerForm.value.owner}
                     onChange=${(uniqueName) => (registerForm.value = { ...registerForm.value, owner: uniqueName })}
                     placeholder="Search by name…"
+                    owner=${registerForm.value.repoOwner}
+                    repository=${registerForm.value.repository}
                     pat=${registerPat.value}
                   />
                 </div>
@@ -2417,7 +2419,10 @@ function InstanceStep() {
               placeholder="Unassigned"
               organization=${ws?.location?.organization}
               project=${ws?.location?.project}
+              owner=${ws?.location?.owner}
+              repository=${ws?.location?.repository}
               workspaceId=${ws?.id}
+              enforceAssignability=${ws?.provider === 'github'}
             />
           `}
     </div>
