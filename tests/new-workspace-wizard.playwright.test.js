@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withFakeGitLabServer, GITLAB_NAMESPACE, GITLAB_REPOSITORY, GITLAB_VALID_PAT } from './helpers/fakeGitLabServer.js'
 import { withRunningServer, basicAuthHeader, VALID_PAT } from './helpers/lifecycle.js'
 
 // Browser smoke test for the "+ New Workspace" wizard (#110, replacing the
@@ -557,6 +558,73 @@ test('#316: the version changelog is collapsed behind "Show release notes" by de
       await toggle.click()
       assert.equal(await content.isVisible(), true, 'changelog content expands on click')
       assert.match(await content.textContent(), /\S/, 'expanded content is non-empty')
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
+// ---- #25: registering a brand new GitLab workspace through the wizard's Register step ----
+//
+// Unlike Azure DevOps/GitHub above (which have no baseUrl field in this wizard, relying on
+// page.route injection to point at the fake server), GitLab's Register form has a real, user-facing
+// "Base URL (optional)" field (ADR-0041's self-hosted CE/EE support) — so this test fills the fake
+// server's own baseUrl directly into that field, exercising the genuine UI path rather than
+// test-only route rewriting.
+function withGitLabWizardTestServer(fn) {
+  return withFakeGitLabServer({ namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, validPat: GITLAB_VALID_PAT, files: {} }, (gitlabBaseUrl) => {
+    const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+    return withRunningServer({ instancesDir, allowGitLabBaseUrlOverride: true }, async (gantryBase) => {
+      try {
+        await fn({ gantryBase, gitlabBaseUrl, instancesDir })
+      } finally {
+        rmSync(instancesDir, { recursive: true, force: true })
+      }
+    })
+  })
+}
+
+test('#25: the "+ New Workspace" wizard registers a brand new GitLab workspace end-to-end (not just adopts an existing one)', async () => {
+  await withGitLabWizardTestServer(async ({ gantryBase, gitlabBaseUrl }) => {
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      const pageErrors = []
+      page.on('pageerror', (err) => pageErrors.push(err.message))
+      page.on('console', (msg) => {
+        if (msg.type() === 'error') pageErrors.push(msg.text())
+      })
+
+      await page.goto(`${gantryBase}/new-workspace`)
+      await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
+
+      // ---------- Step 1: register a brand new GitLab workspace ----------
+      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+      // GitLab is a real, selectable Provider choice (#25) — no longer the disabled "Coming soon" row.
+      const gitlabRadio = page.locator('input[name="ws-provider"][value="gitlab"]')
+      assert.equal(await gitlabRadio.isDisabled(), false)
+      await gitlabRadio.click()
+
+      await page.waitForSelector('#ws-namespace', { timeout: 5_000 })
+      await page.locator('#ws-namespace').fill(GITLAB_NAMESPACE)
+      await page.locator('#ws-repository').fill(GITLAB_REPOSITORY)
+      // The real self-hosted-base-URL field a GitLab registration offers — pointed at this test's own
+      // fake GitLab server rather than gitlab.com, the same "prove real access" contract every other
+      // provider's registration already has.
+      await page.locator('#ws-gitlab-baseurl').fill(gitlabBaseUrl)
+      await page.locator('#ws-pat').fill(GITLAB_VALID_PAT)
+      // Owner (the workspace's Owner *person*) isn't required to register — its own IdentityPicker
+      // search is exercised by the Azure DevOps test above already; left blank here to keep this test
+      // focused on the Provider/location/PAT path #25 actually adds.
+
+      await page.getByRole('button', { name: 'Register workspace' }).click()
+
+      // ---------- Step 2: instance step reached — a real workspace was created, not just checked ----------
+      await page.waitForSelector('#instance-name', { timeout: 10_000 })
+
+      assert.deepEqual(pageErrors, [])
     } finally {
       await browser.close()
     }

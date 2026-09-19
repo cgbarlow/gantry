@@ -251,25 +251,29 @@ test('POST /api/workspaces with a nested { provider: "github", ... } body and no
   })
 })
 
-// #24: `provider` validates (lib/provider.js's own SUPPORTED_PROVIDERS, ADR-0041) once gitlab is
-// added as a third supported-but-not-yet-registered provider — this route's own repo-check dispatch
-// used to be `provider === 'github' ? checkGitHubRepo(...) : checkAzureDevOpsRepo(...)`, which would
-// have silently run Azure DevOps's own repo check (and reused its own baseUrl-override flag) against
-// a GitLab-shaped `{ namespace, repository }` location — exactly the anti-pattern ADR-0039 rejected.
-// A real `gitlab` provider (rather than a fabricated stub) proves this: it is genuinely accepted by
-// `assertValidProvider` and `normalizeProviderLocation` (both correctly gitlab-aware after #24) but
-// has no registered capability yet (`lib/providerRegistry.js`, left for a later ticket per ADR-0041)
-// — this route must report that plainly rather than mis-running Azure DevOps's own client against it.
-test('POST /api/workspaces with a nested { provider: "gitlab", ... } body reports "not supported yet" rather than running Azure DevOps\'s own repo check against it', async () => {
+// #24 laid the groundwork (`provider` validates via lib/provider.js's own SUPPORTED_PROVIDERS,
+// ADR-0041) for gitlab as a third provider; this route's own repo-check dispatch used to be
+// `provider === 'github' ? checkGitHubRepo(...) : checkAzureDevOpsRepo(...)`, which would have
+// silently run Azure DevOps's own repo check (and reused its own baseUrl-override flag) against a
+// GitLab-shaped `{ namespace, repository }` location — exactly the anti-pattern ADR-0039 rejected.
+// #25 finishes the job: gitlab now has a real, registered `checkGitLabRepo`/`allowGitLabBaseUrlOverride`
+// entry in this route's own dispatch tables (proven end-to-end, with a real fake GitLab server, by
+// tests/serverGitLabWorkspaces.test.js) — a gitlab registration reaches the same "prove real access
+// before persisting" flow azure-devops/github already have, rather than being reported unsupported.
+// This test only proves the *dispatch* — no real network call — by checking the missing-PAT case,
+// which short-circuits before `checkGitLabRepo` is ever invoked (that PAT-proving path is what
+// serverGitLabWorkspaces.test.js exercises against a real fake GitLab server).
+test('POST /api/workspaces with a nested { provider: "gitlab", ... } body and no PAT reports the structured "authentication required" response naming GitLab, not "not supported yet"', async () => {
   await withScratchServer({}, async (base) => {
     const res = await fetch(`${base}/api/workspaces`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider: 'gitlab', location: { namespace: 'group/subgroup', repository: 'repo' } }),
     })
-    assert.equal(res.status, 400)
+    assert.equal(res.status, 401)
     const body = await res.json()
-    assert.match(body.error, /"gitlab" workspace is not supported yet/)
+    assert.equal(body.error, 'authentication_required')
+    assert.match(body.message, /GitLab/)
 
     const listing = await (await fetch(`${base}/api/workspaces`)).json()
     assert.equal(listing.length, 0)
