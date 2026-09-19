@@ -445,7 +445,7 @@ test('Import (existing destination): a second import lands in the already-regist
       assert.ok(registry.some((i) => i.slug === first.slug))
       assert.ok(registry.some((i) => i.slug === second.slug))
       const workspaces = await (await fetch(`${gantryBase}/api/workspaces`)).json()
-      assert.equal(workspaces.filter((w) => w.repository === REPOSITORY).length, 1)
+      assert.equal(workspaces.filter((w) => w.location.repository === REPOSITORY).length, 1)
 
       // Opt-in this time — the source local workspace is actually forgotten.
       await page.waitForSelector('#import-forget-prompt', { timeout: 10_000 })

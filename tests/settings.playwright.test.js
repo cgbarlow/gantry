@@ -300,8 +300,12 @@ test('settings: from an instance screen, "Settings" opens a dropdown offering Gl
 // Workspaces are seeded directly via `registerWorkspace` (a plain library call against the same scratch `instancesDir` the test server serves) — no fake Azure DevOps server needed, since this screen's own acceptance criteria are about its UI/local-storage/PATCH behavior, not about proving real Azure DevOps access (that's already covered by tests/serverWorkspaces.test.js's `POST /api/workspaces` coverage).
 
 function seedWorkspace(instancesDir, overrides = {}) {
+  const { owner = 'c.barlow', ...locationOverrides } = overrides
   return registerWorkspace(
-    { organization: 'fake-org', project: 'fake-project', repository: 'fake-repo', owner: 'c.barlow', ...overrides },
+    {
+      location: { organization: 'fake-org', project: 'fake-project', repository: 'fake-repo', ...locationOverrides },
+      owner,
+    },
     { instancesDir }
   )
 }

@@ -276,7 +276,10 @@ test('E1: nav list wraps - longest list-item width <= list-pane width', async ()
     // Create a long repo name workspace
     const { registerWorkspace } = await import('../lib/workspaceRegistry.js')
     const longRepo = 'a-very-long-repository-name-that-should-wrap-inside-the-320px-list-pane-instead-of-spilling-into-detail-pane'
-    const ws = registerWorkspace({ organization: 'Contoso-Production', project: 'Default', repository: longRepo }, { instancesDir })
+    const ws = registerWorkspace(
+      { location: { organization: 'Contoso-Production', project: 'Default', repository: longRepo } },
+      { instancesDir }
+    )
     const { createInstance } = await import('../lib/instance.js')
     createInstance('design', 'e1-instance', { instancesDir })
     // Manually register instance as workspace-backed? For master-detail list we need workspace grouping; listRegistry will group by workspace if instance has azureDevOps location.
