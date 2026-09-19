@@ -363,6 +363,38 @@ test('settings: Workspace Settings\' owner, Workspace PAT, and ticketing-system-
   })
 })
 
+// #41 (ADR-0041): a GitLab workspace is reachable today only by adopting a Project that already
+// holds instance data (#35) — the "+ New Workspace" wizard's own Register step doesn't offer GitLab
+// yet (#25) — but once adopted, its own Workspace Settings row still has to show the right Provider
+// label, repo URL and PAT-scope help, the same as an Azure DevOps or GitHub workspace's row does.
+// Before this ticket, `WorkspaceEditor`'s provider handling was a github/else binary that silently
+// mislabelled a gitlab workspace as "Azure DevOps" and built its repo URL from the wrong location
+// fields — this guards that regression.
+test('settings: Workspace Settings labels a GitLab workspace correctly and shows its PAT-scope help', async () => {
+  await withScratchServer(async (base, instancesDir) => {
+    const workspace = registerWorkspace(
+      { provider: 'gitlab', location: { namespace: 'engineering/platform', repository: 'fake-project' }, owner: 'a.architect' },
+      { instancesDir }
+    )
+    registerInstance('gitlab-initiative', { kind: 'gitlab', workspaceId: workspace.id }, { instancesDir })
+
+    await withPage(async (page) => {
+      await page.goto(`${base}/settings/workspace?slug=gitlab-initiative`)
+      const row = page.locator('.workspace-row')
+      await row.waitFor({ state: 'visible', timeout: 10_000 })
+
+      assert.equal(await row.locator('.stamp[title="Provider"]').textContent(), 'GitLab')
+      assert.match(await row.locator('.workspace-repo-url').textContent(), /engineering\/platform\/fake-project/)
+      assert.equal(await row.locator('.workspace-repo-url').getAttribute('href'), 'https://gitlab.com/engineering/platform/fake-project')
+      assert.match(await row.locator('.workspace-pat label').textContent(), /GitLab Workspace PAT/)
+      assert.match(await row.locator('.workspace-pat .workspace-field-hint').textContent(), /\bapi\b/)
+      // GitLab, like GitHub, has no ticketing-system choice of its own — the tracker is fixed by the
+      // Provider, so the radio group shown for an Azure DevOps workspace must not appear here.
+      assert.equal(await row.locator('.workspace-ticketing').count(), 0)
+    })(base)
+  })
+})
+
 // ---------- Instance Settings (new, #107) ----------
 
 test('settings: Instance Settings hosts an editable Assignee, read-only instance info, and read-only work-item link details', async () => {
