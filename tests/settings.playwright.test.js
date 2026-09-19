@@ -119,9 +119,9 @@ test('settings: "Settings" from the dashboard goes straight to Global Settings, 
       await page.waitForSelector('.settings-header', { timeout: 10_000 })
       assert.equal(new URL(page.url()).pathname, '/settings')
       assert.equal(await page.locator('.settings-header h1').textContent(), 'Settings')
-      // #300 — the ticketing section only exists once advanced mode is enabled.
+      // #300 — the library-repos section only exists once advanced mode is enabled.
       await page.getByLabel('Enable advanced mode').check()
-      assert.ok(await page.locator('.settings-section', { hasText: 'Default ticketing system' }).isVisible())
+      assert.ok(await page.locator('.settings-section', { hasText: 'Library repos' }).isVisible())
     })(base)
   })
 })
@@ -159,40 +159,13 @@ test('settings: Global Settings has no PAT section — every workspace manages i
   })
 })
 
-test('settings: a global ticketing-system default can be set to azure-devops; jira is disabled with a "coming soon" indication', async () => {
-  await withScratchServer(async (base) => {
-    await withPage(async (page) => {
-      await page.goto(`${base}/settings`)
-      await page.waitForSelector('.settings-section', { timeout: 10_000 })
-      // #300 — the ticketing selector is only rendered while advanced mode is on.
-      await page.getByLabel('Enable advanced mode').check()
-      await page.waitForSelector('.settings-radio-group', { timeout: 10_000 })
-
-      const adoRadio = page.locator('.settings-radio', { hasText: 'Azure DevOps' }).locator('input[type=radio]')
-      const jiraRow = page.locator('.settings-radio', { hasText: 'Jira' })
-      const jiraRadio = jiraRow.locator('input[type=radio]')
-
-      assert.ok(await adoRadio.isChecked())
-      assert.equal(await adoRadio.isDisabled(), false)
-
-      assert.equal(await jiraRadio.isDisabled(), true)
-      assert.match(await jiraRow.textContent(), /Coming soon/)
-
-      await jiraRadio.click({ force: true }).catch(() => {})
-      assert.ok(await adoRadio.isChecked())
-      assert.equal(await jiraRadio.isChecked(), false)
-      assert.equal(await page.evaluate(() => localStorage.getItem('gantry:default-ticketing-system')), 'azure-devops')
-    })(base)
-  })
-})
-
 // ---------- #300: "Enable advanced mode" toggle ----------
-// Fresh browser => advanced mode off => the default-ticketing selector is absent from Global
-// Settings entirely. Toggling on reveals it; the choice is sticky across a reload; toggling off
-// hides it again. #9: the old PAT section this test also toggled is gone from Global Settings
-// permanently (on or off), not merely hidden behind advanced mode — see the dedicated "no PAT
-// section" test above.
-test('settings: advanced mode is off by default, hiding the ticketing section until toggled on (sticky across reload)', async () => {
+// Fresh browser => advanced mode off => the Library repos section is absent from Global Settings
+// entirely. Toggling on reveals it; the choice is sticky across a reload; toggling off hides it
+// again. #9: the old PAT section this test also toggled is gone from Global Settings permanently
+// (on or off), not merely hidden behind advanced mode — see the dedicated "no PAT section" test
+// above.
+test('settings: advanced mode is off by default, hiding Provider-repository UI until toggled on (sticky across reload)', async () => {
   await withScratchServer(async (base) => {
     await withPage(async (page) => {
       await page.goto(`${base}/settings`)
@@ -203,27 +176,27 @@ test('settings: advanced mode is off by default, hiding the ticketing section un
       assert.equal(await toggle.isChecked(), false)
       assert.match(
         await page.locator('.settings-section', { hasText: 'Advanced mode' }).textContent(),
-        /Shows Azure DevOps repositories, work-item ticketing, and sign-off\. Leave off for local-only use\./
+        /Shows Provider repositories \(Azure DevOps, GitHub, GitLab, Atlassian\), work-item ticketing, and\s+sign-off\. Leave off for local-only use\./
       )
 
       // Off: the section is not on the page.
-      assert.equal(await page.locator('.settings-section', { hasText: 'Default ticketing system' }).count(), 0)
+      assert.equal(await page.locator('.settings-section', { hasText: 'Library repos' }).count(), 0)
 
       // On: it appears.
       await toggle.check()
-      await page.waitForSelector('.settings-radio-group', { timeout: 5_000 })
-      assert.ok(await page.locator('.settings-section', { hasText: 'Default ticketing system' }).isVisible())
+      await page.waitForSelector('.settings-section:has-text("Library repos")', { timeout: 5_000 })
+      assert.ok(await page.locator('.settings-section', { hasText: 'Library repos' }).isVisible())
       assert.equal(await page.evaluate(() => localStorage.getItem('gantry:advancedMode')), 'true')
 
       // Sticky across a reload.
       await page.reload()
       await page.waitForSelector('.settings-header', { timeout: 10_000 })
       assert.equal(await page.getByLabel('Enable advanced mode').isChecked(), true)
-      assert.ok(await page.locator('.settings-section', { hasText: 'Default ticketing system' }).isVisible())
+      assert.ok(await page.locator('.settings-section', { hasText: 'Library repos' }).isVisible())
 
       // Off again: hidden again.
       await page.getByLabel('Enable advanced mode').uncheck()
-      assert.equal(await page.locator('.settings-section', { hasText: 'Default ticketing system' }).count(), 0)
+      assert.equal(await page.locator('.settings-section', { hasText: 'Library repos' }).count(), 0)
       assert.equal(await page.evaluate(() => localStorage.getItem('gantry:advancedMode')), 'false')
     })(base)
   })
@@ -324,12 +297,12 @@ test('settings: Workspace Settings reports "no workspace" for a local instance, 
       await page.goto(`${base}/settings/workspace?slug=my-initiative`)
       await page.waitForSelector('.settings-section', { timeout: 10_000 })
       assert.equal(await page.locator('.workspace-row').count(), 0)
-      assert.match(await page.locator('.workspace-empty').textContent(), /no Azure DevOps workspace/)
+      assert.match(await page.locator('.workspace-empty').textContent(), /no remote workspace/)
     })(base)
   })
 })
 
-test('settings: Workspace Settings\' owner, Workspace PAT, and ticketing-system-override controls still work, scoped to this one workspace', async () => {
+test('settings: Workspace Settings\' owner and Workspace PAT controls still work, scoped to this one workspace', async () => {
   await withScratchServer(async (base, instancesDir) => {
     const workspace = seedWorkspace(instancesDir, { owner: 'original-owner' })
     registerInstance('remote-initiative', { kind: 'azureDevOps', workspaceId: workspace.id }, { instancesDir })
@@ -343,7 +316,6 @@ test('settings: Workspace Settings\' owner, Workspace PAT, and ticketing-system-
       // #9 (ADR-0038): no global default left to fall back to — a workspace with nothing stored for
       // it yet simply reads as missing, not "using the global default".
       assert.match(await row.locator('.workspace-pat-status').textContent(), /MISSING/)
-      assert.match(await row.locator('.workspace-ticketing-state').textContent(), /USING GLOBAL DEFAULT/)
 
       await row.locator('.workspace-owner input[type=text]').fill('new-owner')
       await row.getByRole('button', { name: 'Save owner' }).click()

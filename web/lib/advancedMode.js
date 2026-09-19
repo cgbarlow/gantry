@@ -2,10 +2,10 @@ import { signal } from '@preact/signals'
 
 // Client-side, cross-screen "advanced mode" toggle (#300, first child of Feature #291) — a
 // `@preact/signals` signal backed by localStorage, following the exact pattern web/lib/theme.js
-// and web/lib/ticketingSystem.js already established for a persisted, cross-screen preference.
+// and web/lib/renderEngine.js already established for a persisted, cross-screen preference.
 //
 // Advanced mode is OFF by default: a fresh browser (or one with storage disabled/unparseable)
-// sees the local-only experience, with all Azure DevOps / work-item ticketing / sign-off UI
+// sees the local-only experience, with all Provider repository / work-item ticketing / sign-off UI
 // hidden. Turning it on is a deliberate, sticky choice. Later tickets (#301, #302) read this
 // signal on other surfaces; this module only owns the setting itself.
 const STORAGE_KEY = 'gantry:advancedMode'

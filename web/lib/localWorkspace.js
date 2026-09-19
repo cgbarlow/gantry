@@ -2,7 +2,7 @@
 // kept in a folder on the browser user's own machine, reached through the
 // File System Access API and never seen by the gantry server.
 //
-// Layered like web/lib/credential.js / web/lib/ticketingSystem.js — a thin,
+// Layered like web/lib/credential.js / web/lib/advancedMode.js — a thin,
 // framework-free module the rest of web/ imports. This is WI #293: schema +
 // filesystem/IndexedDB layer + tests only. NOTHING under web/ (app.js,
 // pages/, the wizard) wires this in yet — the wizard, dashboard and editor

@@ -12,9 +12,6 @@ import {
   archiveWorkspace,
   restoreWorkspace,
   isWorkspaceArchived,
-  assertValidTicketingSystem,
-  TICKETING_SYSTEMS,
-  DEFAULT_TICKETING_SYSTEM,
 } from '../lib/workspaceRegistry.js'
 import { withScratchInstances } from './helpers/lifecycle.js'
 
@@ -26,14 +23,13 @@ const ATLASSIAN_LOCATION = { owner: 'acme', repository: 'fake-repo', jiraSite: '
 
 // ---------- registerWorkspace: nested {provider, location} shape only (ticket #6) ----------
 
-test('registerWorkspace persists location/owner/ticketingSystem, and generates an id', async () => {
+test('registerWorkspace persists location/owner, and generates an id', async () => {
   await withScratchInstances((instancesDir) => {
     const workspace = registerWorkspace({ location: LOCATION, owner: 'c.barlow' }, { instancesDir })
     assert.equal(typeof workspace.id, 'string')
     assert.ok(workspace.id.length > 0)
     assert.deepEqual(workspace.location, LOCATION)
     assert.equal(workspace.owner, 'c.barlow')
-    assert.equal(workspace.ticketingSystem, DEFAULT_TICKETING_SYSTEM)
   })
 })
 
@@ -42,7 +38,6 @@ test('registerWorkspace defaults owner to \'\' and provider to \'azure-devops\' 
     const workspace = registerWorkspace({ location: LOCATION }, { instancesDir })
     assert.equal(workspace.owner, '')
     assert.equal(workspace.provider, 'azure-devops')
-    assert.equal(workspace.ticketingSystem, 'azure-devops')
   })
 })
 
@@ -87,7 +82,6 @@ test('registerWorkspace accepts the nested {provider, location} shape for an Azu
     const workspace = registerWorkspace({ provider: 'azure-devops', location: LOCATION, owner: 'c.barlow' }, { instancesDir })
     assert.equal(workspace.provider, 'azure-devops')
     assert.deepEqual(workspace.location, LOCATION)
-    assert.equal(workspace.ticketingSystem, 'azure-devops')
     assert.equal(workspace.owner, 'c.barlow')
   })
 })
@@ -101,7 +95,6 @@ test('registerWorkspace accepts a GitHub {provider, location} — owner/reposito
     // No location accessor exists at all any more (ticket #6) — a GitHub workspace never had one.
     assert.equal(workspace.organization, undefined)
     assert.equal(workspace.project, undefined)
-    assert.equal(workspace.ticketingSystem, undefined)
   })
 })
 
@@ -139,7 +132,6 @@ test('registerWorkspace accepts a GitLab {provider, location} — namespace/repo
     // No location accessor exists at all any more (ticket #6) — a GitLab workspace never had one.
     assert.equal(workspace.organization, undefined)
     assert.equal(workspace.project, undefined)
-    assert.equal(workspace.ticketingSystem, undefined)
   })
 })
 
@@ -360,15 +352,12 @@ test('updateWorkspace updates owner and re-persists it', async () => {
   })
 })
 
-test('updateWorkspace rejects setting ticketingSystem to "jira"', async () => {
+test('updateWorkspace silently ignores an unrecognized field like the removed ticketingSystem', async () => {
   await withScratchInstances((instancesDir) => {
     const created = registerWorkspace({ location: LOCATION }, { instancesDir })
-    assert.throws(
-      () => updateWorkspace(created.id, { ticketingSystem: 'jira' }, { instancesDir }),
-      /not supported yet/
-    )
-    // The rejected update must not have been persisted.
-    assert.equal(resolveWorkspace(created.id, { instancesDir }).ticketingSystem, 'azure-devops')
+    const updated = updateWorkspace(created.id, { ticketingSystem: 'jira' }, { instancesDir })
+    assert.equal(updated.ticketingSystem, undefined)
+    assert.deepEqual(updated.location, LOCATION)
   })
 })
 
@@ -400,18 +389,6 @@ test('updateWorkspace throws "Unknown workspace" for "__proto__" rather than tre
     registerWorkspace({ location: LOCATION }, { instancesDir })
     assert.throws(() => updateWorkspace('__proto__', { owner: 'x' }, { instancesDir }), /Unknown workspace/)
   })
-})
-
-// ---------- ticketing-system validation (shared enforcement point) ----------
-
-test('TICKETING_SYSTEMS models both azure-devops and jira, so a future selector can list jira as a known-but-disabled option', () => {
-  assert.deepEqual(TICKETING_SYSTEMS, ['azure-devops', 'jira'])
-})
-
-test('assertValidTicketingSystem accepts "azure-devops" and rejects "jira" and anything unknown', () => {
-  assert.doesNotThrow(() => assertValidTicketingSystem('azure-devops'))
-  assert.throws(() => assertValidTicketingSystem('jira'), /not supported yet/)
-  assert.throws(() => assertValidTicketingSystem('trello'), /Unknown ticketing system/)
 })
 
 // ---------- #223: archive / restore ----------
@@ -513,7 +490,6 @@ test('a pre-#3 flat record is read forward as provider: "azure-devops" with its 
     assert.equal(resolved.provider, 'azure-devops')
     assert.deepEqual(resolved.location, { organization: 'legacy-org', project: 'legacy-project', repository: 'legacy-repo' })
     assert.equal(resolved.owner, 'a.person')
-    assert.equal(resolved.ticketingSystem, 'azure-devops')
   })
 })
 

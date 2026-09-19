@@ -112,7 +112,7 @@ test('POST /api/workspaces reusing same tuple returns reused:true', async () => 
     const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-wi253-'))
     try {
       await withRunningServer({ instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
-        const body = { organization: ORGANIZATION, project: PROJECT, repository: 'repo1', baseUrl: adoBaseUrl, owner: 'a', ticketingSystem: 'azure-devops' }
+        const body = { organization: ORGANIZATION, project: PROJECT, repository: 'repo1', baseUrl: adoBaseUrl, owner: 'a' }
         const first = await fetch(`${base}/api/workspaces`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) }, body: JSON.stringify(body) })
         assert.equal(first.status, 201)
         const second = await fetch(`${base}/api/workspaces`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) }, body: JSON.stringify(body) })

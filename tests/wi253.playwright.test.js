@@ -192,7 +192,7 @@ test('B: wizard Owner and Assignee are identity pickers hitting /api/identities'
   })
 })
 
-test('C1: register form defaults to Contoso-Production/Default', async () => {
+test('C1: register form defaults organization blank, project to Default', async () => {
   await withWizardTestServer(async ({ gantryBase }) => {
     const browser = await launchBrowser()
     try {
@@ -202,7 +202,7 @@ test('C1: register form defaults to Contoso-Production/Default', async () => {
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
       await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
       await page.waitForSelector('#ws-organization', { timeout: 5000 })
-      assert.equal(await page.locator('#ws-organization').inputValue(), 'Contoso-Production')
+      assert.equal(await page.locator('#ws-organization').inputValue(), '')
       assert.equal(await page.locator('#ws-project').inputValue(), 'Default')
     } finally {
       await browser.close()
