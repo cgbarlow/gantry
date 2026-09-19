@@ -50,6 +50,19 @@ import { createServer } from 'node:http'
  * `true`) controls whether that last endpoint works at all — `false` makes it 404, reproducing the
  * "feature unavailable" case docs/adr/0040's hierarchy fallback (a task-list entry in the parent's body
  * plus a "Part of #<n>" line in the child) exists to handle.
+ *
+ * Labels and assignees, per #15's Request Review (docs/adr/0040 "Review status rides reserved
+ * labels"): `POST /repos/:owner/:repo/labels` creates a label definition (422 "already_exists" for a
+ * name already taken, mirroring real GitHub — this is what makes `ensureLabelsExist`'s
+ * tolerate-already-exists behaviour genuinely testable). Creating an issue with `assignees` validates
+ * each login against the same access rule `lib/githubIdentityClient.js`'s own `canAssign` already
+ * models — a `collaborators` entry, or an `orgMembers` entry with a non-`'none'` `permissions` value —
+ * and 422s with GitHub's own "Validation Failed" shape for one that isn't, reproducing docs/adr/0040's
+ * "GitHub rejects an issue assignee who lacks repo access" as a real server response rather than only
+ * a client-side gate. Creating (or updating) an issue with `labels` (an array of plain name strings)
+ * auto-creates any name not already defined via `POST .../labels` — mirroring real GitHub's own
+ * create-issue behaviour — and the issue's own `labels` field always reports full `{ name, color,
+ * description }` objects, matching the real API's shape.
  */
 export function createFakeGitHubServer({
   owner,
@@ -67,8 +80,27 @@ export function createFakeGitHubServer({
   const issues = new Map() // number -> issue object
   const issueIdToNumber = new Map() // internal id -> number
   const subIssues = new Map() // parent number -> Set<child number>
+  const labelDefs = new Map() // name -> { name, color, description }
   let issueCounter = 0
   let issueIdCounter = 1000
+
+  // The same "who can actually be assigned" rule lib/githubIdentityClient.js's own `canAssign`
+  // models (#10, docs/adr/0040): a collaborator always can; an org member who isn't one can only if
+  // `permissions` grants them something other than `'none'`.
+  function isAssignable(login) {
+    if (collaborators.some((c) => c.login === login)) return true
+    return (permissions[login] ?? 'none') !== 'none'
+  }
+
+  // Real GitHub auto-creates a label from a bare name the first time it's attached to an issue if no
+  // such label exists yet — this mirrors that so a caller doesn't have to call the labels endpoint
+  // itself to observe an issue's labels field in the label-object shape the real API returns.
+  function resolveLabelObjects(names) {
+    return (names ?? []).map((name) => {
+      if (!labelDefs.has(name)) labelDefs.set(name, { name, color: 'ededed', description: null })
+      return labelDefs.get(name)
+    })
+  }
   const branches = new Map()
   const refs = new Map() // branch name -> commit sha
   const commits = new Map() // commit sha -> { treeSha, parents }
@@ -326,12 +358,42 @@ export function createFakeGitHubServer({
       return json(201, { ref: `refs/heads/${branchName}`, object: { sha: body.sha } })
     }
 
+    // GET /repos/:owner/:repo/labels — lists every label defined on the repo (test-facing
+    // convenience, mirroring real GitHub's own read endpoint, the same way the sub-issues GET below
+    // does for hierarchy).
+    if (req.method === 'GET' && pathname === `${repoBasePath}/labels`) {
+      return json(200, [...labelDefs.values()])
+    }
+
+    // POST /repos/:owner/:repo/labels — creates a label definition. 422s "already_exists" for a name
+    // already taken, mirroring real GitHub — the case lib/githubWorkItemsClient.js's
+    // `ensureLabelsExist` tolerates rather than fails over.
+    if (req.method === 'POST' && pathname === `${repoBasePath}/labels`) {
+      const body = await readJsonBody(req)
+      if (labelDefs.has(body.name)) {
+        return json(422, { message: 'Validation Failed', errors: [{ resource: 'Label', code: 'already_exists', field: 'name' }] })
+      }
+      const label = { name: body.name, color: body.color ?? 'ededed', description: body.description ?? null }
+      labelDefs.set(body.name, label)
+      return json(201, label)
+    }
+
     // POST /repos/:owner/:repo/issues — creates a new issue. Mirrors real GitHub's response shape
     // closely enough for lib/githubWorkItemsClient.js: `number` (repo-scoped, user-visible) and `id`
     // (opaque, global — what the sub_issues endpoint actually addresses a child by) are deliberately
-    // distinct counters, the same way real GitHub's are.
+    // distinct counters, the same way real GitHub's are. `assignees` is validated against
+    // `isAssignable` above — an unassignable login 422s exactly like real GitHub, never silently
+    // dropped — and `labels` (bare name strings) are resolved to full label objects, auto-creating any
+    // gantry hasn't already defined via POST .../labels.
     if (req.method === 'POST' && pathname === `${repoBasePath}/issues`) {
       const body = await readJsonBody(req)
+      const invalidAssignee = (body.assignees ?? []).find((login) => !isAssignable(login))
+      if (invalidAssignee) {
+        return json(422, {
+          message: 'Validation Failed',
+          errors: [{ resource: 'Issue', field: 'assignee', code: 'invalid', value: invalidAssignee }],
+        })
+      }
       const number = ++issueCounter
       const id = ++issueIdCounter
       const issue = {
@@ -342,6 +404,8 @@ export function createFakeGitHubServer({
         state: 'open',
         state_reason: null,
         html_url: `https://fake-github.invalid/${owner}/${repository}/issues/${number}`,
+        assignees: (body.assignees ?? []).map((login) => ({ login })),
+        labels: resolveLabelObjects(body.labels),
       }
       issues.set(number, issue)
       issueIdToNumber.set(id, number)
@@ -356,12 +420,14 @@ export function createFakeGitHubServer({
       return json(200, issue)
     }
 
-    // PATCH /repos/:owner/:repo/issues/:number — partial update (title/body/state/state_reason).
+    // PATCH /repos/:owner/:repo/issues/:number — partial update (title/body/state/state_reason/labels).
     if (req.method === 'PATCH' && issueGetMatch) {
       const issue = issues.get(Number(issueGetMatch[1]))
       if (!issue) return json(404, { message: `No fake issue #${issueGetMatch[1]}` })
       const body = await readJsonBody(req)
-      Object.assign(issue, body)
+      const { labels, ...rest } = body
+      Object.assign(issue, rest)
+      if (labels !== undefined) issue.labels = resolveLabelObjects(labels)
       return json(200, issue)
     }
 

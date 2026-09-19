@@ -6,6 +6,10 @@ import {
   REVIEW_STATUS_VALUES,
   inferReviewStatusFromNativeState,
   reviewStatusFromVoteState,
+  GITHUB_REVIEW_LABEL_PREFIX,
+  reviewStatusToGitHubLabel,
+  gitHubLabelToReviewStatus,
+  allGitHubReviewLabels,
 } from '../lib/reviewStatus.js'
 
 // Lib-level tests for ADR-0024 (docs/adr/0024-custom-review-status-field.md)
@@ -44,4 +48,38 @@ test('reviewStatusFromVoteState maps sign-off\'s PR-reviewer-vote states onto th
   assert.equal(reviewStatusFromVoteState('rejected'), REVIEW_STATUS.REJECTED)
   assert.equal(reviewStatusFromVoteState('changes-requested'), REVIEW_STATUS.CHANGES_REQUESTED)
   assert.equal(reviewStatusFromVoteState('approved-then-invalidated'), REVIEW_STATUS.IN_REVIEW)
+})
+
+// #15, docs/adr/0040 "Review status rides reserved labels" — GitHub's own carrier for this same
+// five-value vocabulary.
+
+test('reviewStatusToGitHubLabel maps every REVIEW_STATUS value to its own reserved gantry:review/* label', () => {
+  assert.equal(reviewStatusToGitHubLabel(REVIEW_STATUS.REQUESTED), 'gantry:review/requested')
+  assert.equal(reviewStatusToGitHubLabel(REVIEW_STATUS.IN_REVIEW), 'gantry:review/in-review')
+  assert.equal(reviewStatusToGitHubLabel(REVIEW_STATUS.CHANGES_REQUESTED), 'gantry:review/changes-requested')
+  assert.equal(reviewStatusToGitHubLabel(REVIEW_STATUS.APPROVED), 'gantry:review/approved')
+  assert.equal(reviewStatusToGitHubLabel(REVIEW_STATUS.REJECTED), 'gantry:review/rejected')
+  assert.throws(() => reviewStatusToGitHubLabel('Not a real status'), /No gantry:review\/\* label is mapped/)
+})
+
+test('gitHubLabelToReviewStatus is the exact reverse of reviewStatusToGitHubLabel, and undefined when no reserved label is present', () => {
+  for (const status of REVIEW_STATUS_VALUES) {
+    assert.equal(gitHubLabelToReviewStatus([reviewStatusToGitHubLabel(status)]), status)
+  }
+  // Unrelated labels alongside a real one are ignored, not treated as a second/conflicting signal.
+  assert.equal(gitHubLabelToReviewStatus(['bug', reviewStatusToGitHubLabel(REVIEW_STATUS.APPROVED), 'good first issue']), REVIEW_STATUS.APPROVED)
+  assert.equal(gitHubLabelToReviewStatus(['bug', 'good first issue']), undefined)
+  assert.equal(gitHubLabelToReviewStatus([]), undefined)
+})
+
+test('allGitHubReviewLabels returns one { name, color, description } definition per REVIEW_STATUS_VALUES entry, prefixed gantry:review/', () => {
+  const labels = allGitHubReviewLabels()
+  assert.equal(labels.length, REVIEW_STATUS_VALUES.length)
+  for (const label of labels) {
+    assert.ok(label.name.startsWith(GITHUB_REVIEW_LABEL_PREFIX))
+    assert.match(label.color, /^[0-9a-f]{6}$/)
+    assert.match(label.description, /Gantry Request Review status/)
+  }
+  // Distinct names and colours — five genuinely different labels, not five copies.
+  assert.equal(new Set(labels.map((l) => l.name)).size, labels.length)
 })
