@@ -61,11 +61,17 @@ test('POST /api/workspaces rejects an "atlassian" location missing its Jira fiel
   })
 })
 
-// #40/ADR-0042: atlassian is now a genuinely accepted provider and location shape (previous
-// assertion), but no capability registration ships until a later ticket in #39's task list — a
-// structurally-valid Atlassian registration attempt still can't complete, distinctly from a bad
-// location.
-test('POST /api/workspaces rejects a structurally-valid "atlassian" registration — known and location-valid, but not selectable yet (no capability registration)', async () => {
+// #48/ADR-0042: atlassian's capability registration (content store, work items, identity —
+// lib/providerRegistry.js) and its own `POST /api/workspaces` wiring (`checkAtlassianRepo`, the
+// `REPO_CHECKERS` table, tests/serverAtlassianWorkspaces.test.js) both landed by this ticket — a
+// structurally-valid Atlassian registration is no longer rejected as unsupported the way it was
+// before #48 (see git history for the prior "not supported yet" assertion this replaces). It now
+// gets exactly the same two-token credential check every other Atlassian route does: supplying only
+// the primary (Bitbucket) Authorization header, with no secondary (Jira) one
+// (lib/credential.js's own `getSecondaryCredential`), is reported as the same structured
+// "authentication required" response a missing PAT already gets for every other provider — not a
+// distinct "not supported" message.
+test('POST /api/workspaces accepts an "atlassian" registration structurally, and reports "authentication required" when only the Bitbucket token is supplied', async () => {
   await withScratchGitHubServer(async ({ gantryBase }) => {
     const res = await fetch(`${gantryBase}/api/workspaces`, {
       method: 'POST',
@@ -75,9 +81,9 @@ test('POST /api/workspaces rejects a structurally-valid "atlassian" registration
         location: { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, jiraSite: 'acme.atlassian.net', jiraProjectKey: 'PROJ' },
       }),
     })
-    assert.equal(res.status, 400)
+    assert.equal(res.status, 401)
     const body = await res.json()
-    assert.match(body.error, /not supported yet/)
+    assert.equal(body.error, 'authentication_required')
   })
 })
 
