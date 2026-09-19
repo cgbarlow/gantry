@@ -31,6 +31,16 @@ import { createServer } from 'node:http'
  * In Progress -> Done, plus a Done -> To Do reopen — enough to exercise
  * `getTransitions`/`transitionIssue`/`closeIssue`'s own "pick the transition whose target status
  * category is 'done'" contract without modelling a real site's fully configurable workflow.
+ *
+ * `users` (default `[]`) seeds this Jira site's own user directory (#45,
+ * `lib/jiraIdentityClient.js`) — `[{ accountId, displayName, emailAddress, assignable }]`. `GET
+ * /rest/api/3/user/search` returns every seeded user whose `displayName`/`emailAddress`/`accountId`
+ * contains the request's `query` (case-insensitive), regardless of `assignable`; `GET
+ * /rest/api/3/user/assignable/search` returns the same substring match narrowed to only those with
+ * `assignable !== false` — real Jira's own "Assignable User"-permission-filtered subset of the site's
+ * directory, which this fake models as a plain per-seeded-user flag rather than a full role/permission
+ * scheme, the same simplification `members`'s flat `access_level` already is for
+ * `tests/helpers/fakeGitLabServer.js`.
  */
 export function createFakeJiraServer({
   jiraProjectKey,
@@ -41,6 +51,7 @@ export function createFakeJiraServer({
     { id: '10002', name: 'Story', description: 'A user story.', subtask: false },
     { id: '10004', name: 'Bug', description: 'A problem which impairs product functions.', subtask: false },
   ],
+  users = [],
 } = {}) {
   // Issues, keyed by their human-facing `key` (e.g. "GANTRY-1") — the id
   // `lib/jiraWorkItemsClient.js` addresses every issue by, Jira's own project-scoped issue number
@@ -196,14 +207,42 @@ export function createFakeJiraServer({
       }
     }
 
+    // GET /rest/api/3/user/search — lib/jiraIdentityClient.js's searchSiteUsers(): every seeded user
+    // whose displayName/emailAddress/accountId contains `query`, regardless of `assignable`.
+    if (req.method === 'GET' && rest === '/user/search') {
+      const query = (url.searchParams.get('query') ?? '').toLowerCase()
+      const matches = users.filter((u) => matchesQuery(u, query))
+      return json(
+        200,
+        matches.map((u) => ({ accountId: u.accountId, displayName: u.displayName, emailAddress: u.emailAddress ?? '', active: u.active ?? true }))
+      )
+    }
+
+    // GET /rest/api/3/user/assignable/search — lib/jiraIdentityClient.js's searchAssignableUsers():
+    // the same substring match, narrowed to seeded users with `assignable !== false` — real Jira's own
+    // "Assignable User"-permission-filtered subset of the site directory for `project`.
+    if (req.method === 'GET' && rest === '/user/assignable/search') {
+      const query = (url.searchParams.get('query') ?? '').toLowerCase()
+      const matches = users.filter((u) => u.assignable !== false && matchesQuery(u, query))
+      return json(
+        200,
+        matches.map((u) => ({ accountId: u.accountId, displayName: u.displayName, emailAddress: u.emailAddress ?? '', active: u.active ?? true }))
+      )
+    }
+
     return json(404, { errorMessages: [`No fake route for ${req.method} ${pathname}`], errors: {} })
   })
 }
 
+function matchesQuery(user, query) {
+  if (!query) return true
+  return [user.accountId, user.displayName, user.emailAddress].some((field) => (field ?? '').toLowerCase().includes(query))
+}
+
 /** Starts a `createFakeJiraServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/helpers/fakeGitLabServer.js`'s own `withFakeGitLabServer` shape. */
-export function withFakeJiraServer({ jiraProjectKey, validPat, projectExists, issueTypes }, fn) {
+export function withFakeJiraServer({ jiraProjectKey, validPat, projectExists, issueTypes, users }, fn) {
   return new Promise((resolve, reject) => {
-    const server = createFakeJiraServer({ jiraProjectKey, validPat, projectExists, issueTypes })
+    const server = createFakeJiraServer({ jiraProjectKey, validPat, projectExists, issueTypes, users })
     server.listen(0, async () => {
       const { port } = server.address()
       try {

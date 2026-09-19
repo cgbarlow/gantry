@@ -231,14 +231,6 @@ test('registeredProviders lists atlassian once its workItems capability is regis
   assert.ok(registeredProviders().includes('atlassian'))
 })
 
-test('getProviderCapabilities resolves atlassian to its content-store and workItems factories, so far', () => {
-  const capabilities = getProviderCapabilities('atlassian')
-  assert.equal(typeof capabilities.contentStore, 'function')
-  assert.equal(typeof capabilities.workItems, 'function')
-  assert.equal(capabilities.pullRequests, undefined)
-  assert.equal(capabilities.identity, undefined)
-})
-
 test('resolveWorkItems instantiates atlassian\'s Jira-backed work-items client and creates/reads an issue through it', async () => {
   await withFakeJiraServer({ jiraProjectKey: JIRA_PROJECT_KEY, validPat: JIRA_VALID_PAT }, async (baseUrl) => {
     const workItems = resolveWorkItems('atlassian', { jiraSite: JIRA_SITE, jiraProjectKey: JIRA_PROJECT_KEY, pat: JIRA_VALID_PAT, baseUrl })
@@ -252,6 +244,42 @@ test('resolveWorkItems\' atlassian client surfaces a rejected token as the neutr
   await withFakeJiraServer({ jiraProjectKey: JIRA_PROJECT_KEY, validPat: JIRA_VALID_PAT }, async (baseUrl) => {
     const workItems = resolveWorkItems('atlassian', { jiraSite: JIRA_SITE, jiraProjectKey: JIRA_PROJECT_KEY, pat: 'wrong-token', baseUrl })
     await assert.rejects(() => workItems.listIssueTypes(), (err) => {
+      assert.ok(err instanceof AuthenticationError)
+      assert.equal(err.provider, 'atlassian')
+      return true
+    })
+  })
+})
+
+// #45: atlassian's identity capability lands its Jira-backed half (work-item assignees,
+// `lib/jiraIdentityClient.js`) — #44's still-outstanding Bitbucket-backed half (PR reviewers) is what
+// will eventually turn this single-factory entry into a dispatcher; until then, `identity` here is the
+// Jira client alone, same as `contentStore`/`workItems` are their own single Bitbucket/Jira client.
+// `pullRequests` (#46, Bitbucket-backed) remains the one capability still entirely unregistered.
+test('getProviderCapabilities resolves atlassian to its content-store, workItems and identity factories, so far', () => {
+  const capabilities = getProviderCapabilities('atlassian')
+  assert.equal(typeof capabilities.contentStore, 'function')
+  assert.equal(typeof capabilities.workItems, 'function')
+  assert.equal(typeof capabilities.identity, 'function')
+  assert.equal(capabilities.pullRequests, undefined)
+})
+
+test('resolveIdentity instantiates atlassian\'s Jira-backed identity client and resolves an assignable candidate through it', async () => {
+  await withFakeJiraServer(
+    { jiraProjectKey: JIRA_PROJECT_KEY, validPat: JIRA_VALID_PAT, users: [{ accountId: 'acc-registry', displayName: 'Reg Istry', assignable: true }] },
+    async (baseUrl) => {
+      const identity = resolveIdentity('atlassian', { jiraSite: JIRA_SITE, jiraProjectKey: JIRA_PROJECT_KEY, pat: JIRA_VALID_PAT, baseUrl })
+      const resolved = await identity.resolveIdentity('Reg Istry')
+      assert.equal(resolved.uniqueName, 'acc-registry')
+      assert.equal(resolved.canAssign, true)
+    }
+  )
+})
+
+test('resolveIdentity\'s atlassian client surfaces a rejected token as the neutral AuthenticationError, tagged atlassian', async () => {
+  await withFakeJiraServer({ jiraProjectKey: JIRA_PROJECT_KEY, validPat: JIRA_VALID_PAT, users: [{ accountId: 'acc-x', displayName: 'X' }] }, async (baseUrl) => {
+    const identity = resolveIdentity('atlassian', { jiraSite: JIRA_SITE, jiraProjectKey: JIRA_PROJECT_KEY, pat: 'wrong-token', baseUrl })
+    await assert.rejects(() => identity.searchIdentities('x'), (err) => {
       assert.ok(err instanceof AuthenticationError)
       assert.equal(err.provider, 'atlassian')
       return true
