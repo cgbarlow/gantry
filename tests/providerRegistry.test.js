@@ -192,9 +192,10 @@ test('resolveWorkItems instantiates gitlab\'s work-items client and creates/read
   })
 })
 
-// #41/#42: atlassian joins the registry the same incremental way github/gitlab did — #41 landed its
-// content store (Bitbucket Cloud), #42 landed its workItems (Jira Cloud). `pullRequests`/`identity`
-// (both Bitbucket-backed, ADR-0042's split-suite provider) land in later tickets (#44/#45).
+// #41/#42/#44: atlassian joins the registry the same incremental way github/gitlab did — #41 landed
+// its content store (Bitbucket Cloud), #42 landed its workItems (Jira Cloud), #44 landed the
+// Bitbucket-backed half of identity (pull-request reviewers). `pullRequests` lands in a later ticket
+// (#46).
 test('registeredProviders lists atlassian once its content store is registered', () => {
   assert.ok(registeredProviders().includes('atlassian'))
 })
@@ -231,12 +232,12 @@ test('registeredProviders lists atlassian once its workItems capability is regis
   assert.ok(registeredProviders().includes('atlassian'))
 })
 
-test('getProviderCapabilities resolves atlassian to its content-store and workItems factories, so far', () => {
+test('getProviderCapabilities resolves atlassian to its content-store, workItems and identity factories, so far', () => {
   const capabilities = getProviderCapabilities('atlassian')
   assert.equal(typeof capabilities.contentStore, 'function')
   assert.equal(typeof capabilities.workItems, 'function')
+  assert.equal(typeof capabilities.identity, 'function')
   assert.equal(capabilities.pullRequests, undefined)
-  assert.equal(capabilities.identity, undefined)
 })
 
 test('resolveWorkItems instantiates atlassian\'s Jira-backed work-items client and creates/reads an issue through it', async () => {
@@ -257,6 +258,25 @@ test('resolveWorkItems\' atlassian client surfaces a rejected token as the neutr
       return true
     })
   })
+})
+
+// #44: atlassian's identity capability (Bitbucket-backed half — pull-request reviewers), registered
+// alongside #41's content store and #42's workItems.
+test('resolveIdentity instantiates atlassian\'s Bitbucket-backed identity client', async () => {
+  await withFakeBitbucketServer(
+    {
+      owner: BITBUCKET_OWNER,
+      repository: BITBUCKET_REPOSITORY,
+      validPat: BITBUCKET_VALID_PAT,
+      permissions: [{ uuid: '{uuid-ana}', accountId: 'acct-ana', displayName: 'Ana', nickname: 'ana', permission: 'write' }],
+    },
+    async (baseUrl) => {
+      const identity = resolveIdentity('atlassian', { owner: BITBUCKET_OWNER, repository: BITBUCKET_REPOSITORY, pat: BITBUCKET_VALID_PAT, baseUrl })
+      const resolved = await identity.resolveIdentity('ana')
+      assert.equal(resolved.uniqueName, 'ana')
+      assert.equal(resolved.canAssign, true)
+    }
+  )
 })
 
 function withFakeBitbucketServerForContract(fn) {
