@@ -190,7 +190,11 @@ const pickedWorkspaceId = signal('')
 // to 'azure-devops' below since GitHub's content store isn't built yet, #11) shares the exact same
 // state shape without needing one of its own.
 const registerProvider = signal(DEFAULT_PROVIDER)
-const registerForm = signal({ organization: 'Contoso-Production', project: 'Default', repository: '', repoOwner: '', owner: '' })
+// `namespace` (GitLab's own full group/subgroup path, ADR-0041) and `baseUrl` (GitLab's optional
+// self-hosted CE/EE override, same ADR) are gitlab-only fields, added alongside the existing
+// azure-devops/github ones (#25) — harmless no-ops for every other provider, exactly like `repoOwner`
+// already is for azure-devops and `organization`/`project` already are for github.
+const registerForm = signal({ organization: 'Contoso-Production', project: 'Default', repository: '', repoOwner: '', namespace: '', baseUrl: '', owner: '' })
 const registerTicketingSystem = signal(defaultTicketingSystem.value)
 
 // #9 (ADR-0038): the PAT for a brand-new Workspace, held here in memory only — never persisted to any
@@ -265,21 +269,29 @@ const newWorkItemTitle = signal('')
 const newWorkItemCreateStatus = signal('idle') // idle | creating | failed
 const newWorkItemCreateError = signal('')
 
-// A registered workspace's own location, rendered per its provider (#8) — azure-devops keeps the
-// existing organization/project/repository form; github shows owner/repository, with no project of
-// its own to show. Reads `location` (ticket #3, ADR-0037's nested provider/location shape every
-// workspace GET now returns) rather than flat top-level fields, since a GitHub workspace carries no
-// flat aliases (`lib/workspaceRegistry.js`'s `toPublicWorkspace` only denormalizes those for
+// A registered workspace's own location, rendered per its provider (#8; gitlab added #41,
+// ADR-0041) — azure-devops keeps the existing organization/project/repository form; github shows
+// owner/repository, with no project of its own to show; gitlab shows namespace/repository, its own
+// group/subgroup path plus the project (stored as `location.repository`, the same key github uses).
+// Reads `location` (ticket #3, ADR-0037's nested provider/location shape every workspace GET now
+// returns) rather than flat top-level fields, since a GitHub or GitLab workspace carries no flat
+// aliases (`lib/workspaceRegistry.js`'s `toPublicWorkspace` only denormalizes those for
 // azure-devops, for pre-#3 back-compat). Shared by both Pick-workspace lists (top-level and the
-// Import destination panel's).
+// Import destination panel's) — a gitlab workspace is reachable both via this wizard's own Register
+// step (#25) and via Adopt (#35).
 function workspaceLocationLabel(w) {
-  return w.provider === 'github' ? `${w.location.owner}/${w.location.repository}` : `${w.location.organization}/${w.location.project}/${w.location.repository}`
+  if (w.provider === 'github') return `${w.location.owner}/${w.location.repository}`
+  if (w.provider === 'gitlab') return `${w.location.namespace}/${w.location.repository}`
+  return `${w.location.organization}/${w.location.project}/${w.location.repository}`
 }
 
-// Same workspace's ticketing/tracker line, provider-aware — GitHub has no ticketing-system choice of
-// its own (ADR-0037: the provider itself is the suite), so this reads "GitHub" rather than "ticketing: none".
+// Same workspace's ticketing/tracker line, provider-aware — neither GitHub nor GitLab has a
+// ticketing-system choice of its own (ADR-0037: the provider itself is the suite), so this reads
+// "GitHub" / "GitLab" rather than "ticketing: none".
 function workspaceTrackerLabel(w) {
-  return w.provider === 'github' ? 'GitHub' : w.ticketingSystem || 'none'
+  if (w.provider === 'github') return 'GitHub'
+  if (w.provider === 'gitlab') return 'GitLab'
+  return w.ticketingSystem || 'none'
 }
 
 function slugify(name) {
@@ -442,7 +454,7 @@ function resetWizard() {
   workspacesLoadError.value = ''
   pickedWorkspaceId.value = ''
   registerProvider.value = DEFAULT_PROVIDER
-  registerForm.value = { organization: 'Contoso-Production', project: 'Default', repository: '', repoOwner: '', owner: '' }
+  registerForm.value = { organization: 'Contoso-Production', project: 'Default', repository: '', repoOwner: '', namespace: '', baseUrl: '', owner: '' }
   registerTicketingSystem.value = defaultTicketingSystem.value
   registerPat.value = ''
   registerStatus.value = 'idle'
@@ -506,18 +518,19 @@ async function registerWorkspace(providerOverride) {
   // braces alongside the registerDataSource effect above) rather than trusting registerProvider's
   // current value — this function is its only other caller.
   const provider = providerOverride ?? registerProvider.value
-  const { organization, project, repository, repoOwner, owner } = registerForm.value
+  const { organization, project, repository, repoOwner, namespace, baseUrl, owner } = registerForm.value
   const isGitHub = provider === 'github'
+  const isGitLab = provider === 'gitlab'
   // #9 (ADR-0038): a brand-new Workspace has no id yet to resolve a stored PAT against, so this
   // attaches the wizard's own in-memory `registerPat` directly rather than going through
   // `apiFetch`'s workspace-scoped auto-prompt-and-retry (`silent: true` suppresses that entirely —
   // a rejected PAT here is this function's own `registerError`, not the shared page-wide modal).
   const authHeader = basicAuthHeaderForValue(registerPat.value.trim())
   try {
-    // Sent as the #37 nested `{ provider, location }` shape rather than flat
-    // organization/project/repository — this wizard still only offers Azure
-    // DevOps fields, so `provider` is always 'azure-devops' here, but the
-    // wire shape matches what a workspace record is now stored as.
+    // Sent as the #3/#37 nested `{ provider, location }` shape (ADR-0037) — each provider's own
+    // location fields, per lib/provider.js's schema: azure-devops keeps
+    // organization/project/repository, github takes owner/repository, gitlab (#25, ADR-0041) takes
+    // namespace/repository plus an optional self-hosted `baseUrl`.
     const res = await apiFetch(
       '/api/workspaces',
       {
@@ -527,7 +540,13 @@ async function registerWorkspace(providerOverride) {
           provider,
           location: isGitHub
             ? { owner: repoOwner.trim(), repository: repository.trim() }
-            : { organization: organization.trim(), project: project.trim(), repository: repository.trim() },
+            : isGitLab
+              ? {
+                  namespace: namespace.trim(),
+                  repository: repository.trim(),
+                  ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
+                }
+              : { organization: organization.trim(), project: project.trim(), repository: repository.trim() },
           owner: owner.trim(),
         }),
       },
@@ -2180,7 +2199,55 @@ function WorkspaceStep() {
                   />
                 </div>
               `
-            : html`
+            : registerProvider.value === 'gitlab'
+              ? html`
+                  <div class="wizard-field">
+                    <label for="ws-namespace">Namespace</label>
+                    <input
+                      class="wizard-input"
+                      id="ws-namespace"
+                      type="text"
+                      placeholder="The full group/subgroup path, e.g. engineering/platform/backend-services"
+                      value=${registerForm.value.namespace}
+                      onInput=${(e) => (registerForm.value = { ...registerForm.value, namespace: e.currentTarget.value })}
+                    />
+                  </div>
+                  <div class="wizard-field">
+                    <label for="ws-repository">Project</label>
+                    <input
+                      class="wizard-input"
+                      id="ws-repository"
+                      type="text"
+                      value=${registerForm.value.repository}
+                      onInput=${(e) => (registerForm.value = { ...registerForm.value, repository: e.currentTarget.value })}
+                    />
+                    <p class="wizard-field-hint">Create the project on GitLab first — gantry links to an existing project, it does not create one.</p>
+                  </div>
+                  <div class="wizard-field">
+                    <label for="ws-gitlab-baseurl">Base URL (optional)</label>
+                    <input
+                      class="wizard-input"
+                      id="ws-gitlab-baseurl"
+                      type="text"
+                      placeholder="For self-hosted GitLab (CE/EE) — leave blank for gitlab.com"
+                      value=${registerForm.value.baseUrl}
+                      onInput=${(e) => (registerForm.value = { ...registerForm.value, baseUrl: e.currentTarget.value })}
+                    />
+                  </div>
+                  <div class="wizard-field">
+                    <label for="ws-gitlab-owner">Owner</label>
+                    <${IdentityPicker}
+                      id="ws-gitlab-owner"
+                      value=${registerForm.value.owner}
+                      onChange=${(uniqueName) => (registerForm.value = { ...registerForm.value, owner: uniqueName })}
+                      placeholder="Search by name…"
+                      namespace=${registerForm.value.namespace}
+                      repository=${registerForm.value.repository}
+                      pat=${registerPat.value}
+                    />
+                  </div>
+                `
+              : html`
                 <div class="wizard-field">
                   <label for="ws-organization">Organization</label>
                   <input
@@ -2260,7 +2327,10 @@ function WorkspaceStep() {
             <p class="wizard-field-hint">
               ${registerProvider.value === 'github'
                 ? html`Used to check access and, once registration succeeds, becomes this workspace's own Personal Access Token — a fine-grained token needs <strong>Contents</strong>, <strong>Issues</strong>, <strong>Pull requests</strong>, and <strong>Metadata</strong> permissions (Read &amp; write, except Metadata which is Read-only). Stored only in this browser, and only if registration succeeds.`
-                : html`Used to check access and, once registration succeeds, becomes this workspace's own Personal Access Token — needs <strong>Code (Read &amp; write)</strong>, <strong>Work Items (Read &amp; write)</strong>, and <strong>Identity (Read)</strong> scope. Stored only in this browser, and only if registration succeeds.`}
+                : registerProvider.value === 'gitlab'
+                  ? // #25 (ADR-0041): GitLab's own scope guidance, mirroring the github/azure-devops hints above.
+                    html`Used to check access and, once registration succeeds, becomes this workspace's own Personal Access Token — a Personal, Project or Group Access Token needs the <strong>api</strong> scope (or, narrower, <strong>read_repository</strong> and <strong>write_repository</strong> together with API access to Issues and Merge Requests). Stored only in this browser, and only if registration succeeds.`
+                  : html`Used to check access and, once registration succeeds, becomes this workspace's own Personal Access Token — needs <strong>Code (Read &amp; write)</strong>, <strong>Work Items (Read &amp; write)</strong>, and <strong>Identity (Read)</strong> scope. Stored only in this browser, and only if registration succeeds.`}
             </p>
           </div>
           <div class="wizard-field">
@@ -2271,7 +2341,9 @@ function WorkspaceStep() {
               !registerPat.value.trim() ||
               (registerProvider.value === 'github'
                 ? !registerForm.value.repoOwner.trim() || !registerForm.value.repository.trim()
-                : !registerForm.value.organization.trim() || !registerForm.value.project.trim() || !registerForm.value.repository.trim())}
+                : registerProvider.value === 'gitlab'
+                  ? !registerForm.value.namespace.trim() || !registerForm.value.repository.trim()
+                  : !registerForm.value.organization.trim() || !registerForm.value.project.trim() || !registerForm.value.repository.trim())}
               onClick=${() => registerWorkspace()}
             >
               ${registerStatus.value === 'registering' ? 'Registering…' : 'Register workspace'}

@@ -21,6 +21,7 @@ import { withScratchInstances } from './helpers/lifecycle.js'
 
 const LOCATION = { organization: 'fake-org', project: 'fake-project', repository: 'fake-repo' }
 const GITHUB_LOCATION = { owner: 'octocat', repository: 'fake-repo' }
+const GITLAB_LOCATION = { namespace: 'fake-group/fake-subgroup', repository: 'fake-repo' }
 
 // ---------- registerWorkspace: nested {provider, location} shape only (ticket #6) ----------
 
@@ -123,6 +124,56 @@ test('registerWorkspace rejects a GitHub location missing owner or repository �
       () => registerWorkspace({ provider: 'github', location: { repository: 'fake-repo' } }, { instancesDir }),
       /missing: owner/
     )
+  })
+})
+
+// ---------- gitlab {provider, location} (#25, ADR-0041) ----------
+
+test('registerWorkspace accepts a GitLab {provider, location} — namespace/repository, no project required', async () => {
+  await withScratchInstances((instancesDir) => {
+    const workspace = registerWorkspace({ provider: 'gitlab', location: GITLAB_LOCATION, owner: 'c.barlow' }, { instancesDir })
+    assert.equal(workspace.provider, 'gitlab')
+    assert.deepEqual(workspace.location, GITLAB_LOCATION)
+    assert.equal(workspace.owner, 'c.barlow')
+    // No location accessor exists at all any more (ticket #6) — a GitLab workspace never had one.
+    assert.equal(workspace.organization, undefined)
+    assert.equal(workspace.project, undefined)
+    assert.equal(workspace.ticketingSystem, undefined)
+  })
+})
+
+test('registerWorkspace persists a GitLab workspace\'s optional baseUrl (self-hosted CE/EE)', async () => {
+  await withScratchInstances((instancesDir) => {
+    const workspace = registerWorkspace(
+      { provider: 'gitlab', location: { ...GITLAB_LOCATION, baseUrl: 'https://gitlab.example.internal' } },
+      { instancesDir }
+    )
+    assert.equal(workspace.location.baseUrl, 'https://gitlab.example.internal')
+  })
+})
+
+test('registerWorkspace rejects a GitLab location missing namespace or repository — never requires a project', async () => {
+  await withScratchInstances((instancesDir) => {
+    assert.throws(
+      () => registerWorkspace({ provider: 'gitlab', location: { namespace: 'fake-group' } }, { instancesDir }),
+      /missing: repository/
+    )
+    assert.throws(
+      () => registerWorkspace({ provider: 'gitlab', location: { repository: 'fake-repo' } }, { instancesDir }),
+      /missing: namespace/
+    )
+  })
+})
+
+test('findWorkspaceByLocation matches a gitlab workspace within its own provider only', async () => {
+  await withScratchInstances((instancesDir) => {
+    const gl = registerWorkspace({ provider: 'gitlab', location: { namespace: 'shared', repository: 'shared-repo' } }, { instancesDir })
+    const gh = registerWorkspace({ provider: 'github', location: { owner: 'shared', repository: 'shared-repo' } }, { instancesDir })
+    assert.equal(
+      findWorkspaceByLocation({ provider: 'gitlab', location: { namespace: 'shared', repository: 'shared-repo' } }, { instancesDir }).id,
+      gl.id
+    )
+    assert.notEqual(gl.id, gh.id)
   })
 })
 

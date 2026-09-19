@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createInstance, readInstance } from '../lib/instance.js'
+import { createInstance, readInstance, recordInstanceWorkItemLink } from '../lib/instance.js'
 import { writeWorkspaceJson } from '../lib/workspaceDirectory.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
@@ -291,6 +291,22 @@ test('linkInstanceToWorkItem works against an Azure-DevOps-backed instance whose
   })
 })
 
+// #24: linkInstanceToWorkItem's own provider dispatch used to be `link.provider === 'github' ? ... :
+// <run the Azure DevOps branch unconditionally>` — a third, genuinely-declared provider (e.g.
+// 'gitlab', ADR-0041, which has no work-items linker of its own yet) would have silently been run
+// through Azure DevOps's own linker against fields it doesn't understand (no `organization`/`project`
+// at all), rather than reported as the unsupported case it actually is. A stub provider id proves the
+// same for any provider gantry doesn't yet have a linker for.
+test('linkInstanceToWorkItem reports a declared but unsupported provider clearly, rather than running the Azure DevOps branch against it', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    await assert.rejects(
+      () => linkInstanceToWorkItem('my-initiative', { provider: 'stub-provider', pat: 'x' }, { instancesDir }),
+      /"stub-provider" work item is not supported yet/
+    )
+  })
+})
+
 test('an instance with no workItem field is simply unlinked — readInstance reports it as undefined, not an error', () => {
   withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
@@ -361,6 +377,25 @@ test('syncGatePassToWorkItem refuses to push a state for an unlinked instance', 
     await assert.rejects(
       () => syncGatePassToWorkItem('my-initiative', {}, { instancesDir, pat: VALID_PAT }),
       /not linked to an Azure DevOps work item/
+    )
+  })
+})
+
+// #24: mirrors linkInstanceToWorkItem's own fix above — syncGatePassToWorkItem's dispatch used to be
+// `instance.workItem.provider === 'github' ? ... : <run the Azure DevOps branch unconditionally>`,
+// which would have quietly tried to push an Azure-DevOps-shaped state update against a work item
+// recorded under any other provider. `recordInstanceWorkItemLink` is called directly here (bypassing
+// linkInstanceToWorkItem's own now-guarded entry point) purely to get a stub-provider-linked instance
+// on disk to exercise this — not a link shape gantry's own linker would ever actually produce.
+test('syncGatePassToWorkItem reports a declared but unsupported work-item provider clearly, rather than running the Azure DevOps branch against it', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    fillShapeStage(instancesDir, 'my-initiative')
+    await recordInstanceWorkItemLink('my-initiative', { provider: 'stub-provider', stages: { shape: 1 } }, { instancesDir })
+
+    await assert.rejects(
+      () => syncGatePassToWorkItem('my-initiative', {}, { instancesDir, pat: VALID_PAT }),
+      /"stub-provider" work item is not supported yet/
     )
   })
 })

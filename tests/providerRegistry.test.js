@@ -8,10 +8,12 @@ import {
   resolveWorkItems,
   resolveIdentity,
 } from '../lib/providerRegistry.js'
+import { AuthenticationError } from '../lib/providerErrors.js'
 import { withFakeAzureDevOpsServer as withFakeServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withFakeGitHubServer, GITHUB_OWNER, GITHUB_REPOSITORY, GITHUB_VALID_PAT } from './helpers/fakeGitHubServer.js'
+import { withFakeGitLabServer, GITLAB_NAMESPACE, GITLAB_REPOSITORY, GITLAB_VALID_PAT } from './helpers/fakeGitLabServer.js'
 import { ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
-import { runProviderContractTests } from './helpers/providerContractTests.js'
+import { runProviderContractTests, runContentStoreContractTests } from './helpers/providerContractTests.js'
 
 function withFakeAzureDevOpsServer(fn) {
   return withFakeServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT }, fn)
@@ -95,6 +97,94 @@ test('resolvePullRequests instantiates github\'s pull-requests client and opens 
       assert.deepEqual(fetched.reviews, [])
     }
   )
+})
+
+// #26/#28/#30/#33: gitlab joins the registry the same incremental way github did — content store
+// (#26), identity (#28), work items (#30) and pull requests (#33), completing ADR-0041's own scope
+// list at full parity with GitHub.
+test('registeredProviders lists gitlab once its content store is registered', () => {
+  assert.ok(registeredProviders().includes('gitlab'))
+})
+
+test('getProviderCapabilities resolves gitlab to all four capability factories', () => {
+  const capabilities = getProviderCapabilities('gitlab')
+  assert.equal(typeof capabilities.contentStore, 'function')
+  assert.equal(typeof capabilities.identity, 'function')
+  assert.equal(typeof capabilities.workItems, 'function')
+  assert.equal(typeof capabilities.pullRequests, 'function')
+})
+
+test('resolveContentStore instantiates gitlab\'s content-store client and reads/writes through it', async () => {
+  await withFakeGitLabServer({ namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, validPat: GITLAB_VALID_PAT }, async (baseUrl) => {
+    const contentStore = resolveContentStore('gitlab', { namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, pat: GITLAB_VALID_PAT, baseUrl })
+    assert.equal(await contentStore.repoExists(), true)
+    await contentStore.writeFile('/registry-smoke-test.md', 'x\n')
+    assert.equal(await contentStore.getFileContent('/registry-smoke-test.md'), 'x\n')
+  })
+})
+
+// #33: the GitLab twin of the GitHub `resolvePullRequests` smoke test above.
+test('resolvePullRequests instantiates gitlab\'s pull-requests client and opens a real merge request', async () => {
+  await withFakeGitLabServer(
+    { namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, validPat: GITLAB_VALID_PAT, files: { 'README.md': '# repo' } },
+    async (baseUrl) => {
+      const contentStore = resolveContentStore('gitlab', { namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, pat: GITLAB_VALID_PAT, baseUrl })
+      await contentStore.createBranch('feature')
+      await contentStore.writeFile('/x.md', 'x\n', { branch: 'feature' })
+
+      const pullRequests = resolvePullRequests('gitlab', { namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, pat: GITLAB_VALID_PAT, baseUrl })
+      const mr = await pullRequests.createPullRequest({ sourceBranch: 'feature', targetBranch: 'main', title: 'Registry smoke test' })
+      assert.equal(typeof mr.pullRequestId, 'number')
+      assert.equal(mr.status, 'active')
+
+      const fetched = await pullRequests.getPullRequest(mr.pullRequestId)
+      assert.equal(fetched.pullRequestId, mr.pullRequestId)
+      assert.equal(fetched.approvals.approved, false)
+      assert.deepEqual(fetched.discussions, [])
+    }
+  )
+})
+
+test('resolveContentStore\'s gitlab client surfaces a rejected PAT as the neutral AuthenticationError, tagged gitlab', async () => {
+  await withFakeGitLabServer({ namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, validPat: GITLAB_VALID_PAT }, async (baseUrl) => {
+    const contentStore = resolveContentStore('gitlab', { namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, pat: 'wrong-pat', baseUrl })
+    await assert.rejects(() => contentStore.getFileContent('/anything.md'), (err) => {
+      assert.ok(err instanceof AuthenticationError)
+      assert.equal(err.provider, 'gitlab')
+      return true
+    })
+  })
+})
+
+function withFakeGitLabServerForContract(fn) {
+  return withFakeGitLabServer({ namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, validPat: GITLAB_VALID_PAT }, fn)
+}
+
+// #29: the content-store slice of the shared contract suite, run against gitlab's registered
+// content-store capability — the same "createBranch/branchExists isolation" and "branch created from
+// a ref carries that ref's current content" contract `lib/gitlabStageBranch.js`'s
+// findGitLabStageBranch/resolveGitLabStageBranch (and #33's re-open path) are themselves built on.
+// `runProviderContractTests` (the four-capability suite, shaped around Azure DevOps's own field-typed
+// work items) isn't run for gitlab, same as it isn't for github — gitlab's own work-items/pull-requests
+// shape is exercised by the dedicated tests around this one instead — so this stays the narrower
+// `runContentStoreContractTests` slice (see that function's own doc comment in
+// tests/helpers/providerContractTests.js), not a parallel suite.
+runContentStoreContractTests('gitlab', {
+  providerId: 'gitlab',
+  withServer: withFakeGitLabServerForContract,
+  buildContentStore: (baseUrl, overrides = {}) =>
+    resolveContentStore('gitlab', { namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, pat: GITLAB_VALID_PAT, baseUrl, ...overrides }),
+  badCredential: 'wrong-pat',
+})
+
+// #30: gitlab's work-items capability, registered the same way as its content store above.
+test('resolveWorkItems instantiates gitlab\'s work-items client and creates/reads an issue through it', async () => {
+  await withFakeGitLabServer({ namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, validPat: GITLAB_VALID_PAT }, async (baseUrl) => {
+    const workItems = resolveWorkItems('gitlab', { namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, pat: GITLAB_VALID_PAT, baseUrl })
+    const created = await workItems.createIssue({ title: 'Registry smoke test', body: '' })
+    const fetched = await workItems.getIssue(created.iid)
+    assert.equal(fetched.title, 'Registry smoke test')
+  })
 })
 
 test('resolveContentStore/resolvePullRequests/resolveWorkItems/resolveIdentity instantiate azure-devops\'s existing clients', async () => {

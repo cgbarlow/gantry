@@ -251,6 +251,48 @@ test('POST /api/workspaces with a nested { provider: "github", ... } body and no
   })
 })
 
+// #24 laid the groundwork (`provider` validates via lib/provider.js's own SUPPORTED_PROVIDERS,
+// ADR-0041) for gitlab as a third provider; this route's own repo-check dispatch used to be
+// `provider === 'github' ? checkGitHubRepo(...) : checkAzureDevOpsRepo(...)`, which would have
+// silently run Azure DevOps's own repo check (and reused its own baseUrl-override flag) against a
+// GitLab-shaped `{ namespace, repository }` location — exactly the anti-pattern ADR-0039 rejected.
+// #25 finishes the job: gitlab now has a real, registered `checkGitLabRepo`/`allowGitLabBaseUrlOverride`
+// entry in this route's own dispatch tables (proven end-to-end, with a real fake GitLab server, by
+// tests/serverGitLabWorkspaces.test.js) — a gitlab registration reaches the same "prove real access
+// before persisting" flow azure-devops/github already have, rather than being reported unsupported.
+// This test only proves the *dispatch* — no real network call — by checking the missing-PAT case,
+// which short-circuits before `checkGitLabRepo` is ever invoked (that PAT-proving path is what
+// serverGitLabWorkspaces.test.js exercises against a real fake GitLab server).
+test('POST /api/workspaces with a nested { provider: "gitlab", ... } body and no PAT reports the structured "authentication required" response naming GitLab, not "not supported yet"', async () => {
+  await withScratchServer({}, async (base) => {
+    const res = await fetch(`${base}/api/workspaces`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'gitlab', location: { namespace: 'group/subgroup', repository: 'repo' } }),
+    })
+    assert.equal(res.status, 401)
+    const body = await res.json()
+    assert.equal(body.error, 'authentication_required')
+    assert.match(body.message, /GitLab/)
+
+    const listing = await (await fetch(`${base}/api/workspaces`)).json()
+    assert.equal(listing.length, 0)
+  })
+})
+
+test('POST /api/workspaces rejects a gitlab.baseUrl override even when allowAzureDevOpsBaseUrlOverride is set — the two flags are not interchangeable', async () => {
+  await withScratchServer({ allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+    const res = await fetch(`${base}/api/workspaces`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+      body: JSON.stringify({ provider: 'gitlab', location: { namespace: 'group', repository: 'repo', baseUrl: 'https://gitlab.example.internal' } }),
+    })
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.match(body.error, /gitlab.baseUrl overrides are not permitted/)
+  })
+})
+
 test('a workspace registered before #3/#5 via the flat wire shape still loads through GET /api/workspaces with a nested location', async () => {
   await withScratchServer({}, async (base, instancesDir) => {
     // Simulates a pre-#3 record: written directly in the old flat shape, bypassing registerWorkspace's own current (already-nested) normalization.

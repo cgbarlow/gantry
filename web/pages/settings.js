@@ -199,14 +199,17 @@ function RenderEngineSection() {
 // Definitions page's own Refresh button re-reads every configured repo on demand thereafter. Gated
 // behind advancedMode alongside the other Azure-DevOps-specific sections above — a local-only user
 // never sees this.
-// #19 (ADR-0037): the location fields collected change with the Provider picked, the same
-// "Provider drives which fields appear" convention the "+ New Workspace" wizard uses — Azure DevOps
-// needs Organization/Project/Repository, GitHub only Owner/Repository. Atlassian is deliberately
-// absent (not built, docs/adr/0037), unlike the wizard's own Provider picker (#8) which shows it as
-// known-but-unavailable — this form has no such row to add it to yet.
+// #19/#27 (ADR-0037, ADR-0041): the location fields collected change with the Provider picked, the
+// same "Provider drives which fields appear" convention the "+ New Workspace" wizard uses — Azure
+// DevOps needs Organization/Project/Repository, GitHub only Owner/Repository, GitLab only
+// Namespace/Project (stored as `location.repository`, ADR-0041's own "wizard labels it Project;
+// only the internal key is neutral"). Atlassian is deliberately absent (not built, docs/adr/0037),
+// unlike the wizard's own Provider picker (#8) which shows it as known-but-unavailable — this form
+// has no such row to add it to yet.
 const LIBRARY_REPO_PROVIDERS = [
   { id: 'azure-devops', label: 'Azure DevOps' },
   { id: 'github', label: 'GitHub' },
+  { id: 'gitlab', label: 'GitLab' },
 ]
 
 function LibraryReposSection() {
@@ -216,6 +219,7 @@ function LibraryReposSection() {
   const [organization, setOrganization] = useState('')
   const [project, setProject] = useState('')
   const [owner, setOwner] = useState('')
+  const [namespace, setNamespace] = useState('')
   const [repository, setRepository] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [codeOwner, setCodeOwner] = useState('')
@@ -249,6 +253,11 @@ function LibraryReposSection() {
         setAddError('Owner and repository are both required.')
         return
       }
+    } else if (provider === 'gitlab') {
+      if (!namespace.trim() || !repository.trim()) {
+        setAddError('Namespace and project are both required.')
+        return
+      }
     } else if (!organization.trim() || !project.trim() || !repository.trim()) {
       setAddError('Organization, project and repository are all required.')
       return
@@ -260,7 +269,9 @@ function LibraryReposSection() {
       const location =
         provider === 'github'
           ? { owner: owner.trim(), repository: repository.trim(), ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}) }
-          : { organization: organization.trim(), project: project.trim(), repository: repository.trim(), ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}) }
+          : provider === 'gitlab'
+            ? { namespace: namespace.trim(), repository: repository.trim(), ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}) }
+            : { organization: organization.trim(), project: project.trim(), repository: repository.trim(), ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}) }
       const res = await fetch('/api/library-repos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -274,6 +285,7 @@ function LibraryReposSection() {
       setOrganization('')
       setProject('')
       setOwner('')
+      setNamespace('')
       setRepository('')
       setBaseUrl('')
       setCodeOwner('')
@@ -319,13 +331,14 @@ function LibraryReposSection() {
     <section class="settings-section">
       <h2>Library repos</h2>
       <p class="guidance">
-        Azure DevOps or GitHub repos read as additional sources for the server library, alongside the
-        packaged <code>definitions/</code> directory — read-only in the editor (viewable,
-        copyable-from, clonable into a workspace), read with this server's own PAT — one per Provider
-        (<code>GANTRY_LIBRARY_PAT_AZURE_DEVOPS</code> / <code>GANTRY_LIBRARY_PAT_GITHUB</code>, the
-        former also honouring the deprecated <code>GANTRY_LIBRARY_PAT</code>) — cached on disk.
-        Re-read at server startup, when a repo is added below, and on the Definitions page's Refresh
-        button — never polled.
+        Azure DevOps, GitHub or GitLab repos read as additional sources for the server library,
+        alongside the packaged <code>definitions/</code> directory — read-only in the editor
+        (viewable, copyable-from, clonable into a workspace), read with this server's own PAT — one
+        per Provider (<code>GANTRY_LIBRARY_PAT_AZURE_DEVOPS</code> /
+        <code>GANTRY_LIBRARY_PAT_GITHUB</code> / <code>GANTRY_LIBRARY_PAT_GITLAB</code>, the first
+        also honouring the deprecated <code>GANTRY_LIBRARY_PAT</code>) — cached on disk. Re-read at
+        server startup, when a repo is added below, and on the Definitions page's Refresh button —
+        never polled.
       </p>
       ${loadError ? html`<p class="load-error">${loadError}</p>` : null}
       ${repos === null && !loadError ? html`<p class="loading">Loading…</p>` : null}
@@ -336,8 +349,12 @@ function LibraryReposSection() {
                 (repo) => html`
                   <div class="result-row" key=${repo.id}>
                     <span class="k"
-                      >${repo.provider === 'github' ? 'GitHub' : 'Azure DevOps'}:
-                      ${repo.provider === 'github' ? `${repo.location.owner}/${repo.location.repository}` : `${repo.location.organization}/${repo.location.project}/${repo.location.repository}`}</span
+                      >${repo.provider === 'github' ? 'GitHub' : repo.provider === 'gitlab' ? 'GitLab' : 'Azure DevOps'}:
+                      ${repo.provider === 'github'
+                        ? `${repo.location.owner}/${repo.location.repository}`
+                        : repo.provider === 'gitlab'
+                          ? `${repo.location.namespace}/${repo.location.repository}`
+                          : `${repo.location.organization}/${repo.location.project}/${repo.location.repository}`}</span
                     >
                     <span class="v">
                       ${repo.definitionCount == null
@@ -386,16 +403,25 @@ function LibraryReposSection() {
               <label class="field-label" for="library-repo-baseurl">Base URL (optional — GitHub Enterprise Server only)</label>
               <input id="library-repo-baseurl" class="wizard-input" value=${baseUrl} onInput=${(e) => setBaseUrl(e.currentTarget.value)} />
             `
-          : html`
-              <label class="field-label" for="library-repo-organization">Organization</label>
-              <input id="library-repo-organization" class="wizard-input" value=${organization} onInput=${(e) => setOrganization(e.currentTarget.value)} />
-              <label class="field-label" for="library-repo-project">Project</label>
-              <input id="library-repo-project" class="wizard-input" value=${project} onInput=${(e) => setProject(e.currentTarget.value)} />
-              <label class="field-label" for="library-repo-repository">Repository</label>
-              <input id="library-repo-repository" class="wizard-input" value=${repository} onInput=${(e) => setRepository(e.currentTarget.value)} />
-              <label class="field-label" for="library-repo-baseurl">Base URL (optional — on-premises Azure DevOps Server only)</label>
-              <input id="library-repo-baseurl" class="wizard-input" value=${baseUrl} onInput=${(e) => setBaseUrl(e.currentTarget.value)} />
-            `}
+          : provider === 'gitlab'
+            ? html`
+                <label class="field-label" for="library-repo-namespace">Namespace</label>
+                <input id="library-repo-namespace" class="wizard-input" value=${namespace} onInput=${(e) => setNamespace(e.currentTarget.value)} />
+                <label class="field-label" for="library-repo-repository">Project</label>
+                <input id="library-repo-repository" class="wizard-input" value=${repository} onInput=${(e) => setRepository(e.currentTarget.value)} />
+                <label class="field-label" for="library-repo-baseurl">Base URL (optional — self-hosted GitLab CE/EE only)</label>
+                <input id="library-repo-baseurl" class="wizard-input" value=${baseUrl} onInput=${(e) => setBaseUrl(e.currentTarget.value)} />
+              `
+            : html`
+                <label class="field-label" for="library-repo-organization">Organization</label>
+                <input id="library-repo-organization" class="wizard-input" value=${organization} onInput=${(e) => setOrganization(e.currentTarget.value)} />
+                <label class="field-label" for="library-repo-project">Project</label>
+                <input id="library-repo-project" class="wizard-input" value=${project} onInput=${(e) => setProject(e.currentTarget.value)} />
+                <label class="field-label" for="library-repo-repository">Repository</label>
+                <input id="library-repo-repository" class="wizard-input" value=${repository} onInput=${(e) => setRepository(e.currentTarget.value)} />
+                <label class="field-label" for="library-repo-baseurl">Base URL (optional — on-premises Azure DevOps Server only)</label>
+                <input id="library-repo-baseurl" class="wizard-input" value=${baseUrl} onInput=${(e) => setBaseUrl(e.currentTarget.value)} />
+              `}
         <label class="field-label" for="library-repo-codeowner">Code owner (optional — Promote's required reviewer)</label>
         <input id="library-repo-codeowner" class="wizard-input" placeholder="Name, unique name, or email" value=${codeOwner} onInput=${(e) => setCodeOwner(e.currentTarget.value)} />
       </div>
@@ -479,7 +505,7 @@ async function patchWorkspace(id, updates) {
   return body
 }
 
-// The standard `https://dev.azure.com/{organization}/{project}/_git/{repository}` shape — the reverse of web/lib/validateRepo.js's `parseRepoUrl` — with `baseUrl` (an on-premises Azure DevOps Server location) substituted in place of `https://dev.azure.com` when a workspace carries one. For a github workspace (#8), the same `baseUrl` override plays the GitHub Enterprise Server host's own role, substituted in place of `https://github.com`.
+// The standard `https://dev.azure.com/{organization}/{project}/_git/{repository}` shape — the reverse of web/lib/validateRepo.js's `parseRepoUrl` — with `baseUrl` (an on-premises Azure DevOps Server location) substituted in place of `https://dev.azure.com` when a workspace carries one. For a github workspace (#8), the same `baseUrl` override plays the GitHub Enterprise Server host's own role, substituted in place of `https://github.com`. For a gitlab workspace (#41), it plays the self-hosted GitLab CE/EE host's own role, substituted in place of `https://gitlab.com`.
 //
 // Shared by two different "workspace" shapes (ticket #5): a workspace-registry record's own nested
 // `{ provider, location: { organization, project, repository, baseUrl? } }` (this file's own callers
@@ -496,18 +522,47 @@ export function workspaceRepoUrl(workspace) {
     const base = location.baseUrl ?? 'https://github.com'
     return `${base}/${encodeURIComponent(location.owner)}/${encodeURIComponent(location.repository)}`
   }
+  if (workspace.provider === 'gitlab') {
+    const base = location.baseUrl ?? 'https://gitlab.com'
+    // `namespace` is GitLab's full group/subgroup path as one opaque string, however many segments
+    // deep (ADR-0041) — e.g. `engineering/platform`. Each segment is split and encoded on its own,
+    // mirroring lib/gitlabFileUrl.js's own `repositoryUrl`, so a literal `/` inside it becomes a real
+    // path separator here rather than a percent-encoded `%2F` that would 404 against GitLab's web UI.
+    const namespaceSegments = String(location.namespace).split('/').filter(Boolean).map(encodeURIComponent).join('/')
+    return `${base}/${namespaceSegments}/${encodeURIComponent(location.repository)}`
+  }
   const base = location.baseUrl ?? 'https://dev.azure.com'
   return `${base}/${encodeURIComponent(location.organization)}/${encodeURIComponent(location.project)}/_git/${encodeURIComponent(location.repository)}`
 }
 
-// The workspace's own location, rendered per its Provider (#8, docs/adr/0037) — azure-devops keeps
-// organization/project/repository; github has no project of its own, so owner/repository instead.
-// Reads the nested `location` (ticket #3) — only ever called with a workspace-registry record below,
-// which always carries one, unlike `workspaceRepoUrl` above which also serves the flat instance shape.
+// The workspace's own location, rendered per its Provider (#8, docs/adr/0037; gitlab added #41,
+// ADR-0041) — azure-devops keeps organization/project/repository; github has no project of its own,
+// so owner/repository instead; gitlab has no separate owner, so namespace/repository (its own
+// group/subgroup path plus the project, ADR-0041's own "namespace holds the full path as one opaque
+// string"). Reads the nested `location` (ticket #3) — only ever called with a workspace-registry
+// record below, which always carries one, unlike `workspaceRepoUrl` above which also serves the flat
+// instance shape.
 function workspaceLocationLabel(workspace) {
-  return workspace.provider === 'github'
-    ? `${workspace.location.owner}/${workspace.location.repository}`
-    : `${workspace.location.organization}/${workspace.location.project}/${workspace.location.repository}`
+  if (workspace.provider === 'github') return `${workspace.location.owner}/${workspace.location.repository}`
+  if (workspace.provider === 'gitlab') return `${workspace.location.namespace}/${workspace.location.repository}`
+  return `${workspace.location.organization}/${workspace.location.project}/${workspace.location.repository}`
+}
+
+// #41 (ADR-0041): the wizard's own PAT-scope guidance (new-workspace-wizard.js), mirrored here so a
+// workspace's own Settings screen — the only place a GitLab or GitHub PAT can be replaced or cleared
+// after registration — carries the same at-the-point-of-entry help the wizard gives at creation time.
+// Keyed by provider rather than a github/else binary so a third (or later fourth) provider's own
+// scopes never silently fall back to Azure DevOps's.
+const PROVIDER_LABELS = {
+  'azure-devops': 'Azure DevOps',
+  github: 'GitHub',
+  gitlab: 'GitLab',
+}
+
+const PAT_SCOPE_HELP = {
+  'azure-devops': html`Needs <strong>Code (Read &amp; write)</strong>, <strong>Work Items (Read &amp; write)</strong> and <strong>Identity (Read)</strong> scope.`,
+  github: html`A fine-grained token needs <strong>Contents</strong>, <strong>Issues</strong> and <strong>Pull requests</strong> permissions set to Read &amp; write, plus <strong>Metadata</strong> set to Read-only.`,
+  gitlab: html`A Personal, Project or Group Access Token needs the <strong>api</strong> scope (or, narrower, <strong>read_repository</strong> and <strong>write_repository</strong> together with API access to Issues and Merge Requests).`,
 }
 
 // One workspace's editable fields: owner (server-persisted, identity-picker), its own Workspace PAT
@@ -538,11 +593,13 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
   //
   // In practice, today, it can't: `jira` is rejected by validation everywhere a ticketing system can be chosen (globally, per-workspace, and at workspace creation — see workspaceRegistry.js's `assertValidTicketingSystem` and this file's own `TICKETING_SYSTEMS` enum), so `defaultTicketingSystem.value` and every workspace's `ticketingSystem` can only ever be `'azure-devops'` — there is no reachable state where the two sides of this comparison differ. This only becomes a real, visible misreporting risk once genuine Jira support ships (explicitly out of scope for this ticket, per spec #95's own "Out of Scope" list) and a real fix (an explicit override flag on the workspace record, intersecting the already-closed #96 ticket's schema) is worth building then, against real second-system requirements, rather than speculatively now.
   const hasTicketingOverride = workspace.ticketingSystem !== defaultTicketingSystem.value
-  // #8, docs/adr/0037 — GitHub has no ticketing-system choice of its own (the provider itself is the
-  // suite), so the Ticketing system radio group below is azure-devops-only; a github workspace's
-  // tracker is simply "GitHub", not a configurable option.
-  const isGitHub = workspace.provider === 'github'
-  const providerLabel = isGitHub ? 'GitHub' : 'Azure DevOps'
+  // #8, docs/adr/0037; gitlab added #41, ADR-0041 — neither GitHub nor GitLab has a ticketing-system
+  // choice of its own (the provider itself is the suite), so the Ticketing system radio group below
+  // is azure-devops-only; a github or gitlab workspace's tracker is simply "GitHub Issues" / "GitLab
+  // Issues", not a configurable option. Keyed by provider rather than a github/else binary so a third
+  // provider's own label and PAT-scope help never silently fall back to Azure DevOps's.
+  const providerLabel = PROVIDER_LABELS[workspace.provider] ?? PROVIDER_LABELS['azure-devops']
+  const showTicketingOverride = workspace.provider === 'azure-devops'
 
   async function handleSaveOwner() {
     const valueToSave = latestOwnerRef.current
@@ -628,10 +685,11 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
             ? html`<button type="button" class="btn small ghost" onClick=${handleClearPat}>Clear PAT</button>`
             : null}
         </div>
+        <p class="workspace-field-hint">${PAT_SCOPE_HELP[workspace.provider] ?? PAT_SCOPE_HELP['azure-devops']}</p>
         <div class="workspace-field-status">${patStatus}</div>
       </div>
 
-      ${isGitHub
+      ${!showTicketingOverride
         ? null
         : html`
             <div class="workspace-field workspace-ticketing">

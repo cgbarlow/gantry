@@ -11,15 +11,17 @@ import { basicAuthHeaderForValue } from './credential.js'
 // by this component itself; see web/pages/new-workspace-wizard.js's own `registerPat`). At most one of
 // `slug`, `workspaceId` or `pat` is meaningful for a given usage; `slug` wins if more than one is
 // passed. `organization`+`project` scope an Azure DevOps search; `owner`+`repository` scope a GitHub
-// one (#10) — at most one pair is meaningful for a given usage, mirroring the provider-discriminated
-// location shape (ADR-0037) this component's callers already carry.
+// one (#10); `namespace`+`repository` scope a GitLab one (#28, ADR-0041) — at most one of the three
+// pairs is meaningful for a given usage, mirroring the provider-discriminated location shape
+// (ADR-0037) this component's callers already carry.
 //
-// `enforceAssignability` (#10, docs/adr/0040) gates selection on a GitHub result's own `canAssign` —
-// GitHub rejects an issue assignee without repo access, so a field that becomes one (an instance's
-// Assignee, a required reviewer) shows a person who resolves but can't be assigned, disabled, with
-// `blockedReason`'s guidance to grant access and retry. Left `false` (the default) for a Gantry-side
-// field that never becomes a GitHub assignee (workspace Owner, a library repo's code owner) — those
-// accept any resolved person regardless of `canAssign`, per ADR-0040.
+// `enforceAssignability` (#10, docs/adr/0040; extended #28 for GitLab, docs/adr/0041) gates selection
+// on a GitHub or GitLab result's own `canAssign` — GitHub rejects an issue assignee without repo
+// access, and GitLab requires at least Reporter access to assign an issue or merge request, so a
+// field that becomes one (an instance's Assignee, a required reviewer) shows a person who resolves
+// but can't be assigned, disabled, with `blockedReason`'s guidance to grant access and retry. Left
+// `false` (the default) for a Gantry-side field that never becomes a provider assignee (workspace
+// Owner, a library repo's code owner) — those accept any resolved person regardless of `canAssign`.
 export function IdentityPicker({
   value,
   onChange,
@@ -28,6 +30,7 @@ export function IdentityPicker({
   organization,
   project,
   owner,
+  namespace,
   repository,
   workspaceId,
   pat,
@@ -75,6 +78,10 @@ export function IdentityPicker({
       } else if (owner && repository) {
         params.set('provider', 'github')
         params.set('owner', owner)
+        params.set('repository', repository)
+      } else if (namespace && repository) {
+        params.set('provider', 'gitlab')
+        params.set('namespace', namespace)
         params.set('repository', repository)
       }
       // `silent: true` — a missing/rejected PAT here is routine (search-as-you-type
@@ -175,11 +182,12 @@ export function IdentityPicker({
           ? html`<div class="no-results">No identities found for "${query}".</div>`
           : null}
         ${results.map((identity) => {
-          // #10, docs/adr/0040: GitHub rejects an issue assignee without repo access, so a field that
-          // becomes one (`enforceAssignability`) shows-but-blocks a person who resolves but can't be
-          // assigned, rather than only failing later once the choice is already committed. A field that
-          // never becomes a GitHub assignee (`enforceAssignability` left `false` — workspace Owner,
-          // library-repo code owner) ignores `canAssign` entirely and accepts anyone resolved.
+          // #10, docs/adr/0040 (GitHub); extended #28, docs/adr/0041 (GitLab): GitHub rejects an issue
+          // assignee without repo access, and GitLab requires at least Reporter access, so a field
+          // that becomes one (`enforceAssignability`) shows-but-blocks a person who resolves but can't
+          // be assigned, rather than only failing later once the choice is already committed. A field
+          // that never becomes a provider assignee (`enforceAssignability` left `false` — workspace
+          // Owner, library-repo code owner) ignores `canAssign` entirely and accepts anyone resolved.
           const blocked = enforceAssignability && identity.canAssign === false
           return html`
             <button
