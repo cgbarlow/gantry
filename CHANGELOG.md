@@ -17,6 +17,12 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.7.2-beta — 2026-09-19
+
+### Changed
+
+- **Renamed "TAC (Technical Architecture Committee)" to "ARB (Architecture Review Board)"** as the `design` definition's own name for the governance body that approves the HLD — a more generic, industry-recognisable term already used by some of the real source material. Updated everywhere gantry's own content and documentation named the committee: the HLD-approval gate, the glossary, the user guide, and the two bundled example instances. The actual real reference document's own title ("2026 TAC Architecture High Level Solution Design Template") is unchanged — that's a citation, not gantry's own vocabulary. See `definitions/design/2/CHANGELOG.md`'s "Round five" entry for the full scope.
+
 ## 0.7.1-beta — 2026-09-19
 
 ### Fixed
