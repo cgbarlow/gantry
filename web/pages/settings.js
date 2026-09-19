@@ -505,7 +505,7 @@ async function patchWorkspace(id, updates) {
   return body
 }
 
-// The standard `https://dev.azure.com/{organization}/{project}/_git/{repository}` shape — the reverse of web/lib/validateRepo.js's `parseRepoUrl` — with `baseUrl` (an on-premises Azure DevOps Server location) substituted in place of `https://dev.azure.com` when a workspace carries one. For a github workspace (#8), the same `baseUrl` override plays the GitHub Enterprise Server host's own role, substituted in place of `https://github.com`.
+// The standard `https://dev.azure.com/{organization}/{project}/_git/{repository}` shape — the reverse of web/lib/validateRepo.js's `parseRepoUrl` — with `baseUrl` (an on-premises Azure DevOps Server location) substituted in place of `https://dev.azure.com` when a workspace carries one. For a github workspace (#8), the same `baseUrl` override plays the GitHub Enterprise Server host's own role, substituted in place of `https://github.com`. For a gitlab workspace (#41), it plays the self-hosted GitLab CE/EE host's own role, substituted in place of `https://gitlab.com`.
 //
 // Shared by two different "workspace" shapes (ticket #5): a workspace-registry record's own nested
 // `{ provider, location: { organization, project, repository, baseUrl? } }` (this file's own callers
@@ -522,18 +522,47 @@ export function workspaceRepoUrl(workspace) {
     const base = location.baseUrl ?? 'https://github.com'
     return `${base}/${encodeURIComponent(location.owner)}/${encodeURIComponent(location.repository)}`
   }
+  if (workspace.provider === 'gitlab') {
+    const base = location.baseUrl ?? 'https://gitlab.com'
+    // `namespace` is GitLab's full group/subgroup path as one opaque string, however many segments
+    // deep (ADR-0041) — e.g. `engineering/platform`. Each segment is split and encoded on its own,
+    // mirroring lib/gitlabFileUrl.js's own `repositoryUrl`, so a literal `/` inside it becomes a real
+    // path separator here rather than a percent-encoded `%2F` that would 404 against GitLab's web UI.
+    const namespaceSegments = String(location.namespace).split('/').filter(Boolean).map(encodeURIComponent).join('/')
+    return `${base}/${namespaceSegments}/${encodeURIComponent(location.repository)}`
+  }
   const base = location.baseUrl ?? 'https://dev.azure.com'
   return `${base}/${encodeURIComponent(location.organization)}/${encodeURIComponent(location.project)}/_git/${encodeURIComponent(location.repository)}`
 }
 
-// The workspace's own location, rendered per its Provider (#8, docs/adr/0037) — azure-devops keeps
-// organization/project/repository; github has no project of its own, so owner/repository instead.
-// Reads the nested `location` (ticket #3) — only ever called with a workspace-registry record below,
-// which always carries one, unlike `workspaceRepoUrl` above which also serves the flat instance shape.
+// The workspace's own location, rendered per its Provider (#8, docs/adr/0037; gitlab added #41,
+// ADR-0041) — azure-devops keeps organization/project/repository; github has no project of its own,
+// so owner/repository instead; gitlab has no separate owner, so namespace/repository (its own
+// group/subgroup path plus the project, ADR-0041's own "namespace holds the full path as one opaque
+// string"). Reads the nested `location` (ticket #3) — only ever called with a workspace-registry
+// record below, which always carries one, unlike `workspaceRepoUrl` above which also serves the flat
+// instance shape.
 function workspaceLocationLabel(workspace) {
-  return workspace.provider === 'github'
-    ? `${workspace.location.owner}/${workspace.location.repository}`
-    : `${workspace.location.organization}/${workspace.location.project}/${workspace.location.repository}`
+  if (workspace.provider === 'github') return `${workspace.location.owner}/${workspace.location.repository}`
+  if (workspace.provider === 'gitlab') return `${workspace.location.namespace}/${workspace.location.repository}`
+  return `${workspace.location.organization}/${workspace.location.project}/${workspace.location.repository}`
+}
+
+// #41 (ADR-0041): the wizard's own PAT-scope guidance (new-workspace-wizard.js), mirrored here so a
+// workspace's own Settings screen — the only place a GitLab or GitHub PAT can be replaced or cleared
+// after registration — carries the same at-the-point-of-entry help the wizard gives at creation time.
+// Keyed by provider rather than a github/else binary so a third (or later fourth) provider's own
+// scopes never silently fall back to Azure DevOps's.
+const PROVIDER_LABELS = {
+  'azure-devops': 'Azure DevOps',
+  github: 'GitHub',
+  gitlab: 'GitLab',
+}
+
+const PAT_SCOPE_HELP = {
+  'azure-devops': html`Needs <strong>Code (Read &amp; write)</strong>, <strong>Work Items (Read &amp; write)</strong> and <strong>Identity (Read)</strong> scope.`,
+  github: html`A fine-grained token needs <strong>Contents</strong>, <strong>Issues</strong> and <strong>Pull requests</strong> permissions set to Read &amp; write, plus <strong>Metadata</strong> set to Read-only.`,
+  gitlab: html`A Personal, Project or Group Access Token needs the <strong>api</strong> scope (or, narrower, <strong>read_repository</strong> and <strong>write_repository</strong> together with API access to Issues and Merge Requests).`,
 }
 
 // One workspace's editable fields: owner (server-persisted, identity-picker), its own Workspace PAT
@@ -564,11 +593,13 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
   //
   // In practice, today, it can't: `jira` is rejected by validation everywhere a ticketing system can be chosen (globally, per-workspace, and at workspace creation — see workspaceRegistry.js's `assertValidTicketingSystem` and this file's own `TICKETING_SYSTEMS` enum), so `defaultTicketingSystem.value` and every workspace's `ticketingSystem` can only ever be `'azure-devops'` — there is no reachable state where the two sides of this comparison differ. This only becomes a real, visible misreporting risk once genuine Jira support ships (explicitly out of scope for this ticket, per spec #95's own "Out of Scope" list) and a real fix (an explicit override flag on the workspace record, intersecting the already-closed #96 ticket's schema) is worth building then, against real second-system requirements, rather than speculatively now.
   const hasTicketingOverride = workspace.ticketingSystem !== defaultTicketingSystem.value
-  // #8, docs/adr/0037 — GitHub has no ticketing-system choice of its own (the provider itself is the
-  // suite), so the Ticketing system radio group below is azure-devops-only; a github workspace's
-  // tracker is simply "GitHub", not a configurable option.
-  const isGitHub = workspace.provider === 'github'
-  const providerLabel = isGitHub ? 'GitHub' : 'Azure DevOps'
+  // #8, docs/adr/0037; gitlab added #41, ADR-0041 — neither GitHub nor GitLab has a ticketing-system
+  // choice of its own (the provider itself is the suite), so the Ticketing system radio group below
+  // is azure-devops-only; a github or gitlab workspace's tracker is simply "GitHub Issues" / "GitLab
+  // Issues", not a configurable option. Keyed by provider rather than a github/else binary so a third
+  // provider's own label and PAT-scope help never silently fall back to Azure DevOps's.
+  const providerLabel = PROVIDER_LABELS[workspace.provider] ?? PROVIDER_LABELS['azure-devops']
+  const showTicketingOverride = workspace.provider === 'azure-devops'
 
   async function handleSaveOwner() {
     const valueToSave = latestOwnerRef.current
@@ -654,10 +685,11 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
             ? html`<button type="button" class="btn small ghost" onClick=${handleClearPat}>Clear PAT</button>`
             : null}
         </div>
+        <p class="workspace-field-hint">${PAT_SCOPE_HELP[workspace.provider] ?? PAT_SCOPE_HELP['azure-devops']}</p>
         <div class="workspace-field-status">${patStatus}</div>
       </div>
 
-      ${isGitHub
+      ${!showTicketingOverride
         ? null
         : html`
             <div class="workspace-field workspace-ticketing">

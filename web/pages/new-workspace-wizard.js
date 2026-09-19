@@ -265,21 +265,29 @@ const newWorkItemTitle = signal('')
 const newWorkItemCreateStatus = signal('idle') // idle | creating | failed
 const newWorkItemCreateError = signal('')
 
-// A registered workspace's own location, rendered per its provider (#8) — azure-devops keeps the
-// existing organization/project/repository form; github shows owner/repository, with no project of
-// its own to show. Reads `location` (ticket #3, ADR-0037's nested provider/location shape every
-// workspace GET now returns) rather than flat top-level fields, since a GitHub workspace carries no
-// flat aliases (`lib/workspaceRegistry.js`'s `toPublicWorkspace` only denormalizes those for
+// A registered workspace's own location, rendered per its provider (#8; gitlab added #41,
+// ADR-0041) — azure-devops keeps the existing organization/project/repository form; github shows
+// owner/repository, with no project of its own to show; gitlab shows namespace/repository, its own
+// group/subgroup path plus the project (stored as `location.repository`, the same key github uses).
+// Reads `location` (ticket #3, ADR-0037's nested provider/location shape every workspace GET now
+// returns) rather than flat top-level fields, since a GitHub or GitLab workspace carries no flat
+// aliases (`lib/workspaceRegistry.js`'s `toPublicWorkspace` only denormalizes those for
 // azure-devops, for pre-#3 back-compat). Shared by both Pick-workspace lists (top-level and the
-// Import destination panel's).
+// Import destination panel's) — reachable for a gitlab workspace today via Adopt (#35), even though
+// this wizard's own Register step doesn't offer GitLab yet (#25).
 function workspaceLocationLabel(w) {
-  return w.provider === 'github' ? `${w.location.owner}/${w.location.repository}` : `${w.location.organization}/${w.location.project}/${w.location.repository}`
+  if (w.provider === 'github') return `${w.location.owner}/${w.location.repository}`
+  if (w.provider === 'gitlab') return `${w.location.namespace}/${w.location.repository}`
+  return `${w.location.organization}/${w.location.project}/${w.location.repository}`
 }
 
-// Same workspace's ticketing/tracker line, provider-aware — GitHub has no ticketing-system choice of
-// its own (ADR-0037: the provider itself is the suite), so this reads "GitHub" rather than "ticketing: none".
+// Same workspace's ticketing/tracker line, provider-aware — neither GitHub nor GitLab has a
+// ticketing-system choice of its own (ADR-0037: the provider itself is the suite), so this reads
+// "GitHub" / "GitLab" rather than "ticketing: none".
 function workspaceTrackerLabel(w) {
-  return w.provider === 'github' ? 'GitHub' : w.ticketingSystem || 'none'
+  if (w.provider === 'github') return 'GitHub'
+  if (w.provider === 'gitlab') return 'GitLab'
+  return w.ticketingSystem || 'none'
 }
 
 function slugify(name) {
@@ -2260,7 +2268,12 @@ function WorkspaceStep() {
             <p class="wizard-field-hint">
               ${registerProvider.value === 'github'
                 ? html`Used to check access and, once registration succeeds, becomes this workspace's own Personal Access Token — a fine-grained token needs <strong>Contents</strong>, <strong>Issues</strong>, <strong>Pull requests</strong>, and <strong>Metadata</strong> permissions (Read &amp; write, except Metadata which is Read-only). Stored only in this browser, and only if registration succeeds.`
-                : html`Used to check access and, once registration succeeds, becomes this workspace's own Personal Access Token — needs <strong>Code (Read &amp; write)</strong>, <strong>Work Items (Read &amp; write)</strong>, and <strong>Identity (Read)</strong> scope. Stored only in this browser, and only if registration succeeds.`}
+                : registerProvider.value === 'gitlab'
+                  ? // #41 (ADR-0041): unreachable via this radio group today — 'gitlab' is listed
+                    // `disabled` in web/lib/provider.js's PROVIDERS pending #25's own location-field
+                    // wiring — but kept correct and ready so flipping that flag needs no change here.
+                    html`Used to check access and, once registration succeeds, becomes this workspace's own Personal Access Token — a Personal, Project or Group Access Token needs the <strong>api</strong> scope (or, narrower, <strong>read_repository</strong> and <strong>write_repository</strong> together with API access to Issues and Merge Requests). Stored only in this browser, and only if registration succeeds.`
+                  : html`Used to check access and, once registration succeeds, becomes this workspace's own Personal Access Token — needs <strong>Code (Read &amp; write)</strong>, <strong>Work Items (Read &amp; write)</strong>, and <strong>Identity (Read)</strong> scope. Stored only in this browser, and only if registration succeeds.`}
             </p>
           </div>
           <div class="wizard-field">
