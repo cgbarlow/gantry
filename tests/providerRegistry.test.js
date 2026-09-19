@@ -12,6 +12,7 @@ import { AuthenticationError } from '../lib/providerErrors.js'
 import { withFakeAzureDevOpsServer as withFakeServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withFakeGitHubServer, GITHUB_OWNER, GITHUB_REPOSITORY, GITHUB_VALID_PAT } from './helpers/fakeGitHubServer.js'
 import { withFakeGitLabServer, GITLAB_NAMESPACE, GITLAB_REPOSITORY, GITLAB_VALID_PAT } from './helpers/fakeGitLabServer.js'
+import { withFakeJiraServer, JIRA_SITE, JIRA_PROJECT_KEY, JIRA_VALID_PAT } from './helpers/fakeJiraServer.js'
 import { ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 import { runProviderContractTests, runContentStoreContractTests } from './helpers/providerContractTests.js'
 
@@ -32,8 +33,8 @@ test('getProviderCapabilities resolves azure-devops to its four capability facto
 })
 
 test('getProviderCapabilities throws a clear error naming the registered providers, for an unregistered provider id', () => {
-  assert.throws(() => getProviderCapabilities('atlassian'), /no provider registered for "atlassian"/)
-  assert.throws(() => getProviderCapabilities('atlassian'), /azure-devops/)
+  assert.throws(() => getProviderCapabilities('nonexistent'), /no provider registered for "nonexistent"/)
+  assert.throws(() => getProviderCapabilities('nonexistent'), /azure-devops/)
 })
 
 // #11/#10/#14/#20: github joins the registry one capability per ticket as each lands (content
@@ -184,6 +185,41 @@ test('resolveWorkItems instantiates gitlab\'s work-items client and creates/read
     const created = await workItems.createIssue({ title: 'Registry smoke test', body: '' })
     const fetched = await workItems.getIssue(created.iid)
     assert.equal(fetched.title, 'Registry smoke test')
+  })
+})
+
+// #42: atlassian's workItems capability (Jira Cloud) joins the registry — the first Atlassian
+// capability registered (#40 registered the provider identifier and its two-token credential schema
+// only, per its own scope, shipping no capability at all).
+test('registeredProviders lists atlassian once its workItems capability is registered', () => {
+  assert.ok(registeredProviders().includes('atlassian'))
+})
+
+test('getProviderCapabilities resolves atlassian to its workItems factory only, so far', () => {
+  const capabilities = getProviderCapabilities('atlassian')
+  assert.equal(typeof capabilities.workItems, 'function')
+  assert.equal(capabilities.contentStore, undefined)
+  assert.equal(capabilities.pullRequests, undefined)
+  assert.equal(capabilities.identity, undefined)
+})
+
+test('resolveWorkItems instantiates atlassian\'s Jira-backed work-items client and creates/reads an issue through it', async () => {
+  await withFakeJiraServer({ jiraProjectKey: JIRA_PROJECT_KEY, validPat: JIRA_VALID_PAT }, async (baseUrl) => {
+    const workItems = resolveWorkItems('atlassian', { jiraSite: JIRA_SITE, jiraProjectKey: JIRA_PROJECT_KEY, pat: JIRA_VALID_PAT, baseUrl })
+    const created = await workItems.createIssue({ title: 'Registry smoke test', body: '', issueType: 'Task' })
+    const fetched = await workItems.getIssue(created.key)
+    assert.equal(fetched.title, 'Registry smoke test')
+  })
+})
+
+test('resolveWorkItems\' atlassian client surfaces a rejected token as the neutral AuthenticationError, tagged atlassian', async () => {
+  await withFakeJiraServer({ jiraProjectKey: JIRA_PROJECT_KEY, validPat: JIRA_VALID_PAT }, async (baseUrl) => {
+    const workItems = resolveWorkItems('atlassian', { jiraSite: JIRA_SITE, jiraProjectKey: JIRA_PROJECT_KEY, pat: 'wrong-token', baseUrl })
+    await assert.rejects(() => workItems.listIssueTypes(), (err) => {
+      assert.ok(err instanceof AuthenticationError)
+      assert.equal(err.provider, 'atlassian')
+      return true
+    })
   })
 })
 
