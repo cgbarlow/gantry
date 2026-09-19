@@ -47,12 +47,61 @@ import { createServer } from 'node:http'
  * every other route below — a genuine Bitbucket API inconsistency `lib/bitbucketIdentityClient.js`'s own
  * doc comment already notes — so it is matched against the raw pathname directly, before this fake's
  * `repoBasePath`-relative routing (and its own `repoExists` gate) even applies.
+ *
+ * `mergeRefusal` (`{ status, message }`, #46) makes every pull request merge attempt fail with that
+ * response instead of succeeding — reproducing a branch-restriction or failed-merge-check refusal
+ * (ADR-0042: "surfaced verbatim as a blocked sign-off") so that behaviour is genuinely testable, the
+ * same knob `tests/helpers/fakeGitLabServer.js`'s own `mergeRefusal` provides.
+ *
+ * Pull requests (#46) are modelled as a flat `Map<id, pr>`, `pr` carrying `{ id, title, description,
+ * state, source_branch, destination_branch, participants }` — `participants` is Bitbucket's own tri-
+ * state reviewer list (`lib/bitbucketPullRequestsClient.js`'s whole `interpretBitbucketPullRequest`
+ * input), each entry `{ user, role: 'REVIEWER' | 'PARTICIPANT', approved, state: 'approved' |
+ * 'changes_requested' | null }`. Real approval/changes-requested is a reviewer's own action, performed
+ * with their own token; this fake has only one accepted PAT, so a test simulates either outcome via
+ * this fake's own test-facing `POST .../pullrequests/{id}/approve` / `.../request-changes` endpoints
+ * (both genuine, documented Bitbucket Cloud routes, unlike `fakeGitLabServer.js`'s own approve/
+ * unapprove pair, which stand in for GitLab's real per-user approval action the same way). Merge
+ * (`POST .../pullrequests/{id}/merge`) fast-forwards the destination branch's own tip to the source
+ * branch's current tip — enough to prove a caller can read the merged content back afterwards, without
+ * modelling a genuine two-parent merge commit, the same simplification `fakeGitLabServer.js`'s own
+ * merge route makes.
  */
-export function createFakeBitbucketServer({ owner, repository, validPat, files = {}, branchFiles = {}, repoExists = true, permissions = [] } = {}) {
+export function createFakeBitbucketServer({
+  owner,
+  repository,
+  validPat,
+  files = {},
+  branchFiles = {},
+  repoExists = true,
+  permissions = [],
+  mergeRefusal = null,
+} = {}) {
   const stores = new Map() // hash -> Map<normalized path, Buffer>
   const commitDates = new Map() // hash -> ISO date string, so re-pointing a branch at an existing hash (createBranch) doesn't mint a fresh date
   const branchTips = new Map() // branch name -> { hash, date }
   let commitCounter = 0
+
+  // ---- Pull requests (#46) ----
+  const pullRequests = new Map() // id -> { id, title, description, state, source_branch, destination_branch, participants }
+  let pullRequestIdCounter = 0
+  const FAKE_REVIEWER = { uuid: '{fake-reviewer-uuid}', display_name: 'Fake Reviewer', nickname: 'fake-reviewer' }
+
+  function toPullRequestResource(pr) {
+    return {
+      id: pr.id,
+      title: pr.title,
+      description: pr.description,
+      state: pr.state,
+      source: { branch: { name: pr.source_branch } },
+      destination: { branch: { name: pr.destination_branch } },
+      participants: pr.participants,
+    }
+  }
+
+  function findParticipant(pr, uuid) {
+    return pr.participants.find((p) => p.user.uuid === uuid)
+  }
 
   function normalize(path) {
     return path.replace(/^\/+/, '').replace(/\/+$/, '')
@@ -308,14 +357,153 @@ export function createFakeBitbucketServer({ owner, repository, validPat, files =
       return res.end('')
     }
 
+    // POST /repositories/{workspace}/{repo_slug}/pullrequests — lib/bitbucketPullRequestsClient.js's
+    // createPullRequest.
+    if (req.method === 'POST' && rest === '/pullrequests') {
+      const body = await readJsonBody(req)
+      const sourceBranch = body.source?.branch?.name
+      const destinationBranch = body.destination?.branch?.name
+      if (!sourceBranch || !destinationBranch || !body.title) {
+        return json(400, { type: 'error', error: { message: 'source.branch.name, destination.branch.name and title are required' } })
+      }
+      const id = ++pullRequestIdCounter
+      const pr = {
+        id,
+        title: body.title,
+        description: body.description ?? '',
+        state: 'OPEN',
+        source_branch: sourceBranch,
+        destination_branch: destinationBranch,
+        participants: (body.reviewers ?? []).map((r) => ({
+          user: { uuid: r.uuid, display_name: r.uuid, nickname: r.uuid },
+          role: 'REVIEWER',
+          approved: false,
+          state: null,
+        })),
+      }
+      pullRequests.set(id, pr)
+      return json(201, toPullRequestResource(pr))
+    }
+
+    // GET/PUT /repositories/{workspace}/{repo_slug}/pullrequests/{id} — getPullRequest, and
+    // addReviewers's own full-replace `PUT ... { reviewers: [{uuid}] }` (Bitbucket has no dedicated
+    // "add a reviewer to an existing pull request" endpoint — see
+    // lib/bitbucketPullRequestsClient.js's own addReviewers doc comment).
+    const prMatch = rest.match(/^\/pullrequests\/(\d+)$/)
+    if (req.method === 'GET' && prMatch) {
+      const pr = pullRequests.get(Number(prMatch[1]))
+      if (!pr) return json(404, { type: 'error', error: { message: `No fake pull request #${prMatch[1]}` } })
+      return json(200, toPullRequestResource(pr))
+    }
+    if (req.method === 'PUT' && prMatch) {
+      const pr = pullRequests.get(Number(prMatch[1]))
+      if (!pr) return json(404, { type: 'error', error: { message: `No fake pull request #${prMatch[1]}` } })
+      const body = await readJsonBody(req)
+      if (body.reviewers) {
+        pr.participants = body.reviewers.map(
+          (r) => findParticipant(pr, r.uuid) ?? { user: { uuid: r.uuid, display_name: r.uuid, nickname: r.uuid }, role: 'REVIEWER', approved: false, state: null }
+        )
+      }
+      if (body.title !== undefined) pr.title = body.title
+      if (body.description !== undefined) pr.description = body.description
+      return json(200, toPullRequestResource(pr))
+    }
+
+    // POST/DELETE .../pullrequests/{id}/approve — genuine Bitbucket Cloud routes (unlike
+    // fakeGitLabServer.js's own approve/unapprove pair, which stand in for GitLab's real per-reviewer
+    // action the same way): test-facing simulation of "the fake reviewer approved" / "withdrew their
+    // approval". Real Bitbucket performs this with the approving reviewer's own token; this fake's
+    // single accepted PAT stands in for whichever reviewer a test wants to simulate.
+    const approveMatch = rest.match(/^\/pullrequests\/(\d+)\/approve$/)
+    if (approveMatch) {
+      const pr = pullRequests.get(Number(approveMatch[1]))
+      if (!pr) return json(404, { type: 'error', error: { message: `No fake pull request #${approveMatch[1]}` } })
+      if (req.method === 'POST') {
+        const existing = findParticipant(pr, FAKE_REVIEWER.uuid)
+        if (existing) {
+          existing.approved = true
+          existing.state = 'approved'
+          existing.role = 'REVIEWER'
+        } else {
+          pr.participants.push({ user: { ...FAKE_REVIEWER }, role: 'REVIEWER', approved: true, state: 'approved' })
+        }
+        return json(200, { approved: true })
+      }
+      if (req.method === 'DELETE') {
+        const existing = findParticipant(pr, FAKE_REVIEWER.uuid)
+        if (existing) {
+          existing.approved = false
+          existing.state = null
+        }
+        return json(200, { approved: false })
+      }
+    }
+
+    // POST/DELETE .../pullrequests/{id}/request-changes — the tri-state's other genuine Bitbucket
+    // Cloud route: test-facing simulation of "the fake reviewer requested changes" / withdrew that.
+    const requestChangesMatch = rest.match(/^\/pullrequests\/(\d+)\/request-changes$/)
+    if (requestChangesMatch) {
+      const pr = pullRequests.get(Number(requestChangesMatch[1]))
+      if (!pr) return json(404, { type: 'error', error: { message: `No fake pull request #${requestChangesMatch[1]}` } })
+      if (req.method === 'POST') {
+        const existing = findParticipant(pr, FAKE_REVIEWER.uuid)
+        if (existing) {
+          existing.approved = false
+          existing.state = 'changes_requested'
+          existing.role = 'REVIEWER'
+        } else {
+          pr.participants.push({ user: { ...FAKE_REVIEWER }, role: 'REVIEWER', approved: false, state: 'changes_requested' })
+        }
+        return json(200, { approved: false })
+      }
+      if (req.method === 'DELETE') {
+        const existing = findParticipant(pr, FAKE_REVIEWER.uuid)
+        if (existing) existing.state = null
+        return json(200, { approved: false })
+      }
+    }
+
+    // GET .../pullrequests/{id}/commits — lib/bitbucketPullRequestsClient.js's getPullRequestCommits.
+    // This fake's git model has no real commit history to walk (mirrors fakeGitLabServer.js's own
+    // equivalent route), so it reports the source branch's own current tip as the pull request's sole
+    // commit — enough for lib/stageStatus.js's commit-panel summary.
+    const prCommitsMatch = rest.match(/^\/pullrequests\/(\d+)\/commits$/)
+    if (req.method === 'GET' && prCommitsMatch) {
+      const pr = pullRequests.get(Number(prCommitsMatch[1]))
+      if (!pr) return json(404, { type: 'error', error: { message: `No fake pull request #${prCommitsMatch[1]}` } })
+      const tip = branchTips.get(pr.source_branch)
+      if (!tip) return json(200, { pagelen: 100, size: 0, page: 1, values: [] })
+      return json(200, { pagelen: 100, size: 1, page: 1, values: [{ hash: tip.hash, date: tip.date, message: `fake commit ${tip.hash}` }] })
+    }
+
+    // POST .../pullrequests/{id}/merge — lib/bitbucketPullRequestsClient.js's completePullRequest.
+    // `mergeRefusal` (`{ status, message }`) simulates a branch-restriction or failed-merge-check
+    // block; otherwise the merge always succeeds, fast-forwarding the destination branch to the source
+    // branch's current tip (see this factory's own doc comment for why that's enough here).
+    const mergeMatch = rest.match(/^\/pullrequests\/(\d+)\/merge$/)
+    if (req.method === 'POST' && mergeMatch) {
+      const pr = pullRequests.get(Number(mergeMatch[1]))
+      if (!pr) return json(404, { type: 'error', error: { message: `No fake pull request #${mergeMatch[1]}` } })
+      if (pr.state === 'MERGED') {
+        return json(400, { type: 'error', error: { message: '400 Bad Request (fake: already merged)' } })
+      }
+      if (mergeRefusal) {
+        return json(mergeRefusal.status ?? 409, { type: 'error', error: { message: mergeRefusal.message ?? '409 Conflict' } })
+      }
+      const sourceTip = branchTips.get(pr.source_branch)
+      if (sourceTip) branchTips.set(pr.destination_branch, sourceTip)
+      pr.state = 'MERGED'
+      return json(200, toPullRequestResource(pr))
+    }
+
     return json(404, { type: 'error', error: { message: `No fake route for ${req.method} ${url.pathname}` } })
   })
 }
 
 /** Starts a `createFakeBitbucketServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/helpers/fakeGitLabServer.js`'s own `withFakeGitLabServer` shape. */
-export function withFakeBitbucketServer({ owner, repository, validPat, files, branchFiles, repoExists, permissions }, fn) {
+export function withFakeBitbucketServer({ owner, repository, validPat, files, branchFiles, repoExists, permissions, mergeRefusal }, fn) {
   return new Promise((resolve, reject) => {
-    const server = createFakeBitbucketServer({ owner, repository, validPat, files, branchFiles, repoExists, permissions })
+    const server = createFakeBitbucketServer({ owner, repository, validPat, files, branchFiles, repoExists, permissions, mergeRefusal })
     server.listen(0, async () => {
       const { port } = server.address()
       try {
