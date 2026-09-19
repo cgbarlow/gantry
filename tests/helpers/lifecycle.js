@@ -5,6 +5,8 @@ import { createServer } from '../../lib/server.js'
 import { withFakeAzureDevOpsServer } from './fakeAzureDevOpsServer.js'
 import { withFakeGitHubServer, GITHUB_OWNER, GITHUB_REPOSITORY, GITHUB_VALID_PAT } from './fakeGitHubServer.js'
 import { withFakeGitLabServer, GITLAB_NAMESPACE, GITLAB_REPOSITORY, GITLAB_VALID_PAT } from './fakeGitLabServer.js'
+import { withFakeBitbucketServer, BITBUCKET_OWNER, BITBUCKET_REPOSITORY, BITBUCKET_VALID_PAT } from './fakeBitbucketServer.js'
+import { withFakeJiraServer, JIRA_SITE, JIRA_PROJECT_KEY, JIRA_VALID_PAT } from './fakeJiraServer.js'
 
 /**
  * Creates a temp directory under `os.tmpdir()`, runs `fn(instancesDir)`, and
@@ -87,6 +89,8 @@ export const VALID_PAT = 'valid-test-pat'
 
 export { GITHUB_OWNER, GITHUB_REPOSITORY, GITHUB_VALID_PAT }
 export { GITLAB_NAMESPACE, GITLAB_REPOSITORY, GITLAB_VALID_PAT }
+export { BITBUCKET_OWNER, BITBUCKET_REPOSITORY, BITBUCKET_VALID_PAT }
+export { JIRA_SITE, JIRA_PROJECT_KEY, JIRA_VALID_PAT }
 
 /**
  * Stands up a real gantry server (`withRunningServer`) alongside a real fake provider server
@@ -107,6 +111,42 @@ export { GITLAB_NAMESPACE, GITLAB_REPOSITORY, GITLAB_VALID_PAT }
  * provider server (e.g. `files` for azure-devops, `repoExists` for any of the three).
  */
 export function withRunningServerForProvider(provider, { options, fakeServerOptions } = {}, fn) {
+  if (provider === 'atlassian') {
+    // #48 (ADR-0042): the split-suite twin of the branches below — two real fake servers (Bitbucket
+    // Cloud content store, Jira Cloud work items), each pointed at by the running gantry server's own
+    // test-only `atlassianBitbucketBaseUrl`/`atlassianJiraBaseUrl` startup options (never a
+    // caller-supplied `baseUrl`, unlike every other provider here — see `lib/server.js`'s own doc
+    // comment on those two options for why). `ctx` carries both fake servers' own `baseUrl`s
+    // (`providerBaseUrl` for Bitbucket, `jiraBaseUrl` for Jira) and both tokens (`pat` for Bitbucket,
+    // `jiraPat` for Jira) — a caller writes `ctx.repository` the same way every other provider's own
+    // `ctx` already lets it, and reaches for `ctx.jiraSite`/`ctx.jiraProjectKey`/`ctx.jiraPat` for the
+    // half no other provider here has.
+    const { bitbucketFakeServerOptions, jiraFakeServerOptions } = fakeServerOptions ?? {}
+    return withFakeBitbucketServer(
+      { owner: BITBUCKET_OWNER, repository: BITBUCKET_REPOSITORY, validPat: BITBUCKET_VALID_PAT, ...bitbucketFakeServerOptions },
+      (providerBaseUrl) =>
+        withFakeJiraServer(
+          { jiraProjectKey: JIRA_PROJECT_KEY, validPat: JIRA_VALID_PAT, ...jiraFakeServerOptions },
+          (jiraBaseUrl) =>
+            withRunningServer(
+              { atlassianBitbucketBaseUrl: providerBaseUrl, atlassianJiraBaseUrl: jiraBaseUrl, ...options },
+              (gantryBase) =>
+                fn({
+                  gantryBase,
+                  providerBaseUrl,
+                  jiraBaseUrl,
+                  provider: 'atlassian',
+                  owner: BITBUCKET_OWNER,
+                  repository: BITBUCKET_REPOSITORY,
+                  jiraSite: JIRA_SITE,
+                  jiraProjectKey: JIRA_PROJECT_KEY,
+                  pat: BITBUCKET_VALID_PAT,
+                  jiraPat: JIRA_VALID_PAT,
+                })
+            )
+        )
+    )
+  }
   if (provider === 'github') {
     return withFakeGitHubServer(
       { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, ...fakeServerOptions },
