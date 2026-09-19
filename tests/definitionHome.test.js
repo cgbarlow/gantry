@@ -7,6 +7,7 @@ import {
   serverWorkspaceDefinitionsDir,
   listServerWorkspaceHomes,
   listDefinitionsAcrossHomes,
+  libraryRepoProblems,
   findDefinitionHomeDefinitionsDir,
   definitionIdExistsIn,
   assertDefinitionIdAvailable,
@@ -15,6 +16,8 @@ import {
 } from '../lib/definitionHome.js'
 import { writeWorkspaceJson } from '../lib/workspaceDirectory.js'
 import { createBlankDefinition } from '../lib/definition.js'
+import { addLibraryRepo } from '../lib/librarySettings.js'
+import { libraryRepoDefinitionsDir } from '../lib/libraryCache.js'
 
 // WI #383 (Definition Editor phase 3, ADR-0036): resolution across the server library and every
 // server workspace's own `definitions/` folder, and the id-uniqueness guard ("no shadowing").
@@ -164,5 +167,25 @@ test('definitionsDirForInstanceScope resolves the workspace\'s own definitions d
       definitionsDirForInstanceScope('design', { definitionsDir, instancesDir, scopeId: 'some-ado-uuid', toFolder }),
       definitionsDir
     )
+  })
+})
+
+// #4: a library repo's clash message names the repo via `describeProviderLocation`, reading the
+// repo's nested `location` rather than the pre-#3 flat `organization`/`project`/`repository`
+// accessors a GitHub-shaped record never carries — a GitHub library repo's clash message must read
+// "owner/repository", never "undefined/undefined/repository".
+test('a library repo clash against a GitHub-shaped repo is reported by owner/repository, not undefined/undefined/repository', () => {
+  withTempDirs((definitionsDir, instancesDir) => {
+    const repo = addLibraryRepo({ provider: 'github', location: { owner: 'octocat', repository: 'widgets' } }, { instancesDir })
+    // Simulate a prior successful refresh (lib/libraryCache.js's own job, not this module's) by
+    // mirroring the packaged "design" definition straight into the repo's cache directory — its id
+    // clashes with the packaged library's own "design", which is exactly the case under test.
+    cpSync(join(definitionsDir, 'design'), join(libraryRepoDefinitionsDir(instancesDir, repo.id), 'design'), { recursive: true })
+
+    const problems = libraryRepoProblems({ definitionsDir, instancesDir })
+    assert.equal(problems.length, 1)
+    assert.equal(problems[0].id, 'design')
+    assert.equal(problems[0].repoName, 'octocat/widgets')
+    assert.match(problems[0].message, /library repo "octocat\/widgets"/)
   })
 })

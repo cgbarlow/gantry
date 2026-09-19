@@ -68,7 +68,7 @@ test('workspace-backed repo assets: listing, file streaming, and render embeddin
           { instancesDir }
         )
         registerWorkspace(
-          { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl, owner: '' },
+          { location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl }, owner: '' },
           { instancesDir }
         )
 
@@ -259,7 +259,7 @@ test('workspace-backed assets API: POST blocked, file 404, file fallback to main
           { instancesDir }
         )
         registerWorkspace(
-          { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl, owner: '' },
+          { location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl }, owner: '' },
           { instancesDir }
         )
 
@@ -419,7 +419,7 @@ test('WI264: completed-stage free-browse reads assets + content from main, not t
           { instancesDir }
         )
         registerWorkspace(
-          { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl, owner: '' },
+          { location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl }, owner: '' },
           { instancesDir }
         )
 

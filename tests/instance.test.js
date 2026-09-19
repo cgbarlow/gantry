@@ -15,7 +15,8 @@ import {
   recordInstanceReviewRequest,
   recordInstanceReviewStatus,
 } from '../lib/instance.js'
-import { AzureDevOpsAuthenticationError, AzureDevOpsNotFoundError, createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
+import { AuthenticationError, NotFoundError } from '../lib/providerErrors.js'
+import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withScratchInstances, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
@@ -969,8 +970,8 @@ test('createInstance writes an Azure-DevOps-backed instance under gantry-workspa
     await client.getFileContent('gantry-workspace/my-initiative/modules/background.md')
 
     // Nothing at all at the legacy repo-root paths.
-    await assert.rejects(() => client.getFileContent('instance.yaml'), AzureDevOpsNotFoundError)
-    await assert.rejects(() => client.getFileContent('modules/background.md'), AzureDevOpsNotFoundError)
+    await assert.rejects(() => client.getFileContent('instance.yaml'), NotFoundError)
+    await assert.rejects(() => client.getFileContent('modules/background.md'), NotFoundError)
   })
 })
 
@@ -1068,7 +1069,7 @@ test('createInstance against Azure DevOps does not fail instance creation when t
       // instance.yaml landed; README never did (its push was the one that failed).
       const client = createAzureDevOpsClient(azureDevOps)
       await client.getFileContent('gantry-workspace/my-initiative/instance.yaml')
-      await assert.rejects(() => client.getFileContent('README.md'), AzureDevOpsNotFoundError)
+      await assert.rejects(() => client.getFileContent('README.md'), NotFoundError)
     }
   )
 })
@@ -1102,8 +1103,8 @@ test('createInstance/readInstance/writeModule/readModule against Azure DevOps re
 
     // Nothing was ever written anywhere as a result of the attempt.
     const client = createAzureDevOpsClient(azureDevOps)
-    await assert.rejects(() => client.getFileContent('gantry-workspace/../evil/instance.yaml'), AzureDevOpsNotFoundError)
-    await assert.rejects(() => client.getFileContent('evil/instance.yaml'), AzureDevOpsNotFoundError)
+    await assert.rejects(() => client.getFileContent('gantry-workspace/../evil/instance.yaml'), NotFoundError)
+    await assert.rejects(() => client.getFileContent('evil/instance.yaml'), NotFoundError)
   })
 })
 
@@ -1368,25 +1369,25 @@ test('readModule forwards options.strict to parseModuleFile on both the local an
   )
 })
 
-test('a PAT the (fake) Azure DevOps server rejects surfaces from readInstance/readModule/writeModule/createInstance as AzureDevOpsAuthenticationError', async () => {
+test('a PAT the (fake) Azure DevOps server rejects surfaces from readInstance/readModule/writeModule/createInstance as AuthenticationError', async () => {
   await withFakeRepo(
     { '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n' },
     async (baseUrl) => {
       const badAzureDevOps = azureDevOpsOptions(baseUrl, { pat: 'a-pat-the-server-does-not-recognize' })
       const definition = loadDefinition('design')
 
-      await assert.rejects(() => readInstance('my-initiative', { azureDevOps: badAzureDevOps }), AzureDevOpsAuthenticationError)
+      await assert.rejects(() => readInstance('my-initiative', { azureDevOps: badAzureDevOps }), AuthenticationError)
       await assert.rejects(
         () => readModule(definition, 'my-initiative', 'background', { azureDevOps: badAzureDevOps }),
-        AzureDevOpsAuthenticationError
+        AuthenticationError
       )
       await assert.rejects(
         () => writeModule(definition, 'my-initiative', 'background', { fields: {} }, { azureDevOps: badAzureDevOps }),
-        AzureDevOpsAuthenticationError
+        AuthenticationError
       )
       await assert.rejects(
         () => createInstance('design', 'another-initiative', { azureDevOps: badAzureDevOps }),
-        AzureDevOpsAuthenticationError
+        AuthenticationError
       )
     }
   )
@@ -1408,7 +1409,7 @@ test('createInstance/readInstance/readModule/writeModule all write to and read f
     const client = createAzureDevOpsClient(azureDevOpsOptions(baseUrl))
     await assert.rejects(
       () => client.getFileContent('/gantry-workspace/my-initiative/instance.yaml'),
-      AzureDevOpsNotFoundError
+      NotFoundError
     )
     const onBranch = await client.getFileContent('/gantry-workspace/my-initiative/instance.yaml', {
       branch: 'stage/hld-definition',
@@ -1433,7 +1434,7 @@ test('createInstance/readInstance/readModule/writeModule all write to and read f
     // The module write above never touched `main` either.
     await assert.rejects(
       () => client.getFileContent('/gantry-workspace/my-initiative/modules/background.md'),
-      AzureDevOpsNotFoundError
+      NotFoundError
     )
   })
 })

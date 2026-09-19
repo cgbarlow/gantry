@@ -1,8 +1,8 @@
-// Wraps every request the web form makes to gantry's own API (#87): attaches the right Azure DevOps PAT (web/lib/credential.js) as an Authorization header whenever one is stored, and — if the server comes back with the structured "authentication required" response (lib/server.js's `sendAuthenticationRequired`, built per #86) — prompts the architect for one and retries the same request exactly once with it attached.
+// Wraps every request the web form makes to gantry's own API (#87): attaches the right Provider PAT (web/lib/credential.js) as an Authorization header whenever one is stored, and — if the server comes back with the structured "authentication required" response (lib/server.js's `sendAuthenticationRequired`, built per #86) — prompts the architect for one and retries the same request exactly once with it attached.
 //
-// A request to a local instance's routes never returns `authentication_required` in the first place, so this never prompts for one — there's nothing here that distinguishes "local" from "Azure-DevOps-backed" up front; it only reacts to what the server actually says.
+// A request to a local instance's routes never returns `authentication_required` in the first place, so this never prompts for one — there's nothing here that distinguishes "local" from "Provider-backed" up front; it only reacts to what the server actually says.
 //
-// #104 generalizes "the right PAT" from always-the-global-default to workspace-aware: a caller that knows which workspace a request targets passes `{ workspaceId }` as a third argument, and `authHeaderForWorkspace` resolves that workspace's own override if one is set, the global default otherwise — see web/lib/credential.js's own doc comment. A caller with no workspace in mind (or targeting a local instance) simply omits it, which resolves to the global default exactly as every call always did before workspace overrides existed.
+// A caller that knows which workspace a request targets passes `{ workspaceId }` as a third argument, and `authHeaderForWorkspace` resolves that workspace's own stored PAT — see web/lib/credential.js's own doc comment. #9 (ADR-0038): there is no global default any more, so a caller with no workspace in mind (or targeting a local instance) simply gets no Authorization header at all rather than falling back to one.
 import { untracked } from '@preact/signals'
 import { authHeaderForWorkspace, markCredentialRejected, requestPat } from './credential.js'
 
@@ -29,7 +29,7 @@ function withAuthHeader(options, workspaceId) {
 }
 
 /**
- * Drop-in replacement for `fetch` for requests to gantry's own `/api/*` routes. Same signature and return value (a `Response`) as `fetch` itself, so existing callers only need their `fetch(...)` calls renamed. The optional third argument's `workspaceId` selects which workspace's PAT override (if any) to prefer over the global default — omit it (or leave it `undefined`) for a request with no specific workspace in mind, which resolves straight to the global default. `silent: true` skips the auto-prompt-and-retry below entirely, returning the bare 401 response instead — for a best-effort background request (e.g. IdentityPicker's debounced search-as-you-type) where a missing/rejected credential is routine and already handled inline; popping the page-wide PAT modal for that would interrupt whatever the architect is actually doing over a request they never asked for.
+ * Drop-in replacement for `fetch` for requests to gantry's own `/api/*` routes. Same signature and return value (a `Response`) as `fetch` itself, so existing callers only need their `fetch(...)` calls renamed. The optional third argument's `workspaceId` selects which workspace's own PAT to attach — omit it (or leave it `undefined`) for a request with no specific workspace in mind (or a local instance), which attaches no Authorization header at all (#9: there is no global default left to fall back to). `silent: true` skips the auto-prompt-and-retry below entirely, returning the bare 401 response instead — for a best-effort background request (e.g. IdentityPicker's debounced search-as-you-type) where a missing/rejected credential is routine and already handled inline; popping the page-wide PAT modal for that would interrupt whatever the architect is actually doing over a request they never asked for.
  */
 export async function apiFetch(url, options = {}, { workspaceId, silent } = {}) {
   let res = await fetch(url, withAuthHeader(options, workspaceId))
@@ -104,5 +104,49 @@ function withScope(url, scope) {
  */
 export async function apiFetchForInstance(slug, url, options = {}, { silent } = {}) {
   const { workspaceId, scope } = await resolveInstanceScopeForSlug(slug)
+  // #9 (ADR-0038): a genuinely local instance resolves no real `workspaceId` (there is no workspace
+  // record at all) — but a local instance can still be linked to a remote Provider's work item
+  // (CONTEXT.md's "Check gate & sync work item": "Available for any instance with a linked work item,
+  // local or Workspace-backed alike"), and *that* still needs a credential to reach it. With the
+  // global-default tier gone there is nowhere else for one to live, so this falls back to the
+  // instance's own `slug` as its credential key — its own, stable, single-instance-scoped "workspace"
+  // for exactly this purpose. A local instance's own content routes never return
+  // `authentication_required` in the first place (they need no Provider at all), so this fallback is
+  // inert for them; it only matters for the work-item sub-routes that do.
+  return apiFetch(withScope(url, scope), options, { workspaceId: workspaceId ?? slug, silent })
+}
+
+// `resolveInstanceScopeForSlug`'s own sibling for a numeric reference (WI200/docs/adr/0024,
+// `w<workspaceNumber>i<instanceNumber>` etc.) rather than a slug — a separate cache, since the two are
+// different keys into the same underlying scope. #9 (ADR-0038): before this existed, resolving a
+// numeric ref (web/app.js's `resolveInstanceRef`, used by the instance switcher and any bookmarked
+// `wNiM` URL) went straight through plain `apiFetch` with no workspace in mind at all — harmless while
+// a global-default PAT existed to fall back to, but with no fallback left this ticket's own removal of
+// that tier would otherwise leave a Provider-backed instance's numeric-ref navigation with no way to
+// attach a credential even after prompting for one (the prompt has no workspace to persist the
+// submission against, and the retry has nothing to attach either). `GET /api/instance/workspace`
+// already accepts `?ref=` server-side (`resolveSlugParam`'s own doc comment) — this just calls it the
+// same uncredentialed-lookup-first way `resolveInstanceScopeForSlug` does for a slug.
+const instanceScopeByRef = new Map()
+
+async function resolveInstanceScopeForRef(ref) {
+  if (!ref) return NO_SCOPE
+  if (instanceScopeByRef.has(ref)) return instanceScopeByRef.get(ref)
+  const res = await fetch(`/api/instance/workspace?ref=${encodeURIComponent(ref)}`).catch(() => null)
+  if (!res || !res.ok) return NO_SCOPE
+  const body = await res.json().catch(() => undefined)
+  if (body === undefined) return NO_SCOPE
+  const resolved = { workspaceId: body?.workspaceId ?? null, scope: body?.scope ?? null }
+  instanceScopeByRef.set(ref, resolved)
+  return resolved
+}
+
+/**
+ * `apiFetch`, but resolving which workspace a numeric `ref` (not yet a known slug) belongs to first —
+ * the `ref`-keyed counterpart to `apiFetchForInstance` above, for the one call site (`resolveInstanceRef`)
+ * that only has a `ref` to address an instance by.
+ */
+export async function apiFetchForInstanceRef(ref, url, options = {}, { silent } = {}) {
+  const { workspaceId, scope } = await resolveInstanceScopeForRef(ref)
   return apiFetch(withScope(url, scope), options, { workspaceId, silent })
 }

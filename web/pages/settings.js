@@ -5,13 +5,10 @@ import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { theme, cycleTheme } from '../lib/theme.js'
 import {
-  pat,
-  clearPat,
-  requestPat,
-  hasWorkspacePatOverride,
+  hasPatForWorkspace,
   credentialStatusForWorkspace,
-  setWorkspacePatOverride,
-  clearWorkspacePatOverride,
+  setPatForWorkspace,
+  clearPatForWorkspace,
 } from '../lib/credential.js'
 import { TICKETING_SYSTEMS, defaultTicketingSystem, setDefaultTicketingSystem } from '../lib/ticketingSystem.js'
 import { advancedMode, setAdvancedMode } from '../lib/advancedMode.js'
@@ -67,37 +64,9 @@ function backHrefFrom(query) {
 }
 
 // ---------- Global Settings (`/settings`) ----------
-// The exact same PAT-management and default-ticketing-system content #101's old Global Defaults tab held — moved here wholesale, now the entire screen rather than one tab among others. Reached directly (no intermediate step) from Home, and via the instance screen's Settings dropdown.
-//
-// The default PAT this section manages is the exact same one web/lib/credential.js already held (and web/app.js's per-instance editor header used to expose) — moved here wholesale, not reimplemented. A third state this section adds beyond "replace"/"clear" (which assumed a PAT already existed): a first-time "Set" action, since this is now the *only* place a PAT can be entered ahead of any 401 ever prompting for one.
-function GlobalPatSection() {
-  const patStatus = credentialStatusForWorkspace()
-  return html`
-    <section class="settings-section">
-      <h2>Azure DevOps Personal Access Token</h2>
-      <p class="guidance">
-        Used for every Azure-DevOps-backed instance this gantry server serves. Stored only in this browser and sent
-        solely to your own gantry server — needs <strong>Code (Read &amp; write)</strong>,
-        <strong>Work Items (Read &amp; write)</strong>, and <strong>Identity (Read)</strong> scope.
-      </p>
-      <div class="settings-pat-status">
-        ${patStatus === 'rejected'
-          ? html`<span class="stamp review">REJECTED</span>`
-          : patStatus === 'set'
-            ? html`<span class="stamp agreed">SET</span>`
-            : html`<span class="stamp draft">NOT SET</span>`}
-      </div>
-      <div class="settings-actions">
-        ${pat.value
-          ? html`
-              <button type="button" class="btn" onClick=${() => requestPat()}>Replace Azure DevOps PAT</button>
-              <button type="button" class="btn ghost" onClick=${clearPat}>Clear Azure DevOps PAT</button>
-            `
-          : html`<button type="button" class="btn primary" onClick=${() => requestPat()}>Set Azure DevOps PAT</button>`}
-      </div>
-    </section>
-  `
-}
+// #9 (ADR-0038): the old Global Defaults tab's PAT section is gone entirely, not merely hidden — there
+// is no global-default PAT any more, and no screen-level control for one. Every workspace's own PAT is
+// managed from that workspace's own Workspace Settings screen (`WorkspaceEditor` below) instead.
 
 function TicketingSystemSection() {
   return html`
@@ -230,11 +199,23 @@ function RenderEngineSection() {
 // Definitions page's own Refresh button re-reads every configured repo on demand thereafter. Gated
 // behind advancedMode alongside the other Azure-DevOps-specific sections above — a local-only user
 // never sees this.
+// #19 (ADR-0037): the location fields collected change with the Provider picked, the same
+// "Provider drives which fields appear" convention the "+ New Workspace" wizard uses — Azure DevOps
+// needs Organization/Project/Repository, GitHub only Owner/Repository. Atlassian is deliberately
+// absent (not built, docs/adr/0037), unlike the wizard's own Provider picker (#8) which shows it as
+// known-but-unavailable — this form has no such row to add it to yet.
+const LIBRARY_REPO_PROVIDERS = [
+  { id: 'azure-devops', label: 'Azure DevOps' },
+  { id: 'github', label: 'GitHub' },
+]
+
 function LibraryReposSection() {
   const [repos, setRepos] = useState(null)
   const [loadError, setLoadError] = useState(null)
+  const [provider, setProvider] = useState('azure-devops')
   const [organization, setOrganization] = useState('')
   const [project, setProject] = useState('')
+  const [owner, setOwner] = useState('')
   const [repository, setRepository] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [codeOwner, setCodeOwner] = useState('')
@@ -263,7 +244,12 @@ function LibraryReposSection() {
   }, [])
 
   async function handleAdd() {
-    if (!organization.trim() || !project.trim() || !repository.trim()) {
+    if (provider === 'github') {
+      if (!owner.trim() || !repository.trim()) {
+        setAddError('Owner and repository are both required.')
+        return
+      }
+    } else if (!organization.trim() || !project.trim() || !repository.trim()) {
       setAddError('Organization, project and repository are all required.')
       return
     }
@@ -271,16 +257,14 @@ function LibraryReposSection() {
     setAddError(null)
     setAddStatus('')
     try {
+      const location =
+        provider === 'github'
+          ? { owner: owner.trim(), repository: repository.trim(), ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}) }
+          : { organization: organization.trim(), project: project.trim(), repository: repository.trim(), ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}) }
       const res = await fetch('/api/library-repos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          organization: organization.trim(),
-          project: project.trim(),
-          repository: repository.trim(),
-          ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
-          ...(codeOwner.trim() ? { codeOwner: codeOwner.trim() } : {}),
-        }),
+        body: JSON.stringify({ provider, location, ...(codeOwner.trim() ? { codeOwner: codeOwner.trim() } : {}) }),
       })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -289,6 +273,7 @@ function LibraryReposSection() {
       }
       setOrganization('')
       setProject('')
+      setOwner('')
       setRepository('')
       setBaseUrl('')
       setCodeOwner('')
@@ -334,11 +319,13 @@ function LibraryReposSection() {
     <section class="settings-section">
       <h2>Library repos</h2>
       <p class="guidance">
-        Azure DevOps repos read as additional sources for the server library, alongside the packaged
-        <code>definitions/</code> directory — read-only in the editor (viewable, copyable-from,
-        clonable into a workspace), read with this server's own PAT (<code>GANTRY_LIBRARY_PAT</code>),
-        cached on disk. Re-read at server startup, when a repo is added below, and on the Definitions
-        page's Refresh button — never polled.
+        Azure DevOps or GitHub repos read as additional sources for the server library, alongside the
+        packaged <code>definitions/</code> directory — read-only in the editor (viewable,
+        copyable-from, clonable into a workspace), read with this server's own PAT — one per Provider
+        (<code>GANTRY_LIBRARY_PAT_AZURE_DEVOPS</code> / <code>GANTRY_LIBRARY_PAT_GITHUB</code>, the
+        former also honouring the deprecated <code>GANTRY_LIBRARY_PAT</code>) — cached on disk.
+        Re-read at server startup, when a repo is added below, and on the Definitions page's Refresh
+        button — never polled.
       </p>
       ${loadError ? html`<p class="load-error">${loadError}</p>` : null}
       ${repos === null && !loadError ? html`<p class="loading">Loading…</p>` : null}
@@ -348,7 +335,10 @@ function LibraryReposSection() {
               ${repos.map(
                 (repo) => html`
                   <div class="result-row" key=${repo.id}>
-                    <span class="k">${repo.organization}/${repo.project}/${repo.repository}</span>
+                    <span class="k"
+                      >${repo.provider === 'github' ? 'GitHub' : 'Azure DevOps'}:
+                      ${repo.provider === 'github' ? `${repo.location.owner}/${repo.location.repository}` : `${repo.location.organization}/${repo.location.project}/${repo.location.repository}`}</span
+                    >
                     <span class="v">
                       ${repo.definitionCount == null
                         ? 'Not read yet'
@@ -383,14 +373,29 @@ function LibraryReposSection() {
           ? html`<p class="guidance">No library repos configured.</p>`
           : null}
       <div class="wizard-field">
-        <label class="field-label" for="library-repo-organization">Organization</label>
-        <input id="library-repo-organization" class="wizard-input" value=${organization} onInput=${(e) => setOrganization(e.currentTarget.value)} />
-        <label class="field-label" for="library-repo-project">Project</label>
-        <input id="library-repo-project" class="wizard-input" value=${project} onInput=${(e) => setProject(e.currentTarget.value)} />
-        <label class="field-label" for="library-repo-repository">Repository</label>
-        <input id="library-repo-repository" class="wizard-input" value=${repository} onInput=${(e) => setRepository(e.currentTarget.value)} />
-        <label class="field-label" for="library-repo-baseurl">Base URL (optional — on-premises Azure DevOps Server only)</label>
-        <input id="library-repo-baseurl" class="wizard-input" value=${baseUrl} onInput=${(e) => setBaseUrl(e.currentTarget.value)} />
+        <label class="field-label" for="library-repo-provider">Provider</label>
+        <select id="library-repo-provider" class="wizard-input" value=${provider} onChange=${(e) => setProvider(e.currentTarget.value)}>
+          ${LIBRARY_REPO_PROVIDERS.map((p) => html`<option value=${p.id}>${p.label}</option>`)}
+        </select>
+        ${provider === 'github'
+          ? html`
+              <label class="field-label" for="library-repo-owner">Owner</label>
+              <input id="library-repo-owner" class="wizard-input" value=${owner} onInput=${(e) => setOwner(e.currentTarget.value)} />
+              <label class="field-label" for="library-repo-repository">Repository</label>
+              <input id="library-repo-repository" class="wizard-input" value=${repository} onInput=${(e) => setRepository(e.currentTarget.value)} />
+              <label class="field-label" for="library-repo-baseurl">Base URL (optional — GitHub Enterprise Server only)</label>
+              <input id="library-repo-baseurl" class="wizard-input" value=${baseUrl} onInput=${(e) => setBaseUrl(e.currentTarget.value)} />
+            `
+          : html`
+              <label class="field-label" for="library-repo-organization">Organization</label>
+              <input id="library-repo-organization" class="wizard-input" value=${organization} onInput=${(e) => setOrganization(e.currentTarget.value)} />
+              <label class="field-label" for="library-repo-project">Project</label>
+              <input id="library-repo-project" class="wizard-input" value=${project} onInput=${(e) => setProject(e.currentTarget.value)} />
+              <label class="field-label" for="library-repo-repository">Repository</label>
+              <input id="library-repo-repository" class="wizard-input" value=${repository} onInput=${(e) => setRepository(e.currentTarget.value)} />
+              <label class="field-label" for="library-repo-baseurl">Base URL (optional — on-premises Azure DevOps Server only)</label>
+              <input id="library-repo-baseurl" class="wizard-input" value=${baseUrl} onInput=${(e) => setBaseUrl(e.currentTarget.value)} />
+            `}
         <label class="field-label" for="library-repo-codeowner">Code owner (optional — Promote's required reviewer)</label>
         <input id="library-repo-codeowner" class="wizard-input" placeholder="Name, unique name, or email" value=${codeOwner} onInput=${(e) => setCodeOwner(e.currentTarget.value)} />
       </div>
@@ -409,7 +414,6 @@ export function GlobalSettingsPage({ query }) {
     <main class="settings-page">
       <${AdvancedModeSection} />
       <${RenderEngineSection} />
-      ${advancedMode.value ? html`<${GlobalPatSection} />` : null}
       ${advancedMode.value ? html`<${TicketingSystemSection} />` : null}
       ${advancedMode.value ? html`<${LibraryReposSection} />` : null}
     </main>
@@ -475,13 +479,41 @@ async function patchWorkspace(id, updates) {
   return body
 }
 
-// The standard `https://dev.azure.com/{organization}/{project}/_git/{repository}` shape — the reverse of web/lib/validateRepo.js's `parseRepoUrl` — with `baseUrl` (an on-premises Azure DevOps Server location) substituted in place of `https://dev.azure.com` when a workspace carries one.
+// The standard `https://dev.azure.com/{organization}/{project}/_git/{repository}` shape — the reverse of web/lib/validateRepo.js's `parseRepoUrl` — with `baseUrl` (an on-premises Azure DevOps Server location) substituted in place of `https://dev.azure.com` when a workspace carries one. For a github workspace (#8), the same `baseUrl` override plays the GitHub Enterprise Server host's own role, substituted in place of `https://github.com`.
+//
+// Shared by two different "workspace" shapes (ticket #5): a workspace-registry record's own nested
+// `{ provider, location: { organization, project, repository, baseUrl? } }` (this file's own callers
+// below), and `lib/instanceRegistry.js`'s unrelated, still-flat, azure-devops-only per-instance
+// `instance.workspace` (`{ kind: 'azureDevOps', organization, project, repository, baseUrl? }`,
+// passed in from web/app.js's `instanceFilesUrl`) — the two registries are independent and only the
+// workspace registry was nested by ADR-0037. Reading `workspace.location` when present, and falling
+// back to `workspace` itself otherwise, serves both without either caller needing to know which shape
+// it holds; the flat `instance.workspace` shape never carries a `provider`, so it always falls
+// through to the azure-devops branch below, exactly as it always has.
 export function workspaceRepoUrl(workspace) {
-  const base = workspace.baseUrl ?? 'https://dev.azure.com'
-  return `${base}/${encodeURIComponent(workspace.organization)}/${encodeURIComponent(workspace.project)}/_git/${encodeURIComponent(workspace.repository)}`
+  const location = workspace.location ?? workspace
+  if (workspace.provider === 'github') {
+    const base = location.baseUrl ?? 'https://github.com'
+    return `${base}/${encodeURIComponent(location.owner)}/${encodeURIComponent(location.repository)}`
+  }
+  const base = location.baseUrl ?? 'https://dev.azure.com'
+  return `${base}/${encodeURIComponent(location.organization)}/${encodeURIComponent(location.project)}/_git/${encodeURIComponent(location.repository)}`
 }
 
-// One workspace's editable fields: owner (server-persisted, identity-picker), a PAT override (client-only, never touches the server), and a ticketing-system override (server-persisted) — the same three fields #104's old Workspace overrides tab exposed per row, now rendered for exactly one workspace (the instance's own) rather than one row per registered workspace. The owner field is now an identity picker (#145 Part 2).
+// The workspace's own location, rendered per its Provider (#8, docs/adr/0037) — azure-devops keeps
+// organization/project/repository; github has no project of its own, so owner/repository instead.
+// Reads the nested `location` (ticket #3) — only ever called with a workspace-registry record below,
+// which always carries one, unlike `workspaceRepoUrl` above which also serves the flat instance shape.
+function workspaceLocationLabel(workspace) {
+  return workspace.provider === 'github'
+    ? `${workspace.location.owner}/${workspace.location.repository}`
+    : `${workspace.location.organization}/${workspace.location.project}/${workspace.location.repository}`
+}
+
+// One workspace's editable fields: owner (server-persisted, identity-picker), its own Workspace PAT
+// (client-only, never touches the server — #9, ADR-0038: this is now the *only* place this
+// workspace's credential lives, there is no global default it could otherwise fall back to), and a
+// ticketing-system override (server-persisted). The owner field is an identity picker (#145 Part 2).
 function WorkspaceEditor({ workspace, onUpdated, slug }) {
   const [ownerDraft, setOwnerDraft] = useState(workspace.owner ?? '')
   const [ownerStatus, setOwnerStatus] = useState('')
@@ -500,12 +532,17 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
     latestOwnerRef.current = workspace.owner ?? ''
   }, [workspace.owner])
 
-  const hasPatOverride = hasWorkspacePatOverride(workspace.id)
-  const effectivePatStatus = credentialStatusForWorkspace(workspace.id)
+  const hasOwnPat = hasPatForWorkspace(workspace.id)
+  const patStatusForDisplay = credentialStatusForWorkspace(workspace.id)
   // Known, low-risk gap (#104 review; re-assessed, not fixed here): this is a *heuristic* ("does this workspace's stored value currently differ from the global default"), not a stored "was this ever explicitly overridden" flag — the workspace registry (#96, unchanged by this ticket) always persists one concrete `ticketingSystem` value, with no distinct "unset, tracks the global default" state. In principle that means this label could drift out from under an untouched workspace if the global default ever changed to a different value later.
   //
   // In practice, today, it can't: `jira` is rejected by validation everywhere a ticketing system can be chosen (globally, per-workspace, and at workspace creation — see workspaceRegistry.js's `assertValidTicketingSystem` and this file's own `TICKETING_SYSTEMS` enum), so `defaultTicketingSystem.value` and every workspace's `ticketingSystem` can only ever be `'azure-devops'` — there is no reachable state where the two sides of this comparison differ. This only becomes a real, visible misreporting risk once genuine Jira support ships (explicitly out of scope for this ticket, per spec #95's own "Out of Scope" list) and a real fix (an explicit override flag on the workspace record, intersecting the already-closed #96 ticket's schema) is worth building then, against real second-system requirements, rather than speculatively now.
   const hasTicketingOverride = workspace.ticketingSystem !== defaultTicketingSystem.value
+  // #8, docs/adr/0037 — GitHub has no ticketing-system choice of its own (the provider itself is the
+  // suite), so the Ticketing system radio group below is azure-devops-only; a github workspace's
+  // tracker is simply "GitHub", not a configurable option.
+  const isGitHub = workspace.provider === 'github'
+  const providerLabel = isGitHub ? 'GitHub' : 'Azure DevOps'
 
   async function handleSaveOwner() {
     const valueToSave = latestOwnerRef.current
@@ -519,15 +556,15 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
     }
   }
 
-  function handleSetPatOverride() {
-    setWorkspacePatOverride(workspace.id, patDraft)
+  function handleSetPat() {
+    setPatForWorkspace(workspace.id, patDraft)
     setPatDraft('')
-    setPatStatus('Override saved \u2014 used for this workspace\u2019s instances from now on.')
+    setPatStatus('PAT saved \u2014 used for this workspace\u2019s instances from now on.')
   }
 
-  function handleClearPatOverride() {
-    clearWorkspacePatOverride(workspace.id)
-    setPatStatus('Override cleared \u2014 falling back to the global default.')
+  function handleClearPat() {
+    clearPatForWorkspace(workspace.id)
+    setPatStatus('PAT cleared \u2014 the next request for this workspace will prompt for one.')
   }
 
   async function handleTicketingChange(systemId) {
@@ -543,8 +580,9 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
 
   return html`
     <div class="workspace-row" data-workspace-id=${workspace.id}>
+      <span class="stamp draft" title="Provider">${providerLabel}</span>
       <a class="workspace-repo-url" href=${workspaceRepoUrl(workspace)} target="_blank" rel="noreferrer">
-        ${workspace.organization}/${workspace.project}/${workspace.repository}
+        ${workspaceLocationLabel(workspace)}
       </a>
 
       <div class="workspace-field workspace-owner">
@@ -567,65 +605,67 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
       </div>
 
       <div class="workspace-field workspace-pat">
-        <label>Azure DevOps PAT override</label>
+        <label>${providerLabel} Workspace PAT</label>
         <div class="workspace-pat-status">
-          ${effectivePatStatus === 'rejected'
-            ? html`<span class="stamp review">${hasPatOverride ? 'OVERRIDE REJECTED' : 'GLOBAL DEFAULT REJECTED'}</span>`
-            : effectivePatStatus === 'missing'
-              ? html`<span class="stamp draft">NO GLOBAL DEFAULT</span>`
-              : hasPatOverride
-                ? html`<span class="stamp agreed">OVERRIDE SET</span>`
-                : html`<span class="stamp draft">USING GLOBAL DEFAULT</span>`}
+          ${patStatusForDisplay === 'rejected'
+            ? html`<span class="stamp review">REJECTED</span>`
+            : patStatusForDisplay === 'missing'
+              ? html`<span class="stamp draft">MISSING</span>`
+              : html`<span class="stamp agreed">SET</span>`}
         </div>
         <div class="workspace-field-row">
           <input
             type="password"
             class="wizard-input"
             value=${patDraft}
-            placeholder="Paste a PAT to override the global default for this workspace"
+            placeholder="Paste this workspace's Personal Access Token"
             onInput=${(e) => setPatDraft(e.currentTarget.value)}
           />
-          <button type="button" class="btn small" disabled=${!patDraft.trim()} onClick=${handleSetPatOverride}>
-            ${hasPatOverride ? 'Replace override' : 'Set override'}
+          <button type="button" class="btn small" disabled=${!patDraft.trim()} onClick=${handleSetPat}>
+            ${hasOwnPat ? 'Replace PAT' : 'Set PAT'}
           </button>
-          ${hasPatOverride
-            ? html`<button type="button" class="btn small ghost" onClick=${handleClearPatOverride}>Clear override</button>`
+          ${hasOwnPat
+            ? html`<button type="button" class="btn small ghost" onClick=${handleClearPat}>Clear PAT</button>`
             : null}
         </div>
         <div class="workspace-field-status">${patStatus}</div>
       </div>
 
-      <div class="workspace-field workspace-ticketing">
-        <label>Ticketing system</label>
-        <div
-          class="settings-radio-group"
-          role="radiogroup"
-          aria-label=${`Ticketing system for ${workspace.organization}/${workspace.project}/${workspace.repository}`}
-        >
-          ${TICKETING_SYSTEMS.map(
-            (system) => html`
-              <label key=${system.id} class=${'settings-radio' + (system.disabled ? ' disabled' : '')}>
-                <input
-                  type="radio"
-                  name=${`workspace-ticketing-${workspace.id}`}
-                  value=${system.id}
-                  checked=${workspace.ticketingSystem === system.id}
-                  disabled=${system.disabled}
-                  onChange=${() => handleTicketingChange(system.id)}
-                />
-                ${system.label}
-                ${system.disabled ? html`<span class="stamp review">${system.disabledReason}</span>` : null}
-              </label>
-            `
-          )}
-        </div>
-        <div class="workspace-ticketing-state">
-          ${hasTicketingOverride
-            ? html`<span class="stamp agreed">OVERRIDE</span>`
-            : html`<span class="stamp draft">USING GLOBAL DEFAULT</span>`}
-        </div>
-        <div class="workspace-field-status">${ticketingStatus}</div>
-      </div>
+      ${isGitHub
+        ? null
+        : html`
+            <div class="workspace-field workspace-ticketing">
+              <label>Ticketing system</label>
+              <div
+                class="settings-radio-group"
+                role="radiogroup"
+                aria-label=${`Ticketing system for ${workspaceLocationLabel(workspace)}`}
+              >
+                ${TICKETING_SYSTEMS.map(
+                  (system) => html`
+                    <label key=${system.id} class=${'settings-radio' + (system.disabled ? ' disabled' : '')}>
+                      <input
+                        type="radio"
+                        name=${`workspace-ticketing-${workspace.id}`}
+                        value=${system.id}
+                        checked=${workspace.ticketingSystem === system.id}
+                        disabled=${system.disabled}
+                        onChange=${() => handleTicketingChange(system.id)}
+                      />
+                      ${system.label}
+                      ${system.disabled ? html`<span class="stamp review">${system.disabledReason}</span>` : null}
+                    </label>
+                  `
+                )}
+              </div>
+              <div class="workspace-ticketing-state">
+                ${hasTicketingOverride
+                  ? html`<span class="stamp agreed">OVERRIDE</span>`
+                  : html`<span class="stamp draft">USING GLOBAL DEFAULT</span>`}
+              </div>
+              <div class="workspace-field-status">${ticketingStatus}</div>
+            </div>
+          `}
     </div>
   `
 }
@@ -879,9 +919,9 @@ function RemoteWorkspaceSettingsPage({ query }) {
       <section class="settings-section">
         <h2>Workspace</h2>
         <p class="guidance">
-          This instance's own workspace (an Azure DevOps repo) — its owner, repo URL, and any PAT or
-          ticketing-system override away from the Global Settings screen's values. Not a picker across every
-          registered workspace: just the one this instance belongs to.
+          This instance's own workspace — its owner, repo URL, its own Workspace PAT, and (for Azure
+          DevOps) its ticketing-system override. Not a picker across every registered workspace: just
+          the one this instance belongs to.
         </p>
         ${state === 'no-slug' ? html`<p class="load-error">No instance was specified for these Workspace Settings.</p>` : null}
         ${state === 'loading' ? html`<p class="loading">Loading\u2026</p>` : null}

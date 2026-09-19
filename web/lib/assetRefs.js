@@ -12,6 +12,16 @@ export function assetReference(asset) {
 }
 
 /**
+ * #16 — builds the insertable markdown reference for an asset uploaded through the WI260
+ * repo-as-asset-store convention (a GitHub-backed instance's own real upload, unlike Azure DevOps
+ * which has none): `![name](assets/<filename>)`, matching REPO_ASSET_REF_RE above rather than the
+ * `asset:<id>` manifest convention `assetReference` builds.
+ */
+export function repoAssetReference(asset) {
+  return `![${asset.name}](assets/${asset.filename})`
+}
+
+/**
  * WI #348: a manifest `source` that is not an http(s) URL is a *local* source — the image's own copy stored within the instance (`assets/<filename>`). Keep in sync with lib/assets.js's isLocalAssetSource.
  */
 export function isLocalAssetSource(source) {
@@ -35,11 +45,21 @@ export function resolveAssetRefs(markdown, resolveUrl, resolveSource) {
 }
 
 /**
- * WI260 repo-as-asset-store: rewrites every `![alt](../assets/<name>)` or `![alt](assets/<name>)` reference in `markdown` to `![alt](<resolveUrl(filename)>)`, so the browser preview sees a fetchable URL. No citation is emitted for repo assets.
+ * WI260 repo-as-asset-store: rewrites every `![alt](../assets/<name>)` or `![alt](assets/<name>)` reference in `markdown` to `![alt](<resolveUrl(filename)>)`, so the browser preview sees a fetchable URL.
+ *
+ * `resolveCitation` (#16): when supplied, `resolveCitation(filename)` returns the file's own permanent
+ * web address (or a falsy value for "no citation") — a GitHub-backed instance's repo-asset has no
+ * separate `source` to cite, so its citation is the committed file's own location. No citation is
+ * emitted when `resolveCitation` is omitted, matching Azure DevOps' and local workspaces' unchanged
+ * behaviour. Mirrors lib/assets.js's resolveRepoAssetFileRefs's own `citationUrl` option.
  */
-export function resolveRepoAssetRefs(markdown, resolveUrl) {
+export function resolveRepoAssetRefs(markdown, resolveUrl, resolveCitation) {
   return markdown.replace(REPO_ASSET_REF_RE, (match, alt, filename) => {
     const url = resolveUrl(filename)
-    return `![${alt}](${url})`
+    const base = `![${alt}](${url})`
+    if (!resolveCitation) return base
+    const href = resolveCitation(filename)
+    if (!href) return base
+    return `${base}\n\n*Source: [assets/${filename.replaceAll(']', '\\]')}](<${href}>)*`
   })
 }

@@ -1,12 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import {
-  createAzureDevOpsClient,
-  AzureDevOpsAuthenticationError,
-  AzureDevOpsNotFoundError,
-  AzureDevOpsRequestError,
-  DEFAULT_BASE_URL,
-} from '../lib/azureDevOpsClient.js'
+import { AuthenticationError, NotFoundError, RequestError } from '../lib/providerErrors.js'
+import { createAzureDevOpsClient, DEFAULT_BASE_URL } from '../lib/azureDevOpsClient.js'
 import { createFakeAzureDevOpsServer, withFakeAzureDevOpsServer as withFakeServer } from './helpers/fakeAzureDevOpsServer.js'
 import { ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
@@ -82,16 +77,16 @@ test('writeFiles is all or nothing: a rejected push leaves every file as it was'
     { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: { '/a.md': 'a\n' }, failAfterPushes: 0 },
     async (baseUrl) => {
       const c = client(baseUrl)
-      await assert.rejects(() => c.writeFiles([{ path: '/a.md', content: 'A\n' }, { path: '/b.md', content: 'B\n' }]), AzureDevOpsRequestError)
+      await assert.rejects(() => c.writeFiles([{ path: '/a.md', content: 'A\n' }, { path: '/b.md', content: 'B\n' }]), RequestError)
       assert.equal(await c.getFileContent('/a.md'), 'a\n')
-      await assert.rejects(() => c.getFileContent('/b.md'), AzureDevOpsNotFoundError)
+      await assert.rejects(() => c.getFileContent('/b.md'), NotFoundError)
     }
   )
 })
 
-test('getFileContent throws AzureDevOpsNotFoundError for a path with no item', async () => {
+test('getFileContent throws NotFoundError for a path with no item', async () => {
   await withFakeAzureDevOpsServer({}, async (baseUrl) => {
-    await assert.rejects(() => client(baseUrl).getFileContent('/missing.md'), AzureDevOpsNotFoundError)
+    await assert.rejects(() => client(baseUrl).getFileContent('/missing.md'), NotFoundError)
   })
 })
 
@@ -162,38 +157,38 @@ test('base URL defaults to the real Azure DevOps API but is configurable/overrid
   })
 })
 
-test('a PAT the (fake) server rejects surfaces as AzureDevOpsAuthenticationError, distinct from other errors', async () => {
+test('a PAT the (fake) server rejects surfaces as AuthenticationError, distinct from other errors', async () => {
   await withFakeAzureDevOpsServer({ '/instance.yaml': 'slug: demo\n' }, async (baseUrl) => {
     const badClient = client(baseUrl, { pat: 'a-pat-the-server-does-not-recognize' })
-    await assert.rejects(() => badClient.getFileContent('/instance.yaml'), AzureDevOpsAuthenticationError)
+    await assert.rejects(() => badClient.getFileContent('/instance.yaml'), AuthenticationError)
   })
 })
 
 test('a rejected PAT is reported distinctly from a not-found path, on the same client', async () => {
   await withFakeAzureDevOpsServer({ '/instance.yaml': 'slug: demo\n' }, async (baseUrl) => {
     const goodClient = client(baseUrl)
-    await assert.rejects(() => goodClient.getFileContent('/does-not-exist.md'), AzureDevOpsNotFoundError)
+    await assert.rejects(() => goodClient.getFileContent('/does-not-exist.md'), NotFoundError)
 
     const badClient = client(baseUrl, { pat: 'wrong' })
-    await assert.rejects(() => badClient.getFileContent('/instance.yaml'), AzureDevOpsAuthenticationError)
+    await assert.rejects(() => badClient.getFileContent('/instance.yaml'), AuthenticationError)
 
     // The two failure modes are genuinely distinct classes, not the same error with a different message.
-    assert.notEqual(AzureDevOpsAuthenticationError, AzureDevOpsNotFoundError)
+    assert.notEqual(AuthenticationError, NotFoundError)
   })
 })
 
-test('a rejected PAT on writeFile also surfaces as AzureDevOpsAuthenticationError', async () => {
+test('a rejected PAT on writeFile also surfaces as AuthenticationError', async () => {
   await withFakeAzureDevOpsServer({}, async (baseUrl) => {
     const badClient = client(baseUrl, { pat: 'wrong' })
-    await assert.rejects(() => badClient.writeFile('/modules/context.md', 'content\n'), AzureDevOpsAuthenticationError)
+    await assert.rejects(() => badClient.writeFile('/modules/context.md', 'content\n'), AuthenticationError)
   })
 })
 
-test('a network failure reaching the Azure DevOps API surfaces as AzureDevOpsRequestError, not the auth or not-found errors', async () => {
+test('a network failure reaching the Azure DevOps API surfaces as RequestError, not the auth or not-found errors', async () => {
   // Nothing listens on this port — a real connection failure, not a mock of fetch — exercising the client's network-error branch, distinct from the HTTP-level auth/not-found branches covered above.
   const unreachableBaseUrl = 'http://127.0.0.1:1'
   const c = client(unreachableBaseUrl)
-  await assert.rejects(() => c.getFileContent('/instance.yaml'), AzureDevOpsRequestError)
+  await assert.rejects(() => c.getFileContent('/instance.yaml'), RequestError)
 })
 
 test('organisation and project names containing URL-reserved characters (space, "&", "#", "?") are encoded, not misparsed as a URL fragment/query', async () => {
@@ -298,15 +293,15 @@ test('deleteFile removes an existing file', async () => {
   await withFakeAzureDevOpsServer({ '/instance.yaml': 'slug: demo\n' }, async (baseUrl) => {
     const c = client(baseUrl)
     await c.deleteFile('/instance.yaml', { message: 'Remove legacy instance.yaml' })
-    await assert.rejects(() => c.getFileContent('/instance.yaml'), AzureDevOpsNotFoundError)
+    await assert.rejects(() => c.getFileContent('/instance.yaml'), NotFoundError)
   })
 })
 
-test('a rejected PAT on listFolder/deleteFile also surfaces as AzureDevOpsAuthenticationError', async () => {
+test('a rejected PAT on listFolder/deleteFile also surfaces as AuthenticationError', async () => {
   await withFakeAzureDevOpsServer({ '/instance.yaml': 'slug: demo\n' }, async (baseUrl) => {
     const badClient = client(baseUrl, { pat: 'wrong' })
-    await assert.rejects(() => badClient.listFolder('/gantry-workspace'), AzureDevOpsAuthenticationError)
-    await assert.rejects(() => badClient.deleteFile('/instance.yaml'), AzureDevOpsAuthenticationError)
+    await assert.rejects(() => badClient.listFolder('/gantry-workspace'), AuthenticationError)
+    await assert.rejects(() => badClient.deleteFile('/instance.yaml'), AuthenticationError)
   })
 })
 
@@ -341,12 +336,12 @@ test('writeFile to a non-default branch does not affect \'main\', and vice versa
   })
 })
 
-test('getFileContent throws AzureDevOpsNotFoundError for a path that exists on a different branch but not the requested one', async () => {
+test('getFileContent throws NotFoundError for a path that exists on a different branch but not the requested one', async () => {
   await withFakeAzureDevOpsServer({ '/instance.yaml': 'on: main\n' }, async (baseUrl) => {
     const c = client(baseUrl)
     await assert.rejects(
       () => c.getFileContent('/instance.yaml', { branch: 'not-created-yet' }),
-      AzureDevOpsNotFoundError
+      NotFoundError
     )
   })
 })
@@ -361,7 +356,7 @@ test('writeFile creates a brand-new branch from an empty state, not seeded from 
       // The file that was only ever on `main` doesn't leak onto the new branch.
       await assert.rejects(
         () => c.getFileContent('/gantry-workspace/foo/instance.yaml', { branch: 'new-branch' }),
-        AzureDevOpsNotFoundError
+        NotFoundError
       )
       assert.equal(
         await c.getFileContent('/gantry-workspace/foo/other.md', { branch: 'new-branch' }),
@@ -400,7 +395,7 @@ test('deleteFile on one branch does not remove the same path from another branch
 
     await c.deleteFile('/instance.yaml', { branch: 'feature' })
 
-    await assert.rejects(() => c.getFileContent('/instance.yaml', { branch: 'feature' }), AzureDevOpsNotFoundError)
+    await assert.rejects(() => c.getFileContent('/instance.yaml', { branch: 'feature' }), NotFoundError)
     assert.equal(await c.getFileContent('/instance.yaml'), 'on: main\n')
   })
 })
@@ -479,32 +474,32 @@ test('createBranch can stack a new branch on another (non-main) branch, not just
   })
 })
 
-test('createBranch throws AzureDevOpsNotFoundError when the source branch does not exist', async () => {
+test('createBranch throws NotFoundError when the source branch does not exist', async () => {
   await withFakeAzureDevOpsServer({}, async (baseUrl) => {
     // No files seeded — "main" itself has no commits yet.
-    await assert.rejects(() => client(baseUrl).createBranch('feature-x'), AzureDevOpsNotFoundError)
+    await assert.rejects(() => client(baseUrl).createBranch('feature-x'), NotFoundError)
   })
 })
 
-test('createBranch throws AzureDevOpsRequestError when the branch name already exists', async () => {
+test('createBranch throws RequestError when the branch name already exists', async () => {
   await withFakeAzureDevOpsServer({ '/instance.yaml': 'slug: demo\n' }, async (baseUrl) => {
     const c = client(baseUrl)
     await c.createBranch('feature-x')
-    await assert.rejects(() => c.createBranch('feature-x'), AzureDevOpsRequestError)
+    await assert.rejects(() => c.createBranch('feature-x'), RequestError)
   })
 })
 
-test('createBranch surfaces a rejected PAT as AzureDevOpsAuthenticationError', async () => {
+test('createBranch surfaces a rejected PAT as AuthenticationError', async () => {
   await withFakeAzureDevOpsServer({ '/instance.yaml': 'slug: demo\n' }, async (baseUrl) => {
     const badClient = client(baseUrl, { pat: 'wrong' })
-    await assert.rejects(() => badClient.createBranch('feature-x'), AzureDevOpsAuthenticationError)
+    await assert.rejects(() => badClient.createBranch('feature-x'), AuthenticationError)
   })
 })
 
-test('a network failure reaching the Azure DevOps API surfaces as AzureDevOpsRequestError on createBranch too', async () => {
+test('a network failure reaching the Azure DevOps API surfaces as RequestError on createBranch too', async () => {
   const unreachableBaseUrl = 'http://127.0.0.1:1'
   const c = client(unreachableBaseUrl)
-  await assert.rejects(() => c.createBranch('feature-x'), AzureDevOpsRequestError)
+  await assert.rejects(() => c.createBranch('feature-x'), RequestError)
 })
 
 test('createAzureDevOpsClient requires organization, project, repository and pat', () => {

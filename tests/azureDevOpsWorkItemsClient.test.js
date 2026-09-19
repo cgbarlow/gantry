@@ -1,10 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { AuthenticationError, NotFoundError, RequestError } from '../lib/providerErrors.js'
 import {
   createAzureDevOpsWorkItemsClient,
-  AzureDevOpsAuthenticationError,
-  AzureDevOpsNotFoundError,
-  AzureDevOpsRequestError,
   DEFAULT_BASE_URL,
   GANTRY_WORK_ITEM_TAG,
   isAzureDevOpsFieldNotFoundError,
@@ -115,10 +113,10 @@ test('getCurrentUser returns null when connectionData reports no authenticated u
   })
 })
 
-test('a rejected PAT surfaces as AzureDevOpsAuthenticationError on getCurrentUser', async () => {
+test('a rejected PAT surfaces as AuthenticationError on getCurrentUser', async () => {
   await withFakeAzureDevOpsServer({}, async (baseUrl) => {
     const badClient = client(baseUrl, { pat: 'wrong' })
-    await assert.rejects(() => badClient.getCurrentUser(), AzureDevOpsAuthenticationError)
+    await assert.rejects(() => badClient.getCurrentUser(), AuthenticationError)
   })
 })
 
@@ -154,9 +152,9 @@ test('ensureWorkItemTag preserves existing tags and is idempotent', async () => 
   })
 })
 
-test('updateWorkItem throws AzureDevOpsNotFoundError for a work item id that does not exist', async () => {
+test('updateWorkItem throws NotFoundError for a work item id that does not exist', async () => {
   await withFakeAzureDevOpsServer({}, async (baseUrl) => {
-    await assert.rejects(() => client(baseUrl).updateWorkItem(999999, { 'System.State': 'Active' }), AzureDevOpsNotFoundError)
+    await assert.rejects(() => client(baseUrl).updateWorkItem(999999, { 'System.State': 'Active' }), NotFoundError)
   })
 })
 
@@ -245,18 +243,18 @@ test('getWorkItem includes `relations` when explicitly requested via `expand: \'
   })
 })
 
-test('getWorkItem throws AzureDevOpsNotFoundError for a work item id that does not exist', async () => {
+test('getWorkItem throws NotFoundError for a work item id that does not exist', async () => {
   await withFakeAzureDevOpsServer({}, async (baseUrl) => {
-    await assert.rejects(() => client(baseUrl).getWorkItem(999999), AzureDevOpsNotFoundError)
+    await assert.rejects(() => client(baseUrl).getWorkItem(999999), NotFoundError)
   })
 })
 
-test('a rejected PAT surfaces as AzureDevOpsAuthenticationError on getWorkItem', async () => {
+test('a rejected PAT surfaces as AuthenticationError on getWorkItem', async () => {
   await withFakeAzureDevOpsServer({}, async (baseUrl) => {
     const c = client(baseUrl)
     const created = await c.createWorkItem('Task', { 'System.Title': 'X' })
     const badClient = client(baseUrl, { pat: 'wrong' })
-    await assert.rejects(() => badClient.getWorkItem(created.id), AzureDevOpsAuthenticationError)
+    await assert.rejects(() => badClient.getWorkItem(created.id), AuthenticationError)
   })
 })
 
@@ -295,32 +293,32 @@ test('listWorkItemTypes does not confuse the project-wide list with a single typ
   )
 })
 
-test('a rejected PAT surfaces as AzureDevOpsAuthenticationError on listWorkItemTypes', async () => {
+test('a rejected PAT surfaces as AuthenticationError on listWorkItemTypes', async () => {
   await withFakeAzureDevOpsServer({}, async (baseUrl) => {
     const badClient = client(baseUrl, { pat: 'wrong' })
-    await assert.rejects(() => badClient.listWorkItemTypes(), AzureDevOpsAuthenticationError)
+    await assert.rejects(() => badClient.listWorkItemTypes(), AuthenticationError)
   })
 })
 
-test('a rejected PAT surfaces as AzureDevOpsAuthenticationError on createWorkItem', async () => {
+test('a rejected PAT surfaces as AuthenticationError on createWorkItem', async () => {
   await withFakeAzureDevOpsServer({}, async (baseUrl) => {
     const badClient = client(baseUrl, { pat: 'wrong' })
-    await assert.rejects(() => badClient.createWorkItem('Task', { 'System.Title': 'X' }), AzureDevOpsAuthenticationError)
+    await assert.rejects(() => badClient.createWorkItem('Task', { 'System.Title': 'X' }), AuthenticationError)
   })
 })
 
-test('a rejected PAT surfaces as AzureDevOpsAuthenticationError on getWorkItemTypeStates', async () => {
+test('a rejected PAT surfaces as AuthenticationError on getWorkItemTypeStates', async () => {
   await withFakeAzureDevOpsServer({}, async (baseUrl) => {
     const badClient = client(baseUrl, { pat: 'wrong' })
-    await assert.rejects(() => badClient.getWorkItemTypeStates('Task'), AzureDevOpsAuthenticationError)
+    await assert.rejects(() => badClient.getWorkItemTypeStates('Task'), AuthenticationError)
   })
 })
 
-test('a network failure reaching the Azure DevOps API surfaces as AzureDevOpsRequestError, not the auth or not-found errors', async () => {
+test('a network failure reaching the Azure DevOps API surfaces as RequestError, not the auth or not-found errors', async () => {
   // Nothing listens on this port — a real connection failure, not a mock of fetch — exercising the client's network-error branch, distinct from the HTTP-level auth/not-found branches covered above. Mirrors the equivalent test in tests/azureDevOpsClient.test.js.
   const unreachableBaseUrl = 'http://127.0.0.1:1'
   const c = client(unreachableBaseUrl)
-  await assert.rejects(() => c.createWorkItem('Task', { 'System.Title': 'X' }), AzureDevOpsRequestError)
+  await assert.rejects(() => c.createWorkItem('Task', { 'System.Title': 'X' }), RequestError)
 })
 
 test('base URL defaults to the real Azure DevOps API but is configurable/overridable for tests', async () => {
@@ -343,22 +341,22 @@ test('createAzureDevOpsWorkItemsClient requires organization, project and pat (n
 
 test('isAzureDevOpsFieldNotFoundError distinguishes TF51535 from other failures', () => {
   assert.equal(isAzureDevOpsFieldNotFoundError(new Error('generic'), 'Custom.GantryReviewStatus'), false)
-  assert.equal(isAzureDevOpsFieldNotFoundError(new AzureDevOpsAuthenticationError('auth'), 'Custom.GantryReviewStatus'), false)
-  const other400 = new AzureDevOpsRequestError('other', { body: 'some other 400' })
+  assert.equal(isAzureDevOpsFieldNotFoundError(new AuthenticationError('auth'), 'Custom.GantryReviewStatus'), false)
+  const other400 = new RequestError('other', { body: 'some other 400' })
   assert.equal(isAzureDevOpsFieldNotFoundError(other400, 'Custom.GantryReviewStatus'), false)
 
-  const tfString = new AzureDevOpsRequestError('missing', { body: 'TF51535: Cannot find field Custom.GantryReviewStatus' })
+  const tfString = new RequestError('missing', { body: 'TF51535: Cannot find field Custom.GantryReviewStatus' })
   assert.equal(isAzureDevOpsFieldNotFoundError(tfString), true)
   assert.equal(isAzureDevOpsFieldNotFoundError(tfString, 'Custom.GantryReviewStatus'), true)
   assert.equal(isAzureDevOpsFieldNotFoundError(tfString, 'Custom.OtherField'), false)
 
-  const fieldException = new AzureDevOpsRequestError('missing', { body: JSON.stringify({ message: 'FieldNotFoundException', field: 'Custom.GantryReviewStatus' }) })
+  const fieldException = new RequestError('missing', { body: JSON.stringify({ message: 'FieldNotFoundException', field: 'Custom.GantryReviewStatus' }) })
   assert.equal(isAzureDevOpsFieldNotFoundError(fieldException, 'Custom.GantryReviewStatus'), true)
   assert.equal(isAzureDevOpsFieldNotFoundError(fieldException), true)
 
-  const noFieldFilter = new AzureDevOpsRequestError('missing', { body: 'FieldNotFoundException: TF51535' })
+  const noFieldFilter = new RequestError('missing', { body: 'FieldNotFoundException: TF51535' })
   assert.equal(isAzureDevOpsFieldNotFoundError(noFieldFilter), true)
 
-  const bodyObject = new AzureDevOpsRequestError('missing', { body: { message: 'TF51535 field Custom.GantryReviewStatus missing' } })
+  const bodyObject = new RequestError('missing', { body: { message: 'TF51535 field Custom.GantryReviewStatus missing' } })
   assert.equal(isAzureDevOpsFieldNotFoundError(bodyObject, 'Custom.GantryReviewStatus'), true)
 })

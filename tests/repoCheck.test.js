@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { checkAzureDevOpsRepo, migrateLegacyAzureDevOpsInstance } from '../lib/repoCheck.js'
-import { createAzureDevOpsClient, AzureDevOpsNotFoundError, AzureDevOpsRepoNotFoundError } from '../lib/azureDevOpsClient.js'
+import { NotFoundError, RepoNotFoundError } from '../lib/providerErrors.js'
+import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { loadDefinition } from '../lib/definition.js'
 import { migrateModuleHeadingScale } from '../lib/instance.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
@@ -76,8 +77,8 @@ test('checkAzureDevOpsRepo migrates a legacy repo-root instance to gantry-worksp
       assert.equal(migratedModule, MIGRATED_CONTEXT_MODULE)
 
       // No repo is left with instance data at both root and subdirectory simultaneously (#100's acceptance criteria) — the legacy copies are gone.
-      await assert.rejects(() => client.getFileContent('instance.yaml'), AzureDevOpsNotFoundError)
-      await assert.rejects(() => client.getFileContent('modules/background.md'), AzureDevOpsNotFoundError)
+      await assert.rejects(() => client.getFileContent('instance.yaml'), NotFoundError)
+      await assert.rejects(() => client.getFileContent('modules/background.md'), NotFoundError)
     }
   )
 })
@@ -206,8 +207,8 @@ test('checkAzureDevOpsRepo resumes and completes a previously-interrupted migrat
       assert.match(migratedSolutionDefinition, /Real, already-saved content\./)
 
       // Nothing left behind at either legacy path.
-      await assert.rejects(() => client.getFileContent('instance.yaml'), AzureDevOpsNotFoundError)
-      await assert.rejects(() => client.getFileContent('modules/solution-definition.md'), AzureDevOpsNotFoundError)
+      await assert.rejects(() => client.getFileContent('instance.yaml'), NotFoundError)
+      await assert.rejects(() => client.getFileContent('modules/solution-definition.md'), NotFoundError)
     }
   )
 })
@@ -228,9 +229,9 @@ test('migrateLegacyAzureDevOpsInstance moves instance.yaml and every module file
       assert.equal(await client.getFileContent('gantry-workspace/my-initiative/instance.yaml'), instanceYamlText)
       assert.equal(await client.getFileContent('gantry-workspace/my-initiative/modules/background.md'), CONTEXT_MODULE)
       assert.equal(await client.getFileContent('gantry-workspace/my-initiative/modules/solution-definition.md'), '# Solution\n')
-      await assert.rejects(() => client.getFileContent('instance.yaml'), AzureDevOpsNotFoundError)
-      await assert.rejects(() => client.getFileContent('modules/background.md'), AzureDevOpsNotFoundError)
-      await assert.rejects(() => client.getFileContent('modules/solution-definition.md'), AzureDevOpsNotFoundError)
+      await assert.rejects(() => client.getFileContent('instance.yaml'), NotFoundError)
+      await assert.rejects(() => client.getFileContent('modules/background.md'), NotFoundError)
+      await assert.rejects(() => client.getFileContent('modules/solution-definition.md'), NotFoundError)
 
       // Re-running against the same (now legacy-empty) content is a safe no-op re-write of the already-migrated files — used as the "explicit migration routine" entry point on its own, independent of checkAzureDevOpsRepo's own lazy call.
       await migrateLegacyAzureDevOpsInstance(client, 'my-initiative', instanceYamlText)
@@ -259,11 +260,11 @@ test('migrateLegacyAzureDevOpsInstance moves a legacy instance on a non-default 
       instanceYamlText
     )
     assert.equal(await client.getFileContent('gantry-workspace/my-initiative/modules/background.md', { branch }), CONTEXT_MODULE)
-    await assert.rejects(() => client.getFileContent('instance.yaml', { branch }), AzureDevOpsNotFoundError)
+    await assert.rejects(() => client.getFileContent('instance.yaml', { branch }), NotFoundError)
 
     // 'main' was never touched by any of the above — it has no ref at all.
-    await assert.rejects(() => client.getFileContent('instance.yaml'), AzureDevOpsNotFoundError)
-    await assert.rejects(() => client.getFileContent('gantry-workspace/my-initiative/instance.yaml'), AzureDevOpsNotFoundError)
+    await assert.rejects(() => client.getFileContent('instance.yaml'), NotFoundError)
+    await assert.rejects(() => client.getFileContent('gantry-workspace/my-initiative/instance.yaml'), NotFoundError)
   })
 })
 
@@ -294,7 +295,7 @@ test('checkAzureDevOpsRepo reads/migrates/evaluates against the caller-supplied 
         await client.getFileContent('gantry-workspace/my-initiative/instance.yaml', { branch }),
         /slug: my-initiative/
       )
-      await assert.rejects(() => client.getFileContent('gantry-workspace/my-initiative/instance.yaml'), AzureDevOpsNotFoundError)
+      await assert.rejects(() => client.getFileContent('gantry-workspace/my-initiative/instance.yaml'), NotFoundError)
 
       // Checking the default branch instead finds nothing there at all.
       const mainResult = await checkAzureDevOpsRepo(locationFor(baseUrl))
@@ -305,14 +306,14 @@ test('checkAzureDevOpsRepo reads/migrates/evaluates against the caller-supplied 
 
 // ---------- #139: nonexistent repository detection ----------
 
-test('checkAzureDevOpsRepo throws AzureDevOpsRepoNotFoundError for a repository that does not exist', async () => {
+test('checkAzureDevOpsRepo throws RepoNotFoundError for a repository that does not exist', async () => {
   await withFakeAzureDevOpsServer(
     { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {}, repoExists: false },
     async (baseUrl) => {
       await assert.rejects(
         () => checkAzureDevOpsRepo(locationFor(baseUrl)),
         (err) => {
-          assert.ok(err instanceof AzureDevOpsRepoNotFoundError)
+          assert.ok(err instanceof RepoNotFoundError)
           assert.match(err.message, /does not exist/)
           assert.match(err.message, /create it in Azure DevOps first/)
           return true

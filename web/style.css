@@ -473,6 +473,10 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .identity-picker .identity-dropdown .identity-option .name { font-weight: 600; }
 .identity-picker .identity-dropdown .identity-option .email { font-size: 11px; color: var(--text-muted); margin-left: 6px; }
 .identity-picker .identity-dropdown .no-results { padding: 8px 12px; font-size: 12px; color: var(--text-muted); }
+/* #10, docs/adr/0040: a person who resolves but can't be assigned a GitHub issue — shown, not hidden, but not selectable. */
+.identity-picker .identity-dropdown .identity-option.blocked { cursor: not-allowed; opacity: 0.6; }
+.identity-picker .identity-dropdown .identity-option.blocked:hover { background: none; }
+.identity-picker .identity-dropdown .identity-option .blocked-reason { display: block; font-size: 11px; color: var(--stamp-error-bg, #b91c1c); margin-top: 2px; }
 
 .field { margin-top: 20px; }
 .field label { font-family: var(--font-display); font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px; }

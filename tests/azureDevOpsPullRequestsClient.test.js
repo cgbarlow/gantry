@@ -1,13 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import {
-  createAzureDevOpsPullRequestsClient,
-  AzureDevOpsAuthenticationError,
-  AzureDevOpsNotFoundError,
-  AzureDevOpsRequestError,
-  DEFAULT_BASE_URL,
-} from '../lib/azureDevOpsPullRequestsClient.js'
+import { AuthenticationError, NotFoundError, RequestError } from '../lib/providerErrors.js'
+import { createAzureDevOpsPullRequestsClient, DEFAULT_BASE_URL } from '../lib/azureDevOpsPullRequestsClient.js'
 import { basicAuthHeader } from '../lib/azureDevOpsClient.js'
 import { withFakeAzureDevOpsServer as withFakeServer } from './helpers/fakeAzureDevOpsServer.js'
 import { ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
@@ -105,9 +100,9 @@ test('getPullRequest fetches a pull request\'s current state by id', async () =>
   })
 })
 
-test('getPullRequest throws AzureDevOpsNotFoundError for a pull request id that does not exist', async () => {
+test('getPullRequest throws NotFoundError for a pull request id that does not exist', async () => {
   await withFakeAzureDevOpsServer(async (baseUrl) => {
-    await assert.rejects(() => client(baseUrl).getPullRequest(999999), AzureDevOpsNotFoundError)
+    await assert.rejects(() => client(baseUrl).getPullRequest(999999), NotFoundError)
   })
 })
 
@@ -221,9 +216,9 @@ test('completePullRequest merges an approved pull request, threading through the
   })
 })
 
-test('completePullRequest throws AzureDevOpsNotFoundError for a pull request id that does not exist', async () => {
+test('completePullRequest throws NotFoundError for a pull request id that does not exist', async () => {
   await withFakeAzureDevOpsServer(async (baseUrl) => {
-    await assert.rejects(() => client(baseUrl).completePullRequest(999999, { mergeStrategy: 'squash' }), AzureDevOpsNotFoundError)
+    await assert.rejects(() => client(baseUrl).completePullRequest(999999, { mergeStrategy: 'squash' }), NotFoundError)
   })
 })
 
@@ -255,27 +250,27 @@ test('the fake server rejects completing a pull request with a stale lastMergeSo
   })
 })
 
-test('a rejected PAT surfaces as AzureDevOpsAuthenticationError on createPullRequest', async () => {
+test('a rejected PAT surfaces as AuthenticationError on createPullRequest', async () => {
   await withFakeAzureDevOpsServer(async (baseUrl) => {
     const badClient = client(baseUrl, { pat: 'wrong' })
     await assert.rejects(
       () => badClient.createPullRequest({ sourceBranch: 'a', targetBranch: 'main', title: 'X' }),
-      AzureDevOpsAuthenticationError
+      AuthenticationError
     )
   })
 })
 
-test('a rejected PAT surfaces as AzureDevOpsAuthenticationError on getPullRequest', async () => {
+test('a rejected PAT surfaces as AuthenticationError on getPullRequest', async () => {
   await withFakeAzureDevOpsServer(async (baseUrl) => {
     const c = client(baseUrl)
     const created = await c.createPullRequest({ sourceBranch: 'a', targetBranch: 'main', title: 'X' })
 
     const badClient = client(baseUrl, { pat: 'wrong' })
-    await assert.rejects(() => badClient.getPullRequest(created.pullRequestId), AzureDevOpsAuthenticationError)
+    await assert.rejects(() => badClient.getPullRequest(created.pullRequestId), AuthenticationError)
   })
 })
 
-test('a network failure reaching the Azure DevOps API surfaces as AzureDevOpsRequestError, not the auth or not-found errors', async () => {
+test('a network failure reaching the Azure DevOps API surfaces as RequestError, not the auth or not-found errors', async () => {
   // Nothing listens on this port — a real connection failure, not a mock
   // of fetch — exercising the client's network-error branch, distinct
   // from the HTTP-level auth/not-found branches covered above. Mirrors the
@@ -285,11 +280,11 @@ test('a network failure reaching the Azure DevOps API surfaces as AzureDevOpsReq
   const c = client(unreachableBaseUrl)
   await assert.rejects(
     () => c.createPullRequest({ sourceBranch: 'a', targetBranch: 'main', title: 'X' }),
-    AzureDevOpsRequestError
+    RequestError
   )
 })
 
-test('a non-auth, non-not-found HTTP error response surfaces as AzureDevOpsRequestError carrying the status and response body', async () => {
+test('a non-auth, non-not-found HTTP error response surfaces as RequestError carrying the status and response body', async () => {
   // A raw local HTTP server standing in for Azure DevOps, returning a
   // generic 500 with a body — exercises the `!res.ok` fallback branch in
   // `request()` (distinct from the dedicated 401/403/404 branches covered
@@ -307,7 +302,7 @@ test('a non-auth, non-not-found HTTP error response surfaces as AzureDevOpsReque
     await assert.rejects(
       () => c.createPullRequest({ sourceBranch: 'a', targetBranch: 'main', title: 'X' }),
       (err) => {
-        assert.ok(err instanceof AzureDevOpsRequestError)
+        assert.ok(err instanceof RequestError)
         assert.equal(err.status, 500)
         assert.match(err.body, /Internal Error Occurred/)
         assert.match(err.message, /HTTP 500/)

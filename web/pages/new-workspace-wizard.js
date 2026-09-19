@@ -34,8 +34,10 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal, effect } from '@preact/signals'
 import { apiFetch, apiFetchForInstance } from '../lib/apiFetch.js'
+import { basicAuthHeaderForValue, setPatForWorkspace } from '../lib/credential.js'
 import { renderMarkdown } from '../lib/markdown.js'
 import { TICKETING_SYSTEMS, defaultTicketingSystem } from '../lib/ticketingSystem.js'
+import { PROVIDERS, DEFAULT_PROVIDER } from '../lib/provider.js'
 import { IdentityPicker } from '../lib/identityPicker.js'
 import { parseRepoUrl } from '../lib/validateRepo.js'
 import { advancedMode } from '../lib/advancedMode.js'
@@ -180,8 +182,32 @@ const workspaces = signal(null) // fetched GET /api/workspaces list, null while 
 const workspacesLoadError = signal('')
 const pickedWorkspaceId = signal('')
 
-const registerForm = signal({ organization: 'Contoso-Production', project: 'Default', repository: '', owner: '' })
+// #8, docs/adr/0037 — Provider is chosen first because it decides which of the fields below apply:
+// azure-devops reads organization/project (github ignores both); github reads repoOwner (azure-devops
+// ignores it); repository and owner (the workspace's Owner *person*, not a GitHub repo's own owner)
+// are shared by both. Kept as one signal, like the fields it replaces, so "Import from local
+// workspace"'s destination panel (which never renders a Provider picker of its own, and is forced back
+// to 'azure-devops' below since GitHub's content store isn't built yet, #11) shares the exact same
+// state shape without needing one of its own.
+const registerProvider = signal(DEFAULT_PROVIDER)
+const registerForm = signal({ organization: 'Contoso-Production', project: 'Default', repository: '', repoOwner: '', owner: '' })
 const registerTicketingSystem = signal(defaultTicketingSystem.value)
+
+// #9 (ADR-0038): the PAT for a brand-new Workspace, held here in memory only — never persisted to any
+// storage slot until `registerWorkspace`'s own call to `POST /api/workspaces` actually succeeds, at
+// which point it becomes exactly that new workspace's own PAT (`setPatForWorkspace`). A failed
+// registration leaves this value in the field (so the architect isn't forced to retype it to retry)
+// but never writes it anywhere. This is "the one route with no workspace in scope" the ADR calls out —
+// every other credentialed request in this wizard already has a real `workspace.id` to attach to.
+const registerPat = signal('')
+
+// Import's destination-picker has no Provider control of its own (#8: GitHub's content store — the
+// thing an import destination actually writes into — is #11's job, not this ticket's), so switching
+// into that flow always resets the shared registerProvider back to the only provider it can target,
+// regardless of what a prior "Start blank" visit in the same wizard session left it as.
+effect(() => {
+  if (registerDataSource.value === 'import') registerProvider.value = DEFAULT_PROVIDER
+})
 const registerStatus = signal('idle') // idle | registering | failed
 const registerError = signal('')
 const registerNotice = signal('')
@@ -238,6 +264,23 @@ const linkMode = signal('create') // 'create' | 'existing'
 const newWorkItemTitle = signal('')
 const newWorkItemCreateStatus = signal('idle') // idle | creating | failed
 const newWorkItemCreateError = signal('')
+
+// A registered workspace's own location, rendered per its provider (#8) — azure-devops keeps the
+// existing organization/project/repository form; github shows owner/repository, with no project of
+// its own to show. Reads `location` (ticket #3, ADR-0037's nested provider/location shape every
+// workspace GET now returns) rather than flat top-level fields, since a GitHub workspace carries no
+// flat aliases (`lib/workspaceRegistry.js`'s `toPublicWorkspace` only denormalizes those for
+// azure-devops, for pre-#3 back-compat). Shared by both Pick-workspace lists (top-level and the
+// Import destination panel's).
+function workspaceLocationLabel(w) {
+  return w.provider === 'github' ? `${w.location.owner}/${w.location.repository}` : `${w.location.organization}/${w.location.project}/${w.location.repository}`
+}
+
+// Same workspace's ticketing/tracker line, provider-aware — GitHub has no ticketing-system choice of
+// its own (ADR-0037: the provider itself is the suite), so this reads "GitHub" rather than "ticketing: none".
+function workspaceTrackerLabel(w) {
+  return w.provider === 'github' ? 'GitHub' : w.ticketingSystem || 'none'
+}
 
 function slugify(name) {
   return (name ?? '')
@@ -398,8 +441,10 @@ function resetWizard() {
   workspaces.value = null
   workspacesLoadError.value = ''
   pickedWorkspaceId.value = ''
-  registerForm.value = { organization: 'Contoso-Production', project: 'Default', repository: '', owner: '' }
+  registerProvider.value = DEFAULT_PROVIDER
+  registerForm.value = { organization: 'Contoso-Production', project: 'Default', repository: '', repoOwner: '', owner: '' }
   registerTicketingSystem.value = defaultTicketingSystem.value
+  registerPat.value = ''
   registerStatus.value = 'idle'
   registerError.value = ''
   registerNotice.value = ''
@@ -453,28 +498,41 @@ function pickWorkspace() {
   step.value = 'instance'
 }
 
-async function registerWorkspace() {
+async function registerWorkspace(providerOverride) {
   registerStatus.value = 'registering'
   registerError.value = ''
   registerNotice.value = ''
-  const { organization, project, repository, owner } = registerForm.value
+  // `providerOverride` lets the Import destination panel force 'azure-devops' explicitly (belt and
+  // braces alongside the registerDataSource effect above) rather than trusting registerProvider's
+  // current value — this function is its only other caller.
+  const provider = providerOverride ?? registerProvider.value
+  const { organization, project, repository, repoOwner, owner } = registerForm.value
+  const isGitHub = provider === 'github'
+  // #9 (ADR-0038): a brand-new Workspace has no id yet to resolve a stored PAT against, so this
+  // attaches the wizard's own in-memory `registerPat` directly rather than going through
+  // `apiFetch`'s workspace-scoped auto-prompt-and-retry (`silent: true` suppresses that entirely —
+  // a rejected PAT here is this function's own `registerError`, not the shared page-wide modal).
+  const authHeader = basicAuthHeaderForValue(registerPat.value.trim())
   try {
-    // A brand-new Workspace registration has no workspaceId yet — this
-    // always uses the global default PAT, exactly like
-    // web/lib/validateRepo.js's own repo-check (there's nothing more
-    // specific to resolve a PAT override against until the Workspace
-    // itself exists).
-    const res = await apiFetch('/api/workspaces', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        organization: organization.trim(),
-        project: project.trim(),
-        repository: repository.trim(),
-        owner: owner.trim(),
-        ticketingSystem: registerTicketingSystem.value,
-      }),
-    })
+    // Sent as the #37 nested `{ provider, location }` shape rather than flat
+    // organization/project/repository — this wizard still only offers Azure
+    // DevOps fields, so `provider` is always 'azure-devops' here, but the
+    // wire shape matches what a workspace record is now stored as.
+    const res = await apiFetch(
+      '/api/workspaces',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(authHeader ? { Authorization: authHeader } : {}) },
+        body: JSON.stringify({
+          provider,
+          location: isGitHub
+            ? { owner: repoOwner.trim(), repository: repository.trim() }
+            : { organization: organization.trim(), project: project.trim(), repository: repository.trim() },
+          owner: owner.trim(),
+        }),
+      },
+      { silent: true }
+    )
     const body = await res.json().catch(() => ({}))
     if (!res.ok) {
       registerStatus.value = 'failed'
@@ -484,12 +542,17 @@ async function registerWorkspace() {
       } else {
         registerError.value = raw
       }
+      // #9: creation failed — the typed PAT is discarded (never persisted anywhere), not silently
+      // kept for a later, unrelated registration to accidentally reuse.
       return
     }
     registerStatus.value = 'idle'
     if (body.reused) {
       registerNotice.value = 'Using the workspace already registered for this repository'
     }
+    // #9: creation succeeded — the PAT the architect just typed becomes this new workspace's own PAT.
+    setPatForWorkspace(body.id, registerPat.value)
+    registerPat.value = ''
     selectedWorkspace.value = body
     workspaces.value = null
     step.value = 'instance'
@@ -521,7 +584,16 @@ async function checkAdoptRepo() {
   adoptCheckMessage.value = ''
   try {
     const qs = new URLSearchParams({ organization: loc.organization, project: loc.project, repository: loc.repository })
-    const res = await apiFetch(`/api/azure-devops/repo-check?${qs}`)
+    // #9 (ADR-0038): no workspace exists yet for this location — the same in-memory `registerPat`
+    // the Register panel uses, attached directly rather than via `apiFetch`'s workspace-scoped
+    // auto-prompt (`silent: true`); a rejected/missing PAT here just surfaces as this check's own
+    // error message, not the shared page-wide modal.
+    const authHeader = basicAuthHeaderForValue(registerPat.value.trim())
+    const res = await apiFetch(
+      `/api/azure-devops/repo-check?${qs}`,
+      { headers: authHeader ? { Authorization: authHeader } : {} },
+      { silent: true }
+    )
     const body = await res.json().catch(() => ({}))
     if (!res.ok) {
       adoptCheckStatus.value = 'error'
@@ -555,18 +627,23 @@ async function adoptCheckedRepo() {
   registerStatus.value = 'registering'
   registerError.value = ''
   registerNotice.value = ''
+  // #9 — same in-memory, no-workspace-yet PAT as registerWorkspace() above.
+  const authHeader = basicAuthHeaderForValue(registerPat.value.trim())
   try {
-    const res = await apiFetch('/api/workspaces', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        organization: loc.organization,
-        project: loc.project,
-        repository: loc.repository,
-        owner: '',
-        ticketingSystem: registerTicketingSystem.value,
-      }),
-    })
+    const res = await apiFetch(
+      '/api/workspaces',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(authHeader ? { Authorization: authHeader } : {}) },
+        body: JSON.stringify({
+          provider: 'azure-devops',
+          location: { organization: loc.organization, project: loc.project, repository: loc.repository },
+          owner: '',
+          ticketingSystem: registerTicketingSystem.value,
+        }),
+      },
+      { silent: true }
+    )
     const body = await res.json().catch(() => ({}))
     if (!res.ok) {
       registerStatus.value = 'failed'
@@ -577,6 +654,8 @@ async function adoptCheckedRepo() {
     registerNotice.value = body.reused
       ? 'Using the workspace already registered for this repository'
       : 'Adopted the existing repository as a workspace'
+    setPatForWorkspace(body.id, registerPat.value)
+    registerPat.value = ''
     selectedWorkspace.value = body
     workspaces.value = null
     step.value = 'instance'
@@ -962,7 +1041,9 @@ function applyImportPrefill() {
 // instance's own content to the Instance step the moment a destination
 // workspace is actually chosen, rather than leaving it blank.
 async function continueImportToNewWorkspace() {
-  await registerWorkspace()
+  // Explicit 'azure-devops' — see registerProvider's own doc comment on why an import destination
+  // can only ever target that provider today.
+  await registerWorkspace('azure-devops')
   if (selectedWorkspace.value) applyImportPrefill()
 }
 
@@ -1074,10 +1155,12 @@ function onParentIdInput(value) {
 
 async function loadWorkItemTypes() {
   const ws = selectedWorkspace.value
-  if (!ws) return
+  // GitHub issues have no type (docs/adr/0040) — nothing to load, and the wizard's Work item type
+  // field is never rendered for a GitHub workspace (see LinkStep below).
+  if (!ws || ws.provider === 'github') return
   workItemTypesLoadError.value = ''
   try {
-    const qs = new URLSearchParams({ organization: ws.organization, project: ws.project })
+    const qs = new URLSearchParams({ organization: ws.location.organization, project: ws.location.project })
     const res = await apiFetch(`/api/azure-devops/work-item-types?${qs}`, {}, { workspaceId: ws.id })
     const body = await res.json().catch(() => ([]))
     if (!res.ok) {
@@ -1096,11 +1179,18 @@ async function lookUpParentWorkItem() {
   const ws = selectedWorkspace.value
   const id = parentIdField.value.trim()
   if (!ws || !id) return
+  const isGitHub = ws.provider === 'github'
   lookupStatus.value = 'looking-up'
   lookupError.value = ''
   try {
-    const qs = new URLSearchParams({ organization: ws.organization, project: ws.project })
-    const res = await apiFetch(`/api/azure-devops/work-items/${encodeURIComponent(id)}?${qs}`, {}, { workspaceId: ws.id })
+    const qs = isGitHub
+      ? new URLSearchParams({ owner: ws.location.owner, repository: ws.location.repository })
+      : new URLSearchParams({ organization: ws.location.organization, project: ws.location.project })
+    const res = await apiFetch(
+      isGitHub ? `/api/github/work-items/${encodeURIComponent(id)}?${qs}` : `/api/azure-devops/work-items/${encodeURIComponent(id)}?${qs}`,
+      {},
+      { workspaceId: ws.id }
+    )
     if (res.status === 404) {
       lookupStatus.value = 'not-found'
       return
@@ -1115,8 +1205,9 @@ async function lookUpParentWorkItem() {
     // overridable via the Work item type select below — but only when
     // it's one of this project's own known types (a custom/renamed type
     // this project's own `GET .../workitemtypes` doesn't report would
-    // otherwise silently select nothing in that dropdown).
-    if (workItemTypes.value.some((t) => t.name === body.workItemType)) {
+    // otherwise silently select nothing in that dropdown). GitHub issues have
+    // no type at all (docs/adr/0040), so this never applies there.
+    if (!isGitHub && workItemTypes.value.some((t) => t.name === body.workItemType)) {
       workItemTypeField.value = body.workItemType
     }
   } catch (err) {
@@ -1158,7 +1249,7 @@ async function createInstanceAndMaybeLink() {
           slug,
           assignee: assigneeField.value.trim(),
           definitionVersion: versionToSend,
-          azureDevOps: { organization: ws.organization, project: ws.project, repository: ws.repository, ...(ws.baseUrl ? { baseUrl: ws.baseUrl } : {}) },
+          azureDevOps: { organization: ws.location.organization, project: ws.location.project, repository: ws.location.repository, ...(ws.location.baseUrl ? { baseUrl: ws.location.baseUrl } : {}) },
           stage: importPayload.value.stage,
           modules: importPayload.value.modules,
           assets: importPayload.value.assets,
@@ -1178,19 +1269,23 @@ async function createInstanceAndMaybeLink() {
       return
     }
   } else {
-    // C4 — check whether this repo already holds instance data for this slug
+    // C4 — check whether this repo already holds instance data for this slug. GitHub has no
+    // repo-check/adopt route yet (#18 — a later ticket) — `shouldAdopt` simply stays `false` for a
+    // GitHub workspace, always falling through to the plain-create path below.
     let shouldAdopt = false
-    try {
-      const qs = new URLSearchParams({ organization: ws.organization, project: ws.project, repository: ws.repository })
-      if (ws.baseUrl) qs.set('baseUrl', ws.baseUrl)
-      const checkRes = await apiFetch(`/api/azure-devops/repo-check?${qs}`, {}, { workspaceId: ws.id })
-      const checkBody = await checkRes.json().catch(() => ({}))
-      if (checkRes.ok) {
-        if (checkBody.result === 'found' && checkBody.slug === slug) shouldAdopt = true
-        else if (checkBody.result === 'multiple' && Array.isArray(checkBody.slugs) && checkBody.slugs.includes(slug)) shouldAdopt = true
+    if (ws.provider !== 'github') {
+      try {
+        const qs = new URLSearchParams({ organization: ws.location.organization, project: ws.location.project, repository: ws.location.repository })
+        if (ws.location.baseUrl) qs.set('baseUrl', ws.location.baseUrl)
+        const checkRes = await apiFetch(`/api/azure-devops/repo-check?${qs}`, {}, { workspaceId: ws.id })
+        const checkBody = await checkRes.json().catch(() => ({}))
+        if (checkRes.ok) {
+          if (checkBody.result === 'found' && checkBody.slug === slug) shouldAdopt = true
+          else if (checkBody.result === 'multiple' && Array.isArray(checkBody.slugs) && checkBody.slugs.includes(slug)) shouldAdopt = true
+        }
+      } catch (_) {
+        // ignore — fall through to create path
       }
-    } catch (_) {
-      // ignore — fall through to create path
     }
 
     if (shouldAdopt) {
@@ -1199,7 +1294,7 @@ async function createInstanceAndMaybeLink() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            azureDevOps: { organization: ws.organization, project: ws.project, repository: ws.repository, ...(ws.baseUrl ? { baseUrl: ws.baseUrl } : {}) },
+            azureDevOps: { organization: ws.location.organization, project: ws.location.project, repository: ws.location.repository, ...(ws.location.baseUrl ? { baseUrl: ws.location.baseUrl } : {}) },
           }),
         }, { workspaceId: ws.id })
         const body = await res.json().catch(() => ({}))
@@ -1226,7 +1321,9 @@ async function createInstanceAndMaybeLink() {
             slug,
             assignee: assigneeField.value.trim(),
             definitionVersion: versionToSend,
-            azureDevOps: { organization: ws.organization, project: ws.project, repository: ws.repository, ...(ws.baseUrl ? { baseUrl: ws.baseUrl } : {}) },
+            ...(ws.provider === 'github'
+              ? { github: { owner: ws.location.owner, repository: ws.location.repository, ...(ws.location.baseUrl ? { baseUrl: ws.location.baseUrl } : {}) } }
+              : { azureDevOps: { organization: ws.location.organization, project: ws.location.project, repository: ws.location.repository, ...(ws.location.baseUrl ? { baseUrl: ws.location.baseUrl } : {}) } }),
           }),
         }, { workspaceId: ws.id })
         const body = await res.json().catch(() => ({}))
@@ -1251,21 +1348,31 @@ async function createInstanceAndMaybeLink() {
   // fires immediately after a successful create when step 'link' was
   // actually reached — never a separate, skippable action.
   if (step.value === 'link') {
+    const isGitHub = ws.provider === 'github'
     let parentIdToLink = null
     if (linkMode.value === 'create') {
       newWorkItemCreateStatus.value = 'creating'
       newWorkItemCreateError.value = ''
       try {
-        const res = await apiFetch('/api/azure-devops/work-items', {
+        const res = await apiFetch(isGitHub ? '/api/github/work-items' : '/api/azure-devops/work-items', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            organization: ws.organization,
-            project: ws.project,
-            workItemType: workItemTypeField.value,
-            title: newWorkItemTitle.value.trim(),
-            ...(ws.baseUrl ? { baseUrl: ws.baseUrl } : {}),
-          }),
+          body: JSON.stringify(
+            isGitHub
+              ? {
+                  owner: ws.location.owner,
+                  repository: ws.location.repository,
+                  title: newWorkItemTitle.value.trim(),
+                  ...(ws.location.baseUrl ? { baseUrl: ws.location.baseUrl } : {}),
+                }
+              : {
+                  organization: ws.location.organization,
+                  project: ws.location.project,
+                  workItemType: workItemTypeField.value,
+                  title: newWorkItemTitle.value.trim(),
+                  ...(ws.location.baseUrl ? { baseUrl: ws.location.baseUrl } : {}),
+                }
+          ),
         }, { workspaceId: ws.id })
         const body = await res.json().catch(() => ({}))
         if (!res.ok) {
@@ -1275,7 +1382,7 @@ async function createInstanceAndMaybeLink() {
           return
         }
         newWorkItemCreateStatus.value = 'idle'
-        parentIdToLink = body.id
+        parentIdToLink = isGitHub ? body.number : body.id
       } catch (err) {
         newWorkItemCreateStatus.value = 'failed'
         newWorkItemCreateError.value = err.message
@@ -1291,12 +1398,22 @@ async function createInstanceAndMaybeLink() {
       const res = await apiFetchForInstance(actualSlug, `/api/instance/work-items/link?slug=${encodeURIComponent(actualSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          organization: ws.organization,
-          project: ws.project,
-          parentId: parentIdToLink,
-          workItemType: workItemTypeField.value,
-        }),
+        body: JSON.stringify(
+          isGitHub
+            ? {
+                provider: 'github',
+                owner: ws.location.owner,
+                repository: ws.location.repository,
+                parentNumber: parentIdToLink,
+                ...(ws.location.baseUrl ? { baseUrl: ws.location.baseUrl } : {}),
+              }
+            : {
+                organization: ws.location.organization,
+                project: ws.location.project,
+                parentId: parentIdToLink,
+                workItemType: workItemTypeField.value,
+              }
+        ),
       }, { workspaceId: ws.id })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -1714,6 +1831,7 @@ function ImportDestinationPanel() {
               placeholder="Search by name…"
               organization=${registerForm.value.organization}
               project=${registerForm.value.project}
+              pat=${registerPat.value}
             />
           </div>
           <div class="wizard-field">
@@ -1738,11 +1856,30 @@ function ImportDestinationPanel() {
             </div>
           </div>
           <div class="wizard-field">
+            <label for="import-ws-pat">Personal Access Token</label>
+            <input
+              class="wizard-input"
+              id="import-ws-pat"
+              type="password"
+              autocomplete="off"
+              placeholder="Needed to prove access to this repository"
+              value=${registerPat.value}
+              onInput=${(e) => (registerPat.value = e.currentTarget.value)}
+            />
+            <p class="wizard-field-hint">
+              Used to check access and, once registration succeeds, becomes this workspace's own
+              Personal Access Token — needs <strong>Code (Read &amp; write)</strong>,
+              <strong>Work Items (Read &amp; write)</strong>, and <strong>Identity (Read)</strong>
+              scope. Stored only in this browser, and only if registration succeeds.
+            </p>
+          </div>
+          <div class="wizard-field">
             <button
               type="button"
               class="btn primary"
               id="import-register-workspace"
               disabled=${registerStatus.value === 'registering' ||
+              !registerPat.value.trim() ||
               !registerForm.value.organization.trim() ||
               !registerForm.value.project.trim() ||
               !registerForm.value.repository.trim()}
@@ -1769,8 +1906,8 @@ function ImportDestinationPanel() {
                           class=${'definition-card' + (pickedWorkspaceId.value === w.id ? ' selected' : '')}
                           onClick=${() => (pickedWorkspaceId.value = w.id)}
                         >
-                          <div class="name">${w.organization}/${w.project}/${w.repository}</div>
-                          <div class="stages">owner: ${w.owner || '—'} · ticketing: ${w.ticketingSystem || 'none'}</div>
+<div class="name">${workspaceLocationLabel(w)}</div>
+                          <div class="stages">owner: ${w.owner || '—'} · ${workspaceTrackerLabel(w)}</div>
                         </div>
                       `
                     )}
@@ -1871,8 +2008,8 @@ function WorkspaceStep() {
                           class=${'definition-card' + (pickedWorkspaceId.value === w.id ? ' selected' : '')}
                           onClick=${() => (pickedWorkspaceId.value = w.id)}
                         >
-                          <div class="name">${w.organization}/${w.project}/${w.repository}</div>
-                          <div class="stages">owner: ${w.owner || '—'} · ticketing: ${w.ticketingSystem || 'none'}</div>
+<div class="name">${workspaceLocationLabel(w)}</div>
+                          <div class="stages">owner: ${w.owner || '—'} · ${workspaceTrackerLabel(w)}</div>
                         </div>
                       `
                     )}
@@ -1899,7 +2036,7 @@ function WorkspaceStep() {
                 <button
                   type="button"
                   class="btn small"
-                  disabled=${!adoptRepoUrl.value.trim() || adoptCheckStatus.value === 'checking'}
+                  disabled=${!adoptRepoUrl.value.trim() || !registerPat.value.trim() || adoptCheckStatus.value === 'checking'}
                   onClick=${checkAdoptRepo}
                 >
                   ${adoptCheckStatus.value === 'checking' ? 'Checking…' : 'Check repo'}
@@ -1908,6 +2045,22 @@ function WorkspaceStep() {
               <p class="wizard-field-hint">
                 Point at a repo that already holds a gantry workspace — gantry checks it and adopts the
                 existing instance data.
+              </p>
+              <label for="adopt-repo-pat">Personal Access Token</label>
+              <input
+                class="wizard-input"
+                id="adopt-repo-pat"
+                type="password"
+                autocomplete="off"
+                placeholder="Needed to check and adopt this repository"
+                value=${registerPat.value}
+                onInput=${(e) => (registerPat.value = e.currentTarget.value)}
+              />
+              <p class="wizard-field-hint">
+                Used only for this check and, once adopted, becomes this workspace's own Personal
+                Access Token — needs <strong>Code (Read &amp; write)</strong>,
+                <strong>Work Items (Read &amp; write)</strong>, and <strong>Identity (Read)</strong>
+                scope. Stored only in this browser, and only if adoption succeeds.
               </p>
               ${adoptCheckStatus.value === 'present'
                 ? html`<p class="wizard-field-hint" id="adopt-check-result">${adoptCheckMessage.value}</p>`
@@ -1970,77 +2123,156 @@ function WorkspaceStep() {
     ${workspaceLocation.value === 'server' && workspaceMode.value === 'register' && registerDataSource.value === 'blank'
       ? html`
           <div class="wizard-field">
-            <label for="ws-organization">Organization</label>
-            <input
-              class="wizard-input"
-              id="ws-organization"
-              type="text"
-              value=${registerForm.value.organization}
-              onInput=${(e) => (registerForm.value = { ...registerForm.value, organization: e.currentTarget.value })}
-            />
-          </div>
-          <div class="wizard-field">
-            <label for="ws-project">Project</label>
-            <input
-              class="wizard-input"
-              id="ws-project"
-              type="text"
-              value=${registerForm.value.project}
-              onInput=${(e) => (registerForm.value = { ...registerForm.value, project: e.currentTarget.value })}
-            />
-          </div>
-          <div class="wizard-field">
-            <label for="ws-repository">Repository</label>
-            <input
-              class="wizard-input"
-              id="ws-repository"
-              type="text"
-              value=${registerForm.value.repository}
-              onInput=${(e) => (registerForm.value = { ...registerForm.value, repository: e.currentTarget.value })}
-            />
-            <p class="wizard-field-hint">Create the repository in Azure DevOps (or your Git host) first — gantry links to an existing repository, it does not create one.</p>
-          </div>
-          <div class="wizard-field">
-            <label for="ws-owner">Owner</label>
-            <${IdentityPicker}
-              id="ws-owner"
-              value=${registerForm.value.owner}
-              onChange=${(uniqueName) => (registerForm.value = { ...registerForm.value, owner: uniqueName })}
-              placeholder="Search by name…"
-              organization=${registerForm.value.organization}
-              project=${registerForm.value.project}
-            />
-          </div>
-          <div class="wizard-field">
-            <label>Ticketing system</label>
-            <div class="settings-radio-group" role="radiogroup" aria-label="Ticketing system">
-              ${TICKETING_SYSTEMS.map(
-                (system) => html`
-                  <label key=${system.id} class=${'settings-radio' + (system.disabled ? ' disabled' : '')}>
+            <label>Provider</label>
+            <div class="settings-radio-group" role="radiogroup" aria-label="Provider">
+              ${PROVIDERS.map(
+                (provider) => html`
+                  <label key=${provider.id} class=${'settings-radio' + (provider.disabled ? ' disabled' : '')}>
                     <input
                       type="radio"
-                      name="ws-ticketing-system"
-                      value=${system.id}
-                      checked=${registerTicketingSystem.value === system.id}
-                      disabled=${system.disabled}
-                      onChange=${() => (registerTicketingSystem.value = system.id)}
+                      name="ws-provider"
+                      value=${provider.id}
+                      checked=${registerProvider.value === provider.id}
+                      disabled=${provider.disabled}
+                      onChange=${() => (registerProvider.value = provider.id)}
                     />
-                    ${system.label}
-                    ${system.disabled ? html`<span class="stamp review">${system.disabledReason}</span>` : null}
+                    ${provider.label}
+                    ${provider.disabled ? html`<span class="stamp review">${provider.disabledReason}</span>` : null}
                   </label>
                 `
               )}
             </div>
+          </div>
+          ${registerProvider.value === 'github'
+            ? html`
+                <div class="wizard-field">
+                  <label for="ws-repo-owner">Owner</label>
+                  <input
+                    class="wizard-input"
+                    id="ws-repo-owner"
+                    type="text"
+                    placeholder="The GitHub user or organization the repository belongs to"
+                    value=${registerForm.value.repoOwner}
+                    onInput=${(e) => (registerForm.value = { ...registerForm.value, repoOwner: e.currentTarget.value })}
+                  />
+                </div>
+                <div class="wizard-field">
+                  <label for="ws-repository">Repository</label>
+                  <input
+                    class="wizard-input"
+                    id="ws-repository"
+                    type="text"
+                    value=${registerForm.value.repository}
+                    onInput=${(e) => (registerForm.value = { ...registerForm.value, repository: e.currentTarget.value })}
+                  />
+                  <p class="wizard-field-hint">Create the repository on GitHub first — gantry links to an existing repository, it does not create one.</p>
+                </div>
+                <div class="wizard-field">
+                  <label for="ws-github-owner">Owner</label>
+                  <${IdentityPicker}
+                    id="ws-github-owner"
+                    value=${registerForm.value.owner}
+                    onChange=${(uniqueName) => (registerForm.value = { ...registerForm.value, owner: uniqueName })}
+                    placeholder="Search by name…"
+                    owner=${registerForm.value.repoOwner}
+                    repository=${registerForm.value.repository}
+                    pat=${registerPat.value}
+                  />
+                </div>
+              `
+            : html`
+                <div class="wizard-field">
+                  <label for="ws-organization">Organization</label>
+                  <input
+                    class="wizard-input"
+                    id="ws-organization"
+                    type="text"
+                    value=${registerForm.value.organization}
+                    onInput=${(e) => (registerForm.value = { ...registerForm.value, organization: e.currentTarget.value })}
+                  />
+                </div>
+                <div class="wizard-field">
+                  <label for="ws-project">Project</label>
+                  <input
+                    class="wizard-input"
+                    id="ws-project"
+                    type="text"
+                    value=${registerForm.value.project}
+                    onInput=${(e) => (registerForm.value = { ...registerForm.value, project: e.currentTarget.value })}
+                  />
+                </div>
+                <div class="wizard-field">
+                  <label for="ws-repository">Repository</label>
+                  <input
+                    class="wizard-input"
+                    id="ws-repository"
+                    type="text"
+                    value=${registerForm.value.repository}
+                    onInput=${(e) => (registerForm.value = { ...registerForm.value, repository: e.currentTarget.value })}
+                  />
+                  <p class="wizard-field-hint">Create the repository in Azure DevOps (or your Git host) first — gantry links to an existing repository, it does not create one.</p>
+                </div>
+                <div class="wizard-field">
+                  <label for="ws-owner">Owner</label>
+                  <${IdentityPicker}
+                    id="ws-owner"
+                    value=${registerForm.value.owner}
+                    onChange=${(uniqueName) => (registerForm.value = { ...registerForm.value, owner: uniqueName })}
+                    placeholder="Search by name…"
+                    organization=${registerForm.value.organization}
+                    project=${registerForm.value.project}
+                    pat=${registerPat.value}
+                  />
+                </div>
+                <div class="wizard-field">
+                  <label>Ticketing system</label>
+                  <div class="settings-radio-group" role="radiogroup" aria-label="Ticketing system">
+                    ${TICKETING_SYSTEMS.map(
+                      (system) => html`
+                        <label key=${system.id} class=${'settings-radio' + (system.disabled ? ' disabled' : '')}>
+                          <input
+                            type="radio"
+                            name="ws-ticketing-system"
+                            value=${system.id}
+                            checked=${registerTicketingSystem.value === system.id}
+                            disabled=${system.disabled}
+                            onChange=${() => (registerTicketingSystem.value = system.id)}
+                          />
+                          ${system.label}
+                          ${system.disabled ? html`<span class="stamp review">${system.disabledReason}</span>` : null}
+                        </label>
+                      `
+                    )}
+                  </div>
+                </div>
+              `}
+          <div class="wizard-field">
+            <label for="ws-pat">Personal Access Token</label>
+            <input
+              class="wizard-input"
+              id="ws-pat"
+              type="password"
+              autocomplete="off"
+              placeholder="Needed to prove access to this repository"
+              value=${registerPat.value}
+              onInput=${(e) => (registerPat.value = e.currentTarget.value)}
+            />
+            <p class="wizard-field-hint">
+              ${registerProvider.value === 'github'
+                ? html`Used to check access and, once registration succeeds, becomes this workspace's own Personal Access Token — a fine-grained token needs <strong>Contents</strong>, <strong>Issues</strong>, <strong>Pull requests</strong>, and <strong>Metadata</strong> permissions (Read &amp; write, except Metadata which is Read-only). Stored only in this browser, and only if registration succeeds.`
+                : html`Used to check access and, once registration succeeds, becomes this workspace's own Personal Access Token — needs <strong>Code (Read &amp; write)</strong>, <strong>Work Items (Read &amp; write)</strong>, and <strong>Identity (Read)</strong> scope. Stored only in this browser, and only if registration succeeds.`}
+            </p>
           </div>
           <div class="wizard-field">
             <button
               type="button"
               class="btn primary"
               disabled=${registerStatus.value === 'registering' ||
-              !registerForm.value.organization.trim() ||
-              !registerForm.value.project.trim() ||
-              !registerForm.value.repository.trim()}
-              onClick=${registerWorkspace}
+              !registerPat.value.trim() ||
+              (registerProvider.value === 'github'
+                ? !registerForm.value.repoOwner.trim() || !registerForm.value.repository.trim()
+                : !registerForm.value.organization.trim() || !registerForm.value.project.trim() || !registerForm.value.repository.trim())}
+              onClick=${() => registerWorkspace()}
             >
               ${registerStatus.value === 'registering' ? 'Registering…' : 'Register workspace'}
             </button>
@@ -2055,7 +2287,7 @@ function WorkspaceStep() {
 // This step is shared by both the Server-hosted and Local flows — see the
 // Assignee field below for WI #306 item 2's local-flow-specific branch: a
 // plain text input there, not <${IdentityPicker}>, since a local workspace
-// has no Azure DevOps organization/project (`ws.organization`/`ws.project`
+// has no Azure DevOps organization/project (`ws.location.organization`/`ws.location.project`
 // are both undefined) for IdentityPicker's search() to scope its
 // `/api/identities` lookup to — it would otherwise still fire that request
 // against whatever org/project the server falls back to, a real Azure
@@ -2064,7 +2296,12 @@ function WorkspaceStep() {
 // the same call for the *Instance Settings* screen's own Assignee field.
 function InstanceStep() {
   const ws = selectedWorkspace.value
-  const ticketingEnabled = Boolean(ws?.ticketingSystem)
+  // A GitHub workspace always has a tracker (its own Issues, ADR-0037's suite model) even though it
+  // carries no `ticketingSystem` field (#3/#6 dropped that field for every provider but the legacy
+  // Azure DevOps one, ADR-0037's "ticketingSystem is absorbed into a single provider field") — so the
+  // parent-work-item link step is offered whenever the provider supplies one, not just when the
+  // now-vestigial `ticketingSystem` field happens to be set.
+  const ticketingEnabled = ws?.provider === 'github' || Boolean(ws?.ticketingSystem)
 
   // WI #383 (ADR-0036): once an Azure DevOps workspace is picked, its own definitions join the
   // library/server-workspace set the top-level fetch above already loaded — merged by id (definition
@@ -2108,7 +2345,9 @@ function InstanceStep() {
       <h3><span class="stamp agreed">Workspace</span></h3>
       ${ws.isLocal
         ? html`<div class="result-row"><span class="k">Local workspace</span><span class="v">${ws.name}</span></div>`
-        : html`<div class="result-row"><span class="k">Organization/Project/Repository</span><span class="v">${ws.organization}/${ws.project}/${ws.repository}</span></div>`}
+        : ws.provider === 'github'
+          ? html`<div class="result-row"><span class="k">Owner/Repository</span><span class="v">${ws.location.owner}/${ws.location.repository}</span></div>`
+          : html`<div class="result-row"><span class="k">Organization/Project/Repository</span><span class="v">${ws.location.organization}/${ws.location.project}/${ws.location.repository}</span></div>`}
     </div>
 
     <h3>New Instance</h3>
@@ -2221,8 +2460,12 @@ function InstanceStep() {
               value=${assigneeField.value}
               onChange=${(uniqueName) => (assigneeField.value = uniqueName)}
               placeholder="Unassigned"
-              organization=${ws?.organization}
-              project=${ws?.project}
+              organization=${ws?.location?.organization}
+              project=${ws?.location?.project}
+              owner=${ws?.location?.owner}
+              repository=${ws?.location?.repository}
+              workspaceId=${ws?.id}
+              enforceAssignability=${ws?.provider === 'github'}
             />
           `}
     </div>
@@ -2264,21 +2507,23 @@ function InstanceStep() {
 
 function LinkStep() {
   const ws = selectedWorkspace.value
+  const isGitHub = ws.provider === 'github'
 
   useEffect(() => {
     loadWorkItemTypes()
     // eslint-disable-next-line
   }, [])
 
+  // GitHub issues have no type (docs/adr/0040) — a GitHub link never waits on `workItemTypeField`.
   const canSubmitCreate =
     Boolean(newWorkItemTitle.value.trim()) &&
-    Boolean(workItemTypeField.value) &&
+    (isGitHub || Boolean(workItemTypeField.value)) &&
     createStatus.value !== 'creating' &&
     linkStatus.value !== 'linking' &&
     newWorkItemCreateStatus.value !== 'creating'
   const canSubmitExisting =
     lookupStatus.value === 'found' &&
-    Boolean(workItemTypeField.value) &&
+    (isGitHub || Boolean(workItemTypeField.value)) &&
     createStatus.value !== 'creating' &&
     linkStatus.value !== 'linking'
   const canSubmit = linkMode.value === 'create' ? canSubmitCreate : canSubmitExisting
@@ -2289,14 +2534,27 @@ function LinkStep() {
       <button type="button" class=${'btn small' + (linkMode.value === 'existing' ? ' active' : '')} onClick=${() => (linkMode.value = 'existing')}>Link an existing parent work item</button>
     </div>
 
-    <div class="wizard-field">
-      <label for="link-organization">Organization</label>
-      <input class="wizard-input" id="link-organization" type="text" value=${ws.organization} disabled />
-    </div>
-    <div class="wizard-field">
-      <label for="link-project">Project</label>
-      <input class="wizard-input" id="link-project" type="text" value=${ws.project} disabled />
-    </div>
+    ${isGitHub
+      ? html`
+          <div class="wizard-field">
+            <label for="link-owner">Owner</label>
+            <input class="wizard-input" id="link-owner" type="text" value=${ws.location.owner} disabled />
+          </div>
+          <div class="wizard-field">
+            <label for="link-repository">Repository</label>
+            <input class="wizard-input" id="link-repository" type="text" value=${ws.location.repository} disabled />
+          </div>
+        `
+      : html`
+          <div class="wizard-field">
+            <label for="link-organization">Organization</label>
+            <input class="wizard-input" id="link-organization" type="text" value=${ws.location.organization} disabled />
+          </div>
+          <div class="wizard-field">
+            <label for="link-project">Project</label>
+            <input class="wizard-input" id="link-project" type="text" value=${ws.location.project} disabled />
+          </div>
+        `}
 
     ${linkMode.value === 'create'
       ? html`
@@ -2313,7 +2571,7 @@ function LinkStep() {
         `
       : html`
           <div class="wizard-field">
-            <label for="parent-work-item-id">Parent work item id</label>
+            <label for="parent-work-item-id">${isGitHub ? 'Parent issue number' : 'Parent work item id'}</label>
             <div class="workspace-field-row">
               <input
                 class="wizard-input"
@@ -2332,25 +2590,33 @@ function LinkStep() {
               </button>
             </div>
             ${lookupStatus.value === 'found'
-              ? html`<p class="wizard-field-hint">Found: #${lookupResult.value.id} "${lookupResult.value.title}" (${lookupResult.value.workItemType}, ${lookupResult.value.state})</p>`
+              ? isGitHub
+                ? html`<p class="wizard-field-hint">Found: #${lookupResult.value.number} "${lookupResult.value.title}" (${lookupResult.value.state})</p>`
+                : html`<p class="wizard-field-hint">Found: #${lookupResult.value.id} "${lookupResult.value.title}" (${lookupResult.value.workItemType}, ${lookupResult.value.state})</p>`
               : null}
-            ${lookupStatus.value === 'not-found' ? html`<div class="inline-error">No work item #${parentIdField.value} found in ${ws.organization}/${ws.project}.</div>` : null}
+            ${lookupStatus.value === 'not-found'
+              ? html`<div class="inline-error">No ${isGitHub ? 'issue' : 'work item'} #${parentIdField.value} found in ${isGitHub ? `${ws.location.owner}/${ws.location.repository}` : `${ws.location.organization}/${ws.location.project}`}.</div>`
+              : null}
             ${lookupStatus.value === 'error' ? html`<div class="inline-error">${lookupError.value}</div>` : null}
           </div>
         `}
 
-    <div class="wizard-field">
-      <label for="work-item-type">Work item type</label>
-      ${workItemTypesLoadError.value ? html`<div class="inline-error">${workItemTypesLoadError.value}</div>` : null}
-      <select
-        class="wizard-input"
-        id="work-item-type"
-        value=${workItemTypeField.value}
-        onChange=${(e) => (workItemTypeField.value = e.currentTarget.value)}
-      >
-        ${workItemTypes.value.map((t) => html`<option key=${t.name} value=${t.name}>${t.name}</option>`)}
-      </select>
-    </div>
+    ${isGitHub
+      ? null
+      : html`
+          <div class="wizard-field">
+            <label for="work-item-type">Work item type</label>
+            ${workItemTypesLoadError.value ? html`<div class="inline-error">${workItemTypesLoadError.value}</div>` : null}
+            <select
+              class="wizard-input"
+              id="work-item-type"
+              value=${workItemTypeField.value}
+              onChange=${(e) => (workItemTypeField.value = e.currentTarget.value)}
+            >
+              ${workItemTypes.value.map((t) => html`<option key=${t.name} value=${t.name}>${t.name}</option>`)}
+            </select>
+          </div>
+        `}
 
     <div class="wizard-field" style="display:flex;gap:8px">
       <button type="button" class="btn ghost" onClick=${() => (step.value = 'instance')}>← Back</button>

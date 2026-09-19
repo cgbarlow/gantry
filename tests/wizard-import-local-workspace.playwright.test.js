@@ -6,7 +6,8 @@ import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withRunningServer, basicAuthHeader, VALID_PAT } from './helpers/lifecycle.js'
-import { createAzureDevOpsClient, AzureDevOpsNotFoundError } from '../lib/azureDevOpsClient.js'
+import { NotFoundError } from '../lib/providerErrors.js'
+import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 
 // Browser tests for WI #305 — "Import a local-workspace instance into a
 // Server-hosted workspace": the "Start blank" / "Import from local
@@ -107,7 +108,11 @@ function installBaseUrlRoutes(page, adoBaseUrl) {
       return
     }
     const body = JSON.parse(route.request().postData() ?? '{}')
-    body.baseUrl = adoBaseUrl
+    // The wizard now sends the #37 nested `{ provider, location }` body (ticket #5) — the injected
+    // baseUrl has to land in `location`, not the top level, or the server proves this workspace's PAT
+    // against real dev.azure.com instead of this test's own fake server.
+    if (body.location) body.location.baseUrl = adoBaseUrl
+    else body.baseUrl = adoBaseUrl
     await route.continue({ postData: JSON.stringify(body) })
   })
   const routeImport = page.route('**/api/instances/import', async (route) => {
@@ -272,6 +277,9 @@ async function chooseNewDestination(page, { organization, project, repository })
   await page.locator('#import-ws-organization').fill(organization)
   await page.locator('#import-ws-project').fill(project)
   await page.locator('#import-ws-repository').fill(repository)
+  // #9 (ADR-0038): a brand-new workspace has no id yet to resolve a stored PAT against — the
+  // wizard's own PAT field, not the (now-removed) global default, is what proves access here.
+  await page.locator('#import-ws-pat').fill(VALID_PAT)
   await page.locator('#import-register-workspace').click()
 }
 
@@ -295,7 +303,7 @@ async function readFileOrNull(client, path) {
   try {
     return await client.getFileContent(path)
   } catch (err) {
-    if (err instanceof AzureDevOpsNotFoundError) return null
+    if (err instanceof NotFoundError) return null
     throw err
   }
 }
@@ -440,7 +448,7 @@ test('Import (existing destination): a second import lands in the already-regist
       assert.ok(registry.some((i) => i.slug === first.slug))
       assert.ok(registry.some((i) => i.slug === second.slug))
       const workspaces = await (await fetch(`${gantryBase}/api/workspaces`)).json()
-      assert.equal(workspaces.filter((w) => w.repository === REPOSITORY).length, 1)
+      assert.equal(workspaces.filter((w) => w.location.repository === REPOSITORY).length, 1)
 
       // Opt-in this time — the source local workspace is actually forgotten.
       await page.waitForSelector('#import-forget-prompt', { timeout: 10_000 })

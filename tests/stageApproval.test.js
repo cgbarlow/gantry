@@ -189,7 +189,7 @@ test('requestStageApproval requires options.azureDevOps — a local instance has
   await assert.rejects(() => requestStageApproval(SLUG, {}), /Workspace-backed instances only/)
 })
 
-test('requestStageApproval propagates a rejected PAT as AzureDevOpsAuthenticationError', async () => {
+test('requestStageApproval propagates a rejected PAT as AuthenticationError', async () => {
   await withServer({ files: seedInstanceYaml() }, async (baseUrl) => {
     const azureDevOps = locationFor(baseUrl)
     const branch = await resolveStageBranch(azureDevOps, definition, SLUG, SHAPE.id)
@@ -200,7 +200,7 @@ test('requestStageApproval propagates a rejected PAT as AzureDevOpsAuthenticatio
       try {
         await requestStageApproval(SLUG, { azureDevOps: badAzureDevOps })
       } catch (err) {
-        assert.equal(err.name, 'AzureDevOpsAuthenticationError')
+        assert.equal(err.name, 'AuthenticationError')
         throw err
       }
     })

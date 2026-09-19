@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { registerWorkspace } from '../lib/workspaceRegistry.js'
@@ -156,10 +156,10 @@ test('POST /api/workspaces with a valid PAT for the real location creates the wo
           })
           assert.equal(createRes.status, 201)
           const created = await createRes.json()
-          assert.equal(created.organization, ORGANIZATION)
-          assert.equal(created.project, PROJECT)
-          assert.equal(created.repository, REPOSITORY)
-          assert.equal(created.baseUrl, adoBaseUrl)
+          assert.equal(created.location.organization, ORGANIZATION)
+          assert.equal(created.location.project, PROJECT)
+          assert.equal(created.location.repository, REPOSITORY)
+          assert.equal(created.location.baseUrl, adoBaseUrl)
           assert.equal(created.owner, 'c.barlow')
           assert.equal(created.ticketingSystem, 'azure-devops')
           assert.equal(typeof created.id, 'string')
@@ -170,6 +170,104 @@ test('POST /api/workspaces with a valid PAT for the real location creates the wo
       )
     }
   )
+})
+
+// ---------- #5: nested `{ provider, location }` wire shape ----------
+
+test('GET /api/workspaces returns the nested provider/location shape', async () => {
+  await withScratchServer({}, async (base, instancesDir) => {
+    registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }, owner: 'c.barlow' }, { instancesDir })
+
+    const listing = await (await fetch(`${base}/api/workspaces`)).json()
+    assert.equal(listing.length, 1)
+    assert.equal(listing[0].provider, 'azure-devops')
+    assert.deepEqual(listing[0].location, { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY })
+  })
+})
+
+test('POST /api/workspaces accepts the nested { provider, location } body and returns the nested shape', async () => {
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: {} },
+    async (adoBaseUrl) => {
+      await withScratchServer(
+        { allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true },
+        async (base) => {
+          const res = await fetch(`${base}/api/workspaces`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+            body: JSON.stringify({
+              provider: 'azure-devops',
+              location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+              owner: 'c.barlow',
+            }),
+          })
+          assert.equal(res.status, 201)
+          const created = await res.json()
+          assert.equal(created.provider, 'azure-devops')
+          assert.deepEqual(created.location, { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl })
+          assert.equal(created.owner, 'c.barlow')
+        }
+      )
+    }
+  )
+})
+
+test('POST /api/workspaces reports a nested location missing a required field as 400, matching the flat-body message shape', async () => {
+  await withScratchServer({}, async (base) => {
+    const res = await fetch(`${base}/api/workspaces`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'azure-devops', location: { organization: ORGANIZATION } }),
+    })
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.match(body.error, /missing: project, repository/)
+  })
+})
+
+// A nested { provider: "github", ... } body is structurally accepted (#8, docs/adr/0037) — it is no
+// longer rejected outright the way it was before #8 landed. With no PAT supplied, it fails the same
+// way every other provider's registration does (the caller's own PAT is required before this route
+// will even attempt to prove access) rather than a provider-specific 400 — the full github-specific
+// contract (real access proof via checkGitHubRepo, actual registration, dedup) is exercised end to
+// end in tests/serverGitHubWorkspaces.test.js.
+test('POST /api/workspaces with a nested { provider: "github", ... } body and no PAT returns the structured "authentication required" response, and persists nothing', async () => {
+  await withScratchServer({}, async (base) => {
+    const res = await fetch(`${base}/api/workspaces`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'github', location: { owner: 'octocat', repository: 'hello-world' } }),
+    })
+    assert.equal(res.status, 401)
+    const body = await res.json()
+    assert.equal(body.error, 'authentication_required')
+    // #9 (ADR-0038): `provider` is already known from the request body at this point — even with no
+    // workspace yet to resolve it from, the message names GitHub, not the azure-devops default this
+    // route falls back to when no provider is known at all.
+    assert.match(body.message, /GitHub/)
+
+    const listing = await (await fetch(`${base}/api/workspaces`)).json()
+    assert.equal(listing.length, 0)
+  })
+})
+
+test('a workspace registered before #3/#5 via the flat wire shape still loads through GET /api/workspaces with a nested location', async () => {
+  await withScratchServer({}, async (base, instancesDir) => {
+    // Simulates a pre-#3 record: written directly in the old flat shape, bypassing registerWorkspace's own current (already-nested) normalization.
+    const registryPath = join(instancesDir, 'workspace-registry.json')
+    const legacyId = 'legacy-workspace-id'
+    writeFileSync(
+      registryPath,
+      JSON.stringify({ [legacyId]: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, owner: 'c.barlow', ticketingSystem: 'azure-devops' } }, null, 2)
+    )
+
+    const listing = await (await fetch(`${base}/api/workspaces`)).json()
+    const found = listing.find((w) => w.id === legacyId)
+    assert.ok(found, 'the legacy-shaped workspace is still listed')
+    assert.equal(found.provider, 'azure-devops')
+    assert.deepEqual(found.location, { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY })
+    assert.equal(found.owner, 'c.barlow')
+  })
 })
 
 test('POST /api/workspaces defaults ticketingSystem to "azure-devops" when omitted', async () => {
@@ -215,10 +313,10 @@ test('registering a new Azure-DevOps-backed instance via POST /api/instances aut
 
           const workspaces = await (await fetch(`${base}/api/workspaces`)).json()
           assert.equal(workspaces.length, 1)
-          assert.equal(workspaces[0].organization, ORGANIZATION)
-          assert.equal(workspaces[0].project, PROJECT)
-          assert.equal(workspaces[0].repository, REPOSITORY)
-          assert.equal(workspaces[0].baseUrl, adoBaseUrl)
+          assert.equal(workspaces[0].location.organization, ORGANIZATION)
+          assert.equal(workspaces[0].location.project, PROJECT)
+          assert.equal(workspaces[0].location.repository, REPOSITORY)
+          assert.equal(workspaces[0].location.baseUrl, adoBaseUrl)
         }
       )
     }
@@ -268,7 +366,7 @@ test('adopting an instance at an Azure DevOps location already backing a registe
 
           const workspaces = await (await fetch(`${base}/api/workspaces`)).json()
           assert.equal(workspaces.length, 1)
-          assert.equal(workspaces[0].repository, REPOSITORY)
+          assert.equal(workspaces[0].location.repository, REPOSITORY)
         }
       )
     }
@@ -287,13 +385,13 @@ function patchWorkspace(base, id, body) {
 
 test('PATCH /api/workspaces/:id updates owner, with no PAT required', async () => {
   await withScratchServer({}, async (base, instancesDir) => {
-    const workspace = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }, { instancesDir })
+    const workspace = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY } }, { instancesDir })
 
     const res = await patchWorkspace(base, workspace.id, { owner: 'c.barlow' })
     assert.equal(res.status, 200)
     const updated = await res.json()
     assert.equal(updated.owner, 'c.barlow')
-    assert.equal(updated.organization, ORGANIZATION)
+    assert.equal(updated.location.organization, ORGANIZATION)
 
     const listing = await (await fetch(`${base}/api/workspaces`)).json()
     assert.equal(listing.find((w) => w.id === workspace.id).owner, 'c.barlow')
@@ -302,8 +400,8 @@ test('PATCH /api/workspaces/:id updates owner, with no PAT required', async () =
 
 test('PATCH /api/workspaces/:id updates ticketingSystem to a supported value, overriding that workspace alone', async () => {
   await withScratchServer({}, async (base, instancesDir) => {
-    const workspaceA = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }, { instancesDir })
-    const workspaceB = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: 'fake-repo-2' }, { instancesDir })
+    const workspaceA = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY } }, { instancesDir })
+    const workspaceB = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: 'fake-repo-2' } }, { instancesDir })
 
     const res = await patchWorkspace(base, workspaceA.id, { ticketingSystem: 'azure-devops' })
     assert.equal(res.status, 200)
@@ -318,7 +416,7 @@ test('PATCH /api/workspaces/:id updates ticketingSystem to a supported value, ov
 
 test('PATCH /api/workspaces/:id rejects ticketingSystem "jira" with 400, and persists nothing', async () => {
   await withScratchServer({}, async (base, instancesDir) => {
-    const workspace = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }, { instancesDir })
+    const workspace = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY } }, { instancesDir })
 
     const res = await patchWorkspace(base, workspace.id, { ticketingSystem: 'jira' })
     assert.equal(res.status, 400)
@@ -341,7 +439,7 @@ test('PATCH /api/workspaces/:id for an unknown id reports 404, not 500', async (
 
 test('PATCH /api/workspaces/:id leaves organization/project/repository untouched — those fields are not accepted by this route', async () => {
   await withScratchServer({}, async (base, instancesDir) => {
-    const workspace = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }, { instancesDir })
+    const workspace = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY } }, { instancesDir })
 
     const res = await fetch(`${base}/api/workspaces/${encodeURIComponent(workspace.id)}`, {
       method: 'PATCH',
@@ -350,14 +448,14 @@ test('PATCH /api/workspaces/:id leaves organization/project/repository untouched
     })
     assert.equal(res.status, 200)
     const updated = await res.json()
-    assert.equal(updated.organization, ORGANIZATION)
+    assert.equal(updated.location.organization, ORGANIZATION)
     assert.equal(updated.owner, 'c.barlow')
   })
 })
 
 test('PATCH /api/workspaces/:id rejects a non-string owner (e.g. null) with 400, rather than persisting it verbatim', async () => {
   await withScratchServer({}, async (base, instancesDir) => {
-    const workspace = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, owner: 'c.barlow' }, { instancesDir })
+    const workspace = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }, owner: 'c.barlow' }, { instancesDir })
 
     const res = await patchWorkspace(base, workspace.id, { owner: null })
     assert.equal(res.status, 400)
@@ -414,7 +512,7 @@ test('POST /api/workspaces with an empty-but-existing Azure DevOps repository st
 
           const listing = await (await fetch(`${base}/api/workspaces`)).json()
           assert.equal(listing.length, 1)
-          assert.equal(listing[0].repository, REPOSITORY)
+          assert.equal(listing[0].location.repository, REPOSITORY)
         }
       )
     }

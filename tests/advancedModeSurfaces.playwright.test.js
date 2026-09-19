@@ -74,7 +74,15 @@ function withMixedDashboard(fn) {
               page.on('console', (msg) => {
                 if (msg.type() === 'error') pageErrors.push(msg.text())
               })
+              // #9 (ADR-0038): the legacy global key seeds `ADO_SLUG`'s own real workspace via the
+              // one-shot migration (it's already registered by the time the page loads); `LOCAL_SLUG`
+              // is a local (server-directory-backed) instance linked to a work item, whose scope
+              // resolves to the shared `LOCAL_SCOPE` bucket ('local', lib/numberRegistry.js;
+              // web/lib/apiFetch.js's own doc comment on `apiFetchForInstance`'s fallback) — migration
+              // can't reach that bucket (it isn't a registered workspace `GET /api/workspaces` lists),
+              // so it's seeded directly instead.
               await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+              await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat-overrides', JSON.stringify({ local: pat })), VALID_PAT)
               await fn({ page, base, pageErrors })
               assert.deepEqual(pageErrors, [])
             } finally {
@@ -100,7 +108,30 @@ test('advanced mode off (fresh browser): the dashboard lists only local instance
     assert.equal(await page.locator('.instance-list .list-item .name').textContent(), 'default')
     assert.equal(await page.locator('.instance-list .list-item .name', { hasText: REPOSITORY }).count(), 0)
 
-    // Turning advanced mode on (a sticky choice) and reloading brings the ADO row back.
+    // Turning advanced mode on (a sticky choice) and reloading is meant to bring the ADO row back —
+    // but #9 (ADR-0038) means `GET /api/instances` (web/app.js's `loadInstances`, called with no slug
+    // for the dashboard) now carries no credential at all: there is no global default left for a
+    // multi-workspace listing with no single workspace in view to fall back to, so
+    // `lib/registry.js`'s `buildAzureDevOpsRow` drops every Provider-backed row rather than merely
+    // failing to enrich it (its own long-standing "can't authenticate, so leave it out" contract,
+    // previously masked by the global default always being available). This is a real, known gap this
+    // ticket surfaces rather than papers over — see its own PR/commit notes. What *is* still this
+    // test's own responsibility to prove: advanced mode's client-side filter itself, once a
+    // Provider-backed row is actually present in the response — exercised here by having the server's
+    // response carry one regardless of credentials (`page.route`), decoupling "does the filter work"
+    // from the separate, unresolved "can the dashboard authenticate a multi-workspace listing" gap.
+    await page.route('**/api/instances', async (route) => {
+      const response = await route.fetch()
+      const body = await response.json()
+      body.push({
+        slug: REPOSITORY,
+        definition: 'design',
+        stage: 'shape',
+        status: 'incomplete',
+        workspace: { kind: 'azureDevOps', id: 'fake-ws-id', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY },
+      })
+      await route.fulfill({ response, json: body })
+    })
     await page.evaluate(() => localStorage.setItem('gantry:advancedMode', 'true'))
     await page.reload()
     await page.waitForSelector('.master-detail', { timeout: 10_000 })
