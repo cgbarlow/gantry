@@ -19,14 +19,11 @@ test('DEFAULT_PROVIDER is azure-devops — the value a pre-#3 flat record is rea
   assert.equal(DEFAULT_PROVIDER, 'azure-devops')
 })
 
-test('assertValidProvider accepts azure-devops, github and gitlab', () => {
+test('assertValidProvider accepts azure-devops, github, gitlab and atlassian', () => {
   assert.doesNotThrow(() => assertValidProvider('azure-devops'))
   assert.doesNotThrow(() => assertValidProvider('github'))
   assert.doesNotThrow(() => assertValidProvider('gitlab'))
-})
-
-test('assertValidProvider rejects atlassian as not supported yet', () => {
-  assert.throws(() => assertValidProvider('atlassian'), /not supported yet/)
+  assert.doesNotThrow(() => assertValidProvider('atlassian'))
 })
 
 test('assertValidProvider rejects a completely unknown provider', () => {
@@ -160,4 +157,59 @@ test('providerLocationsMatch treats a different GitLab namespace as a non-match'
   const a = { namespace: 'group/subgroup', repository: 'repo' }
   const b = { namespace: 'group/other-subgroup', repository: 'repo' }
   assert.equal(providerLocationsMatch('gitlab', a, b), false)
+})
+
+// ---------- atlassian (ADR-0042: {owner, repository, jiraSite, jiraProjectKey}, all required, no baseUrl) ----------
+
+test('normalizeProviderLocation validates and prunes an Atlassian location to owner/repository/jiraSite/jiraProjectKey — no baseUrl', () => {
+  const location = normalizeProviderLocation('atlassian', {
+    owner: 'acme',
+    repository: 'repo',
+    jiraSite: 'acme.atlassian.net',
+    jiraProjectKey: 'PROJ',
+    baseUrl: 'should-be-dropped',
+    namespace: 'should-be-dropped',
+  })
+  assert.deepEqual(location, {
+    owner: 'acme',
+    repository: 'repo',
+    jiraSite: 'acme.atlassian.net',
+    jiraProjectKey: 'PROJ',
+  })
+})
+
+test('normalizeProviderLocation rejects an Atlassian location missing any of owner/repository/jiraSite/jiraProjectKey', () => {
+  assert.throws(() => normalizeProviderLocation('atlassian', {}), /missing: owner, repository, jiraSite, jiraProjectKey/)
+  assert.throws(
+    () => normalizeProviderLocation('atlassian', { owner: 'acme', repository: 'repo' }),
+    /missing: jiraSite, jiraProjectKey/
+  )
+  assert.throws(
+    () => normalizeProviderLocation('atlassian', { owner: 'acme', repository: 'repo', jiraSite: 'acme.atlassian.net' }),
+    /missing: jiraProjectKey/
+  )
+})
+
+test('describeProviderLocation renders an Atlassian location as owner/repository — the Bitbucket half only, not the Jira fields', () => {
+  assert.equal(
+    describeProviderLocation('atlassian', {
+      owner: 'acme',
+      repository: 'repo',
+      jiraSite: 'acme.atlassian.net',
+      jiraProjectKey: 'PROJ',
+    }),
+    'acme/repo'
+  )
+})
+
+test('providerLocationsMatch matches an exact Atlassian tuple, Jira fields included', () => {
+  const a = { owner: 'acme', repository: 'repo', jiraSite: 'acme.atlassian.net', jiraProjectKey: 'PROJ' }
+  const b = { owner: 'acme', repository: 'repo', jiraSite: 'acme.atlassian.net', jiraProjectKey: 'PROJ' }
+  assert.equal(providerLocationsMatch('atlassian', a, b), true)
+})
+
+test('providerLocationsMatch treats a different Jira site or project key as a non-match', () => {
+  const base = { owner: 'acme', repository: 'repo', jiraSite: 'acme.atlassian.net', jiraProjectKey: 'PROJ' }
+  assert.equal(providerLocationsMatch('atlassian', base, { ...base, jiraSite: 'other.atlassian.net' }), false)
+  assert.equal(providerLocationsMatch('atlassian', base, { ...base, jiraProjectKey: 'OTHER' }), false)
 })

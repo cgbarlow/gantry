@@ -193,8 +193,20 @@ const registerProvider = signal(DEFAULT_PROVIDER)
 // `namespace` (GitLab's own full group/subgroup path, ADR-0041) and `baseUrl` (GitLab's optional
 // self-hosted CE/EE override, same ADR) are gitlab-only fields, added alongside the existing
 // azure-devops/github ones (#25) — harmless no-ops for every other provider, exactly like `repoOwner`
-// already is for azure-devops and `organization`/`project` already are for github.
-const registerForm = signal({ organization: 'Contoso-Production', project: 'Default', repository: '', repoOwner: '', namespace: '', baseUrl: '', owner: '' })
+// already is for azure-devops and `organization`/`project` already are for github. `jiraSite`/
+// `jiraProjectKey` (#48, ADR-0042) are atlassian-only, the same way — `repoOwner`/`repository` are
+// reused for atlassian's own Bitbucket half (ADR-0042: identical `owner/repository` addressing).
+const registerForm = signal({
+  organization: 'Contoso-Production',
+  project: 'Default',
+  repository: '',
+  repoOwner: '',
+  namespace: '',
+  baseUrl: '',
+  owner: '',
+  jiraSite: '',
+  jiraProjectKey: '',
+})
 const registerTicketingSystem = signal(defaultTicketingSystem.value)
 
 // #9 (ADR-0038): the PAT for a brand-new Workspace, held here in memory only — never persisted to any
@@ -203,7 +215,27 @@ const registerTicketingSystem = signal(defaultTicketingSystem.value)
 // registration leaves this value in the field (so the architect isn't forced to retype it to retry)
 // but never writes it anywhere. This is "the one route with no workspace in scope" the ADR calls out —
 // every other credentialed request in this wizard already has a real `workspace.id` to attach to.
+//
+// For an Atlassian registration (#48, ADR-0042) this is specifically the *Bitbucket* half of the
+// two-token pair — `registerJiraPat` below is the Jira half, held and discarded/persisted the exact
+// same in-memory-only way. Every other provider's registration only ever has the one token.
 const registerPat = signal('')
+const registerJiraPat = signal('')
+
+// The live-fetched Jira issue-type picker (#48, ADR-0042's "Jira issue type" section — mirrors Azure
+// DevOps's own `loadWorkItemTypes()`/`workItemTypeField` pattern below, offered here at Register time
+// instead of at the parent-work-item Link step, since an Atlassian workspace has no ticketing-enabled
+// Link step of its own in this ticket's scope): `registerJiraIssueTypes` is `GET
+// /api/atlassian/issue-types`'s own raw `[{ name }]` list for the entered Jira Site + Jira Project,
+// `registerJiraIssueType` the selected one (required before "Register workspace" is enabled — this is
+// the "collects... a Jira issue type" acceptance criterion). Reset whenever the Jira Project or Jira
+// PAT changes, the same "editing invalidates a prior check" rule `onParentIdInput` already applies to
+// the Link step's own parent-work-item lookup — a stale list from a *different* project/token must
+// never be submittable against a newly-typed one.
+const registerJiraIssueTypes = signal([])
+const registerJiraIssueType = signal('')
+const registerJiraIssueTypesStatus = signal('idle') // idle | loading | error
+const registerJiraIssueTypesError = signal('')
 
 // Import's destination-picker has no Provider control of its own (#8: GitHub's content store — the
 // thing an import destination actually writes into — is #11's job, not this ticket's), so switching
@@ -282,6 +314,11 @@ const newWorkItemCreateError = signal('')
 function workspaceLocationLabel(w) {
   if (w.provider === 'github') return `${w.location.owner}/${w.location.repository}`
   if (w.provider === 'gitlab') return `${w.location.namespace}/${w.location.repository}`
+  // #48 (ADR-0042): named by its Bitbucket half plus the Jira project key — the repo is what this
+  // label is otherwise naming for every provider (`describeProviderLocation`'s own doc comment makes
+  // the same call for atlassian), with the Jira project appended since a Bitbucket repo name alone
+  // doesn't say which of an account's Jira projects this workspace's work items live in.
+  if (w.provider === 'atlassian') return `${w.location.owner}/${w.location.repository} (${w.location.jiraProjectKey})`
   return `${w.location.organization}/${w.location.project}/${w.location.repository}`
 }
 
@@ -291,6 +328,7 @@ function workspaceLocationLabel(w) {
 function workspaceTrackerLabel(w) {
   if (w.provider === 'github') return 'GitHub'
   if (w.provider === 'gitlab') return 'GitLab'
+  if (w.provider === 'atlassian') return 'Atlassian'
   return w.ticketingSystem || 'none'
 }
 
@@ -454,9 +492,24 @@ function resetWizard() {
   workspacesLoadError.value = ''
   pickedWorkspaceId.value = ''
   registerProvider.value = DEFAULT_PROVIDER
-  registerForm.value = { organization: 'Contoso-Production', project: 'Default', repository: '', repoOwner: '', namespace: '', baseUrl: '', owner: '' }
+  registerForm.value = {
+    organization: 'Contoso-Production',
+    project: 'Default',
+    repository: '',
+    repoOwner: '',
+    namespace: '',
+    baseUrl: '',
+    owner: '',
+    jiraSite: '',
+    jiraProjectKey: '',
+  }
   registerTicketingSystem.value = defaultTicketingSystem.value
   registerPat.value = ''
+  registerJiraPat.value = ''
+  registerJiraIssueTypes.value = []
+  registerJiraIssueType.value = ''
+  registerJiraIssueTypesStatus.value = 'idle'
+  registerJiraIssueTypesError.value = ''
   registerStatus.value = 'idle'
   registerError.value = ''
   registerNotice.value = ''
@@ -518,24 +571,35 @@ async function registerWorkspace(providerOverride) {
   // braces alongside the registerDataSource effect above) rather than trusting registerProvider's
   // current value — this function is its only other caller.
   const provider = providerOverride ?? registerProvider.value
-  const { organization, project, repository, repoOwner, namespace, baseUrl, owner } = registerForm.value
+  const { organization, project, repository, repoOwner, namespace, baseUrl, owner, jiraSite, jiraProjectKey } = registerForm.value
   const isGitHub = provider === 'github'
   const isGitLab = provider === 'gitlab'
+  const isAtlassian = provider === 'atlassian'
   // #9 (ADR-0038): a brand-new Workspace has no id yet to resolve a stored PAT against, so this
   // attaches the wizard's own in-memory `registerPat` directly rather than going through
   // `apiFetch`'s workspace-scoped auto-prompt-and-retry (`silent: true` suppresses that entirely —
   // a rejected PAT here is this function's own `registerError`, not the shared page-wide modal).
   const authHeader = basicAuthHeaderForValue(registerPat.value.trim())
+  // #48 (ADR-0042): an Atlassian registration proves *two* tokens at once — Bitbucket's (above, the
+  // primary `Authorization` header, same as every other provider) and Jira's, carried on a second
+  // header (`lib/credential.js`'s own `getSecondaryCredential` doc comment) since one HTTP
+  // `Authorization` header can only ever encode one credential.
+  const jiraAuthHeader = isAtlassian ? basicAuthHeaderForValue(registerJiraPat.value.trim()) : null
   try {
     // Sent as the #3/#37 nested `{ provider, location }` shape (ADR-0037) — each provider's own
     // location fields, per lib/provider.js's schema: azure-devops keeps
     // organization/project/repository, github takes owner/repository, gitlab (#25, ADR-0041) takes
-    // namespace/repository plus an optional self-hosted `baseUrl`.
+    // namespace/repository plus an optional self-hosted `baseUrl`, atlassian (#48, ADR-0042) takes
+    // owner/repository (Bitbucket, reusing GitHub's own keys) plus jiraSite/jiraProjectKey (Jira).
     const res = await apiFetch(
       '/api/workspaces',
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(authHeader ? { Authorization: authHeader } : {}) },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authHeader ? { Authorization: authHeader } : {}),
+          ...(jiraAuthHeader ? { 'X-Gantry-Secondary-Authorization': jiraAuthHeader } : {}),
+        },
         body: JSON.stringify({
           provider,
           location: isGitHub
@@ -546,7 +610,14 @@ async function registerWorkspace(providerOverride) {
                   repository: repository.trim(),
                   ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
                 }
-              : { organization: organization.trim(), project: project.trim(), repository: repository.trim() },
+              : isAtlassian
+                ? {
+                    owner: repoOwner.trim(),
+                    repository: repository.trim(),
+                    jiraSite: jiraSite.trim(),
+                    jiraProjectKey: jiraProjectKey.trim(),
+                  }
+                : { organization: organization.trim(), project: project.trim(), repository: repository.trim() },
           owner: owner.trim(),
         }),
       },
@@ -561,7 +632,7 @@ async function registerWorkspace(providerOverride) {
       } else {
         registerError.value = raw
       }
-      // #9: creation failed — the typed PAT is discarded (never persisted anywhere), not silently
+      // #9: creation failed — the typed PAT(s) are discarded (never persisted anywhere), not silently
       // kept for a later, unrelated registration to accidentally reuse.
       return
     }
@@ -570,7 +641,15 @@ async function registerWorkspace(providerOverride) {
       registerNotice.value = 'Using the workspace already registered for this repository'
     }
     // #9: creation succeeded — the PAT the architect just typed becomes this new workspace's own PAT.
-    setPatForWorkspace(body.id, registerPat.value)
+    // #48: for Atlassian, that's *both* tokens, each into its own `product` slot
+    // (web/lib/credential.js's `{bitbucket, jira}` shape, #40) — never one bare string.
+    if (isAtlassian) {
+      setPatForWorkspace(body.id, registerPat.value, 'bitbucket')
+      setPatForWorkspace(body.id, registerJiraPat.value, 'jira')
+      registerJiraPat.value = ''
+    } else {
+      setPatForWorkspace(body.id, registerPat.value)
+    }
     registerPat.value = ''
     selectedWorkspace.value = body
     workspaces.value = null
@@ -1962,6 +2041,64 @@ function ImportDestinationPanel() {
   `
 }
 
+// ---------- Server-hosted + Register + Atlassian: live-fetched Jira issue-type picker (#48) ----------
+
+// Editing the Jira Project or the Jira PAT invalidates whatever issue-type list was fetched for the
+// *previous* value — the same "editing invalidates a prior check" rule `onParentIdInput` already
+// applies to the Link step's own parent-work-item lookup — so a stale list can never be submitted
+// against a project/token it was never actually fetched for.
+function resetRegisterJiraIssueTypes() {
+  registerJiraIssueTypes.value = []
+  registerJiraIssueType.value = ''
+  registerJiraIssueTypesStatus.value = 'idle'
+  registerJiraIssueTypesError.value = ''
+}
+
+function onAtlassianJiraProjectInput(value) {
+  registerForm.value = { ...registerForm.value, jiraProjectKey: value }
+  resetRegisterJiraIssueTypes()
+}
+
+function onAtlassianJiraPatInput(value) {
+  registerJiraPat.value = value
+  resetRegisterJiraIssueTypes()
+}
+
+// Fetches `GET /api/atlassian/issue-types` for the entered Jira Site + Jira Project, using the Jira
+// PAT typed above (attached directly, the same in-memory "no workspace to resolve a stored PAT from
+// yet" way `registerWorkspace`/`checkAdoptRepo` already attach `registerPat`) — mirrors Azure DevOps's
+// own `loadWorkItemTypes()`, offered here at Register time instead of at the Link step (see
+// `registerJiraIssueTypes`'s own doc comment for why).
+async function loadRegisterJiraIssueTypes() {
+  const jiraSite = registerForm.value.jiraSite.trim()
+  const jiraProjectKey = registerForm.value.jiraProjectKey.trim()
+  const jiraPat = registerJiraPat.value.trim()
+  if (!jiraSite || !jiraProjectKey || !jiraPat) return
+  registerJiraIssueTypesStatus.value = 'loading'
+  registerJiraIssueTypesError.value = ''
+  try {
+    const qs = new URLSearchParams({ jiraSite, jiraProjectKey })
+    const authHeader = basicAuthHeaderForValue(jiraPat)
+    const res = await apiFetch(
+      `/api/atlassian/issue-types?${qs}`,
+      { headers: authHeader ? { Authorization: authHeader } : {} },
+      { silent: true }
+    )
+    const body = await res.json().catch(() => [])
+    if (!res.ok) {
+      throw new Error(body.message ?? body.error ?? `Failed to load issue types (${res.status})`)
+    }
+    registerJiraIssueTypes.value = body
+    registerJiraIssueTypesStatus.value = 'idle'
+    if (body.length && !body.some((t) => t.name === registerJiraIssueType.value)) {
+      registerJiraIssueType.value = body.some((t) => t.name === DEFAULT_WORK_ITEM_TYPE) ? DEFAULT_WORK_ITEM_TYPE : body[0].name
+    }
+  } catch (err) {
+    registerJiraIssueTypesStatus.value = 'error'
+    registerJiraIssueTypesError.value = err.message
+  }
+}
+
 function WorkspaceStep() {
   useEffect(() => {
     if (
@@ -2247,7 +2384,126 @@ function WorkspaceStep() {
                     />
                   </div>
                 `
-              : html`
+              : registerProvider.value === 'atlassian'
+                ? html`
+                    <div class="wizard-field">
+                      <label for="ws-atlassian-owner">Bitbucket Account</label>
+                      <input
+                        class="wizard-input"
+                        id="ws-atlassian-owner"
+                        type="text"
+                        placeholder="The Bitbucket account the repository belongs to"
+                        value=${registerForm.value.repoOwner}
+                        onInput=${(e) => (registerForm.value = { ...registerForm.value, repoOwner: e.currentTarget.value })}
+                      />
+                    </div>
+                    <div class="wizard-field">
+                      <label for="ws-atlassian-repository">Repository</label>
+                      <input
+                        class="wizard-input"
+                        id="ws-atlassian-repository"
+                        type="text"
+                        value=${registerForm.value.repository}
+                        onInput=${(e) => (registerForm.value = { ...registerForm.value, repository: e.currentTarget.value })}
+                      />
+                      <p class="wizard-field-hint">Create the repository on Bitbucket first — gantry links to an existing repository, it does not create one.</p>
+                    </div>
+                    <div class="wizard-field">
+                      <label for="ws-atlassian-jira-site">Jira Site</label>
+                      <input
+                        class="wizard-input"
+                        id="ws-atlassian-jira-site"
+                        type="text"
+                        placeholder="yoursite.atlassian.net"
+                        value=${registerForm.value.jiraSite}
+                        onInput=${(e) => (registerForm.value = { ...registerForm.value, jiraSite: e.currentTarget.value })}
+                      />
+                    </div>
+                    <div class="wizard-field">
+                      <label for="ws-atlassian-jira-project">Jira Project</label>
+                      <input
+                        class="wizard-input"
+                        id="ws-atlassian-jira-project"
+                        type="text"
+                        placeholder="The Jira project key, e.g. GANTRY"
+                        value=${registerForm.value.jiraProjectKey}
+                        onInput=${(e) => onAtlassianJiraProjectInput(e.currentTarget.value)}
+                      />
+                    </div>
+                    <div class="wizard-field">
+                      <label for="ws-atlassian-owner-person">Owner</label>
+                      <input
+                        class="wizard-input"
+                        id="ws-atlassian-owner-person"
+                        type="text"
+                        placeholder="Who owns this workspace"
+                        value=${registerForm.value.owner}
+                        onInput=${(e) => (registerForm.value = { ...registerForm.value, owner: e.currentTarget.value })}
+                      />
+                    </div>
+                    <div class="wizard-field">
+                      <label for="ws-atlassian-bitbucket-pat">Personal Access Token (Bitbucket)</label>
+                      <input
+                        class="wizard-input"
+                        id="ws-atlassian-bitbucket-pat"
+                        type="password"
+                        autocomplete="off"
+                        placeholder="Needed to prove access to this repository"
+                        value=${registerPat.value}
+                        onInput=${(e) => (registerPat.value = e.currentTarget.value)}
+                      />
+                      <p class="wizard-field-hint">
+                        Used to check access and, once registration succeeds, becomes this workspace's own Bitbucket token —
+                        needs <strong>Repositories</strong> and <strong>Pull requests</strong> (Read &amp; Write) scope.
+                        Stored only in this browser, and only if registration succeeds.
+                      </p>
+                    </div>
+                    <div class="wizard-field">
+                      <label for="ws-atlassian-jira-pat">Personal Access Token (Jira)</label>
+                      <input
+                        class="wizard-input"
+                        id="ws-atlassian-jira-pat"
+                        type="password"
+                        autocomplete="off"
+                        placeholder="Needed to prove access to this Jira project"
+                        value=${registerJiraPat.value}
+                        onInput=${(e) => onAtlassianJiraPatInput(e.currentTarget.value)}
+                      />
+                      <p class="wizard-field-hint">
+                        Used to check access to the Jira project and, once registration succeeds, becomes this workspace's
+                        own Jira token — needs Read &amp; write access to Jira issues. Stored only in this browser, and
+                        only if registration succeeds.
+                      </p>
+                    </div>
+                    <div class="wizard-field">
+                      <label for="ws-atlassian-issue-type">Jira issue type</label>
+                      <div class="workspace-field-row">
+                        <select
+                          class="wizard-input"
+                          id="ws-atlassian-issue-type"
+                          value=${registerJiraIssueType.value}
+                          onChange=${(e) => (registerJiraIssueType.value = e.currentTarget.value)}
+                        >
+                          ${registerJiraIssueTypes.value.map((t) => html`<option key=${t.name} value=${t.name}>${t.name}</option>`)}
+                        </select>
+                        <button
+                          type="button"
+                          class="btn small"
+                          id="ws-atlassian-load-issue-types"
+                          disabled=${!registerForm.value.jiraSite.trim() ||
+                          !registerForm.value.jiraProjectKey.trim() ||
+                          !registerJiraPat.value.trim() ||
+                          registerJiraIssueTypesStatus.value === 'loading'}
+                          onClick=${loadRegisterJiraIssueTypes}
+                        >
+                          ${registerJiraIssueTypesStatus.value === 'loading' ? 'Loading…' : 'Load issue types'}
+                        </button>
+                      </div>
+                      <p class="wizard-field-hint">Fetched live from this Jira project's own configured issue types — required before registering.</p>
+                      ${registerJiraIssueTypesStatus.value === 'error' ? html`<div class="inline-error">${registerJiraIssueTypesError.value}</div>` : null}
+                    </div>
+                  `
+                : html`
                 <div class="wizard-field">
                   <label for="ws-organization">Organization</label>
                   <input
@@ -2313,37 +2569,49 @@ function WorkspaceStep() {
                   </div>
                 </div>
               `}
-          <div class="wizard-field">
-            <label for="ws-pat">Personal Access Token</label>
-            <input
-              class="wizard-input"
-              id="ws-pat"
-              type="password"
-              autocomplete="off"
-              placeholder="Needed to prove access to this repository"
-              value=${registerPat.value}
-              onInput=${(e) => (registerPat.value = e.currentTarget.value)}
-            />
-            <p class="wizard-field-hint">
-              ${registerProvider.value === 'github'
-                ? html`Used to check access and, once registration succeeds, becomes this workspace's own Personal Access Token — a fine-grained token needs <strong>Contents</strong>, <strong>Issues</strong>, <strong>Pull requests</strong>, and <strong>Metadata</strong> permissions (Read &amp; write, except Metadata which is Read-only). Stored only in this browser, and only if registration succeeds.`
-                : registerProvider.value === 'gitlab'
-                  ? // #25 (ADR-0041): GitLab's own scope guidance, mirroring the github/azure-devops hints above.
-                    html`Used to check access and, once registration succeeds, becomes this workspace's own Personal Access Token — a Personal, Project or Group Access Token needs the <strong>api</strong> scope (or, narrower, <strong>read_repository</strong> and <strong>write_repository</strong> together with API access to Issues and Merge Requests). Stored only in this browser, and only if registration succeeds.`
-                  : html`Used to check access and, once registration succeeds, becomes this workspace's own Personal Access Token — needs <strong>Code (Read &amp; write)</strong>, <strong>Work Items (Read &amp; write)</strong>, and <strong>Identity (Read)</strong> scope. Stored only in this browser, and only if registration succeeds.`}
-            </p>
-          </div>
+          ${registerProvider.value === 'atlassian'
+            ? null
+            : html`
+                <div class="wizard-field">
+                  <label for="ws-pat">Personal Access Token</label>
+                  <input
+                    class="wizard-input"
+                    id="ws-pat"
+                    type="password"
+                    autocomplete="off"
+                    placeholder="Needed to prove access to this repository"
+                    value=${registerPat.value}
+                    onInput=${(e) => (registerPat.value = e.currentTarget.value)}
+                  />
+                  <p class="wizard-field-hint">
+                    ${registerProvider.value === 'github'
+                      ? html`Used to check access and, once registration succeeds, becomes this workspace's own Personal Access Token — a fine-grained token needs <strong>Contents</strong>, <strong>Issues</strong>, <strong>Pull requests</strong>, and <strong>Metadata</strong> permissions (Read &amp; write, except Metadata which is Read-only). Stored only in this browser, and only if registration succeeds.`
+                      : registerProvider.value === 'gitlab'
+                        ? // #25 (ADR-0041): GitLab's own scope guidance, mirroring the github/azure-devops hints above.
+                          html`Used to check access and, once registration succeeds, becomes this workspace's own Personal Access Token — a Personal, Project or Group Access Token needs the <strong>api</strong> scope (or, narrower, <strong>read_repository</strong> and <strong>write_repository</strong> together with API access to Issues and Merge Requests). Stored only in this browser, and only if registration succeeds.`
+                        : html`Used to check access and, once registration succeeds, becomes this workspace's own Personal Access Token — needs <strong>Code (Read &amp; write)</strong>, <strong>Work Items (Read &amp; write)</strong>, and <strong>Identity (Read)</strong> scope. Stored only in this browser, and only if registration succeeds.`}
+                  </p>
+                </div>
+              `}
           <div class="wizard-field">
             <button
               type="button"
               class="btn primary"
               disabled=${registerStatus.value === 'registering' ||
-              !registerPat.value.trim() ||
-              (registerProvider.value === 'github'
-                ? !registerForm.value.repoOwner.trim() || !registerForm.value.repository.trim()
-                : registerProvider.value === 'gitlab'
-                  ? !registerForm.value.namespace.trim() || !registerForm.value.repository.trim()
-                  : !registerForm.value.organization.trim() || !registerForm.value.project.trim() || !registerForm.value.repository.trim())}
+              (registerProvider.value === 'atlassian'
+                ? !registerPat.value.trim() ||
+                  !registerJiraPat.value.trim() ||
+                  !registerForm.value.repoOwner.trim() ||
+                  !registerForm.value.repository.trim() ||
+                  !registerForm.value.jiraSite.trim() ||
+                  !registerForm.value.jiraProjectKey.trim() ||
+                  !registerJiraIssueType.value
+                : !registerPat.value.trim() ||
+                  (registerProvider.value === 'github'
+                    ? !registerForm.value.repoOwner.trim() || !registerForm.value.repository.trim()
+                    : registerProvider.value === 'gitlab'
+                      ? !registerForm.value.namespace.trim() || !registerForm.value.repository.trim()
+                      : !registerForm.value.organization.trim() || !registerForm.value.project.trim() || !registerForm.value.repository.trim()))}
               onClick=${() => registerWorkspace()}
             >
               ${registerStatus.value === 'registering' ? 'Registering…' : 'Register workspace'}

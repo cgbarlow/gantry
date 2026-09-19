@@ -7,6 +7,8 @@ import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { createAzureDevOpsWorkItemsClient } from '../lib/azureDevOpsWorkItemsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withFakeGitLabServer, GITLAB_NAMESPACE, GITLAB_REPOSITORY, GITLAB_VALID_PAT } from './helpers/fakeGitLabServer.js'
+import { withFakeBitbucketServer, BITBUCKET_OWNER, BITBUCKET_REPOSITORY, BITBUCKET_VALID_PAT } from './helpers/fakeBitbucketServer.js'
+import { withFakeJiraServer, JIRA_SITE, JIRA_PROJECT_KEY, JIRA_VALID_PAT } from './helpers/fakeJiraServer.js'
 import { withRunningServer, basicAuthHeader, VALID_PAT } from './helpers/lifecycle.js'
 
 // Browser smoke test for the "+ New Workspace" wizard (#110, replacing the
@@ -625,6 +627,113 @@ test('#25: the "+ New Workspace" wizard registers a brand new GitLab workspace e
       await page.waitForSelector('#instance-name', { timeout: 10_000 })
 
       assert.deepEqual(pageErrors, [])
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
+// ---- #48: registering a brand new Atlassian workspace through the wizard's Register step ----
+//
+// Unlike GitLab above, Atlassian has no public `baseUrl` field in this wizard at all (ADR-0042:
+// Cloud-only, no self-hosted override to gate) — the two fake servers this test stands up (Bitbucket
+// Cloud, Jira Cloud) are pointed at purely via the running gantry server's own test-only
+// `atlassianBitbucketBaseUrl`/`atlassianJiraBaseUrl` startup options (lib/server.js's own doc comment
+// on those two options), never a value typed into the page. This test exercises every acceptance
+// criterion #48 names: Atlassian selectable (not disabled), all four location fields plus both PATs
+// collected, the live-fetched Jira issue-type picker, and a real `POST /api/workspaces` reaching the
+// Instance step — mirroring the GitLab test's own scope (register -> Instance step reached), per #48's
+// own instruction not to repeat the GitLab build's split-ticket gap.
+function withAtlassianWizardTestServer(fn) {
+  return withFakeBitbucketServer(
+    { owner: BITBUCKET_OWNER, repository: BITBUCKET_REPOSITORY, validPat: BITBUCKET_VALID_PAT, files: {} },
+    (bitbucketBaseUrl) =>
+      withFakeJiraServer({ jiraProjectKey: JIRA_PROJECT_KEY, validPat: JIRA_VALID_PAT }, (jiraBaseUrl) => {
+        const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+        return withRunningServer(
+          { instancesDir, atlassianBitbucketBaseUrl: bitbucketBaseUrl, atlassianJiraBaseUrl: jiraBaseUrl },
+          async (gantryBase) => {
+            try {
+              await fn({ gantryBase, bitbucketBaseUrl, jiraBaseUrl, instancesDir })
+            } finally {
+              rmSync(instancesDir, { recursive: true, force: true })
+            }
+          }
+        )
+      })
+  )
+}
+
+test('#48: the "+ New Workspace" wizard registers a brand new Atlassian workspace end-to-end (not just adopts an existing one)', async () => {
+  await withAtlassianWizardTestServer(async ({ gantryBase }) => {
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      const pageErrors = []
+      page.on('pageerror', (err) => pageErrors.push(err.message))
+      page.on('console', (msg) => {
+        if (msg.type() === 'error') pageErrors.push(msg.text())
+      })
+      // The Instance step's own best-effort `GET /api/workspaces/:id/definitions` fetch (WI #383,
+      // lib/server.js's own `rejectUnlessAzureDevOpsWorkspace`) is a known, already-declared 400 for
+      // any provider without its own workspace-definitions route wired in yet — Atlassian's isn't
+      // (per that function's own doc comment: "a fail-safe for any *future* provider ... without
+      // workspace-definitions support of its own"), out of #48's own scope (Register step + repoCheck
+      // + the POST /api/workspaces dispatch table, not this separate definitions-listing route). The
+      // wizard's own effect already handles it gracefully (falls back to `[]`, `catch(() => {})`) — the
+      // browser still logs its own generic, URL-less "Failed to load resource: ... 400" console message
+      // for it regardless, so this counts *expected* such 400s (via the real response, which does carry
+      // a URL) to tell them apart from a genuinely unexpected failure below.
+      let expectedBadRequestResponses = 0
+      page.on('response', (res) => {
+        if (res.status() === 400 && res.url().includes('/definitions')) expectedBadRequestResponses += 1
+      })
+
+      await page.goto(`${gantryBase}/new-workspace`)
+      await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
+
+      // ---------- Step 1: register a brand new Atlassian workspace ----------
+      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+      // Atlassian is a real, selectable Provider choice (#48) — no longer the disabled "Coming soon" row.
+      const atlassianRadio = page.locator('input[name="ws-provider"][value="atlassian"]')
+      assert.equal(await atlassianRadio.isDisabled(), false)
+      await atlassianRadio.click()
+
+      await page.waitForSelector('#ws-atlassian-owner', { timeout: 5_000 })
+      await page.locator('#ws-atlassian-owner').fill(BITBUCKET_OWNER)
+      await page.locator('#ws-atlassian-repository').fill(BITBUCKET_REPOSITORY)
+      await page.locator('#ws-atlassian-jira-site').fill(JIRA_SITE)
+      await page.locator('#ws-atlassian-jira-project').fill(JIRA_PROJECT_KEY)
+      await page.locator('#ws-atlassian-bitbucket-pat').fill(BITBUCKET_VALID_PAT)
+      await page.locator('#ws-atlassian-jira-pat').fill(JIRA_VALID_PAT)
+
+      // The Register button stays disabled until a real Jira issue type has been picked — collecting
+      // one is #48's own acceptance criterion, not an incidental UI detail.
+      const registerButton = page.getByRole('button', { name: 'Register workspace' })
+      assert.equal(await registerButton.isDisabled(), true)
+
+      await page.getByRole('button', { name: 'Load issue types' }).click()
+      // `<option>` elements aren't "visible" to Playwright's own default actionability check while
+      // their `<select>` is closed, so this waits on the `<select>`'s own real value instead of a
+      // selector-visibility wait that would time out even on a genuinely successful load.
+      await page.waitForFunction(() => document.querySelector('#ws-atlassian-issue-type')?.value === 'Task', { timeout: 5_000 })
+      assert.equal(await page.locator('#ws-atlassian-issue-type').inputValue(), 'Task')
+
+      assert.equal(await registerButton.isDisabled(), false)
+      await registerButton.click()
+
+      // ---------- Step 2: instance step reached — a real workspace was created, not just checked ----------
+      await page.waitForSelector('#instance-name', { timeout: 10_000 })
+
+      // Exactly the expected number of generic "Failed to load resource ... 400" console messages
+      // (the `/definitions` 400 tracked above, see this test's own `response` listener) — anything
+      // beyond that is a genuinely unexpected error and must still fail this test.
+      const genericBadRequestMessages = pageErrors.filter((msg) => /responded with a status of 400/.test(msg))
+      const unexpectedErrors = pageErrors.filter((msg) => !/responded with a status of 400/.test(msg))
+      assert.deepEqual(unexpectedErrors, [])
+      assert.equal(genericBadRequestMessages.length, expectedBadRequestResponses)
     } finally {
       await browser.close()
     }

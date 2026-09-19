@@ -4,6 +4,7 @@ import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, wri
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
+import { setTimeout as delay } from 'node:timers/promises'
 import { renderArtefact, renderStageArtefacts, prepareAzureDevOpsWasmRender, finishAzureDevOpsWasmRender, externaliseImagesForWasm } from '../lib/render.js'
 import { createAsset } from '../lib/assets.js'
 import { loadDefinition } from '../lib/definition.js'
@@ -117,15 +118,28 @@ test('deliverToClient (md): out/ is never created, and the markdown is available
   }
 })
 
-test('deliverToClient leaves no scratch temp files behind after a docx render', () => {
+test('deliverToClient leaves no scratch temp files behind after a docx render', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
     const before = new Set(readdirSync(tmpdir()).filter((n) => n.startsWith('gantry-render-')))
     renderArtefact('examples', 'soap', { instancesDir, deliverToClient: true })
-    const after = new Set(readdirSync(tmpdir()).filter((n) => n.startsWith('gantry-render-')))
-    assert.deepEqual([...after].filter((n) => !before.has(n)), [])
+    // `node --test` runs test files concurrently by default, and every docx render (this one,
+    // tests/renderAtlassian.test.js's own, etc.) shares this same OS-wide tmp dir for its
+    // `gantry-render-*` scratch files — so a sibling test's file can transiently exist here
+    // through no fault of this call, gone again within milliseconds once that render's own
+    // `finally` cleanup (lib/render.js) runs. Poll rather than a single before/after compare, so
+    // a fleeting concurrent file doesn't fail this assertion; only a name that outlives every
+    // concurrent render is this call's own leak.
+    let leftover = []
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const after = new Set(readdirSync(tmpdir()).filter((n) => n.startsWith('gantry-render-')))
+      leftover = [...after].filter((n) => !before.has(n))
+      if (leftover.length === 0) break
+      await delay(100)
+    }
+    assert.deepEqual(leftover, [])
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }

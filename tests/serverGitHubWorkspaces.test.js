@@ -48,7 +48,7 @@ test('POST /api/workspaces (github) reports 400, not 500, for a location missing
   })
 })
 
-test('POST /api/workspaces rejects provider "atlassian" — known, but not selectable yet', async () => {
+test('POST /api/workspaces rejects an "atlassian" location missing its Jira fields — accepted as a provider, but the location schema is still enforced (#40)', async () => {
   await withScratchGitHubServer(async ({ gantryBase }) => {
     const res = await fetch(`${gantryBase}/api/workspaces`, {
       method: 'POST',
@@ -57,7 +57,33 @@ test('POST /api/workspaces rejects provider "atlassian" — known, but not selec
     })
     assert.equal(res.status, 400)
     const body = await res.json()
-    assert.match(body.error, /not supported yet/)
+    assert.match(body.error, /missing: jiraSite, jiraProjectKey/)
+  })
+})
+
+// #48/ADR-0042: atlassian's capability registration (content store, work items, identity —
+// lib/providerRegistry.js) and its own `POST /api/workspaces` wiring (`checkAtlassianRepo`, the
+// `REPO_CHECKERS` table, tests/serverAtlassianWorkspaces.test.js) both landed by this ticket — a
+// structurally-valid Atlassian registration is no longer rejected as unsupported the way it was
+// before #48 (see git history for the prior "not supported yet" assertion this replaces). It now
+// gets exactly the same two-token credential check every other Atlassian route does: supplying only
+// the primary (Bitbucket) Authorization header, with no secondary (Jira) one
+// (lib/credential.js's own `getSecondaryCredential`), is reported as the same structured
+// "authentication required" response a missing PAT already gets for every other provider — not a
+// distinct "not supported" message.
+test('POST /api/workspaces accepts an "atlassian" registration structurally, and reports "authentication required" when only the Bitbucket token is supplied', async () => {
+  await withScratchGitHubServer(async ({ gantryBase }) => {
+    const res = await fetch(`${gantryBase}/api/workspaces`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader('some-pat') },
+      body: JSON.stringify({
+        provider: 'atlassian',
+        location: { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, jiraSite: 'acme.atlassian.net', jiraProjectKey: 'PROJ' },
+      }),
+    })
+    assert.equal(res.status, 401)
+    const body = await res.json()
+    assert.equal(body.error, 'authentication_required')
   })
 })
 

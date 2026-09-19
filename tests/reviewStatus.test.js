@@ -14,6 +14,9 @@ import {
   reviewStatusToGitLabLabel,
   gitlabLabelToReviewStatus,
   allGitLabReviewLabels,
+  JIRA_REVIEW_LABEL_PREFIX,
+  reviewStatusToJiraLabel,
+  jiraLabelToReviewStatus,
 } from '../lib/reviewStatus.js'
 
 // Lib-level tests for ADR-0024 (docs/adr/0024-custom-review-status-field.md)
@@ -123,4 +126,32 @@ test('allGitLabReviewLabels returns one { name, color, description } definition 
   }
   // Distinct names and colours — five genuinely different labels, not five copies.
   assert.equal(new Set(labels.map((l) => l.name)).size, labels.length)
+})
+
+// #47, docs/adr/0042 "Status rides the same reserved gantry:review/<status> labels already used on
+// GitHub and GitLab issues — identical vocabulary and slugs" — Jira Cloud's own carrier for this same
+// five-value lifecycle.
+
+test('reviewStatusToJiraLabel maps every REVIEW_STATUS value to its own reserved gantry:review/* label, identical to GitHub/GitLab\'s own vocabulary', () => {
+  assert.equal(reviewStatusToJiraLabel(REVIEW_STATUS.REQUESTED), 'gantry:review/requested')
+  assert.equal(reviewStatusToJiraLabel(REVIEW_STATUS.IN_REVIEW), 'gantry:review/in-review')
+  assert.equal(reviewStatusToJiraLabel(REVIEW_STATUS.CHANGES_REQUESTED), 'gantry:review/changes-requested')
+  assert.equal(reviewStatusToJiraLabel(REVIEW_STATUS.APPROVED), 'gantry:review/approved')
+  assert.equal(reviewStatusToJiraLabel(REVIEW_STATUS.REJECTED), 'gantry:review/rejected')
+  assert.throws(() => reviewStatusToJiraLabel('Not a real status'), /No gantry:review\/\* label is mapped/)
+  for (const status of REVIEW_STATUS_VALUES) {
+    assert.equal(reviewStatusToJiraLabel(status), reviewStatusToGitHubLabel(status))
+    assert.equal(reviewStatusToJiraLabel(status), reviewStatusToGitLabLabel(status))
+    assert.ok(reviewStatusToJiraLabel(status).startsWith(JIRA_REVIEW_LABEL_PREFIX))
+  }
+})
+
+test('jiraLabelToReviewStatus is the exact reverse of reviewStatusToJiraLabel, and undefined when no reserved label is present', () => {
+  for (const status of REVIEW_STATUS_VALUES) {
+    assert.equal(jiraLabelToReviewStatus([reviewStatusToJiraLabel(status)]), status)
+  }
+  // Unrelated labels alongside a real one are ignored, not treated as a second/conflicting signal.
+  assert.equal(jiraLabelToReviewStatus(['bug', reviewStatusToJiraLabel(REVIEW_STATUS.APPROVED), 'good-first-issue']), REVIEW_STATUS.APPROVED)
+  assert.equal(jiraLabelToReviewStatus(['bug', 'good-first-issue']), undefined)
+  assert.equal(jiraLabelToReviewStatus([]), undefined)
 })

@@ -11,6 +11,18 @@
 // everywhere else in this file. `migrateGlobalPatToWorkspaces` below is the one-shot, first-load
 // migration that carries a previously-stored global PAT forward into every workspace that was
 // relying on it, so nobody re-enters a credential just because this tier was removed.
+//
+// #40 (ADR-0042): an Atlassian workspace holds *two* tokens in its one workspace slot — a Bitbucket
+// token and a Jira token, since Bitbucket Cloud and Jira Cloud are different products with their own
+// separate token systems. Every other provider keeps storing a bare PAT string, unchanged. This is
+// done by branching on *shape*, not by threading a `provider` argument through every function: a
+// stored value is either a plain string (single-token provider) or a `{bitbucket, jira}` object
+// (Atlassian), and every reader/writer below inspects which it has rather than being told. The one
+// function that can't infer this from storage alone — `credentialStatusForWorkspace`, which must
+// report per-token missing/set/rejected even before either token has ever been set — takes an
+// explicit, optional `provider` argument instead; every other function takes an optional trailing
+// `product` (`'bitbucket'` | `'jira'`) that non-Atlassian callers simply never pass. Either way, no
+// existing azure-devops/github/gitlab call site needs to change.
 import { signal, computed } from '@preact/signals'
 
 // The legacy global-default PAT's own storage key (pre-#9) — read exactly once, by
@@ -101,19 +113,40 @@ function persistRejectedCredentials(map) {
 const patsByWorkspace = signal(readStoredPats())
 const rejectedCredentialSlots = signal(readStoredRejectedCredentials())
 
+// A stored workspace credential is either a plain PAT string (every provider except Atlassian) or a
+// `{bitbucket, jira}` object (Atlassian, #40/ADR-0042). Readers/writers below tell the two apart by
+// this shape alone, rather than needing a `provider` argument — see the module doc comment above.
+function isTwoTokenValue(stored) {
+  return Boolean(stored) && typeof stored === 'object' && !Array.isArray(stored)
+}
+
 /**
  * The PAT to use for `workspaceId`, or `null` when nothing resolves — no fallback of any kind. A
  * falsy `workspaceId` (a local instance, or a caller with no workspace context at all) always
  * resolves to `null`, since there is no global default left to fall back to.
+ *
+ * For an Atlassian workspace (#40/ADR-0042), storage holds `{bitbucket, jira}` rather than a bare
+ * string — pass `product` (`'bitbucket'` | `'jira'`) to read one token specifically. Every other
+ * provider's callers never pass `product`; a plain string simply ignores it.
  */
-export function patForWorkspace(workspaceId) {
+export function patForWorkspace(workspaceId, product) {
   if (!workspaceId) return null
-  return patsByWorkspace.value[workspaceId] ?? null
+  const stored = patsByWorkspace.value[workspaceId]
+  if (isTwoTokenValue(stored)) return (product && stored[product]) || null
+  return stored ?? null
 }
 
-/** Whether `workspaceId` has a PAT stored for it — `false` for a falsy `workspaceId`. */
-export function hasPatForWorkspace(workspaceId) {
+/**
+ * Whether `workspaceId` has a PAT stored for it — `false` for a falsy `workspaceId`. For an
+ * Atlassian workspace, pass `product` to check one token specifically; omitted, it reports whether
+ * *either* token has been set.
+ */
+export function hasPatForWorkspace(workspaceId, product) {
   if (!workspaceId) return false
+  const stored = patsByWorkspace.value[workspaceId]
+  if (isTwoTokenValue(stored)) {
+    return product ? Boolean(stored[product]) : Object.values(stored).some(Boolean)
+  }
   return Object.hasOwn(patsByWorkspace.value, workspaceId)
 }
 
@@ -122,12 +155,25 @@ export function hasPatForWorkspace(workspaceId) {
  * there's no slot to write a credential to until a workspace actually exists (see
  * `basicAuthHeaderForValue` below for the one route, registration itself, that has to authenticate
  * before that's true).
+ *
+ * For an Atlassian workspace, pass `product` (`'bitbucket'` | `'jira'`) to set that one token,
+ * leaving the other (if any already set) untouched — this stores `{bitbucket, jira}` in that
+ * workspace's slot instead of a bare string. Every other provider's callers never pass `product`.
  */
-export function setPatForWorkspace(workspaceId, value) {
+export function setPatForWorkspace(workspaceId, value, product) {
   if (!workspaceId) return
   const trimmed = (value ?? '').trim()
   if (trimmed === '') {
-    clearPatForWorkspace(workspaceId)
+    clearPatForWorkspace(workspaceId, product)
+    return
+  }
+  if (product) {
+    const current = patsByWorkspace.value[workspaceId]
+    const currentTokens = isTwoTokenValue(current) ? current : {}
+    const next = { ...patsByWorkspace.value, [workspaceId]: { ...currentTokens, [product]: trimmed } }
+    patsByWorkspace.value = next
+    clearCredentialRejection(workspaceId)
+    persistPats(next)
     return
   }
   const next = { ...patsByWorkspace.value, [workspaceId]: trimmed }
@@ -136,9 +182,32 @@ export function setPatForWorkspace(workspaceId, value) {
   persistPats(next)
 }
 
-/** Clears `workspaceId`'s own PAT — the next request for that workspace gets the structured "authentication required" response and `apiFetch` re-prompts. A no-op for a falsy `workspaceId`. */
-export function clearPatForWorkspace(workspaceId) {
+/**
+ * Clears `workspaceId`'s own PAT — the next request for that workspace gets the structured
+ * "authentication required" response and `apiFetch` re-prompts. A no-op for a falsy `workspaceId`.
+ *
+ * For an Atlassian workspace, pass `product` to clear just that one token, leaving the other (if
+ * set) in place. Omitted, it clears the whole slot — both Atlassian tokens, or the one PAT for
+ * every other provider.
+ */
+export function clearPatForWorkspace(workspaceId, product) {
   if (!workspaceId) return
+  if (product) {
+    const current = patsByWorkspace.value[workspaceId]
+    if (!isTwoTokenValue(current) || !(product in current)) return
+    const nextTokens = { ...current }
+    delete nextTokens[product]
+    const next = { ...patsByWorkspace.value }
+    if (Object.keys(nextTokens).length === 0) {
+      delete next[workspaceId]
+    } else {
+      next[workspaceId] = nextTokens
+    }
+    patsByWorkspace.value = next
+    clearCredentialRejection(workspaceId)
+    persistPats(next)
+    return
+  }
   const next = { ...patsByWorkspace.value }
   delete next[workspaceId]
   patsByWorkspace.value = next
@@ -161,8 +230,27 @@ export function markCredentialRejected(workspaceId) {
   persistRejectedCredentials(next)
 }
 
-/** 'missing' | 'set' | 'rejected' — the Settings screen's own per-workspace credential-state display (#9's own acceptance criterion). A falsy `workspaceId` always reads as 'missing', matching `patForWorkspace`'s own "no fallback" resolution. */
-export function credentialStatusForWorkspace(workspaceId) {
+/**
+ * 'missing' | 'set' | 'rejected' — the Settings screen's own per-workspace credential-state display
+ * (#9's own acceptance criterion). A falsy `workspaceId` always reads as 'missing', matching
+ * `patForWorkspace`'s own "no fallback" resolution.
+ *
+ * For an Atlassian workspace (#40/ADR-0042), pass `provider: 'atlassian'` to get a per-token report
+ * instead — `{bitbucket, jira}`, each one of the same three statuses — since a flat status can't say
+ * *which* of the two tokens (if either) is missing. This is the one function in this module that
+ * can't tell Atlassian-ness from storage shape alone: a brand-new Atlassian workspace with neither
+ * token set yet has nothing stored at all, so there's no object shape to read. Every other
+ * provider's callers never pass `provider` and get the existing flat status, unchanged.
+ */
+export function credentialStatusForWorkspace(workspaceId, provider) {
+  if (provider === 'atlassian') {
+    const rejected = Boolean(rejectedCredentialSlots.value[workspaceId])
+    const statusFor = (product) => {
+      if (!patForWorkspace(workspaceId, product)) return 'missing'
+      return rejected ? 'rejected' : 'set'
+    }
+    return { bitbucket: statusFor('bitbucket'), jira: statusFor('jira') }
+  }
   if (!patForWorkspace(workspaceId)) return 'missing'
   return rejectedCredentialSlots.value[workspaceId] ? 'rejected' : 'set'
 }
@@ -186,9 +274,14 @@ export function basicAuthHeaderForValue(value) {
   }
 }
 
-/** The `Authorization` header value to attach to a request targeting `workspaceId`, or `null` when no PAT resolves for it (including a falsy `workspaceId` — there is nothing left to fall back to). */
-export function authHeaderForWorkspace(workspaceId) {
-  return basicAuthHeaderForValue(patForWorkspace(workspaceId))
+/**
+ * The `Authorization` header value to attach to a request targeting `workspaceId`, or `null` when no
+ * PAT resolves for it (including a falsy `workspaceId` — there is nothing left to fall back to). For
+ * an Atlassian workspace, pass `product` (`'bitbucket'` | `'jira'`) to select which of its two
+ * tokens to encode — every other provider's callers never pass it.
+ */
+export function authHeaderForWorkspace(workspaceId, product) {
+  return basicAuthHeaderForValue(patForWorkspace(workspaceId, product))
 }
 
 /**
