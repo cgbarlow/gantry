@@ -32,6 +32,20 @@ GitLab has no formal "request changes" review verb on Free/CE — only a binary 
 
 On GitLab Premium/Ultimate instances where enforced Approval Rules exist, gantry honours those; where they don't (Free/CE, or a Premium instance that hasn't configured them), it falls back to the toggle-plus-threads reading above rather than refusing to support sign-off gating on GitLab's lower tiers at all.
 
+## Person-picker assignability gate
+
+GitLab's Members API (`GET /projects/:id/members/all`) already folds inherited group/subgroup
+membership into a project's own member list server-side, unlike GitHub's own separate
+collaborators-plus-org-members union (docs/adr/0040) — so the picker's candidate set is that one
+response, no second per-user permission lookup needed.
+
+Every candidate still needs a *can this actually be assigned* answer, the same gate docs/adr/0040
+gives GitHub. GitLab expresses access as a 10/20/30/40/50 (Guest/Reporter/Developer/Maintainer/Owner)
+scale rather than GitHub's has-access-or-not; gantry reads Reporter (20) or above as sufficient —
+GitLab itself requires at least Reporter to be assigned an issue or merge request, so a Guest resolves
+but is shown blocked, with guidance to grant Reporter access (directly or through the group) and retry
+(#28, mirroring #10's identical shows-but-blocks contract for GitHub).
+
 ## Terminology
 
 `docs/adr/0037-...`'s existing caution about "workspace" colliding with a provider's own vocabulary extends to GitLab: GitLab ships an unrelated "GitLab Workspaces" cloud-dev-environment feature, so Gantry's docs/UI say "a workspace on GitLab," never "GitLab workspace" as a compound noun.

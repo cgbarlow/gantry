@@ -99,18 +99,18 @@ test('resolvePullRequests instantiates github\'s pull-requests client and opens 
   )
 })
 
-// #26: gitlab joins the registry the same incremental way github did, starting with content store
-// only — identity/work items/pull requests are later tickets' job (ADR-0041's own scope list).
+// #26/#28: gitlab joins the registry the same incremental way github did — content store first, then
+// identity (#28) — work items/pull requests are later tickets' job (ADR-0041's own scope list).
 test('registeredProviders lists gitlab once its content store is registered', () => {
   assert.ok(registeredProviders().includes('gitlab'))
 })
 
-test('getProviderCapabilities resolves gitlab to its content-store factory (no other capability registered yet)', () => {
+test('getProviderCapabilities resolves gitlab to its content-store and identity factories (pull requests/work items not registered yet)', () => {
   const capabilities = getProviderCapabilities('gitlab')
   assert.equal(typeof capabilities.contentStore, 'function')
+  assert.equal(typeof capabilities.identity, 'function')
   assert.equal(capabilities.pullRequests, undefined)
   assert.equal(capabilities.workItems, undefined)
-  assert.equal(capabilities.identity, undefined)
 })
 
 test('resolveContentStore instantiates gitlab\'s content-store client and reads/writes through it', async () => {
