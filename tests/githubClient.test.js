@@ -59,6 +59,25 @@ test('getRepo throws GitHubRepoNotFoundError when the repository does not exist'
   )
 })
 
+// #21, docs/adr/0040's own "Consequences": GitHub returns the same 404 for a repository that genuinely
+// doesn't exist and for a fine-grained PAT missing a required permission, so the thrown message must
+// name that ambiguity rather than reading as a bare "not found" that sends someone hunting for a typo.
+test('getRepo\'s not-found message explains that a missing PAT permission looks identical to a missing repository', async () => {
+  await withFakeGitHubServer(
+    { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, repoExists: false },
+    async (baseUrl) => {
+      const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+      try {
+        await client.getRepo()
+        assert.fail('expected getRepo to throw')
+      } catch (err) {
+        assert.match(err.message, /permission/i)
+        assert.match(err.message, /cannot see it/i)
+      }
+    }
+  )
+})
+
 test('repoExists is false, not thrown, when the repository does not exist', async () => {
   await withFakeGitHubServer(
     { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, repoExists: false },
