@@ -2,32 +2,44 @@ import { createServer } from 'node:http'
 
 /**
  * A minimal in-process fake of the GitHub REST API, standing in for a real `api.github.com` (or
- * GitHub Enterprise Server) owner/repository in tests (#8) — a real HTTP server on an ephemeral port
- * that lib/githubClient.js talks to over real `fetch` calls, never a mock of `fetch` itself. Mirrors
- * tests/helpers/fakeAzureDevOpsServer.js's own shape and conventions (see that file's doc comment)
- * so the two fakes read the same way to a caller working across both providers.
+ * GitHub Enterprise Server) owner/repository in tests (#8, #19) — a real HTTP server on an ephemeral
+ * port that `lib/githubClient.js` talks to over real `fetch` calls, never a mock of `fetch` itself.
+ * Mirrors `tests/helpers/fakeAzureDevOpsServer.js`'s own shape and conventions so the two fakes read
+ * the same way to a caller working across both providers.
  *
- * Covers only what #8 needs today: the repository-metadata endpoint (`GET /repos/:owner/:repo`) that
- * `checkGitHubRepo`/`createGitHubClient().getRepo()` call to prove a PAT reaches a real repository
- * before a workspace is registered. Later tickets (#11 content store, #13 pull requests, #14 work
- * items, #15 review labels, #10 identity) extend this the same incremental way #99/#118/#120 extended
- * the Azure DevOps fake — new endpoints added here as the GitHub client itself grows them, never a
- * parallel second fake.
+ * Covers the read-only subset `lib/githubClient.js` implements: the repository-metadata endpoint
+ * (`GET /repos/:owner/:repo`) that `checkGitHubRepo`/`createGitHubClient().getRepo()` call to prove a
+ * PAT reaches a real repository before a workspace is registered (#8), and the Contents API (get a
+ * file, list a folder) `lib/definitionGitHub.js` reads a library repo's `definitions/` folder over
+ * (#19). Later tickets (#11 content store, #13 pull requests, #14 work items, #15 review labels, #10
+ * identity) extend this the same incremental way #99/#118/#120 extended the Azure DevOps fake — new
+ * endpoints added here as the GitHub client itself grows them, never a parallel second fake.
  *
- * `validPat` is the PAT (or, if an array, any one of several) accepted in the
- * `Authorization: Bearer <pat>` header GitHub itself expects — anything else, or a missing/malformed
- * header, gets a 401, mirroring a rejected PAT's real shape.
- *
- * `repoExists` (default `true`) controls whether `GET /repos/:owner/:repo` reports the repository as
- * existing. `false` returns 404, simulating both a genuinely nonexistent repository and — per
- * docs/adr/0040's own noted trap — a fine-grained PAT with insufficient scope against a repo it can't
- * see, which GitHub itself also reports as 404 rather than 403.
+ * `files` seeds `main`'s initial content, keyed by repo-relative path (leading "/" optional).
+ * `branchFiles`, if given, seeds one or more other branches the same way. `validPat` is the PAT (or,
+ * if an array, any one of several) accepted in the `Authorization: Bearer <pat>` header GitHub itself
+ * expects — anything else, or a missing/malformed header, gets a 401, mirroring a rejected PAT's real
+ * shape. `repoExists` (default `true`) controls whether `GET /repos/:owner/:repo` reports the
+ * repository as existing. `false` returns 404, simulating both a genuinely nonexistent repository and
+ * — per docs/adr/0040's own noted trap — a fine-grained PAT with insufficient scope against a repo it
+ * can't see, which GitHub itself also reports as 404 rather than 403.
  */
-export function createFakeGitHubServer({ owner, repository, validPat, repoExists = true } = {}) {
-  const repoPath = `/repos/${owner}/${repository}`
-  const validPats = Array.isArray(validPat) ? validPat : [validPat]
+export function createFakeGitHubServer({ owner, repository, validPat, files = {}, branchFiles = {}, repoExists = true } = {}) {
+  const branches = new Map()
 
-  return createServer((req, res) => {
+  function seedBranch(name, seedFiles) {
+    const entries = Object.entries(seedFiles)
+    const store = new Map(entries.map(([path, content]) => [path.startsWith('/') ? path : `/${path}`, content]))
+    branches.set(name, store)
+  }
+  seedBranch('main', files)
+  for (const [branchName, seedFiles] of Object.entries(branchFiles)) {
+    seedBranch(branchName, seedFiles)
+  }
+
+  const repoBasePath = `/repos/${owner}/${repository}`
+
+  return createServer(async (req, res) => {
     const url = new URL(req.url, 'http://fake-github.invalid')
     const pathname = decodeURIComponent(url.pathname)
     const json = (status, body) => {
@@ -35,14 +47,15 @@ export function createFakeGitHubServer({ owner, repository, validPat, repoExists
       res.end(JSON.stringify(body))
     }
 
-    const authHeader = req.headers['authorization'] ?? ''
-    const [scheme, token] = authHeader.split(' ')
-    const providedPat = scheme?.toLowerCase() === 'bearer' ? token : undefined
+    const auth = req.headers['authorization'] ?? ''
+    const [, providedPat] = auth.match(/^Bearer (.+)$/) ?? []
+    const validPats = Array.isArray(validPat) ? validPat : [validPat]
     if (!validPats.includes(providedPat)) {
-      return json(401, { message: 'Bad credentials (fake: invalid or missing PAT)' })
+      return json(401, { message: 'Bad credentials (fake server: invalid or missing PAT)' })
     }
 
-    if (req.method === 'GET' && pathname === repoPath) {
+    // GET the repository metadata itself — lib/githubClient.js's getRepo()/repoExists() call this.
+    if (req.method === 'GET' && pathname === repoBasePath) {
       if (!repoExists) {
         return json(404, { message: 'Not Found (fake: repository does not exist, or PAT scope insufficient to see it)' })
       }
@@ -55,18 +68,59 @@ export function createFakeGitHubServer({ owner, repository, validPat, repoExists
       })
     }
 
-    return json(404, { message: `Not Found (fake: no route for ${req.method} ${pathname})` })
+    // Contents API — GET /repos/{owner}/{repo}/contents/{path}?ref={branch}, one route for both a
+    // single file (object response) and a folder listing (array response), exactly like the real API.
+    if (req.method === 'GET' && pathname.startsWith(`${repoBasePath}/contents`)) {
+      const branchName = url.searchParams.get('ref') ?? 'main'
+      const store = branches.get(branchName) ?? new Map()
+      const scopePath = pathname.slice(`${repoBasePath}/contents`.length).replace(/^\/+/, '')
+      const normalizedScope = scopePath === '' ? '' : scopePath.replace(/\/+$/, '')
+
+      // A single file at exactly this path.
+      if (store.has(`/${normalizedScope}`)) {
+        const content = store.get(`/${normalizedScope}`)
+        return json(200, {
+          type: 'file',
+          name: normalizedScope.split('/').pop(),
+          path: normalizedScope,
+          content: Buffer.from(content, 'utf8').toString('base64'),
+          encoding: 'base64',
+        })
+      }
+
+      // Otherwise, treat it as a folder listing — derive immediate children from stored paths, the
+      // same "no real folder concept, infer from flat paths" approach fakeAzureDevOpsServer.js uses.
+      const prefix = normalizedScope === '' ? '/' : `/${normalizedScope}/`
+      const children = new Map() // name -> isFolder
+      for (const key of store.keys()) {
+        if (!key.startsWith(prefix)) continue
+        const rest = key.slice(prefix.length)
+        if (rest === '') continue
+        const [name, ...more] = rest.split('/')
+        const isFolder = more.length > 0
+        children.set(name, (children.get(name) ?? false) || isFolder)
+      }
+      if (children.size === 0) {
+        return json(404, { message: `Not Found (fake server: no item at "${scopePath}")` })
+      }
+      const value = [...children.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([name, isFolder]) => ({
+          type: isFolder ? 'dir' : 'file',
+          name,
+          path: normalizedScope === '' ? name : `${normalizedScope}/${name}`,
+        }))
+      return json(200, value)
+    }
+
+    return json(404, { message: `No fake route for ${req.method} ${pathname}` })
   })
 }
 
-/**
- * Starts a `createFakeGitHubServer` on an ephemeral port for the duration of `fn(baseUrl)`, then
- * closes it — mirrors tests/helpers/fakeAzureDevOpsServer.js's own `withFakeAzureDevOpsServer` shape,
- * so both providers' fakes are driven the same way from a test.
- */
-export function withFakeGitHubServer({ owner, repository, validPat, repoExists }, fn) {
+/** Starts a `createFakeGitHubServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/helpers/fakeAzureDevOpsServer.js`'s own `withFakeAzureDevOpsServer` shape. */
+export function withFakeGitHubServer({ owner, repository, validPat, files, branchFiles, repoExists }, fn) {
   return new Promise((resolve, reject) => {
-    const server = createFakeGitHubServer({ owner, repository, validPat, repoExists })
+    const server = createFakeGitHubServer({ owner, repository, validPat, files, branchFiles, repoExists })
     server.listen(0, async () => {
       const { port } = server.address()
       try {

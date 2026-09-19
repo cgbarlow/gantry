@@ -230,17 +230,22 @@ test('POST /api/workspaces reports a nested location missing a required field as
   })
 })
 
-test('POST /api/workspaces with a nested { provider: "github", ... } body is rejected as not-yet-supported, and persists nothing', async () => {
+// A nested { provider: "github", ... } body is structurally accepted (#8, docs/adr/0037) — it is no
+// longer rejected outright the way it was before #8 landed. With no PAT supplied, it fails the same
+// way every other provider's registration does (the caller's own PAT is required before this route
+// will even attempt to prove access) rather than a provider-specific 400 — the full github-specific
+// contract (real access proof via checkGitHubRepo, actual registration, dedup) is exercised end to
+// end in tests/serverGitHubWorkspaces.test.js.
+test('POST /api/workspaces with a nested { provider: "github", ... } body and no PAT returns the structured "authentication required" response, and persists nothing', async () => {
   await withScratchServer({}, async (base) => {
     const res = await fetch(`${base}/api/workspaces`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider: 'github', location: { owner: 'octocat', repository: 'hello-world' } }),
     })
-    assert.equal(res.status, 400)
+    assert.equal(res.status, 401)
     const body = await res.json()
-    assert.match(body.error, /github/)
-    assert.match(body.error, /not supported yet/)
+    assert.equal(body.error, 'authentication_required')
 
     const listing = await (await fetch(`${base}/api/workspaces`)).json()
     assert.equal(listing.length, 0)
