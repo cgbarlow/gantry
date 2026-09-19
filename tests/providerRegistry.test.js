@@ -13,7 +13,7 @@ import { withFakeAzureDevOpsServer as withFakeServer } from './helpers/fakeAzure
 import { withFakeGitHubServer, GITHUB_OWNER, GITHUB_REPOSITORY, GITHUB_VALID_PAT } from './helpers/fakeGitHubServer.js'
 import { withFakeGitLabServer, GITLAB_NAMESPACE, GITLAB_REPOSITORY, GITLAB_VALID_PAT } from './helpers/fakeGitLabServer.js'
 import { ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
-import { runProviderContractTests } from './helpers/providerContractTests.js'
+import { runProviderContractTests, runContentStoreContractTests } from './helpers/providerContractTests.js'
 
 function withFakeAzureDevOpsServer(fn) {
   return withFakeServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT }, fn)
@@ -131,6 +131,26 @@ test('resolveContentStore\'s gitlab client surfaces a rejected PAT as the neutra
       return true
     })
   })
+})
+
+function withFakeGitLabServerForContract(fn) {
+  return withFakeGitLabServer({ namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, validPat: GITLAB_VALID_PAT }, fn)
+}
+
+// #29: the content-store slice of the shared contract suite, run against gitlab's registered
+// content-store capability — the same "createBranch/branchExists isolation" and "branch created from
+// a ref carries that ref's current content" contract `lib/gitlabStageBranch.js`'s
+// findGitLabStageBranch/resolveGitLabStageBranch (and, later, #33's re-open path) are themselves built
+// on. The full `runProviderContractTests` isn't run for gitlab yet — pull requests and work items
+// aren't registered until #33/#30 — so this is the narrower `runContentStoreContractTests` slice
+// (see that function's own doc comment in tests/helpers/providerContractTests.js), not a parallel
+// suite.
+runContentStoreContractTests('gitlab', {
+  providerId: 'gitlab',
+  withServer: withFakeGitLabServerForContract,
+  buildContentStore: (baseUrl, overrides = {}) =>
+    resolveContentStore('gitlab', { namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, pat: GITLAB_VALID_PAT, baseUrl, ...overrides }),
+  badCredential: 'wrong-pat',
 })
 
 test('resolveContentStore/resolvePullRequests/resolveWorkItems/resolveIdentity instantiate azure-devops\'s existing clients', async () => {
