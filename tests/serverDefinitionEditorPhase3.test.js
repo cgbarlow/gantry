@@ -191,7 +191,7 @@ test('creating a library definition with an id that already exists in an Azure D
     const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-p3-ado-shadow-lib-'))
     try {
       cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
-      const workspace = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl, owner: '' }, { instancesDir })
+      const workspace = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl }, owner: '' }, { instancesDir })
 
       await withRunningServer({ definitionsDir, instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
         const auth = basicAuthHeader(VALID_PAT)
@@ -235,8 +235,8 @@ test('creating a definition in one Azure DevOps workspace with an id that alread
       const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-p3-ado-multi-lib-'))
       try {
         cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
-        const workspaceA = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: baseUrlA, owner: '' }, { instancesDir })
-        const workspaceB = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: 'fake-repo-2', baseUrl: baseUrlB, owner: '' }, { instancesDir })
+        const workspaceA = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: baseUrlA }, owner: '' }, { instancesDir })
+        const workspaceB = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: 'fake-repo-2', baseUrl: baseUrlB }, owner: '' }, { instancesDir })
 
         await withRunningServer({ definitionsDir, instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
           const auth = basicAuthHeader(VALID_PAT)
@@ -271,7 +271,7 @@ test('Azure DevOps workspace definitions: create, save and publish each land as 
     const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-p3-ado-lib-'))
     try {
       cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
-      const workspace = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl, owner: '' }, { instancesDir })
+      const workspace = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl }, owner: '' }, { instancesDir })
 
       await withRunningServer({ definitionsDir, instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
         const auth = basicAuthHeader(VALID_PAT)
@@ -374,7 +374,7 @@ test('Azure DevOps workspace: a new draft version copies the latest version\'s m
     const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-p3-ado-draft-lib-'))
     try {
       cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
-      const workspace = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl, owner: '' }, { instancesDir })
+      const workspace = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl }, owner: '' }, { instancesDir })
       await withRunningServer({ definitionsDir, instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
         const auth = basicAuthHeader(VALID_PAT)
         await fetch(`${base}/api/workspaces/${workspace.id}/definitions`, {

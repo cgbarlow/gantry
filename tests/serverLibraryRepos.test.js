@@ -194,7 +194,7 @@ test('a library repo definition keeps listing and loading from its cache after t
       baseUrl = url
       azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: 'lib-repo-cache', baseUrl, pat: VALID_PAT }
       await seedAzureDevOpsDefinition(azureDevOps, 'widget-process', { title: 'Widget Process' })
-      cachedRepo = addLibraryRepo({ organization: ORGANIZATION, project: PROJECT, repository: 'lib-repo-cache', baseUrl }, { instancesDir })
+      cachedRepo = addLibraryRepo({ location: { organization: ORGANIZATION, project: PROJECT, repository: 'lib-repo-cache', baseUrl } }, { instancesDir })
       const meta = await refreshLibraryRepo(cachedRepo, { instancesDir, pat: VALID_PAT })
       assert.equal(meta.ids.length, 1)
       assert.ok(existsSync(join(libraryRepoDefinitionsDir(instancesDir, cachedRepo.id), 'widget-process', '1', 'definition.yaml')))

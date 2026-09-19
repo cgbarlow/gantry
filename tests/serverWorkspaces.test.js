@@ -156,10 +156,10 @@ test('POST /api/workspaces with a valid PAT for the real location creates the wo
           })
           assert.equal(createRes.status, 201)
           const created = await createRes.json()
-          assert.equal(created.organization, ORGANIZATION)
-          assert.equal(created.project, PROJECT)
-          assert.equal(created.repository, REPOSITORY)
-          assert.equal(created.baseUrl, adoBaseUrl)
+          assert.equal(created.location.organization, ORGANIZATION)
+          assert.equal(created.location.project, PROJECT)
+          assert.equal(created.location.repository, REPOSITORY)
+          assert.equal(created.location.baseUrl, adoBaseUrl)
           assert.equal(created.owner, 'c.barlow')
           assert.equal(created.ticketingSystem, 'azure-devops')
           assert.equal(typeof created.id, 'string')
@@ -174,16 +174,14 @@ test('POST /api/workspaces with a valid PAT for the real location creates the wo
 
 // ---------- #5: nested `{ provider, location }` wire shape ----------
 
-test('GET /api/workspaces returns the nested provider/location shape alongside the flat aliases', async () => {
+test('GET /api/workspaces returns the nested provider/location shape', async () => {
   await withScratchServer({}, async (base, instancesDir) => {
-    registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, owner: 'c.barlow' }, { instancesDir })
+    registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }, owner: 'c.barlow' }, { instancesDir })
 
     const listing = await (await fetch(`${base}/api/workspaces`)).json()
     assert.equal(listing.length, 1)
     assert.equal(listing[0].provider, 'azure-devops')
     assert.deepEqual(listing[0].location, { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY })
-    // Flat aliases still present too — no consumer relying on them breaks.
-    assert.equal(listing[0].organization, ORGANIZATION)
   })
 })
 
@@ -208,9 +206,6 @@ test('POST /api/workspaces accepts the nested { provider, location } body and re
           assert.equal(created.provider, 'azure-devops')
           assert.deepEqual(created.location, { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl })
           assert.equal(created.owner, 'c.barlow')
-          // Flat aliases still round-trip for any consumer not yet migrated.
-          assert.equal(created.organization, ORGANIZATION)
-          assert.equal(created.repository, REPOSITORY)
         }
       )
     }
@@ -267,7 +262,6 @@ test('a workspace registered before #3/#5 via the flat wire shape still loads th
     assert.ok(found, 'the legacy-shaped workspace is still listed')
     assert.equal(found.provider, 'azure-devops')
     assert.deepEqual(found.location, { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY })
-    assert.equal(found.organization, ORGANIZATION)
     assert.equal(found.owner, 'c.barlow')
   })
 })
@@ -315,10 +309,10 @@ test('registering a new Azure-DevOps-backed instance via POST /api/instances aut
 
           const workspaces = await (await fetch(`${base}/api/workspaces`)).json()
           assert.equal(workspaces.length, 1)
-          assert.equal(workspaces[0].organization, ORGANIZATION)
-          assert.equal(workspaces[0].project, PROJECT)
-          assert.equal(workspaces[0].repository, REPOSITORY)
-          assert.equal(workspaces[0].baseUrl, adoBaseUrl)
+          assert.equal(workspaces[0].location.organization, ORGANIZATION)
+          assert.equal(workspaces[0].location.project, PROJECT)
+          assert.equal(workspaces[0].location.repository, REPOSITORY)
+          assert.equal(workspaces[0].location.baseUrl, adoBaseUrl)
         }
       )
     }
@@ -368,7 +362,7 @@ test('adopting an instance at an Azure DevOps location already backing a registe
 
           const workspaces = await (await fetch(`${base}/api/workspaces`)).json()
           assert.equal(workspaces.length, 1)
-          assert.equal(workspaces[0].repository, REPOSITORY)
+          assert.equal(workspaces[0].location.repository, REPOSITORY)
         }
       )
     }
@@ -387,13 +381,13 @@ function patchWorkspace(base, id, body) {
 
 test('PATCH /api/workspaces/:id updates owner, with no PAT required', async () => {
   await withScratchServer({}, async (base, instancesDir) => {
-    const workspace = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }, { instancesDir })
+    const workspace = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY } }, { instancesDir })
 
     const res = await patchWorkspace(base, workspace.id, { owner: 'c.barlow' })
     assert.equal(res.status, 200)
     const updated = await res.json()
     assert.equal(updated.owner, 'c.barlow')
-    assert.equal(updated.organization, ORGANIZATION)
+    assert.equal(updated.location.organization, ORGANIZATION)
 
     const listing = await (await fetch(`${base}/api/workspaces`)).json()
     assert.equal(listing.find((w) => w.id === workspace.id).owner, 'c.barlow')
@@ -402,8 +396,8 @@ test('PATCH /api/workspaces/:id updates owner, with no PAT required', async () =
 
 test('PATCH /api/workspaces/:id updates ticketingSystem to a supported value, overriding that workspace alone', async () => {
   await withScratchServer({}, async (base, instancesDir) => {
-    const workspaceA = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }, { instancesDir })
-    const workspaceB = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: 'fake-repo-2' }, { instancesDir })
+    const workspaceA = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY } }, { instancesDir })
+    const workspaceB = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: 'fake-repo-2' } }, { instancesDir })
 
     const res = await patchWorkspace(base, workspaceA.id, { ticketingSystem: 'azure-devops' })
     assert.equal(res.status, 200)
@@ -418,7 +412,7 @@ test('PATCH /api/workspaces/:id updates ticketingSystem to a supported value, ov
 
 test('PATCH /api/workspaces/:id rejects ticketingSystem "jira" with 400, and persists nothing', async () => {
   await withScratchServer({}, async (base, instancesDir) => {
-    const workspace = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }, { instancesDir })
+    const workspace = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY } }, { instancesDir })
 
     const res = await patchWorkspace(base, workspace.id, { ticketingSystem: 'jira' })
     assert.equal(res.status, 400)
@@ -441,7 +435,7 @@ test('PATCH /api/workspaces/:id for an unknown id reports 404, not 500', async (
 
 test('PATCH /api/workspaces/:id leaves organization/project/repository untouched — those fields are not accepted by this route', async () => {
   await withScratchServer({}, async (base, instancesDir) => {
-    const workspace = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }, { instancesDir })
+    const workspace = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY } }, { instancesDir })
 
     const res = await fetch(`${base}/api/workspaces/${encodeURIComponent(workspace.id)}`, {
       method: 'PATCH',
@@ -450,14 +444,14 @@ test('PATCH /api/workspaces/:id leaves organization/project/repository untouched
     })
     assert.equal(res.status, 200)
     const updated = await res.json()
-    assert.equal(updated.organization, ORGANIZATION)
+    assert.equal(updated.location.organization, ORGANIZATION)
     assert.equal(updated.owner, 'c.barlow')
   })
 })
 
 test('PATCH /api/workspaces/:id rejects a non-string owner (e.g. null) with 400, rather than persisting it verbatim', async () => {
   await withScratchServer({}, async (base, instancesDir) => {
-    const workspace = registerWorkspace({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, owner: 'c.barlow' }, { instancesDir })
+    const workspace = registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }, owner: 'c.barlow' }, { instancesDir })
 
     const res = await patchWorkspace(base, workspace.id, { owner: null })
     assert.equal(res.status, 400)
@@ -514,7 +508,7 @@ test('POST /api/workspaces with an empty-but-existing Azure DevOps repository st
 
           const listing = await (await fetch(`${base}/api/workspaces`)).json()
           assert.equal(listing.length, 1)
-          assert.equal(listing[0].repository, REPOSITORY)
+          assert.equal(listing[0].location.repository, REPOSITORY)
         }
       )
     }

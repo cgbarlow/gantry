@@ -1474,7 +1474,7 @@ export function DefinitionViewerPage() {
                             (repo) => html`
                               <label key=${repo.id}>
                                 <input type="checkbox" checked=${promoteSelectedIds.includes(repo.id)} onChange=${() => togglePromoteRepo(repo.id)} />
-                                ${repo.organization}/${repo.project}/${repo.repository}
+                                ${repo.provider === 'github' ? `${repo.location.owner}/${repo.location.repository}` : `${repo.location.organization}/${repo.location.project}/${repo.location.repository}`}
                                 ${repo.codeOwner ? html`<span class="muted"> — code owner: ${repo.codeOwner}</span>` : null}
                               </label>
                             `

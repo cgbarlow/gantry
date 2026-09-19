@@ -190,7 +190,7 @@ test('stageNumberForStageId/stageIdForNumber are 1-based positions in definition
 
 test('backfillNumberRegistry assigns numbers to pre-existing workspaces/instances', async () => {
   await withScratchInstances((instancesDir) => {
-    const ws = registerWorkspace({ organization: 'org', project: 'proj', repository: 'repo' }, { instancesDir })
+    const ws = registerWorkspace({ location: { organization: 'org', project: 'proj', repository: 'repo' } }, { instancesDir })
     registerInstance('remote-one', { kind: 'azureDevOps', workspaceId: ws.id }, { instancesDir })
     makeLocalInstance(instancesDir, 'local-one')
     registerLocalInstance('local-one', { instancesDir })
@@ -228,7 +228,7 @@ test('backfillNumberRegistry orders pre-existing local instances by directory cr
 
 test('backfillNumberRegistry is idempotent — a second call assigns nothing new and keeps existing numbers', async () => {
   await withScratchInstances((instancesDir) => {
-    registerWorkspace({ organization: 'org', project: 'proj', repository: 'repo' }, { instancesDir })
+    registerWorkspace({ location: { organization: 'org', project: 'proj', repository: 'repo' } }, { instancesDir })
     makeLocalInstance(instancesDir, 'demo')
     registerLocalInstance('demo', { instancesDir })
 
