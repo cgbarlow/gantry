@@ -9,6 +9,7 @@ import {
   resolveIdentity,
 } from '../lib/providerRegistry.js'
 import { withFakeAzureDevOpsServer as withFakeServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withFakeGitHubServer, GITHUB_OWNER, GITHUB_REPOSITORY, GITHUB_VALID_PAT } from './helpers/fakeGitHubServer.js'
 import { ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 import { runProviderContractTests } from './helpers/providerContractTests.js'
 
@@ -29,9 +30,35 @@ test('getProviderCapabilities resolves azure-devops to its four capability facto
 })
 
 test('getProviderCapabilities throws a clear error naming the registered providers, for an unregistered provider id', () => {
-  assert.throws(() => getProviderCapabilities('github'), /no provider registered for "github"/)
-  assert.throws(() => getProviderCapabilities('github'), /azure-devops/)
   assert.throws(() => getProviderCapabilities('atlassian'), /no provider registered for "atlassian"/)
+  assert.throws(() => getProviderCapabilities('atlassian'), /azure-devops/)
+})
+
+// #11/#10: github joins the registry one capability per ticket as each lands (content store, then
+// identity) — pullRequests/workItems are #13/#14's job, registered here the same incremental way
+// this file's own doc comment describes for Azure DevOps's own four clients.
+test('registeredProviders lists github once its content store is registered', () => {
+  assert.ok(registeredProviders().includes('github'))
+})
+
+test('getProviderCapabilities resolves github to its content-store and identity factories, so far', () => {
+  const capabilities = getProviderCapabilities('github')
+  assert.equal(typeof capabilities.contentStore, 'function')
+  assert.equal(typeof capabilities.identity, 'function')
+  assert.equal(capabilities.pullRequests, undefined)
+  assert.equal(capabilities.workItems, undefined)
+})
+
+test('resolveIdentity instantiates github\'s identity client', async () => {
+  await withFakeGitHubServer(
+    { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, collaborators: [{ login: 'ana', id: 1 }] },
+    async (baseUrl) => {
+      const identity = resolveIdentity('github', { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+      const resolved = await identity.resolveIdentity('ana')
+      assert.equal(resolved.uniqueName, 'ana')
+      assert.equal(resolved.canAssign, true)
+    }
+  )
 })
 
 test('resolveContentStore/resolvePullRequests/resolveWorkItems/resolveIdentity instantiate azure-devops\'s existing clients', async () => {
