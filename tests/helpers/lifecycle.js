@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { createServer } from '../../lib/server.js'
 import { withFakeAzureDevOpsServer } from './fakeAzureDevOpsServer.js'
 import { withFakeGitHubServer, GITHUB_OWNER, GITHUB_REPOSITORY, GITHUB_VALID_PAT } from './fakeGitHubServer.js'
+import { withFakeGitLabServer, GITLAB_NAMESPACE, GITLAB_REPOSITORY, GITLAB_VALID_PAT } from './fakeGitLabServer.js'
 
 /**
  * Creates a temp directory under `os.tmpdir()`, runs `fn(instancesDir)`, and
@@ -85,6 +86,7 @@ export const REPOSITORY = 'fake-repo'
 export const VALID_PAT = 'valid-test-pat'
 
 export { GITHUB_OWNER, GITHUB_REPOSITORY, GITHUB_VALID_PAT }
+export { GITLAB_NAMESPACE, GITLAB_REPOSITORY, GITLAB_VALID_PAT }
 
 /**
  * Stands up a real gantry server (`withRunningServer`) alongside a real fake provider server
@@ -109,6 +111,17 @@ export function withRunningServerForProvider(provider, { options, fakeServerOpti
       (providerBaseUrl) =>
         withRunningServer({ allowGitHubBaseUrlOverride: true, ...options }, (gantryBase) =>
           fn({ gantryBase, providerBaseUrl, provider, owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT })
+        )
+    )
+  }
+  if (provider === 'gitlab') {
+    // #31 — the GitLab twin of the GitHub branch above: same "real fake provider server + real gantry
+    // server" lifecycle, over GitLab's own `{ namespace, repository }` location fields (ADR-0041).
+    return withFakeGitLabServer(
+      { namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, validPat: GITLAB_VALID_PAT, ...fakeServerOptions },
+      (providerBaseUrl) =>
+        withRunningServer({ ...options }, (gantryBase) =>
+          fn({ gantryBase, providerBaseUrl, provider, namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, pat: GITLAB_VALID_PAT })
         )
     )
   }
