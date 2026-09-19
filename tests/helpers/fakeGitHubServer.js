@@ -50,6 +50,19 @@ import { createServer } from 'node:http'
  * `true`) controls whether that last endpoint works at all — `false` makes it 404, reproducing the
  * "feature unavailable" case docs/adr/0040's hierarchy fallback (a task-list entry in the parent's body
  * plus a "Part of #<n>" line in the child) exists to handle.
+ *
+ * Labels and assignees, per #15's Request Review (docs/adr/0040 "Review status rides reserved
+ * labels"): `POST /repos/:owner/:repo/labels` creates a label definition (422 "already_exists" for a
+ * name already taken, mirroring real GitHub — this is what makes `ensureLabelsExist`'s
+ * tolerate-already-exists behaviour genuinely testable). Creating an issue with `assignees` validates
+ * each login against the same access rule `lib/githubIdentityClient.js`'s own `canAssign` already
+ * models — a `collaborators` entry, or an `orgMembers` entry with a non-`'none'` `permissions` value —
+ * and 422s with GitHub's own "Validation Failed" shape for one that isn't, reproducing docs/adr/0040's
+ * "GitHub rejects an issue assignee who lacks repo access" as a real server response rather than only
+ * a client-side gate. Creating (or updating) an issue with `labels` (an array of plain name strings)
+ * auto-creates any name not already defined via `POST .../labels` — mirroring real GitHub's own
+ * create-issue behaviour — and the issue's own `labels` field always reports full `{ name, color,
+ * description }` objects, matching the real API's shape.
  */
 export function createFakeGitHubServer({
   owner,
@@ -63,12 +76,32 @@ export function createFakeGitHubServer({
   orgMembers = [],
   permissions = {},
   subIssuesEnabled = true,
+  mergeRefusal = null,
 } = {}) {
   const issues = new Map() // number -> issue object
   const issueIdToNumber = new Map() // internal id -> number
   const subIssues = new Map() // parent number -> Set<child number>
+  const labelDefs = new Map() // name -> { name, color, description }
   let issueCounter = 0
   let issueIdCounter = 1000
+
+  // The same "who can actually be assigned" rule lib/githubIdentityClient.js's own `canAssign`
+  // models (#10, docs/adr/0040): a collaborator always can; an org member who isn't one can only if
+  // `permissions` grants them something other than `'none'`.
+  function isAssignable(login) {
+    if (collaborators.some((c) => c.login === login)) return true
+    return (permissions[login] ?? 'none') !== 'none'
+  }
+
+  // Real GitHub auto-creates a label from a bare name the first time it's attached to an issue if no
+  // such label exists yet — this mirrors that so a caller doesn't have to call the labels endpoint
+  // itself to observe an issue's labels field in the label-object shape the real API returns.
+  function resolveLabelObjects(names) {
+    return (names ?? []).map((name) => {
+      if (!labelDefs.has(name)) labelDefs.set(name, { name, color: 'ededed', description: null })
+      return labelDefs.get(name)
+    })
+  }
   const branches = new Map()
   const refs = new Map() // branch name -> commit sha
   const commits = new Map() // commit sha -> { treeSha, parents }
@@ -221,6 +254,22 @@ export function createFakeGitHubServer({
       return json(200, value)
     }
 
+    // DELETE /repos/:owner/:repo/git/refs/heads/:branch — real GitHub's own branch-deletion endpoint.
+    // Not called by any gantry client (merging never deletes the source branch itself — same as the
+    // Azure DevOps fake), but test-facing: mirrors the "a stage branch was cleaned up after merge, by
+    // a repo setting or a human, before a later re-open" scenario `tests/serverStageReopen.test.js`
+    // already simulates for Azure DevOps by deleting the ref directly.
+    const deleteRefMatch = pathname.match(new RegExp(`^${repoBasePath}/git/refs/heads/(.+)$`))
+    if (req.method === 'DELETE' && deleteRefMatch) {
+      const branchName = deleteRefMatch[1]
+      if (!refs.has(branchName)) return json(422, { message: `Reference does not exist (fake: "refs/heads/${branchName}")` })
+      refs.delete(branchName)
+      branches.delete(branchName)
+      res.writeHead(204)
+      res.end()
+      return
+    }
+
     // GET /repos/:owner/:repo/git/ref/heads/:branch — the current tip commit of a branch;
     // lib/githubClient.js's getBranchTip calls this first, then GET .../git/commits/:sha below.
     const refMatch = pathname.match(new RegExp(`^${repoBasePath}/git/ref/heads/(.+)$`))
@@ -326,12 +375,42 @@ export function createFakeGitHubServer({
       return json(201, { ref: `refs/heads/${branchName}`, object: { sha: body.sha } })
     }
 
+    // GET /repos/:owner/:repo/labels — lists every label defined on the repo (test-facing
+    // convenience, mirroring real GitHub's own read endpoint, the same way the sub-issues GET below
+    // does for hierarchy).
+    if (req.method === 'GET' && pathname === `${repoBasePath}/labels`) {
+      return json(200, [...labelDefs.values()])
+    }
+
+    // POST /repos/:owner/:repo/labels — creates a label definition. 422s "already_exists" for a name
+    // already taken, mirroring real GitHub — the case lib/githubWorkItemsClient.js's
+    // `ensureLabelsExist` tolerates rather than fails over.
+    if (req.method === 'POST' && pathname === `${repoBasePath}/labels`) {
+      const body = await readJsonBody(req)
+      if (labelDefs.has(body.name)) {
+        return json(422, { message: 'Validation Failed', errors: [{ resource: 'Label', code: 'already_exists', field: 'name' }] })
+      }
+      const label = { name: body.name, color: body.color ?? 'ededed', description: body.description ?? null }
+      labelDefs.set(body.name, label)
+      return json(201, label)
+    }
+
     // POST /repos/:owner/:repo/issues — creates a new issue. Mirrors real GitHub's response shape
     // closely enough for lib/githubWorkItemsClient.js: `number` (repo-scoped, user-visible) and `id`
     // (opaque, global — what the sub_issues endpoint actually addresses a child by) are deliberately
-    // distinct counters, the same way real GitHub's are.
+    // distinct counters, the same way real GitHub's are. `assignees` is validated against
+    // `isAssignable` above — an unassignable login 422s exactly like real GitHub, never silently
+    // dropped — and `labels` (bare name strings) are resolved to full label objects, auto-creating any
+    // gantry hasn't already defined via POST .../labels.
     if (req.method === 'POST' && pathname === `${repoBasePath}/issues`) {
       const body = await readJsonBody(req)
+      const invalidAssignee = (body.assignees ?? []).find((login) => !isAssignable(login))
+      if (invalidAssignee) {
+        return json(422, {
+          message: 'Validation Failed',
+          errors: [{ resource: 'Issue', field: 'assignee', code: 'invalid', value: invalidAssignee }],
+        })
+      }
       const number = ++issueCounter
       const id = ++issueIdCounter
       const issue = {
@@ -342,6 +421,8 @@ export function createFakeGitHubServer({
         state: 'open',
         state_reason: null,
         html_url: `https://fake-github.invalid/${owner}/${repository}/issues/${number}`,
+        assignees: (body.assignees ?? []).map((login) => ({ login })),
+        labels: resolveLabelObjects(body.labels),
       }
       issues.set(number, issue)
       issueIdToNumber.set(id, number)
@@ -356,12 +437,14 @@ export function createFakeGitHubServer({
       return json(200, issue)
     }
 
-    // PATCH /repos/:owner/:repo/issues/:number — partial update (title/body/state/state_reason).
+    // PATCH /repos/:owner/:repo/issues/:number — partial update (title/body/state/state_reason/labels).
     if (req.method === 'PATCH' && issueGetMatch) {
       const issue = issues.get(Number(issueGetMatch[1]))
       if (!issue) return json(404, { message: `No fake issue #${issueGetMatch[1]}` })
       const body = await readJsonBody(req)
-      Object.assign(issue, body)
+      const { labels, ...rest } = body
+      Object.assign(issue, rest)
+      if (labels !== undefined) issue.labels = resolveLabelObjects(labels)
       return json(200, issue)
     }
 
@@ -401,9 +484,15 @@ export function createFakeGitHubServer({
     // review *submission* is a reviewer's own action, performed with their own token; this fake has
     // only one accepted PAT, so a test simulates "the code owner reviewed" the same way real GitHub's
     // own API models it — `POST .../pulls/:number/reviews` with `{event}` — rather than inventing a
-    // second, fake-only endpoint. Merging is deliberately not modelled: Promote never merges a
-    // library repo's own Pull Request (ADR-0036 — "gantry proposes, it doesn't merge on their
-    // behalf"), so lib/githubPullRequestsClient.js has no merge call for this fake to answer.
+    // second, fake-only endpoint.
+    //
+    // Merge (`PUT .../pulls/:number/merge`, #13's `completePullRequest`) always uses a merge commit,
+    // fast-forwarding the base branch's own file map/ref to the head branch's current tip — enough to
+    // prove a caller can read the merged content back afterwards, without modelling a genuine
+    // two-parent merge commit. `mergeRefusal`, if set (`{ status, message }`), makes every merge
+    // attempt fail with that response instead — reproducing a branch-protection or required-check
+    // refusal (ADR-0040: "surfaced verbatim as a blocked sign-off, never retried, never downgraded to
+    // another merge method") so that behaviour is genuinely testable.
     if (req.method === 'POST' && pathname === `${repoBasePath}/pulls`) {
       const body = await readJsonBody(req)
       if (!body.head || !body.base || !body.title) return json(422, { message: 'head, base and title are required' })
@@ -447,13 +536,69 @@ export function createFakeGitHubServer({
       return json(200, review)
     }
 
+    // GET /repos/:owner/:repo/pulls/:number/commits — #13's getPullRequestCommits. This fake's git
+    // model has no real commit history to walk, so it reports the head branch's own current tip commit
+    // (real author/committer stamps from that commit, if it has any) as the PR's sole commit — enough
+    // for lib/stageStatus.js's commit-panel summary, never used for anything git-history-shaped.
+    const prCommitsMatch = pathname.match(new RegExp(`^${repoBasePath}/pulls/(\\d+)/commits$`))
+    if (req.method === 'GET' && prCommitsMatch) {
+      const number = Number(prCommitsMatch[1])
+      const pr = pulls.get(number)
+      if (!pr) return json(404, { message: `No fake pull request #${number}` })
+      const sha = refs.get(pr.head.ref)
+      if (!sha) return json(200, [])
+      const commit = commits.get(sha)
+      const date = new Date().toISOString()
+      const stamp = { name: 'Fake Author', email: 'fake-author@example.invalid', date }
+      return json(200, [
+        {
+          sha,
+          commit: {
+            message: `fake commit ${sha}`,
+            author: commit?.author ?? stamp,
+            committer: commit?.committer ?? stamp,
+          },
+        },
+      ])
+    }
+
+    // PUT /repos/:owner/:repo/pulls/:number/merge — #13's completePullRequest. `mergeRefusal`
+    // (`{ status, message }`) simulates a branch-protection or required-check block; otherwise the
+    // merge always succeeds with a merge commit, fast-forwarding `base` to `head`'s current content.
+    const mergeMatch = pathname.match(new RegExp(`^${repoBasePath}/pulls/(\\d+)/merge$`))
+    if (req.method === 'PUT' && mergeMatch) {
+      const number = Number(mergeMatch[1])
+      const pr = pulls.get(number)
+      if (!pr) return json(404, { message: `No fake pull request #${number}` })
+      if (pr.merged) return json(405, { message: 'Pull Request is not mergeable (fake: already merged)' })
+      if (mergeRefusal) {
+        return json(mergeRefusal.status ?? 405, { message: mergeRefusal.message ?? 'Pull Request is not mergeable' })
+      }
+      const headSha = refs.get(pr.head.ref)
+      const headTree = headSha ? commits.get(headSha)?.treeSha : undefined
+      const mergeSha = nextSha('commit')
+      const date = new Date().toISOString()
+      commits.set(mergeSha, {
+        treeSha: headTree ?? trees.get([...trees.keys()].at(-1)),
+        parents: [refs.get(pr.base.ref), headSha].filter(Boolean),
+        committer: { name: 'Fake Committer', email: 'fake-committer@example.invalid', date },
+        author: { name: 'Fake Author', email: 'fake-author@example.invalid', date },
+      })
+      refs.set(pr.base.ref, mergeSha)
+      branches.set(pr.base.ref, new Map(branches.get(pr.head.ref) ?? new Map()))
+      pr.merged = true
+      pr.state = 'closed'
+      pr.merge_commit_sha = mergeSha
+      return json(200, { sha: mergeSha, merged: true, message: 'Pull Request successfully merged' })
+    }
+
     return json(404, { message: `No fake route for ${req.method} ${pathname}` })
   })
 }
 
 /** Starts a `createFakeGitHubServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/helpers/fakeAzureDevOpsServer.js`'s own `withFakeAzureDevOpsServer` shape. */
 export function withFakeGitHubServer(
-  { owner, repository, validPat, files, branchFiles, repoExists, ownerType, collaborators, orgMembers, permissions, subIssuesEnabled },
+  { owner, repository, validPat, files, branchFiles, repoExists, ownerType, collaborators, orgMembers, permissions, subIssuesEnabled, mergeRefusal },
   fn
 ) {
   return new Promise((resolve, reject) => {
@@ -469,6 +614,7 @@ export function withFakeGitHubServer(
       orgMembers,
       permissions,
       subIssuesEnabled,
+      mergeRefusal,
     })
     server.listen(0, async () => {
       const { port } = server.address()
