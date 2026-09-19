@@ -40,7 +40,7 @@ import { createServer } from 'node:http'
  * `lib/gitlabIdentityClient.js`'s own Reporter-or-above assignability gate. The fake's `query` param
  * handling matches real GitLab's own substring, case-insensitive match against `username` or `name`.
  */
-export function createFakeGitLabServer({ namespace, repository, validPat, files = {}, branchFiles = {}, repoExists = true, members = [] } = {}) {
+export function createFakeGitLabServer({ namespace, repository, validPat, files = {}, branchFiles = {}, repoExists = true, members = [], mergeRefusal = null } = {}) {
   const branches = new Map() // branch name -> Map<path, Buffer>
   const branchTips = new Map() // branch name -> { commitId, committedDate, authoredDate }
   let commitCounter = 0
@@ -53,6 +53,18 @@ export function createFakeGitLabServer({ namespace, repository, validPat, files 
   const issues = new Map() // iid -> issue object
   let issueIidCounter = 0
   let issueIdCounter = 5000
+
+  // #33: Merge Requests, keyed by their project-scoped `iid` (GitLab's own "internal id", the number
+  // shown in its own UI and what `lib/gitlabPullRequestsClient.js` addresses every MR by — the same
+  // iid-not-id distinction the issues fixture above already draws). Each MR carries its own approvals
+  // summary (`approved`, `approved_by`) and discussion list, so a test can drive
+  // `interpretGitLabMergeRequest`'s three readings (approved / changes-requested-equivalent / pending)
+  // directly against a real HTTP response, mirroring `fakeGitHubServer.js`'s own Pull Requests section.
+  const mergeRequests = new Map() // iid -> { iid, source_branch, target_branch, title, description, state, approved, approved_by, discussions }
+  let mrIidCounter = 0
+  let mrIdCounter = 9000
+  let discussionIdCounter = 0
+  const FAKE_APPROVER = { id: 777, username: 'fake-approver', name: 'Fake Approver' }
 
   // #26: every stored file is a real Buffer — a fixture may pass either a plain string (a text file's
   // UTF-8 content) or a Buffer (a binary file's real bytes) — matching how a write via the Commits API
@@ -196,6 +208,22 @@ export function createFakeGitLabServer({ namespace, repository, validPat, files 
       return json(200, { name: branchName, commit: { id: tip.commitId, committed_date: tip.committedDate } })
     }
 
+    // DELETE /projects/:id/repository/branches/:branch — real GitLab's own branch-deletion endpoint.
+    // Not called by any gantry client (merging never deletes the source branch itself, #33's own
+    // `should_remove_source_branch: false`), but test-facing: mirrors the "a stage branch was cleaned
+    // up after merge, by a repo setting or a human, before a later re-open" scenario
+    // tests/gitlabStageApproval.test.js simulates, the same way fakeGitHubServer.js's own DELETE ref
+    // route exists for GitHub.
+    if (req.method === 'DELETE' && branchGetMatch) {
+      const branchName = decodeURIComponent(branchGetMatch[1])
+      if (!branchTips.has(branchName)) return json(404, { message: `404 Branch Not Found (fake: "${branchName}")` })
+      branchTips.delete(branchName)
+      branches.delete(branchName)
+      res.writeHead(204)
+      res.end()
+      return
+    }
+
     // POST /projects/:id/repository/branches?branch=&ref= — creates a new branch pointing at `ref`'s
     // current tip. Mirrors real GitLab's own two documented failure modes: `ref` not existing (404)
     // and `branch` already existing (400 "Branch already exists").
@@ -293,14 +321,173 @@ export function createFakeGitLabServer({ namespace, repository, validPat, files 
       }
     }
 
+    // ---- Merge Requests (#33) ----
+    //
+    // A minimal fake of GitLab's Merge Requests API: enough for `lib/gitlabPullRequestsClient.js` to
+    // open a stage's sign-off Merge Request, read it back (status + approvals + discussions), attach a
+    // requested reviewer, and merge it. Real approval/discussion-resolution is a reviewer's own action,
+    // performed with their own token; this fake has only one accepted PAT, so a test simulates "the
+    // reviewer approved"/"a reviewer left an unresolved comment" the same way `fakeGitHubServer.js`'s
+    // own review-submission simulation does — dedicated test-facing endpoints below, not gated behind a
+    // second PAT.
+    //
+    // Merge (`PUT .../merge_requests/:iid/merge`, #33's `completePullRequest`) always produces a merge
+    // commit, fast-forwarding the target branch's own file map/ref to the source branch's current tip
+    // — enough to prove a caller can read the merged content back afterwards, without modelling a
+    // genuine two-parent merge commit. `mergeRefusal`, if set (`{ status, message }`), makes every
+    // merge attempt fail with that response instead — reproducing a protected-branch or push-rule
+    // refusal (ADR-0041: "surfaced verbatim as a blocked sign-off") so that behaviour is genuinely
+    // testable.
+    if (req.method === 'POST' && rest === '/merge_requests') {
+      const body = await readJsonBody(req)
+      if (!body.source_branch || !body.target_branch || !body.title) {
+        return json(400, { message: 'source_branch, target_branch and title are required' })
+      }
+      const iid = ++mrIidCounter
+      const id = ++mrIdCounter
+      const mr = {
+        id,
+        iid,
+        source_branch: body.source_branch,
+        target_branch: body.target_branch,
+        title: body.title,
+        description: body.description ?? null,
+        state: 'opened',
+        reviewer_ids: body.reviewer_ids ?? [],
+        approved: false,
+        approved_by: [],
+        discussions: [],
+      }
+      mergeRequests.set(iid, mr)
+      return json(201, mr)
+    }
+
+    const mrMatch = rest.match(/^\/merge_requests\/(\d+)$/)
+    if (req.method === 'GET' && mrMatch) {
+      const mr = mergeRequests.get(Number(mrMatch[1]))
+      if (!mr) return json(404, { message: `No fake merge request !${mrMatch[1]}` })
+      return json(200, mr)
+    }
+    if (req.method === 'PUT' && mrMatch) {
+      const mr = mergeRequests.get(Number(mrMatch[1]))
+      if (!mr) return json(404, { message: `No fake merge request !${mrMatch[1]}` })
+      const body = await readJsonBody(req)
+      Object.assign(mr, body)
+      return json(200, mr)
+    }
+
+    // GET .../merge_requests/:iid/approvals — lib/gitlabPullRequestsClient.js's getApprovals.
+    const approvalsMatch = rest.match(/^\/merge_requests\/(\d+)\/approvals$/)
+    if (req.method === 'GET' && approvalsMatch) {
+      const mr = mergeRequests.get(Number(approvalsMatch[1]))
+      if (!mr) return json(404, { message: `No fake merge request !${approvalsMatch[1]}` })
+      return json(200, {
+        approved: mr.approved,
+        approved_by: mr.approved_by.map((user) => ({ user })),
+        approvals_left: mr.approved ? 0 : 1,
+      })
+    }
+
+    // POST/POST .../merge_requests/:iid/approve and /unapprove — test-facing simulation of "a reviewer
+    // approved" (real GitLab performs this with the approving reviewer's own token; this fake's single
+    // accepted PAT stands in for whichever reviewer a test wants to simulate).
+    const approveMatch = rest.match(/^\/merge_requests\/(\d+)\/approve$/)
+    if (req.method === 'POST' && approveMatch) {
+      const mr = mergeRequests.get(Number(approveMatch[1]))
+      if (!mr) return json(404, { message: `No fake merge request !${approveMatch[1]}` })
+      mr.approved = true
+      if (!mr.approved_by.some((u) => u.id === FAKE_APPROVER.id)) mr.approved_by.push(FAKE_APPROVER)
+      return json(201, { approved: true })
+    }
+    const unapproveMatch = rest.match(/^\/merge_requests\/(\d+)\/unapprove$/)
+    if (req.method === 'POST' && unapproveMatch) {
+      const mr = mergeRequests.get(Number(unapproveMatch[1]))
+      if (!mr) return json(404, { message: `No fake merge request !${unapproveMatch[1]}` })
+      mr.approved = false
+      mr.approved_by = []
+      return json(201, { approved: false })
+    }
+
+    // GET .../merge_requests/:iid/discussions — lib/gitlabPullRequestsClient.js's getDiscussions.
+    const discussionsMatch = rest.match(/^\/merge_requests\/(\d+)\/discussions$/)
+    if (req.method === 'GET' && discussionsMatch) {
+      const mr = mergeRequests.get(Number(discussionsMatch[1]))
+      if (!mr) return json(404, { message: `No fake merge request !${discussionsMatch[1]}` })
+      return json(200, mr.discussions)
+    }
+    // POST .../merge_requests/:iid/discussions — test-facing: opens a new (unresolved) discussion
+    // thread, simulating a reviewer leaving feedback without approving.
+    if (req.method === 'POST' && discussionsMatch) {
+      const mr = mergeRequests.get(Number(discussionsMatch[1]))
+      if (!mr) return json(404, { message: `No fake merge request !${discussionsMatch[1]}` })
+      const body = await readJsonBody(req)
+      const discussion = {
+        id: `fake-discussion-${++discussionIdCounter}`,
+        individual_note: false,
+        notes: [{ id: discussionIdCounter, body: body.body ?? '', resolvable: true, resolved: false }],
+      }
+      mr.discussions.push(discussion)
+      return json(201, discussion)
+    }
+    // PUT .../merge_requests/:iid/discussions/:discussion_id — test-facing: resolves (or unresolves)
+    // every resolvable note in that discussion, real GitLab's own documented contract for this endpoint.
+    const discussionResolveMatch = rest.match(/^\/merge_requests\/(\d+)\/discussions\/([^/]+)$/)
+    if (req.method === 'PUT' && discussionResolveMatch) {
+      const mr = mergeRequests.get(Number(discussionResolveMatch[1]))
+      if (!mr) return json(404, { message: `No fake merge request !${discussionResolveMatch[1]}` })
+      const discussion = mr.discussions.find((d) => d.id === discussionResolveMatch[2])
+      if (!discussion) return json(404, { message: `No fake discussion "${discussionResolveMatch[2]}"` })
+      const body = await readJsonBody(req)
+      const resolved = body.resolved !== false
+      discussion.notes = discussion.notes.map((note) => (note.resolvable ? { ...note, resolved } : note))
+      return json(200, discussion)
+    }
+
+    // GET .../merge_requests/:iid/commits — #33's getPullRequestCommits. This fake's git model has no
+    // real commit history to walk (mirrors fakeGitHubServer.js's own Pull Requests commits route), so
+    // it reports the source branch's own current tip commit as the MR's sole commit — enough for
+    // lib/stageStatus.js's commit-panel summary.
+    const mrCommitsMatch = rest.match(/^\/merge_requests\/(\d+)\/commits$/)
+    if (req.method === 'GET' && mrCommitsMatch) {
+      const mr = mergeRequests.get(Number(mrCommitsMatch[1]))
+      if (!mr) return json(404, { message: `No fake merge request !${mrCommitsMatch[1]}` })
+      const tip = branchTips.get(mr.source_branch)
+      if (!tip) return json(200, [])
+      return json(200, [
+        { id: tip.commitId, short_id: tip.commitId, title: `fake commit ${tip.commitId}`, message: `fake commit ${tip.commitId}`, committed_date: tip.committedDate, authored_date: tip.authoredDate },
+      ])
+    }
+
+    // PUT .../merge_requests/:iid/merge — #33's completePullRequest. `mergeRefusal`
+    // (`{ status, message }`) simulates a protected-branch or push-rule block; otherwise the merge
+    // always succeeds with a merge commit, fast-forwarding `target_branch` to `source_branch`'s
+    // current content.
+    const mrMergeMatch = rest.match(/^\/merge_requests\/(\d+)\/merge$/)
+    if (req.method === 'PUT' && mrMergeMatch) {
+      const mr = mergeRequests.get(Number(mrMergeMatch[1]))
+      if (!mr) return json(404, { message: `No fake merge request !${mrMergeMatch[1]}` })
+      if (mr.state === 'merged') return json(405, { message: '405 Method Not Allowed (fake: already merged)' })
+      if (mergeRefusal) {
+        return json(mergeRefusal.status ?? 405, { message: mergeRefusal.message ?? '405 Method Not Allowed' })
+      }
+      const sourceStore = branches.get(mr.source_branch)
+      if (sourceStore) branches.set(mr.target_branch, new Map(sourceStore))
+      commitCounter += 1
+      const date = new Date().toISOString()
+      const mergeCommit = { commitId: `fake-commit-${commitCounter}`, committedDate: date, authoredDate: date }
+      branchTips.set(mr.target_branch, mergeCommit)
+      mr.state = 'merged'
+      return json(200, { id: mr.id, iid: mr.iid, state: 'merged', merge_commit_sha: mergeCommit.commitId })
+    }
+
     return json(404, { message: `No fake route for ${req.method} ${rawPathname}` })
   })
 }
 
 /** Starts a `createFakeGitLabServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/helpers/fakeGitHubServer.js`'s own `withFakeGitHubServer` shape. */
-export function withFakeGitLabServer({ namespace, repository, validPat, files, branchFiles, repoExists, members }, fn) {
+export function withFakeGitLabServer({ namespace, repository, validPat, files, branchFiles, repoExists, members, mergeRefusal }, fn) {
   return new Promise((resolve, reject) => {
-    const server = createFakeGitLabServer({ namespace, repository, validPat, files, branchFiles, repoExists, members })
+    const server = createFakeGitLabServer({ namespace, repository, validPat, files, branchFiles, repoExists, members, mergeRefusal })
     server.listen(0, async () => {
       const { port } = server.address()
       try {
