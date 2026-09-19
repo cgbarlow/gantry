@@ -11,17 +11,18 @@ import {
 
 // ---------- provider enum (ADR-0037) ----------
 
-test('PROVIDERS models azure-devops, github and atlassian, so a future selector can list atlassian as known-but-disabled', () => {
-  assert.deepEqual(PROVIDERS, ['azure-devops', 'github', 'atlassian'])
+test('PROVIDERS models azure-devops, github, gitlab and atlassian, so a future selector can list atlassian as known-but-disabled', () => {
+  assert.deepEqual(PROVIDERS, ['azure-devops', 'github', 'gitlab', 'atlassian'])
 })
 
 test('DEFAULT_PROVIDER is azure-devops — the value a pre-#3 flat record is read forward as', () => {
   assert.equal(DEFAULT_PROVIDER, 'azure-devops')
 })
 
-test('assertValidProvider accepts azure-devops and github', () => {
+test('assertValidProvider accepts azure-devops, github and gitlab', () => {
   assert.doesNotThrow(() => assertValidProvider('azure-devops'))
   assert.doesNotThrow(() => assertValidProvider('github'))
+  assert.doesNotThrow(() => assertValidProvider('gitlab'))
 })
 
 test('assertValidProvider rejects atlassian as not supported yet', () => {
@@ -61,6 +62,32 @@ test('normalizeProviderLocation rejects a GitHub location missing owner or repos
 
 test('normalizeProviderLocation rejects an Azure DevOps location missing any of organization/project/repository', () => {
   assert.throws(() => normalizeProviderLocation('azure-devops', {}), /missing: organization, project, repository/)
+})
+
+// ---------- gitlab (ADR-0041: {namespace, repository, baseUrl?}) ----------
+
+test('normalizeProviderLocation validates and prunes a GitLab location to namespace/repository/baseUrl', () => {
+  const location = normalizeProviderLocation('gitlab', {
+    namespace: 'engineering/platform/backend-services',
+    repository: 'repo',
+    baseUrl: 'https://gitlab.example.internal',
+    owner: 'should-be-dropped',
+  })
+  assert.deepEqual(location, {
+    namespace: 'engineering/platform/backend-services',
+    repository: 'repo',
+    baseUrl: 'https://gitlab.example.internal',
+  })
+})
+
+test('normalizeProviderLocation rejects a GitLab location missing namespace or repository', () => {
+  assert.throws(() => normalizeProviderLocation('gitlab', { namespace: 'group' }), /missing: repository/)
+  assert.throws(() => normalizeProviderLocation('gitlab', { repository: 'repo' }), /missing: namespace/)
+})
+
+test('normalizeProviderLocation omits a GitLab baseUrl entirely when absent, same as every other provider', () => {
+  const location = normalizeProviderLocation('gitlab', { namespace: 'group', repository: 'repo' })
+  assert.ok(!('baseUrl' in location))
 })
 
 test('normalizeProviderLocation customizes its error message with entityLabel', () => {
@@ -112,4 +139,25 @@ test('describeProviderLocation renders an Azure DevOps location as organization/
 
 test('describeProviderLocation renders a GitHub location as owner/repository — never "undefined/undefined/repo"', () => {
   assert.equal(describeProviderLocation('github', { owner: 'octocat', repository: 'repo' }), 'octocat/repo')
+})
+
+test('describeProviderLocation renders a GitLab location as namespace/repository, namespace kept as one opaque segment', () => {
+  assert.equal(
+    describeProviderLocation('gitlab', { namespace: 'engineering/platform/backend-services', repository: 'repo' }),
+    'engineering/platform/backend-services/repo'
+  )
+})
+
+// ---------- providerLocationsMatch (gitlab) ----------
+
+test('providerLocationsMatch matches an exact GitLab tuple, namespace included', () => {
+  const a = { namespace: 'group/subgroup', repository: 'repo' }
+  const b = { namespace: 'group/subgroup', repository: 'repo' }
+  assert.equal(providerLocationsMatch('gitlab', a, b), true)
+})
+
+test('providerLocationsMatch treats a different GitLab namespace as a non-match', () => {
+  const a = { namespace: 'group/subgroup', repository: 'repo' }
+  const b = { namespace: 'group/other-subgroup', repository: 'repo' }
+  assert.equal(providerLocationsMatch('gitlab', a, b), false)
 })
