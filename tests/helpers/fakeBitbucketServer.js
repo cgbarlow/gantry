@@ -38,8 +38,17 @@ import { createServer } from 'node:http'
  * `repoExists` (default `true`) controls whether the repository is reported as existing at all —
  * `false` 404s every route under this repository, simulating a workspace/repo slug that doesn't
  * resolve to anything.
+ *
+ * `permissions` (#44, default `[]`) seeds `GET /workspaces/{workspace}/permissions/repositories/{repo_slug}`
+ * — Bitbucket's own repository-permissions API, `lib/bitbucketIdentityClient.js`'s whole candidate set.
+ * Each entry is `{ uuid, accountId, displayName, nickname, permission }` — `permission` is Bitbucket's
+ * own "read"/"write"/"admin" scale, exercising that client's own write-or-above assignability gate. This
+ * route lives under `/workspaces/{workspace}/...`, not `/repositories/{workspace}/{repo_slug}/...` like
+ * every other route below — a genuine Bitbucket API inconsistency `lib/bitbucketIdentityClient.js`'s own
+ * doc comment already notes — so it is matched against the raw pathname directly, before this fake's
+ * `repoBasePath`-relative routing (and its own `repoExists` gate) even applies.
  */
-export function createFakeBitbucketServer({ owner, repository, validPat, files = {}, branchFiles = {}, repoExists = true } = {}) {
+export function createFakeBitbucketServer({ owner, repository, validPat, files = {}, branchFiles = {}, repoExists = true, permissions = [] } = {}) {
   const stores = new Map() // hash -> Map<normalized path, Buffer>
   const commitDates = new Map() // hash -> ISO date string, so re-pointing a branch at an existing hash (createBranch) doesn't mint a fresh date
   const branchTips = new Map() // branch name -> { hash, date }
@@ -122,6 +131,26 @@ export function createFakeBitbucketServer({ owner, repository, validPat, files =
     const providedToken = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : null
     if (!providedToken || !validPats.includes(providedToken)) {
       return json(401, { type: 'error', error: { message: '401 Unauthorized (fake server: invalid or missing Bearer token)' } })
+    }
+
+    // GET /workspaces/{workspace}/permissions/repositories/{repo_slug} — #44's
+    // lib/bitbucketIdentityClient.js. Lives under a different path prefix than every other route below
+    // (see this factory's own doc comment on `permissions`), so it's matched here, ahead of (and
+    // independent of) the `/repositories/...`-relative routing and `repoExists` gate below.
+    const permissionsPath = `/2.0/workspaces/${encodeURIComponent(owner)}/permissions/repositories/${encodeURIComponent(repository)}`
+    if (req.method === 'GET' && url.pathname === permissionsPath) {
+      const values = permissions.map((p) => ({
+        type: 'repository_permission',
+        permission: p.permission,
+        user: {
+          type: 'user',
+          display_name: p.displayName,
+          uuid: p.uuid,
+          account_id: p.accountId,
+          nickname: p.nickname,
+        },
+      }))
+      return json(200, { pagelen: 100, size: values.length, page: 1, values })
     }
 
     if (!url.pathname.startsWith(repoBasePath)) {
@@ -284,9 +313,9 @@ export function createFakeBitbucketServer({ owner, repository, validPat, files =
 }
 
 /** Starts a `createFakeBitbucketServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/helpers/fakeGitLabServer.js`'s own `withFakeGitLabServer` shape. */
-export function withFakeBitbucketServer({ owner, repository, validPat, files, branchFiles, repoExists }, fn) {
+export function withFakeBitbucketServer({ owner, repository, validPat, files, branchFiles, repoExists, permissions }, fn) {
   return new Promise((resolve, reject) => {
-    const server = createFakeBitbucketServer({ owner, repository, validPat, files, branchFiles, repoExists })
+    const server = createFakeBitbucketServer({ owner, repository, validPat, files, branchFiles, repoExists, permissions })
     server.listen(0, async () => {
       const { port } = server.address()
       try {

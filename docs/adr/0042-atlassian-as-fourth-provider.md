@@ -46,6 +46,12 @@ Bitbucket Cloud's PR review model needs no GitLab-style workaround. Each reviewe
 
 A PR reviewer is picked from Bitbucket's own member list; a work-item assignee is picked from Jira's own user directory. The two are never unified into one combined picker, even though both may sit under one Atlassian account — this falls directly out of the split-suite model already chosen: each capability (pull requests, work items) is backed by whichever product actually implements it, and that product's own directory is the only one that capability ever needs.
 
+### Person-picker assignability gate (Bitbucket half)
+
+Bitbucket Cloud's own repository-permissions API (`GET /workspaces/{workspace}/permissions/repositories/{repo_slug}`) is a single response listing everyone with an explicit permission on the repository, each already carrying their own `permission` — the same "one response, no second per-user lookup" shape GitLab's Members API gives (docs/adr/0041), and unlike GitHub's own two-endpoint collaborators-plus-org-members union (docs/adr/0040).
+
+Bitbucket expresses access as a three-level `read`/`write`/`admin` scale — coarser than GitLab's five-level Guest/Reporter/Developer/Maintainer/Owner scale, but still not GitHub's binary has-access-or-not. `write` (or `admin`) is the minimum a candidate needs to be a meaningful pull-request reviewer: a `read`-only account can view a pull request and leave a general comment, but Bitbucket only lets `write`-or-above accounts submit a review outcome (approve / request changes). A `read`-only candidate therefore resolves but is shown blocked, with guidance to request write access and retry — the same shows-but-blocks contract #10/#28 already established for GitHub/GitLab (`lib/bitbucketIdentityClient.js`, #44).
+
 ## Terminology
 
 Bitbucket's own org-level container is literally named "workspace" in Bitbucket's own product and API — a sharper collision than GitLab's (GitLab's clash was with an unrelated cloud-dev-environment feature, not the same word for a structurally similar thing). Gantry's docs and UI call it a **Bitbucket account** instead, never "Bitbucket workspace." The glossary entry ADR-0037 left open ("must be renamed before the term reaches code or UI copy") is resolved by this choice.
