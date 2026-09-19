@@ -117,6 +117,11 @@ export function withRunningServerForProvider(provider, { options, fakeServerOpti
     )
   }
   if (provider === 'gitlab') {
+    // #31 — the GitLab twin of the GitHub branch above: same "real fake provider server + real gantry
+    // server" lifecycle, over GitLab's own `{ namespace, repository }` location fields (ADR-0041).
+    // `allowGitLabBaseUrlOverride: true` (#30) is needed for the work-items/link route's own SSRF
+    // guard against this fixture's baseUrl; harmless for callers (like #31's asset/render tests) that
+    // don't exercise that route.
     return withFakeGitLabServer(
       { namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, validPat: GITLAB_VALID_PAT, ...fakeServerOptions },
       (providerBaseUrl) =>
