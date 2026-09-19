@@ -13,6 +13,7 @@ import { withFakeAzureDevOpsServer as withFakeServer } from './helpers/fakeAzure
 import { withFakeGitHubServer, GITHUB_OWNER, GITHUB_REPOSITORY, GITHUB_VALID_PAT } from './helpers/fakeGitHubServer.js'
 import { withFakeGitLabServer, GITLAB_NAMESPACE, GITLAB_REPOSITORY, GITLAB_VALID_PAT } from './helpers/fakeGitLabServer.js'
 import { withFakeBitbucketServer, BITBUCKET_OWNER, BITBUCKET_REPOSITORY, BITBUCKET_VALID_PAT } from './helpers/fakeBitbucketServer.js'
+import { withFakeJiraServer, JIRA_SITE, JIRA_PROJECT_KEY, JIRA_VALID_PAT } from './helpers/fakeJiraServer.js'
 import { ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 import { runProviderContractTests, runContentStoreContractTests } from './helpers/providerContractTests.js'
 
@@ -33,9 +34,9 @@ test('getProviderCapabilities resolves azure-devops to its four capability facto
 })
 
 test('getProviderCapabilities throws a clear error naming the registered providers, for an unregistered provider id', () => {
-  // 'atlassian' itself is registered as of #41 (its content-store capability) — a bogus id neither
-  // this registry nor lib/provider.js's own enum has ever heard of exercises the same "unregistered"
-  // path without going stale the next time a real provider gains its first capability.
+  // 'atlassian' itself is registered as of #41/#42 (its content-store and workItems capabilities) — a
+  // bogus id neither this registry nor lib/provider.js's own enum has ever heard of exercises the same
+  // "unregistered" path without going stale the next time a real provider gains its first capability.
   assert.throws(() => getProviderCapabilities('not-a-real-provider'), /no provider registered for "not-a-real-provider"/)
   assert.throws(() => getProviderCapabilities('not-a-real-provider'), /azure-devops/)
 })
@@ -191,10 +192,9 @@ test('resolveWorkItems instantiates gitlab\'s work-items client and creates/read
   })
 })
 
-// #41: atlassian joins the registry the same incremental way github/gitlab did, starting with its
-// content store — backed by Bitbucket Cloud, ADR-0042's split-suite provider. Only `contentStore` is
-// registered so far; its `pullRequests`/`identity` (Bitbucket-backed) and `workItems` (Jira-backed)
-// land in later tickets (#42/#44/#46).
+// #41/#42: atlassian joins the registry the same incremental way github/gitlab did — #41 landed its
+// content store (Bitbucket Cloud), #42 landed its workItems (Jira Cloud). `pullRequests`/`identity`
+// (both Bitbucket-backed, ADR-0042's split-suite provider) land in later tickets (#44/#45).
 test('registeredProviders lists atlassian once its content store is registered', () => {
   assert.ok(registeredProviders().includes('atlassian'))
 })
@@ -224,6 +224,41 @@ test('resolveContentStore\'s atlassian client surfaces a rejected token as the n
   })
 })
 
+// #42: atlassian's workItems capability (Jira Cloud) joins the registry alongside #41's content store
+// (#40 registered the provider identifier and its two-token credential schema only, per its own
+// scope, shipping no capability at all).
+test('registeredProviders lists atlassian once its workItems capability is registered', () => {
+  assert.ok(registeredProviders().includes('atlassian'))
+})
+
+test('getProviderCapabilities resolves atlassian to its content-store and workItems factories, so far', () => {
+  const capabilities = getProviderCapabilities('atlassian')
+  assert.equal(typeof capabilities.contentStore, 'function')
+  assert.equal(typeof capabilities.workItems, 'function')
+  assert.equal(capabilities.pullRequests, undefined)
+  assert.equal(capabilities.identity, undefined)
+})
+
+test('resolveWorkItems instantiates atlassian\'s Jira-backed work-items client and creates/reads an issue through it', async () => {
+  await withFakeJiraServer({ jiraProjectKey: JIRA_PROJECT_KEY, validPat: JIRA_VALID_PAT }, async (baseUrl) => {
+    const workItems = resolveWorkItems('atlassian', { jiraSite: JIRA_SITE, jiraProjectKey: JIRA_PROJECT_KEY, pat: JIRA_VALID_PAT, baseUrl })
+    const created = await workItems.createIssue({ title: 'Registry smoke test', body: '', issueType: 'Task' })
+    const fetched = await workItems.getIssue(created.key)
+    assert.equal(fetched.title, 'Registry smoke test')
+  })
+})
+
+test('resolveWorkItems\' atlassian client surfaces a rejected token as the neutral AuthenticationError, tagged atlassian', async () => {
+  await withFakeJiraServer({ jiraProjectKey: JIRA_PROJECT_KEY, validPat: JIRA_VALID_PAT }, async (baseUrl) => {
+    const workItems = resolveWorkItems('atlassian', { jiraSite: JIRA_SITE, jiraProjectKey: JIRA_PROJECT_KEY, pat: 'wrong-token', baseUrl })
+    await assert.rejects(() => workItems.listIssueTypes(), (err) => {
+      assert.ok(err instanceof AuthenticationError)
+      assert.equal(err.provider, 'atlassian')
+      return true
+    })
+  })
+})
+
 function withFakeBitbucketServerForContract(fn) {
   return withFakeBitbucketServer({ owner: BITBUCKET_OWNER, repository: BITBUCKET_REPOSITORY, validPat: BITBUCKET_VALID_PAT }, fn)
 }
@@ -232,7 +267,7 @@ function withFakeBitbucketServerForContract(fn) {
 // for gitlab above), run against atlassian's registered content-store capability — the same
 // createBranch/branchExists isolation contract a later stage-branch ticket (#43) builds on.
 // `runProviderContractTests` (the four-capability suite) isn't run for atlassian, same as it isn't for
-// github/gitlab, and for the same reason: only content-store is registered so far.
+// github/gitlab, and for the same reason: contentStore + workItems are registered so far, not all four.
 runContentStoreContractTests('atlassian', {
   providerId: 'atlassian',
   withServer: withFakeBitbucketServerForContract,
