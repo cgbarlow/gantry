@@ -14,7 +14,9 @@ import { withFakeGitLabServer, GITLAB_NAMESPACE, GITLAB_REPOSITORY, GITLAB_VALID
 // APIs, writing one or several files as a single commit over the Commits API, and the per-stage
 // branch lifecycle's own primitives (getBranchObjectId/branchExists/createBranch). Exercised over
 // real `fetch` against tests/helpers/fakeGitLabServer.js, never a mocked `fetch`, mirroring
-// tests/githubClient.test.js's own conventions.
+// tests/githubClient.test.js's own conventions. Also carries #27's own namespace-addressing coverage
+// for the read-only methods (`lib/definitionGitLab.js`'s path) once #26 absorbed #27's read-only
+// client into this same superset file, per #27's own doc comment.
 
 test('createGitLabClient requires namespace, repository and pat', () => {
   assert.throws(() => createGitLabClient({ repository: GITLAB_REPOSITORY, pat: GITLAB_VALID_PAT }), /"namespace" is required/)
@@ -376,4 +378,17 @@ test('a multi-segment namespace (a subgroup path) is addressed correctly end to 
     await client.writeFile('x.md', 'x\n')
     assert.equal(await client.getFileContent('x.md'), 'x\n')
   })
+})
+
+// From #27: exercises a multi-segment namespace through listFolder specifically (rather than
+// repoExists/writeFile/getFileContent above) — lib/definitionGitLab.js's own read path never calls
+// repoExists or writeFile, so this is the namespace-encoding coverage that path actually relies on.
+test('listFolder addresses the project by its full namespace/repository path, URL-encoded as a single :id segment', async () => {
+  await withFakeGitLabServer(
+    { namespace: 'engineering/platform/backend-services', repository: GITLAB_REPOSITORY, validPat: GITLAB_VALID_PAT, files: { 'definitions/x/1/definition.yaml': 'a' } },
+    async (baseUrl) => {
+      const client = createGitLabClient({ namespace: 'engineering/platform/backend-services', repository: GITLAB_REPOSITORY, pat: GITLAB_VALID_PAT, baseUrl })
+      assert.deepEqual(await client.listFolder('definitions'), [{ path: 'definitions/x', isFolder: true }])
+    }
+  )
 })

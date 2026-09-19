@@ -14,6 +14,7 @@ import { withScratchInstances } from './helpers/lifecycle.js'
 
 const LOCATION = { organization: 'fake-org', project: 'fake-project', repository: 'fake-repo' }
 const GITHUB_LOCATION = { owner: 'octocat', repository: 'fake-repo' }
+const GITLAB_LOCATION = { namespace: 'engineering/platform', repository: 'fake-repo' }
 
 // ---------- addLibraryRepo: nested {provider, location} shape only (ticket #6) ----------
 
@@ -80,6 +81,30 @@ test('addLibraryRepo accepts a GitHub {provider, location} — owner/repository,
 test('addLibraryRepo rejects a GitHub location missing owner or repository', async () => {
   await withScratchInstances((instancesDir) => {
     assert.throws(() => addLibraryRepo({ provider: 'github', location: { owner: 'octocat' } }, { instancesDir }), /missing: repository/)
+  })
+})
+
+test('addLibraryRepo accepts a GitLab {provider, location} — namespace/repository, no project required (ADR-0041)', async () => {
+  await withScratchInstances((instancesDir) => {
+    const repo = addLibraryRepo({ provider: 'gitlab', location: GITLAB_LOCATION }, { instancesDir })
+    assert.equal(repo.provider, 'gitlab')
+    assert.deepEqual(repo.location, GITLAB_LOCATION)
+    // No location accessor exists at all any more (ticket #6).
+    assert.equal(repo.organization, undefined)
+  })
+})
+
+test('addLibraryRepo accepts a GitLab location with a self-hosted baseUrl', async () => {
+  await withScratchInstances((instancesDir) => {
+    const repo = addLibraryRepo({ provider: 'gitlab', location: { ...GITLAB_LOCATION, baseUrl: 'https://gitlab.example.internal' } }, { instancesDir })
+    assert.equal(repo.location.baseUrl, 'https://gitlab.example.internal')
+  })
+})
+
+test('addLibraryRepo rejects a GitLab location missing namespace or repository', async () => {
+  await withScratchInstances((instancesDir) => {
+    assert.throws(() => addLibraryRepo({ provider: 'gitlab', location: { namespace: 'engineering' } }, { instancesDir }), /missing: repository/)
+    assert.throws(() => addLibraryRepo({ provider: 'gitlab', location: { repository: 'fake-repo' } }, { instancesDir }), /missing: namespace/)
   })
 })
 
@@ -158,6 +183,16 @@ test('findLibraryRepoByLocation matches within a provider only — a GitHub repo
       findLibraryRepoByLocation({ provider: 'github', location: { owner: 'shared', repository: 'shared-repo' } }, { instancesDir }),
       gh
     )
+  })
+})
+
+test('findLibraryRepoByLocation scopes GitLab separately too — a GitLab repo sharing a repository name with a GitHub one is distinct', async () => {
+  await withScratchInstances((instancesDir) => {
+    const gh = addLibraryRepo({ provider: 'github', location: { owner: 'shared', repository: 'shared-repo' } }, { instancesDir })
+    const gl = addLibraryRepo({ provider: 'gitlab', location: { namespace: 'shared', repository: 'shared-repo' } }, { instancesDir })
+
+    assert.deepEqual(findLibraryRepoByLocation({ provider: 'github', location: { owner: 'shared', repository: 'shared-repo' } }, { instancesDir }), gh)
+    assert.deepEqual(findLibraryRepoByLocation({ provider: 'gitlab', location: { namespace: 'shared', repository: 'shared-repo' } }, { instancesDir }), gl)
   })
 })
 
