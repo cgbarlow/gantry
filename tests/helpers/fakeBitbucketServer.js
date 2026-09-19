@@ -16,8 +16,12 @@ import { createServer } from 'node:http'
  * name to its tip commit hash — see `lib/bitbucketClient.js`'s own "Branch names containing '/'" doc
  * comment), branch creation (`POST .../refs/branches`), the hash-addressed Source API
  * (`GET .../src/{hash}/{path}`, with and without `?format=meta`) and the multipart commit endpoint
- * (`POST .../src`) that adds/updates/deletes files in one commit. Later tickets (#43 stage branches,
- * #46 pull requests, ...) extend this the same incremental way `fakeGitLabServer.js` grew.
+ * (`POST .../src`) that adds/updates/deletes files in one commit. #49 adds
+ * `lib/bitbucketPullRequestsClient.js`'s own scope on top — create/read/update-reviewers
+ * (`POST`/`GET`/`PUT .../pullrequests[/{id}]`) plus two test-only convenience routes
+ * (`POST .../pullrequests/{id}/approve` and `.../request-changes`) simulating a reviewer acting
+ * directly on Bitbucket, the same role `fakeGitLabServer.js`'s own `/approve`/`/discussions` routes
+ * play for GitLab. #46 (merge, wired into sign-off) extends this the same incremental way.
  *
  * Unlike GitLab's own `namespace%2Frepository`-style opaque `:id`, a Bitbucket workspace/repo slug is
  * always a single path segment with no internal encoding concerns — this fake's own routing is
@@ -82,7 +86,7 @@ export function createFakeBitbucketServer({
   const branchTips = new Map() // branch name -> { hash, date }
   let commitCounter = 0
 
-  // ---- Pull requests (#46) ----
+  // ---- Pull requests (#46, #49) ----
   const pullRequests = new Map() // id -> { id, title, description, state, source_branch, destination_branch, participants }
   let pullRequestIdCounter = 0
   const FAKE_REVIEWER = { uuid: '{fake-reviewer-uuid}', display_name: 'Fake Reviewer', nickname: 'fake-reviewer' }
