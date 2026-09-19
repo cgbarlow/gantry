@@ -99,17 +99,17 @@ test('resolvePullRequests instantiates github\'s pull-requests client and opens 
   )
 })
 
-// #26: gitlab joins the registry the same incremental way github did, starting with content store
-// only — identity/work items/pull requests are later tickets' job (ADR-0041's own scope list).
+// #26/#30: gitlab joins the registry the same incremental way github did — content store (#26) and
+// work items (#30) so far; identity/pull requests are later tickets' job (ADR-0041's own scope list).
 test('registeredProviders lists gitlab once its content store is registered', () => {
   assert.ok(registeredProviders().includes('gitlab'))
 })
 
-test('getProviderCapabilities resolves gitlab to its content-store factory (no other capability registered yet)', () => {
+test('getProviderCapabilities resolves gitlab to its content-store and work-items factories (no other capability registered yet)', () => {
   const capabilities = getProviderCapabilities('gitlab')
   assert.equal(typeof capabilities.contentStore, 'function')
+  assert.equal(typeof capabilities.workItems, 'function')
   assert.equal(capabilities.pullRequests, undefined)
-  assert.equal(capabilities.workItems, undefined)
   assert.equal(capabilities.identity, undefined)
 })
 
@@ -130,6 +130,16 @@ test('resolveContentStore\'s gitlab client surfaces a rejected PAT as the neutra
       assert.equal(err.provider, 'gitlab')
       return true
     })
+  })
+})
+
+// #30: gitlab's work-items capability, registered the same way as its content store above.
+test('resolveWorkItems instantiates gitlab\'s work-items client and creates/reads an issue through it', async () => {
+  await withFakeGitLabServer({ namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, validPat: GITLAB_VALID_PAT }, async (baseUrl) => {
+    const workItems = resolveWorkItems('gitlab', { namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, pat: GITLAB_VALID_PAT, baseUrl })
+    const created = await workItems.createIssue({ title: 'Registry smoke test', body: '' })
+    const fetched = await workItems.getIssue(created.iid)
+    assert.equal(fetched.title, 'Registry smoke test')
   })
 })
 

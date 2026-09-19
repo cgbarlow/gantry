@@ -10,9 +10,12 @@ import { createServer } from 'node:http'
  * Covers the subset `lib/gitlabClient.js` implements so far (#26's content-store scope): the project
  * metadata endpoint (`GET /projects/:id`), the Repository Files API (get a file), the Repository Tree
  * API (list a folder), the Repository Branches API (get/create a branch), and the Commits API (write
- * one or several files as a single commit). Later tickets (#28 identity, #29 stage branches, #30 work
- * items, #33 merge requests, ...) extend this the same incremental way `fakeGitHubServer.js` grew —
- * new endpoints added here as the GitLab client itself grows them, never a parallel second fake.
+ * one or several files as a single commit) — plus, per #30, the Issues API (`lib/gitlabWorkItemsClient.js`'s
+ * work-items capability): create/read/update a project issue by its `iid` (GitLab's own project-scoped
+ * issue number, the "iid" — `id` stays a separate, global-across-all-projects identifier this fake also
+ * assigns but which `lib/gitlabWorkItemsClient.js` never addresses an issue by). Later tickets (#29
+ * stage branches, #33 merge requests, ...) extend this the same incremental way `fakeGitHubServer.js`
+ * grew — new endpoints added here as the GitLab client itself grows them, never a parallel second fake.
  *
  * A project's `:id` is GitLab's own `namespace%2Frepository` URL-encoded path — both the project id
  * and a file's `file_path` are single path *segments* that may themselves contain `%2F`-encoded
@@ -33,6 +36,15 @@ export function createFakeGitLabServer({ namespace, repository, validPat, files 
   const branches = new Map() // branch name -> Map<path, Buffer>
   const branchTips = new Map() // branch name -> { commitId, committedDate, authoredDate }
   let commitCounter = 0
+
+  // #30: issues, keyed by their project-scoped `iid` — the id `lib/gitlabWorkItemsClient.js` addresses
+  // every issue by (GitLab's own "internal id", equivalent to GitHub's issue `number`). `id` is a
+  // separate, globally-unique-across-the-whole-GitLab-instance identifier real GitLab also assigns;
+  // this fake mints one too so a response shape-checks the same as the real API's, even though nothing
+  // in `lib/gitlabWorkItemsClient.js` currently addresses an issue by it.
+  const issues = new Map() // iid -> issue object
+  let issueIidCounter = 0
+  let issueIdCounter = 5000
 
   // #26: every stored file is a real Buffer — a fixture may pass either a plain string (a text file's
   // UTF-8 content) or a Buffer (a binary file's real bytes) — matching how a write via the Commits API
@@ -214,6 +226,48 @@ export function createFakeGitLabServer({ namespace, repository, validPat, files 
       const commit = { commitId: `fake-commit-${commitCounter}`, committedDate: date, authoredDate: date }
       branchTips.set(branch, commit)
       return json(201, { id: commit.commitId, short_id: commit.commitId, committed_date: commit.committedDate, authored_date: commit.authoredDate })
+    }
+
+    // POST /projects/:id/issues — creates a new issue. Mirrors real GitLab's own create-issue response
+    // shape (`iid`/`id`/`title`/`description`/`state`/`web_url`), lib/gitlabWorkItemsClient.js's
+    // createIssue().
+    if (req.method === 'POST' && rest === '/issues') {
+      const body = await readJsonBody(req)
+      const iid = ++issueIidCounter
+      const id = ++issueIdCounter
+      const issue = {
+        id,
+        iid,
+        project_id: 1,
+        title: body.title,
+        description: body.description ?? null,
+        state: 'opened',
+        web_url: `https://fake-gitlab.invalid/${namespace}/${repository}/-/issues/${iid}`,
+      }
+      issues.set(iid, issue)
+      return json(201, issue)
+    }
+
+    // GET /projects/:id/issues/:issue_iid and PUT /projects/:id/issues/:issue_iid — read/partially
+    // update an issue by its project-scoped `iid`. PUT supports `title`/`description` plus GitLab's own
+    // `state_event` ('close'/'reopen', translated here into the `state` field a GET reports —
+    // lib/gitlabWorkItemsClient.js never sends a bare `state` directly, matching real GitLab's own
+    // contract, which only accepts state changes via `state_event`).
+    const issueMatch = rest.match(/^\/issues\/(\d+)$/)
+    if (issueMatch) {
+      const iid = Number(issueMatch[1])
+      const issue = issues.get(iid)
+      if (!issue) return json(404, { message: `404 Issue Not Found (fake: iid ${iid})` })
+
+      if (req.method === 'GET') return json(200, issue)
+
+      if (req.method === 'PUT') {
+        const { state_event, ...rest } = await readJsonBody(req)
+        Object.assign(issue, rest)
+        if (state_event === 'close') issue.state = 'closed'
+        else if (state_event === 'reopen') issue.state = 'opened'
+        return json(200, issue)
+      }
     }
 
     return json(404, { message: `No fake route for ${req.method} ${rawPathname}` })
