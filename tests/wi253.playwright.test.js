@@ -168,6 +168,9 @@ test('B: wizard Owner and Assignee are identity pickers hitting /api/identities'
       await page.locator('#ws-organization').fill(ORGANIZATION)
       await page.locator('#ws-project').fill(PROJECT)
       await page.locator('#ws-repository').fill(REPOSITORY)
+      // #9 (ADR-0038): a brand-new workspace has no id yet to resolve a stored PAT against — the
+      // wizard's own PAT field, not the (now-removed) global default, is what proves access here.
+      await page.locator('#ws-pat').fill(VALID_PAT)
       // Owner picker: type and select
       await page.locator('.identity-picker input').fill('Test')
       await page.waitForTimeout(500)
@@ -248,6 +251,9 @@ test('D1: create-new-parent is default link mode and creates+links', async () =>
       await page.locator('#ws-organization').fill(ORGANIZATION)
       await page.locator('#ws-project').fill(PROJECT)
       await page.locator('#ws-repository').fill(REPOSITORY)
+      // #9 (ADR-0038): a brand-new workspace has no id yet to resolve a stored PAT against — the
+      // wizard's own PAT field, not the (now-removed) global default, is what proves access here.
+      await page.locator('#ws-pat').fill(VALID_PAT)
       await page.getByRole('button', { name: 'Register workspace' }).click()
       await page.waitForSelector('#instance-name', { timeout: 10_000 })
       await page.locator('.definition-card').first().click()

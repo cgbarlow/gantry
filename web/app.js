@@ -12,8 +12,8 @@ import { keymap } from '@codemirror/view'
 import { indentWithTab, undo, redo, undoDepth, redoDepth, isolateHistory } from '@codemirror/commands'
 import { syntaxTree } from '@codemirror/language'
 import { markdown } from '@codemirror/lang-markdown'
-import { promptContext, promptOpen, resolvePromptWith } from './lib/credential.js'
-import { apiFetch, apiFetchForInstance, cachedScopeForSlug } from './lib/apiFetch.js'
+import { promptContext, promptOpen, resolvePromptWith, migrateGlobalPatToWorkspaces } from './lib/credential.js'
+import { apiFetch, apiFetchForInstance, apiFetchForInstanceRef, cachedScopeForSlug } from './lib/apiFetch.js'
 import { renderMarkdown } from './lib/markdown.js'
 import { Dropdown } from './lib/dropdown.js'
 import { apply as applyMarkdownCommand, HEADING_LEVELS, findTable, diffRange } from './lib/markdownCommands.js'
@@ -641,7 +641,10 @@ export function buildStageHeadings(modules, visibleFieldIds) {
 const NUMERIC_REF_RE = /^w\d+(i\d+)?(s\d+)?$/i
 
 async function resolveInstanceRef(ref) {
-  const res = await apiFetch(`/api/instance?ref=${encodeURIComponent(ref)}`)
+  // #9 (ADR-0038): resolves which workspace this ref belongs to first, the same
+  // uncredentialed-lookup-then-scoped-request shape `apiFetchForInstance` already uses for a slug —
+  // there is no global-default PAT left for this to silently fall back to.
+  const res = await apiFetchForInstanceRef(ref, `/api/instance?ref=${encodeURIComponent(ref)}`)
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new Error(body.message ?? body.error ?? `Failed to resolve reference "${ref}" (${res.status})`)
@@ -4594,19 +4597,16 @@ function ModuleEditorPage({ slug: routeRef }) {
 
 // ============================================================ Workspaces landing page (#77, restructured by #102) — the landing screen at `/`, titled "Workspaces". Two togglable views over the multi-instance registry (`GET /api/instances`, #76): master-detail (default, grouping instances by workspace — see groupInstancesByWorkspace above) and stage swimlanes (still one chip per instance, ungrouped — the ticket's own acceptance criteria describe the *list*, i.e. master-detail's list pane, not this alternate view). The view choice is a persisted signal (web/lib/dashboardView.js), not local state, so it survives remounting this page and reloading the app. ============================================================
 
-// `slug` is optional: the Workspaces landing page (DashboardPage) calls
-// this with none, since it has no single "current" workspace in mind and
-// only ever wants the global-default PAT's best-effort view (see
-// lib/registry.js's buildAzureDevOpsRow — an entry this PAT can't
-// authenticate to is simply left out, not treated as a fatal error). A
-// caller that *does* already know which instance it's asking on behalf of
-// (InstanceSwitcher, below) should pass its slug, so this resolves and
-// attaches that instance's own workspace PAT override (#104) via
-// `apiFetchForInstance` instead of only ever trying the global default —
-// otherwise a workspace whose override PAT differs from the global default
-// would silently drop out of the response entirely (every one of its rows
-// failing to authenticate), even for the one instance whose own page is
-// making this exact request and already knows the right credential.
+// `slug` is optional: the Workspaces landing page (DashboardPage) calls this with none, since it has
+// no single "current" workspace in mind. #9 (ADR-0038): with the global-default PAT gone, that
+// unscoped call now carries no Authorization header at all, so every Provider-backed row this
+// listing can't authenticate to is left out (lib/registry.js's `buildAzureDevOpsRow`'s own
+// long-standing "an entry it can't read is left out, not a fatal error" contract) — in practice,
+// every Provider-backed row, until a design exists for a listing that spans more than one workspace's
+// own credential. A caller that *does* already know which instance it's asking on behalf of
+// (InstanceSwitcher, below) should pass its slug, so this resolves and attaches that instance's own
+// workspace PAT via `apiFetchForInstance` instead — its own rows keep enriching correctly regardless
+// of the dashboard-wide gap above.
 async function loadInstances(slug) {
   const res = slug ? await apiFetchForInstance(slug, '/api/instances') : await apiFetch('/api/instances')
   if (!res.ok) {
@@ -5665,8 +5665,15 @@ function DashboardPage() {
   `
 }
 
-// ---------- Azure DevOps PAT prompt (#87) ----------
+// ---------- Provider PAT prompt (#87, #9) ----------
 // Rendered globally (see App() below) rather than scoped to any one screen — `apiFetch` (web/lib/apiFetch.js) opens it (via `requestPat()`) the moment *any* request against gantry's own API comes back with the structured "authentication required" response, regardless of which route triggered it. Local instances never produce that response, so this never opens for them — nothing here checks "is this instance local" itself.
+//
+// #9 (ADR-0038): every prompt now targets one specific, already-registered workspace — there is no
+// global default any more, so this never fires for the "+ New Workspace" wizard's own registration
+// step (that flow has its own PAT field; see web/pages/new-workspace-wizard.js). Deliberately
+// provider-neutral copy: the server's own `sendAuthenticationRequired` message (docs/adr/0039) names
+// the Provider for a rejected credential (`context.message` below), but a plain missing-credential
+// prompt has no structured provider tag to read, so this doesn't guess at one.
 function PatPromptModal() {
   const [value, setValue] = useState('')
   const [error, setError] = useState('')
@@ -5691,19 +5698,17 @@ function PatPromptModal() {
 
   return html`
     <div class="modal-backdrop" role="presentation">
-      <div class="modal" role="dialog" aria-modal="true" aria-label="Azure DevOps sign-in required">
-        <h3>${rejected ? 'Azure DevOps PAT rejected' : 'Azure DevOps sign-in required'}</h3>
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Sign-in required">
+        <h3>${rejected ? 'Personal Access Token rejected' : 'Sign-in required'}</h3>
         <p class="guidance">
-          ${rejected ? context.message : "This instance's data lives in Azure DevOps. Paste a Personal Access Token (PAT) to continue."}
-          It needs <strong>Code (Read & write)</strong>, <strong>Work Items (Read & write)</strong>, and
-          <strong>Identity (Read)</strong> scope.
-          It's stored only in this browser and sent solely to your own gantry server.
+          ${rejected ? context.message : "This workspace's data lives with an external Provider. Paste this workspace's own Personal Access Token (PAT) to continue."}
+          It's stored only in this browser, scoped to this one workspace, and sent solely to your own gantry server.
         </p>
         <input
           class=${'text-field' + (error ? ' has-error' : '')}
           type="password"
           autocomplete="off"
-          placeholder="Paste your Azure DevOps PAT"
+          placeholder="Paste this workspace's Personal Access Token"
           value=${value}
           onInput=${(e) => {
             setValue(e.currentTarget.value)
@@ -5752,5 +5757,27 @@ function App() {
 // (read by Global Settings and the Render action) is how the rest of the app observes how
 // this turns out.
 warmLoadPandocWasm().catch(() => {})
+
+// #9 (ADR-0038): the one-shot fan-out of a previously-stored global-default PAT into every
+// currently-registered workspace's own slot, then deletion of the legacy global key. `GET
+// /api/workspaces` needs no credential itself (lib/server.js's own doc comment on that route), so
+// this never itself triggers a PAT prompt. A user with nothing stored under the legacy key
+// (everyone who's already migrated, or never had a global PAT at all) pays for one harmless,
+// uncredentialed fetch.
+//
+// Awaited (top-level await — this module is loaded as `type="module"`, web/index.html) before the
+// app renders at all, deliberately not fire-and-forget: the very first render can immediately issue
+// a Provider-backed request for an already-registered workspace (e.g. the module editor's own
+// instance-loading effect), and that request's `patForWorkspace` lookup is a synchronous read of
+// already-resolved state — there is no later point for a race with this fetch to resolve at. A
+// failure here (offline, a slow/broken server) falls through to rendering anyway rather than hanging
+// the whole app on one best-effort migration step.
+try {
+  const workspacesRes = await fetch('/api/workspaces')
+  const workspaces = workspacesRes.ok ? await workspacesRes.json() : []
+  migrateGlobalPatToWorkspaces((workspaces ?? []).map((w) => w.id))
+} catch {
+  // Best-effort — see this block's own comment above.
+}
 
 render(html`<${App} />`, document.getElementById('app'))

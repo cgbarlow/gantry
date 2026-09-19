@@ -1,17 +1,29 @@
-// Client-side half of the credential-provider seam (#82's spec; the server side is lib/credential.js's `getCredential(req)`, built out per #86). An Azure-DevOps-backed instance's API routes reject any request with no PAT (or one Azure DevOps itself rejects) with the structured `{ error: "authentication_required" }` response — this module holds the PAT(s) the architect pastes in response to that, so every other request can attach one without re-prompting, and provides the "prompt, then retry" orchestration web/lib/apiFetch.js drives off of.
+// Client-side half of the credential-provider seam (#82's spec; the server side is lib/credential.js's `getCredential(req)`, built out per #86). A Provider-backed instance's API routes reject any request with no PAT (or one the Provider itself rejects) with the structured `{ error: "authentication_required" }` response — this module holds the PAT(s) the architect pastes in response to that, so every other request can attach one without re-prompting, and provides the "prompt, then retry" orchestration web/lib/apiFetch.js drives off of.
 //
 // Local instances (`examples`, `demo-cli`, `demo-web`) never trigger any of this: their routes never return `authentication_required`, so `requestPat` is never called and no prompt ever appears — there's no separate "is this instance local" check anywhere in here.
 //
-// Storage was originally keyed by Azure DevOps organization name (a primitive for future multi-org support, mirroring how ADR-0007's credential-provider seam already keeps an unused-but-ready shape for a future Entra ID implementation — see #88, #91) with only one key (`DEFAULT_WORKSPACE_KEY`) ever populated. #104 generalizes that same map from organization-keyed to **workspace**-keyed: `DEFAULT_WORKSPACE_KEY` ('default') now holds the *global default* PAT (set from the Settings screen's Global Defaults tab, exactly as before), and any other key is a specific workspace id's *override* (set from that same screen's Workspace tab) — resolved by `patForWorkspace`/`authHeaderForWorkspace` below, which `web/lib/apiFetch.js`'s `apiFetchForInstance` calls with whichever workspace id a given instance's slug actually belongs to (looked up via `GET /api/instance/workspace`).
+// #9 (ADR-0038): every workspace holds its own PAT; there is no global default and no fallback. A
+// credential's blast radius is one workspace, which is what structurally prevents a token for one
+// Provider from ever being offered to another. This module used to hold a *global default* PAT
+// (`DEFAULT_WORKSPACE_KEY`, set from the Settings screen's old Global Defaults tab) that every
+// workspace fell back to until it had its own override — `pat`, `setPat`, `clearPat`, `authHeader()`
+// and that default slot are gone entirely, along with the "override vs default" distinction
+// everywhere else in this file. `migrateGlobalPatToWorkspaces` below is the one-shot, first-load
+// migration that carries a previously-stored global PAT forward into every workspace that was
+// relying on it, so nobody re-enters a credential just because this tier was removed.
 import { signal, computed } from '@preact/signals'
 
-const STORAGE_KEY = 'gantry:ado-pat'
+// The legacy global-default PAT's own storage key (pre-#9) — read exactly once, by
+// `migrateGlobalPatToWorkspaces` below, and never written to again by this module.
+const LEGACY_GLOBAL_PAT_STORAGE_KEY = 'gantry:ado-pat'
 
-// A *second*, separate storage key for workspace-specific overrides — kept apart from `STORAGE_KEY` rather than folded into one serialized map, so the global default's own on-disk format stays byte-for-byte what it always was (a bare string, not JSON) — every existing test/user that reads `localStorage.getItem('gantry:ado-pat')` directly is unaffected by per-workspace overrides existing at all.
-const OVERRIDES_STORAGE_KEY = 'gantry:ado-pat-overrides'
+// Every workspace's own PAT, keyed by workspace id — the sole storage tier now that the global
+// default is gone. Kept at its pre-#9 key (`gantry:ado-pat-overrides`) deliberately: #9's own spec
+// ("existing per-workspace overrides are already correctly shaped and are left alone") means this
+// format doesn't change, only what it means — every entry here was already a specific workspace's
+// own credential, never a "default", so there's nothing to migrate about the shape itself.
+const PATS_STORAGE_KEY = 'gantry:ado-pat-overrides'
 const REJECTED_CREDENTIALS_STORAGE_KEY = 'gantry:ado-pat-rejected'
-
-const DEFAULT_WORKSPACE_KEY = 'default'
 
 // `localStorage` can throw on access rather than just being absent — e.g. storage blocked by browser privacy settings, or a sandboxed iframe with no `allow-same-origin`. Mirrors web/lib/theme.js's own guarded access, for the same reason: a throw here must never take down the rest of the app.
 function safeGetItem(key) {
@@ -38,9 +50,10 @@ function safeRemoveItem(key) {
   }
 }
 
-// Overrides are persisted as a JSON object mapping workspace id -> PAT, tolerating anything unreadable (corrupt JSON, a non-object value, browser storage that's since changed shape) as "no overrides yet" rather than throwing. `DEFAULT_WORKSPACE_KEY` is stripped from whatever's read back — it belongs solely to `STORAGE_KEY`'s bare-string slot, never to this map, so a hand-edited or otherwise corrupted overrides blob can never shadow the global default.
-function readStoredOverrides() {
-  const raw = safeGetItem(OVERRIDES_STORAGE_KEY)
+// Tolerates anything unreadable (corrupt JSON, a non-object value, browser storage that's since
+// changed shape) as "no PATs stored yet" rather than throwing.
+function readStoredPats() {
+  const raw = safeGetItem(PATS_STORAGE_KEY)
   if (!raw) return {}
   let parsed
   try {
@@ -49,17 +62,15 @@ function readStoredOverrides() {
     return {}
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-  const { [DEFAULT_WORKSPACE_KEY]: _ignoredDefaultKey, ...overrides } = parsed
-  return overrides
+  return parsed
 }
 
-function persistOverrides(map) {
-  const { [DEFAULT_WORKSPACE_KEY]: _ignoredDefaultKey, ...overrides } = map
-  if (Object.keys(overrides).length === 0) {
-    safeRemoveItem(OVERRIDES_STORAGE_KEY)
+function persistPats(map) {
+  if (Object.keys(map).length === 0) {
+    safeRemoveItem(PATS_STORAGE_KEY)
     return
   }
-  safeSetItem(OVERRIDES_STORAGE_KEY, JSON.stringify(overrides))
+  safeSetItem(PATS_STORAGE_KEY, JSON.stringify(map))
 }
 
 function readStoredRejectedCredentials() {
@@ -83,148 +94,146 @@ function persistRejectedCredentials(map) {
   safeSetItem(REJECTED_CREDENTIALS_STORAGE_KEY, JSON.stringify(map))
 }
 
-// PATs keyed by workspace id (`DEFAULT_WORKSPACE_KEY` for the global default) — `{}` when nothing is stored at all. The default key's value still round-trips through `STORAGE_KEY` as a single bare string exactly as before #104; every other key round-trips through `OVERRIDES_STORAGE_KEY` as a JSON map — see readStoredOverrides/persistOverrides above.
-const initialPat = safeGetItem(STORAGE_KEY)
-const patsByWorkspace = signal({
-  ...(initialPat === null ? {} : { [DEFAULT_WORKSPACE_KEY]: initialPat }),
-  ...readStoredOverrides(),
-})
+// PATs keyed by workspace id — `{}` when nothing is stored at all. Never seeded from the legacy
+// global-default key here; that only ever happens through `migrateGlobalPatToWorkspaces`, called
+// explicitly and exactly once by web/app.js at startup, not as an import-time side effect (so this
+// module stays a plain, network-free, deterministic seam for direct unit-testing).
+const patsByWorkspace = signal(readStoredPats())
 const rejectedCredentialSlots = signal(readStoredRejectedCredentials())
 
-// The global default PAT — `null` when none is stored, matching `getCredential(req)`'s own "no usable credential" return value. This is what the Settings screen's Global Defaults tab manages, and what every workspace falls back to until it has its own override.
-export const pat = computed(() => patsByWorkspace.value[DEFAULT_WORKSPACE_KEY] ?? null)
-
 /**
- * Stores a newly-pasted *global default* PAT (trimmed; blank clears it instead). Persisted to `localStorage` immediately so it survives a page reload. Never touches any workspace-specific override — see `setWorkspacePatOverride` for that.
+ * The PAT to use for `workspaceId`, or `null` when nothing resolves — no fallback of any kind. A
+ * falsy `workspaceId` (a local instance, or a caller with no workspace context at all) always
+ * resolves to `null`, since there is no global default left to fall back to.
  */
-export function setPat(value) {
-  const trimmed = (value ?? '').trim()
-  if (trimmed === '') {
-    clearPat()
-    return
-  }
-  const next = { ...patsByWorkspace.value, [DEFAULT_WORKSPACE_KEY]: trimmed }
-  patsByWorkspace.value = next
-  clearCredentialRejection(DEFAULT_WORKSPACE_KEY)
-  safeSetItem(STORAGE_KEY, trimmed)
+export function patForWorkspace(workspaceId) {
+  if (!workspaceId) return null
+  return patsByWorkspace.value[workspaceId] ?? null
 }
 
-/**
- * Clears the stored *global default* PAT. The very next Azure-DevOps-touching request for a workspace with no override of its own then carries no Authorization header, gets the structured "authentication required" response back, and `apiFetch` re-prompts — this function only needs to forget the credential, not orchestrate the re-prompt itself. A workspace-specific override, if any exist, is left untouched.
- */
-export function clearPat() {
-  const next = { ...patsByWorkspace.value }
-  delete next[DEFAULT_WORKSPACE_KEY]
-  patsByWorkspace.value = next
-  clearCredentialRejection(DEFAULT_WORKSPACE_KEY)
-  safeRemoveItem(STORAGE_KEY)
-}
-
-/**
- * Whether `workspaceId` has its own PAT override set (distinct from the global default) — the Settings screen's Workspace tab uses this to show each workspace's PAT-override state. `false` for a falsy/`undefined` `workspaceId` (a local instance has none) and for `DEFAULT_WORKSPACE_KEY` itself (that key is the global default, never an "override" of itself).
- */
-export function hasWorkspacePatOverride(workspaceId) {
-  if (!workspaceId || workspaceId === DEFAULT_WORKSPACE_KEY) return false
+/** Whether `workspaceId` has a PAT stored for it — `false` for a falsy `workspaceId`. */
+export function hasPatForWorkspace(workspaceId) {
+  if (!workspaceId) return false
   return Object.hasOwn(patsByWorkspace.value, workspaceId)
 }
 
 /**
- * Sets (or, given a blank value, clears) `workspaceId`'s own PAT override. A no-op for a falsy `workspaceId` or `DEFAULT_WORKSPACE_KEY` itself — neither is a real, overridable workspace.
+ * Sets (or, given a blank value, clears) `workspaceId`'s own PAT. A no-op for a falsy `workspaceId` —
+ * there's no slot to write a credential to until a workspace actually exists (see
+ * `basicAuthHeaderForValue` below for the one route, registration itself, that has to authenticate
+ * before that's true).
  */
-export function setWorkspacePatOverride(workspaceId, value) {
-  if (!workspaceId || workspaceId === DEFAULT_WORKSPACE_KEY) return
+export function setPatForWorkspace(workspaceId, value) {
+  if (!workspaceId) return
   const trimmed = (value ?? '').trim()
   if (trimmed === '') {
-    clearWorkspacePatOverride(workspaceId)
+    clearPatForWorkspace(workspaceId)
     return
   }
   const next = { ...patsByWorkspace.value, [workspaceId]: trimmed }
   patsByWorkspace.value = next
   clearCredentialRejection(workspaceId)
-  persistOverrides(next)
+  persistPats(next)
 }
 
-/**
- * Clears `workspaceId`'s own PAT override, falling back to the global default automatically on the very next request for that workspace — the same "just forget it, `apiFetch` handles the rest" shape `clearPat` already has for the global default.
- */
-export function clearWorkspacePatOverride(workspaceId) {
-  if (!workspaceId || workspaceId === DEFAULT_WORKSPACE_KEY) return
+/** Clears `workspaceId`'s own PAT — the next request for that workspace gets the structured "authentication required" response and `apiFetch` re-prompts. A no-op for a falsy `workspaceId`. */
+export function clearPatForWorkspace(workspaceId) {
+  if (!workspaceId) return
   const next = { ...patsByWorkspace.value }
   delete next[workspaceId]
   patsByWorkspace.value = next
   clearCredentialRejection(workspaceId)
-  persistOverrides(next)
+  persistPats(next)
 }
 
-function clearCredentialRejection(slot) {
-  if (!rejectedCredentialSlots.value[slot]) return
+function clearCredentialRejection(workspaceId) {
+  if (!rejectedCredentialSlots.value[workspaceId]) return
   const next = { ...rejectedCredentialSlots.value }
-  delete next[slot]
+  delete next[workspaceId]
   rejectedCredentialSlots.value = next
   persistRejectedCredentials(next)
-}
-
-function effectiveCredentialSlot(workspaceId) {
-  return workspaceId && hasWorkspacePatOverride(workspaceId) ? workspaceId : DEFAULT_WORKSPACE_KEY
 }
 
 export function markCredentialRejected(workspaceId) {
-  const slot = effectiveCredentialSlot(workspaceId)
-  const next = { ...rejectedCredentialSlots.value, [slot]: true }
+  if (!workspaceId) return
+  const next = { ...rejectedCredentialSlots.value, [workspaceId]: true }
   rejectedCredentialSlots.value = next
   persistRejectedCredentials(next)
 }
 
+/** 'missing' | 'set' | 'rejected' — the Settings screen's own per-workspace credential-state display (#9's own acceptance criterion). A falsy `workspaceId` always reads as 'missing', matching `patForWorkspace`'s own "no fallback" resolution. */
 export function credentialStatusForWorkspace(workspaceId) {
-  const slot = effectiveCredentialSlot(workspaceId)
   if (!patForWorkspace(workspaceId)) return 'missing'
-  return rejectedCredentialSlots.value[slot] ? 'rejected' : 'set'
+  return rejectedCredentialSlots.value[workspaceId] ? 'rejected' : 'set'
 }
 
 /**
- * The PAT to use for `workspaceId` — that workspace's own override if one is set, else the global default, else `null` (matching `getCredential(req)`'s own "no usable credential" return value). A falsy `workspaceId` (a local instance, or a caller with no workspace context at all) always resolves straight to the global default — the same behavior `authHeader()` (below) always had, before workspace overrides existed.
+ * HTTP Basic auth (empty username, the PAT as password) for an arbitrary, not-yet-stored PAT value —
+ * the Provider's own supported PAT convention (per #82's spec), the same scheme lib/credential.js's
+ * `getCredential(req)` decodes on the server. `null` for a blank value or one that can't be encoded
+ * (`btoa` throws for any character outside Latin1 — e.g. a stray smart-quote/invisible character
+ * from a rich-text paste). Exported for the one route with no workspace in scope — the "+ New
+ * Workspace" wizard's own registration call (ADR-0038): it holds the PAT the architect types in
+ * memory (this function, not any persisted slot) and only calls `setPatForWorkspace` with it once
+ * that call actually succeeds; see web/pages/new-workspace-wizard.js's `registerWorkspace`.
  */
-export function patForWorkspace(workspaceId) {
-  const map = patsByWorkspace.value
-  if (workspaceId && Object.hasOwn(map, workspaceId)) return map[workspaceId]
-  return map[DEFAULT_WORKSPACE_KEY] ?? null
-}
-
-/**
- * The `Authorization` header value to attach to a request targeting `workspaceId` (or the global default, for a falsy `workspaceId`), or `null` when no PAT resolves (or the resolved value can't be encoded as one — see below). HTTP Basic auth with an empty username and the PAT as the password — Azure DevOps's own supported PAT convention (per #82's spec), the same scheme lib/credential.js's `getCredential(req)` decodes on the server.
- */
-export function authHeaderForWorkspace(workspaceId) {
-  const value = patForWorkspace(workspaceId)
+export function basicAuthHeaderForValue(value) {
   if (!value) return null
   try {
-    // `btoa` throws for any character outside Latin1 — e.g. a stray smart-quote/invisible character from a rich-text paste into the PAT field. Guarded the same way the server-side decode step (lib/credential.js's `getCredential`) guards its own base64 step: treat an unencodable value as "no usable credential" (`null`) rather than letting a `DOMException` escape and surface as a cryptic error in whichever caller happens to trigger this read.
     return `Basic ${btoa(`:${value}`)}`
   } catch {
     return null
   }
 }
 
+/** The `Authorization` header value to attach to a request targeting `workspaceId`, or `null` when no PAT resolves for it (including a falsy `workspaceId` — there is nothing left to fall back to). */
+export function authHeaderForWorkspace(workspaceId) {
+  return basicAuthHeaderForValue(patForWorkspace(workspaceId))
+}
+
 /**
- * The `Authorization` header value for the *global default* PAT only — unchanged from before #104's workspace-keyed generalization. Every call site that has a specific workspace in mind should prefer `authHeaderForWorkspace` instead; this remains for the handful of requests (e.g. `web/lib/validateRepo.js`'s repo-check, made before any workspace exists to belong to) that only ever have the global default to use in the first place.
+ * The one-shot migration (#9, ADR-0038): copies a previously-stored *global default* PAT into every
+ * workspace id in `workspaceIds` that doesn't already have its own PAT — an existing per-workspace
+ * PAT is left untouched, exactly as the spec requires — then deletes the legacy global key
+ * regardless (there is nothing left for it to do once every currently-registered workspace has had
+ * its chance to inherit it). A no-op, including the delete, when no global PAT was ever stored.
+ *
+ * Called explicitly and exactly once, from web/app.js at startup (after fetching the registered
+ * workspace list from `GET /api/workspaces`, which needs no credential itself) — never as an
+ * import-time side effect of this module, so this file stays network-free and directly unit-testable
+ * (tests/credentialWorkspace.test.js calls this with an explicit id list, no server involved).
  */
-export function authHeader() {
-  return authHeaderForWorkspace(DEFAULT_WORKSPACE_KEY)
+export function migrateGlobalPatToWorkspaces(workspaceIds) {
+  const legacyGlobalPat = safeGetItem(LEGACY_GLOBAL_PAT_STORAGE_KEY)
+  if (legacyGlobalPat === null) return
+  const current = patsByWorkspace.value
+  const additions = {}
+  for (const id of workspaceIds ?? []) {
+    if (id && !Object.hasOwn(current, id)) additions[id] = legacyGlobalPat
+  }
+  if (Object.keys(additions).length > 0) {
+    const next = { ...current, ...additions }
+    patsByWorkspace.value = next
+    persistPats(next)
+  }
+  safeRemoveItem(LEGACY_GLOBAL_PAT_STORAGE_KEY)
 }
 
 // ---------- Prompt orchestration ----------
-// `apiFetch` calls `requestPat(workspaceId)` whenever a request comes back with the structured "authentication required" response; `PatPromptModal` (in web/app.js) renders while `promptOpen` is true and calls `resolvePromptWith` once the architect submits or cancels. Concurrent callers (e.g. several in-flight requests all hitting `authentication_required` at once) share the single in-flight prompt instead of each opening their own modal — only the *first* caller (the one that actually opens the prompt) gets to influence where the submission lands; a caller that instead joins an already-open prompt (the `pendingResolve` chaining below) just shares that same outcome, exactly as it always has.
+// `apiFetch` calls `requestPat(workspaceId)` whenever a request comes back with the structured "authentication required" response; `PatPromptModal` (in web/app.js) renders while `promptOpen` is true and calls `resolvePromptWith` once the architect submits or cancels. Concurrent callers (e.g. several in-flight requests all hitting `authentication_required` at once) share the single in-flight prompt instead of each opening their own modal.
 //
-// #104 review fix: whether a submitted PAT lands in the global-default slot or a workspace-specific override depends on `workspaceId` — but only when that workspace *already has* its own override set. `hasWorkspacePatOverride(workspaceId)` is checked once, at the moment the prompt actually opens (not later, in `resolvePromptWith` — the override could otherwise be cleared/changed by something else while the prompt is still open). This distinction matters: the overwhelmingly common case is a request with *no* override at all (the workspace-unaware, pre-#104 behavior every existing test already exercises) — for that case, a newly submitted PAT must still become the global default, exactly as before, not silently create a brand-new override the architect never asked for just because the request happened to know which workspace it was for. Only when a workspace's own override is the very thing that's (now) invalid does a resubmission repair *that* override instead — otherwise the retry would silently keep resending the same rejected override PAT forever, since `authHeaderForWorkspace` always prefers an existing override over the global default.
+// #9: every prompt now targets a specific, already-registered workspace — there is no global-default
+// slot left for a submission to fall back to. The one flow with no workspace yet at all (registering
+// a brand-new one) doesn't go through this shared modal any more; see `basicAuthHeaderForValue`'s own
+// doc comment above.
 export const promptOpen = signal(false)
 export const promptContext = signal(null)
 
 let pendingResolve = null
-let pendingOverrideWorkspaceId = null
+let pendingWorkspaceId = null
 
 /**
- * Opens the PAT prompt (if not already open) and resolves once the architect submits a PAT (`true`) or cancels (`false`). Callers that get `true` back should re-read the relevant PAT (`pat.value`/`authHeader()`, or `patForWorkspace`/`authHeaderForWorkspace` for a specific workspace) and retry their request; callers that get `false` back should surface their original authentication failure rather than retrying.
- *
- * `workspaceId` identifies which workspace the failing request targeted — omit it (or pass a falsy value) for a request with no specific workspace in mind, which always resolves to the global default, unchanged from before workspace overrides existed.
+ * Opens the PAT prompt (if not already open) and resolves once the architect submits a PAT (`true`) or cancels (`false`). Callers that get `true` back should re-read the relevant PAT (`patForWorkspace`/`authHeaderForWorkspace` for `workspaceId`) and retry their request; callers that get `false` back should surface their original authentication failure rather than retrying.
  */
 export function requestPat(workspaceId, context = null) {
   if (pendingResolve) {
@@ -236,8 +245,7 @@ export function requestPat(workspaceId, context = null) {
       }
     })
   }
-  // See this section's own comment above for why this only ever targets an *existing* override, never creates a new one from a plain PAT prompt.
-  pendingOverrideWorkspaceId = hasWorkspacePatOverride(workspaceId) ? workspaceId : null
+  pendingWorkspaceId = workspaceId || null
   promptContext.value = context
   promptOpen.value = true
   return new Promise((resolve) => {
@@ -246,17 +254,13 @@ export function requestPat(workspaceId, context = null) {
 }
 
 /**
- * Called by `PatPromptModal` when the architect submits (`patValue` set) or cancels (`patValue` is `null`/omitted). Writes to whichever slot `requestPat` recorded when the prompt was opened — a workspace's own override if it already had one and that's what triggered the prompt, the global default otherwise.
+ * Called by `PatPromptModal` when the architect submits (`patValue` set) or cancels (`patValue` is `null`/omitted). Writes the submission to whichever workspace `requestPat` was opened for; a prompt opened with no workspace in mind (shouldn't happen post-#9 — every caller of `requestPat` now names one) simply has nowhere to persist to, and only unblocks its caller.
  */
 export function resolvePromptWith(patValue) {
-  const overrideWorkspaceId = pendingOverrideWorkspaceId
-  pendingOverrideWorkspaceId = null
-  if (patValue) {
-    if (overrideWorkspaceId) {
-      setWorkspacePatOverride(overrideWorkspaceId, patValue)
-    } else {
-      setPat(patValue)
-    }
+  const workspaceId = pendingWorkspaceId
+  pendingWorkspaceId = null
+  if (patValue && workspaceId) {
+    setPatForWorkspace(workspaceId, patValue)
   }
   promptOpen.value = false
   promptContext.value = null

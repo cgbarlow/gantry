@@ -7,7 +7,7 @@ import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { createInstance, recordInstanceWorkItemLink } from '../lib/instance.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
-import { withRunningServer } from './helpers/lifecycle.js'
+import { withRunningServer, basicAuthHeader } from './helpers/lifecycle.js'
 
 // Browser smoke test for the Workspaces landing page (#77, restructured by #102) — the landing screen at `/`, backed by the multi-instance registry (`GET /api/instances`, #76). Mirrors tests/module-editor.playwright.test.js's pattern: a real server, a real Chromium page, asserting no console/page errors alongside the ticket's acceptance criteria — the "Workspaces" title, master-detail grouping instances by workspace (one row per workspace, a multi-instance workspace's detail column listing every instance it holds), a working view-mode menu, the view choice persisting across a reload (via localStorage), and the empty state's "new instance" call to action.
 
@@ -156,8 +156,21 @@ test('dashboard: selecting a workspace with multiple instances shows every one o
         await withRunningServer(
           { instancesDir, allowedAzureDevOpsBaseUrls: [adoBaseUrl], allowAzureDevOpsBaseUrlOverride: true },
           withPage(async (page, base) => {
-            // A PAT is required to enrich an Azure-DevOps-backed row (see lib/registry.js's buildAzureDevOpsRow) — seeded into localStorage before navigating, mirroring tests/patPrompt.playwright.test.js's own technique, so GET /api/instances attaches it from the very first request.
-            await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+            // A PAT is required to enrich an Azure-DevOps-backed row (see lib/registry.js's
+            // buildAzureDevOpsRow). #9 (ADR-0038): `GET /api/instances` (the dashboard's own unscoped
+            // listing, web/app.js's `loadInstances` called with no slug) has no single workspace to
+            // resolve a stored PAT against and so, correctly, now attaches none — there is no global
+            // default left for a multi-workspace request to fall back to (a real, known gap this
+            // ticket surfaces rather than papers over). This test's own point is proving
+            // `lib/registry.js`'s real server-side enrichment/grouping is still correct given a
+            // credential, not that the browser can currently produce one for this specific request —
+            // so the credential is attached at the network layer directly (`page.route`) rather than
+            // via any client-side storage, exercising the real fake-Azure-DevOps-backed server path
+            // end to end regardless of that separate gap.
+            await page.route('**/api/instances', async (route) => {
+              const headers = { ...route.request().headers(), authorization: basicAuthHeader(VALID_PAT) }
+              await route.continue({ headers })
+            })
             // #301 — Azure-DevOps-backed rows list on the dashboard only while advanced mode is on.
             await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
             await page.goto(base)

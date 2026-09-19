@@ -34,6 +34,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal, effect } from '@preact/signals'
 import { apiFetch, apiFetchForInstance } from '../lib/apiFetch.js'
+import { basicAuthHeaderForValue, setPatForWorkspace } from '../lib/credential.js'
 import { renderMarkdown } from '../lib/markdown.js'
 import { TICKETING_SYSTEMS, defaultTicketingSystem } from '../lib/ticketingSystem.js'
 import { PROVIDERS, DEFAULT_PROVIDER } from '../lib/provider.js'
@@ -191,6 +192,14 @@ const pickedWorkspaceId = signal('')
 const registerProvider = signal(DEFAULT_PROVIDER)
 const registerForm = signal({ organization: 'Contoso-Production', project: 'Default', repository: '', repoOwner: '', owner: '' })
 const registerTicketingSystem = signal(defaultTicketingSystem.value)
+
+// #9 (ADR-0038): the PAT for a brand-new Workspace, held here in memory only — never persisted to any
+// storage slot until `registerWorkspace`'s own call to `POST /api/workspaces` actually succeeds, at
+// which point it becomes exactly that new workspace's own PAT (`setPatForWorkspace`). A failed
+// registration leaves this value in the field (so the architect isn't forced to retype it to retry)
+// but never writes it anywhere. This is "the one route with no workspace in scope" the ADR calls out —
+// every other credentialed request in this wizard already has a real `workspace.id` to attach to.
+const registerPat = signal('')
 
 // Import's destination-picker has no Provider control of its own (#8: GitHub's content store — the
 // thing an import destination actually writes into — is #11's job, not this ticket's), so switching
@@ -435,6 +444,7 @@ function resetWizard() {
   registerProvider.value = DEFAULT_PROVIDER
   registerForm.value = { organization: 'Contoso-Production', project: 'Default', repository: '', repoOwner: '', owner: '' }
   registerTicketingSystem.value = defaultTicketingSystem.value
+  registerPat.value = ''
   registerStatus.value = 'idle'
   registerError.value = ''
   registerNotice.value = ''
@@ -498,27 +508,31 @@ async function registerWorkspace(providerOverride) {
   const provider = providerOverride ?? registerProvider.value
   const { organization, project, repository, repoOwner, owner } = registerForm.value
   const isGitHub = provider === 'github'
+  // #9 (ADR-0038): a brand-new Workspace has no id yet to resolve a stored PAT against, so this
+  // attaches the wizard's own in-memory `registerPat` directly rather than going through
+  // `apiFetch`'s workspace-scoped auto-prompt-and-retry (`silent: true` suppresses that entirely —
+  // a rejected PAT here is this function's own `registerError`, not the shared page-wide modal).
+  const authHeader = basicAuthHeaderForValue(registerPat.value.trim())
   try {
-    // A brand-new Workspace registration has no workspaceId yet — this
-    // always uses the global default PAT, exactly like
-    // web/lib/validateRepo.js's own repo-check (there's nothing more
-    // specific to resolve a PAT override against until the Workspace
-    // itself exists).
     // Sent as the #37 nested `{ provider, location }` shape rather than flat
     // organization/project/repository — this wizard still only offers Azure
     // DevOps fields, so `provider` is always 'azure-devops' here, but the
     // wire shape matches what a workspace record is now stored as.
-    const res = await apiFetch('/api/workspaces', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        provider,
-        location: isGitHub
-          ? { owner: repoOwner.trim(), repository: repository.trim() }
-          : { organization: organization.trim(), project: project.trim(), repository: repository.trim() },
-        owner: owner.trim(),
-      }),
-    })
+    const res = await apiFetch(
+      '/api/workspaces',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(authHeader ? { Authorization: authHeader } : {}) },
+        body: JSON.stringify({
+          provider,
+          location: isGitHub
+            ? { owner: repoOwner.trim(), repository: repository.trim() }
+            : { organization: organization.trim(), project: project.trim(), repository: repository.trim() },
+          owner: owner.trim(),
+        }),
+      },
+      { silent: true }
+    )
     const body = await res.json().catch(() => ({}))
     if (!res.ok) {
       registerStatus.value = 'failed'
@@ -528,12 +542,17 @@ async function registerWorkspace(providerOverride) {
       } else {
         registerError.value = raw
       }
+      // #9: creation failed — the typed PAT is discarded (never persisted anywhere), not silently
+      // kept for a later, unrelated registration to accidentally reuse.
       return
     }
     registerStatus.value = 'idle'
     if (body.reused) {
       registerNotice.value = 'Using the workspace already registered for this repository'
     }
+    // #9: creation succeeded — the PAT the architect just typed becomes this new workspace's own PAT.
+    setPatForWorkspace(body.id, registerPat.value)
+    registerPat.value = ''
     selectedWorkspace.value = body
     workspaces.value = null
     step.value = 'instance'
@@ -565,7 +584,16 @@ async function checkAdoptRepo() {
   adoptCheckMessage.value = ''
   try {
     const qs = new URLSearchParams({ organization: loc.organization, project: loc.project, repository: loc.repository })
-    const res = await apiFetch(`/api/azure-devops/repo-check?${qs}`)
+    // #9 (ADR-0038): no workspace exists yet for this location — the same in-memory `registerPat`
+    // the Register panel uses, attached directly rather than via `apiFetch`'s workspace-scoped
+    // auto-prompt (`silent: true`); a rejected/missing PAT here just surfaces as this check's own
+    // error message, not the shared page-wide modal.
+    const authHeader = basicAuthHeaderForValue(registerPat.value.trim())
+    const res = await apiFetch(
+      `/api/azure-devops/repo-check?${qs}`,
+      { headers: authHeader ? { Authorization: authHeader } : {} },
+      { silent: true }
+    )
     const body = await res.json().catch(() => ({}))
     if (!res.ok) {
       adoptCheckStatus.value = 'error'
@@ -599,17 +627,23 @@ async function adoptCheckedRepo() {
   registerStatus.value = 'registering'
   registerError.value = ''
   registerNotice.value = ''
+  // #9 — same in-memory, no-workspace-yet PAT as registerWorkspace() above.
+  const authHeader = basicAuthHeaderForValue(registerPat.value.trim())
   try {
-    const res = await apiFetch('/api/workspaces', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        provider: 'azure-devops',
-        location: { organization: loc.organization, project: loc.project, repository: loc.repository },
-        owner: '',
-        ticketingSystem: registerTicketingSystem.value,
-      }),
-    })
+    const res = await apiFetch(
+      '/api/workspaces',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(authHeader ? { Authorization: authHeader } : {}) },
+        body: JSON.stringify({
+          provider: 'azure-devops',
+          location: { organization: loc.organization, project: loc.project, repository: loc.repository },
+          owner: '',
+          ticketingSystem: registerTicketingSystem.value,
+        }),
+      },
+      { silent: true }
+    )
     const body = await res.json().catch(() => ({}))
     if (!res.ok) {
       registerStatus.value = 'failed'
@@ -620,6 +654,8 @@ async function adoptCheckedRepo() {
     registerNotice.value = body.reused
       ? 'Using the workspace already registered for this repository'
       : 'Adopted the existing repository as a workspace'
+    setPatForWorkspace(body.id, registerPat.value)
+    registerPat.value = ''
     selectedWorkspace.value = body
     workspaces.value = null
     step.value = 'instance'
@@ -1759,6 +1795,7 @@ function ImportDestinationPanel() {
               placeholder="Search by name…"
               organization=${registerForm.value.organization}
               project=${registerForm.value.project}
+              pat=${registerPat.value}
             />
           </div>
           <div class="wizard-field">
@@ -1783,11 +1820,30 @@ function ImportDestinationPanel() {
             </div>
           </div>
           <div class="wizard-field">
+            <label for="import-ws-pat">Personal Access Token</label>
+            <input
+              class="wizard-input"
+              id="import-ws-pat"
+              type="password"
+              autocomplete="off"
+              placeholder="Needed to prove access to this repository"
+              value=${registerPat.value}
+              onInput=${(e) => (registerPat.value = e.currentTarget.value)}
+            />
+            <p class="wizard-field-hint">
+              Used to check access and, once registration succeeds, becomes this workspace's own
+              Personal Access Token — needs <strong>Code (Read &amp; write)</strong>,
+              <strong>Work Items (Read &amp; write)</strong>, and <strong>Identity (Read)</strong>
+              scope. Stored only in this browser, and only if registration succeeds.
+            </p>
+          </div>
+          <div class="wizard-field">
             <button
               type="button"
               class="btn primary"
               id="import-register-workspace"
               disabled=${registerStatus.value === 'registering' ||
+              !registerPat.value.trim() ||
               !registerForm.value.organization.trim() ||
               !registerForm.value.project.trim() ||
               !registerForm.value.repository.trim()}
@@ -1944,7 +2000,7 @@ function WorkspaceStep() {
                 <button
                   type="button"
                   class="btn small"
-                  disabled=${!adoptRepoUrl.value.trim() || adoptCheckStatus.value === 'checking'}
+                  disabled=${!adoptRepoUrl.value.trim() || !registerPat.value.trim() || adoptCheckStatus.value === 'checking'}
                   onClick=${checkAdoptRepo}
                 >
                   ${adoptCheckStatus.value === 'checking' ? 'Checking…' : 'Check repo'}
@@ -1953,6 +2009,22 @@ function WorkspaceStep() {
               <p class="wizard-field-hint">
                 Point at a repo that already holds a gantry workspace — gantry checks it and adopts the
                 existing instance data.
+              </p>
+              <label for="adopt-repo-pat">Personal Access Token</label>
+              <input
+                class="wizard-input"
+                id="adopt-repo-pat"
+                type="password"
+                autocomplete="off"
+                placeholder="Needed to check and adopt this repository"
+                value=${registerPat.value}
+                onInput=${(e) => (registerPat.value = e.currentTarget.value)}
+              />
+              <p class="wizard-field-hint">
+                Used only for this check and, once adopted, becomes this workspace's own Personal
+                Access Token — needs <strong>Code (Read &amp; write)</strong>,
+                <strong>Work Items (Read &amp; write)</strong>, and <strong>Identity (Read)</strong>
+                scope. Stored only in this browser, and only if adoption succeeds.
               </p>
               ${adoptCheckStatus.value === 'present'
                 ? html`<p class="wizard-field-hint" id="adopt-check-result">${adoptCheckMessage.value}</p>`
@@ -2066,6 +2138,7 @@ function WorkspaceStep() {
                     value=${registerForm.value.owner}
                     onChange=${(uniqueName) => (registerForm.value = { ...registerForm.value, owner: uniqueName })}
                     placeholder="Search by name…"
+                    pat=${registerPat.value}
                   />
                 </div>
               `
@@ -2110,6 +2183,7 @@ function WorkspaceStep() {
                     placeholder="Search by name…"
                     organization=${registerForm.value.organization}
                     project=${registerForm.value.project}
+                    pat=${registerPat.value}
                   />
                 </div>
                 <div class="wizard-field">
@@ -2135,10 +2209,28 @@ function WorkspaceStep() {
                 </div>
               `}
           <div class="wizard-field">
+            <label for="ws-pat">Personal Access Token</label>
+            <input
+              class="wizard-input"
+              id="ws-pat"
+              type="password"
+              autocomplete="off"
+              placeholder="Needed to prove access to this repository"
+              value=${registerPat.value}
+              onInput=${(e) => (registerPat.value = e.currentTarget.value)}
+            />
+            <p class="wizard-field-hint">
+              ${registerProvider.value === 'github'
+                ? html`Used to check access and, once registration succeeds, becomes this workspace's own Personal Access Token — a fine-grained token needs <strong>Contents</strong>, <strong>Issues</strong>, <strong>Pull requests</strong>, and <strong>Metadata</strong> permissions (Read &amp; write, except Metadata which is Read-only). Stored only in this browser, and only if registration succeeds.`
+                : html`Used to check access and, once registration succeeds, becomes this workspace's own Personal Access Token — needs <strong>Code (Read &amp; write)</strong>, <strong>Work Items (Read &amp; write)</strong>, and <strong>Identity (Read)</strong> scope. Stored only in this browser, and only if registration succeeds.`}
+            </p>
+          </div>
+          <div class="wizard-field">
             <button
               type="button"
               class="btn primary"
               disabled=${registerStatus.value === 'registering' ||
+              !registerPat.value.trim() ||
               (registerProvider.value === 'github'
                 ? !registerForm.value.repoOwner.trim() || !registerForm.value.repository.trim()
                 : !registerForm.value.organization.trim() || !registerForm.value.project.trim() || !registerForm.value.repository.trim())}
@@ -2325,6 +2417,7 @@ function InstanceStep() {
               placeholder="Unassigned"
               organization=${ws?.location?.organization}
               project=${ws?.location?.project}
+              workspaceId=${ws?.id}
             />
           `}
     </div>
