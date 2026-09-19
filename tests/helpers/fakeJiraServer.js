@@ -41,6 +41,15 @@ import { createServer } from 'node:http'
  * directory, which this fake models as a plain per-seeded-user flag rather than a full role/permission
  * scheme, the same simplification `members`'s flat `access_level` already is for
  * `tests/helpers/fakeGitLabServer.js`.
+ *
+ * #47 (Request Review): `POST /issue` now also accepts `fields.assignee.accountId` and `fields.labels`,
+ * stored and echoed back unchanged by every read route exactly like `summary`/`description` already
+ * are. Every issue is addressable by either its human-facing `key` (e.g. "GANTRY-1") *or* its own
+ * globally-unique numeric `id` on every route below — real Jira Cloud's REST API v3 accepts either as
+ * the same `issueIdOrKey` path segment, and `lib/stageReview.js` relies on this: a review request's own
+ * `workItemId` is the numeric `id` (so it satisfies the provider-neutral "review id is numeric" check
+ * `lib/stageReview.js#checkStageReviewStatus` already applies before any provider-specific dispatch),
+ * while `lib/jiraWorkItemsClient.js` itself always addresses an issue by `key`.
  */
 export function createFakeJiraServer({
   jiraProjectKey,
@@ -59,9 +68,14 @@ export function createFakeJiraServer({
   // identifier real Jira also assigns; this fake mints one too so a response shape-checks the same as
   // the real API's, even though nothing in `lib/jiraWorkItemsClient.js` addresses an issue by it.
   const issues = new Map() // key -> { id, key, fields: { summary, description, issuetype, status, project } }
+  const issuesById = new Map() // id -> the exact same issue object stored in `issues` (#47: addressable by either)
   let issueNumberCounter = 0
   let issueIdCounter = 10000
   let commentIdCounter = 0
+
+  function findIssue(idOrKey) {
+    return issues.get(idOrKey) ?? issuesById.get(idOrKey)
+  }
 
   const STATUSES = {
     'To Do': { id: '1', name: 'To Do', statusCategory: { key: 'new' } },
@@ -144,22 +158,29 @@ export function createFakeJiraServer({
           issuetype: { id: issueTypes.find((t) => t.name === issueTypeName).id, name: issueTypeName },
           status: STATUSES['To Do'],
           project: { key: jiraProjectKey },
+          // #47: echoed back unchanged, mirroring every other field here — `lib/jiraWorkItemsClient.js`
+          // never validates these against real Jira's own assignable-permission/label rules itself
+          // (that gate lives in `lib/jiraIdentityClient.js`, checked before this call is ever made).
+          assignee: fields.assignee ? { accountId: fields.assignee.accountId } : null,
+          labels: fields.labels ?? [],
         },
         comments: [],
       }
       issues.set(key, issue)
+      issuesById.set(issue.id, issue)
       return json(201, { id: issue.id, key: issue.key, self: `${url.origin}/rest/api/3/issue/${issue.id}` })
     }
 
-    // GET/PUT /rest/api/3/issue/:key — read, or partially update, an issue by its own project-scoped
-    // key. PUT accepts `fields.summary`/`fields.description` and returns 204 with no body, matching
-    // real Jira's own contract for this endpoint (lib/jiraWorkItemsClient.js's updateIssue() re-fetches
-    // afterwards for exactly this reason).
+    // GET/PUT /rest/api/3/issue/:idOrKey — read, or partially update, an issue by its own
+    // project-scoped key *or* its globally-unique numeric id (see this factory's own doc comment on
+    // `findIssue` above). PUT accepts `fields.summary`/`fields.description` and returns 204 with no
+    // body, matching real Jira's own contract for this endpoint (lib/jiraWorkItemsClient.js's
+    // updateIssue() re-fetches afterwards for exactly this reason).
     const issueMatch = rest.match(/^\/issue\/([^/]+)$/)
     if (issueMatch) {
-      const key = decodeURIComponent(issueMatch[1])
-      const issue = issues.get(key)
-      if (!issue) return json(404, { errorMessages: [`404 Issue Not Found (fake: "${key}")`], errors: {} })
+      const idOrKey = decodeURIComponent(issueMatch[1])
+      const issue = findIssue(idOrKey)
+      if (!issue) return json(404, { errorMessages: [`404 Issue Not Found (fake: "${idOrKey}")`], errors: {} })
 
       if (req.method === 'GET') return json(200, issue)
 
@@ -167,16 +188,22 @@ export function createFakeJiraServer({
         const { fields = {} } = await readJsonBody()
         if (fields.summary !== undefined) issue.fields.summary = fields.summary
         if (fields.description !== undefined) issue.fields.description = fields.description
+        // #47: a test's own stand-in for "a reviewer changed this issue's status label directly in
+        // Jira's UI" — bypassing gantry (and lib/jiraWorkItemsClient.js, which never itself writes
+        // labels post-creation) entirely, the same way the GitHub/GitLab review suites simulate a real
+        // reviewer decision with a raw PATCH/PUT straight against their own fake servers.
+        if (fields.labels !== undefined) issue.fields.labels = fields.labels
+        if (fields.assignee !== undefined) issue.fields.assignee = fields.assignee ? { accountId: fields.assignee.accountId } : null
         return noContent()
       }
     }
 
-    // POST /rest/api/3/issue/:key/comment — lib/jiraWorkItemsClient.js's addComment().
+    // POST /rest/api/3/issue/:idOrKey/comment — lib/jiraWorkItemsClient.js's addComment().
     const commentMatch = rest.match(/^\/issue\/([^/]+)\/comment$/)
     if (req.method === 'POST' && commentMatch) {
-      const key = decodeURIComponent(commentMatch[1])
-      const issue = issues.get(key)
-      if (!issue) return json(404, { errorMessages: [`404 Issue Not Found (fake: "${key}")`], errors: {} })
+      const idOrKey = decodeURIComponent(commentMatch[1])
+      const issue = findIssue(idOrKey)
+      if (!issue) return json(404, { errorMessages: [`404 Issue Not Found (fake: "${idOrKey}")`], errors: {} })
       const body = await readJsonBody()
       commentIdCounter += 1
       const comment = { id: String(commentIdCounter), body: body.body ?? null, created: new Date().toISOString() }
@@ -184,13 +211,13 @@ export function createFakeJiraServer({
       return json(201, comment)
     }
 
-    // GET /rest/api/3/issue/:key/transitions — lib/jiraWorkItemsClient.js's getTransitions().
+    // GET /rest/api/3/issue/:idOrKey/transitions — lib/jiraWorkItemsClient.js's getTransitions().
     // POST (same path) — transitionIssue()/closeIssue(), moving the issue to `transition.to`.
     const transitionsMatch = rest.match(/^\/issue\/([^/]+)\/transitions$/)
     if (transitionsMatch) {
-      const key = decodeURIComponent(transitionsMatch[1])
-      const issue = issues.get(key)
-      if (!issue) return json(404, { errorMessages: [`404 Issue Not Found (fake: "${key}")`], errors: {} })
+      const idOrKey = decodeURIComponent(transitionsMatch[1])
+      const issue = findIssue(idOrKey)
+      if (!issue) return json(404, { errorMessages: [`404 Issue Not Found (fake: "${idOrKey}")`], errors: {} })
       const available = TRANSITIONS_BY_STATUS[issue.fields.status.name] ?? []
 
       if (req.method === 'GET') return json(200, { transitions: available })
