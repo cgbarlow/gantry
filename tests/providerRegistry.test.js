@@ -12,6 +12,7 @@ import { AuthenticationError } from '../lib/providerErrors.js'
 import { withFakeAzureDevOpsServer as withFakeServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withFakeGitHubServer, GITHUB_OWNER, GITHUB_REPOSITORY, GITHUB_VALID_PAT } from './helpers/fakeGitHubServer.js'
 import { withFakeGitLabServer, GITLAB_NAMESPACE, GITLAB_REPOSITORY, GITLAB_VALID_PAT } from './helpers/fakeGitLabServer.js'
+import { withFakeBitbucketServer, BITBUCKET_OWNER, BITBUCKET_REPOSITORY, BITBUCKET_VALID_PAT } from './helpers/fakeBitbucketServer.js'
 import { ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 import { runProviderContractTests, runContentStoreContractTests } from './helpers/providerContractTests.js'
 
@@ -32,8 +33,11 @@ test('getProviderCapabilities resolves azure-devops to its four capability facto
 })
 
 test('getProviderCapabilities throws a clear error naming the registered providers, for an unregistered provider id', () => {
-  assert.throws(() => getProviderCapabilities('atlassian'), /no provider registered for "atlassian"/)
-  assert.throws(() => getProviderCapabilities('atlassian'), /azure-devops/)
+  // 'atlassian' itself is registered as of #41 (its content-store capability) — a bogus id neither
+  // this registry nor lib/provider.js's own enum has ever heard of exercises the same "unregistered"
+  // path without going stale the next time a real provider gains its first capability.
+  assert.throws(() => getProviderCapabilities('not-a-real-provider'), /no provider registered for "not-a-real-provider"/)
+  assert.throws(() => getProviderCapabilities('not-a-real-provider'), /azure-devops/)
 })
 
 // #11/#10/#14/#20: github joins the registry one capability per ticket as each lands (content
@@ -185,6 +189,56 @@ test('resolveWorkItems instantiates gitlab\'s work-items client and creates/read
     const fetched = await workItems.getIssue(created.iid)
     assert.equal(fetched.title, 'Registry smoke test')
   })
+})
+
+// #41: atlassian joins the registry the same incremental way github/gitlab did, starting with its
+// content store — backed by Bitbucket Cloud, ADR-0042's split-suite provider. Only `contentStore` is
+// registered so far; its `pullRequests`/`identity` (Bitbucket-backed) and `workItems` (Jira-backed)
+// land in later tickets (#42/#44/#46).
+test('registeredProviders lists atlassian once its content store is registered', () => {
+  assert.ok(registeredProviders().includes('atlassian'))
+})
+
+test('getProviderCapabilities resolves atlassian to its content-store factory', () => {
+  const capabilities = getProviderCapabilities('atlassian')
+  assert.equal(typeof capabilities.contentStore, 'function')
+})
+
+test('resolveContentStore instantiates atlassian\'s content-store client (Bitbucket Cloud) and reads/writes through it', async () => {
+  await withFakeBitbucketServer({ owner: BITBUCKET_OWNER, repository: BITBUCKET_REPOSITORY, validPat: BITBUCKET_VALID_PAT }, async (baseUrl) => {
+    const contentStore = resolveContentStore('atlassian', { owner: BITBUCKET_OWNER, repository: BITBUCKET_REPOSITORY, pat: BITBUCKET_VALID_PAT, baseUrl })
+    assert.equal(await contentStore.repoExists(), true)
+    await contentStore.writeFile('/registry-smoke-test.md', 'x\n')
+    assert.equal(await contentStore.getFileContent('/registry-smoke-test.md'), 'x\n')
+  })
+})
+
+test('resolveContentStore\'s atlassian client surfaces a rejected token as the neutral AuthenticationError, tagged atlassian', async () => {
+  await withFakeBitbucketServer({ owner: BITBUCKET_OWNER, repository: BITBUCKET_REPOSITORY, validPat: BITBUCKET_VALID_PAT }, async (baseUrl) => {
+    const contentStore = resolveContentStore('atlassian', { owner: BITBUCKET_OWNER, repository: BITBUCKET_REPOSITORY, pat: 'wrong-token', baseUrl })
+    await assert.rejects(() => contentStore.getFileContent('/anything.md'), (err) => {
+      assert.ok(err instanceof AuthenticationError)
+      assert.equal(err.provider, 'atlassian')
+      return true
+    })
+  })
+})
+
+function withFakeBitbucketServerForContract(fn) {
+  return withFakeBitbucketServer({ owner: BITBUCKET_OWNER, repository: BITBUCKET_REPOSITORY, validPat: BITBUCKET_VALID_PAT }, fn)
+}
+
+// #41: the content-store slice of the shared contract suite (see this file's own identical use of it
+// for gitlab above), run against atlassian's registered content-store capability — the same
+// createBranch/branchExists isolation contract a later stage-branch ticket (#43) builds on.
+// `runProviderContractTests` (the four-capability suite) isn't run for atlassian, same as it isn't for
+// github/gitlab, and for the same reason: only content-store is registered so far.
+runContentStoreContractTests('atlassian', {
+  providerId: 'atlassian',
+  withServer: withFakeBitbucketServerForContract,
+  buildContentStore: (baseUrl, overrides = {}) =>
+    resolveContentStore('atlassian', { owner: BITBUCKET_OWNER, repository: BITBUCKET_REPOSITORY, pat: BITBUCKET_VALID_PAT, baseUrl, ...overrides }),
+  badCredential: 'wrong-token',
 })
 
 test('resolveContentStore/resolvePullRequests/resolveWorkItems/resolveIdentity instantiate azure-devops\'s existing clients', async () => {
