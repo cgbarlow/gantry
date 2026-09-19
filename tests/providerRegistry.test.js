@@ -192,10 +192,11 @@ test('resolveWorkItems instantiates gitlab\'s work-items client and creates/read
   })
 })
 
-// #41/#42/#44: atlassian joins the registry the same incremental way github/gitlab did — #41 landed
-// its content store (Bitbucket Cloud), #42 landed its workItems (Jira Cloud), #44 landed the
-// Bitbucket-backed half of identity (pull-request reviewers). `pullRequests` lands in a later ticket
-// (#46).
+// #41/#42/#44/#49: atlassian joins the registry the same incremental way github/gitlab did — #41
+// landed its content store (Bitbucket Cloud), #42 landed its workItems (Jira Cloud), #44 landed the
+// Bitbucket-backed half of identity (pull-request reviewers), #49 landed its pullRequests
+// (Bitbucket-backed, Promote's own open/read/request-reviewer scope — sign-off's fuller surface,
+// merge, is #46's job, extending the same client).
 test('registeredProviders lists atlassian once its content store is registered', () => {
   assert.ok(registeredProviders().includes('atlassian'))
 })
@@ -232,12 +233,12 @@ test('registeredProviders lists atlassian once its workItems capability is regis
   assert.ok(registeredProviders().includes('atlassian'))
 })
 
-test('getProviderCapabilities resolves atlassian to its content-store, workItems and identity factories, so far', () => {
+test('getProviderCapabilities resolves atlassian to all four capability factories — content-store, workItems, identity and (#49) pullRequests', () => {
   const capabilities = getProviderCapabilities('atlassian')
   assert.equal(typeof capabilities.contentStore, 'function')
   assert.equal(typeof capabilities.workItems, 'function')
   assert.equal(typeof capabilities.identity, 'function')
-  assert.equal(capabilities.pullRequests, undefined)
+  assert.equal(typeof capabilities.pullRequests, 'function')
 })
 
 test('resolveWorkItems instantiates atlassian\'s Jira-backed work-items client and creates/reads an issue through it', async () => {
@@ -264,8 +265,7 @@ test('resolveWorkItems\' atlassian client surfaces a rejected token as the neutr
 // #44's Bitbucket-backed half (pull-request reviewers) and #45's Jira-backed half (work-item
 // assignees) — dispatched between by `createAtlassianIdentityClient` (lib/providerRegistry.js) on
 // which of `owner`/`repository` (Bitbucket-shaped) or `jiraSite`/`jiraProjectKey` (Jira-shaped) the
-// caller's config carries. `pullRequests` (#46, Bitbucket-backed) remains the one capability still
-// entirely unregistered.
+// caller's config carries.
 test('resolveIdentity instantiates atlassian\'s Bitbucket-backed identity client', async () => {
   await withFakeBitbucketServer(
     {
@@ -299,6 +299,31 @@ test('resolveIdentity\'s atlassian client surfaces a rejected token as the neutr
   await withFakeJiraServer({ jiraProjectKey: JIRA_PROJECT_KEY, validPat: JIRA_VALID_PAT, users: [{ accountId: 'acc-x', displayName: 'X' }] }, async (baseUrl) => {
     const identity = resolveIdentity('atlassian', { jiraSite: JIRA_SITE, jiraProjectKey: JIRA_PROJECT_KEY, pat: 'wrong-token', baseUrl })
     await assert.rejects(() => identity.searchIdentities('x'), (err) => {
+      assert.ok(err instanceof AuthenticationError)
+      assert.equal(err.provider, 'atlassian')
+      return true
+    })
+  })
+})
+
+// #49: atlassian's pullRequests capability (Bitbucket-backed), registered the same incremental way
+// github's/gitlab's own pull-requests smoke tests above exercise theirs.
+test('resolvePullRequests instantiates atlassian\'s Bitbucket-backed pull-requests client and opens a real pull request', async () => {
+  await withFakeBitbucketServer({ owner: BITBUCKET_OWNER, repository: BITBUCKET_REPOSITORY, validPat: BITBUCKET_VALID_PAT, branchFiles: { feature: {} } }, async (baseUrl) => {
+    const pullRequests = resolvePullRequests('atlassian', { owner: BITBUCKET_OWNER, repository: BITBUCKET_REPOSITORY, pat: BITBUCKET_VALID_PAT, baseUrl })
+    const pr = await pullRequests.createPullRequest({ sourceBranch: 'feature', targetBranch: 'main', title: 'Registry smoke test' })
+    assert.equal(pr.status, 'active')
+
+    const fetched = await pullRequests.getPullRequest(pr.pullRequestId)
+    assert.equal(fetched.pullRequestId, pr.pullRequestId)
+    assert.deepEqual(fetched.participants, [])
+  })
+})
+
+test('resolvePullRequests\' atlassian client surfaces a rejected token as the neutral AuthenticationError, tagged atlassian', async () => {
+  await withFakeBitbucketServer({ owner: BITBUCKET_OWNER, repository: BITBUCKET_REPOSITORY, validPat: BITBUCKET_VALID_PAT }, async (baseUrl) => {
+    const pullRequests = resolvePullRequests('atlassian', { owner: BITBUCKET_OWNER, repository: BITBUCKET_REPOSITORY, pat: 'wrong-token', baseUrl })
+    await assert.rejects(() => pullRequests.createPullRequest({ sourceBranch: 'feature', targetBranch: 'main', title: 't' }), (err) => {
       assert.ok(err instanceof AuthenticationError)
       assert.equal(err.provider, 'atlassian')
       return true

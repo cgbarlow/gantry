@@ -199,17 +199,20 @@ function RenderEngineSection() {
 // Definitions page's own Refresh button re-reads every configured repo on demand thereafter. Gated
 // behind advancedMode alongside the other Azure-DevOps-specific sections above — a local-only user
 // never sees this.
-// #19/#27 (ADR-0037, ADR-0041): the location fields collected change with the Provider picked, the
-// same "Provider drives which fields appear" convention the "+ New Workspace" wizard uses — Azure
-// DevOps needs Organization/Project/Repository, GitHub only Owner/Repository, GitLab only
+// #19/#27/#49 (ADR-0037, ADR-0041, ADR-0042): the location fields collected change with the Provider
+// picked, the same "Provider drives which fields appear" convention the "+ New Workspace" wizard uses
+// — Azure DevOps needs Organization/Project/Repository, GitHub only Owner/Repository, GitLab only
 // Namespace/Project (stored as `location.repository`, ADR-0041's own "wizard labels it Project;
-// only the internal key is neutral"). Atlassian is deliberately absent (not built, docs/adr/0037),
-// unlike the wizard's own Provider picker (#8) which shows it as known-but-unavailable — this form
-// has no such row to add it to yet.
+// only the internal key is neutral"), Atlassian (Bitbucket Cloud) needs Bitbucket Account + Repository
+// plus Jira Site + Jira Project (ADR-0042's own full four-field location — a library repo's location
+// is unchanged from a workspace's; only its *credential* is Bitbucket-only, see this file's own
+// `handleAdd`). "Bitbucket Account", never "Bitbucket Workspace" — ADR-0042's own resolved
+// terminology collision with gantry's own Workspace concept.
 const LIBRARY_REPO_PROVIDERS = [
   { id: 'azure-devops', label: 'Azure DevOps' },
   { id: 'github', label: 'GitHub' },
   { id: 'gitlab', label: 'GitLab' },
+  { id: 'atlassian', label: 'Atlassian (Bitbucket)' },
 ]
 
 function LibraryReposSection() {
@@ -222,6 +225,8 @@ function LibraryReposSection() {
   const [namespace, setNamespace] = useState('')
   const [repository, setRepository] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
+  const [jiraSite, setJiraSite] = useState('')
+  const [jiraProjectKey, setJiraProjectKey] = useState('')
   const [codeOwner, setCodeOwner] = useState('')
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState(null)
@@ -258,6 +263,11 @@ function LibraryReposSection() {
         setAddError('Namespace and project are both required.')
         return
       }
+    } else if (provider === 'atlassian') {
+      if (!owner.trim() || !repository.trim() || !jiraSite.trim() || !jiraProjectKey.trim()) {
+        setAddError('Bitbucket account, repository, Jira site and Jira project are all required.')
+        return
+      }
     } else if (!organization.trim() || !project.trim() || !repository.trim()) {
       setAddError('Organization, project and repository are all required.')
       return
@@ -271,7 +281,9 @@ function LibraryReposSection() {
           ? { owner: owner.trim(), repository: repository.trim(), ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}) }
           : provider === 'gitlab'
             ? { namespace: namespace.trim(), repository: repository.trim(), ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}) }
-            : { organization: organization.trim(), project: project.trim(), repository: repository.trim(), ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}) }
+            : provider === 'atlassian'
+              ? { owner: owner.trim(), repository: repository.trim(), jiraSite: jiraSite.trim(), jiraProjectKey: jiraProjectKey.trim() }
+              : { organization: organization.trim(), project: project.trim(), repository: repository.trim(), ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}) }
       const res = await fetch('/api/library-repos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -288,6 +300,8 @@ function LibraryReposSection() {
       setNamespace('')
       setRepository('')
       setBaseUrl('')
+      setJiraSite('')
+      setJiraProjectKey('')
       setCodeOwner('')
       setAddStatus(body.refresh?.ok ? `Added — ${body.refresh.definitionCount} definition${body.refresh.definitionCount === 1 ? '' : 's'} found.` : `Added — ${body.refresh?.error ?? 'could not be read yet; try Refresh on the Definitions page.'}`)
       load()
@@ -331,14 +345,17 @@ function LibraryReposSection() {
     <section class="settings-section">
       <h2>Library repos</h2>
       <p class="guidance">
-        Azure DevOps, GitHub or GitLab repos read as additional sources for the server library,
-        alongside the packaged <code>definitions/</code> directory — read-only in the editor
-        (viewable, copyable-from, clonable into a workspace), read with this server's own PAT — one
-        per Provider (<code>GANTRY_LIBRARY_PAT_AZURE_DEVOPS</code> /
-        <code>GANTRY_LIBRARY_PAT_GITHUB</code> / <code>GANTRY_LIBRARY_PAT_GITLAB</code>, the first
-        also honouring the deprecated <code>GANTRY_LIBRARY_PAT</code>) — cached on disk. Re-read at
-        server startup, when a repo is added below, and on the Definitions page's Refresh button —
-        never polled.
+        Azure DevOps, GitHub, GitLab or Atlassian (Bitbucket) repos read as additional sources for the
+        server library, alongside the packaged <code>definitions/</code> directory — read-only in the
+        editor (viewable, copyable-from, clonable into a workspace), read with this server's own PAT —
+        one per Provider (<code>GANTRY_LIBRARY_PAT_AZURE_DEVOPS</code> /
+        <code>GANTRY_LIBRARY_PAT_GITHUB</code> / <code>GANTRY_LIBRARY_PAT_GITLAB</code> /
+        <code>GANTRY_LIBRARY_PAT_ATLASSIAN</code>, the first also honouring the deprecated
+        <code>GANTRY_LIBRARY_PAT</code>) — cached on disk. An Atlassian library repo's one PAT is its
+        Bitbucket token only; it never touches Jira, and no Jira credential is ever requested for it
+        (ADR-0042 — Promote and reading <code>definitions/</code> are both content-store-only
+        operations). Re-read at server startup, when a repo is added below, and on the Definitions
+        page's Refresh button — never polled.
       </p>
       ${loadError ? html`<p class="load-error">${loadError}</p>` : null}
       ${repos === null && !loadError ? html`<p class="loading">Loading…</p>` : null}
@@ -349,12 +366,20 @@ function LibraryReposSection() {
                 (repo) => html`
                   <div class="result-row" key=${repo.id}>
                     <span class="k"
-                      >${repo.provider === 'github' ? 'GitHub' : repo.provider === 'gitlab' ? 'GitLab' : 'Azure DevOps'}:
+                      >${repo.provider === 'github'
+                        ? 'GitHub'
+                        : repo.provider === 'gitlab'
+                          ? 'GitLab'
+                          : repo.provider === 'atlassian'
+                            ? 'Atlassian (Bitbucket)'
+                            : 'Azure DevOps'}:
                       ${repo.provider === 'github'
                         ? `${repo.location.owner}/${repo.location.repository}`
                         : repo.provider === 'gitlab'
                           ? `${repo.location.namespace}/${repo.location.repository}`
-                          : `${repo.location.organization}/${repo.location.project}/${repo.location.repository}`}</span
+                          : repo.provider === 'atlassian'
+                            ? `${repo.location.owner}/${repo.location.repository}`
+                            : `${repo.location.organization}/${repo.location.project}/${repo.location.repository}`}</span
                     >
                     <span class="v">
                       ${repo.definitionCount == null
@@ -412,7 +437,22 @@ function LibraryReposSection() {
                 <label class="field-label" for="library-repo-baseurl">Base URL (optional — self-hosted GitLab CE/EE only)</label>
                 <input id="library-repo-baseurl" class="wizard-input" value=${baseUrl} onInput=${(e) => setBaseUrl(e.currentTarget.value)} />
               `
-            : html`
+            : provider === 'atlassian'
+              ? html`
+                  <label class="field-label" for="library-repo-owner">Bitbucket account</label>
+                  <input id="library-repo-owner" class="wizard-input" value=${owner} onInput=${(e) => setOwner(e.currentTarget.value)} />
+                  <label class="field-label" for="library-repo-repository">Repository</label>
+                  <input id="library-repo-repository" class="wizard-input" value=${repository} onInput=${(e) => setRepository(e.currentTarget.value)} />
+                  <label class="field-label" for="library-repo-jirasite">Jira site</label>
+                  <input id="library-repo-jirasite" class="wizard-input" placeholder="yoursite.atlassian.net" value=${jiraSite} onInput=${(e) => setJiraSite(e.currentTarget.value)} />
+                  <label class="field-label" for="library-repo-jiraprojectkey">Jira project key</label>
+                  <input id="library-repo-jiraprojectkey" class="wizard-input" value=${jiraProjectKey} onInput=${(e) => setJiraProjectKey(e.currentTarget.value)} />
+                  <p class="workspace-field-hint">
+                    Only this server's Bitbucket credential (<code>GANTRY_LIBRARY_PAT_ATLASSIAN</code>) is ever used for this repo — no
+                    Jira credential is requested or stored here (ADR-0042: a library repo never touches work items).
+                  </p>
+                `
+              : html`
                 <label class="field-label" for="library-repo-organization">Organization</label>
                 <input id="library-repo-organization" class="wizard-input" value=${organization} onInput=${(e) => setOrganization(e.currentTarget.value)} />
                 <label class="field-label" for="library-repo-project">Project</label>

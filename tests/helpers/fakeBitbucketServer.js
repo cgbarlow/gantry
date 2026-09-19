@@ -16,8 +16,12 @@ import { createServer } from 'node:http'
  * name to its tip commit hash — see `lib/bitbucketClient.js`'s own "Branch names containing '/'" doc
  * comment), branch creation (`POST .../refs/branches`), the hash-addressed Source API
  * (`GET .../src/{hash}/{path}`, with and without `?format=meta`) and the multipart commit endpoint
- * (`POST .../src`) that adds/updates/deletes files in one commit. Later tickets (#43 stage branches,
- * #46 pull requests, ...) extend this the same incremental way `fakeGitLabServer.js` grew.
+ * (`POST .../src`) that adds/updates/deletes files in one commit. #49 adds
+ * `lib/bitbucketPullRequestsClient.js`'s own scope on top — create/read/update-reviewers
+ * (`POST`/`GET`/`PUT .../pullrequests[/{id}]`) plus two test-only convenience routes
+ * (`POST .../pullrequests/{id}/approve` and `.../request-changes`) simulating a reviewer acting
+ * directly on Bitbucket, the same role `fakeGitLabServer.js`'s own `/approve`/`/discussions` routes
+ * play for GitLab. #46 (merge, wired into sign-off) extends this the same incremental way.
  *
  * Unlike GitLab's own `namespace%2Frepository`-style opaque `:id`, a Bitbucket workspace/repo slug is
  * always a single path segment with no internal encoding concerns — this fake's own routing is
@@ -53,6 +57,14 @@ export function createFakeBitbucketServer({ owner, repository, validPat, files =
   const commitDates = new Map() // hash -> ISO date string, so re-pointing a branch at an existing hash (createBranch) doesn't mint a fresh date
   const branchTips = new Map() // branch name -> { hash, date }
   let commitCounter = 0
+
+  // #49's lib/bitbucketPullRequestsClient.js — id -> { id, title, description, state, source, destination, participants }.
+  // `participants` starts empty on creation (a brand-new Bitbucket pull request has none) and gains one
+  // entry per reviewer PUT `addReviewers` sends, each `{ user, role: 'REVIEWER', approved: false, state: null }`
+  // until this fake's own `/participants/{uuid}` test-only mutation route (below) flips it to
+  // 'approved'/'changes_requested', mirroring a real reviewer acting on the pull request.
+  const pullRequests = new Map()
+  let pullRequestCounter = 0
 
   function normalize(path) {
     return path.replace(/^\/+/, '').replace(/\/+$/, '')
@@ -205,6 +217,89 @@ export function createFakeBitbucketServer({ owner, repository, validPat, files =
       const tip = { hash, date: commitDates.get(hash) }
       branchTips.set(name, tip)
       return json(201, branchObject(name, tip))
+    }
+
+    // POST /repositories/{workspace}/{repo_slug}/pullrequests — #49's
+    // lib/bitbucketPullRequestsClient.js's createPullRequest(). `id` is repo-scoped and sequential,
+    // the same as real Bitbucket's own pull-request numbering.
+    if (req.method === 'POST' && rest === '/pullrequests') {
+      const body = await readJsonBody(req)
+      pullRequestCounter += 1
+      const pr = {
+        type: 'pullrequest',
+        id: pullRequestCounter,
+        title: body.title,
+        description: body.description ?? '',
+        state: 'OPEN',
+        source: body.source,
+        destination: body.destination,
+        participants: [],
+      }
+      pullRequests.set(pr.id, pr)
+      return json(201, pr)
+    }
+
+    const pullRequestMatch = rest.match(/^\/pullrequests\/(\d+)$/)
+
+    // GET /repositories/{workspace}/{repo_slug}/pullrequests/{id} — getPullRequest().
+    if (req.method === 'GET' && pullRequestMatch) {
+      const pr = pullRequests.get(Number(pullRequestMatch[1]))
+      if (!pr) return json(404, { type: 'error', error: { message: `No fake pull request #${pullRequestMatch[1]}` } })
+      return json(200, pr)
+    }
+
+    // PUT /repositories/{workspace}/{repo_slug}/pullrequests/{id} — addReviewers(), Bitbucket's own
+    // "set the reviewers list" call. Replaces `participants` wholesale with one freshly-added,
+    // not-yet-acted-on entry per reviewer (`approved: false, state: null`) — the same "only ever
+    // called once, right after creation, with no existing reviewers" contract
+    // `lib/bitbucketPullRequestsClient.js`'s own `addReviewers` doc comment describes.
+    if (req.method === 'PUT' && pullRequestMatch) {
+      const pr = pullRequests.get(Number(pullRequestMatch[1]))
+      if (!pr) return json(404, { type: 'error', error: { message: `No fake pull request #${pullRequestMatch[1]}` } })
+      const body = await readJsonBody(req)
+      if (Array.isArray(body.reviewers)) {
+        pr.participants = body.reviewers.map((r) => ({
+          type: 'participant',
+          user: { type: 'user', uuid: r.uuid },
+          role: 'REVIEWER',
+          approved: false,
+          state: null,
+        }))
+      }
+      return json(200, pr)
+    }
+
+    // POST /repositories/{workspace}/{repo_slug}/pullrequests/{id}/approve — test-only convenience
+    // simulating a reviewer approving directly on Bitbucket (`lib/definitionPromote.js`'s explicit
+    // Check action then re-reads this). Real Bitbucket approves as whichever account the request's
+    // own token authenticates as; this fake has no such notion, so it acts on the pull request's own
+    // reviewer participant (there is always at most one — Promote attaches only the configured code
+    // owner) rather than taking one in the request body.
+    const approveMatch = rest.match(/^\/pullrequests\/(\d+)\/approve$/)
+    if (req.method === 'POST' && approveMatch) {
+      const pr = pullRequests.get(Number(approveMatch[1]))
+      if (!pr) return json(404, { type: 'error', error: { message: `No fake pull request #${approveMatch[1]}` } })
+      const participant = pr.participants[0]
+      if (participant) {
+        participant.approved = true
+        participant.state = 'approved'
+      }
+      return json(200, participant ?? {})
+    }
+
+    // POST /repositories/{workspace}/{repo_slug}/pullrequests/{id}/request-changes — the
+    // changes-requested twin of `/approve` above, same test-only "acts on the sole reviewer
+    // participant" convenience.
+    const requestChangesMatch = rest.match(/^\/pullrequests\/(\d+)\/request-changes$/)
+    if (req.method === 'POST' && requestChangesMatch) {
+      const pr = pullRequests.get(Number(requestChangesMatch[1]))
+      if (!pr) return json(404, { type: 'error', error: { message: `No fake pull request #${requestChangesMatch[1]}` } })
+      const participant = pr.participants[0]
+      if (participant) {
+        participant.approved = false
+        participant.state = 'changes_requested'
+      }
+      return json(200, participant ?? {})
     }
 
     // GET /repositories/{workspace}/{repo_slug}/src/{hash}/{path...}[?format=meta] — Bitbucket's own
