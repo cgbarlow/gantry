@@ -7,13 +7,21 @@ import { createServer } from 'node:http'
  * Mirrors `tests/helpers/fakeAzureDevOpsServer.js`'s own shape and conventions so the two fakes read
  * the same way to a caller working across both providers.
  *
- * Covers the read-only subset `lib/githubClient.js` implements: the repository-metadata endpoint
+ * Covers the subset `lib/githubClient.js` implements: the repository-metadata endpoint
  * (`GET /repos/:owner/:repo`) that `checkGitHubRepo`/`createGitHubClient().getRepo()` call to prove a
- * PAT reaches a real repository before a workspace is registered (#8), and the Contents API (get a
- * file, list a folder) `lib/definitionGitHub.js` reads a library repo's `definitions/` folder over
- * (#19). Later tickets (#11 content store, #13 pull requests, #14 work items, #15 review labels, #10
- * identity) extend this the same incremental way #99/#118/#120 extended the Azure DevOps fake — new
+ * PAT reaches a real repository before a workspace is registered (#8), the Contents API (get a file,
+ * list a folder) `lib/definitionGitHub.js` reads a library repo's `definitions/` folder over (#19), and
+ * the Git Data API (blobs/trees/commits/refs) `writeFile`/`writeFiles` uses to land one or several
+ * files as a single commit (#11). Later tickets (#13 pull requests, #14 work items, #15 review labels,
+ * #10 identity) extend this the same incremental way #99/#118/#120 extended the Azure DevOps fake — new
  * endpoints added here as the GitHub client itself grows them, never a parallel second fake.
+ *
+ * The Git Data API is modelled loosely, not as real git objects: a "tree" is just the flat
+ * `Map<path, content>` a branch already is (no nested subtrees, no real SHA-1 hashing) — enough to
+ * prove `lib/githubClient.js`'s own request sequence (blob → tree → commit → ref) round-trips real
+ * content through real HTTP, without reimplementing git itself. Blob/tree/commit ids are opaque
+ * incrementing fake shas (`blob-1`, `tree-1`, `commit-1`, ...), never validated by this fake or by the
+ * client, which never parses a sha's shape.
  *
  * `files` seeds `main`'s initial content, keyed by repo-relative path (leading "/" optional).
  * `branchFiles`, if given, seeds one or more other branches the same way. `validPat` is the PAT (or,
@@ -26,11 +34,26 @@ import { createServer } from 'node:http'
  */
 export function createFakeGitHubServer({ owner, repository, validPat, files = {}, branchFiles = {}, repoExists = true } = {}) {
   const branches = new Map()
+  const refs = new Map() // branch name -> commit sha
+  const commits = new Map() // commit sha -> { treeSha, parents }
+  const trees = new Map() // tree sha -> Map<path, content> (the materialized file set at that tree)
+  const blobs = new Map() // blob sha -> { content, encoding }
+  let objectCounter = 0
+  const nextSha = (kind) => `${kind}-${++objectCounter}`
 
+  // Seeds a branch with both the Contents-API-facing flat file map (`branches`) and a synthetic
+  // initial commit/tree/ref, so `writeFiles`'s own `getBranchTip` finds a real tip (and a real
+  // `base_tree` to build on) even for a repo seeded directly via `files`/`branchFiles`, not through a
+  // prior write.
   function seedBranch(name, seedFiles) {
     const entries = Object.entries(seedFiles)
     const store = new Map(entries.map(([path, content]) => [path.startsWith('/') ? path : `/${path}`, content]))
     branches.set(name, store)
+    const treeSha = nextSha('tree')
+    trees.set(treeSha, new Map(store))
+    const commitSha = nextSha('commit')
+    commits.set(commitSha, { treeSha, parents: [] })
+    refs.set(name, commitSha)
   }
   seedBranch('main', files)
   for (const [branchName, seedFiles] of Object.entries(branchFiles)) {
@@ -38,6 +61,12 @@ export function createFakeGitHubServer({ owner, repository, validPat, files = {}
   }
 
   const repoBasePath = `/repos/${owner}/${repository}`
+
+  async function readJsonBody(req) {
+    let raw = ''
+    for await (const chunk of req) raw += chunk
+    return raw ? JSON.parse(raw) : {}
+  }
 
   return createServer(async (req, res) => {
     const url = new URL(req.url, 'http://fake-github.invalid')
@@ -111,6 +140,93 @@ export function createFakeGitHubServer({ owner, repository, validPat, files = {}
           path: normalizedScope === '' ? name : `${normalizedScope}/${name}`,
         }))
       return json(200, value)
+    }
+
+    // GET /repos/:owner/:repo/git/ref/heads/:branch — the current tip commit of a branch;
+    // lib/githubClient.js's getBranchTip calls this first, then GET .../git/commits/:sha below.
+    const refMatch = pathname.match(new RegExp(`^${repoBasePath}/git/ref/heads/(.+)$`))
+    if (req.method === 'GET' && refMatch) {
+      const branchName = refMatch[1]
+      const sha = refs.get(branchName)
+      if (!sha) return json(404, { message: `No fake ref for "heads/${branchName}"` })
+      return json(200, { ref: `refs/heads/${branchName}`, object: { sha, type: 'commit' } })
+    }
+
+    // GET /repos/:owner/:repo/git/commits/:sha — just enough of a commit object for
+    // lib/githubClient.js's getBranchTip to read the tree it points at.
+    const commitMatch = pathname.match(new RegExp(`^${repoBasePath}/git/commits/([^/]+)$`))
+    if (req.method === 'GET' && commitMatch) {
+      const commit = commits.get(commitMatch[1])
+      if (!commit) return json(404, { message: `No fake commit "${commitMatch[1]}"` })
+      return json(200, { sha: commitMatch[1], tree: { sha: commit.treeSha } })
+    }
+
+    // POST /repos/:owner/:repo/git/blobs — stores one file's content, keyed by a fake blob sha.
+    if (req.method === 'POST' && pathname === `${repoBasePath}/git/blobs`) {
+      const body = await readJsonBody(req)
+      const sha = nextSha('blob')
+      blobs.set(sha, { content: body.content, encoding: body.encoding ?? 'utf-8' })
+      return json(201, { sha })
+    }
+
+    // POST /repos/:owner/:repo/git/trees — materializes a new flat file map from `base_tree` (if
+    // given) plus the entries in `tree`; an entry with `sha: null` removes that path (GitHub's own
+    // documented convention for deleting a path via the Git Data API).
+    if (req.method === 'POST' && pathname === `${repoBasePath}/git/trees`) {
+      const body = await readJsonBody(req)
+      const base = body.base_tree ? trees.get(body.base_tree) : undefined
+      if (body.base_tree && !base) return json(404, { message: `No fake tree "${body.base_tree}"` })
+      const materialized = new Map(base ?? [])
+      for (const entry of body.tree ?? []) {
+        const key = entry.path.startsWith('/') ? entry.path : `/${entry.path}`
+        if (entry.sha === null) {
+          materialized.delete(key)
+          continue
+        }
+        const blob = blobs.get(entry.sha)
+        if (!blob) return json(422, { message: `No fake blob "${entry.sha}"` })
+        materialized.set(key, Buffer.from(blob.content, blob.encoding === 'base64' ? 'base64' : 'utf8').toString('utf8'))
+      }
+      const sha = nextSha('tree')
+      trees.set(sha, materialized)
+      return json(201, { sha })
+    }
+
+    // POST /repos/:owner/:repo/git/commits — records a new commit object pointing at `tree`.
+    if (req.method === 'POST' && pathname === `${repoBasePath}/git/commits`) {
+      const body = await readJsonBody(req)
+      if (!trees.has(body.tree)) return json(422, { message: `No fake tree "${body.tree}"` })
+      const sha = nextSha('commit')
+      commits.set(sha, { treeSha: body.tree, parents: body.parents ?? [] })
+      return json(201, { sha })
+    }
+
+    // PATCH /repos/:owner/:repo/git/refs/heads/:branch — fast-forwards an existing branch to a new
+    // commit; the final step of lib/githubClient.js's writeFiles for a branch that already exists.
+    // Syncs `branches` (the Contents-API-facing store) to the new tip's materialized tree so a
+    // subsequent GET .../contents immediately reflects the write.
+    const updateRefMatch = pathname.match(new RegExp(`^${repoBasePath}/git/refs/heads/(.+)$`))
+    if (req.method === 'PATCH' && updateRefMatch) {
+      const branchName = updateRefMatch[1]
+      const body = await readJsonBody(req)
+      const commit = commits.get(body.sha)
+      if (!commit) return json(422, { message: `No fake commit "${body.sha}"` })
+      refs.set(branchName, body.sha)
+      branches.set(branchName, new Map(trees.get(commit.treeSha)))
+      return json(200, { ref: `refs/heads/${branchName}`, object: { sha: body.sha } })
+    }
+
+    // POST /repos/:owner/:repo/git/refs — creates a brand-new branch ref; writeFiles's path for the
+    // very first commit onto a branch that doesn't exist yet (mirrors a genuinely empty repo/branch).
+    if (req.method === 'POST' && pathname === `${repoBasePath}/git/refs`) {
+      const body = await readJsonBody(req)
+      const branchName = String(body.ref ?? '').replace(/^refs\/heads\//, '')
+      if (!branchName) return json(422, { message: 'Missing or malformed "ref"' })
+      const commit = commits.get(body.sha)
+      if (!commit) return json(422, { message: `No fake commit "${body.sha}"` })
+      refs.set(branchName, body.sha)
+      branches.set(branchName, new Map(trees.get(commit.treeSha)))
+      return json(201, { ref: `refs/heads/${branchName}`, object: { sha: body.sha } })
     }
 
     return json(404, { message: `No fake route for ${req.method} ${pathname}` })

@@ -174,3 +174,74 @@ test('a rejected PAT surfaces as the neutral AuthenticationError, tagged github'
     })
   })
 })
+
+// ---------- #11: writeFile / writeFiles (the content-store write half lib/instance.js builds on) ----------
+
+test('writeFile creates a new file, then getFileContent reads it back unchanged', async () => {
+  await withFakeGitHubServer({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT }, async (baseUrl) => {
+    const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+    const result = await client.writeFile('notes/hello.md', 'hello world\n')
+    assert.equal(result.changeType, 'add')
+    assert.ok(result.push.commits[0].commitId)
+    assert.equal(await client.getFileContent('notes/hello.md'), 'hello world\n')
+  })
+})
+
+test('writeFile on an already-existing path reports changeType "edit", and getFileContent reads the new content', async () => {
+  await withFakeGitHubServer(
+    { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: { 'notes/hello.md': 'v1\n' } },
+    async (baseUrl) => {
+      const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+      const result = await client.writeFile('notes/hello.md', 'v2\n')
+      assert.equal(result.changeType, 'edit')
+      assert.equal(await client.getFileContent('notes/hello.md'), 'v2\n')
+    }
+  )
+})
+
+test('writeFiles lands several files in exactly one commit, leaving an untouched sibling file byte-identical', async () => {
+  await withFakeGitHubServer(
+    { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: { 'modules/untouched.md': 'unchanged\n' } },
+    async (baseUrl) => {
+      const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+      const { changes, push } = await client.writeFiles(
+        [
+          { path: 'modules/a.md', content: 'a content\n' },
+          { path: 'modules/b.md', content: 'b content\n' },
+        ],
+        { message: 'Save two modules' }
+      )
+      assert.equal(changes.length, 2)
+      assert.ok(changes.every((c) => c.changeType === 'add'))
+      // One commit id covers both files — the "one Save is one commit" contract.
+      assert.equal(typeof push.commits[0].commitId, 'string')
+
+      assert.equal(await client.getFileContent('modules/a.md'), 'a content\n')
+      assert.equal(await client.getFileContent('modules/b.md'), 'b content\n')
+      assert.equal(await client.getFileContent('modules/untouched.md'), 'unchanged\n')
+    }
+  )
+})
+
+test('writeFiles targets a non-default branch without touching main', async () => {
+  await withFakeGitHubServer(
+    { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: { 'main-only.md': 'main\n' }, branchFiles: { 'feature-branch': { 'main-only.md': 'main\n' } } },
+    async (baseUrl) => {
+      const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+      await client.writeFile('branch-only.md', 'branch\n', { branch: 'feature-branch' })
+      assert.equal(await client.fileExists('branch-only.md', 'feature-branch'), true)
+      assert.equal(await client.fileExists('branch-only.md', 'main'), false)
+    }
+  )
+})
+
+test('a rejected PAT on writeFile surfaces as the neutral AuthenticationError, tagged github', async () => {
+  await withFakeGitHubServer({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT }, async (baseUrl) => {
+    const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: 'wrong-pat', baseUrl })
+    await assert.rejects(() => client.writeFile('x.md', 'x\n'), (err) => {
+      assert.ok(err instanceof GitHubAuthenticationError)
+      assert.equal(err.provider, 'github')
+      return true
+    })
+  })
+})

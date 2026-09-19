@@ -29,9 +29,23 @@ test('getProviderCapabilities resolves azure-devops to its four capability facto
 })
 
 test('getProviderCapabilities throws a clear error naming the registered providers, for an unregistered provider id', () => {
-  assert.throws(() => getProviderCapabilities('github'), /no provider registered for "github"/)
-  assert.throws(() => getProviderCapabilities('github'), /azure-devops/)
   assert.throws(() => getProviderCapabilities('atlassian'), /no provider registered for "atlassian"/)
+  assert.throws(() => getProviderCapabilities('atlassian'), /azure-devops/)
+})
+
+// #11: github joins the registry with its content-store capability only — pullRequests/workItems/
+// identity are #12-#15/#10's job, registered here the same incremental way this file's own doc
+// comment describes for Azure DevOps's own four clients.
+test('registeredProviders lists github once its content store is registered', () => {
+  assert.ok(registeredProviders().includes('github'))
+})
+
+test('getProviderCapabilities resolves github to a content-store factory only, so far', () => {
+  const capabilities = getProviderCapabilities('github')
+  assert.equal(typeof capabilities.contentStore, 'function')
+  assert.equal(capabilities.pullRequests, undefined)
+  assert.equal(capabilities.workItems, undefined)
+  assert.equal(capabilities.identity, undefined)
 })
 
 test('resolveContentStore/resolvePullRequests/resolveWorkItems/resolveIdentity instantiate azure-devops\'s existing clients', async () => {
