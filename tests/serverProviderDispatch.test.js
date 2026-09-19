@@ -101,11 +101,19 @@ test('POST /api/instance/work-items/link with a declared but unsupported provide
 
 // ---------- GET /api/identities ----------
 
-test('GET /api/identities?provider=gitlab reports 400 "not supported yet" rather than silently falling through to the Azure DevOps/first-workspace default', async () => {
+// #28 registered GitLab's identity capability (`lib/gitlabIdentityClient.js`, ADR-0041) and taught
+// this route a `provider=gitlab`+`namespace`+`repository` branch (tests/serverGitLabIdentities.test.js
+// covers that path end-to-end) — so `provider=gitlab` is no longer unconditionally rejected here the
+// way it still correctly is for the other, not-yet-registered call sites below. A bare `provider=gitlab`
+// with no `namespace`/`repository` (the case this test now covers) falls through to the same "no
+// location named or found anywhere" 200-with-`[]` response the route already gives a bare
+// `provider=github` with no `owner`/`repository`, or no `provider` at all — never a 400, since an
+// unresolvable identity search is routine (a free-text field polled before any location is known), not
+// a caller error.
+test('GET /api/identities?provider=gitlab with no namespace/repository falls through to "no location found" (200, []), not a 400', async () => {
   await withScratchServer({}, async (base) => {
     const res = await fetch(`${base}/api/identities?q=someone&provider=gitlab`)
-    assert.equal(res.status, 400)
-    const body = await res.json()
-    assert.match(body.error, /not supported yet for provider "gitlab"/)
+    assert.equal(res.status, 200)
+    assert.deepEqual(await res.json(), [])
   })
 })

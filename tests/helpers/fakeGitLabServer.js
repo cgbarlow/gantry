@@ -28,8 +28,16 @@ import { createServer } from 'node:http'
  * (default `true`) controls whether `GET /projects/:id` reports the project as existing; `false`
  * returns 404, simulating both a genuinely nonexistent project and a PAT whose scopes can't see an
  * otherwise-real one — GitLab, like GitHub, reports both cases identically.
+ *
+ * `members` (#28, default `[]`) seeds `GET /projects/:id/members/all` — GitLab's own Members API,
+ * already folding inherited group membership server-side (unlike GitHub's own separate
+ * collaborators/org-members endpoints), so a test seeds one flat list regardless of whether a given
+ * member is direct or inherited. Each entry is `{ id, username, name, access_level }` — `access_level`
+ * is GitLab's own 10/20/30/40/50 (Guest/Reporter/Developer/Maintainer/Owner) scale, exercising
+ * `lib/gitlabIdentityClient.js`'s own Reporter-or-above assignability gate. The fake's `query` param
+ * handling matches real GitLab's own substring, case-insensitive match against `username` or `name`.
  */
-export function createFakeGitLabServer({ namespace, repository, validPat, files = {}, branchFiles = {}, repoExists = true } = {}) {
+export function createFakeGitLabServer({ namespace, repository, validPat, files = {}, branchFiles = {}, repoExists = true, members = [] } = {}) {
   const branches = new Map() // branch name -> Map<path, Buffer>
   const branchTips = new Map() // branch name -> { commitId, committedDate, authoredDate }
   let commitCounter = 0
@@ -150,6 +158,21 @@ export function createFakeGitLabServer({ namespace, repository, validPat, files 
       return json(200, value)
     }
 
+    // GET /projects/:id/members/all?query=&per_page= — GitLab's own Members API (#28), already
+    // folding inherited group membership into one flat list (see this factory's own doc comment
+    // above). `query`, when present, filters `members` by substring against `username` or `name`,
+    // case-insensitive — mirroring real GitLab's own documented behaviour for this parameter.
+    if (req.method === 'GET' && rest === '/members/all') {
+      const q = (url.searchParams.get('query') ?? '').toLowerCase()
+      const matched = q
+        ? members.filter((m) => m.username.toLowerCase().includes(q) || (m.name ?? '').toLowerCase().includes(q))
+        : members
+      return json(
+        200,
+        matched.map((m) => ({ id: m.id, username: m.username, name: m.name ?? m.username, access_level: m.access_level }))
+      )
+    }
+
     // GET /projects/:id/repository/branches/:branch — GitLab's own Repository Branches API,
     // lib/gitlabClient.js's getBranchObjectId's single request (unlike GitHub's own two-step
     // ref-then-commit lookup, the branch's tip commit is already embedded here).
@@ -221,9 +244,9 @@ export function createFakeGitLabServer({ namespace, repository, validPat, files 
 }
 
 /** Starts a `createFakeGitLabServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/helpers/fakeGitHubServer.js`'s own `withFakeGitHubServer` shape. */
-export function withFakeGitLabServer({ namespace, repository, validPat, files, branchFiles, repoExists }, fn) {
+export function withFakeGitLabServer({ namespace, repository, validPat, files, branchFiles, repoExists, members }, fn) {
   return new Promise((resolve, reject) => {
-    const server = createFakeGitLabServer({ namespace, repository, validPat, files, branchFiles, repoExists })
+    const server = createFakeGitLabServer({ namespace, repository, validPat, files, branchFiles, repoExists, members })
     server.listen(0, async () => {
       const { port } = server.address()
       try {
