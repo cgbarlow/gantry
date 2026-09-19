@@ -17,6 +17,17 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.7.0-beta — 2026-09-19
+
+### Added
+
+- **GitHub, GitLab and Atlassian (Bitbucket + Jira) as Providers** (docs/adr/0041, docs/adr/0042): alongside Azure DevOps, a workspace or library repo can now live on GitHub, on GitLab (gitlab.com or self-hosted CE/EE, with a configurable base URL), or on Atlassian (Bitbucket Cloud for the repo, Jira Cloud for work items). Each gets the full set of existing capabilities: stage branches, pull/merge-request-gated sign-off, work-item linking, Request Review, Promote to a library repo, and repo adoption. An Atlassian workspace is entered with two Personal Access Tokens (one for Bitbucket, one for Jira) rather than one, since they're separate products.
+- **Reviewer/sign-off states are read natively per Provider**: GitHub's Approved/Changes Requested/Commented, GitLab's approve-toggle-plus-discussion-threads (with Premium/Ultimate Approval Rules honoured where configured), and Bitbucket's own Approved/Changes Requested states each map onto Gantry's own approved/changes-requested/pending reading, so "Request approval" and "Check status" behave consistently regardless of which Provider a workspace is on.
+
+### Notes
+
+- GitHub, GitLab and Atlassian support is new in this release and has not yet been fully exercised in UAT. Azure DevOps remains the most extensively used path. Teams adopting one of the three newer Providers should validate their own stage sign-off, work-item sync and Promote workflows before relying on them for anything business-critical, and report anything unexpected.
+
 ## 0.6.8-beta — 2026-09-14
 
 ### Added
