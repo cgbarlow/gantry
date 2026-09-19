@@ -70,7 +70,7 @@ test(
       seedServerWorkspaceDefinition(instancesDir, 'acme', 'widget-process', { title: 'Widget Process' })
 
       await withRunningServer({ definitionsDir, instancesDir, libraryPat: VALID_PAT, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
-        const added = addLibraryRepo({ organization: ORGANIZATION, project: PROJECT, repository: 'promote-repo', baseUrl }, { instancesDir })
+        const added = addLibraryRepo({ location: { organization: ORGANIZATION, project: PROJECT, repository: 'promote-repo', baseUrl } }, { instancesDir })
 
         const { status, body } = await fetchJson(`${base}/api/definitions/widget-process/versions/1/promote`, {
           method: 'POST',
@@ -141,7 +141,7 @@ test(
         // The fake server's identity endpoint resolves any query matching "Test User" /
         // "testuser@example.com" (see tests/helpers/fakeAzureDevOpsServer.js).
         const added = addLibraryRepo(
-          { organization: ORGANIZATION, project: PROJECT, repository: 'promote-owner-repo', baseUrl, codeOwner: 'testuser@example.com' },
+          { location: { organization: ORGANIZATION, project: PROJECT, repository: 'promote-owner-repo', baseUrl }, codeOwner: 'testuser@example.com' },
           { instancesDir }
         )
 
@@ -178,8 +178,8 @@ test(
         // The server's own libraryPat (VALID_PAT) is valid against repo A but not repo B —
         // repo B's promotion fails with a rejected-PAT error while repo A's still succeeds.
         await withRunningServer({ definitionsDir, instancesDir, libraryPat: VALID_PAT, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
-          const repoA = addLibraryRepo({ organization: ORGANIZATION, project: PROJECT, repository: 'promote-fanout-a', baseUrl: baseUrlA }, { instancesDir })
-          const repoB = addLibraryRepo({ organization: ORGANIZATION, project: PROJECT, repository: 'promote-fanout-b', baseUrl: baseUrlB }, { instancesDir })
+          const repoA = addLibraryRepo({ location: { organization: ORGANIZATION, project: PROJECT, repository: 'promote-fanout-a', baseUrl: baseUrlA } }, { instancesDir })
+          const repoB = addLibraryRepo({ location: { organization: ORGANIZATION, project: PROJECT, repository: 'promote-fanout-b', baseUrl: baseUrlB } }, { instancesDir })
 
           const { status, body } = await fetchJson(`${base}/api/definitions/widget-process/versions/1/promote`, {
             method: 'POST',
@@ -215,7 +215,7 @@ test(
       seedServerWorkspaceDefinition(instancesDir, 'acme', 'widget-process', { title: 'Widget Process' })
 
       await withRunningServer({ definitionsDir, instancesDir, libraryPat: VALID_PAT, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
-        const added = addLibraryRepo({ organization: ORGANIZATION, project: PROJECT, repository: 'promote-check-repo', baseUrl }, { instancesDir })
+        const added = addLibraryRepo({ location: { organization: ORGANIZATION, project: PROJECT, repository: 'promote-check-repo', baseUrl } }, { instancesDir })
         const { body: promoteBody } = await fetchJson(`${base}/api/definitions/widget-process/versions/1/promote`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -262,7 +262,7 @@ test(
     createBlankDefinition('draft-only', { definitionsDir: workspaceDefinitionsDir, title: 'Draft Only' })
 
     await withRunningServer({ definitionsDir, instancesDir, libraryPat: VALID_PAT, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
-      const added = addLibraryRepo({ organization: ORGANIZATION, project: PROJECT, repository: 'unused-repo' }, { instancesDir })
+      const added = addLibraryRepo({ location: { organization: ORGANIZATION, project: PROJECT, repository: 'unused-repo' } }, { instancesDir })
 
       const draftAttempt = await fetchJson(`${base}/api/definitions/draft-only/versions/1/promote`, {
         method: 'POST',
@@ -290,7 +290,7 @@ test(
   withScratchDirs(async (definitionsDir, instancesDir) => {
     await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: 'promote-local-repo', validPat: VALID_PAT, files: { 'README.md': '# repo' } }, async (baseUrl) => {
       await withRunningServer({ definitionsDir, instancesDir, libraryPat: VALID_PAT, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
-        const added = addLibraryRepo({ organization: ORGANIZATION, project: PROJECT, repository: 'promote-local-repo', baseUrl }, { instancesDir })
+        const added = addLibraryRepo({ location: { organization: ORGANIZATION, project: PROJECT, repository: 'promote-local-repo', baseUrl } }, { instancesDir })
 
         const files = [
           { path: 'definition.yaml', content: 'id: local-widget\nversion: 1\nstatus: published\ntitle: Local Widget\n', contentType: 'rawtext' },
@@ -324,7 +324,7 @@ test(
   withScratchDirs(async (definitionsDir, instancesDir) => {
     await withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: 'promote-local-draft-repo', validPat: VALID_PAT, files: { 'README.md': '# repo' } }, async (baseUrl) => {
       await withRunningServer({ definitionsDir, instancesDir, libraryPat: VALID_PAT, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
-        const added = addLibraryRepo({ organization: ORGANIZATION, project: PROJECT, repository: 'promote-local-draft-repo', baseUrl }, { instancesDir })
+        const added = addLibraryRepo({ location: { organization: ORGANIZATION, project: PROJECT, repository: 'promote-local-draft-repo', baseUrl } }, { instancesDir })
 
         const draftFiles = [
           { path: 'definition.yaml', content: 'id: local-draft\nversion: 1\nstatus: draft\ntitle: Local Draft\n', contentType: 'rawtext' },

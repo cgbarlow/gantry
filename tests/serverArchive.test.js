@@ -151,7 +151,7 @@ test('GET /api/instances hides archived instances by default and shows them with
 
 test('POST /api/workspace/archive archives a workspace with no active instances', async () => {
   await withScratchServer(async (base, instancesDir) => {
-    const ws = registerWorkspace(LOCATION, { instancesDir })
+    const ws = registerWorkspace({ location: LOCATION }, { instancesDir })
 
     const res = await postJSON(base, '/api/workspace/archive', { workspaceId: ws.id })
     assert.equal(res.status, 200)
@@ -166,7 +166,7 @@ test('POST /api/workspace/archive archives a workspace with no active instances'
 
 test('POST /api/workspace/archive is BLOCKED (409) while the workspace still has an active instance (#223 decision)', async () => {
   await withScratchServer(async (base, instancesDir) => {
-    const ws = registerWorkspace(LOCATION, { instancesDir })
+    const ws = registerWorkspace({ location: LOCATION }, { instancesDir })
     registerInstance('remote-initiative', { kind: 'azureDevOps', workspaceId: ws.id }, { instancesDir })
 
     const blocked = await postJSON(base, '/api/workspace/archive', { workspaceId: ws.id })
@@ -184,7 +184,7 @@ test('POST /api/workspace/archive is BLOCKED (409) while the workspace still has
 
 test('POST /api/workspace/archive is idempotent, 404s for an unknown id, and 400s with no workspaceId', async () => {
   await withScratchServer(async (base, instancesDir) => {
-    const ws = registerWorkspace(LOCATION, { instancesDir })
+    const ws = registerWorkspace({ location: LOCATION }, { instancesDir })
     await postJSON(base, '/api/workspace/archive', { workspaceId: ws.id })
     const again = await postJSON(base, '/api/workspace/archive', { workspaceId: ws.id })
     assert.equal(again.status, 200)
@@ -198,7 +198,7 @@ test('POST /api/workspace/archive is idempotent, 404s for an unknown id, and 400
 
 test('POST /api/workspace/restore returns an archived workspace to exactly its prior state', async () => {
   await withScratchServer(async (base, instancesDir) => {
-    const ws = registerWorkspace({ ...LOCATION, owner: 'c.barlow' }, { instancesDir })
+    const ws = registerWorkspace({ location: LOCATION, owner: 'c.barlow' }, { instancesDir })
     await postJSON(base, '/api/workspace/archive', { workspaceId: ws.id })
 
     const res = await postJSON(base, '/api/workspace/restore', { workspaceId: ws.id })
@@ -212,7 +212,7 @@ test('POST /api/workspace/restore returns an archived workspace to exactly its p
 
 test('POST /api/workspace/restore is idempotent, and 404s for an unknown id', async () => {
   await withScratchServer(async (base, instancesDir) => {
-    const ws = registerWorkspace(LOCATION, { instancesDir })
+    const ws = registerWorkspace({ location: LOCATION }, { instancesDir })
     assert.equal((await postJSON(base, '/api/workspace/restore', { workspaceId: ws.id })).status, 200)
     assert.equal((await postJSON(base, '/api/workspace/restore', { workspaceId: 'nowhere' })).status, 404)
   })

@@ -241,9 +241,9 @@ test('registerInstance persists an azureDevOps location keyed by workspace id, n
     assert.deepEqual(persisted[scopeIds[0]]['remote-initiative'], { kind: 'azureDevOps' })
 
     const workspace = resolveWorkspace(scopeIds[0], { instancesDir })
-    assert.equal(workspace.organization, 'fake-org')
-    assert.equal(workspace.project, 'fake-project')
-    assert.equal(workspace.repository, 'fake-repo')
+    assert.equal(workspace.location.organization, 'fake-org')
+    assert.equal(workspace.location.project, 'fake-project')
+    assert.equal(workspace.location.repository, 'fake-repo')
   })
 })
 
@@ -410,7 +410,13 @@ test('resolveInstanceWorkspaceId returns the real workspace id for an Azure-DevO
       { instancesDir }
     )
     const location = resolveInstanceLocation('remote-initiative', { instancesDir })
-    const workspace = findWorkspaceByLocation(location, { instancesDir })
+    const workspace = findWorkspaceByLocation(
+      {
+        provider: 'azure-devops',
+        location: { organization: location.organization, project: location.project, repository: location.repository, baseUrl: location.baseUrl },
+      },
+      { instancesDir }
+    )
     assert.equal(resolveInstanceWorkspaceId('remote-initiative', { instancesDir }), workspace.id)
   })
 })
