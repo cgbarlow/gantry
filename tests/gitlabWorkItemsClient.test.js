@@ -82,6 +82,38 @@ test('createChildIssue attaches the child via a task-list entry in the parent an
   })
 })
 
+// #34 — createIssue's assignee/label support and ensureLabelsExist, backing Request Review.
+
+test('createIssue attaches assignee_ids and labels, auto-creating any label the project does not already define', async () => {
+  await withFakeServer({}, async (baseUrl) => {
+    const c = client(baseUrl)
+    const issue = await c.createIssue({ title: 'Review requested', body: '', assigneeIds: [501], labels: ['gantry:review/requested'] })
+    assert.deepEqual(issue.assignee_ids, [501])
+    assert.deepEqual(issue.labels, ['gantry:review/requested'])
+
+    const labels = await fetch(`${baseUrl}/projects/${encodeURIComponent(`${GITLAB_NAMESPACE}/${GITLAB_REPOSITORY}`)}/labels`, {
+      headers: { 'PRIVATE-TOKEN': GITLAB_VALID_PAT },
+    }).then((r) => r.json())
+    assert.equal(labels.find((l) => l.name === 'gantry:review/requested').color, '#ededed')
+  })
+})
+
+test('ensureLabelsExist creates every label it is given, and tolerates one that already exists', async () => {
+  await withFakeServer({}, async (baseUrl) => {
+    const c = client(baseUrl)
+    const labels = [
+      { name: 'gantry:review/requested', color: '#fbca04', description: 'Requested' },
+      { name: 'gantry:review/approved', color: '#0e8a16', description: 'Approved' },
+    ]
+    await c.ensureLabelsExist(labels)
+    // Calling again must not throw despite every label now already existing.
+    await c.ensureLabelsExist(labels)
+
+    const created = await c.createIssue({ title: 'x', body: '', labels: ['gantry:review/requested'] })
+    assert.deepEqual(created.labels, ['gantry:review/requested'])
+  })
+})
+
 test('a second stage falling back appends a second checklist item under the same "## Stages" heading, not a duplicate one', async () => {
   await withFakeServer({}, async (baseUrl) => {
     const c = client(baseUrl)
