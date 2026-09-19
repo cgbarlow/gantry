@@ -260,8 +260,12 @@ test('resolveWorkItems\' atlassian client surfaces a rejected token as the neutr
   })
 })
 
-// #44: atlassian's identity capability (Bitbucket-backed half — pull-request reviewers), registered
-// alongside #41's content store and #42's workItems.
+// #44/#45: atlassian's identity capability lands in two halves under one `identity` key —
+// #44's Bitbucket-backed half (pull-request reviewers) and #45's Jira-backed half (work-item
+// assignees) — dispatched between by `createAtlassianIdentityClient` (lib/providerRegistry.js) on
+// which of `owner`/`repository` (Bitbucket-shaped) or `jiraSite`/`jiraProjectKey` (Jira-shaped) the
+// caller's config carries. `pullRequests` (#46, Bitbucket-backed) remains the one capability still
+// entirely unregistered.
 test('resolveIdentity instantiates atlassian\'s Bitbucket-backed identity client', async () => {
   await withFakeBitbucketServer(
     {
@@ -277,6 +281,29 @@ test('resolveIdentity instantiates atlassian\'s Bitbucket-backed identity client
       assert.equal(resolved.canAssign, true)
     }
   )
+})
+
+test('resolveIdentity instantiates atlassian\'s Jira-backed identity client and resolves an assignable candidate through it', async () => {
+  await withFakeJiraServer(
+    { jiraProjectKey: JIRA_PROJECT_KEY, validPat: JIRA_VALID_PAT, users: [{ accountId: 'acc-registry', displayName: 'Reg Istry', assignable: true }] },
+    async (baseUrl) => {
+      const identity = resolveIdentity('atlassian', { jiraSite: JIRA_SITE, jiraProjectKey: JIRA_PROJECT_KEY, pat: JIRA_VALID_PAT, baseUrl })
+      const resolved = await identity.resolveIdentity('Reg Istry')
+      assert.equal(resolved.uniqueName, 'acc-registry')
+      assert.equal(resolved.canAssign, true)
+    }
+  )
+})
+
+test('resolveIdentity\'s atlassian client surfaces a rejected token as the neutral AuthenticationError, tagged atlassian', async () => {
+  await withFakeJiraServer({ jiraProjectKey: JIRA_PROJECT_KEY, validPat: JIRA_VALID_PAT, users: [{ accountId: 'acc-x', displayName: 'X' }] }, async (baseUrl) => {
+    const identity = resolveIdentity('atlassian', { jiraSite: JIRA_SITE, jiraProjectKey: JIRA_PROJECT_KEY, pat: 'wrong-token', baseUrl })
+    await assert.rejects(() => identity.searchIdentities('x'), (err) => {
+      assert.ok(err instanceof AuthenticationError)
+      assert.equal(err.provider, 'atlassian')
+      return true
+    })
+  })
 })
 
 function withFakeBitbucketServerForContract(fn) {
