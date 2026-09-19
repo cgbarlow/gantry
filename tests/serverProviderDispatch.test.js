@@ -84,6 +84,10 @@ test('POST /api/workspaces/:id/definitions/:id/archive on a GitLab workspace rep
 
 // ---------- POST /api/instance/work-items/link ----------
 
+// #30 gave GitLab its own work-items linker (a dedicated `gitlab` branch, mirroring `github`'s), so
+// this dispatch-guard test now names a provider gantry genuinely has no linker for at all, keeping its
+// original intent: a declared-but-unregistered provider must report 400 clearly, never fall through to
+// Azure DevOps's own field validation.
 test('POST /api/instance/work-items/link with a declared but unsupported provider reports 400, rather than Azure DevOps\'s own missing-field validation', async () => {
   await withScratchServer({}, async (base, instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
@@ -91,11 +95,11 @@ test('POST /api/instance/work-items/link with a declared but unsupported provide
     const res = await fetch(`${base}/api/instance/work-items/link?slug=my-initiative`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
-      body: JSON.stringify({ provider: 'gitlab', namespace: 'group', repository: 'repo', parentId: 1 }),
+      body: JSON.stringify({ provider: 'atlassian', namespace: 'group', repository: 'repo', parentId: 1 }),
     })
     assert.equal(res.status, 400)
     const body = await res.json()
-    assert.match(body.error, /"gitlab" work item is not supported yet/)
+    assert.match(body.error, /"atlassian" work item is not supported yet/)
   })
 })
 

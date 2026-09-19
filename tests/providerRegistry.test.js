@@ -99,18 +99,19 @@ test('resolvePullRequests instantiates github\'s pull-requests client and opens 
   )
 })
 
-// #26/#28: gitlab joins the registry the same incremental way github did — content store first, then
-// identity (#28) — work items/pull requests are later tickets' job (ADR-0041's own scope list).
+// #26/#28/#30: gitlab joins the registry the same incremental way github did — content store (#26),
+// identity (#28) and work items (#30) so far; pull requests is a later ticket's job (ADR-0041's own
+// scope list).
 test('registeredProviders lists gitlab once its content store is registered', () => {
   assert.ok(registeredProviders().includes('gitlab'))
 })
 
-test('getProviderCapabilities resolves gitlab to its content-store and identity factories (pull requests/work items not registered yet)', () => {
+test('getProviderCapabilities resolves gitlab to its content-store, identity and work-items factories (pull requests not registered yet)', () => {
   const capabilities = getProviderCapabilities('gitlab')
   assert.equal(typeof capabilities.contentStore, 'function')
   assert.equal(typeof capabilities.identity, 'function')
+  assert.equal(typeof capabilities.workItems, 'function')
   assert.equal(capabilities.pullRequests, undefined)
-  assert.equal(capabilities.workItems, undefined)
 })
 
 test('resolveContentStore instantiates gitlab\'s content-store client and reads/writes through it', async () => {
@@ -141,16 +142,25 @@ function withFakeGitLabServerForContract(fn) {
 // content-store capability — the same "createBranch/branchExists isolation" and "branch created from
 // a ref carries that ref's current content" contract `lib/gitlabStageBranch.js`'s
 // findGitLabStageBranch/resolveGitLabStageBranch (and, later, #33's re-open path) are themselves built
-// on. The full `runProviderContractTests` isn't run for gitlab yet — pull requests and work items
-// aren't registered until #33/#30 — so this is the narrower `runContentStoreContractTests` slice
-// (see that function's own doc comment in tests/helpers/providerContractTests.js), not a parallel
-// suite.
+// on. The full `runProviderContractTests` isn't run for gitlab yet — pull requests aren't registered
+// until a later ticket — so this is the narrower `runContentStoreContractTests` slice (see that
+// function's own doc comment in tests/helpers/providerContractTests.js), not a parallel suite.
 runContentStoreContractTests('gitlab', {
   providerId: 'gitlab',
   withServer: withFakeGitLabServerForContract,
   buildContentStore: (baseUrl, overrides = {}) =>
     resolveContentStore('gitlab', { namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, pat: GITLAB_VALID_PAT, baseUrl, ...overrides }),
   badCredential: 'wrong-pat',
+})
+
+// #30: gitlab's work-items capability, registered the same way as its content store above.
+test('resolveWorkItems instantiates gitlab\'s work-items client and creates/reads an issue through it', async () => {
+  await withFakeGitLabServer({ namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, validPat: GITLAB_VALID_PAT }, async (baseUrl) => {
+    const workItems = resolveWorkItems('gitlab', { namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, pat: GITLAB_VALID_PAT, baseUrl })
+    const created = await workItems.createIssue({ title: 'Registry smoke test', body: '' })
+    const fetched = await workItems.getIssue(created.iid)
+    assert.equal(fetched.title, 'Registry smoke test')
+  })
 })
 
 test('resolveContentStore/resolvePullRequests/resolveWorkItems/resolveIdentity instantiate azure-devops\'s existing clients', async () => {
