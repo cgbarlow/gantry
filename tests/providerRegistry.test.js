@@ -34,18 +34,19 @@ test('getProviderCapabilities throws a clear error naming the registered provide
   assert.throws(() => getProviderCapabilities('atlassian'), /azure-devops/)
 })
 
-// #11/#10: github joins the registry one capability per ticket as each lands (content store, then
-// identity) — pullRequests/workItems are #13/#14's job, registered here the same incremental way
-// this file's own doc comment describes for Azure DevOps's own four clients.
+// #11/#10/#20: github joins the registry one capability per ticket as each lands (content store,
+// then identity, then pull requests — scoped to what Promote needs, no merge) — workItems is #14's
+// job, registered here the same incremental way this file's own doc comment describes for Azure
+// DevOps's own four clients.
 test('registeredProviders lists github once its content store is registered', () => {
   assert.ok(registeredProviders().includes('github'))
 })
 
-test('getProviderCapabilities resolves github to its content-store and identity factories, so far', () => {
+test('getProviderCapabilities resolves github to its content-store, identity and pull-requests factories, so far', () => {
   const capabilities = getProviderCapabilities('github')
   assert.equal(typeof capabilities.contentStore, 'function')
   assert.equal(typeof capabilities.identity, 'function')
-  assert.equal(capabilities.pullRequests, undefined)
+  assert.equal(typeof capabilities.pullRequests, 'function')
   assert.equal(capabilities.workItems, undefined)
 })
 
@@ -57,6 +58,26 @@ test('resolveIdentity instantiates github\'s identity client', async () => {
       const resolved = await identity.resolveIdentity('ana')
       assert.equal(resolved.uniqueName, 'ana')
       assert.equal(resolved.canAssign, true)
+    }
+  )
+})
+
+test('resolvePullRequests instantiates github\'s pull-requests client and opens a real pull request', async () => {
+  await withFakeGitHubServer(
+    { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: { 'README.md': '# repo' } },
+    async (baseUrl) => {
+      const contentStore = resolveContentStore('github', { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+      await contentStore.createBranch('feature')
+      await contentStore.writeFile('/x.md', 'x\n', { branch: 'feature' })
+
+      const pullRequests = resolvePullRequests('github', { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+      const pr = await pullRequests.createPullRequest({ sourceBranch: 'feature', targetBranch: 'main', title: 'Registry smoke test' })
+      assert.equal(typeof pr.pullRequestId, 'number')
+      assert.equal(pr.status, 'active')
+
+      const fetched = await pullRequests.getPullRequest(pr.pullRequestId)
+      assert.equal(fetched.pullRequestId, pr.pullRequestId)
+      assert.deepEqual(fetched.reviews, [])
     }
   )
 })

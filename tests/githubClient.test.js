@@ -245,3 +245,45 @@ test('a rejected PAT on writeFile surfaces as the neutral AuthenticationError, t
     })
   })
 })
+
+// ---------- #20: branchExists / createBranch (lib/definitionPromote.js's own primitives) ----------
+
+test('branchExists is false for a branch that has never existed, true once created', async () => {
+  await withFakeGitHubServer({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: { 'README.md': '# repo' } }, async (baseUrl) => {
+    const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+    assert.equal(await client.branchExists('feature'), false)
+    await client.createBranch('feature')
+    assert.equal(await client.branchExists('feature'), true)
+  })
+})
+
+test('createBranch points the new branch at the current tip of "from", carrying its content', async () => {
+  await withFakeGitHubServer({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: { 'README.md': '# repo' } }, async (baseUrl) => {
+    const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+    await client.writeFile('main-only.md', 'main content\n')
+    await client.createBranch('stacked', { from: 'main' })
+    assert.equal(await client.getFileContent('main-only.md', { branch: 'stacked' }), 'main content\n')
+
+    // A write on the new branch never leaks back onto "from".
+    await client.writeFile('branch-only.md', 'branch content\n', { branch: 'stacked' })
+    assert.equal(await client.fileExists('branch-only.md', 'main'), false)
+  })
+})
+
+test('createBranch throws NotFoundError when the source branch does not exist', async () => {
+  await withFakeGitHubServer({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT }, async (baseUrl) => {
+    const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+    await assert.rejects(() => client.createBranch('feature', { from: 'never-existed' }), (err) => {
+      assert.ok(err instanceof NotFoundError)
+      return true
+    })
+  })
+})
+
+test('createBranch rejects re-creating a branch name that already exists', async () => {
+  await withFakeGitHubServer({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: { 'README.md': '# repo' } }, async (baseUrl) => {
+    const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+    await client.createBranch('feature')
+    await assert.rejects(() => client.createBranch('feature'))
+  })
+})

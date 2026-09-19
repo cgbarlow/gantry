@@ -85,6 +85,13 @@ export function createFakeGitHubServer({
 
   const repoBasePath = `/repos/${owner}/${repository}`
 
+  // Pull Requests (#20) — see this file's own "Pull Requests" section below for the endpoints these
+  // back. Declared here (not inside the request handler) so state persists across requests against
+  // the same fake server instance, exactly like `branches`/`refs`/`commits` above.
+  const pulls = new Map() // number -> { number, head, base, title, body, state, merged, requested_reviewers }
+  let pullCounter = 0
+  const reviews = new Map() // number -> [{ id, user, state, submitted_at }]
+
   async function readJsonBody(req) {
     let raw = ''
     for await (const chunk of req) raw += chunk
@@ -266,16 +273,73 @@ export function createFakeGitHubServer({
     }
 
     // POST /repos/:owner/:repo/git/refs — creates a brand-new branch ref; writeFiles's path for the
-    // very first commit onto a branch that doesn't exist yet (mirrors a genuinely empty repo/branch).
+    // very first commit onto a branch that doesn't exist yet (mirrors a genuinely empty repo/branch),
+    // and lib/githubClient.js's own `createBranch` (#20). Real GitHub rejects creating a ref that
+    // already exists with 422 ("Reference already exists") — mirrored here so `createBranch`'s own
+    // "branch already exists" failure round-trips through real HTTP the same way Azure DevOps's does.
     if (req.method === 'POST' && pathname === `${repoBasePath}/git/refs`) {
       const body = await readJsonBody(req)
       const branchName = String(body.ref ?? '').replace(/^refs\/heads\//, '')
       if (!branchName) return json(422, { message: 'Missing or malformed "ref"' })
+      if (refs.has(branchName)) return json(422, { message: `Reference "refs/heads/${branchName}" already exists` })
       const commit = commits.get(body.sha)
       if (!commit) return json(422, { message: `No fake commit "${body.sha}"` })
       refs.set(branchName, body.sha)
       branches.set(branchName, new Map(trees.get(commit.treeSha)))
       return json(201, { ref: `refs/heads/${branchName}`, object: { sha: body.sha } })
+    }
+
+    // ---- Pull Requests (#20) ----
+    //
+    // A minimal fake of GitHub's Pulls API: enough for `lib/githubPullRequestsClient.js` to open a
+    // Promote Pull Request, read it back (status + reviews) and attach a requested reviewer. Real
+    // review *submission* is a reviewer's own action, performed with their own token; this fake has
+    // only one accepted PAT, so a test simulates "the code owner reviewed" the same way real GitHub's
+    // own API models it — `POST .../pulls/:number/reviews` with `{event}` — rather than inventing a
+    // second, fake-only endpoint. Merging is deliberately not modelled: Promote never merges a
+    // library repo's own Pull Request (ADR-0036 — "gantry proposes, it doesn't merge on their
+    // behalf"), so lib/githubPullRequestsClient.js has no merge call for this fake to answer.
+    if (req.method === 'POST' && pathname === `${repoBasePath}/pulls`) {
+      const body = await readJsonBody(req)
+      if (!body.head || !body.base || !body.title) return json(422, { message: 'head, base and title are required' })
+      const number = ++pullCounter
+      const pr = { number, head: { ref: body.head }, base: { ref: body.base }, title: body.title, body: body.body ?? null, state: 'open', merged: false }
+      pulls.set(number, pr)
+      reviews.set(number, [])
+      return json(201, pr)
+    }
+
+    const pullMatch = pathname.match(new RegExp(`^${repoBasePath}/pulls/(\\d+)$`))
+    if (req.method === 'GET' && pullMatch) {
+      const pr = pulls.get(Number(pullMatch[1]))
+      if (!pr) return json(404, { message: `No fake pull request #${pullMatch[1]}` })
+      return json(200, pr)
+    }
+
+    const requestedReviewersMatch = pathname.match(new RegExp(`^${repoBasePath}/pulls/(\\d+)/requested_reviewers$`))
+    if (req.method === 'POST' && requestedReviewersMatch) {
+      const number = Number(requestedReviewersMatch[1])
+      const pr = pulls.get(number)
+      if (!pr) return json(404, { message: `No fake pull request #${number}` })
+      const body = await readJsonBody(req)
+      pr.requested_reviewers = [...(pr.requested_reviewers ?? []), ...(body.reviewers ?? []).map((login) => ({ login }))]
+      return json(201, pr)
+    }
+
+    const reviewsMatch = pathname.match(new RegExp(`^${repoBasePath}/pulls/(\\d+)/reviews$`))
+    if (req.method === 'GET' && reviewsMatch) {
+      const number = Number(reviewsMatch[1])
+      if (!pulls.has(number)) return json(404, { message: `No fake pull request #${number}` })
+      return json(200, reviews.get(number) ?? [])
+    }
+    if (req.method === 'POST' && reviewsMatch) {
+      const number = Number(reviewsMatch[1])
+      if (!pulls.has(number)) return json(404, { message: `No fake pull request #${number}` })
+      const body = await readJsonBody(req)
+      const state = { APPROVE: 'APPROVED', REQUEST_CHANGES: 'CHANGES_REQUESTED', COMMENT: 'COMMENTED' }[body.event] ?? 'COMMENTED'
+      const review = { id: (reviews.get(number)?.length ?? 0) + 1, user: { login: 'fake-reviewer' }, state, submitted_at: new Date().toISOString() }
+      reviews.set(number, [...(reviews.get(number) ?? []), review])
+      return json(200, review)
     }
 
     return json(404, { message: `No fake route for ${req.method} ${pathname}` })
