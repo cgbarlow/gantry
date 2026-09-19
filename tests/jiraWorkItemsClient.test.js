@@ -46,6 +46,32 @@ test('createIssue creates an issue typed as given, with distinct, incrementing k
   })
 })
 
+test('createIssue accepts an optional assigneeAccountId and labels, surfaced back on the normalized issue (#47)', async () => {
+  await withFakeServer({}, async (baseUrl) => {
+    const c = client(baseUrl)
+    const withBoth = await c.createIssue({
+      title: 'Review requested',
+      body: '',
+      issueType: 'Task',
+      assigneeAccountId: 'acc-1',
+      labels: ['gantry:review/requested'],
+    })
+    assert.equal(withBoth.assignee, 'acc-1')
+    assert.deepEqual(withBoth.labels, ['gantry:review/requested'])
+
+    // Both are optional — an issue created without them still normalizes to the same absent-field
+    // convention every other field on this client already uses.
+    const withNeither = await c.createIssue({ title: 'Plain', body: '', issueType: 'Task' })
+    assert.equal(withNeither.assignee, null)
+    assert.deepEqual(withNeither.labels, [])
+
+    // getIssue re-reads the same normalized shape, not just the create response.
+    const reread = await c.getIssue(withBoth.key)
+    assert.equal(reread.assignee, 'acc-1')
+    assert.deepEqual(reread.labels, ['gantry:review/requested'])
+  })
+})
+
 test('getIssue reads back a created issue by key, round-tripping a multi-paragraph body, and throws NotFoundError for one that does not exist', async () => {
   await withFakeServer({}, async (baseUrl) => {
     const c = client(baseUrl)
