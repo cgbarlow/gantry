@@ -136,3 +136,62 @@ runProviderContractTests('azure-devops', {
   knownIdentityQuery: 'Test User',
   unknownIdentityQuery: 'Nobody Matches This Query',
 })
+
+// #13: github's pull-requests capability gains completePullRequest/getPullRequestCommits (merge with
+// a merge commit; read back its commits) — asserted directly here, the same way this file already
+// asserts resolveWorkItems/resolveIdentity/resolvePullRequests's own github-specific shape, rather
+// than folded into `runProviderContractTests` above: that shared suite's own work-items assertions are
+// Azure-DevOps-field-map-shaped (`createWorkItem`/`updateWorkItem`/`getWorkItem`), which GitHub's
+// Issues-backed client genuinely doesn't implement (see this file's own comment on
+// `resolveWorkItems instantiates github's work-items client` above) — running the full shared suite
+// against github would fail on that mismatch, not on anything #13 itself got wrong.
+test('resolvePullRequests instantiates github\'s pull-requests client and merges a real pull request', async () => {
+  await withFakeGitHubServer(
+    { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: { 'README.md': '# repo' } },
+    async (baseUrl) => {
+      const contentStore = resolveContentStore('github', { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+      await contentStore.createBranch('feature')
+      await contentStore.writeFile('/x.md', 'x\n', { branch: 'feature' })
+
+      const pullRequests = resolvePullRequests('github', { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+      const pr = await pullRequests.createPullRequest({ sourceBranch: 'feature', targetBranch: 'main', title: 'Registry merge test' })
+
+      const commits = await pullRequests.getPullRequestCommits(pr.pullRequestId)
+      assert.ok(Array.isArray(commits))
+
+      const merged = await pullRequests.completePullRequest(pr.pullRequestId, {})
+      assert.equal(merged.merged, true)
+
+      const fetched = await pullRequests.getPullRequest(pr.pullRequestId)
+      assert.equal(fetched.status, 'completed')
+    }
+  )
+})
+
+test('resolvePullRequests\' github completePullRequest surfaces a branch-protection refusal verbatim, unmerged', async () => {
+  await withFakeGitHubServer(
+    {
+      owner: GITHUB_OWNER,
+      repository: GITHUB_REPOSITORY,
+      validPat: GITHUB_VALID_PAT,
+      files: { 'README.md': '# repo' },
+      mergeRefusal: { status: 405, message: 'At least 1 approving review is required by reviewers with write access.' },
+    },
+    async (baseUrl) => {
+      const contentStore = resolveContentStore('github', { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+      await contentStore.createBranch('feature')
+      await contentStore.writeFile('/x.md', 'x\n', { branch: 'feature' })
+
+      const pullRequests = resolvePullRequests('github', { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+      const pr = await pullRequests.createPullRequest({ sourceBranch: 'feature', targetBranch: 'main', title: 'Refused merge test' })
+
+      await assert.rejects(() => pullRequests.completePullRequest(pr.pullRequestId, {}), (err) => {
+        assert.ok(JSON.parse(err.body).message.includes('approving review'))
+        return true
+      })
+
+      const fetched = await pullRequests.getPullRequest(pr.pullRequestId)
+      assert.equal(fetched.status, 'active')
+    }
+  )
+})
