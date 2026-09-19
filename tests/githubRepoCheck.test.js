@@ -89,3 +89,21 @@ test('checkGitHubRepo throws GitHubRepoNotFoundError for a bad owner, distinguis
     )
   })
 })
+
+// #21: this is the message POST /api/workspaces and GET /api/github/repo-check surface verbatim to the
+// architect registering/checking a location, so it must explain the 404-vs-scope ambiguity itself
+// rather than reading as a plain "no such repository".
+test('checkGitHubRepo\'s not-found error explains that an insufficient PAT scope looks identical to a missing repository', async () => {
+  await withFakeGitHubServer(
+    { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, repoExists: false },
+    async (baseUrl) => {
+      try {
+        await checkGitHubRepo({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, baseUrl, pat: GITHUB_VALID_PAT })
+        assert.fail('expected checkGitHubRepo to throw')
+      } catch (err) {
+        assert.ok(err instanceof GitHubRepoNotFoundError)
+        assert.match(err.message, /permission/i)
+      }
+    }
+  )
+})

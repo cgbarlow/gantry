@@ -129,6 +129,9 @@ test('POST /api/workspaces (github) with a nonexistent repository returns 400 na
       assert.equal(res.status, 400)
       const body = await res.json()
       assert.match(body.error, /does not exist/)
+      // #21: the same 404 also means "PAT lacks a required scope" (docs/adr/0040) — the message this
+      // route forwards verbatim must say so, not just report a bare not-found.
+      assert.match(body.error, /permission/i)
 
       const listing = await (await fetch(`${gantryBase}/api/workspaces`)).json()
       assert.equal(listing.length, 0)
