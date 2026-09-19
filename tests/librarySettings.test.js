@@ -15,6 +15,7 @@ import { withScratchInstances } from './helpers/lifecycle.js'
 const LOCATION = { organization: 'fake-org', project: 'fake-project', repository: 'fake-repo' }
 const GITHUB_LOCATION = { owner: 'octocat', repository: 'fake-repo' }
 const GITLAB_LOCATION = { namespace: 'engineering/platform', repository: 'fake-repo' }
+const ATLASSIAN_LOCATION = { owner: 'acme', repository: 'fake-repo', jiraSite: 'acme.atlassian.net', jiraProjectKey: 'PROJ' }
 
 // ---------- addLibraryRepo: nested {provider, location} shape only (ticket #6) ----------
 
@@ -108,10 +109,30 @@ test('addLibraryRepo rejects a GitLab location missing namespace or repository',
   })
 })
 
-test('addLibraryRepo rejects an unknown or unsupported provider', async () => {
+test('addLibraryRepo rejects an unknown provider', async () => {
   await withScratchInstances((instancesDir) => {
     assert.throws(() => addLibraryRepo({ provider: 'trello', location: {} }, { instancesDir }), /Unknown provider/)
-    assert.throws(() => addLibraryRepo({ provider: 'atlassian', location: {} }, { instancesDir }), /not supported yet/)
+  })
+})
+
+// ---------- atlassian (#40, ADR-0042: location is {owner, repository, jiraSite, jiraProjectKey}) ----------
+// A Library repo's *credential* is Bitbucket-only (ADR-0042: it never touches work items), but its
+// location is validated against the same full schema as a workspace's — the credential exemption
+// doesn't shrink the location shape.
+
+test('addLibraryRepo accepts an Atlassian location', async () => {
+  await withScratchInstances((instancesDir) => {
+    const repo = addLibraryRepo({ provider: 'atlassian', location: ATLASSIAN_LOCATION }, { instancesDir })
+    assert.deepEqual(repo.location, ATLASSIAN_LOCATION)
+  })
+})
+
+test('addLibraryRepo rejects an Atlassian location missing jiraSite or jiraProjectKey', async () => {
+  await withScratchInstances((instancesDir) => {
+    assert.throws(
+      () => addLibraryRepo({ provider: 'atlassian', location: { owner: 'acme', repository: 'fake-repo' } }, { instancesDir }),
+      /missing: jiraSite, jiraProjectKey/
+    )
   })
 })
 
