@@ -1,7 +1,7 @@
 # Field order follows the SAD reference template's "Security View" (§16).
 #
 # CHANGED v2: `privacy-and-confidentiality` is now also required at
-# `hld-tac-approved`. The TAC HLD reference template carries a mandatory
+# `hld-arb-approved`. The TAC HLD reference template carries a mandatory
 # "Security and privacy" sub-section under Proposed solution ("Will the proposed
 # solution affect anyone's PII?"), but every field here was previously required
 # only at `build-ready-checklist`, so the HLD gate enforced nothing. Only the one
@@ -54,9 +54,9 @@ fields:
   - id: privacy-and-confidentiality
     title: Privacy and confidentiality concerns
     type: markdown
-    required-at: [hld-tac-approved, build-ready-checklist]
+    required-at: [hld-arb-approved, build-ready-checklist]
     guidance: >
       Whether the solution affects anyone's personal information, and any privacy
       or confidentiality concern it raises. State this at high-level design in
-      enough depth for TAC to judge whether a security assessment is needed;
+      enough depth for the ARB to judge whether a security assessment is needed;
       deepen before build readiness.

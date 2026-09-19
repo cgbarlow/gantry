@@ -5,7 +5,7 @@
 # `sad` artefact places it there.
 #
 # CHANGED v2: `performance` and `availability-and-continuity` are now also
-# required at `hld-tac-approved`. The TAC HLD reference template carries a
+# required at `hld-arb-approved`. The TAC HLD reference template carries a
 # mandatory "Non-functional requirements" sub-section under Problem Statement
 # and instructs authors not to delete sections ("if a section is not relevant,
 # just put in n/a"), but every field here was previously required only at
@@ -46,7 +46,7 @@ fields:
   - id: performance
     title: Performance
     type: markdown
-    required-at: [hld-tac-approved, build-ready-checklist]
+    required-at: [hld-arb-approved, build-ready-checklist]
     guidance: >
       Keep this to a headline target at high-level design — the TAC reference
       template asks only for the performance requirements that bear on the
@@ -55,7 +55,7 @@ fields:
   - id: availability-and-continuity
     title: Availability and continuity
     type: markdown
-    required-at: [hld-tac-approved, build-ready-checklist]
+    required-at: [hld-arb-approved, build-ready-checklist]
     guidance: >
       Keep this to a headline target at high-level design; deepen to a
       testable availability target and continuity approach before build

@@ -53,7 +53,7 @@ test('stageId lets a caller evaluate a stage other than the instance\'s current 
     createInstance('design', 'my-initiative', { instancesDir })
     const status = getStatus('my-initiative', { instancesDir, stageId: 'hld-define' })
 
-    assert.deepEqual(status.stage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-tac-approved' })
+    assert.deepEqual(status.stage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-arb-approved' })
     assert.equal(status.complete, false)
     const hldSubmission = status.modules.find((m) => m.id === 'hld-submission')
     assert.equal(hldSubmission.exists, false)

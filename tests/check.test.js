@@ -286,10 +286,10 @@ test('passes Business Case Approved with only the Full SOAP fields, without proc
 test('--gate resolves the stage owning that gate, even when it is not the instance\'s current stage', async () => {
   await withScratchInstances((instancesDir) => {
     createInstance('design', 'my-initiative', { instancesDir })
-    const result = checkGate('my-initiative', { instancesDir, gate: 'hld-tac-approved' })
+    const result = checkGate('my-initiative', { instancesDir, gate: 'hld-arb-approved' })
 
-    assert.deepEqual(result.stage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-tac-approved' })
-    assert.equal(result.gate, 'hld-tac-approved')
+    assert.deepEqual(result.stage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-arb-approved' })
+    assert.equal(result.gate, 'hld-arb-approved')
     assert.equal(result.pass, false)
 
     const hldSubmission = result.modules.find((m) => m.id === 'hld-submission')
@@ -337,6 +337,8 @@ test('checkGate against Azure DevOps passes once the Shape-stage modules are fil
 })
 
 test('checkGate against Azure DevOps honours --gate, resolving a stage other than the instance\'s current one', async () => {
+  // No `definitionVersion` in this seeded instance.yaml, so it resolves to v1 (pre-rename) — the
+  // ARB rename only touched v2's gate id, per the definition-versioning convention.
   const seedFiles = { '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n' }
   await withFakeRepo(seedFiles, async (baseUrl) => {
     const azureDevOps = azureDevOpsOptions(baseUrl)

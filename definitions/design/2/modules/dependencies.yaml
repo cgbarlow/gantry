@@ -11,7 +11,7 @@ fields:
   - id: dependencies-overview
     title: Dependencies
     type: markdown
-    required-at: [business-case, hld-tac-approved]
+    required-at: [business-case, hld-arb-approved]
     guidance: >
       Describe what this solution depends on and what depends on it — other initiatives,
       platforms, teams or decisions still in progress. Give enough for a reviewer to judge

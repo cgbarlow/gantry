@@ -85,7 +85,7 @@ test('GET /api/instance?stage=<id> browses a different stage\'s modules without 
     const res = await fetch(`${base}/api/instance?stage=hld-define`)
     assert.equal(res.status, 200)
     const body = await res.json()
-    assert.deepEqual(body.stage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-tac-approved', number: 2 })
+    assert.deepEqual(body.stage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-arb-approved', number: 2 })
     assert.equal(body.currentStageId, 'shape')
     // design v2 `hld.requires` — field-level end to end (WI #318), fixture pinned to v2 (WI #348),
     // trimmed to one entry per TAC reference section (WI #362, docs/adr/0032). This list is what
@@ -430,7 +430,7 @@ test('GET /api/definitions/:id/stages reports the definition\'s stages in order,
     const stages = await res.json()
     assert.deepEqual(stages, [
       { id: 'shape', title: 'SOAP', gate: 'business-case' },
-      { id: 'hld-define', title: 'High-level Design', gate: 'hld-tac-approved' },
+      { id: 'hld-define', title: 'High-level Design', gate: 'hld-arb-approved' },
       { id: 'detailed-design', title: 'Detailed Design', gate: 'build-ready-checklist' },
       { id: 'handover', title: 'Operational Handover', gate: 'operational-handover' },
     ])

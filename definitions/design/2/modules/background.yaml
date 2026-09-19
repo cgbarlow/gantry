@@ -7,13 +7,13 @@ purpose: >
 
   One module used at SOAP and at HLD — fill it progressively: at SOAP state the
   current problem and the domains it touches for the business case; by HLD add the
-  opportunity and success criteria in the depth TAC needs.
+  opportunity and success criteria in the depth the ARB needs.
 
 fields:
   - id: problem
     title: Problem statement
     type: markdown
-    required-at: [business-case, hld-tac-approved]
+    required-at: [business-case, hld-arb-approved]
     guidance: >
       The current state — what is wrong, missing, or binding right now: the
       legislative, operational, commercial, or technical constraint that makes
@@ -22,12 +22,12 @@ fields:
       `opportunity`.
 
       The HLD's `background` framing and the SAD's `introduction` framing are
-      intentionally separate (TAC vs Design Authority audiences) — do not expect
+      intentionally separate (ARB vs Design Authority audiences) — do not expect
       `introduction.overview` to pre-fill from this field. See the reconciliation
       doc §5.
 
       This field and `architecture.business-context` are also deliberately
-      separate: the problem stated here is what TAC decides on, while the
+      separate: the problem stated here is what the ARB decides on, while the
       business context there is the setting a builder needs. Reviewed and
       confirmed as a decision in v2, not an unresolved duplicate.
 
@@ -39,7 +39,7 @@ fields:
   - id: opportunity
     title: Opportunity
     type: markdown
-    required-at: [hld-tac-approved]
+    required-at: [hld-arb-approved]
     guidance: >
       The desired future state — the better outcome, service, or capability this
       initiative creates once the problem is addressed. Describe what "good" looks
@@ -48,7 +48,7 @@ fields:
   - id: success-criteria
     title: Success criteria
     type: markdown
-    required-at: [hld-tac-approved]
+    required-at: [hld-arb-approved]
     guidance: >
       How you'll know the desired future state has actually been reached —
       observable, not aspirational.

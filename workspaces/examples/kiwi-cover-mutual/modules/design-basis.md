@@ -43,7 +43,7 @@ owner: p.natarajan
 
 | Phase | Outcome / deliverable | Owner |
 | --- | --- | --- |
-| Design | Approved SOAP, HLD (TAC) and this SAD; SSAD for the support team | Solution Architecture (P. Natarajan) |
+| Design | Approved SOAP, HLD (ARB) and this SAD; SSAD for the support team | Solution Architecture (P. Natarajan) |
 | Triage | Agreed requirement set and traceability matrix; data classification sign-off | Claims Product Owner (T. Whitaker) |
 | Build increment 1 | Register and Accept steps live: CIS, Claims InfoServ, CRM and Policy Data Management integration, document management indexing | Claims Platform Team |
 | Build increment 2 | Valuate step, claims data mart feed, Home & Away Financial Application integration | Claims Platform Team, Finance Systems |

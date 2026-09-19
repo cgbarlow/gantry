@@ -180,7 +180,7 @@ describe('getLocalStatus matches getStatus', () => {
       const localStatus = await getLocalStatus(handle, 'my-initiative', structure, 'hld-define')
 
       assert.deepEqual(localStatus, serverStatus)
-      assert.deepEqual(localStatus.stage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-tac-approved' })
+      assert.deepEqual(localStatus.stage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-arb-approved' })
       const hldSubmission = localStatus.modules.find((m) => m.id === 'hld-submission')
       assert.equal(hldSubmission.exists, false)
     })
@@ -363,15 +363,15 @@ describe('checkLocalGate matches checkGate', () => {
   })
 
   test('--gate resolves the stage owning that gate, even when it is not the instance\'s current stage', async () => {
-    const serverResult = checkGate('kiwi-cover-mutual', { instancesDir: 'workspaces/examples', gate: 'hld-tac-approved' })
+    const serverResult = checkGate('kiwi-cover-mutual', { instancesDir: 'workspaces/examples', gate: 'hld-arb-approved' })
     // workspaces/examples/kiwi-cover-mutual has no `definitionVersion`, so it resolves to v1 —
     // pinned here to match (WI #318).
     const structure = projectionFor('design', { version: 2 })
     const handle = await memHandleFromInstance('workspaces/examples', 'kiwi-cover-mutual')
-    const localResult = await checkLocalGate(handle, 'kiwi-cover-mutual', structure, 'shape', { gate: 'hld-tac-approved' })
+    const localResult = await checkLocalGate(handle, 'kiwi-cover-mutual', structure, 'shape', { gate: 'hld-arb-approved' })
 
     assert.deepEqual(localResult, serverResult)
-    assert.equal(localResult.stage.gate, 'hld-tac-approved')
+    assert.equal(localResult.stage.gate, 'hld-arb-approved')
   })
 
   test('an unknown --gate throws', async () => {
@@ -731,7 +731,7 @@ describe('resolveLocalCheckStage', () => {
 
   test('resolves any stage owning the requested gate', () => {
     const structure = projectionFor('design')
-    const stage = resolveLocalCheckStage(structure, 'shape', 'my-initiative', { gate: 'hld-tac-approved' })
+    const stage = resolveLocalCheckStage(structure, 'shape', 'my-initiative', { gate: 'hld-arb-approved' })
     assert.equal(stage.id, 'hld-define')
   })
 })
