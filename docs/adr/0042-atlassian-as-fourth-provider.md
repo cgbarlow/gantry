@@ -32,6 +32,8 @@ Atlassian's location is `{ owner, repository, jiraSite, jiraProjectKey }`:
 ### Considered and rejected
 - One shared Atlassian API token sent to both products — rejected: relies on a user's token happening to be scoped for both Bitbucket and Jira, which Atlassian's own token scoping does not guarantee, and fails silently (a token valid for one product, rejected by the other) rather than by construction.
 
+A **Library repo** (ADR-0036) does not follow the two-token rule above: it needs only its Bitbucket environment credential. A library repo holds definitions and receives Promote pull requests — both purely content-store operations — and never touches work items, so its Jira half is never exercised and no Jira credential is ever requested for one.
+
 ## Jira issue type
 
 Jira requires an issue type at creation (Story, Bug, Task, Epic, …) — there is no type-less create-issue call the way GitHub/GitLab Issues have. This mirrors Azure DevOps, not GitHub/GitLab: Azure Boards work items are typed too, and the wizard already fetches the project's live configured types (`web/pages/new-workspace-wizard.js`'s `loadWorkItemTypes()`) rather than hardcoding one, defaulting to `DEFAULT_WORK_ITEM_TYPE` ("Task") when present. Jira gets the identical treatment: the wizard fetches the Jira project's own configured issue types and offers the same kind of picker, rather than inventing a new pattern or silently picking one fixed type.
