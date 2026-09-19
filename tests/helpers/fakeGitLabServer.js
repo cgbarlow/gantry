@@ -13,9 +13,11 @@ import { createServer } from 'node:http'
  * one or several files as a single commit) — plus, per #30, the Issues API (`lib/gitlabWorkItemsClient.js`'s
  * work-items capability): create/read/update a project issue by its `iid` (GitLab's own project-scoped
  * issue number, the "iid" — `id` stays a separate, global-across-all-projects identifier this fake also
- * assigns but which `lib/gitlabWorkItemsClient.js` never addresses an issue by). Later tickets (#29
- * stage branches, #33 merge requests, ...) extend this the same incremental way `fakeGitHubServer.js`
- * grew — new endpoints added here as the GitLab client itself grows them, never a parallel second fake.
+ * assigns but which `lib/gitlabWorkItemsClient.js` never addresses an issue by). #34 extends the Issues
+ * API with `assignee_ids`/`labels` support plus the Labels API (`GET`/`POST /projects/:id/labels`),
+ * backing Request Review. Later tickets (#29 stage branches, #33 merge requests, ...) extend this the
+ * same incremental way `fakeGitHubServer.js` grew — new endpoints added here as the GitLab client
+ * itself grows them, never a parallel second fake.
  *
  * A project's `:id` is GitLab's own `namespace%2Frepository` URL-encoded path — both the project id
  * and a file's `file_path` are single path *segments* that may themselves contain `%2F`-encoded
@@ -65,6 +67,26 @@ export function createFakeGitLabServer({ namespace, repository, validPat, files 
   let mrIdCounter = 9000
   let discussionIdCounter = 0
   const FAKE_APPROVER = { id: 777, username: 'fake-approver', name: 'Fake Approver' }
+
+  // #34: label definitions, keyed by name — `POST /projects/:id/labels` (name/color/description) and
+  // an issue's own `assignee_ids`/`labels` fields, backing `lib/gitlabWorkItemsClient.js`'s
+  // `ensureLabelsExist` and Request Review's assigned-and-labelled create-issue call. Real GitLab
+  // auto-creates a label from a bare name the first time it's attached to an issue if no such label
+  // already exists — mirrored here the same way `fakeGitHubServer.js`'s own `resolveLabelObjects`
+  // does, except GitLab's Issues API reports `labels` back as an array of plain name strings, never
+  // `{ name, color, description }` objects (this fake's own `getIssue`/create response mirrors that).
+  const labelDefs = new Map() // name -> { name, color, description }
+  function resolveLabelNames(labelsField) {
+    const names = Array.isArray(labelsField)
+      ? labelsField
+      : typeof labelsField === 'string' && labelsField.trim()
+        ? labelsField.split(',').map((name) => name.trim()).filter(Boolean)
+        : []
+    for (const name of names) {
+      if (!labelDefs.has(name)) labelDefs.set(name, { name, color: '#ededed', description: null })
+    }
+    return names
+  }
 
   // #26: every stored file is a real Buffer — a fixture may pass either a plain string (a text file's
   // UTF-8 content) or a Buffer (a binary file's real bytes) — matching how a write via the Commits API
@@ -279,9 +301,31 @@ export function createFakeGitLabServer({ namespace, repository, validPat, files 
       return json(201, { id: commit.commitId, short_id: commit.commitId, committed_date: commit.committedDate, authored_date: commit.authoredDate })
     }
 
+    // GET /projects/:id/labels — lists every label defined on the project (test-facing convenience,
+    // mirroring fakeGitHubServer.js's own read endpoint).
+    if (req.method === 'GET' && rest === '/labels') {
+      return json(200, [...labelDefs.values()])
+    }
+
+    // POST /projects/:id/labels — creates a label definition. Real GitLab responds 400 with a
+    // `{ message: { title: ["has already been taken"] } }`-shaped body for a name already taken —
+    // the case lib/gitlabWorkItemsClient.js's `ensureLabelsExist` tolerates rather than fails over.
+    if (req.method === 'POST' && rest === '/labels') {
+      const body = await readJsonBody(req)
+      if (labelDefs.has(body.name)) {
+        return json(400, { message: { title: ['has already been taken'] } })
+      }
+      const label = { name: body.name, color: body.color ?? '#ededed', description: body.description ?? null }
+      labelDefs.set(body.name, label)
+      return json(201, label)
+    }
+
     // POST /projects/:id/issues — creates a new issue. Mirrors real GitLab's own create-issue response
-    // shape (`iid`/`id`/`title`/`description`/`state`/`web_url`), lib/gitlabWorkItemsClient.js's
-    // createIssue().
+    // shape (`iid`/`id`/`title`/`description`/`state`/`web_url`/`labels`/`assignee_ids`),
+    // lib/gitlabWorkItemsClient.js's createIssue(). `labels` (a comma-separated string, or an array —
+    // this fake accepts either) auto-creates any name not already defined via `POST .../labels`, and
+    // the issue's own `labels` field always reports plain name strings, matching real GitLab's shape
+    // (unlike GitHub's array of label objects).
     if (req.method === 'POST' && rest === '/issues') {
       const body = await readJsonBody(req)
       const iid = ++issueIidCounter
@@ -294,14 +338,17 @@ export function createFakeGitLabServer({ namespace, repository, validPat, files 
         description: body.description ?? null,
         state: 'opened',
         web_url: `https://fake-gitlab.invalid/${namespace}/${repository}/-/issues/${iid}`,
+        assignee_ids: body.assignee_ids ?? [],
+        labels: resolveLabelNames(body.labels),
       }
       issues.set(iid, issue)
       return json(201, issue)
     }
 
     // GET /projects/:id/issues/:issue_iid and PUT /projects/:id/issues/:issue_iid — read/partially
-    // update an issue by its project-scoped `iid`. PUT supports `title`/`description` plus GitLab's own
-    // `state_event` ('close'/'reopen', translated here into the `state` field a GET reports —
+    // update an issue by its project-scoped `iid`. PUT supports `title`/`description`/`assignee_ids`
+    // plus `labels` (re-resolved the same auto-creating way as create) and GitLab's own `state_event`
+    // ('close'/'reopen', translated here into the `state` field a GET reports —
     // lib/gitlabWorkItemsClient.js never sends a bare `state` directly, matching real GitLab's own
     // contract, which only accepts state changes via `state_event`).
     const issueMatch = rest.match(/^\/issues\/(\d+)$/)
@@ -313,8 +360,9 @@ export function createFakeGitLabServer({ namespace, repository, validPat, files 
       if (req.method === 'GET') return json(200, issue)
 
       if (req.method === 'PUT') {
-        const { state_event, ...rest } = await readJsonBody(req)
+        const { state_event, labels, ...rest } = await readJsonBody(req)
         Object.assign(issue, rest)
+        if (labels !== undefined) issue.labels = resolveLabelNames(labels)
         if (state_event === 'close') issue.state = 'closed'
         else if (state_event === 'reopen') issue.state = 'opened'
         return json(200, issue)

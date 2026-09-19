@@ -10,6 +10,10 @@ import {
   reviewStatusToGitHubLabel,
   gitHubLabelToReviewStatus,
   allGitHubReviewLabels,
+  GITLAB_REVIEW_LABEL_PREFIX,
+  reviewStatusToGitLabLabel,
+  gitlabLabelToReviewStatus,
+  allGitLabReviewLabels,
 } from '../lib/reviewStatus.js'
 
 // Lib-level tests for ADR-0024 (docs/adr/0024-custom-review-status-field.md)
@@ -78,6 +82,43 @@ test('allGitHubReviewLabels returns one { name, color, description } definition 
   for (const label of labels) {
     assert.ok(label.name.startsWith(GITHUB_REVIEW_LABEL_PREFIX))
     assert.match(label.color, /^[0-9a-f]{6}$/)
+    assert.match(label.description, /Gantry Request Review status/)
+  }
+  // Distinct names and colours — five genuinely different labels, not five copies.
+  assert.equal(new Set(labels.map((l) => l.name)).size, labels.length)
+})
+
+// #34, docs/adr/0041 "applied here to GitLab's Issues" — GitLab's own carrier for this same
+// five-value vocabulary, deliberately identical prefix/slugs to GitHub's own.
+
+test('reviewStatusToGitLabLabel maps every REVIEW_STATUS value to its own reserved gantry:review/* label, identical to GitHub\'s own vocabulary', () => {
+  assert.equal(reviewStatusToGitLabLabel(REVIEW_STATUS.REQUESTED), 'gantry:review/requested')
+  assert.equal(reviewStatusToGitLabLabel(REVIEW_STATUS.IN_REVIEW), 'gantry:review/in-review')
+  assert.equal(reviewStatusToGitLabLabel(REVIEW_STATUS.CHANGES_REQUESTED), 'gantry:review/changes-requested')
+  assert.equal(reviewStatusToGitLabLabel(REVIEW_STATUS.APPROVED), 'gantry:review/approved')
+  assert.equal(reviewStatusToGitLabLabel(REVIEW_STATUS.REJECTED), 'gantry:review/rejected')
+  assert.throws(() => reviewStatusToGitLabLabel('Not a real status'), /No gantry:review\/\* label is mapped/)
+  for (const status of REVIEW_STATUS_VALUES) {
+    assert.equal(reviewStatusToGitLabLabel(status), reviewStatusToGitHubLabel(status))
+  }
+})
+
+test('gitlabLabelToReviewStatus is the exact reverse of reviewStatusToGitLabLabel, and undefined when no reserved label is present', () => {
+  for (const status of REVIEW_STATUS_VALUES) {
+    assert.equal(gitlabLabelToReviewStatus([reviewStatusToGitLabLabel(status)]), status)
+  }
+  // Unrelated labels alongside a real one are ignored, not treated as a second/conflicting signal.
+  assert.equal(gitlabLabelToReviewStatus(['bug', reviewStatusToGitLabLabel(REVIEW_STATUS.APPROVED), 'good first issue']), REVIEW_STATUS.APPROVED)
+  assert.equal(gitlabLabelToReviewStatus(['bug', 'good first issue']), undefined)
+  assert.equal(gitlabLabelToReviewStatus([]), undefined)
+})
+
+test('allGitLabReviewLabels returns one { name, color, description } definition per REVIEW_STATUS_VALUES entry, prefixed gantry:review/, with GitLab-shaped #RRGGBB colours', () => {
+  const labels = allGitLabReviewLabels()
+  assert.equal(labels.length, REVIEW_STATUS_VALUES.length)
+  for (const label of labels) {
+    assert.ok(label.name.startsWith(GITLAB_REVIEW_LABEL_PREFIX))
+    assert.match(label.color, /^#[0-9a-f]{6}$/)
     assert.match(label.description, /Gantry Request Review status/)
   }
   // Distinct names and colours — five genuinely different labels, not five copies.
