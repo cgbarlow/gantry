@@ -48,12 +48,32 @@ test('POST /api/workspaces (github) reports 400, not 500, for a location missing
   })
 })
 
-test('POST /api/workspaces rejects provider "atlassian" — known, but not selectable yet', async () => {
+test('POST /api/workspaces rejects an "atlassian" location missing its Jira fields — accepted as a provider, but the location schema is still enforced (#40)', async () => {
   await withScratchGitHubServer(async ({ gantryBase }) => {
     const res = await fetch(`${gantryBase}/api/workspaces`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider: 'atlassian', location: { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY } }),
+    })
+    assert.equal(res.status, 400)
+    const body = await res.json()
+    assert.match(body.error, /missing: jiraSite, jiraProjectKey/)
+  })
+})
+
+// #40/ADR-0042: atlassian is now a genuinely accepted provider and location shape (previous
+// assertion), but no capability registration ships until a later ticket in #39's task list — a
+// structurally-valid Atlassian registration attempt still can't complete, distinctly from a bad
+// location.
+test('POST /api/workspaces rejects a structurally-valid "atlassian" registration — known and location-valid, but not selectable yet (no capability registration)', async () => {
+  await withScratchGitHubServer(async ({ gantryBase }) => {
+    const res = await fetch(`${gantryBase}/api/workspaces`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader('some-pat') },
+      body: JSON.stringify({
+        provider: 'atlassian',
+        location: { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, jiraSite: 'acme.atlassian.net', jiraProjectKey: 'PROJ' },
+      }),
     })
     assert.equal(res.status, 400)
     const body = await res.json()

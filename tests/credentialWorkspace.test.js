@@ -232,3 +232,122 @@ test('migrateGlobalPatToWorkspaces still deletes the legacy key even with no wor
     globalThis.localStorage = originalLocalStorage
   }
 })
+
+// ---------- Atlassian: two tokens, one workspace slot (#40, ADR-0042) ----------
+// An Atlassian workspace stores `{bitbucket, jira}` instead of a bare PAT string — every function
+// above tells the two shapes apart by inspecting what's actually stored, so a `product` argument is
+// only ever needed for an Atlassian workspace; every other provider's own tests above never pass it
+// and are completely unaffected by any of this.
+
+test('setPatForWorkspace/patForWorkspace with a product stores and reads {bitbucket, jira} independently, not a bare string', async () => {
+  const { setPatForWorkspace, patForWorkspace } = await freshCredentialModule()
+
+  setPatForWorkspace('atlassian-workspace', 'bb-token', 'bitbucket')
+  setPatForWorkspace('atlassian-workspace', 'jira-token', 'jira')
+
+  assert.equal(patForWorkspace('atlassian-workspace', 'bitbucket'), 'bb-token')
+  assert.equal(patForWorkspace('atlassian-workspace', 'jira'), 'jira-token')
+  // Asking for the workspace's PAT with no product at all doesn't resolve to either token — a
+  // two-token workspace has no single "the PAT".
+  assert.equal(patForWorkspace('atlassian-workspace'), null)
+})
+
+test('setPatForWorkspace with a product only ever touches that one token, leaving the other untouched', async () => {
+  const { setPatForWorkspace, patForWorkspace } = await freshCredentialModule()
+  setPatForWorkspace('atlassian-workspace', 'bb-token', 'bitbucket')
+  setPatForWorkspace('atlassian-workspace', 'jira-token', 'jira')
+
+  setPatForWorkspace('atlassian-workspace', 'bb-token-2', 'bitbucket')
+
+  assert.equal(patForWorkspace('atlassian-workspace', 'bitbucket'), 'bb-token-2')
+  assert.equal(patForWorkspace('atlassian-workspace', 'jira'), 'jira-token')
+})
+
+test('a Library repo\'s Bitbucket-only case: setting just one product token never invents a jira entry', async () => {
+  const { setPatForWorkspace, hasPatForWorkspace } = await freshCredentialModule()
+  setPatForWorkspace('atlassian-library', 'bb-token', 'bitbucket')
+
+  assert.equal(hasPatForWorkspace('atlassian-library', 'bitbucket'), true)
+  assert.equal(hasPatForWorkspace('atlassian-library', 'jira'), false)
+})
+
+test('setPatForWorkspace with a product and a blank value clears just that token, same as clearPatForWorkspace', async () => {
+  const { setPatForWorkspace, patForWorkspace } = await freshCredentialModule()
+  setPatForWorkspace('atlassian-workspace', 'bb-token', 'bitbucket')
+  setPatForWorkspace('atlassian-workspace', 'jira-token', 'jira')
+
+  setPatForWorkspace('atlassian-workspace', '   ', 'bitbucket')
+
+  assert.equal(patForWorkspace('atlassian-workspace', 'bitbucket'), null)
+  assert.equal(patForWorkspace('atlassian-workspace', 'jira'), 'jira-token')
+})
+
+test('clearPatForWorkspace with a product clears just that token, leaving the other set', async () => {
+  const { setPatForWorkspace, clearPatForWorkspace, patForWorkspace, hasPatForWorkspace } = await freshCredentialModule()
+  setPatForWorkspace('atlassian-workspace', 'bb-token', 'bitbucket')
+  setPatForWorkspace('atlassian-workspace', 'jira-token', 'jira')
+
+  clearPatForWorkspace('atlassian-workspace', 'jira')
+
+  assert.equal(patForWorkspace('atlassian-workspace', 'jira'), null)
+  assert.equal(patForWorkspace('atlassian-workspace', 'bitbucket'), 'bb-token')
+  assert.equal(hasPatForWorkspace('atlassian-workspace'), true)
+})
+
+test('clearPatForWorkspace with no product clears both Atlassian tokens at once', async () => {
+  const { setPatForWorkspace, clearPatForWorkspace, hasPatForWorkspace } = await freshCredentialModule()
+  setPatForWorkspace('atlassian-workspace', 'bb-token', 'bitbucket')
+  setPatForWorkspace('atlassian-workspace', 'jira-token', 'jira')
+
+  clearPatForWorkspace('atlassian-workspace')
+
+  assert.equal(hasPatForWorkspace('atlassian-workspace', 'bitbucket'), false)
+  assert.equal(hasPatForWorkspace('atlassian-workspace', 'jira'), false)
+})
+
+test('hasPatForWorkspace with no product reports true once either Atlassian token is set', async () => {
+  const { setPatForWorkspace, hasPatForWorkspace } = await freshCredentialModule()
+  assert.equal(hasPatForWorkspace('atlassian-workspace'), false)
+
+  setPatForWorkspace('atlassian-workspace', 'bb-token', 'bitbucket')
+  assert.equal(hasPatForWorkspace('atlassian-workspace'), true)
+})
+
+test('authHeaderForWorkspace with a product encodes that one Atlassian token as HTTP Basic auth', async () => {
+  const { setPatForWorkspace, authHeaderForWorkspace } = await freshCredentialModule()
+  setPatForWorkspace('atlassian-workspace', 'bb-token', 'bitbucket')
+  setPatForWorkspace('atlassian-workspace', 'jira-token', 'jira')
+
+  assert.equal(authHeaderForWorkspace('atlassian-workspace', 'bitbucket'), `Basic ${Buffer.from(':bb-token', 'utf8').toString('base64')}`)
+  assert.equal(authHeaderForWorkspace('atlassian-workspace', 'jira'), `Basic ${Buffer.from(':jira-token', 'utf8').toString('base64')}`)
+})
+
+test('credentialStatusForWorkspace(workspaceId, "atlassian") reports each token missing/set independently, not one flat boolean', async () => {
+  const { setPatForWorkspace, credentialStatusForWorkspace } = await freshCredentialModule()
+
+  assert.deepEqual(credentialStatusForWorkspace('atlassian-workspace', 'atlassian'), { bitbucket: 'missing', jira: 'missing' })
+
+  setPatForWorkspace('atlassian-workspace', 'bb-token', 'bitbucket')
+  assert.deepEqual(credentialStatusForWorkspace('atlassian-workspace', 'atlassian'), { bitbucket: 'set', jira: 'missing' })
+
+  setPatForWorkspace('atlassian-workspace', 'jira-token', 'jira')
+  assert.deepEqual(credentialStatusForWorkspace('atlassian-workspace', 'atlassian'), { bitbucket: 'set', jira: 'set' })
+})
+
+test('credentialStatusForWorkspace(workspaceId, "atlassian") reports a rejected token as "rejected", not "set"', async () => {
+  const { setPatForWorkspace, markCredentialRejected, credentialStatusForWorkspace } = await freshCredentialModule()
+  setPatForWorkspace('atlassian-workspace', 'bb-token', 'bitbucket')
+  setPatForWorkspace('atlassian-workspace', 'jira-token', 'jira')
+
+  markCredentialRejected('atlassian-workspace')
+
+  assert.deepEqual(credentialStatusForWorkspace('atlassian-workspace', 'atlassian'), { bitbucket: 'rejected', jira: 'rejected' })
+})
+
+test('credentialStatusForWorkspace with no provider keeps its existing flat status for every non-Atlassian workspace', async () => {
+  const { setPatForWorkspace, credentialStatusForWorkspace } = await freshCredentialModule()
+  assert.equal(credentialStatusForWorkspace('workspace-a'), 'missing')
+
+  setPatForWorkspace('workspace-a', 'a-pat')
+  assert.equal(credentialStatusForWorkspace('workspace-a'), 'set')
+})

@@ -22,6 +22,7 @@ import { withScratchInstances } from './helpers/lifecycle.js'
 const LOCATION = { organization: 'fake-org', project: 'fake-project', repository: 'fake-repo' }
 const GITHUB_LOCATION = { owner: 'octocat', repository: 'fake-repo' }
 const GITLAB_LOCATION = { namespace: 'fake-group/fake-subgroup', repository: 'fake-repo' }
+const ATLASSIAN_LOCATION = { owner: 'acme', repository: 'fake-repo', jiraSite: 'acme.atlassian.net', jiraProjectKey: 'PROJ' }
 
 // ---------- registerWorkspace: nested {provider, location} shape only (ticket #6) ----------
 
@@ -186,11 +187,22 @@ test('registerWorkspace rejects an unknown provider', async () => {
   })
 })
 
-test('registerWorkspace rejects "atlassian" — modeled, but not built yet', async () => {
+// #40, ADR-0042: atlassian is now a genuinely accepted, storable provider at this layer — only its
+// capability registration (a live Bitbucket/Jira client) is still absent, which is a separate,
+// later ticket's concern, not this registry's.
+test('registerWorkspace accepts an "atlassian" location', async () => {
+  await withScratchInstances((instancesDir) => {
+    const workspace = registerWorkspace({ provider: 'atlassian', location: ATLASSIAN_LOCATION, owner: 'c.barlow' }, { instancesDir })
+    assert.equal(workspace.provider, 'atlassian')
+    assert.deepEqual(workspace.location, ATLASSIAN_LOCATION)
+  })
+})
+
+test('registerWorkspace rejects an "atlassian" location missing jiraSite or jiraProjectKey', async () => {
   await withScratchInstances((instancesDir) => {
     assert.throws(
-      () => registerWorkspace({ provider: 'atlassian', location: {} }, { instancesDir }),
-      /not supported yet/
+      () => registerWorkspace({ provider: 'atlassian', location: { owner: 'acme', repository: 'fake-repo' } }, { instancesDir }),
+      /missing: jiraSite, jiraProjectKey/
     )
   })
 })
