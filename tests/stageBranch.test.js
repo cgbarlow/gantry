@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createAzureDevOpsClient, AzureDevOpsNotFoundError } from '../lib/azureDevOpsClient.js'
+import { NotFoundError } from '../lib/providerErrors.js'
+import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { loadDefinition } from '../lib/definition.js'
 import { stageBranchName, findStageBranch, resolveStageBranch } from '../lib/stageBranch.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
@@ -140,14 +141,14 @@ test('resolveStageBranch throws for a stage that is not part of the given defini
   })
 })
 
-test('resolveStageBranch propagates a rejected PAT as AzureDevOpsAuthenticationError, the same as createBranch itself', async () => {
+test('resolveStageBranch propagates a rejected PAT as AuthenticationError, the same as createBranch itself', async () => {
   await withServer({ files: { '/gantry-workspace/my-initiative/instance.yaml': 'slug: my-initiative\n' } }, async (baseUrl) => {
     const badAzureDevOps = locationFor(baseUrl, { pat: 'wrong-pat' })
     await assert.rejects(async () => {
       try {
         await resolveStageBranch(badAzureDevOps, definition, SLUG, SHAPE.id)
       } catch (err) {
-        assert.equal(err.name, 'AzureDevOpsAuthenticationError')
+        assert.equal(err.name, 'AuthenticationError')
         throw err
       }
     })

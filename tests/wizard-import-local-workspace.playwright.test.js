@@ -6,7 +6,8 @@ import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withRunningServer, basicAuthHeader, VALID_PAT } from './helpers/lifecycle.js'
-import { createAzureDevOpsClient, AzureDevOpsNotFoundError } from '../lib/azureDevOpsClient.js'
+import { NotFoundError } from '../lib/providerErrors.js'
+import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 
 // Browser tests for WI #305 — "Import a local-workspace instance into a
 // Server-hosted workspace": the "Start blank" / "Import from local
@@ -299,7 +300,7 @@ async function readFileOrNull(client, path) {
   try {
     return await client.getFileContent(path)
   } catch (err) {
-    if (err instanceof AzureDevOpsNotFoundError) return null
+    if (err instanceof NotFoundError) return null
     throw err
   }
 }

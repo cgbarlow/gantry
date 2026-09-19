@@ -117,7 +117,7 @@ test('GET /api/instance against an Azure-DevOps-backed instance with a valid PAT
   })
 })
 
-// A genuine Azure DevOps-side failure (not a 404 "no saved data yet" miss, not a 401/403 rejected-PAT) reading one module's file must surface as a real error, not be silently swallowed into "this module is just blank" — regression test for a review finding where the GET /api/instance handler caught *every* readModule failure other than AzureDevOpsAuthenticationError and treated it as "no data yet". Uses a minimal ad hoc fake server (rather than tests/helpers/fakeAzureDevOpsServer.js, which has no way to inject a GET failure) so one specific module's read can be made to fail with a 500 while the rest of the repo behaves normally.
+// A genuine Azure DevOps-side failure (not a 404 "no saved data yet" miss, not a 401/403 rejected-PAT) reading one module's file must surface as a real error, not be silently swallowed into "this module is just blank" — regression test for a review finding where the GET /api/instance handler caught *every* readModule failure other than AuthenticationError and treated it as "no data yet". Uses a minimal ad hoc fake server (rather than tests/helpers/fakeAzureDevOpsServer.js, which has no way to inject a GET failure) so one specific module's read can be made to fail with a 500 while the rest of the repo behaves normally.
 test('GET /api/instance surfaces a genuine Azure DevOps read failure (a 500, not a 404) as an error, instead of reporting the module as blank', async () => {
   const basePath = `/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/${REPOSITORY}`
   const fakeAdo = createHttpServer((req, res) => {
