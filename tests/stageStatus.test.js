@@ -288,6 +288,8 @@ test('detecting approval merges the Pull Request itself and advances the stage p
     assert.equal(result.review.reviewStatus, 'Approved')
     assert.equal(result.merged, true)
     assert.equal(result.prStatus, 'completed')
+    // withOpenPullRequest seeds an instance.yaml with no `definitionVersion`, so it resolves to v1
+    // (pre-rename) — the ARB rename only touched v2's gate id.
     assert.deepEqual(result.advancedTo, { id: 'hld-define', title: 'High-level Design', gate: 'hld-tac-approved' })
 
     // The merge happened on Azure DevOps's side…

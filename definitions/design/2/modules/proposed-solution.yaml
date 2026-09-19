@@ -31,7 +31,7 @@ fields:
     guidance: >
       Builds on the SOAP sketch — see `solution-definition`
       (`high-level-solution-overview`, `feature-breakdown`). Do not re-derive;
-      show how that shape aligns with strategy for TAC.
+      show how that shape aligns with strategy for the ARB.
 
   - id: implications
     title: Implications

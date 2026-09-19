@@ -54,7 +54,7 @@ stages:
     purpose: >
       Describe the proposed solution in enough detail to be approved before
       detailed design begins. Cover what is needed to decide whether to proceed.
-    gate: hld-tac-approved
+    gate: hld-arb-approved
     # nfrs, risks, security and dependencies are introduced here in early/light form and
     # carried forward — not re-declared — at detailed-design, where the same module ids are
     # required in fuller form. See each module's guidance.
@@ -224,7 +224,7 @@ artefacts:
       Present the proposed solution, alternatives, risks and open questions for
       approval before detailed design.
     template: templates/hld.md.tmpl
-    gate: hld-tac-approved
+    gate: hld-arb-approved
     # Order follows the TAC HLD reference template: cover block -> Problem
     # Statement (Current state, Desired future state, In scope / out of scope,
     # Success criteria, Non-functional requirements) -> Proposed solution
@@ -267,9 +267,9 @@ artefacts:
     #
     # Gate note. `nfrs.performance`, `nfrs.availability-and-continuity` and
     # `security.privacy-and-confidentiality` stay bare and declare
-    # `required-at: [hld-tac-approved, ...]` in their own module YAML — the
+    # `required-at: [hld-arb-approved, ...]` in their own module YAML — the
     # reference makes both sections mandatory, and v1 enforced neither. Of the
-    # 14 dropped entries, 12 did not gate at `hld-tac-approved` at all. The two
+    # 14 dropped entries, 12 did not gate at `hld-arb-approved` at all. The two
     # that did are `background.affected-domains` and
     # `solution-definition.high-level-solution-overview` (both `required: true`,
     # so an `?` suffix did not exempt the latter). Both stay mandatory at

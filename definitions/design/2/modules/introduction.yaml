@@ -60,7 +60,7 @@ fields:
       "Introduction" section when filled at SOAP.
 
       The HLD's `background` framing and this SAD `introduction` framing are
-      intentionally separate (TAC vs Design Authority audiences) — do not
+      intentionally separate (ARB vs Design Authority audiences) — do not
       expect this to pre-fill from `background.problem`. See the reconciliation
       doc §5.
 
@@ -75,7 +75,7 @@ fields:
   - id: in-scope
     title: In scope
     type: markdown
-    required-at: [hld-tac-approved, build-ready-checklist, operational-handover]
+    required-at: [hld-arb-approved, build-ready-checklist, operational-handover]
     guidance: >
       The features, functionality, and deliverables inside the boundaries of
       this design. This is the canonical scope statement — it re-opens and is
@@ -84,7 +84,7 @@ fields:
   - id: out-of-scope
     title: Out of scope
     type: markdown
-    required-at: [hld-tac-approved, build-ready-checklist, operational-handover]
+    required-at: [hld-arb-approved, build-ready-checklist, operational-handover]
     guidance: >
       What this design explicitly does not cover. Silence on out-of-scope is
       the most common cause of a design being sent back with questions.

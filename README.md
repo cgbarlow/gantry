@@ -403,7 +403,7 @@ stages:
 
   - id: hld-define
     title: High-level Design
-    gate: hld-tac-approved
+    gate: hld-arb-approved
     modules: [hld-submission, problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies]
 
   - id: detailed-design
@@ -432,7 +432,7 @@ artefacts:
   - id: hld
     title: High Level Design
     template: templates/hld.md.tmpl
-    gate: hld-tac-approved
+    gate: hld-arb-approved
     requires: [hld-submission, problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies]
 
   # sad and ssad also render at build-ready-checklist, each with its own field-level requires list;
@@ -478,7 +478,7 @@ Modules can be shared between definitions where the content genuinely is the sam
 
 ### Field requiredness across shared gates
 
-A module can be required at more than one gate (e.g. `nfrs` at both `hld-tac-approved` and `build-ready-checklist`), with a field expected to be filled in progressively — light at the earlier gate, complete by the later one. `required: true|false` alone can't express that: it's one value, applied wherever the module appears.
+A module can be required at more than one gate (e.g. `nfrs` at both `hld-arb-approved` and `build-ready-checklist`), with a field expected to be filled in progressively — light at the earlier gate, complete by the later one. `required: true|false` alone can't express that: it's one value, applied wherever the module appears.
 
 For a field whose requiredness genuinely differs by gate, use `required-at` instead of `required` — a list of the gate ids at which the field becomes required. At any other gate the module is also required at, the field is optional.
 
@@ -489,7 +489,7 @@ For a field whose requiredness genuinely differs by gate, use `required-at` inst
     required-at: [build-ready-checklist]
     guidance: >
       Recovery time/point objectives, backup schedule and retention. Light
-      or absent at `hld-tac-approved`; required by `build-ready-checklist`.
+      or absent at `hld-arb-approved`; required by `build-ready-checklist`.
 ```
 
 Where a field's *content* genuinely changes shape across the gates its module spans — not just gains depth — model it as two fields on the shared module instead of one field with `required-at`. See `definitions/design/1/modules/dependencies.yaml`: `dependencies-overview` (narrative, required at the earlier gate) and `dependency-list` (structured, required at the later gate) answer the same question in two different shapes, not two depths of one answer.

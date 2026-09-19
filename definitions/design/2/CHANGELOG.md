@@ -5,6 +5,13 @@ order of its reference document; reuse wired up where v1 declared it but never
 connected it; two duplicate field pairs merged. No field `id` renamed. The
 rest of this file gives the heading-by-heading mapping behind each move.
 
+### Round five: TAC renamed to ARB (2026-09-19)
+
+- **Gate id renamed**: `hld-tac-approved` → `hld-arb-approved`, everywhere it appears as `gate:` or in a module's `required-at` list. No other change to when the gate closes or what it requires.
+- **"Technical Architecture Committee (TAC)" renamed to "Architecture Review Board (ARB)"** as this definition's own canonical name for the body that approves the HLD — CONTEXT.md's glossary, this definition's user-facing `purpose`/`guidance` text (`background`, `introduction`, `solution-definition`, `security`, `architecture`, `proposed-solution`), and the two bundled example instances all updated together. ARB was already the name some of the real source material (the SAD template) used for the same body; this makes it the one name gantry itself uses going forward, and drops a company-specific committee name in favour of a more generic, industry-recognisable one.
+- **Not renamed**: citations of the actual external reference document — "the *2026 TAC Architecture High Level Solution Design Template*", "the TAC HLD reference template", "the TAC template" — wherever a comment or the user guide names that specific real source document rather than gantry's own governance vocabulary. That document's own real title still says TAC; this rename is about what gantry calls the committee, not about rewriting a citation.
+- **Historical comments and this changelog's own earlier rounds are left as-is** — they're an accurate record of what was true when they were written, the same convention already applied to this repo's ADRs.
+
 ### Round four: the HLD trimmed to the TAC reference template's sections (WI #362)
 
 The `hld` artefact listed **38** field references. The *2026 TAC Architecture High

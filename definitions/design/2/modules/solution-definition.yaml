@@ -51,5 +51,5 @@ fields:
     required: false
     guidance: >
       Brief alternative(s) considered at SOAP, including "do nothing" —
-      expanded at `modules/alternatives-considered.md` for TAC; do not
+      expanded at `modules/alternatives-considered.md` for the ARB; do not
       re-derive there.

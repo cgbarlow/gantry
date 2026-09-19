@@ -9,6 +9,7 @@ owner: p.natarajan
 
 | Term | Definition |
 | --- | --- |
+| ARB | Architecture Review Board — approves high-level designs |
 | ArchiSurance | The insurer KCM merged with in 2014; the name survives on the inherited Policy Data Management platform and some legacy domains |
 | BIBIT | The third-party payment gateway KCM uses for premium collection and, after this initiative, claims payment |
 | C&A | Certification and Accreditation — KCM's security sign-off process before a solution handles member data in production |
@@ -30,6 +31,5 @@ owner: p.natarajan
 | RPO / RTO | Recovery point objective / recovery time objective |
 | SAD / SSAD | Solution Architecture Document / Solution Support Architecture Document |
 | SOAP | Solution on a Page — the shaping document approved before high-level design |
-| TAC | Technical Architecture Committee — approves high-level designs |
 | Take out insurance | The policy intake business process: request received, processed, premium collected |
 | UNIX server farm | The virtualised RHEL estate in KCM's Wellington data centre that hosts the CRM, the Financial Application and the shared services |
