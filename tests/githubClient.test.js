@@ -312,3 +312,17 @@ test('createBranch surfaces a rejected PAT as AuthenticationError', async () => 
     await assert.rejects(() => client.createBranch('feature-x'), AuthenticationError)
   })
 })
+
+// ---------- #20: branchExists / createBranch, exercised again from lib/definitionPromote.js's own angle ----------
+
+test('createBranch points the new branch at the current tip of "from", and a write on the new branch never leaks back onto "from"', async () => {
+  await withFakeGitHubServer({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: { 'README.md': '# repo' } }, async (baseUrl) => {
+    const client = createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+    await client.writeFile('main-only.md', 'main content\n')
+    await client.createBranch('stacked', { from: 'main' })
+    assert.equal(await client.getFileContent('main-only.md', { branch: 'stacked' }), 'main content\n')
+
+    await client.writeFile('branch-only.md', 'branch content\n', { branch: 'stacked' })
+    assert.equal(await client.fileExists('branch-only.md', 'main'), false)
+  })
+})
