@@ -5,13 +5,10 @@ import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { theme, cycleTheme } from '../lib/theme.js'
 import {
-  pat,
-  clearPat,
-  requestPat,
-  hasWorkspacePatOverride,
+  hasPatForWorkspace,
   credentialStatusForWorkspace,
-  setWorkspacePatOverride,
-  clearWorkspacePatOverride,
+  setPatForWorkspace,
+  clearPatForWorkspace,
 } from '../lib/credential.js'
 import { TICKETING_SYSTEMS, defaultTicketingSystem, setDefaultTicketingSystem } from '../lib/ticketingSystem.js'
 import { advancedMode, setAdvancedMode } from '../lib/advancedMode.js'
@@ -67,37 +64,9 @@ function backHrefFrom(query) {
 }
 
 // ---------- Global Settings (`/settings`) ----------
-// The exact same PAT-management and default-ticketing-system content #101's old Global Defaults tab held — moved here wholesale, now the entire screen rather than one tab among others. Reached directly (no intermediate step) from Home, and via the instance screen's Settings dropdown.
-//
-// The default PAT this section manages is the exact same one web/lib/credential.js already held (and web/app.js's per-instance editor header used to expose) — moved here wholesale, not reimplemented. A third state this section adds beyond "replace"/"clear" (which assumed a PAT already existed): a first-time "Set" action, since this is now the *only* place a PAT can be entered ahead of any 401 ever prompting for one.
-function GlobalPatSection() {
-  const patStatus = credentialStatusForWorkspace()
-  return html`
-    <section class="settings-section">
-      <h2>Azure DevOps Personal Access Token</h2>
-      <p class="guidance">
-        Used for every Azure-DevOps-backed instance this gantry server serves. Stored only in this browser and sent
-        solely to your own gantry server — needs <strong>Code (Read &amp; write)</strong>,
-        <strong>Work Items (Read &amp; write)</strong>, and <strong>Identity (Read)</strong> scope.
-      </p>
-      <div class="settings-pat-status">
-        ${patStatus === 'rejected'
-          ? html`<span class="stamp review">REJECTED</span>`
-          : patStatus === 'set'
-            ? html`<span class="stamp agreed">SET</span>`
-            : html`<span class="stamp draft">NOT SET</span>`}
-      </div>
-      <div class="settings-actions">
-        ${pat.value
-          ? html`
-              <button type="button" class="btn" onClick=${() => requestPat()}>Replace Azure DevOps PAT</button>
-              <button type="button" class="btn ghost" onClick=${clearPat}>Clear Azure DevOps PAT</button>
-            `
-          : html`<button type="button" class="btn primary" onClick=${() => requestPat()}>Set Azure DevOps PAT</button>`}
-      </div>
-    </section>
-  `
-}
+// #9 (ADR-0038): the old Global Defaults tab's PAT section is gone entirely, not merely hidden — there
+// is no global-default PAT any more, and no screen-level control for one. Every workspace's own PAT is
+// managed from that workspace's own Workspace Settings screen (`WorkspaceEditor` below) instead.
 
 function TicketingSystemSection() {
   return html`
@@ -445,7 +414,6 @@ export function GlobalSettingsPage({ query }) {
     <main class="settings-page">
       <${AdvancedModeSection} />
       <${RenderEngineSection} />
-      ${advancedMode.value ? html`<${GlobalPatSection} />` : null}
       ${advancedMode.value ? html`<${TicketingSystemSection} />` : null}
       ${advancedMode.value ? html`<${LibraryReposSection} />` : null}
     </main>
@@ -542,7 +510,10 @@ function workspaceLocationLabel(workspace) {
     : `${workspace.location.organization}/${workspace.location.project}/${workspace.location.repository}`
 }
 
-// One workspace's editable fields: owner (server-persisted, identity-picker), a PAT override (client-only, never touches the server), and a ticketing-system override (server-persisted) — the same three fields #104's old Workspace overrides tab exposed per row, now rendered for exactly one workspace (the instance's own) rather than one row per registered workspace. The owner field is now an identity picker (#145 Part 2).
+// One workspace's editable fields: owner (server-persisted, identity-picker), its own Workspace PAT
+// (client-only, never touches the server — #9, ADR-0038: this is now the *only* place this
+// workspace's credential lives, there is no global default it could otherwise fall back to), and a
+// ticketing-system override (server-persisted). The owner field is an identity picker (#145 Part 2).
 function WorkspaceEditor({ workspace, onUpdated, slug }) {
   const [ownerDraft, setOwnerDraft] = useState(workspace.owner ?? '')
   const [ownerStatus, setOwnerStatus] = useState('')
@@ -561,8 +532,8 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
     latestOwnerRef.current = workspace.owner ?? ''
   }, [workspace.owner])
 
-  const hasPatOverride = hasWorkspacePatOverride(workspace.id)
-  const effectivePatStatus = credentialStatusForWorkspace(workspace.id)
+  const hasOwnPat = hasPatForWorkspace(workspace.id)
+  const patStatusForDisplay = credentialStatusForWorkspace(workspace.id)
   // Known, low-risk gap (#104 review; re-assessed, not fixed here): this is a *heuristic* ("does this workspace's stored value currently differ from the global default"), not a stored "was this ever explicitly overridden" flag — the workspace registry (#96, unchanged by this ticket) always persists one concrete `ticketingSystem` value, with no distinct "unset, tracks the global default" state. In principle that means this label could drift out from under an untouched workspace if the global default ever changed to a different value later.
   //
   // In practice, today, it can't: `jira` is rejected by validation everywhere a ticketing system can be chosen (globally, per-workspace, and at workspace creation — see workspaceRegistry.js's `assertValidTicketingSystem` and this file's own `TICKETING_SYSTEMS` enum), so `defaultTicketingSystem.value` and every workspace's `ticketingSystem` can only ever be `'azure-devops'` — there is no reachable state where the two sides of this comparison differ. This only becomes a real, visible misreporting risk once genuine Jira support ships (explicitly out of scope for this ticket, per spec #95's own "Out of Scope" list) and a real fix (an explicit override flag on the workspace record, intersecting the already-closed #96 ticket's schema) is worth building then, against real second-system requirements, rather than speculatively now.
@@ -585,15 +556,15 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
     }
   }
 
-  function handleSetPatOverride() {
-    setWorkspacePatOverride(workspace.id, patDraft)
+  function handleSetPat() {
+    setPatForWorkspace(workspace.id, patDraft)
     setPatDraft('')
-    setPatStatus('Override saved \u2014 used for this workspace\u2019s instances from now on.')
+    setPatStatus('PAT saved \u2014 used for this workspace\u2019s instances from now on.')
   }
 
-  function handleClearPatOverride() {
-    clearWorkspacePatOverride(workspace.id)
-    setPatStatus('Override cleared \u2014 falling back to the global default.')
+  function handleClearPat() {
+    clearPatForWorkspace(workspace.id)
+    setPatStatus('PAT cleared \u2014 the next request for this workspace will prompt for one.')
   }
 
   async function handleTicketingChange(systemId) {
@@ -634,29 +605,27 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
       </div>
 
       <div class="workspace-field workspace-pat">
-        <label>${providerLabel} PAT override</label>
+        <label>${providerLabel} Workspace PAT</label>
         <div class="workspace-pat-status">
-          ${effectivePatStatus === 'rejected'
-            ? html`<span class="stamp review">${hasPatOverride ? 'OVERRIDE REJECTED' : 'GLOBAL DEFAULT REJECTED'}</span>`
-            : effectivePatStatus === 'missing'
-              ? html`<span class="stamp draft">NO GLOBAL DEFAULT</span>`
-              : hasPatOverride
-                ? html`<span class="stamp agreed">OVERRIDE SET</span>`
-                : html`<span class="stamp draft">USING GLOBAL DEFAULT</span>`}
+          ${patStatusForDisplay === 'rejected'
+            ? html`<span class="stamp review">REJECTED</span>`
+            : patStatusForDisplay === 'missing'
+              ? html`<span class="stamp draft">MISSING</span>`
+              : html`<span class="stamp agreed">SET</span>`}
         </div>
         <div class="workspace-field-row">
           <input
             type="password"
             class="wizard-input"
             value=${patDraft}
-            placeholder="Paste a PAT to override the global default for this workspace"
+            placeholder="Paste this workspace's Personal Access Token"
             onInput=${(e) => setPatDraft(e.currentTarget.value)}
           />
-          <button type="button" class="btn small" disabled=${!patDraft.trim()} onClick=${handleSetPatOverride}>
-            ${hasPatOverride ? 'Replace override' : 'Set override'}
+          <button type="button" class="btn small" disabled=${!patDraft.trim()} onClick=${handleSetPat}>
+            ${hasOwnPat ? 'Replace PAT' : 'Set PAT'}
           </button>
-          ${hasPatOverride
-            ? html`<button type="button" class="btn small ghost" onClick=${handleClearPatOverride}>Clear override</button>`
+          ${hasOwnPat
+            ? html`<button type="button" class="btn small ghost" onClick=${handleClearPat}>Clear PAT</button>`
             : null}
         </div>
         <div class="workspace-field-status">${patStatus}</div>
@@ -950,9 +919,9 @@ function RemoteWorkspaceSettingsPage({ query }) {
       <section class="settings-section">
         <h2>Workspace</h2>
         <p class="guidance">
-          This instance's own workspace (an Azure DevOps repo) — its owner, repo URL, and any PAT or
-          ticketing-system override away from the Global Settings screen's values. Not a picker across every
-          registered workspace: just the one this instance belongs to.
+          This instance's own workspace — its owner, repo URL, its own Workspace PAT, and (for Azure
+          DevOps) its ticketing-system override. Not a picker across every registered workspace: just
+          the one this instance belongs to.
         </p>
         ${state === 'no-slug' ? html`<p class="load-error">No instance was specified for these Workspace Settings.</p>` : null}
         ${state === 'loading' ? html`<p class="loading">Loading\u2026</p>` : null}

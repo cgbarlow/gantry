@@ -1,8 +1,16 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { apiFetch, apiFetchForInstance } from './apiFetch.js'
+import { basicAuthHeaderForValue } from './credential.js'
 
-export function IdentityPicker({ value, onChange, placeholder, slug, organization, project, className, id }) {
+// `workspaceId` scopes a search to that workspace's own stored PAT (#9, ADR-0038) — used once a real
+// workspace already exists but no instance slug does yet (the "+ New Workspace" wizard's own Instance
+// step, before Create). `pat` is the narrower, one-off case with no workspace at all yet — the
+// wizard's Register step, searching against the organization/project the architect is about to
+// register, using the PAT they're about to prove access with (never persisted by this component
+// itself; see web/pages/new-workspace-wizard.js's own `registerPat`). At most one of `slug`,
+// `workspaceId` or `pat` is meaningful for a given usage; `slug` wins if more than one is passed.
+export function IdentityPicker({ value, onChange, placeholder, slug, organization, project, workspaceId, pat, className, id }) {
   const [query, setQuery] = useState(value ?? '')
   const [results, setResults] = useState([])
   const [open, setOpen] = useState(false)
@@ -45,9 +53,19 @@ export function IdentityPicker({ value, onChange, placeholder, slug, organizatio
       // fires before the architect has necessarily configured one) and already
       // handled inline via `searchError` below; it must never pop the page-wide
       // PAT prompt over a request nobody explicitly asked for.
+      //
+      // #9: no `slug` yet (nothing created to resolve a workspace from) still has two real cases —
+      // an already-registered `workspaceId` (attach that workspace's own stored PAT), or a not-yet-
+      // registered `pat` typed in memory (the wizard's Register step, attached directly since there's
+      // no workspace to resolve one from at all).
+      const authHeader = !slug && pat ? basicAuthHeaderForValue(pat) : null
       const res = slug
         ? await apiFetchForInstance(slug, `/api/identities?${params}`, {}, { silent: true })
-        : await apiFetch(`/api/identities?${params}`, {}, { silent: true })
+        : await apiFetch(
+            `/api/identities?${params}`,
+            authHeader ? { headers: { Authorization: authHeader } } : {},
+            { workspaceId, silent: true }
+          )
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setResults([])

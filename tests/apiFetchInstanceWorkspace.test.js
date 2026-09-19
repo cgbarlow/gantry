@@ -1,23 +1,21 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { setPat, clearPat, setWorkspacePatOverride, clearWorkspacePatOverride } from '../web/lib/credential.js'
+import { setPatForWorkspace, clearPatForWorkspace } from '../web/lib/credential.js'
 import { basicAuthHeader } from './helpers/lifecycle.js'
 
-// `apiFetchForInstance`'s workspace-id-for-slug cache (#104, web/lib/apiFetch.js) — a review pass on this ticket flagged the original version as caching *every* lookup outcome, including a failed one, permanently for the page's life. This exercises the fix directly: a stubbed global `fetch` simulates a transient failure on the first lookup, then a real answer on the second, proving the failure was not cached and a later call still applies the workspace's PAT override.
+// `apiFetchForInstance`'s workspace-id-for-slug cache (#104, web/lib/apiFetch.js) — a review pass on this ticket flagged the original version as caching *every* lookup outcome, including a failed one, permanently for the page's life. This exercises the fix directly: a stubbed global `fetch` simulates a transient failure on the first lookup, then a real answer on the second, proving the failure was not cached and a later call still applies the workspace's own PAT.
 //
-// `credential.js` is imported as a plain (non-cache-busted) static import here deliberately — it's the same singleton module instance `web/lib/apiFetch.js`'s own internal `import './credential.js'` resolves to, so calls to `setPat`/`setWorkspacePatOverride` here are visible to `apiFetch.js` without needing to reach into its internals. Only `apiFetch.js` itself is re-imported fresh per test (via a cache-busting query string), to reset its own private `workspaceIdBySlug` cache between tests.
+// `credential.js` is imported as a plain (non-cache-busted) static import here deliberately — it's the same singleton module instance `web/lib/apiFetch.js`'s own internal `import './credential.js'` resolves to, so calls to `setPatForWorkspace` here are visible to `apiFetch.js` without needing to reach into its internals. Only `apiFetch.js` itself is re-imported fresh per test (via a cache-busting query string), to reset its own private `workspaceIdBySlug` cache between tests.
 async function freshApiFetchModule() {
   return import(`../web/lib/apiFetch.js?t=${Math.random()}`)
 }
 
 
-test('a failed workspace-id lookup is not cached — a later successful lookup still applies that workspace\'s PAT override', async () => {
+test('a failed workspace-id lookup is not cached — a later successful lookup still applies that workspace\'s own PAT', async () => {
   const originalFetch = globalThis.fetch
-  clearPat()
-  clearWorkspacePatOverride('workspace-a')
+  clearPatForWorkspace('workspace-a')
   try {
-    setPat('global-default-pat')
-    setWorkspacePatOverride('workspace-a', 'override-pat')
+    setPatForWorkspace('workspace-a', 'workspace-a-pat')
 
     let workspaceLookupCallCount = 0
     let failLookup = true
@@ -35,38 +33,36 @@ test('a failed workspace-id lookup is not cached — a later successful lookup s
 
     const { apiFetchForInstance } = await freshApiFetchModule()
 
-    // First call: the workspace lookup fails, so this falls back to the global default rather than the workspace's override.
+    // First call: the workspace lookup fails, so no workspace is known yet — #9: there is no global
+    // default to fall back to any more, so this attaches no Authorization header at all.
     const res1 = await apiFetchForInstance('my-slug', '/api/instance?slug=my-slug')
     const body1 = await res1.json()
-    assert.equal(body1.authorization, basicAuthHeader('global-default-pat'))
+    assert.equal(body1.authorization, null)
     assert.equal(workspaceLookupCallCount, 1)
 
-    // Second call: the lookup now succeeds. If the earlier failure had been cached, this would still resolve to "no workspace" and reuse the global default — asserting on the override here is the whole point.
+    // Second call: the lookup now succeeds. If the earlier failure had been cached, this would still resolve to "no workspace" and attach no credential — asserting the workspace's own PAT here is the whole point.
     failLookup = false
     const res2 = await apiFetchForInstance('my-slug', '/api/instance?slug=my-slug')
     const body2 = await res2.json()
-    assert.equal(body2.authorization, basicAuthHeader('override-pat'))
+    assert.equal(body2.authorization, basicAuthHeader('workspace-a-pat'))
     assert.equal(workspaceLookupCallCount, 2)
 
     // Third call: the now-successful resolution *is* cached — no further lookup request is made.
     const res3 = await apiFetchForInstance('my-slug', '/api/instance?slug=my-slug')
     const body3 = await res3.json()
-    assert.equal(body3.authorization, basicAuthHeader('override-pat'))
+    assert.equal(body3.authorization, basicAuthHeader('workspace-a-pat'))
     assert.equal(workspaceLookupCallCount, 2)
   } finally {
     globalThis.fetch = originalFetch
-    clearPat()
-    clearWorkspacePatOverride('workspace-a')
+    clearPatForWorkspace('workspace-a')
   }
 })
 
 test('a malformed workspace-lookup response body is not cached either', async () => {
   const originalFetch = globalThis.fetch
-  clearPat()
-  clearWorkspacePatOverride('workspace-a')
+  clearPatForWorkspace('workspace-a')
   try {
-    setPat('global-default-pat')
-    setWorkspacePatOverride('workspace-a', 'override-pat')
+    setPatForWorkspace('workspace-a', 'workspace-a-pat')
 
     let workspaceLookupCallCount = 0
     let returnMalformedBody = true
@@ -84,26 +80,22 @@ test('a malformed workspace-lookup response body is not cached either', async ()
     const { apiFetchForInstance } = await freshApiFetchModule()
 
     const res1 = await apiFetchForInstance('my-slug', '/api/instance?slug=my-slug')
-    assert.equal((await res1.json()).authorization, basicAuthHeader('global-default-pat'))
+    assert.equal((await res1.json()).authorization, null)
     assert.equal(workspaceLookupCallCount, 1)
 
     returnMalformedBody = false
     const res2 = await apiFetchForInstance('my-slug', '/api/instance?slug=my-slug')
-    assert.equal((await res2.json()).authorization, basicAuthHeader('override-pat'))
+    assert.equal((await res2.json()).authorization, basicAuthHeader('workspace-a-pat'))
     assert.equal(workspaceLookupCallCount, 2)
   } finally {
     globalThis.fetch = originalFetch
-    clearPat()
-    clearWorkspacePatOverride('workspace-a')
+    clearPatForWorkspace('workspace-a')
   }
 })
 
 test('a genuinely local instance (a well-formed { workspaceId: null } response) is cached, and does not re-query on later calls', async () => {
   const originalFetch = globalThis.fetch
-  clearPat()
   try {
-    setPat('global-default-pat')
-
     let workspaceLookupCallCount = 0
     globalThis.fetch = async (url, options) => {
       const urlStr = String(url)
@@ -122,6 +114,5 @@ test('a genuinely local instance (a well-formed { workspaceId: null } response) 
     assert.equal(workspaceLookupCallCount, 1)
   } finally {
     globalThis.fetch = originalFetch
-    clearPat()
   }
 })

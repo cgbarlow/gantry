@@ -277,6 +277,9 @@ async function chooseNewDestination(page, { organization, project, repository })
   await page.locator('#import-ws-organization').fill(organization)
   await page.locator('#import-ws-project').fill(project)
   await page.locator('#import-ws-repository').fill(repository)
+  // #9 (ADR-0038): a brand-new workspace has no id yet to resolve a stored PAT against — the
+  // wizard's own PAT field, not the (now-removed) global default, is what proves access here.
+  await page.locator('#import-ws-pat').fill(VALID_PAT)
   await page.locator('#import-register-workspace').click()
 }
 

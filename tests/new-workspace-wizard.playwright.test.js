@@ -150,16 +150,22 @@ test('the "+ New Workspace" wizard registers a workspace, creates an instance, a
         if (msg.type() === 'error') pageErrors.push(msg.text())
       })
       await installBaseUrlRoutes(page, adoBaseUrl)
-      await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+      // #9 (ADR-0038): no global-default PAT to pre-seed any more — every test below registers its
+      // own workspace through the wizard's own `#ws-pat` field, which becomes that workspace's PAT.
 
       await page.goto(`${gantryBase}/new-workspace`)
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
 
       // ---------- Step 1: register a brand new workspace ----------
       await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+      // #9 (ADR-0038): filled before Owner below — its own search is PAT-backed (against the
+      // organization/project just entered), and a brand-new workspace has no id yet to resolve a
+      // stored PAT against, so the wizard's own PAT field is what search (and, later, Register
+      // workspace itself) prove access with.
       await page.locator('#ws-organization').fill(ORGANIZATION)
       await page.locator('#ws-project').fill(PROJECT)
       await page.locator('#ws-repository').fill(REPOSITORY)
+      await page.locator('#ws-pat').fill(VALID_PAT)
       await page.locator('#ws-owner').fill('a.architect')
       // Azure DevOps is the only enabled ticketing system — already
       // selected by default; Jira's radio is present but disabled.
@@ -229,7 +235,8 @@ test('the "+ New Workspace" wizard\'s pick-existing-workspace path adds a second
       await page.addInitScript(ADVANCED_MODE_ON_INIT)
       page.setDefaultTimeout(DEFAULT_TIMEOUT)
       await installBaseUrlRoutes(page, adoBaseUrl)
-      await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+      // #9 (ADR-0038): no global-default PAT to pre-seed any more — every test below registers its
+      // own workspace through the wizard's own `#ws-pat` field, which becomes that workspace's PAT.
 
       // First pass: register the workspace and create the first instance.
       await page.goto(`${gantryBase}/new-workspace`)
@@ -238,6 +245,9 @@ test('the "+ New Workspace" wizard\'s pick-existing-workspace path adds a second
       await page.locator('#ws-organization').fill(ORGANIZATION)
       await page.locator('#ws-project').fill(PROJECT)
       await page.locator('#ws-repository').fill(REPOSITORY)
+      // #9 (ADR-0038): a brand-new workspace has no id yet to resolve a stored PAT against — the
+      // wizard's own PAT field, not the (now-removed) global default, is what proves access here.
+      await page.locator('#ws-pat').fill(VALID_PAT)
       await page.getByRole('button', { name: 'Register workspace' }).click()
 
       await page.waitForSelector('#instance-name', { timeout: 10_000 })
@@ -327,7 +337,8 @@ test('#137: Back from Instance step returns to workspace picker with values inta
       const page = await browser.newPage()
       await page.addInitScript(ADVANCED_MODE_ON_INIT)
       await installBaseUrlRoutes(page, adoBaseUrl)
-      await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+      // #9 (ADR-0038): no global-default PAT to pre-seed any more — every test below registers its
+      // own workspace through the wizard's own `#ws-pat` field, which becomes that workspace's PAT.
 
       // Register a workspace so the pick list has at least one entry.
       await page.goto(`${gantryBase}/new-workspace`)
@@ -336,6 +347,8 @@ test('#137: Back from Instance step returns to workspace picker with values inta
       await page.locator('#ws-organization').fill(ORGANIZATION)
       await page.locator('#ws-project').fill(PROJECT)
       await page.locator('#ws-repository').fill(REPOSITORY)
+      // #9 (ADR-0038): filled before Owner below — see the first test's own comment on why.
+      await page.locator('#ws-pat').fill(VALID_PAT)
       await page.locator('#ws-owner').fill('a.architect')
       await page.getByRole('button', { name: 'Register workspace' }).click()
 
@@ -374,7 +387,8 @@ test('#137: Back from Link step returns to Instance step with values intact', as
       const page = await browser.newPage()
       await page.addInitScript(ADVANCED_MODE_ON_INIT)
       await installBaseUrlRoutes(page, adoBaseUrl)
-      await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+      // #9 (ADR-0038): no global-default PAT to pre-seed any more — every test below registers its
+      // own workspace through the wizard's own `#ws-pat` field, which becomes that workspace's PAT.
 
       await page.goto(`${gantryBase}/new-workspace`)
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
@@ -382,6 +396,9 @@ test('#137: Back from Link step returns to Instance step with values intact', as
       await page.locator('#ws-organization').fill(ORGANIZATION)
       await page.locator('#ws-project').fill(PROJECT)
       await page.locator('#ws-repository').fill(REPOSITORY)
+      // #9 (ADR-0038): a brand-new workspace has no id yet to resolve a stored PAT against — the
+      // wizard's own PAT field, not the (now-removed) global default, is what proves access here.
+      await page.locator('#ws-pat').fill(VALID_PAT)
       await page.getByRole('button', { name: 'Register workspace' }).click()
 
       await page.waitForSelector('#instance-name', { timeout: 10_000 })
@@ -413,7 +430,8 @@ test('#137: mid-flow revisit of /new-workspace persists step; Back reaches works
       const page = await browser.newPage()
       await page.addInitScript(ADVANCED_MODE_ON_INIT)
       await installBaseUrlRoutes(page, adoBaseUrl)
-      await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+      // #9 (ADR-0038): no global-default PAT to pre-seed any more — every test below registers its
+      // own workspace through the wizard's own `#ws-pat` field, which becomes that workspace's PAT.
 
       // Register a workspace and advance to Instance step.
       await page.goto(`${gantryBase}/new-workspace`)
@@ -422,6 +440,9 @@ test('#137: mid-flow revisit of /new-workspace persists step; Back reaches works
       await page.locator('#ws-organization').fill(ORGANIZATION)
       await page.locator('#ws-project').fill(PROJECT)
       await page.locator('#ws-repository').fill(REPOSITORY)
+      // #9 (ADR-0038): a brand-new workspace has no id yet to resolve a stored PAT against — the
+      // wizard's own PAT field, not the (now-removed) global default, is what proves access here.
+      await page.locator('#ws-pat').fill(VALID_PAT)
       await page.getByRole('button', { name: 'Register workspace' }).click()
       await page.waitForSelector('#instance-name', { timeout: 10_000 })
 
@@ -457,7 +478,8 @@ test('#138: Instance step renders "New Instance" heading between Workspace card 
       const page = await browser.newPage()
       await page.addInitScript(ADVANCED_MODE_ON_INIT)
       await installBaseUrlRoutes(page, adoBaseUrl)
-      await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+      // #9 (ADR-0038): no global-default PAT to pre-seed any more — every test below registers its
+      // own workspace through the wizard's own `#ws-pat` field, which becomes that workspace's PAT.
 
       await page.goto(`${gantryBase}/new-workspace`)
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
@@ -465,6 +487,9 @@ test('#138: Instance step renders "New Instance" heading between Workspace card 
       await page.locator('#ws-organization').fill(ORGANIZATION)
       await page.locator('#ws-project').fill(PROJECT)
       await page.locator('#ws-repository').fill(REPOSITORY)
+      // #9 (ADR-0038): a brand-new workspace has no id yet to resolve a stored PAT against — the
+      // wizard's own PAT field, not the (now-removed) global default, is what proves access here.
+      await page.locator('#ws-pat').fill(VALID_PAT)
       await page.getByRole('button', { name: 'Register workspace' }).click()
 
       // Wait for Instance step to appear.
@@ -503,7 +528,8 @@ test('#316: the version changelog is collapsed behind "Show release notes" by de
       const page = await browser.newPage()
       await page.addInitScript(ADVANCED_MODE_ON_INIT)
       await installBaseUrlRoutes(page, adoBaseUrl)
-      await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+      // #9 (ADR-0038): no global-default PAT to pre-seed any more — every test below registers its
+      // own workspace through the wizard's own `#ws-pat` field, which becomes that workspace's PAT.
 
       await page.goto(`${gantryBase}/new-workspace`)
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
@@ -511,6 +537,9 @@ test('#316: the version changelog is collapsed behind "Show release notes" by de
       await page.locator('#ws-organization').fill(ORGANIZATION)
       await page.locator('#ws-project').fill(PROJECT)
       await page.locator('#ws-repository').fill(REPOSITORY)
+      // #9 (ADR-0038): a brand-new workspace has no id yet to resolve a stored PAT against — the
+      // wizard's own PAT field, not the (now-removed) global default, is what proves access here.
+      await page.locator('#ws-pat').fill(VALID_PAT)
       await page.getByRole('button', { name: 'Register workspace' }).click()
 
       await page.waitForSelector('#instance-name', { timeout: 10_000 })

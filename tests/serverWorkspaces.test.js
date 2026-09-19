@@ -241,6 +241,10 @@ test('POST /api/workspaces with a nested { provider: "github", ... } body and no
     assert.equal(res.status, 401)
     const body = await res.json()
     assert.equal(body.error, 'authentication_required')
+    // #9 (ADR-0038): `provider` is already known from the request body at this point — even with no
+    // workspace yet to resolve it from, the message names GitHub, not the azure-devops default this
+    // route falls back to when no provider is known at all.
+    assert.match(body.message, /GitHub/)
 
     const listing = await (await fetch(`${base}/api/workspaces`)).json()
     assert.equal(listing.length, 0)

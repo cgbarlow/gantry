@@ -115,7 +115,12 @@ test('a linked instance\'s Work Item panel confirms a gate-pass state push', asy
       })
 
       // The sync route does require a PAT (Work Items scope) — seed one up front, as if already entered in a prior session, so this test can drive the panel itself rather than the (separately covered, tests/patPrompt.playwright.test.js) PAT-prompt flow.
-      await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+      // #9 (ADR-0038): "my-initiative" is a local (server-directory-backed) instance with no Azure
+      // DevOps workspace of its own — `GET /api/instance/workspace` resolves its scope to the shared
+      // `LOCAL_SCOPE` bucket ('local', lib/numberRegistry.js) every such instance in the default
+      // server workspace falls into, and that's the key its linked work item's PAT is stored under —
+      // there is no global default left for it to fall back to.
+      await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat-overrides', JSON.stringify({ local: pat })), VALID_PAT)
       // #301 — the Work item details / synced-fields panel renders only while advanced mode is on.
       await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
 
@@ -169,7 +174,9 @@ test('declining the confirmation leaves the linked work item\'s state unchanged'
         if (msg.type() === 'error') pageErrors.push(msg.text())
       })
 
-      await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+      // #9 (ADR-0038): see the previous test's own comment on why this is keyed by the shared
+      // `LOCAL_SCOPE` bucket ('local'), not any global default.
+      await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat-overrides', JSON.stringify({ local: pat })), VALID_PAT)
       // #301 — the Work item details / synced-fields panel renders only while advanced mode is on.
       await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
 
