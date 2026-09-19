@@ -34,19 +34,34 @@ test('getProviderCapabilities throws a clear error naming the registered provide
   assert.throws(() => getProviderCapabilities('atlassian'), /azure-devops/)
 })
 
-// #11/#10: github joins the registry one capability per ticket as each lands (content store, then
-// identity) — pullRequests/workItems are #13/#14's job, registered here the same incremental way
-// this file's own doc comment describes for Azure DevOps's own four clients.
+// #11/#10/#14: github joins the registry one capability per ticket as each lands (content store,
+// then identity, then work items) — pullRequests is #13's job, registered here the same incremental
+// way this file's own doc comment describes for Azure DevOps's own four clients.
 test('registeredProviders lists github once its content store is registered', () => {
   assert.ok(registeredProviders().includes('github'))
 })
 
-test('getProviderCapabilities resolves github to its content-store and identity factories, so far', () => {
+test('getProviderCapabilities resolves github to its content-store, identity and work-items factories, so far', () => {
   const capabilities = getProviderCapabilities('github')
   assert.equal(typeof capabilities.contentStore, 'function')
   assert.equal(typeof capabilities.identity, 'function')
+  assert.equal(typeof capabilities.workItems, 'function')
   assert.equal(capabilities.pullRequests, undefined)
-  assert.equal(capabilities.workItems, undefined)
+})
+
+// #14: resolveWorkItems instantiates GitHub's Issues-backed client through the registry, the same
+// seam `lib/workItemLink.js` uses — not the Azure-DevOps-shaped field-map API
+// `runProviderContractTests` below exercises (GitHub issues have no typed fields to map), so this is
+// asserted directly here rather than folded into that shared suite.
+test('resolveWorkItems instantiates github\'s work-items client', async () => {
+  await withFakeGitHubServer(
+    { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT },
+    async (baseUrl) => {
+      const workItems = resolveWorkItems('github', { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+      const created = await workItems.createIssue({ title: 'Registry smoke test', body: '' })
+      assert.ok(created.number)
+    }
+  )
 })
 
 test('resolveIdentity instantiates github\'s identity client', async () => {
