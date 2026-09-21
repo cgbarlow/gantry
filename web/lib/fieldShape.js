@@ -9,8 +9,11 @@
 // two must stay behaviourally identical, mirroring the existing deliberate twinning between
 // web/lib/localInstanceFiles.js and lib/instance.js.
 
+// #83 (ADR-0044): a select with `multiple: true` is a variation within `select`, not a second
+// type name — it stores its several values as bullets, byte-identical to how `list` already
+// writes, so it needs no new parse/serialise branch here, only this one extra shape check.
 export function isMultiValuedField(field) {
-  return field.type === 'list'
+  return field.type === 'list' || (field.type === 'select' && field.multiple === true)
 }
 
 export function emptyFieldValue(field) {
