@@ -1,0 +1,379 @@
+id: recruitment-onboarding
+version: 1
+status: published
+title: Recruitment and Onboarding
+description: >
+  Turning an identified vacancy into a starter who can work on their first day, from
+  requisition through selection and appointment to provisioning.
+
+# Provenance
+# ----------
+# Ported from a BPMN 2.0 process model held in Iris, the architectural modelling tool at
+# https://iris-uat.chrisbarlow.nz. Ported 2026-09-21.
+#
+#   Collection  Contoso Test Organisation
+#               /collections/924ca902-c7f8-41d1-80f1-5dd0b9986c1e
+#   Set         Process Modelling
+#               /sets/ece872af-7ca4-403b-8154-420c54234f89
+#
+#   Recruitment and Onboarding Process   /views/e95d5e8f-090d-4292-ab84-b153b6f8c028
+#     BPMN 2.0, one pool, three lanes (Technology, HR, Payroll), three phase groups.
+#     Source of this definition's stages and gates.
+#   Domain Model                         /views/306a99f7-c6e2-4664-8444-9dcf9f0c87f0
+#     UML class diagram, eight classes. Source of this definition's fields.
+#   Process Narrative                    /views/d7471051-2cc4-4aa3-b481-906f9858f336
+#     Source of the stage purposes and of every duration quoted in module guidance.
+#   Glossary                             /views/0ce87725-54ae-4e0b-9625-dfabe11e537d
+#     Source of the field guidance wording and of the vocabulary used throughout.
+#
+# This is a one-way port, not a synchronised copy. Nothing here updates when Iris changes.
+#
+# Approval is not authored content
+# --------------------------------
+# The source model contains an approval chain, an "Approved to Recruit" milestone and an
+# executive approval to appoint. None of them is modelled here as a field, because none of them
+# is content: in Gantry an approval is the stage sign-off (ADR-0014). `request_approval` opens a
+# pull request from the stage branch, the workspace Owner approves it, and `check_status` merges
+# it and advances the instance. The record of who approved what, when, is the merged pull
+# request.
+#
+# An authored "approved by" field would re-record that, self-attested, in a document the
+# approver never sees. The only part of the chain that is genuinely content — which route an
+# engagement type commits the request to, full or shortened — is a property of the engagement,
+# and lives at `engagement.approval-route`.
+#
+# The `appointment-case` artefact is named accordingly: it is the case put to the approver, not
+# the approval.
+#
+# Current state, not target state
+# -------------------------------
+# The source model is deliberately as-is and keeps its weak points rather than designing them
+# away. So does this. Five of them are named explicitly in module guidance, because a process
+# whose faults are written down is one somebody can make a case about:
+#
+#   - the payroll rework loop           `payroll.rework`
+#   - credentials issued by email       `identity.credential-issue`
+#   - undocumented role evaluation      `role-evaluation.method`
+#   - undocumented advertising          `advertising` (module purpose)
+#   - non-standard hardware undecided   `device.non-standard-decision`
+#
+# Publishing a corrected process here would invent policy nobody has agreed to. The case for
+# changing any of the above is made from instance data, not from this file.
+#
+# What BPMN carries that Gantry does not
+# --------------------------------------
+# Stages are an ordered list with one exit gate each. There is no loop, no fork, no lane and no
+# duration in the schema. Four things from the source model therefore live in prose rather than
+# structure, and are noted here so their absence is not read as an oversight:
+#
+#   Lanes         Each stage's `purpose` names its owning department.
+#   Durations     Quoted in the guidance of the field they bear on, from the Narrative.
+#   Rework loop   `payroll.rework` records each failure and its cost. Re-running a stage after
+#                 sign-off is `reopen_stage`, a runtime action, not a declared path.
+#   Phase 3 fork  Provisioning's parallel identity and device paths are three separate modules
+#                 mounted on one stage; the order they are worked in is not Gantry's business.
+#
+# Stage topology
+# --------------
+# The source model has three phase groups but four real decisions. Phase 1 alone contains both
+# the approval to recruit and the selection of a candidate. One gate per stage (docs/adr/0001)
+# means a stage holding two approvals can only gate on the later one, hiding the earlier — so
+# Phase 1 is split at "Approved to Recruit" and this definition has four stages, one per
+# decision, each with a single owning department and its own sign-off.
+#
+# Ordering convention
+# -------------------
+# An artefact's `requires` list is written in the order its sections render, so the list doubles
+# as the document outline. A bare `module.field` always blocks the gate. A `module.field?` is in
+# the artefact's scope — loaded, editable, rendered — but blocks only where the field's own
+# `required` / `required-at` makes it mandatory, which for every `?` entry below it does not.
+#
+# Gate strictness
+# ---------------
+# These gates are deliberately strict: nearly every entry is bare. A gate here is meant to be
+# evidence that the work was done and recorded, put to whoever signs the stage off.
+#
+# Two gates carry more than one artefact, and a gate passes when *any one* of its artefacts is
+# complete — so the least demanding artefact at a gate sets the real bar. `offer-pack`,
+# `manager-handover` and `hire-record` therefore block on the same core field set as the
+# document they sit alongside, and differ only in what they add on top. Deliberately unlike
+# design's soap/soap-full pairing, where the lighter document sets the bar on purpose.
+
+stages:
+  - id: requisition
+    title: Requisition
+    purpose: >
+      Establish what the role is, how the person will be engaged, and what it evaluated to, as
+      the case for recruiting. Owned by the requesting department. Signing this stage off is
+      the approval to recruit.
+    gate: approved-to-recruit
+    # Technology in the source model, but the owner is whichever department holds the vacancy.
+    # `open-questions` is mounted from here onward and required at no gate.
+    modules: [role, engagement, role-evaluation, open-questions]
+    example: platform-engineer
+
+  - id: selection
+    title: Selection
+    purpose: >
+      Take the approved role to market, narrow the field to one preferred candidate, and
+      complete pre-employment checks on them. Owned by HR.
+    gate: candidate-selected
+    # `role` carries forward read-only in practice — it is required by the selection report so
+    # the document opens by saying what the role is, not so it is re-entered.
+    modules: [role, advertising, selection, vetting, open-questions]
+    example: platform-engineer
+
+  - id: appointment
+    title: Appointment
+    purpose: >
+      Put the case for appointing the preferred candidate, agree and sign the contract, and
+      confirm the starter can be paid. Owned by HR, with Payroll validating. Signing this
+      stage off is the approval to appoint.
+    gate: onboarding-approved
+    # `vetting` is mounted for the appointment case, which turns on the clearance outcome.
+    modules: [role, engagement, selection, vetting, offer, contract, payroll, open-questions]
+    example: platform-engineer
+
+  - id: provisioning
+    title: Provisioning
+    purpose: >
+      Create the starter's identity, issue their device and access, and confirm they can work
+      from their first day. Owned by Technology.
+    gate: ready-to-start
+    # Mounts all fourteen modules because `hire-record` renders the whole file and an artefact
+    # can only reach modules its stage mounts — an unmounted module reads as "file missing" and
+    # the artefact can never complete. The ten carried forward are already filled by here.
+    modules: [role, engagement, role-evaluation, advertising, selection, vetting, offer, contract, payroll, identity, device, access, handover, open-questions]
+    example: platform-engineer
+
+artefacts:
+  - id: requisition-brief
+    title: Requisition Brief
+    purpose: >
+      State the role, how the person will be engaged, and what the role evaluated to, as the
+      case for recruiting put to whoever signs this stage off.
+    template: templates/requisition-brief.md.tmpl
+    gate: approved-to-recruit
+    # Reading order: what the role is -> how it will be engaged -> what it evaluated to. The
+    # approval itself is the stage sign-off and is deliberately not a section of this document.
+    requires:
+      [
+        role.summary,
+        role.team,
+        role.responsibilities,
+        role.justification,
+        engagement.type,
+        engagement.rationale,
+        engagement.approval-route,
+        role-evaluation.method,
+        role-evaluation.outcome,
+        role-evaluation.notes?,
+        open-questions.questions?,
+      ]
+
+  - id: selection-report
+    title: Selection Report
+    purpose: >
+      Record how the role was advertised, how the preferred candidate was chosen, and what
+      vetting returned.
+    template: templates/selection-report.md.tmpl
+    gate: candidate-selected
+    # Opens with the role so the report stands alone for a reader who has not seen the brief.
+    requires:
+      [
+        role.summary,
+        advertising.channels,
+        advertising.period,
+        advertising.response,
+        advertising.notes?,
+        selection.shortlist,
+        selection.interviews,
+        selection.preferred-candidate,
+        selection.unsuccessful?,
+        vetting.checks-required,
+        vetting.outcome,
+        vetting.conditions?,
+        open-questions.questions?,
+      ]
+
+  - id: appointment-case
+    title: Appointment Case
+    purpose: >
+      Present the case for appointing this candidate, and the contract and payroll position
+      that releases onboarding.
+    template: templates/appointment-case.md.tmpl
+    gate: onboarding-approved
+    # The internal half of this gate — the document the approver reads before signing the stage
+    # off. Core set shared with `offer-pack`: role.summary, engagement.type, offer.terms,
+    # offer.status, contract.terms-summary, contract.signatures, contract.start-date,
+    # payroll.details-requested, payroll.validation-outcome, payroll.confirmed. This document
+    # adds the selection and vetting basis on top.
+    requires:
+      [
+        role.summary,
+        role.team,
+        engagement.type,
+        selection.preferred-candidate,
+        vetting.outcome,
+        offer.terms,
+        offer.status,
+        offer.negotiation?,
+        contract.terms-summary,
+        contract.signatures,
+        contract.start-date,
+        payroll.details-requested,
+        payroll.validation-outcome,
+        payroll.rework?,
+        payroll.confirmed,
+        open-questions.questions?,
+      ]
+
+  - id: offer-pack
+    title: Offer Pack
+    purpose: >
+      Set out for the appointed candidate what the role is, what was agreed, and what has been
+      confirmed on their behalf.
+    template: templates/offer-pack.md.tmpl
+    gate: onboarding-approved
+    # The outward-facing half. Carries the full core set so it cannot become the soft path
+    # through this gate, and adds the role's responsibilities so the pack reads as a whole. It
+    # deliberately does not carry selection or vetting content.
+    requires:
+      [
+        role.summary,
+        role.team,
+        role.responsibilities,
+        engagement.type,
+        offer.terms,
+        offer.status,
+        contract.terms-summary,
+        contract.signatures,
+        contract.start-date,
+        payroll.details-requested,
+        payroll.validation-outcome,
+        payroll.confirmed,
+        open-questions.questions?,
+      ]
+
+  - id: starter-readiness
+    title: Starter Readiness
+    purpose: >
+      Record the identity, device and access provisioned for the starter and confirm they can
+      work from their first day.
+    template: templates/starter-readiness.md.tmpl
+    gate: ready-to-start
+    # Core set for this gate, shared by all three of its artefacts: contract.start-date,
+    # identity.account, identity.propagation, identity.credential-issue, device.specification,
+    # device.build-status, access.entitlements, access.setup, handover.manager-actions,
+    # handover.day-one, handover.readiness-confirmation.
+    requires:
+      [
+        role.summary,
+        contract.start-date,
+        identity.account,
+        identity.propagation,
+        identity.credential-issue,
+        device.specification,
+        device.non-standard-decision?,
+        device.build-status,
+        access.entitlements,
+        access.setup,
+        access.outstanding?,
+        handover.manager-actions,
+        handover.day-one,
+        handover.readiness-confirmation,
+        open-questions.questions?,
+      ]
+
+  - id: manager-handover
+    title: Manager Handover
+    purpose: >
+      Tell the hiring manager what they must do before the start date and what is already in
+      place.
+    template: templates/manager-handover.md.tmpl
+    gate: ready-to-start
+    # Written for someone who has not been following the stages, so it leads with the actions
+    # rather than the provisioning record. Same core set as `starter-readiness`, reordered —
+    # not a lighter document, despite being a shorter one.
+    requires:
+      [
+        role.summary,
+        role.team,
+        contract.start-date,
+        handover.manager-actions,
+        handover.day-one,
+        handover.readiness-confirmation,
+        identity.account,
+        identity.credential-issue,
+        identity.propagation,
+        device.specification,
+        device.build-status,
+        access.entitlements,
+        access.setup,
+        access.outstanding?,
+        open-questions.questions?,
+      ]
+
+  - id: hire-record
+    title: Hire Record
+    purpose: >
+      Assemble the complete record of the hire, in process order, as the file that is kept.
+    template: templates/hire-record.md.tmpl
+    gate: ready-to-start
+    # Every module in the definition, in the order the process ran. Strictly more demanding
+    # than the other two artefacts at this gate, which is why neither of them weakens it: by
+    # the time provisioning is reached, every field from the earlier three gates is already
+    # filled, because those gates would not have passed otherwise.
+    #
+    # It carries no approval sections. The sign-off history of this hire is the merged pull
+    # request behind each of the four stages, which is a better record than a field claiming
+    # the same thing.
+    requires:
+      [
+        role.summary,
+        role.team,
+        role.responsibilities,
+        role.justification,
+        engagement.type,
+        engagement.rationale,
+        engagement.approval-route,
+        role-evaluation.method,
+        role-evaluation.outcome,
+        role-evaluation.notes?,
+        advertising.channels,
+        advertising.period,
+        advertising.response,
+        advertising.notes?,
+        selection.shortlist,
+        selection.interviews,
+        selection.preferred-candidate,
+        selection.unsuccessful?,
+        vetting.checks-required,
+        vetting.outcome,
+        vetting.conditions?,
+        offer.terms,
+        offer.status,
+        offer.negotiation?,
+        contract.terms-summary,
+        contract.signatures,
+        contract.start-date,
+        contract.elapsed?,
+        payroll.details-requested,
+        payroll.validation-outcome,
+        payroll.rework?,
+        payroll.confirmed,
+        identity.account,
+        identity.propagation,
+        identity.credential-issue,
+        device.specification,
+        device.non-standard-decision?,
+        device.build-status,
+        access.entitlements,
+        access.setup,
+        access.outstanding?,
+        handover.manager-actions,
+        handover.day-one,
+        handover.readiness-confirmation,
+        open-questions.questions?,
+        open-questions.process-gaps?,
+      ]

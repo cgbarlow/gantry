@@ -17,6 +17,48 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.7.4-beta — 2026-09-21
+
+### Added
+
+- **A second process definition ships with Gantry: Recruitment and Onboarding.** Until now the
+  only definition in the box was Solution Design, which made Gantry look like a tool for
+  architecture practices. It is not — the engine runs any staged, gated process, and this is the
+  proof. One instance is one hire: it opens when a vacancy is identified and closes on the
+  starter's first day, through four stages — Requisition, Selection, Appointment, Provisioning —
+  each owned by a different part of the organisation and each with its own sign-off.
+
+  It produces seven documents, from the requisition brief that makes the case for recruiting,
+  through the selection report and the offer pack, to a complete hire record that is the file you
+  keep. Create an instance from it the same way you would for a design initiative; nothing about
+  running it is different.
+
+- **A worked example you can read before you commit to anything.** The bundled Examples workspace
+  now includes a completed hire — a Contoso Platform Engineer — filled in across all four stages,
+  and the "Populate example text" button on every field draws from it. It is deliberately not a
+  tidy run: payroll validation failed once and cost five days, the hardware was non-standard with
+  no agreed way of deciding that, and the building pass turned up the day after the new starter
+  did. That is what the definition is for.
+
+### Notes
+
+- **Recruitment and Onboarding records the process as it is, not as it should be.** Where the
+  process has known weak points — payroll details requested by an email that nothing notices
+  going unread, account credentials sent to a personal mailbox, two steps nobody has ever written
+  down — the definition asks you to record what actually happened rather than quietly assuming
+  the better version. Filling those fields in honestly is how the case for changing any of it
+  gets made.
+
+- **It does not ask for candidate bank details, and it never will.** Payroll fields record that
+  details were requested, supplied and validated, and what went wrong if anything did — not the
+  details themselves. Vetting records which checks applied and whether they cleared, not what
+  they found. Instance content is stored as plain files in your repository, and none of that
+  belongs there.
+
+- **Approvals stay where they already are.** The definition has no "approved by" field for you to
+  fill in. Approving a stage is what the sign-off on that stage already does, and that record is
+  the one that counts.
+
 ## 0.7.3-beta — 2026-09-21
 
 ### Fixed
