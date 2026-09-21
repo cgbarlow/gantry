@@ -17,6 +17,22 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.7.3-beta — 2026-09-21
+
+### Fixed
+
+- **Pages no longer go blank, or load only partly, on a busy or constrained
+  server.** Every page load asked the server to re-check all ~40 bundled
+  third-party libraries, every single time — around forty separate requests
+  fired off at once, on top of everything else the page needs. A server under
+  any strain could drop some of them, and because the app is assembled from
+  those pieces in the browser, losing even one left a blank screen with nothing
+  to explain it. Those libraries are now downloaded once and kept, so a repeat
+  visit asks for none of them. Gantry still picks up a new version
+  immediately — upgrading changes what the browser asks for, so there is no
+  stale-cache trap and no hard reload to remember. Nothing to do; it applies
+  from the first page load after upgrading.
+
 ## 0.7.2-beta — 2026-09-19
 
 ### Changed
