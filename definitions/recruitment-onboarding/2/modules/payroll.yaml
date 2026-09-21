@@ -1,0 +1,54 @@
+id: payroll
+title: Payroll
+purpose: >
+  Record that the candidate's payroll details were requested, supplied and validated — and
+  where that failed, what failed and what it cost.
+
+  Never record the details themselves. Not the bank account, not the retirement savings scheme
+  election, not anything the candidate typed into the form. This module records that the
+  exchange happened and what it returned; instance content is committed as plain files and this
+  data has no business being in any of them.
+
+  This is the most fragile point in the process. A failed validation returns to the details
+  request and costs about twenty-four hours, and because it sits close to the start date it is
+  the most common reason a first day slips. The usual causes are known: the request lands in a
+  spam folder, the information supplied is wrong, or the form is not submitted correctly. If a
+  failure here was avoidable, `rework` is where that gets said.
+
+fields:
+  - id: details-requested
+    title: Details requested
+    type: markdown
+    required: true
+    guidance: >
+      When the request was sent and by what channel. If it was re-sent, record each attempt —
+      a second send usually means the first was never seen.
+
+  - id: validation-outcome
+    title: Validation outcome
+    type: select
+    required: true
+    options:
+      - Passed
+      - Failed
+    guidance: >
+      Passed or failed. Where it failed, say which of the known causes applied — spam folder,
+      incorrect information, form not submitted correctly — or name a new one, in `rework`
+      below.
+
+  - id: rework
+    title: Rework
+    type: markdown
+    required: false
+    guidance: >
+      Each validation failure, which of the known causes applied (or a new one), and the delay
+      it added. Leave empty where validation passed first time. Filling this in honestly is the
+      only way the cost of this loop ever becomes visible.
+
+  - id: confirmed
+    title: Payroll confirmation
+    type: markdown
+    required: true
+    guidance: >
+      Payroll's confirmation that the details are valid and the starter can be paid, with the
+      date and who confirmed it. This is what releases onboarding approval.

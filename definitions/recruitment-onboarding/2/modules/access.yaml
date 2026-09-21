@@ -1,0 +1,36 @@
+id: access
+title: Access
+purpose: >
+  The entitlements granted to the starter — access card, software licences, email group
+  memberships — and whether they were all in place on time.
+
+  Access administration is manual. Nothing raises a flag when an entitlement is missed; it
+  surfaces on the first day when the starter cannot get into something. `outstanding` is the
+  only early warning this process has.
+
+fields:
+  - id: entitlements
+    title: Entitlements
+    type: list
+    required: true
+    guidance: >
+      Every entitlement the starter needs: access card, software licences, email groups,
+      shared drives, systems. One per line, named specifically enough that someone else could
+      verify it.
+
+  - id: setup
+    title: Setup
+    type: markdown
+    required: true
+    guidance: >
+      Who set the entitlements up and when. Where they were set up in more than one pass, say
+      so — a second pass usually means the list above was incomplete when the work started.
+
+  - id: outstanding
+    title: Outstanding at start date
+    type: markdown
+    required: false
+    guidance: >
+      Anything not in place by the first day, why, and when it is expected. Leave empty only
+      when everything was genuinely ready — this field is the one that makes a partial
+      provisioning visible before the starter finds it.

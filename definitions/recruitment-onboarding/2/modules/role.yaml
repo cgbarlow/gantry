@@ -1,0 +1,46 @@
+id: role
+title: Role
+purpose: >
+  Describe the vacancy: what the role is, where it sits, what the person will do, and why
+  it needs filling now. This is the opening statement of the whole hire and the one piece of
+  content every later document repeats, so write it for someone with no prior knowledge.
+
+  Mounted at every stage. Fill it at Requisition and leave it alone unless the role itself
+  changes — if it does, say so in `open-questions`, because a role that shifts after approval
+  has usually invalidated the approval.
+
+fields:
+  - id: summary
+    title: Role summary
+    type: markdown
+    required: true
+    guidance: >
+      One line naming the role, then a short paragraph on what it exists to do. State the
+      role, not the person — this is written before there is a candidate and is reused
+      unchanged after there is one.
+
+  - id: team
+    title: Team and reporting line
+    type: markdown
+    required: true
+    guidance: >
+      Which department and team the role sits in, who it reports to, and who the hiring
+      manager is. Name the hiring manager explicitly: three later steps depend on knowing
+      who they are, including the credential handover.
+
+  - id: responsibilities
+    title: Key responsibilities
+    type: list
+    required: true
+    guidance: >
+      The handful of things this role is accountable for. Five or six entries, not a job
+      description — the detail belongs in the advertisement.
+
+  - id: justification
+    title: Justification
+    type: markdown
+    required: true
+    guidance: >
+      Why recruit now, and what happens if the role is not filled. This is the substance the
+      approval chain is actually deciding on, so be concrete about the consequence of doing
+      nothing rather than restating the responsibilities.
