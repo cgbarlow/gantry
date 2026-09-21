@@ -1715,10 +1715,75 @@ export function DefinitionViewerPage() {
           }} />
           ${!isValidSlugClient(f.id) ? html`<p class="inline-error">Invalid slug</p>` : null}
           <label class="field-label">Type</label>
-          <select class="wizard-input" value=${f.type} onChange=${(e) => updateDraft((d) => { d.modules[mIndex].fields[fi].type = e.currentTarget.value })}>
+          <select class="wizard-input defn-field-type" value=${f.type} onChange=${(e) => {
+            const nextType = e.currentTarget.value
+            // #86 (ADR-0044): switching a select field to any other type discards options:/multiple:/
+            // default: — nothing else in the vocabulary can hold them, so warn before the draft loses
+            // them, the same window.confirm convention handlePublish already uses for its own
+            // irreversible action.
+            if (f.type === 'select' && nextType !== 'select' && Array.isArray(f.options) && f.options.length > 0) {
+              const confirmed = typeof window !== 'undefined' && window.confirm
+                ? window.confirm(`Changing "${f.title || f.id}" from "select" to "${nextType}" discards its ${f.options.length} option${f.options.length === 1 ? '' : 's'}. Continue?`)
+                : true
+              if (!confirmed) return
+            }
+            updateDraft((d) => {
+              const field = d.modules[mIndex].fields[fi]
+              field.type = nextType
+              if (nextType !== 'select') {
+                delete field.options
+                delete field.multiple
+                delete field.default
+              }
+            })
+          }}>
             <option value="markdown">markdown</option>
             <option value="list">list</option>
+            <option value="select">select</option>
+            <option value="text">text</option>
+            <option value="date">date</option>
           </select>
+          ${f.type === 'select' ? html`
+            <label class="field-label">Options</label>
+            <div>
+              <div class="defn-options-list">
+                ${(f.options ?? []).map((opt, oi) => html`
+                  <div key=${oi} class="defn-option-row">
+                    <input class="wizard-input defn-option-input" value=${opt} placeholder="Option value" onInput=${(e) => updateDraft((d) => { d.modules[mIndex].fields[fi].options[oi] = e.currentTarget.value })} />
+                    <span class="defn-move-btns">
+                      <button type="button" class="btn small ghost" aria-label=${`Move option "${opt}" up`} disabled=${oi === 0} onClick=${() => updateDraft((d) => { const field = d.modules[mIndex].fields[fi]; field.options = reorder(field.options, oi, oi - 1) })}>↑</button>
+                      <button type="button" class="btn small ghost" aria-label=${`Move option "${opt}" down`} disabled=${oi === (f.options.length - 1)} onClick=${() => updateDraft((d) => { const field = d.modules[mIndex].fields[fi]; field.options = reorder(field.options, oi, oi + 1) })}>↓</button>
+                    </span>
+                    <button type="button" class="btn small ghost" aria-label=${`Remove option "${opt}"`} onClick=${() => updateDraft((d) => {
+                      const field = d.modules[mIndex].fields[fi]
+                      const removed = field.options[oi]
+                      field.options = field.options.filter((_, idx) => idx !== oi)
+                      if (field.default === removed) delete field.default
+                    })}>✕</button>
+                  </div>
+                `)}
+              </div>
+              <button type="button" class="btn small ghost defn-add-option" onClick=${() => updateDraft((d) => {
+                const field = d.modules[mIndex].fields[fi]
+                field.options = [...(field.options ?? []), '']
+              })}>+ Add option</button>
+            </div>
+            <label class="field-label">Multiple</label>
+            <label class="defn-field-multiple"><input type="checkbox" checked=${f.multiple === true} onChange=${(e) => updateDraft((d) => {
+              const field = d.modules[mIndex].fields[fi]
+              if (e.currentTarget.checked) field.multiple = true
+              else delete field.multiple
+            })} /> Allow choosing more than one</label>
+            <label class="field-label">Default</label>
+            <select class="wizard-input defn-field-default" value=${f.default ?? ''} onChange=${(e) => updateDraft((d) => {
+              const field = d.modules[mIndex].fields[fi]
+              if (e.currentTarget.value === '') delete field.default
+              else field.default = e.currentTarget.value
+            })}>
+              <option value="">None</option>
+              ${(f.options ?? []).filter((o) => o !== '').map((o) => html`<option key=${o} value=${o}>${o}</option>`)}
+            </select>
+          ` : null}
           <label class="field-label">Required</label>
           <select class="wizard-input" value=${f.required === true ? 'required' : Array.isArray(f.requiredAt) ? 'required-at' : 'optional'} onChange=${(e) => {
             const v = e.currentTarget.value
