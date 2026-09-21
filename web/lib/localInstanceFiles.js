@@ -301,7 +301,7 @@ export function buildLocalModuleEntry(moduleSpec, stage, data, exampleData) {
     guidance: field.guidance,
     value: fieldValue(field, data),
     example: exampleData ? fieldValue(field, exampleData) : null,
-    ...(field.type === 'select' ? { options: field.options } : {}),
+    ...(field.type === 'select' ? { options: field.options, multiple: field.multiple === true ? true : undefined } : {}),
   })
 
   const entries = []

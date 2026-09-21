@@ -123,7 +123,10 @@ export function renderModuleYaml(mod) {
     if (f.required === true) field.required = true
     else if (f.requiredAt) field['required-at'] = f.requiredAt
     if (f.guidance !== undefined && f.guidance !== null) field.guidance = f.guidance
-    if (f.type === 'select') field.options = f.options ?? []
+    if (f.type === 'select') {
+      field.options = f.options ?? []
+      if (f.multiple === true) field.multiple = true
+    }
     if (f.copiedFrom !== undefined) field['copied-from'] = f.copiedFrom
     return field
   })
@@ -168,7 +171,11 @@ function moduleFromRaw(raw) {
     if (optionsProblem) throw new Error(optionsProblem)
     return withOptional(
       { id: field.id, title: field.title, type: field.type, required: field.required, requiredAt: field['required-at'], guidance: field.guidance },
-      { copiedFrom: field['copied-from'], options: field.type === 'select' ? field.options : undefined }
+      {
+        copiedFrom: field['copied-from'],
+        options: field.type === 'select' ? field.options : undefined,
+        multiple: field.type === 'select' && field.multiple === true ? true : undefined,
+      }
     )
   })
   return withOptional({ id: raw.id, title: raw.title, purpose: raw.purpose, fields }, { copiedFrom: raw['copied-from'] })

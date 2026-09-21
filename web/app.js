@@ -1845,6 +1845,12 @@ function autosizeTextarea(el) {
 // below the control, so a subsequent Save can't quietly overwrite it with a blank or the
 // first option — `check` reports the same condition (lib/status.js's selectOffListWarnings).
 function SelectField({ field, moduleId, onRegister }) {
+  return field.multiple
+    ? html`<${MultiSelectField} field=${field} moduleId=${moduleId} onRegister=${onRegister} />`
+    : html`<${SingleSelectField} field=${field} moduleId=${moduleId} onRegister=${onRegister} />`
+}
+
+function SingleSelectField({ field, moduleId, onRegister }) {
   const valueRef = useRef(field.value ?? '')
   const [, bump] = useState(0)
   const rerender = () => {
@@ -1886,6 +1892,70 @@ function SelectField({ field, moduleId, onRegister }) {
         ${options.map((option) => html`<option value=${option} key=${option}>${option}</option>`)}
       </select>
       ${offList ? html`<p class="field-select-warning">This value isn't in the current option list. It's kept as-is — pick a listed option to replace it, or leave it and fix the Definition's options.</p>` : null}
+    </div>
+  `
+}
+
+// select multiple: true (#83, ADR-0044): a variation within select, not a second field type —
+// several options ticked instead of one chosen. Checkboxes rather than a native multi-select
+// (which needs ctrl/cmd-click to pick more than one, an affordance most authors never discover):
+// four required vetting checks should be four clicks, not four modifier-held clicks. An off-list
+// stored value (from `multiple: false` -> `true` authoring, or hand edits) gets its own checked,
+// marked row so it survives a save exactly like the single-select's synthetic extra <option>.
+function MultiSelectField({ field, moduleId, onRegister }) {
+  const valuesRef = useRef(Array.isArray(field.value) ? [...field.value] : [])
+  const [, bump] = useState(0)
+  const rerender = () => {
+    bump((n) => n + 1)
+    noteContentEdit()
+  }
+
+  useEffect(() => {
+    onRegister({
+      getValue: () => valuesRef.current,
+      setValue: (values) => {
+        valuesRef.current = Array.isArray(values) ? [...values] : []
+        rerender()
+      },
+    })
+    // eslint-disable-next-line
+  }, [])
+
+  function toggle(option, checked) {
+    valuesRef.current = checked
+      ? [...valuesRef.current, option]
+      : valuesRef.current.filter((v) => v !== option)
+    rerender()
+  }
+
+  const options = field.options ?? []
+  const offListValues = valuesRef.current.filter((v) => !options.includes(v))
+  const headingIdForField = moduleId ? headingId(moduleId, field.title) : null
+  const allOptions = [...options, ...offListValues]
+
+  return html`
+    <div class="field field-select field-select-multiple">
+      ${headingIdForField
+        ? html`<h3 id=${headingIdForField} class="field-heading">${field.title}${field.required ? ' *' : ''}</h3><label class="visually-hidden" style="display:none">${field.title}${field.required ? ' *' : ''}</label>`
+        : html`<label>${field.title}${field.required ? ' *' : ''}</label>`}
+      ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
+      <div class="select-checkboxes">
+        ${allOptions.map((option) => {
+          const isOffList = !options.includes(option)
+          return html`
+            <label class="select-checkbox-row ${isOffList ? 'field-select-offlist' : ''}" key=${option}>
+              <input
+                type="checkbox"
+                disabled=${isArchived()}
+                checked=${valuesRef.current.includes(option)}
+                onChange=${(e) => toggle(option, e.currentTarget.checked)}
+              />
+              <span>${option}${isOffList ? ' (not in option list)' : ''}</span>
+            </label>
+          `
+        })}
+      </div>
+      ${offListValues.length ? html`<p class="field-select-warning">${offListValues.length === 1 ? 'A checked value isn’t' : 'Some checked values aren’t'} in the current option list. Kept as-is — untick to remove, or fix the Definition's options.</p>` : null}
     </div>
   `
 }
