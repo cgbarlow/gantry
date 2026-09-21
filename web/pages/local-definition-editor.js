@@ -47,6 +47,38 @@ function templateFileName(artefactId) {
   return `${artefactId}.md.tmpl`
 }
 
+// #89 (ADR-0045): verbatim port of web/pages/definition-viewer.js's own FILENAME_BUILTIN_TOKENS —
+// see that file's comment for the source of truth (filenamePatternProblems, lib/definition.js).
+const FILENAME_BUILTIN_TOKENS = [
+  { token: 'instance.name', label: 'Instance name' },
+  { token: 'instance.slug', label: 'Instance slug' },
+  { token: 'today', label: "Today's date" },
+]
+
+// Verbatim port of web/pages/definition-viewer.js's own eligibleFilenameFields — see that
+// file's comment for the acceptance rule this mirrors (filenamePatternProblems, lib/definition.js).
+function eligibleFilenameFields(modules, artefact) {
+  const results = []
+  const seen = new Set()
+  for (const requirement of artefact.requires ?? []) {
+    const ref = requirement.endsWith('?') ? requirement.slice(0, -1) : requirement
+    const dot = ref.indexOf('.')
+    const moduleId = dot === -1 ? ref : ref.slice(0, dot)
+    const fieldId = dot === -1 ? null : ref.slice(dot + 1)
+    const mod = (modules ?? []).find((m) => m.id === moduleId)
+    if (!mod) continue
+    const fields = fieldId ? (mod.fields ?? []).filter((f) => f.id === fieldId) : (mod.fields ?? [])
+    for (const f of fields) {
+      if (!['select', 'text', 'date'].includes(f.type) || (f.type === 'select' && f.multiple === true)) continue
+      const token = `${moduleId}.${f.id}`
+      if (seen.has(token)) continue
+      seen.add(token)
+      results.push({ token, label: `${mod.title} · ${f.title}` })
+    }
+  }
+  return results
+}
+
 function splitIds(text) {
   return text
     .split(',')
@@ -367,8 +399,9 @@ function ArtefactTemplateEditor({ handle, definitionId, version, artefact, readO
   `
 }
 
-function ArtefactEditor({ handle, definitionId, version, artefact, readOnly, onChange, onRemove }) {
+function ArtefactEditor({ handle, definitionId, version, artefact, modules, readOnly, onChange, onRemove }) {
   const [expanded, setExpanded] = useState(false)
+  const filenameTokens = [...FILENAME_BUILTIN_TOKENS, ...eligibleFilenameFields(modules, artefact)]
   return html`
     <div class="local-def-element">
       <div class="local-def-element-header">
@@ -389,6 +422,20 @@ function ArtefactEditor({ handle, definitionId, version, artefact, readOnly, onC
         readOnly=${readOnly}
         onInput=${(e) => onChange({ ...artefact, requires: splitIds(e.currentTarget.value) })}
       />
+      <label class="field-label">Filename pattern</label>
+      <input
+        class="wizard-input mono defn-filename-input"
+        type="text"
+        placeholder="e.g. {candidate.name} - Offer Pack"
+        value=${artefact.filename ?? ''}
+        readOnly=${readOnly}
+        onInput=${(e) => onChange({ ...artefact, filename: e.currentTarget.value })}
+      />
+      ${readOnly ? null : html`
+        <div class="local-def-filename-tokens">
+          ${filenameTokens.map((t) => html`<button key=${t.token} type="button" class="btn small ghost defn-filename-token" title=${t.label} onClick=${() => onChange({ ...artefact, filename: `${artefact.filename ?? ''}{${t.token}}` })}>{${t.token}}</button>`)}
+        </div>
+      `}
       <button type="button" class="btn small ghost" onClick=${() => setExpanded(!expanded)}>${expanded ? 'Hide template' : 'Edit template'}</button>
       ${expanded ? html`<${ArtefactTemplateEditor} handle=${handle} definitionId=${definitionId} version=${version} artefact=${artefact} readOnly=${readOnly} />` : null}
     </div>
@@ -556,6 +603,7 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
               definitionId=${definitionId}
               version=${version}
               artefact=${artefact}
+              modules=${structure.modules}
               readOnly=${readOnly}
               onChange=${(next) => {
                 const artefacts = structure.artefacts.slice()

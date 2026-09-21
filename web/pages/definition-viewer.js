@@ -101,6 +101,43 @@ function problemTarget(problem) {
   return { type: m[1].toLowerCase(), id: m[2] }
 }
 
+// #89 (ADR-0045): the three filename: built-ins filenamePatternProblems (lib/definition.js)
+// always accepts, regardless of what the artefact requires.
+const FILENAME_BUILTIN_TOKENS = [
+  { token: 'instance.name', label: 'Instance name' },
+  { token: 'instance.slug', label: 'Instance slug' },
+  { token: 'today', label: "Today's date" },
+]
+
+// #89: which {module.field} tokens an artefact's filename: pattern may legally reference —
+// mirrors filenamePatternProblems' own acceptance rule (lib/definition.js): single-valued
+// select/text/date fields, reachable either by their own `module.field` requirement or by a
+// bare `module` requirement that puts the whole module's fields in scope. Kept in lock-step
+// with that function rather than asking it directly, since the editor needs the list of what
+// *is* eligible (to offer as tokens) where filenamePatternProblems only ever reports what
+// isn't.
+function eligibleFilenameFields(d, artefact) {
+  const results = []
+  const seen = new Set()
+  for (const requirement of artefact.requires ?? []) {
+    const ref = requirement.endsWith('?') ? requirement.slice(0, -1) : requirement
+    const dot = ref.indexOf('.')
+    const moduleId = dot === -1 ? ref : ref.slice(0, dot)
+    const fieldId = dot === -1 ? null : ref.slice(dot + 1)
+    const mod = d.modules.find((m) => m.id === moduleId)
+    if (!mod) continue
+    const fields = fieldId ? mod.fields.filter((f) => f.id === fieldId) : mod.fields
+    for (const f of fields) {
+      if (!['select', 'text', 'date'].includes(f.type) || (f.type === 'select' && f.multiple === true)) continue
+      const token = `${moduleId}.${f.id}`
+      if (seen.has(token)) continue
+      seen.add(token)
+      results.push({ token, label: `${mod.title} · ${f.title}` })
+    }
+  }
+  return results
+}
+
 // -- list addressing for reorder-in-place drags/buttons --------------------------------------
 function getList(d, listPath) {
   if (listPath === 'stages') return d.stages
@@ -1979,6 +2016,11 @@ export function DefinitionViewerPage() {
         if (!a.requires.includes(ref) && !a.requires.includes(`${ref}?`)) allFieldOptions.push({ value: ref, label: `${m.title} · ${f.title}` })
       }
     }
+    // #89 (ADR-0045): the same filenamePatternProblems messages the toolbar's dot markers already
+    // count against this artefact, filtered down to the filename: ones and shown inline so a bad
+    // token is explained where it's authored, not just flagged elsewhere.
+    const filenameProblems = validationProblems.filter((p) => typeof p.type === 'string' && p.type.startsWith('filename-') && problemTarget(p)?.type === 'artefact' && problemTarget(p)?.id === a.id)
+    const filenameTokens = [...FILENAME_BUILTIN_TOKENS, ...eligibleFilenameFields(d, a)]
     return html`
       <div class="defn-focus">
         <span class="kicker">Artefact</span>
@@ -1999,6 +2041,14 @@ export function DefinitionViewerPage() {
                 </div>
                 <label class="field-label">Reference docx</label>
                 ${renderReferenceDocxRow(a.id, true)}
+                <label class="field-label">Filename pattern</label>
+                <div class="defn-filename-editor">
+                  <input class="wizard-input mono defn-filename-input" placeholder="e.g. {candidate.name} - Offer Pack" value=${a.filename ?? ''} onInput=${(e) => updateDraft((dd) => { dd.artefacts[ai].filename = e.currentTarget.value })} />
+                  <div class="defn-filename-tokens">
+                    ${filenameTokens.map((t) => html`<button key=${t.token} type="button" class="btn small ghost defn-filename-token" title=${t.label} onClick=${() => updateDraft((dd) => { dd.artefacts[ai].filename = `${dd.artefacts[ai].filename ?? ''}{${t.token}}` })}>{${t.token}}</button>`)}
+                  </div>
+                  ${filenameProblems.length ? html`<ul class="defn-filename-problems">${filenameProblems.map((p) => html`<li class="inline-error">${p.message}</li>`)}</ul>` : null}
+                </div>
               </div>
             `
           : html`
@@ -2007,6 +2057,7 @@ export function DefinitionViewerPage() {
               <p><span class="field-label">Template</span> <code>${a.template}</code> <button class="btn small ghost" onClick=${() => handleOpenTemplate(a.id)}>View template</button></p>
               <p><span class="field-label">Reference docx</span></p>
               ${renderReferenceDocxRow(a.id, false)}
+              ${a.filename ? html`<p><span class="field-label">Filename pattern</span> <code>${a.filename}</code></p>` : null}
             `}
         <div class="defn-focus-section">
           <div class="defn-focus-section-head">
