@@ -418,6 +418,12 @@ export function findLocalDefinitionProblems(structure) {
           message: `Module "${moduleSpec.id}" field "${field.id}" is type "select" but declares no "options:" list`,
         })
       }
+      if (field.type === 'select' && field.default !== undefined && !(field.options ?? []).includes(field.default)) {
+        problems.push({
+          type: 'select-invalid-default',
+          message: `Module "${moduleSpec.id}" field "${field.id}" has "default: ${field.default}" which is not in its own "options:" list`,
+        })
+      }
     }
   }
 

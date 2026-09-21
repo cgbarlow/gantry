@@ -1851,7 +1851,11 @@ function SelectField({ field, moduleId, onRegister }) {
 }
 
 function SingleSelectField({ field, moduleId, onRegister }) {
-  const valueRef = useRef(field.value ?? '')
+  // default: (#84, ADR-0044) pre-selects in the editor but is never written at Instance creation —
+  // an untouched Field has no stored value, so the control's own initial value falls back to the
+  // default here. Saving writes whatever the control holds, which is why this alone is enough to
+  // make "the first save writes the default": there is nothing further to special-case.
+  const valueRef = useRef(field.value || field.default || '')
   const [, bump] = useState(0)
   const rerender = () => {
     bump((n) => n + 1)
@@ -1866,6 +1870,10 @@ function SingleSelectField({ field, moduleId, onRegister }) {
         rerender()
       },
     })
+    // A default applied at mount, with no keystroke or change event to notify the stage's dirty
+    // tracking, would otherwise leave Save disabled until the author touched the field — even
+    // though what would be saved (the default) already differs from what's on disk (empty).
+    if (!field.value && field.default) noteContentEdit()
     // eslint-disable-next-line
   }, [])
 

@@ -51,6 +51,15 @@ function selectOptionsProblem(moduleId, field) {
   return null
 }
 
+// Verbatim port of lib/definition.js's selectDefaultProblem — see that file for rationale (ADR-0044).
+function selectDefaultProblem(moduleId, field) {
+  if (field.type !== 'select' || field.default === undefined) return null
+  if (!Array.isArray(field.options) || !field.options.includes(field.default)) {
+    return `Module "${moduleId}" field "${field.id}" has "default: ${field.default}" which is not in its own "options:" list`
+  }
+  return null
+}
+
 function definitionDirPath(definitionId, version) {
   return `definitions/${definitionId}/${version}`
 }
@@ -126,6 +135,7 @@ export function renderModuleYaml(mod) {
     if (f.type === 'select') {
       field.options = f.options ?? []
       if (f.multiple === true) field.multiple = true
+      if (f.default !== undefined) field.default = f.default
     }
     if (f.copiedFrom !== undefined) field['copied-from'] = f.copiedFrom
     return field
@@ -169,12 +179,15 @@ function moduleFromRaw(raw) {
     }
     const optionsProblem = selectOptionsProblem(raw.id, field)
     if (optionsProblem) throw new Error(optionsProblem)
+    const defaultProblem = selectDefaultProblem(raw.id, field)
+    if (defaultProblem) throw new Error(defaultProblem)
     return withOptional(
       { id: field.id, title: field.title, type: field.type, required: field.required, requiredAt: field['required-at'], guidance: field.guidance },
       {
         copiedFrom: field['copied-from'],
         options: field.type === 'select' ? field.options : undefined,
         multiple: field.type === 'select' && field.multiple === true ? true : undefined,
+        default: field.type === 'select' ? field.default : undefined,
       }
     )
   })
