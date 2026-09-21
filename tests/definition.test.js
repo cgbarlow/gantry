@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { loadDefinition, splitArtefactRequirement } from '../lib/definition.js'
+import { loadDefinition, splitArtefactRequirement, findDefinitionProblems, writeDefinitionVersion, definitionVersionProjection } from '../lib/definition.js'
 
 test('loads the real design definition', () => {
   // Pinned to v1 explicitly (WI #318 published v2 alongside it, so an unpinned
@@ -121,5 +121,90 @@ test('fails loudly on an unknown field type', () => {
       () => loadDefinition('broken-field', { definitionsDir: join(root, 'definitions') }),
       /unknown type "freeform"/
     )
+  })
+})
+
+// #81 (ADR-0044): type: select — a closed-set dropdown field.
+test('loads a select field with options', () => {
+  withScratchDefinition((root) => {
+    const defDir = join(root, 'definitions', 'has-select')
+    mkdirSync(join(defDir, 'modules'), { recursive: true })
+    writeFileSync(
+      join(defDir, 'definition.yaml'),
+      'id: has-select\ntitle: Has Select\nstages:\n  - id: only\n    title: Only\n    gate: g\n    modules: [engagement]\nartefacts: []\n'
+    )
+    writeFileSync(
+      join(defDir, 'modules', 'engagement.yaml'),
+      'id: engagement\ntitle: Engagement\nfields:\n  - id: type\n    title: Type\n    type: select\n    options:\n      - Permanent\n      - Fixed term\n'
+    )
+
+    const def = loadDefinition('has-select', { definitionsDir: join(root, 'definitions') })
+    const field = def.modules.get('engagement').fields.find((f) => f.id === 'type')
+    assert.equal(field.type, 'select')
+    assert.deepEqual(field.options, ['Permanent', 'Fixed term'])
+  })
+})
+
+test('fails loudly when a select field declares no options', () => {
+  withScratchDefinition((root) => {
+    const defDir = join(root, 'definitions', 'select-no-options')
+    mkdirSync(join(defDir, 'modules'), { recursive: true })
+    writeFileSync(
+      join(defDir, 'definition.yaml'),
+      'id: select-no-options\ntitle: Select No Options\nstages:\n  - id: only\n    title: Only\n    gate: g\n    modules: [engagement]\nartefacts: []\n'
+    )
+    writeFileSync(
+      join(defDir, 'modules', 'engagement.yaml'),
+      'id: engagement\ntitle: Engagement\nfields:\n  - id: type\n    title: Type\n    type: select\n'
+    )
+
+    assert.throws(
+      () => loadDefinition('select-no-options', { definitionsDir: join(root, 'definitions') }),
+      /declares no "options:" list/
+    )
+  })
+})
+
+test('findDefinitionProblems reports a select field with no options rather than throwing', () => {
+  withScratchDefinition((root) => {
+    const defDir = join(root, 'definitions', 'select-no-options-report')
+    mkdirSync(join(defDir, 'modules'), { recursive: true })
+    writeFileSync(
+      join(defDir, 'definition.yaml'),
+      'id: select-no-options-report\ntitle: X\nstages:\n  - id: only\n    title: Only\n    gate: g\n    modules: [engagement]\nartefacts: []\n'
+    )
+    writeFileSync(
+      join(defDir, 'modules', 'engagement.yaml'),
+      'id: engagement\ntitle: Engagement\nfields:\n  - id: type\n    title: Type\n    type: select\n'
+    )
+
+    const problems = findDefinitionProblems('select-no-options-report', { definitionsDir: join(root, 'definitions') })
+    assert.ok(problems.some((p) => p.type === 'select-missing-options'))
+  })
+})
+
+test('a write-then-read round trip through writeDefinitionVersion preserves a select field\'s options (ADR-0044 §7 — the writer\'s fixed key whitelist)', () => {
+  withScratchDefinition((root) => {
+    const definitionsDir = join(root, 'definitions')
+    cpSync('definitions/design/1', join(definitionsDir, 'design/1'), { recursive: true })
+    cpSync(join(definitionsDir, 'design/1'), join(definitionsDir, 'design/2'), { recursive: true })
+    let yamlText = readFileSync(join(definitionsDir, 'design/2/definition.yaml'), 'utf8')
+    yamlText = yamlText.replace('version: 1', 'version: 2').replace('status: published', 'status: draft')
+    writeFileSync(join(definitionsDir, 'design/2/definition.yaml'), yamlText)
+
+    const def = loadDefinition('design', { definitionsDir, version: 2 })
+    const projection = definitionVersionProjection(def)
+    const background = projection.modules.find((m) => m.id === 'background')
+    background.fields.push({ id: 'engagement-type', title: 'Engagement type', type: 'select', options: ['Permanent', 'Fixed term', 'Contractor'] })
+
+    const result = writeDefinitionVersion('design', 2, projection, { definitionsDir })
+    assert.equal(result.problems, undefined)
+
+    // Re-load from disk — this is the round trip: a save that went through buildModuleYamlObject's
+    // fixed key whitelist and back through loadModuleSpec must not have dropped "options:".
+    const reloaded = loadDefinition('design', { definitionsDir, version: 2 })
+    const field = reloaded.modules.get('background').fields.find((f) => f.id === 'engagement-type')
+    assert.equal(field.type, 'select')
+    assert.deepEqual(field.options, ['Permanent', 'Fixed term', 'Contractor'])
   })
 })

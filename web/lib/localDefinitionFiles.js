@@ -36,8 +36,20 @@ export function isValidLocalDefinitionId(id) {
   return typeof id === 'string' && id !== '' && id !== '.' && id !== '..' && SINGLE_SEGMENT_RE.test(id)
 }
 
-const VALID_FIELD_TYPES = new Set(['markdown', 'list'])
+const VALID_FIELD_TYPES = new Set(['markdown', 'list', 'select'])
 export const TEMPLATE_NAME_RE = /^[A-Za-z0-9._-]+\.md\.tmpl$/
+
+// Verbatim port of lib/definition.js's selectOptionsProblem — see that file for rationale (ADR-0044).
+function selectOptionsProblem(moduleId, field) {
+  if (field.type !== 'select') return null
+  if (!Array.isArray(field.options) || field.options.length === 0) {
+    return `Module "${moduleId}" field "${field.id}" is type "select" but declares no "options:" list`
+  }
+  if (!field.options.every((option) => typeof option === 'string' && option !== '')) {
+    return `Module "${moduleId}" field "${field.id}" has an "options:" entry that is not a non-empty string`
+  }
+  return null
+}
 
 function definitionDirPath(definitionId, version) {
   return `definitions/${definitionId}/${version}`
@@ -111,6 +123,7 @@ export function renderModuleYaml(mod) {
     if (f.required === true) field.required = true
     else if (f.requiredAt) field['required-at'] = f.requiredAt
     if (f.guidance !== undefined && f.guidance !== null) field.guidance = f.guidance
+    if (f.type === 'select') field.options = f.options ?? []
     if (f.copiedFrom !== undefined) field['copied-from'] = f.copiedFrom
     return field
   })
@@ -146,14 +159,16 @@ function withOptional(base, extra) {
 function moduleFromRaw(raw) {
   const fields = (raw.fields ?? []).map((field) => {
     if (!VALID_FIELD_TYPES.has(field.type)) {
-      throw new Error(`Module "${raw.id}" field "${field.id}" has unknown type "${field.type}" (expected "markdown" or "list")`)
+      throw new Error(`Module "${raw.id}" field "${field.id}" has unknown type "${field.type}" (expected "markdown", "list" or "select")`)
     }
     if (field.required !== undefined && field['required-at'] !== undefined) {
       throw new Error(`Module "${raw.id}" field "${field.id}" sets both "required" and "required-at" — they are mutually exclusive`)
     }
+    const optionsProblem = selectOptionsProblem(raw.id, field)
+    if (optionsProblem) throw new Error(optionsProblem)
     return withOptional(
       { id: field.id, title: field.title, type: field.type, required: field.required, requiredAt: field['required-at'], guidance: field.guidance },
-      { copiedFrom: field['copied-from'] }
+      { copiedFrom: field['copied-from'], options: field.type === 'select' ? field.options : undefined }
     )
   })
   return withOptional({ id: raw.id, title: raw.title, purpose: raw.purpose, fields }, { copiedFrom: raw['copied-from'] })

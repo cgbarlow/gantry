@@ -655,6 +655,26 @@ describe('findLocalDefinitionProblems', () => {
     assert.match(problems[0].message, /unknown type "freeform"/)
   })
 
+  // #81 (ADR-0044): a select field with no options is a validation problem, not a thrown error —
+  // findLocalDefinitionProblems (like its server-side twin, findDefinitionProblems) reports
+  // everything rather than failing fast.
+  test('reports a select field with no options', () => {
+    const structure = baseStructure({
+      modules: [{ id: 'thing', title: 'Thing', fields: [{ id: 'whatsit', title: 'Whatsit', type: 'select' }] }],
+    })
+    const problems = findLocalDefinitionProblems(structure)
+    assert.equal(problems.length, 1)
+    assert.equal(problems[0].type, 'select-missing-options')
+    assert.match(problems[0].message, /declares no "options:" list/)
+  })
+
+  test('accepts a select field with options', () => {
+    const structure = baseStructure({
+      modules: [{ id: 'thing', title: 'Thing', fields: [{ id: 'whatsit', title: 'Whatsit', type: 'select', options: ['A', 'B'] }] }],
+    })
+    assert.deepEqual(findLocalDefinitionProblems(structure), [])
+  })
+
   test('reports a required/required-at mutual-exclusivity violation', () => {
     const structure = baseStructure({
       modules: [{ id: 'thing', title: 'Thing', fields: [{ id: 'whatsit', title: 'Whatsit', type: 'markdown', required: true, requiredAt: ['g'] }] }],
