@@ -16,6 +16,13 @@
 # Deliberately NOT a substitute for ContainerFile: nothing built here is
 # gated on anything. Never publish a release image from this file.
 #
+# This file is live. The hosted demo builds from it, from `main`. It used to
+# live alone on a `demo/render` branch, where its purpose was self-evident and
+# keeping it current meant rebasing that branch onto every release; pointing
+# the deploy at `main` retired both the branch and the rebase. Do not delete
+# this as an unreferenced file — nothing in the repo references it, because the
+# reference is deploy configuration held outside the repo.
+#
 # Data note: no volume is mounted, so GANTRY_WORKSPACES_DIR is left unset and
 # the server uses the `workspaces/` baked into the image — which is what puts
 # the bundled Examples workspace on the dashboard for a visitor arriving cold.
