@@ -71,6 +71,21 @@ function isFieldEmpty(value) {
   return value.trim().length === 0
 }
 
+// Verbatim port of lib/status.js's (private) selectOffListWarnings.
+function selectOffListWarnings(moduleSpec, exists, parsedFields) {
+  if (!exists) return []
+  const warnings = []
+  for (const field of moduleSpec.fields) {
+    if (field.type !== 'select') continue
+    const value = parsedFields[field.id]
+    if (value === undefined || value === '') continue
+    if (!(field.options ?? []).includes(value)) {
+      warnings.push(`Module "${moduleSpec.title}" field "${field.title}" has a value ("${value}") that is not in its option list`)
+    }
+  }
+  return warnings
+}
+
 // Verbatim port of lib/status.js's (private) buildModuleStatus, over the
 // projection's modulesById Map instead of definition.modules.
 function buildModuleStatus(modulesById, stage, moduleId, exists, parsedFields) {
@@ -90,6 +105,7 @@ function buildModuleStatus(modulesById, stage, moduleId, exists, parsedFields) {
     fields,
     outstanding,
     complete: exists && outstanding.length === 0,
+    warnings: selectOffListWarnings(moduleSpec, exists, parsedFields),
   }
 }
 
@@ -173,7 +189,12 @@ export function evaluateLocalStage(structure, stage, moduleData) {
   })
   const artefacts = evaluateArtefacts(modulesById, stage, structure.artefacts, moduleData)
 
-  return { modules, artefacts, complete: artefacts.some((artefact) => artefact.complete) }
+  return {
+    modules,
+    artefacts,
+    complete: artefacts.some((artefact) => artefact.complete),
+    warnings: modules.flatMap((m) => m.warnings),
+  }
 }
 
 /**
@@ -253,7 +274,7 @@ export function resolveLocalCheckStage(structure, instanceStageId, slug, options
 }
 
 // Verbatim port of lib/check.js's (private) checkResultFor.
-function checkResultFor(slug, structure, stage, modules, artefacts, complete) {
+function checkResultFor(slug, structure, stage, modules, artefacts, complete, warnings) {
   return {
     slug,
     definition: structure.id,
@@ -263,6 +284,7 @@ function checkResultFor(slug, structure, stage, modules, artefacts, complete) {
     complete,
     pass: complete,
     gate: stage.gate,
+    warnings: warnings ?? [],
   }
 }
 
@@ -277,9 +299,9 @@ function checkResultFor(slug, structure, stage, modules, artefacts, complete) {
 export async function checkLocalGate(handle, slug, structure, instanceStageId, options = {}) {
   const stage = resolveLocalCheckStage(structure, instanceStageId, slug, options)
   const moduleData = await readLocalModuleData(handle, slug, stage, structure, { strict: true })
-  const { modules, artefacts, complete } = evaluateLocalStage(structure, stage, moduleData)
+  const { modules, artefacts, complete, warnings } = evaluateLocalStage(structure, stage, moduleData)
 
-  return checkResultFor(slug, structure, stage, modules, artefacts, complete)
+  return checkResultFor(slug, structure, stage, modules, artefacts, complete, warnings)
 }
 
 /**

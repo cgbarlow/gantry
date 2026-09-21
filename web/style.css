@@ -749,6 +749,8 @@ main[data-view-mode='split'] .field-markdown .split:focus-within .editor-host:no
   background: var(--bg-raised);
   color: var(--text);
 }
+.field-select select:has(option.field-select-offlist:checked) { border-color: var(--warning, #b06a00); }
+.field-select-warning { font-size: 12px; color: var(--warning, #b06a00); margin: 6px 0 0; }
 
 .save-status { font-size: 0.9rem; color: var(--text-muted); min-height: 1.2em; margin-top: 0.5rem; white-space: pre-line; }
 .load-error, .loading { padding-top: 48px; color: var(--text-muted); }
