@@ -2,6 +2,8 @@
 // differs from what's saved. Kept pure so the dirty rule is tested without a
 // browser; the module editor (web/app.js) owns when these run.
 
+import { emptyFieldValue } from './fieldShape.js'
+
 // The payload the module writer takes — `{ status, owner, fields, layout }` —
 // with fields and custom sections in displayed order. `valueOf(field)` gives a
 // field's live value (its editor text or list rows); `undefined` falls back to
@@ -11,7 +13,7 @@ export function modulePayload(mod, valueOf = () => undefined) {
   const layout = []
   for (const field of mod.fields) {
     const live = valueOf(field)
-    const value = live === undefined ? (field.value ?? (field.type === 'list' ? [] : '')) : live
+    const value = live === undefined ? (field.value ?? emptyFieldValue(field)) : live
     fields[field.id] = value
     layout.push(
       field.custom ? { custom: { id: field.id, title: field.title, type: field.type, value } } : { field: field.id }

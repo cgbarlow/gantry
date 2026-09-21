@@ -32,6 +32,7 @@
 //     `GET /api/instance` contract already returns, so `ModuleEditorPage`
 //     can consume a local instance unchanged.
 import { parse as parseYAML, stringify as stringifyYAML } from 'yaml'
+import { parseFieldBody, serialiseFieldBody, emptyFieldValue } from './fieldShape.js'
 
 // Recursively sort every plain object's keys — the exact shape of
 // `lib/instance.js`'s `canonicalizeForSerialization`.
@@ -215,21 +216,7 @@ export function parseLocalModuleFile(text, moduleSpec, options = {}) {
   for (const field of moduleSpec.fields) {
     const raw = sections.get(field.title)
     if (raw === undefined) continue
-    if (field.type === 'list') {
-      const items = []
-      for (const rawLine of raw.split('\n')) {
-        const line = rawLine.trim()
-        if (line === '') continue
-        if (line.startsWith('- ')) {
-          items.push(line.slice(2).trim())
-        } else if (items.length > 0) {
-          items[items.length - 1] += ` ${line}`
-        }
-      }
-      fields[field.id] = items
-    } else {
-      fields[field.id] = raw
-    }
+    fields[field.id] = parseFieldBody(field, raw)
   }
 
   return {
@@ -258,16 +245,7 @@ export function renderLocalModuleInstanceFile(moduleId, moduleSpec, data) {
 
   const fieldsById = new Map(moduleSpec.fields.map((field) => [field.id, field]))
   const sectionText = (title, body) => `## ${title}\n\n${body}\n`
-  const definedFieldBody = (field) => {
-    const value = data.fields?.[field.id]
-    return field.type === 'list'
-      ? (Array.isArray(value) ? value : [])
-          .map((item) => item.trim())
-          .filter((item) => item !== '')
-          .map((item) => `- ${item}`)
-          .join('\n')
-      : value ?? ''
-  }
+  const definedFieldBody = (field) => serialiseFieldBody(field, data.fields?.[field.id])
 
   const sections = []
   const laidOut = new Set()
@@ -302,7 +280,7 @@ export function renderLocalModuleInstanceFile(moduleId, moduleSpec, data) {
 function fieldValue(field, data) {
   const raw = data.fields[field.id]
   if (raw !== undefined) return raw
-  return field.type === 'list' ? [] : ''
+  return emptyFieldValue(field)
 }
 
 /**

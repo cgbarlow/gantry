@@ -28,6 +28,7 @@ import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
 import { visualMode, refreshVisual, clearActiveCell, restoreActiveCell, activeCellSelection, focusTableCellAt } from './lib/visualMode.js'
 import { advancedMode } from './lib/advancedMode.js'
 import { modulePayload, payloadKey, savedFields, saveStatusLine } from './lib/stageSave.js'
+import { isMultiValuedField, emptyFieldValue } from './lib/fieldShape.js'
 import { renderEngine } from './lib/renderEngine.js'
 import { warmLoadPandocWasm, renderDocxWithWasm } from './lib/pandocWasm.js'
 import { hydrateMermaidPreview, prepareMermaidForDocx } from './lib/mermaid.js'
@@ -2008,7 +2009,7 @@ function ModuleCard({ mod, onFieldRegistered, visibleFieldIds }) {
           controlsRef.current[field.id] = control
           onFieldRegistered(field, control, mod.id)
         }
-        const isList = field.type === 'list'
+        const isList = isMultiValuedField(field)
         return isList
           ? html`<${ListField}
               key=${field.id}
@@ -4532,7 +4533,7 @@ function ModuleEditorPage({ slug: routeRef }) {
   }
 
   function clearAllFields() {
-    registryRef.current.entries.forEach(({ field, control }) => control.setValue(field.type === 'list' ? [] : ''))
+    registryRef.current.entries.forEach(({ field, control }) => control.setValue(emptyFieldValue(field)))
   }
 
   function changeArtefact(artefactId) {
