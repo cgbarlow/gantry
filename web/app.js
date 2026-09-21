@@ -1968,6 +1968,92 @@ function MultiSelectField({ field, moduleId, onRegister }) {
   `
 }
 
+// type: text (#85, ADR-0044): a single-line string — a person's name, a reference number —
+// where a markdown field's multi-line editor and toolbar would be the wrong tool. Same
+// getValue/setValue/onRegister control contract as every other field type.
+function TextField({ field, moduleId, onRegister }) {
+  const valueRef = useRef(field.value || '')
+  const [, bump] = useState(0)
+  const rerender = () => {
+    bump((n) => n + 1)
+    noteContentEdit()
+  }
+
+  useEffect(() => {
+    onRegister({
+      getValue: () => valueRef.current,
+      setValue: (value) => {
+        valueRef.current = value ?? ''
+        rerender()
+      },
+    })
+    // eslint-disable-next-line
+  }, [])
+
+  const headingIdForField = moduleId ? headingId(moduleId, field.title) : null
+
+  return html`
+    <div class="field field-text">
+      ${headingIdForField
+        ? html`<h3 id=${headingIdForField} class="field-heading">${field.title}${field.required ? ' *' : ''}</h3><label class="visually-hidden" style="display:none">${field.title}${field.required ? ' *' : ''}</label>`
+        : html`<label>${field.title}${field.required ? ' *' : ''}</label>`}
+      ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
+      <input
+        type="text"
+        disabled=${isArchived()}
+        value=${valueRef.current}
+        onInput=${(e) => {
+          valueRef.current = e.currentTarget.value
+          rerender()
+        }}
+      />
+    </div>
+  `
+}
+
+// type: date (#85, ADR-0044): a calendar date, authored through the browser's native date
+// picker (no custom widget) and stored as the YYYY-MM-DD string the input already produces —
+// no time-of-day, no timezone, nothing this control has to convert either way.
+function DateField({ field, moduleId, onRegister }) {
+  const valueRef = useRef(field.value || '')
+  const [, bump] = useState(0)
+  const rerender = () => {
+    bump((n) => n + 1)
+    noteContentEdit()
+  }
+
+  useEffect(() => {
+    onRegister({
+      getValue: () => valueRef.current,
+      setValue: (value) => {
+        valueRef.current = value ?? ''
+        rerender()
+      },
+    })
+    // eslint-disable-next-line
+  }, [])
+
+  const headingIdForField = moduleId ? headingId(moduleId, field.title) : null
+
+  return html`
+    <div class="field field-date">
+      ${headingIdForField
+        ? html`<h3 id=${headingIdForField} class="field-heading">${field.title}${field.required ? ' *' : ''}</h3><label class="visually-hidden" style="display:none">${field.title}${field.required ? ' *' : ''}</label>`
+        : html`<label>${field.title}${field.required ? ' *' : ''}</label>`}
+      ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
+      <input
+        type="date"
+        disabled=${isArchived()}
+        value=${valueRef.current}
+        onInput=${(e) => {
+          valueRef.current = e.currentTarget.value
+          rerender()
+        }}
+      />
+    </div>
+  `
+}
+
 function ListField({ field, moduleId, onRegister, onRemove, onRequestSection, onRequestList }) {
   const rowsRef = useRef(field.value?.length ? [...field.value] : [''])
   const [, bump] = useState(0)
@@ -2142,6 +2228,12 @@ function ModuleCard({ mod, onFieldRegistered, visibleFieldIds }) {
         }
         if (field.type === 'select') {
           return html`<${SelectField} key=${field.id} field=${field} moduleId=${mod.id} onRegister=${onRegister} />`
+        }
+        if (field.type === 'text') {
+          return html`<${TextField} key=${field.id} field=${field} moduleId=${mod.id} onRegister=${onRegister} />`
+        }
+        if (field.type === 'date') {
+          return html`<${DateField} key=${field.id} field=${field} moduleId=${mod.id} onRegister=${onRegister} />`
         }
         const isList = isMultiValuedField(field)
         return isList
