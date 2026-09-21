@@ -1,0 +1,67 @@
+# syntax=docker/dockerfile:1
+
+# Demo image — the runtime half of ContainerFile, with none of the gates.
+#
+# ContainerFile's `runtime` stage deliberately depends on the `test`,
+# `test-e2e` and `render` stages (via COPY --from), so building it runs the
+# whole verification suite — two Playwright browser installs included — as
+# part of the image build. That is the point when publishing a release: a
+# broken build cannot produce an image.
+#
+# A hosted demo box is not a release. It wants a fast, cheap rebuild, and the
+# verification it would re-run is already enforced on `main` by
+# azure-pipelines.yml. So this file builds the same runtime, from the same
+# base and the same production dependency install, and skips the gates.
+#
+# Deliberately NOT a substitute for ContainerFile: nothing built here is
+# gated on anything. Never publish a release image from this file.
+#
+# This file is live. The hosted demo builds from it, from `main`. It used to
+# live alone on a `demo/render` branch, where its purpose was self-evident and
+# keeping it current meant rebasing that branch onto every release; pointing
+# the deploy at `main` retired both the branch and the rebase. Do not delete
+# this as an unreferenced file — nothing in the repo references it, because the
+# reference is deploy configuration held outside the repo.
+#
+# Data note: no volume is mounted, so GANTRY_WORKSPACES_DIR is left unset and
+# the server uses the `workspaces/` baked into the image — which is what puts
+# the bundled Examples workspace on the dashboard for a visitor arriving cold.
+# Anything a visitor creates lives in the container's own writable layer and
+# is gone on the next restart or redeploy, which is the intended behaviour
+# here: the demo self-cleans back to the examples.
+
+FROM node:24-slim
+
+# pandoc renders artefacts to .docx; git stamps render provenance.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends pandoc git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY bin/               bin/
+COPY lib/               lib/
+COPY web/               web/
+COPY definitions/       definitions/
+COPY workspaces/        workspaces/
+COPY docs/user-guide/   docs/user-guide/
+COPY gantry.yaml       ./
+
+# Same ownership dance as ContainerFile's runtime stage: the server writes
+# into workspaces/ (and each instance's out/ during a render) as uid 1000.
+RUN mkdir -p workspaces && chown -R node:node /app
+USER node
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["node","-e","fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+# CMD carries no --port, unlike ContainerFile's. The flag beats the PORT env
+# var in bin/gantry.js's resolution order (--port > PORT > 3000), so omitting
+# it lets a host that injects PORT — Render does — be obeyed rather than
+# silently ignored.
+ENTRYPOINT ["node", "bin/gantry.js"]
+CMD ["serve"]
