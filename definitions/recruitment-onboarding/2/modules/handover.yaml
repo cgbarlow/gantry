@@ -1,0 +1,41 @@
+id: handover
+title: Handover
+purpose: >
+  What the hiring manager has to do, what happens on the first day, and the confirmation that
+  the starter is actually ready.
+
+  This is the only module written for someone outside the process rather than inside it. The
+  hiring manager has been a participant since the requisition but has not been following the
+  stages, so state their obligations plainly and with dates.
+
+fields:
+  - id: manager-actions
+    title: Manager actions
+    type: list
+    required: true
+    guidance: >
+      What the hiring manager must do and by when — issue credentials, arrange the first-day
+      meeting, confirm the desk or workspace, brief the team, arrange the first week. One per
+      line, each with a deadline relative to the start date.
+
+  - id: day-one
+    title: First day
+    type: markdown
+    required: true
+    guidance: >
+      What happens on the first day: where the starter goes, who meets them, what they are
+      given, what they are expected to complete. Written for the starter's manager to act on,
+      not as a process description. Record who confirmed readiness and when here too.
+
+  - id: readiness-confirmation
+    title: Readiness confirmation
+    type: select
+    required: true
+    options:
+      - Ready
+      - Ready with outstanding items
+      - Not ready
+    guidance: >
+      Whether account, access and device are all in place and the starter can work from day
+      one. Where something is outstanding, say so here as well as in `access.outstanding` — a
+      confirmation that quietly omits a gap is worse than no confirmation.

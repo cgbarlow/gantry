@@ -1,0 +1,82 @@
+# <%~ it.instance.name || it.instance.slug %>: Manager Handover
+<%
+  /* Written for the hiring manager, who has been a participant since the requisition but has
+     not been following the stages. It leads with what they have to do and only then reports
+     what is already in place — the reverse of `starter-readiness`, which is the same core
+     field set written for the people who did the provisioning.
+     Deliberately not a lighter document than the one it sits beside: see the gate strictness
+     note in v1's definition.yaml for why the shortest artefact at a gate must not be the
+     easiest.
+
+     v2 (#90): named from the candidate and today's date (definition.yaml's `filename:`) —
+     unlike the other candidate-named documents this one carries `{today}` rather than the
+     start date, since it can be re-sent close to the start date and the date it was produced
+     is the more useful fact for a manager filing it. `selection.candidate-name` is `?` in
+     `requires`, purely so the pattern can reach it — this document carries no other selection
+     content, matching v1. `contract.start-date` is formatted with `formatDate()`. */
+%>
+# Your new starter
+
+## Role
+
+<%~ na(it.modules.role.summary) %>
+
+## Team and reporting line
+
+<%~ na(it.modules.role.team) %>
+
+## Start date
+
+<%~ na(formatDate(it.modules.contract['start-date'])) %>
+
+# What you need to do
+
+<% it.modules.handover['manager-actions'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+## The first day
+
+<%~ na(it.modules.handover['day-one']) %>
+
+## Readiness confirmation
+
+<%~ na(it.modules.handover['readiness-confirmation']) %>
+
+# What is already in place
+
+## Account
+
+<%~ na(it.modules.identity.account) %>
+
+## Credentials
+
+<%~ na(it.modules.identity['credential-issue']) %>
+
+## Systems and directory
+
+<%~ na(it.modules.identity.propagation) %>
+
+## Device
+
+<%~ na(it.modules.device.specification) %>
+
+## Device build
+
+<%~ na(it.modules.device['build-status']) %>
+
+## Access
+
+<% it.modules.access.entitlements.forEach(function(item) { %>- <%~ item %>
+<% }) %>
+## Access setup
+
+<%~ na(it.modules.access.setup) %>
+<% if (it.modules.access.outstanding) { %>
+## Still outstanding
+
+<%~ it.modules.access.outstanding %>
+<% } %>
+<% if (it.modules['open-questions'].questions && it.modules['open-questions'].questions.length) { %>
+# Open questions
+
+<% it.modules['open-questions'].questions.forEach(function(item) { %>- <%~ item %>
+<% }) %><% } %>

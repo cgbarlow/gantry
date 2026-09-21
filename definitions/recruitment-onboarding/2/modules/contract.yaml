@@ -1,0 +1,54 @@
+id: contract
+title: Contract
+purpose: >
+  The employment agreement: its terms, its two signatures, and the start date it sets.
+
+  Contract creation starts the clock. Roughly fifteen days run from here to the start date when
+  nothing goes wrong — about three for the contract itself, one to two for the manager's
+  signature, one to three for the candidate's, and the rest for payroll and provisioning. There
+  is very little slack in that, which is why a single payroll failure is usually what moves a
+  start date.
+
+fields:
+  - id: terms-summary
+    title: Terms
+    type: markdown
+    required: true
+    guidance: >
+      A summary of the agreement as drawn, and any way it differs from the offer accepted. The
+      contract itself is not stored here — attach it as an asset if it needs to travel with the
+      instance.
+
+  - id: signatures
+    title: Signatures
+    type: markdown
+    required: true
+    guidance: >
+      When the hiring manager signed, and when the candidate returned their electronic
+      signature. Record both dates even where they were the same day: the gap between them is
+      one of the few timings in this process anyone can act on.
+
+  - id: start-date
+    title: Start date
+    type: date
+    required: true
+    guidance: >
+      The agreed first day. If it moves after being agreed, record the change in
+      `start-date-changes` below rather than here.
+
+  - id: start-date-changes
+    title: Start date changes
+    type: markdown
+    required: false
+    guidance: >
+      If the start date moved after being agreed, record the original date, the new one, and
+      what moved it. Leave empty where the date has not moved.
+
+  - id: elapsed
+    title: Elapsed time
+    type: markdown
+    required: false
+    guidance: >
+      Actual elapsed time from contract creation to start date, against the fifteen days the
+      process assumes. Worth filling even when it went to plan — the baseline is only useful if
+      something is measured against it.

@@ -17,6 +17,48 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.7.5-beta — 2026-09-21
+
+### Added
+
+- **Dropdowns, single-line text and date pickers, as Field types a Definition can declare.**
+  Until now every Field was either a paragraph or a bullet list, even where the Definition's own
+  guidance already named the only valid answers — an engagement type, an offer status, a vetting
+  outcome. A Field can now be `type: select`, offering a dropdown of the answers a Definition
+  author has decided are valid (optionally several at once, as tick-boxes), `type: text` for a
+  short single-line fact such as a name, or `type: date` for a calendar date entered through your
+  browser's own date picker rather than typed. A value that no longer matches a select's option
+  list — hand-edited, or left behind by a changed Definition — is kept and flagged rather than
+  silently discarded.
+
+- **Rendered documents can be named from their own content.** An Artefact may now declare a
+  `filename:` pattern such as `{selection.candidate-name} - Offer Pack - {contract.start-date}`,
+  resolved against the Instance's own data at render time — so a document that leaves your
+  organisation identifies itself (`Jane Smith - Offer Pack - 2026-11-03.docx`) instead of arriving
+  named only after the process that produced it. An Artefact with no pattern renders exactly what
+  it always has.
+
+- **A second version of Recruitment and Onboarding**, `recruitment-onboarding/2`, built on both
+  features above — seven Fields whose answers v1's own guidance already enumerated are now
+  dropdowns, two become tick-box multi-selects, a candidate's name and a start date are split out
+  of prose into their own typed Fields, and every rendered document is named from the Instance's
+  own content. v1 is completely unmodified — Instances already in flight against it keep
+  rendering exactly what they always did. v2 ships as a `draft`, not `published`: every option
+  list it introduces is traceable to wording already in v1's own guidance, but confirming that
+  wording with the process owner before locking it into an immutable published version is a
+  manual follow-up, not part of this release.
+
+### Notes
+
+- **A Field's type is fixed by the Definition, not editable per Instance.** If a dropdown's
+  choices look wrong, that's a change for whoever maintains the Definition, not something an
+  Instance author can work around by typing something else.
+
+- **A changed filename doesn't yet clean up after itself.** Where a filename pattern's resolved
+  name changes between renders — a corrected candidate name, a moved start date — the previous
+  file currently stays in `out/` alongside the new one; automatically removing it is tracked
+  separately and not yet built.
+
 ## 0.7.4-beta — 2026-09-21
 
 ### Added

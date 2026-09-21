@@ -1,0 +1,70 @@
+# <%~ it.instance.name || it.instance.slug %>: Requisition Brief
+<%
+  /* Section order follows `requisition-brief.requires` in definition.yaml, which is written in
+     render order — the list is the outline. `na()` is injected once as an Eta functionHeader by
+     lib/render.js and is in scope here without redefinition; it renders a literal "— n/a —"
+     under the heading when a bare (gate-blocking) field is blank, so a document is never
+     silently short a section. `?` entries are suppress-when-blank `<% if %>` blocks instead,
+     since they never block the gate and an empty heading would be noise.
+
+     No approval section, by design. This document is the case put to whoever signs the
+     requisition stage off; the approval is that sign-off. See definition.yaml.
+
+     v2 (#90): `engagement.type` is now a select, `engagement.term` is a new optional prose
+     field beside it — see modules/engagement.yaml. */
+%>
+# The role
+
+## Role summary
+
+<%~ na(it.modules.role.summary) %>
+
+## Team and reporting line
+
+<%~ na(it.modules.role.team) %>
+
+## Key responsibilities
+
+<% it.modules.role.responsibilities.forEach(function(item) { %>- <%~ item %>
+<% }) %>
+## Justification
+
+<%~ na(it.modules.role.justification) %>
+
+# Engagement
+
+## Engagement type
+
+<%~ na(it.modules.engagement.type) %>
+<% if (it.modules.engagement.term) { %>
+## Term or expected duration
+
+<%~ it.modules.engagement.term %>
+<% } %>
+## Rationale
+
+<%~ na(it.modules.engagement.rationale) %>
+
+## Approval route
+
+<%~ na(it.modules.engagement['approval-route']) %>
+
+# Role evaluation
+
+## How it was evaluated
+
+<%~ na(it.modules['role-evaluation'].method) %>
+
+## Outcome
+
+<%~ na(it.modules['role-evaluation'].outcome) %>
+<% if (it.modules['role-evaluation'].notes) { %>
+## Notes
+
+<%~ it.modules['role-evaluation'].notes %>
+<% } %>
+<% if (it.modules['open-questions'].questions && it.modules['open-questions'].questions.length) { %>
+# Open questions
+
+<% it.modules['open-questions'].questions.forEach(function(item) { %>- <%~ item %>
+<% }) %><% } %>
