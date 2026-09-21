@@ -370,16 +370,22 @@ export function findLocalDefinitionProblems(structure) {
 
   for (const moduleSpec of modulesById.values()) {
     for (const field of moduleSpec.fields ?? []) {
-      if (field.type !== 'markdown' && field.type !== 'list') {
+      if (field.type !== 'markdown' && field.type !== 'list' && field.type !== 'select') {
         problems.push({
           type: 'unknown-field-type',
-          message: `Module "${moduleSpec.id}" field "${field.id}" has unknown type "${field.type}" (expected "markdown" or "list")`,
+          message: `Module "${moduleSpec.id}" field "${field.id}" has unknown type "${field.type}" (expected "markdown", "list" or "select")`,
         })
       }
       if (field.required !== undefined && field.requiredAt !== undefined) {
         problems.push({
           type: 'mutually-exclusive-required',
           message: `Module "${moduleSpec.id}" field "${field.id}" sets both "required" and "required-at" — they are mutually exclusive`,
+        })
+      }
+      if (field.type === 'select' && (!Array.isArray(field.options) || field.options.length === 0)) {
+        problems.push({
+          type: 'select-missing-options',
+          message: `Module "${moduleSpec.id}" field "${field.id}" is type "select" but declares no "options:" list`,
         })
       }
     }

@@ -1837,6 +1837,57 @@ function autosizeTextarea(el) {
   el.style.height = `${el.scrollHeight}px`
 }
 
+// type: select (#81, ADR-0044): a single-choice dropdown over `field.options`, a plain string
+// list. Opens unselected on a field with no stored value — a required select is never
+// satisfied by a browser default, only by an author's own choice. A stored value outside
+// `options` (hand-edited content, or a draft definition whose options changed) gets a
+// synthetic extra <option> so the field never silently reverts to blank — the minimum needed
+// to not lose data even before #82's fuller "marked extra entry" + check-warning treatment.
+function SelectField({ field, moduleId, onRegister }) {
+  const valueRef = useRef(field.value ?? '')
+  const [, bump] = useState(0)
+  const rerender = () => {
+    bump((n) => n + 1)
+    noteContentEdit()
+  }
+
+  useEffect(() => {
+    onRegister({
+      getValue: () => valueRef.current,
+      setValue: (value) => {
+        valueRef.current = value ?? ''
+        rerender()
+      },
+    })
+    // eslint-disable-next-line
+  }, [])
+
+  const options = field.options ?? []
+  const offList = valueRef.current !== '' && !options.includes(valueRef.current)
+  const headingIdForField = moduleId ? headingId(moduleId, field.title) : null
+
+  return html`
+    <div class="field field-select">
+      ${headingIdForField
+        ? html`<h3 id=${headingIdForField} class="field-heading">${field.title}${field.required ? ' *' : ''}</h3><label class="visually-hidden" style="display:none">${field.title}${field.required ? ' *' : ''}</label>`
+        : html`<label>${field.title}${field.required ? ' *' : ''}</label>`}
+      ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
+      <select
+        disabled=${isArchived()}
+        value=${valueRef.current}
+        onChange=${(e) => {
+          valueRef.current = e.currentTarget.value
+          rerender()
+        }}
+      >
+        <option value="">— Select —</option>
+        ${offList ? html`<option value=${valueRef.current}>${valueRef.current} (not in list)</option>` : null}
+        ${options.map((option) => html`<option value=${option} key=${option}>${option}</option>`)}
+      </select>
+    </div>
+  `
+}
+
 function ListField({ field, moduleId, onRegister, onRemove, onRequestSection, onRequestList }) {
   const rowsRef = useRef(field.value?.length ? [...field.value] : [''])
   const [, bump] = useState(0)
@@ -2008,6 +2059,9 @@ function ModuleCard({ mod, onFieldRegistered, visibleFieldIds }) {
         const onRegister = (control) => {
           controlsRef.current[field.id] = control
           onFieldRegistered(field, control, mod.id)
+        }
+        if (field.type === 'select') {
+          return html`<${SelectField} key=${field.id} field=${field} moduleId=${mod.id} onRegister=${onRegister} />`
         }
         const isList = isMultiValuedField(field)
         return isList

@@ -254,6 +254,39 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
     const read = await readLocalDefinitionStructure(handle, 'empty-def', 1)
     assert.deepEqual(read.modules, [])
   })
+
+  // #81 (ADR-0044): a select field's options: must survive the Local-Workspace writer the same
+  // way it must survive the server-side one (tests/definition.test.js's own round-trip test) —
+  // both YAML writers rebuild each field from a fixed key whitelist, so either one left untaught
+  // deletes options: on save.
+  test('round-trips a select field\'s options, and matches the server-side projection for the same structure', async () => {
+    const withSelect = {
+      ...FIXTURE_STRUCTURE,
+      modules: [
+        {
+          ...FIXTURE_STRUCTURE.modules[0],
+          fields: [
+            ...FIXTURE_STRUCTURE.modules[0].fields,
+            { id: 'engagement-type', title: 'Engagement type', type: 'select', options: ['Permanent', 'Fixed term', 'Contractor'] },
+          ],
+        },
+      ],
+    }
+
+    const handle = new MemDirHandle()
+    await writeLocalDefinitionStructure(handle, 'wi384-fixture', 1, withSelect)
+    const read = await readLocalDefinitionStructure(handle, 'wi384-fixture', 1)
+    const field = read.modules[0].fields.find((f) => f.id === 'engagement-type')
+    assert.equal(field.type, 'select')
+    assert.deepEqual(field.options, ['Permanent', 'Fixed term', 'Contractor'])
+
+    await withScratchInstances(async (definitionsDir) => {
+      createBlankDefinition('wi384-fixture', { definitionsDir })
+      writeDefinitionVersion('wi384-fixture', 1, withSelect, { definitionsDir })
+      const diskProjection = definitionVersionProjection(loadDefinition('wi384-fixture', { definitionsDir, version: 1 }))
+      assert.deepEqual(read.modules, diskProjection.modules)
+    })
+  })
 })
 
 describe('templates and reference docx', () => {
