@@ -450,7 +450,9 @@ test('GET / serves index.html with the import map resolved (no leftover placehol
     assert.equal(res.status, 200)
     const html = await res.text()
     assert.doesNotMatch(html, /__IMPORT_MAP__/)
-    assert.match(html, /"codemirror":\s*"\/node_modules\/codemirror\/dist\/index\.js"/)
+    // The trailing `?v=` is the cache-busting token; what matters here is that the specifier
+    // resolved to its real entry file rather than being left as the placeholder.
+    assert.match(html, /"codemirror":\s*"\/node_modules\/codemirror\/dist\/index\.js(\?v=[^"]*)?"/)
   })
 })
 
@@ -2046,6 +2048,32 @@ test('static files and the app shell carry an ETag and revalidate, so an upgrade
       const revalidated = await fetch(`${base}${path}`, { headers: { 'If-None-Match': etag } })
       assert.equal(revalidated.status, 304, `${path} should revalidate to 304 while unchanged`)
       assert.equal(revalidated.headers.get('etag'), etag, 'a 304 must still carry the validator')
+    }
+  })
+})
+
+// A dependency URL carries its own version token, so it can be cached outright instead of
+// revalidated. WI #368's `no-cache` made every page load revalidate all ~40 import-map entries —
+// correct, but ~40 conditional round trips per load, which is the burst that drops connections on a
+// constrained host. A token that changes with `package-lock.json` makes the URL itself the
+// validator, so the browser can skip the request entirely without any risk of pinning stale bytes.
+test('a versioned dependency URL is cached immutably, while an unversioned or stale-token one still revalidates', async () => {
+  await withRunningServer({}, async (base) => {
+    const shell = await (await fetch(`${base}/`)).text()
+    const versioned = shell.match(/"preact":"([^"]+)"/)?.[1]
+    assert.ok(versioned?.includes('?v='), 'the import map must version its /node_modules/ URLs')
+
+    const immutable = await fetch(`${base}${versioned}`)
+    assert.equal(immutable.status, 200)
+    assert.match(immutable.headers.get('cache-control'), /immutable/)
+
+    // Anything that did not come from *this* process's import map must not be pinned: a hand-typed
+    // path, or a shell cached from before an upgrade, has no guarantee the bytes still match.
+    const bare = versioned.split('?')[0]
+    for (const path of [bare, `${bare}?v=notthecurrenttoken`]) {
+      const res = await fetch(`${base}${path}`)
+      assert.equal(res.status, 200, path)
+      assert.equal(res.headers.get('cache-control'), 'no-cache', path)
     }
   })
 })

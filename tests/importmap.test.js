@@ -18,6 +18,15 @@ test('resolves every root specifier and its transitive dependencies to a real fi
   }
 })
 
+test('a version stamps every URL, so the whole dependency set moves to new URLs at once', () => {
+  const { imports } = buildImportMap(['preact', 'htm'], { version: 'abc123' })
+
+  assert.ok(Object.keys(imports).length > 0)
+  for (const [specifier, path] of Object.entries(imports)) {
+    assert.ok(path.endsWith('?v=abc123'), `"${specifier}" resolved to an unversioned ${path}`)
+  }
+})
+
 test('follows transitive dependencies — @codemirror/lang-markdown pulls in @lezer/markdown', () => {
   const { imports } = buildImportMap(['@codemirror/lang-markdown'])
   assert.ok('@lezer/markdown' in imports)
