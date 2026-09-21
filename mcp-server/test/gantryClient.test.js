@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createGantryClient } from '../src/gantryClient.js'
+import { createGantryClient, resolveInstanceWorkspace } from '../src/gantryClient.js'
 import { stubFetch } from './helpers/fakeFetch.js'
 
 const BASE_URL = 'https://gantry.example.test'
@@ -131,6 +131,61 @@ test('request() caches workspace classification across calls within the TTL', as
 
     const classificationCalls = fetch.calls.filter((c) => c.url.pathname === '/api/workspaces' || c.url.pathname === '/api/server-workspaces')
     assert.equal(classificationCalls.length, 2, 'one GET /api/workspaces + one GET /api/server-workspaces, only once')
+  } finally {
+    fetch.restore()
+  }
+})
+
+test('resolveInstanceWorkspace forwards slug/scope/ref to GET /api/instance/workspace and returns its body', async () => {
+  const fetch = stubFetch(({ url }) => {
+    if (url.pathname === '/api/instance/workspace') {
+      assert.equal(url.searchParams.get('slug'), 'my-instance')
+      assert.equal(url.searchParams.get('scope'), 'ws-scope')
+      assert.equal(url.searchParams.get('ref'), 'w1i2')
+      return { status: 200, body: { workspaceId: 'ws-1', scope: 'ws-scope' } }
+    }
+    return undefined
+  })
+  try {
+    const client = createGantryClient({ baseUrl: BASE_URL, workspacePats: {} })
+    const res = await resolveInstanceWorkspace({ gantryClient: client, slug: 'my-instance', scope: 'ws-scope', ref: 'w1i2' })
+
+    assert.equal(res.ok, true)
+    assert.deepEqual(res.body, { workspaceId: 'ws-1', scope: 'ws-scope' })
+    // Unscoped lookup — no PAT resolution, no classification calls at all.
+    assert.equal(fetch.calls.length, 1)
+  } finally {
+    fetch.restore()
+  }
+})
+
+test('resolveInstanceWorkspace returns { workspaceId: null } for a local/unknown instance', async () => {
+  const fetch = stubFetch(({ url }) => {
+    if (url.pathname === '/api/instance/workspace') return { status: 200, body: { workspaceId: null, scope: null } }
+    return undefined
+  })
+  try {
+    const client = createGantryClient({ baseUrl: BASE_URL, workspacePats: {} })
+    const res = await resolveInstanceWorkspace({ gantryClient: client, slug: 'local-instance' })
+
+    assert.equal(res.ok, true)
+    assert.deepEqual(res.body, { workspaceId: null, scope: null })
+  } finally {
+    fetch.restore()
+  }
+})
+
+test('resolveInstanceWorkspace surfaces an upstream error rather than throwing', async () => {
+  const fetch = stubFetch(({ url }) => {
+    if (url.pathname === '/api/instance/workspace') return { status: 400, body: { error: 'No instance slug given' } }
+    return undefined
+  })
+  try {
+    const client = createGantryClient({ baseUrl: BASE_URL, workspacePats: {} })
+    const res = await resolveInstanceWorkspace({ gantryClient: client })
+
+    assert.equal(res.ok, false)
+    assert.equal(res.status, 400)
   } finally {
     fetch.restore()
   }
