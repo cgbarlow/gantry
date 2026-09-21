@@ -268,6 +268,9 @@ withInstanceOptions(
   console.log(result.pass ? 'PASS' : 'FAIL')
   console.log(`${result.slug} — ${result.definition} / ${result.stage.title} (gate: ${result.gate})`)
   printModules(result.modules)
+  for (const warning of result.warnings ?? []) {
+    console.log(`  warning: ${warning}`)
+  }
   if (!result.pass) process.exitCode = 1
 })
 

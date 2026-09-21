@@ -1837,12 +1837,13 @@ function autosizeTextarea(el) {
   el.style.height = `${el.scrollHeight}px`
 }
 
-// type: select (#81, ADR-0044): a single-choice dropdown over `field.options`, a plain string
-// list. Opens unselected on a field with no stored value — a required select is never
+// type: select (#81/#82, ADR-0044): a single-choice dropdown over `field.options`, a plain
+// string list. Opens unselected on a field with no stored value — a required select is never
 // satisfied by a browser default, only by an author's own choice. A stored value outside
-// `options` (hand-edited content, or a draft definition whose options changed) gets a
-// synthetic extra <option> so the field never silently reverts to blank — the minimum needed
-// to not lose data even before #82's fuller "marked extra entry" + check-warning treatment.
+// `options` (hand-edited content, or a draft definition whose options changed) is preserved:
+// it gets a synthetic extra <option>, marked both in its own label and with a warning line
+// below the control, so a subsequent Save can't quietly overwrite it with a blank or the
+// first option — `check` reports the same condition (lib/status.js's selectOffListWarnings).
 function SelectField({ field, moduleId, onRegister }) {
   const valueRef = useRef(field.value ?? '')
   const [, bump] = useState(0)
@@ -1881,9 +1882,10 @@ function SelectField({ field, moduleId, onRegister }) {
         }}
       >
         <option value="">— Select —</option>
-        ${offList ? html`<option value=${valueRef.current}>${valueRef.current} (not in list)</option>` : null}
+        ${offList ? html`<option value=${valueRef.current} class="field-select-offlist">${valueRef.current} (not in option list)</option>` : null}
         ${options.map((option) => html`<option value=${option} key=${option}>${option}</option>`)}
       </select>
+      ${offList ? html`<p class="field-select-warning">This value isn't in the current option list. It's kept as-is — pick a listed option to replace it, or leave it and fix the Definition's options.</p>` : null}
     </div>
   `
 }
