@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -8,7 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { renderArtefact, renderStageArtefacts, prepareAzureDevOpsWasmRender, finishAzureDevOpsWasmRender, externaliseImagesForWasm } from '../lib/render.js'
 import { createAsset } from '../lib/assets.js'
 import { loadDefinition } from '../lib/definition.js'
-import { readModule, writeModule } from '../lib/instance.js'
+import { readModule, writeModule, RENDER_MANIFEST_FILENAME } from '../lib/instance.js'
 import { NotFoundError, AuthenticationError } from '../lib/providerErrors.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
@@ -1130,4 +1130,201 @@ test('externaliseImagesForWasm is a no-op for markdown with no images', async ()
   const { markdown, files } = externaliseImagesForWasm('# Heading\n\nJust prose, no pictures.\n')
   assert.deepEqual(files, {})
   assert.equal(markdown, '# Heading\n\nJust prose, no pictures.\n')
+})
+
+// --- #88 (ADR-0045 §7): the render manifest — supersede-and-delete on a name-affecting render ---
+
+function renamedExamplesInstance(instancesDir, newName) {
+  const path = join(instancesDir, 'examples', 'instance.yaml')
+  const before = readFileSync(path, 'utf8')
+  assert.match(before, /^name: .*$/m, 'fixture instance.yaml is expected to already carry a name:')
+  writeFileSync(path, before.replace(/^name: .*$/m, `name: ${newName}`))
+}
+
+function outFiles(instancesDir) {
+  return readdirSync(join(instancesDir, 'examples', 'out')).filter((f) => f !== RENDER_MANIFEST_FILENAME)
+}
+
+function readManifest(instancesDir) {
+  return JSON.parse(readFileSync(join(instancesDir, 'examples', 'out', RENDER_MANIFEST_FILENAME), 'utf8'))
+}
+
+test('local: re-rendering after renaming the instance leaves exactly one document for the artefact, and deletes the one stranded under the old name', () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    const first = renderArtefact('examples', 'soap', { instancesDir, format: 'md' })
+    assert.equal(outFiles(instancesDir).length, 1)
+    assert.deepEqual(readManifest(instancesDir), { soap: `${first.basename}.md` })
+
+    renamedExamplesInstance(instancesDir, 'Kiwi Cover Mutual Renamed')
+    const second = renderArtefact('examples', 'soap', { instancesDir, format: 'md' })
+    assert.notEqual(second.basename, first.basename)
+
+    // The old file is gone, the new one is there, and out/ holds exactly one document for "soap".
+    assert.equal(existsSync(first.mdPath), false)
+    assert.equal(existsSync(second.mdPath), true)
+    assert.deepEqual(outFiles(instancesDir), [`${second.basename}.md`])
+    assert.deepEqual(readManifest(instancesDir), { soap: `${second.basename}.md` })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('local: re-rendering with no name-affecting change leaves the manifest file completely untouched (no spurious write)', () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    renderArtefact('examples', 'soap', { instancesDir, format: 'md' })
+    const manifestPath = join(instancesDir, 'examples', 'out', RENDER_MANIFEST_FILENAME)
+    const mtimeBefore = statSync(manifestPath).mtimeMs
+
+    renderArtefact('examples', 'soap', { instancesDir, format: 'md' })
+
+    assert.equal(statSync(manifestPath).mtimeMs, mtimeBefore, 'an unchanged name must not rewrite the manifest file at all')
+    assert.equal(outFiles(instancesDir).length, 1)
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('local: a manifest that is missing or unreadable degrades to pre-#88 behaviour (new file written, nothing deleted) instead of failing the render', () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    const first = renderArtefact('examples', 'soap', { instancesDir, format: 'md' })
+    const manifestPath = join(instancesDir, 'examples', 'out', RENDER_MANIFEST_FILENAME)
+    writeFileSync(manifestPath, 'not json at all {{{')
+
+    renamedExamplesInstance(instancesDir, 'Kiwi Cover Mutual Renamed')
+    const second = renderArtefact('examples', 'soap', { instancesDir, format: 'md' })
+    // Degraded to the exact pre-#88 behaviour: with no readable previous filename, the old file
+    // is never deleted — it just sits there, the same latent-bug shape ADR-0045 §7 describes.
+    assert.equal(existsSync(first.mdPath), true)
+    assert.equal(existsSync(second.mdPath), true)
+    // But the render itself succeeded and self-healed the manifest for next time.
+    assert.deepEqual(readManifest(instancesDir), { soap: `${second.basename}.md` })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('local: two different artefacts on the same instance are tracked independently in the manifest', () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+
+    const soap = renderArtefact('examples', 'soap', { instancesDir, format: 'md' })
+    const hld = renderArtefact('examples', 'hld', { instancesDir, format: 'md' })
+    assert.deepEqual(readManifest(instancesDir), { soap: `${soap.basename}.md`, hld: `${hld.basename}.md` })
+    assert.equal(outFiles(instancesDir).length, 2)
+
+    renamedExamplesInstance(instancesDir, 'Kiwi Cover Mutual Renamed')
+    const soap2 = renderArtefact('examples', 'soap', { instancesDir, format: 'md' })
+
+    // Renaming and re-rendering only "soap" supersedes soap's own file — hld's is untouched.
+    assert.equal(existsSync(hld.mdPath), true)
+    assert.equal(existsSync(soap.mdPath), false)
+    assert.deepEqual(readManifest(instancesDir), { soap: `${soap2.basename}.md`, hld: `${hld.basename}.md` })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+test('Azure DevOps: re-rendering after renaming the instance deletes the old file and lands the new one in the same push as the manifest update — not two separate operations', async () => {
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: seedExamplesAzureDevOpsFiles() },
+    async (baseUrl) => {
+      const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl }
+      const client = createAzureDevOpsClient(azureDevOps)
+
+      const first = await renderArtefact('examples', 'soap', { azureDevOps, format: 'md' })
+      const manifestPath = first.azureDevOpsPath.replace(/[^/]+$/, RENDER_MANIFEST_FILENAME)
+      assert.deepEqual(JSON.parse(await client.getFileContent(manifestPath)), { soap: first.azureDevOpsPath.split('/').pop() })
+
+      // Rename the instance directly in the (fake) Azure DevOps repo, as if the author had
+      // edited it through Gantry's own instance-rename UI, then re-render.
+      const instanceYaml = await client.getFileContent('gantry-workspace/examples/instance.yaml')
+      await client.writeFile(
+        'gantry-workspace/examples/instance.yaml',
+        instanceYaml.replace(/^name: .*$/m, 'name: Kiwi Cover Mutual Renamed'),
+        { message: 'Rename instance' }
+      )
+
+      const commitsBefore = await client.listBranchCommits('main', { compareTo: null })
+      const second = await renderArtefact('examples', 'soap', { azureDevOps, format: 'md' })
+      assert.notEqual(second.azureDevOpsPath, first.azureDevOpsPath)
+
+      // The new file is live, the old one is gone.
+      const pushedContent = await client.getFileContent(second.azureDevOpsPath)
+      assert.match(Buffer.from(pushedContent, 'base64').toString('utf8'), /Document Control/)
+      await assert.rejects(() => client.getFileContent(first.azureDevOpsPath), NotFoundError)
+
+      // The manifest now records only the new filename.
+      assert.deepEqual(JSON.parse(await client.getFileContent(manifestPath)), { soap: second.azureDevOpsPath.split('/').pop() })
+
+      // Exactly the usual two pushes for a render (draft, then Document-Control-complete final)
+      // — the delete rode along inside the second, it did not cost a third push of its own.
+      const commitsAfter = await client.listBranchCommits('main', { compareTo: null })
+      assert.equal(commitsAfter.length - commitsBefore.length, 2)
+    }
+  )
+})
+
+test('Azure DevOps: re-rendering with no name-affecting change never rewrites the manifest file', async () => {
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: seedExamplesAzureDevOpsFiles() },
+    async (baseUrl) => {
+      const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl }
+      const client = createAzureDevOpsClient(azureDevOps)
+
+      const first = await renderArtefact('examples', 'soap', { azureDevOps, format: 'md' })
+      const manifestPath = first.azureDevOpsPath.replace(/[^/]+$/, RENDER_MANIFEST_FILENAME)
+      const manifestBefore = await client.getFileContent(manifestPath)
+
+      const second = await renderArtefact('examples', 'soap', { azureDevOps, format: 'md' })
+      assert.equal(second.azureDevOpsPath, first.azureDevOpsPath)
+
+      const manifestAfter = await client.getFileContent(manifestPath)
+      assert.equal(manifestAfter, manifestBefore)
+    }
+  )
+})
+
+test('Azure DevOps: a manifest that fails to parse degrades to pre-#88 behaviour (new file lands, nothing deleted) instead of failing the render', async () => {
+  await withFakeAzureDevOpsServer(
+    { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, files: seedExamplesAzureDevOpsFiles() },
+    async (baseUrl) => {
+      const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl }
+      const client = createAzureDevOpsClient(azureDevOps)
+
+      const first = await renderArtefact('examples', 'soap', { azureDevOps, format: 'md' })
+      const manifestPath = first.azureDevOpsPath.replace(/[^/]+$/, RENDER_MANIFEST_FILENAME)
+      await client.writeFile(manifestPath, 'not json at all {{{', { contentType: 'rawtext' })
+
+      const instanceYaml = await client.getFileContent('gantry-workspace/examples/instance.yaml')
+      await client.writeFile(
+        'gantry-workspace/examples/instance.yaml',
+        instanceYaml.replace(/^name: .*$/m, 'name: Kiwi Cover Mutual Renamed'),
+        { message: 'Rename instance' }
+      )
+
+      const second = await renderArtefact('examples', 'soap', { azureDevOps, format: 'md' })
+
+      // Degraded exactly like the pre-#88 render behaviour: the old file is left in place because
+      // the manifest couldn't be read to learn its name, not deleted incorrectly.
+      await client.getFileContent(first.azureDevOpsPath) // does not throw — still there
+      await client.getFileContent(second.azureDevOpsPath) // the new render landed too
+
+      // But the manifest itself is healed for next time.
+      assert.deepEqual(JSON.parse(await client.getFileContent(manifestPath)), { soap: second.azureDevOpsPath.split('/').pop() })
+    }
+  )
 })
