@@ -36,7 +36,9 @@ export function isValidLocalDefinitionId(id) {
   return typeof id === 'string' && id !== '' && id !== '.' && id !== '..' && SINGLE_SEGMENT_RE.test(id)
 }
 
-const VALID_FIELD_TYPES = new Set(['markdown', 'list', 'select'])
+// #85 (ADR-0044): 'text'/'date' join the vocabulary alongside 'select' — see lib/definition.js's
+// own VALID_FIELD_TYPES comment for why neither needs an options:-equivalent key.
+const VALID_FIELD_TYPES = new Set(['markdown', 'list', 'select', 'text', 'date'])
 export const TEMPLATE_NAME_RE = /^[A-Za-z0-9._-]+\.md\.tmpl$/
 
 // Verbatim port of lib/definition.js's selectOptionsProblem — see that file for rationale (ADR-0044).
@@ -172,7 +174,7 @@ function withOptional(base, extra) {
 function moduleFromRaw(raw) {
   const fields = (raw.fields ?? []).map((field) => {
     if (!VALID_FIELD_TYPES.has(field.type)) {
-      throw new Error(`Module "${raw.id}" field "${field.id}" has unknown type "${field.type}" (expected "markdown", "list" or "select")`)
+      throw new Error(`Module "${raw.id}" field "${field.id}" has unknown type "${field.type}" (expected "markdown", "list", "select", "text" or "date")`)
     }
     if (field.required !== undefined && field['required-at'] !== undefined) {
       throw new Error(`Module "${raw.id}" field "${field.id}" sets both "required" and "required-at" — they are mutually exclusive`)

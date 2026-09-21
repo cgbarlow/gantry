@@ -94,6 +94,30 @@ function selectOffListWarnings(moduleSpec, exists, parsedFields) {
   return warnings
 }
 
+// Verbatim port of lib/status.js's (private) isValidIsoDate.
+function isValidIsoDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!match) return false
+  const [, y, m, d] = match.map(Number)
+  const date = new Date(Date.UTC(y, m - 1, d))
+  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d
+}
+
+// Verbatim port of lib/status.js's (private) dateFormatWarnings.
+function dateFormatWarnings(moduleSpec, exists, parsedFields) {
+  if (!exists) return []
+  const warnings = []
+  for (const field of moduleSpec.fields) {
+    if (field.type !== 'date') continue
+    const value = parsedFields[field.id]
+    if (value === undefined || value === '') continue
+    if (!isValidIsoDate(value)) {
+      warnings.push(`Module "${moduleSpec.title}" field "${field.title}" has a value ("${value}") that is not a valid date (expected YYYY-MM-DD)`)
+    }
+  }
+  return warnings
+}
+
 // Verbatim port of lib/status.js's (private) buildModuleStatus, over the
 // projection's modulesById Map instead of definition.modules.
 function buildModuleStatus(modulesById, stage, moduleId, exists, parsedFields) {
@@ -113,7 +137,7 @@ function buildModuleStatus(modulesById, stage, moduleId, exists, parsedFields) {
     fields,
     outstanding,
     complete: exists && outstanding.length === 0,
-    warnings: selectOffListWarnings(moduleSpec, exists, parsedFields),
+    warnings: [...selectOffListWarnings(moduleSpec, exists, parsedFields), ...dateFormatWarnings(moduleSpec, exists, parsedFields)],
   }
 }
 
@@ -400,10 +424,10 @@ export function findLocalDefinitionProblems(structure) {
 
   for (const moduleSpec of modulesById.values()) {
     for (const field of moduleSpec.fields ?? []) {
-      if (field.type !== 'markdown' && field.type !== 'list' && field.type !== 'select') {
+      if (!['markdown', 'list', 'select', 'text', 'date'].includes(field.type)) {
         problems.push({
           type: 'unknown-field-type',
-          message: `Module "${moduleSpec.id}" field "${field.id}" has unknown type "${field.type}" (expected "markdown", "list" or "select")`,
+          message: `Module "${moduleSpec.id}" field "${field.id}" has unknown type "${field.type}" (expected "markdown", "list", "select", "text" or "date")`,
         })
       }
       if (field.required !== undefined && field.requiredAt !== undefined) {

@@ -738,7 +738,9 @@ main[data-view-mode='split'] .field-markdown .split:focus-within .editor-host:no
 .field-list input::placeholder,
 .field-list textarea::placeholder { color: var(--text-muted); }
 
-.field-select select {
+.field-select select,
+.field-text input[type='text'],
+.field-date input[type='date'] {
   width: 100%;
   max-width: 420px;
   font-family: var(--font-body, inherit);
