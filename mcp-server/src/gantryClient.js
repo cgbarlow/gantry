@@ -123,3 +123,23 @@ export function createGantryClient({ baseUrl, workspacePats = {}, fetchImpl = fe
 
   return { request, invalidateClassification }
 }
+
+/**
+ * Resolves the workspace id (and canonical `scope` addressing token) an instance slug lives in —
+ * every instance-scoped tool needs this *before* it can attach the right credential via
+ * `request()`'s own `workspaceId`, since a slug alone doesn't say which workspace/PAT it needs.
+ * Wraps `GET /api/instance/workspace` (an unscoped, no-PAT-required lookup — see that route's own
+ * doc comment in lib/server.js), forwarding whichever of `slug`/`scope`/`ref` the caller has (the
+ * same three-way query contract every instance route shares, `resolveSlugParam` in lib/server.js).
+ *
+ * Returns the raw `{ ok, status, body }` shape `request()` always returns — callers check `.ok`
+ * before trusting `.body.workspaceId` (`null` for a local/unknown instance, a real workspace id for
+ * a Provider-backed one) exactly as they would any other `gantryClient.request()` result.
+ */
+export async function resolveInstanceWorkspace({ gantryClient, slug, scope, ref } = {}) {
+  const query = {}
+  if (slug !== undefined) query.slug = slug
+  if (scope !== undefined) query.scope = scope
+  if (ref !== undefined) query.ref = ref
+  return gantryClient.request({ path: '/api/instance/workspace', query })
+}
