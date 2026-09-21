@@ -1,0 +1,66 @@
+# <%~ it.instance.name || it.instance.slug %>: Selection Report
+<%
+  /* Opens with the role summary so the report stands alone for a reader who has not seen the
+     Requisition Brief — the only reason `role` is in this artefact's `requires` at all.
+     Vetting records outcomes only; see modules/vetting.yaml for why the particulars are
+     deliberately not modelled anywhere in this definition. */
+%>
+# The role
+
+<%~ na(it.modules.role.summary) %>
+
+# Advertising
+
+## Channels
+
+<% it.modules.advertising.channels.forEach(function(item) { %>- <%~ item %>
+<% }) %>
+## Advertising period
+
+<%~ na(it.modules.advertising.period) %>
+
+## Response
+
+<%~ na(it.modules.advertising.response) %>
+<% if (it.modules.advertising.notes) { %>
+## Notes
+
+<%~ it.modules.advertising.notes %>
+<% } %>
+# Selection
+
+## Shortlist
+
+<%~ na(it.modules.selection.shortlist) %>
+
+## Interviews
+
+<%~ na(it.modules.selection.interviews) %>
+
+## Preferred candidate
+
+<%~ na(it.modules.selection['preferred-candidate']) %>
+<% if (it.modules.selection.unsuccessful) { %>
+## Unsuccessful candidates
+
+<%~ it.modules.selection.unsuccessful %>
+<% } %>
+# Vetting
+
+## Checks required
+
+<% it.modules.vetting['checks-required'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+## Outcome
+
+<%~ na(it.modules.vetting.outcome) %>
+<% if (it.modules.vetting.conditions) { %>
+## Conditions
+
+<%~ it.modules.vetting.conditions %>
+<% } %>
+<% if (it.modules['open-questions'].questions && it.modules['open-questions'].questions.length) { %>
+# Open questions
+
+<% it.modules['open-questions'].questions.forEach(function(item) { %>- <%~ item %>
+<% }) %><% } %>

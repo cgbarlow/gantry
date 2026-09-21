@@ -1,0 +1,43 @@
+id: selection
+title: Selection
+purpose: >
+  Record how the field was narrowed to one preferred candidate: the shortlist, the interviews,
+  and the reasoning behind the choice.
+
+  Record the decision, not the people. Enough to show the selection was made on stated criteria
+  and to remind a reader later why this person was chosen — not a file on everyone who applied.
+
+fields:
+  - id: shortlist
+    title: Shortlist
+    type: markdown
+    required: true
+    guidance: >
+      How many were shortlisted and against what criteria. State the criteria explicitly: they
+      are what makes the choice defensible, and they are the first thing anyone reviewing this
+      later will look for.
+
+  - id: interviews
+    title: Interviews
+    type: markdown
+    required: true
+    guidance: >
+      Format, panel, how many rounds, and when. Name the panel members by role.
+
+  - id: preferred-candidate
+    title: Preferred candidate
+    type: markdown
+    required: true
+    guidance: >
+      Who was selected and why, against the criteria above. Keep this to the decision and its
+      basis — the candidate's name, the role fit, the panel's reasoning. Nothing about them
+      that the decision did not turn on.
+
+  - id: unsuccessful
+    title: Unsuccessful candidates
+    type: markdown
+    required: false
+    guidance: >
+      How unsuccessful candidates were handled and when they were told. No names and no
+      individual feedback — this is a record that the process closed properly, not a file on
+      people who were not hired.

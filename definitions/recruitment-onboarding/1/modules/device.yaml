@@ -1,0 +1,37 @@
+id: device
+title: Device
+purpose: >
+  The hardware issued to the starter: what was specified, whether it was standard, and where
+  the build got to.
+
+  The process asks whether non-standard hardware is needed but has never said what happens
+  differently when the answer is yes. Until that is resolved, a non-standard request is
+  unpredictable — record what was actually done so the answer can eventually be written down.
+
+fields:
+  - id: specification
+    title: Specification
+    type: markdown
+    required: true
+    guidance: >
+      What was specified, and whether it is standard issue or not. Say which explicitly — the
+      whole of the rest of this module depends on that answer.
+
+  - id: non-standard-decision
+    title: Non-standard hardware decision
+    type: markdown
+    required: false
+    guidance: >
+      Where the hardware is non-standard: who decided, what they approved, what it changed
+      about the build, and how much longer it took. Leave empty for a standard build.
+
+      There is no defined path for this. What you write here is the nearest thing to one.
+
+  - id: build-status
+    title: Build status
+    type: markdown
+    required: true
+    guidance: >
+      Where the device got to and when — requested, built, configured, ready. Include the date
+      the request was raised and the date the device was ready; three days is the assumption
+      and it is worth knowing when that holds.
