@@ -20,6 +20,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { useLocation } from 'preact-iso'
+import { reorder } from '../lib/reorder.js'
 import {
   getWorkspaceHandle,
   ensurePermission,
@@ -37,7 +38,10 @@ import {
 } from '../lib/localDefinitionFiles.js'
 
 const GATES = ['business-case', 'design-review', 'implementation-ready']
-const FIELD_TYPES = ['markdown', 'list']
+// #86 (ADR-0044): select/text/date join the local-workspace editor's own field-type vocabulary,
+// mirroring web/pages/definition-viewer.js's server-hosted editor — see that page's own Type
+// <select> for the identical list.
+const FIELD_TYPES = ['markdown', 'list', 'select', 'text', 'date']
 
 function templateFileName(artefactId) {
   return `${artefactId}.md.tmpl`
@@ -126,18 +130,94 @@ function CreateDefinitionForm({ workspaceId, handle, onCreated }) {
 }
 
 function FieldRow({ field, readOnly, onChange, onRemove }) {
+  // #86 (ADR-0044): switching a select field to any other type discards options:/multiple:/
+  // default: — the same window.confirm-before-discard convention
+  // web/pages/definition-viewer.js's own Type <select> uses.
+  function setType(nextType) {
+    if (field.type === 'select' && nextType !== 'select' && Array.isArray(field.options) && field.options.length > 0) {
+      const confirmed = typeof window !== 'undefined' && window.confirm
+        ? window.confirm(`Changing "${field.title || field.id}" from "select" to "${nextType}" discards its ${field.options.length} option${field.options.length === 1 ? '' : 's'}. Continue?`)
+        : true
+      if (!confirmed) return
+    }
+    const next = { ...field, type: nextType }
+    if (nextType !== 'select') {
+      delete next.options
+      delete next.multiple
+      delete next.default
+    }
+    onChange(next)
+  }
+  function updateOption(index, value) {
+    const options = field.options.slice()
+    options[index] = value
+    onChange({ ...field, options })
+  }
+  function addOption() {
+    onChange({ ...field, options: [...(field.options ?? []), ''] })
+  }
+  function removeOption(index) {
+    const removed = field.options[index]
+    const options = field.options.filter((_, i) => i !== index)
+    const next = { ...field, options }
+    if (next.default === removed) delete next.default
+    onChange(next)
+  }
+  function moveOption(index, to) {
+    onChange({ ...field, options: reorder(field.options, index, to) })
+  }
   return html`
-    <div class="local-def-field-row">
-      <input class="wizard-input" type="text" value=${field.id} placeholder="field-id" readOnly=${readOnly} onInput=${(e) => onChange({ ...field, id: e.currentTarget.value })} />
-      <input class="wizard-input" type="text" value=${field.title ?? ''} placeholder="Title" readOnly=${readOnly} onInput=${(e) => onChange({ ...field, title: e.currentTarget.value })} />
-      <select class="wizard-input" value=${field.type ?? 'markdown'} disabled=${readOnly} onChange=${(e) => onChange({ ...field, type: e.currentTarget.value })}>
-        ${FIELD_TYPES.map((t) => html`<option value=${t}>${t}</option>`)}
-      </select>
-      <label class="field-label">
-        <input type="checkbox" checked=${field.required === true} disabled=${readOnly} onChange=${(e) => onChange({ ...field, required: e.currentTarget.checked ? true : undefined })} />
-        required
-      </label>
-      ${readOnly ? null : html`<button type="button" class="btn small ghost" onClick=${onRemove}>Remove field</button>`}
+    <div class="local-def-field-block">
+      <div class="local-def-field-row">
+        <input class="wizard-input" type="text" value=${field.id} placeholder="field-id" readOnly=${readOnly} onInput=${(e) => onChange({ ...field, id: e.currentTarget.value })} />
+        <input class="wizard-input" type="text" value=${field.title ?? ''} placeholder="Title" readOnly=${readOnly} onInput=${(e) => onChange({ ...field, title: e.currentTarget.value })} />
+        <select class="wizard-input defn-field-type" value=${field.type ?? 'markdown'} disabled=${readOnly} onChange=${(e) => setType(e.currentTarget.value)}>
+          ${FIELD_TYPES.map((t) => html`<option value=${t}>${t}</option>`)}
+        </select>
+        <label class="field-label">
+          <input type="checkbox" checked=${field.required === true} disabled=${readOnly} onChange=${(e) => onChange({ ...field, required: e.currentTarget.checked ? true : undefined })} />
+          required
+        </label>
+        ${readOnly ? null : html`<button type="button" class="btn small ghost" onClick=${onRemove}>Remove field</button>`}
+      </div>
+      ${field.type === 'select' ? html`
+        <div class="local-def-options">
+          ${(field.options ?? []).map((opt, oi) => html`
+            <div key=${oi} class="local-def-option-row">
+              <input class="wizard-input defn-option-input" type="text" value=${opt} placeholder="Option value" readOnly=${readOnly} onInput=${(e) => updateOption(oi, e.currentTarget.value)} />
+              ${readOnly ? null : html`
+                <span class="defn-move-btns">
+                  <button type="button" class="btn small ghost" aria-label=${`Move option "${opt}" up`} disabled=${oi === 0} onClick=${() => moveOption(oi, oi - 1)}>↑</button>
+                  <button type="button" class="btn small ghost" aria-label=${`Move option "${opt}" down`} disabled=${oi === field.options.length - 1} onClick=${() => moveOption(oi, oi + 1)}>↓</button>
+                </span>
+                <button type="button" class="btn small ghost" aria-label=${`Remove option "${opt}"`} onClick=${() => removeOption(oi)}>✕</button>
+              `}
+            </div>
+          `)}
+          ${readOnly ? null : html`<button type="button" class="btn small ghost defn-add-option" onClick=${addOption}>+ Add option</button>`}
+          <label class="field-label defn-field-multiple">
+            <input type="checkbox" checked=${field.multiple === true} disabled=${readOnly} onChange=${(e) => {
+              const next = { ...field }
+              if (e.currentTarget.checked) next.multiple = true
+              else delete next.multiple
+              onChange(next)
+            }} />
+            multiple
+          </label>
+          <label class="field-label">
+            Default
+            <select class="wizard-input defn-field-default" value=${field.default ?? ''} disabled=${readOnly} onChange=${(e) => {
+              const next = { ...field }
+              if (e.currentTarget.value === '') delete next.default
+              else next.default = e.currentTarget.value
+              onChange(next)
+            }}>
+              <option value="">None</option>
+              ${(field.options ?? []).filter((o) => o !== '').map((o) => html`<option key=${o} value=${o}>${o}</option>`)}
+            </select>
+          </label>
+        </div>
+      ` : null}
     </div>
   `
 }

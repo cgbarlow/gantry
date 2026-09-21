@@ -1659,6 +1659,11 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-gate-checks { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; }
 .defn-gate-checks label { display: flex; align-items: center; gap: 4px; }
 
+/* select field options (#86) */
+.defn-options-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+.defn-option-row { display: flex; align-items: center; gap: 6px; }
+.defn-option-row .wizard-input { flex: 1; }
+
 /* Drag and drop */
 .defn-drag-handle { cursor: grab; user-select: none; padding: 2px 6px; font-size: 14px; color: var(--text-muted); border: var(--hairline) solid transparent; border-radius: var(--radius); }
 .defn-drag-handle:active { cursor: grabbing; }
@@ -1882,8 +1887,13 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 }
 .local-def-element-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .local-def-element-header input.wizard-input { flex: 1 1 160px; }
-.local-def-field-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: 16px; }
+.local-def-field-block { margin-left: 16px; }
+.local-def-field-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .local-def-field-row input.wizard-input { flex: 1 1 140px; }
+/* select field options (#86) */
+.local-def-options { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 6px 0 6px 16px; }
+.local-def-option-row { display: flex; align-items: center; gap: 6px; width: 100%; }
+.local-def-option-row input.wizard-input { flex: 1 1 140px; }
 .local-def-template { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .local-def-template-source { font: 13px/1.5 var(--font-mono); min-height: 160px; }
 .local-def-validation { margin: 20px 0; }
