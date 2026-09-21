@@ -115,6 +115,7 @@ export function renderDefinitionYaml(structure) {
   })
   obj.artefacts = (structure.artefacts ?? []).map((a) => {
     const entry = { id: a.id, title: a.title, purpose: a.purpose, template: a.template, gate: a.gate, requires: a.requires ?? [] }
+    if (a.filename !== undefined) entry.filename = a.filename
     if (a.copiedFrom !== undefined) entry['copied-from'] = a.copiedFrom
     return entry
   })
@@ -287,7 +288,7 @@ export async function readLocalDefinitionStructure(handle, definitionId, version
     artefacts: (raw.artefacts ?? []).map((a) =>
       withOptional(
         { id: a.id, title: a.title, purpose: a.purpose, template: a.template, gate: a.gate, requires: a.requires ?? [] },
-        { copiedFrom: a['copied-from'] }
+        { filename: a.filename, copiedFrom: a['copied-from'] }
       )
     ),
     modules,

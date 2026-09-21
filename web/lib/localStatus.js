@@ -33,6 +33,7 @@
 
 import { readTextFile } from './localWorkspace.js'
 import { parseLocalModuleFile } from './localInstanceFiles.js'
+import { isMultiValuedField } from './fieldShape.js'
 
 // ---------------------------------------------------------------------------
 // definition/module lookup — the projection's `modules` is a plain array;
@@ -369,6 +370,51 @@ export function formatLocalGateOutstanding(checkResult) {
 // than assuming that invariant everywhere it's used.
 // ---------------------------------------------------------------------------
 
+// Verbatim port of lib/definition.js's artefactRequiresField (ADR-0045 §4).
+function artefactRequiresLocalField(artefact, moduleId, fieldId) {
+  return (artefact.requires ?? []).some((requirement) => {
+    const split = splitLocalArtefactRequirement(requirement)
+    return split.moduleId === moduleId && (!split.fieldId || split.fieldId === fieldId)
+  })
+}
+
+// Verbatim port of lib/definition.js's filenamePatternProblems — see that file for the full
+// rationale (ADR-0045). `findField(moduleId, fieldId)` resolves a token against this
+// structure's own `modulesById`, built by the caller the same way `moduleMap` already does.
+function filenamePatternProblems(artefact, findField) {
+  if (typeof artefact.filename !== 'string' || artefact.filename.trim() === '') return []
+  const problems = []
+  for (const match of artefact.filename.matchAll(/\{([^{}]+)\}/g)) {
+    const token = match[1].trim()
+    if (token === 'today' || token === 'instance.name' || token === 'instance.slug') continue
+    const dot = token.indexOf('.')
+    const moduleId = dot === -1 ? null : token.slice(0, dot)
+    const fieldId = dot === -1 ? null : token.slice(dot + 1)
+    const field = moduleId ? findField(moduleId, fieldId) : undefined
+    if (!field) {
+      problems.push({
+        type: 'filename-unknown-token',
+        message: `Artefact "${artefact.id}" filename: references "{${token}}", which is not a field or a built-in ({instance.name}, {instance.slug}, {today})`,
+      })
+      continue
+    }
+    if (!['select', 'text', 'date'].includes(field.type) || isMultiValuedField(field)) {
+      problems.push({
+        type: 'filename-invalid-field-type',
+        message: `Artefact "${artefact.id}" filename: references "{${token}}", but field "${fieldId}" is type "${field.type}"${isMultiValuedField(field) ? ' with multiple: true' : ''} — only single-valued select, text and date fields can name a rendered document`,
+      })
+      continue
+    }
+    if (!artefactRequiresLocalField(artefact, moduleId, fieldId)) {
+      problems.push({
+        type: 'filename-field-not-required',
+        message: `Artefact "${artefact.id}" filename: references "{${token}}", but "${moduleId}.${fieldId}" is not in this artefact's own "requires" list`,
+      })
+    }
+  }
+  return problems
+}
+
 /**
  * Client-side port of `lib/definition.js`'s `findDefinitionProblems`, over an
  * already-loaded definition version projection (`structure`) instead of
@@ -449,6 +495,11 @@ export function findLocalDefinitionProblems(structure) {
         })
       }
     }
+  }
+
+  const findFilenameField = (moduleId, fieldId) => modulesById.get(moduleId)?.fields?.find((field) => field.id === fieldId)
+  for (const artefact of artefacts) {
+    problems.push(...filenamePatternProblems(artefact, findFilenameField))
   }
 
   return problems
