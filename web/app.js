@@ -12,8 +12,19 @@ import { keymap } from '@codemirror/view'
 import { indentWithTab, undo, redo, undoDepth, redoDepth, isolateHistory } from '@codemirror/commands'
 import { syntaxTree } from '@codemirror/language'
 import { markdown } from '@codemirror/lang-markdown'
-import { promptContext, promptOpen, resolvePromptWith, migrateGlobalPatToWorkspaces } from './lib/credential.js'
-import { apiFetch, apiFetchForInstance, apiFetchForInstanceRef, cachedScopeForSlug } from './lib/apiFetch.js'
+import {
+  promptContext,
+  promptOpen,
+  resolvePromptWith,
+  migrateGlobalPatToWorkspaces,
+  hasPatForWorkspace,
+  hasConfirmedWriteAccess,
+  hasCheckedWriteAccess,
+  credentialStatusForWorkspace,
+  requestPat,
+} from './lib/credential.js'
+import { apiFetch, apiFetchForInstance, apiFetchForInstanceRef, cachedScopeForSlug, cachedWorkspaceIdForSlug } from './lib/apiFetch.js'
+import { ensureWriteAccessChecked } from './lib/writeAccess.js'
 import { renderMarkdown } from './lib/markdown.js'
 import { Dropdown } from './lib/dropdown.js'
 import { apply as applyMarkdownCommand, HEADING_LEVELS, findTable, diffRange } from './lib/markdownCommands.js'
@@ -894,6 +905,86 @@ effect(() => {
 // An archived instance is read-only in every view (#374 — this replaced the retired read-only Rendered view). Genuinely read-only, not just visually hidden: `EditorState.readOnly` rejects direct-edit transactions and `EditorView.editable` drops `contenteditable` (and with it every Visual grid cell and table handle), so neither typing nor paste nor drag-drop can land a change.
 const isArchived = () => !!instanceData.value?.archived
 
+// #126 (parent #109, docs/adr/0047): the currently-viewed instance's own workspace id, or `null` for a
+// local instance — `web/lib/apiFetch.js`'s `cachedWorkspaceIdForSlug` reading off the same cache entry
+// `apiFetchForInstance` already warmed loading this instance's data, so this never triggers a request
+// of its own.
+const currentWorkspaceId = () => cachedWorkspaceIdForSlug(currentSlug.value)
+
+// #126: "shared" (`instanceData.value.shared`, set by lib/server.js's own `GET /api/instance` — this
+// workspace has a `GANTRY_SHARED_WORKSPACE_PATS` entry, i.e. it can be browsed with no credential at
+// all) is what tells an unshared workspace apart from the case this ticket exists for. An unshared
+// workspace's reads already 401-and-prompt (`apiFetch`'s existing `requestPat` flow) before any
+// instance data — and with it any editing affordance — ever renders, so by the time this function
+// could even be asked, an unshared instance always already holds a credential; gating on
+// `isSharedInstance()` (rather than gating unconditionally on write-access confirmation) is what keeps
+// that pre-existing flow's behaviour genuinely untouched, per #126's own explicit "unshared is
+// unaffected" requirement.
+const isSharedInstance = () => !!instanceData.value?.shared
+
+// #126: the single answer every editing affordance below gates on. `false` (never blocked) for a
+// local instance or an unshared one — see `isSharedInstance` above for why. For a shared instance,
+// blocked whenever this workspace's stored credential (if any) has not been *confirmed* to write here
+// — no credential at all and "checked, and it's read-only" collapse to the same UI state on purpose
+// (both get `writeAccessBlockedReason`'s "Add credential" action below); only a rejected credential
+// gets its own distinct wording, from the pre-existing `credentialStatusForWorkspace`.
+function isWriteAccessBlocked() {
+  if (!isSharedInstance()) return false
+  return !hasConfirmedWriteAccess(currentWorkspaceId())
+}
+
+// The union this file's editing affordances actually gate on: archived (unconditional, every
+// workspace) or, for a shared workspace, write access not yet confirmed for whatever credential (if
+// any) is currently stored. `isArchived()` itself is untouched and keeps meaning exactly "this
+// instance is archived" wherever this file still reads it directly (the archived banner's own text).
+const isEditingBlocked = () => isArchived() || isWriteAccessBlocked()
+
+// #126: the stated reason + action pairing every gated control's "why is this off, and what do I do
+// about it" reads from — `null` while editing isn't blocked at all (including "blocked because
+// archived", which already has its own banner and needs no second explanation here).
+function writeAccessBlockedReason() {
+  if (isArchived() || !isWriteAccessBlocked()) return null
+  const workspaceId = currentWorkspaceId()
+  if (credentialStatusForWorkspace(workspaceId) === 'rejected') {
+    return { reason: 'rejected', message: 'This credential was rejected — add a working one to edit.' }
+  }
+  if (hasPatForWorkspace(workspaceId)) {
+    return { reason: 'read-only', message: "This credential can read but can't write here — add one with write access to edit." }
+  }
+  return { reason: 'no-credential', message: 'Browsing without a credential — add one with write access to edit.' }
+}
+
+// #126: runs once per credential (web/lib/writeAccess.js's own in-flight/already-checked guards make
+// this cheap to call from every render of a shared instance's editor) — the "when a credential is
+// entered for a shared workspace, run this check ONCE" trigger, covering both a credential entered
+// just now via `<${AddCredentialAction}>` below and one this browser already held for this workspace
+// from an earlier visit that was simply never asked about yet.
+effect(() => {
+  const shared = instanceData.value?.shared
+  const slug = currentSlug.value
+  if (!shared || !slug) return
+  const workspaceId = cachedWorkspaceIdForSlug(slug)
+  if (!workspaceId) return
+  // Explicit, synchronous signal reads (rather than leaving this effect's dependency tracking to
+  // whatever `ensureWriteAccessChecked` itself happens to read before its first `await`) — this is
+  // what makes the effect re-run, and so re-trigger the check, the moment a credential is entered or
+  // changed for this workspace (`setPatForWorkspace`'s own `patsByWorkspace` signal write) rather than
+  // only when `instanceData`/`currentSlug` themselves change.
+  if (!hasPatForWorkspace(workspaceId)) return
+  if (hasCheckedWriteAccess(workspaceId)) return
+  ensureWriteAccessChecked(workspaceId)
+})
+
+// The "Add credential" action every gated control's reason pairs with (#126's own acceptance
+// criterion) — opens the same shared PAT-prompt modal `apiFetch`'s own 401 handling uses
+// (`requestPat`), so submitting here goes through the identical storage path as entering one in
+// response to a failed request. A granted submission's write-access check follows from the effect
+// above (`instanceData.value.shared` + the now-stored credential), not from anything this button does
+// directly — it only has to get a credential stored.
+function AddCredentialAction() {
+  return html`<button type="button" class="btn small" onClick=${() => requestPat(currentWorkspaceId())}>Add credential</button>`
+}
+
 function editableExtension(readOnly) {
   return [EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]
 }
@@ -1547,7 +1638,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
   // flag, refreshed from every selection/doc update below.
   const [inTable, setInTable] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
-  const readOnly = isArchived()
+  const readOnly = isEditingBlocked()
 
   useEffect(() => {
     const editableCompartment = new Compartment()
@@ -1564,7 +1655,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
         markdownToolbarKeymap,
         basicSetup,
         markdown(),
-        editableCompartment.of(editableExtension(isArchived())),
+        editableCompartment.of(editableExtension(isEditingBlocked())),
         wrapCompartment.of(wrap.value ? EditorView.lineWrapping : []),
         visualCompartment.of(viewMode.value === 'visual' ? visualLayer() : []),
         EditorView.updateListener.of((update) => {
@@ -1605,7 +1696,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
             markdownToolbarKeymap,
             basicSetup,
             markdown(),
-            splitEditableCompartment.of(editableExtension(isArchived())),
+            splitEditableCompartment.of(editableExtension(isEditingBlocked())),
             visualLayer(),
           ],
         }),
@@ -1646,11 +1737,14 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
       }
     })
 
-    // Archiving (or restoring) an instance while it is open flips read-only live.
+    // Archiving (or restoring) an instance while it is open flips read-only live — and so, per #126,
+    // does a write-access check resolving (in either direction) for a shared instance's stored
+    // credential: `isEditingBlocked()` reads `instanceData`/credential/write-access signals, so this
+    // effect re-runs and reconfigures the editor the moment any of them changes, with no reload.
     const stopEditableSync = effect(() => {
-      const archived = isArchived()
-      view.dispatch({ effects: editableCompartment.reconfigure(editableExtension(archived)) })
-      splitViewRef.current?.dispatch({ effects: splitEditableCompartment.reconfigure(editableExtension(archived)) })
+      const blocked = isEditingBlocked()
+      view.dispatch({ effects: editableCompartment.reconfigure(editableExtension(blocked)) })
+      splitViewRef.current?.dispatch({ effects: splitEditableCompartment.reconfigure(editableExtension(blocked)) })
     })
 
     const stopWrapSync = effect(() => {
@@ -1889,7 +1983,7 @@ function SingleSelectField({ field, moduleId, onRegister }) {
         : html`<label>${field.title}${field.required ? ' *' : ''}</label>`}
       ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
       <select
-        disabled=${isArchived()}
+        disabled=${isEditingBlocked()}
         value=${valueRef.current}
         onChange=${(e) => {
           valueRef.current = e.currentTarget.value
@@ -1955,7 +2049,7 @@ function MultiSelectField({ field, moduleId, onRegister }) {
             <label class="select-checkbox-row ${isOffList ? 'field-select-offlist' : ''}" key=${option}>
               <input
                 type="checkbox"
-                disabled=${isArchived()}
+                disabled=${isEditingBlocked()}
                 checked=${valuesRef.current.includes(option)}
                 onChange=${(e) => toggle(option, e.currentTarget.checked)}
               />
@@ -2001,7 +2095,7 @@ function TextField({ field, moduleId, onRegister }) {
       ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
       <input
         type="text"
-        disabled=${isArchived()}
+        disabled=${isEditingBlocked()}
         value=${valueRef.current}
         onInput=${(e) => {
           valueRef.current = e.currentTarget.value
@@ -2044,7 +2138,7 @@ function DateField({ field, moduleId, onRegister }) {
       ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
       <input
         type="date"
-        disabled=${isArchived()}
+        disabled=${isEditingBlocked()}
         value=${valueRef.current}
         onInput=${(e) => {
           valueRef.current = e.currentTarget.value
@@ -2108,22 +2202,22 @@ function ListField({ field, moduleId, onRegister, onRemove, onRequestSection, on
               <textarea
                 rows="1"
                 value=${value}
-                readOnly=${isArchived()}
+                readOnly=${isEditingBlocked()}
                 ref=${autosizeTextarea}
                 onInput=${(e) => {
                   autosizeTextarea(e.currentTarget)
                   updateRow(i, e.currentTarget.value)
                 }}
               ></textarea>
-              ${!isArchived()
+              ${!isEditingBlocked()
                 ? html`<button type="button" class="btn small" onClick=${() => removeRow(i)}>Remove</button>`
                 : null}
             </div>
           `
         )}
       </div>
-      ${!isArchived() ? html`<button type="button" class="btn small" onClick=${addRow}>Add</button>` : null}
-      ${!isArchived()
+      ${!isEditingBlocked() ? html`<button type="button" class="btn small" onClick=${addRow}>Add</button>` : null}
+      ${!isEditingBlocked()
         ? html`
             <div class="insert-bar">
               <${InsertDropdown}
@@ -3373,6 +3467,7 @@ function SyncedFieldsPanel({ instance }) {
                       type="text"
                       placeholder=${`${instance.slug} — ${instance.stage.title}`}
                       value=${titleDraft ?? data.title}
+                      disabled=${isEditingBlocked()}
                       onInput=${(e) => setTitleDraft(e.currentTarget.value)}
                       onBlur=${commitTitle}
                       onKeyDown=${(e) => e.key === 'Enter' && e.currentTarget.blur()}
@@ -3395,6 +3490,7 @@ function SyncedFieldsPanel({ instance }) {
                     <label class="field-label" for="synced-assignee">Assignee${data.assigneeInherited ? '' : ' · overridden'}</label>
                     <${IdentityPicker}
                       value=${assigneeDraft ?? data.assignee}
+                      disabled=${isEditingBlocked()}
                       onChange=${(uniqueName) => {
                         setAssigneeDraft(uniqueName)
                         // Commit immediately on select (no blur-based commit needed — the picker's selection is already definitive)
@@ -3428,7 +3524,7 @@ function SyncedFieldsPanel({ instance }) {
                 <div class="review-signoff-header">
                   <span class="field-label">Reviews</span>
                   ${isCurrentStage
-                    ? html`<button type="button" class="btn small" onClick=${openReviewDialog}>Request Review</button>`
+                    ? html`<button type="button" class="btn small" disabled=${isEditingBlocked()} onClick=${openReviewDialog}>Request Review</button>`
                     : null}
                 </div>
                 ${!instance.reviews?.length
@@ -3460,7 +3556,7 @@ function SyncedFieldsPanel({ instance }) {
                 <div class="review-signoff-header">
                   <span class="field-label">Sign-off</span>
                   ${!openPullRequestId && isCurrentStage
-                    ? html`<button type="button" class="btn small" onClick=${afterUnsavedCheck(handleCheckAndMaybeRequestSignoff)}>Request Sign-off</button>`
+                    ? html`<button type="button" class="btn small" disabled=${isEditingBlocked()} onClick=${afterUnsavedCheck(handleCheckAndMaybeRequestSignoff)}>Request Sign-off</button>`
                     : null}
                 </div>
                 ${openPullRequestId
@@ -3819,7 +3915,7 @@ function ReopenStagePanel({ instance }) {
   const viewedIdx = instance.stages.findIndex((s) => s.id === instance.stage.id)
   const currentIdx = instance.stages.findIndex((s) => s.id === instance.currentStageId)
   const isCompleted = viewedIdx !== -1 && currentIdx !== -1 && viewedIdx < currentIdx
-  const show = instance.workspaceBacked && isCompleted && !isArchived()
+  const show = instance.workspaceBacked && isCompleted && !isEditingBlocked()
   const [confirming, setConfirming] = useState(false)
   const [status, setStatus] = useState('')
   const [loading, setLoading] = useState(false)
@@ -3949,7 +4045,7 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
         ? html`<${SyncedFieldsPanel} key=${instance.workItem ? 'linked' : 'unlinked'} instance=${instance} />`
         : null}
       ${modules.length > 0
-        ? html`<div class="insert-bar top-insert-bar" data-testid="top-insert" hidden=${isArchived()}>
+        ? html`<div class="insert-bar top-insert-bar" data-testid="top-insert" hidden=${isEditingBlocked()}>
             <${InsertDropdown} onSection=${() => setTopSectionOpen(true)} onList=${() => setTopListOpen(true)} />
           </div>`
         : null}
@@ -4066,7 +4162,7 @@ function ViewModeToolbar({
   return html`
     <div class="toolbar">
       <div class="toolbar-left">
-        ${!isArchived() ? html`<${StageSaveButton} />` : null}
+        ${!isEditingBlocked() ? html`<${StageSaveButton} />` : null}
         <div class="toolbar-field">
           <span>Mode</span>
           <${Dropdown}
@@ -4562,7 +4658,7 @@ function ModuleEditorPage({ slug: routeRef }) {
     refreshDirty()
     const inst = instanceData.peek()
     const { dirtyModuleIds, phase } = stageSave.peek()
-    if (!inst?.stage || isArchived() || phase === 'saving') return false
+    if (!inst?.stage || isEditingBlocked() || phase === 'saving') return false
     if (dirtyModuleIds.length === 0) return true
     const key = stageKey(inst)
     const payloads = Object.fromEntries(
@@ -4858,10 +4954,16 @@ function ModuleEditorPage({ slug: routeRef }) {
           to make changes.
         </div>`
       : null}
+    ${!instance.archived && writeAccessBlockedReason()
+      ? html`<div class="archived-banner write-access-banner" data-testid="write-access-banner">
+          ${writeAccessBlockedReason().message}
+          <${AddCredentialAction} />
+        </div>`
+      : null}
     ${showStageSyncBanner
       ? html`<div class="archived-banner stage-sync-banner" role="status" data-testid="stage-sync-banner">
           This stage's working branch is behind main on ${stageSync.behindFiles.length} file(s). Sync to pull the latest.
-          <button type="button" class="btn small" disabled=${syncing} onClick=${handleSyncFromMain} data-testid="sync-from-main">
+          <button type="button" class="btn small" disabled=${syncing || isEditingBlocked()} onClick=${handleSyncFromMain} data-testid="sync-from-main">
             ${syncing ? 'Syncing…' : 'Sync from main'}
           </button>
           ${syncStatus ? html`<span class="save-status">${syncStatus}</span>` : null}

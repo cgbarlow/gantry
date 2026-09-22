@@ -36,6 +36,16 @@ const LEGACY_GLOBAL_PAT_STORAGE_KEY = 'gantry:ado-pat'
 // own credential, never a "default", so there's nothing to migrate about the shape itself.
 const PATS_STORAGE_KEY = 'gantry:ado-pat-overrides'
 const REJECTED_CREDENTIALS_STORAGE_KEY = 'gantry:ado-pat-rejected'
+// #126 (parent #109, docs/adr/0047): whether a workspace's *currently stored* credential has been
+// confirmed to have write access — a third piece of per-workspace state, genuinely different from
+// both `PATS_STORAGE_KEY` ("is a credential stored") and `REJECTED_CREDENTIALS_STORAGE_KEY` ("did the
+// Provider reject it"). A credential can be present, accepted, and still read-only — exactly the case
+// this ticket exists to make the UI honest about instead of inferring "has a credential" means "may
+// edit". Keyed by workspace id, value `true`/`false` (never stores "unknown" — an absent entry already
+// means that); an entry is only ever written by `setWriteAccessForWorkspace` (server.js's `GET
+// /api/workspaces/:id/write-access` is the sole real caller, via web/lib/writeAccess.js), which a
+// caller runs once per credential and never re-derives itself.
+const WRITE_ACCESS_STORAGE_KEY = 'gantry:write-access'
 
 // `localStorage` can throw on access rather than just being absent — e.g. storage blocked by browser privacy settings, or a sandboxed iframe with no `allow-same-origin`. Mirrors web/lib/theme.js's own guarded access, for the same reason: a throw here must never take down the rest of the app.
 function safeGetItem(key) {
@@ -106,12 +116,38 @@ function persistRejectedCredentials(map) {
   safeSetItem(REJECTED_CREDENTIALS_STORAGE_KEY, JSON.stringify(map))
 }
 
+// Tolerates anything unreadable the same way readStoredPats/readStoredRejectedCredentials do, and
+// (like readStoredRejectedCredentials) drops any entry whose value isn't a real boolean — storage
+// written by a future version of this module, or hand-edited, must not resolve as a confirmed answer
+// either way.
+function readStoredWriteAccess() {
+  const raw = safeGetItem(WRITE_ACCESS_STORAGE_KEY)
+  if (!raw) return {}
+  let parsed
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return {}
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+  return Object.fromEntries(Object.entries(parsed).filter(([, canWrite]) => typeof canWrite === 'boolean'))
+}
+
+function persistWriteAccess(map) {
+  if (Object.keys(map).length === 0) {
+    safeRemoveItem(WRITE_ACCESS_STORAGE_KEY)
+    return
+  }
+  safeSetItem(WRITE_ACCESS_STORAGE_KEY, JSON.stringify(map))
+}
+
 // PATs keyed by workspace id — `{}` when nothing is stored at all. Never seeded from the legacy
 // global-default key here; that only ever happens through `migrateGlobalPatToWorkspaces`, called
 // explicitly and exactly once by web/app.js at startup, not as an import-time side effect (so this
 // module stays a plain, network-free, deterministic seam for direct unit-testing).
 const patsByWorkspace = signal(readStoredPats())
 const rejectedCredentialSlots = signal(readStoredRejectedCredentials())
+const writeAccessByWorkspace = signal(readStoredWriteAccess())
 
 // A stored workspace credential is either a plain PAT string (every provider except Atlassian) or a
 // `{bitbucket, jira}` object (Atlassian, #40/ADR-0042). Readers/writers below tell the two apart by
@@ -173,12 +209,14 @@ export function setPatForWorkspace(workspaceId, value, product) {
     const next = { ...patsByWorkspace.value, [workspaceId]: { ...currentTokens, [product]: trimmed } }
     patsByWorkspace.value = next
     clearCredentialRejection(workspaceId)
+    clearWriteAccessForWorkspace(workspaceId)
     persistPats(next)
     return
   }
   const next = { ...patsByWorkspace.value, [workspaceId]: trimmed }
   patsByWorkspace.value = next
   clearCredentialRejection(workspaceId)
+  clearWriteAccessForWorkspace(workspaceId)
   persistPats(next)
 }
 
@@ -205,6 +243,7 @@ export function clearPatForWorkspace(workspaceId, product) {
     }
     patsByWorkspace.value = next
     clearCredentialRejection(workspaceId)
+    clearWriteAccessForWorkspace(workspaceId)
     persistPats(next)
     return
   }
@@ -212,6 +251,7 @@ export function clearPatForWorkspace(workspaceId, product) {
   delete next[workspaceId]
   patsByWorkspace.value = next
   clearCredentialRejection(workspaceId)
+  clearWriteAccessForWorkspace(workspaceId)
   persistPats(next)
 }
 
@@ -223,11 +263,27 @@ function clearCredentialRejection(workspaceId) {
   persistRejectedCredentials(next)
 }
 
+// #126: a stored write-access answer is only ever meaningful for the *credential it was checked
+// against* — the moment that credential changes (a new one set) or goes away (cleared, or the
+// Provider rejects it), any prior "confirmed write" or "confirmed read-only" is stale and must not
+// keep gating the interface. Every place below that changes what credential is stored for a workspace
+// clears this too, so the very next render sees "not yet checked" rather than a leftover answer for a
+// PAT that's no longer the one in use — `web/lib/writeAccess.js`'s `ensureWriteAccessChecked` then
+// re-runs the check for whatever credential (if any) is there now.
+function clearWriteAccessForWorkspace(workspaceId) {
+  if (!Object.hasOwn(writeAccessByWorkspace.value, workspaceId)) return
+  const next = { ...writeAccessByWorkspace.value }
+  delete next[workspaceId]
+  writeAccessByWorkspace.value = next
+  persistWriteAccess(next)
+}
+
 export function markCredentialRejected(workspaceId) {
   if (!workspaceId) return
   const next = { ...rejectedCredentialSlots.value, [workspaceId]: true }
   rejectedCredentialSlots.value = next
   persistRejectedCredentials(next)
+  clearWriteAccessForWorkspace(workspaceId)
 }
 
 /**
@@ -253,6 +309,44 @@ export function credentialStatusForWorkspace(workspaceId, provider) {
   }
   if (!patForWorkspace(workspaceId)) return 'missing'
   return rejectedCredentialSlots.value[workspaceId] ? 'rejected' : 'set'
+}
+
+/**
+ * #126: whether `workspaceId`'s *currently stored* credential has already been asked "can you write
+ * here" (`web/lib/writeAccess.js`'s `ensureWriteAccessChecked`, the sole real writer of this state) —
+ * `false` for a falsy `workspaceId` or one with no entry yet, matching every other reader in this
+ * module. Distinct from `hasConfirmedWriteAccess` below: this only says whether an answer exists at
+ * all, not what it was — a caller deciding whether to *run* the check wants this one; a caller
+ * deciding whether to *enable editing* wants the other.
+ */
+export function hasCheckedWriteAccess(workspaceId) {
+  if (!workspaceId) return false
+  return Object.hasOwn(writeAccessByWorkspace.value, workspaceId)
+}
+
+/**
+ * #126: whether `workspaceId`'s currently stored credential has been confirmed to have write access —
+ * `false` (never `true`) for a falsy `workspaceId`, an unchecked workspace, or one whose check came
+ * back read-only. This is the one function every editing-affordance gate in the web app reads;
+ * `hasCheckedWriteAccess` above is for the checker itself to decide whether there's anything left to
+ * do.
+ */
+export function hasConfirmedWriteAccess(workspaceId) {
+  if (!workspaceId) return false
+  return writeAccessByWorkspace.value[workspaceId] === true
+}
+
+/**
+ * Records the answer to #126's write-access check for `workspaceId`'s *currently stored* credential —
+ * called exactly once per credential by `web/lib/writeAccess.js`'s `ensureWriteAccessChecked` (the
+ * only real caller), never re-derived here. A no-op for a falsy `workspaceId`, matching every other
+ * writer in this module.
+ */
+export function setWriteAccessForWorkspace(workspaceId, canWrite) {
+  if (!workspaceId) return
+  const next = { ...writeAccessByWorkspace.value, [workspaceId]: Boolean(canWrite) }
+  writeAccessByWorkspace.value = next
+  persistWriteAccess(next)
 }
 
 /**

@@ -9,13 +9,65 @@ import {
   credentialStatusForWorkspace,
   setPatForWorkspace,
   clearPatForWorkspace,
+  hasConfirmedWriteAccess,
+  requestPat,
 } from '../lib/credential.js'
 import { advancedMode, setAdvancedMode } from '../lib/advancedMode.js'
 import { copyTextToClipboard } from '../lib/clipboard.js'
 import { renderEngine, setRenderEngine } from '../lib/renderEngine.js'
 import { pandocWasmState } from '../lib/pandocWasm.js'
-import { apiFetch, apiFetchForInstance } from '../lib/apiFetch.js'
+import { apiFetch, apiFetchForInstance, cachedWorkspaceIdForSlug } from '../lib/apiFetch.js'
+import { ensureWriteAccessChecked } from '../lib/writeAccess.js'
 import { IdentityPicker } from '../lib/identityPicker.js'
+
+// #126 (parent #109, docs/adr/0047): the Settings-screen twin of web/app.js's own
+// `isWriteAccessBlocked`/`writeAccessBlockedReason` — same rule (a shared instance's write-affecting
+// controls stay off until its stored credential is confirmed to write there), applied to this file's
+// own write-affecting controls (assignee, required reviewer) instead of the module editor's. Kept as
+// its own small pair here rather than importing app.js's (which also close over app.js's own
+// `instanceData`/`currentSlug` module signals, not this file's per-screen `instance`/`slug` state) —
+// both read the exact same three pieces of state (`instance.shared`, `hasConfirmedWriteAccess`,
+// `credentialStatusForWorkspace`), just sourced from this screen's own props instead.
+function writeAccessBlocked(instance, workspaceId) {
+  if (!instance?.shared) return false
+  return !hasConfirmedWriteAccess(workspaceId)
+}
+
+function writeAccessReason(instance, workspaceId) {
+  if (!writeAccessBlocked(instance, workspaceId)) return null
+  if (credentialStatusForWorkspace(workspaceId) === 'rejected') {
+    return 'This credential was rejected — add a working one to edit.'
+  }
+  if (hasPatForWorkspace(workspaceId)) {
+    return "This credential can read but can't write here — add one with write access to edit."
+  }
+  return 'Browsing without a credential — add one with write access to edit.'
+}
+
+// The same "run once per credential" trigger as web/app.js's own module-editor effect, scoped to
+// whichever instance a Settings screen is currently showing.
+// Deliberately no dependency array: this must re-run after *every* render of the calling screen, not
+// only when `instance`/`workspaceId` themselves change — otherwise entering a credential via
+// `<${WriteAccessBanner}>`'s "Add credential" action (which changes `patsByWorkspace`, not `instance`
+// or `workspaceId`) would leave this effect never re-firing, and so editing would stay off until the
+// screen was left and re-entered — exactly the reload #126's own acceptance criteria rule out.
+// `ensureWriteAccessChecked`'s own internal guards (already-checked, already-in-flight) are what keep
+// a call on every render cheap.
+function useWriteAccessCheck(instance, workspaceId) {
+  useEffect(() => {
+    if (!instance?.shared || !workspaceId) return
+    ensureWriteAccessChecked(workspaceId)
+  })
+}
+
+function WriteAccessBanner({ instance, workspaceId }) {
+  const reason = writeAccessReason(instance, workspaceId)
+  if (!reason) return null
+  return html`<div class="archived-banner write-access-banner" data-testid="write-access-banner">
+    ${reason}
+    <button type="button" class="btn small" onClick=${() => requestPat(workspaceId)}>Add credential</button>
+  </div>`
+}
 // #303 — the local-workspace-aware branches of Workspace/Instance Settings
 // below (ADR-0029, WI #293/A2's client-side registry). Aliased to `Local`
 // names for the same reason web/app.js's own local-instance wiring does:
@@ -1189,7 +1241,7 @@ async function saveRequiredReviewer(slug, requiredReviewer) {
 // The instance's own stored Assignee — editable here, distinct from a
 // module's own frontmatter `owner` (the Design Authority sign-off
 // convention, untouched by this screen).
-function AssigneeSection({ slug, assignee }) {
+function AssigneeSection({ slug, assignee, disabled = false }) {
   const [draft, setDraft] = useState(assignee ?? '')
   const [status, setStatus] = useState('')
   const savingRef = useRef(false)
@@ -1223,6 +1275,7 @@ function AssigneeSection({ slug, assignee }) {
       <div class="workspace-field-row">
         <${IdentityPicker}
           value=${draft}
+          disabled=${disabled}
           onChange=${(uniqueName) => {
             setDraft(uniqueName)
             latestDraftRef.current = uniqueName
@@ -1232,7 +1285,7 @@ function AssigneeSection({ slug, assignee }) {
           placeholder="Unassigned"
           slug=${slug}
         />
-        <button type="button" class="btn small" onClick=${handleSave}>Save</button>
+        <button type="button" class="btn small" disabled=${disabled} onClick=${handleSave}>Save</button>
       </div>
       <div class="workspace-field-status">${status}</div>
     </section>
@@ -1245,7 +1298,7 @@ function AssigneeSection({ slug, assignee }) {
 // by emptying the field. The effective reviewer is resolved at PR-open time
 // in lib/stageApproval.js, so a stale or blank value here is caught then
 // with a clear error message, not silently ignored.
-function RequiredReviewerSection({ slug, requiredReviewer }) {
+function RequiredReviewerSection({ slug, requiredReviewer, disabled = false }) {
   const [draft, setDraft] = useState(requiredReviewer ?? '')
   const [status, setStatus] = useState('')
   const savingRef = useRef(false)
@@ -1283,6 +1336,7 @@ function RequiredReviewerSection({ slug, requiredReviewer }) {
       <div class="workspace-field-row">
         <${IdentityPicker}
           value=${draft}
+          disabled=${disabled}
           onChange=${(uniqueName) => {
             setDraft(uniqueName)
             latestDraftRef.current = uniqueName
@@ -1292,7 +1346,7 @@ function RequiredReviewerSection({ slug, requiredReviewer }) {
           placeholder=${'Falls back to workspace Owner'}
           slug=${slug}
         />
-        <button type="button" class="btn small" onClick=${handleSave}>Save</button>
+        <button type="button" class="btn small" disabled=${disabled} onClick=${handleSave}>Save</button>
       </div>
       <div class="workspace-field-status">${status}</div>
     </section>
@@ -1584,6 +1638,14 @@ function RemoteInstanceSettingsPage({ query }) {
     }
   }, [slug])
 
+  // #126: this instance's own workspace id, warmed by the `fetchInstanceDetail` call above (it goes
+  // through `apiFetchForInstance`, same as web/app.js's module editor) \u2014 `null` for a local instance,
+  // for which `writeAccessBlocked`/`useWriteAccessCheck` are both already no-ops (`instance.shared` is
+  // always `false` there, see lib/server.js's own local-instance response).
+  const workspaceId = cachedWorkspaceIdForSlug(slug)
+  useWriteAccessCheck(instance, workspaceId)
+  const blocked = writeAccessBlocked(instance, workspaceId)
+
   return html`
     <${SettingsHeader} title="Instance Settings" backHref=${backHrefFrom(query)} />
     <main class="settings-page">
@@ -1592,8 +1654,9 @@ function RemoteInstanceSettingsPage({ query }) {
       ${state === 'error' ? html`<p class="load-error">Failed to load: ${error}</p>` : null}
       ${state === 'ready'
         ? html`
-            <${AssigneeSection} slug=${slug} assignee=${instance.assignee} />
-            <${RequiredReviewerSection} slug=${slug} requiredReviewer=${instance.requiredReviewer} />
+            <${WriteAccessBanner} instance=${instance} workspaceId=${workspaceId} />
+            <${AssigneeSection} slug=${slug} assignee=${instance.assignee} disabled=${blocked} />
+            <${RequiredReviewerSection} slug=${slug} requiredReviewer=${instance.requiredReviewer} disabled=${blocked} />
             <${InstanceInfoSection} instance=${instance} />
             <${WorkItemLinkSection} instance=${instance} />
             <${InstanceArchiveSection} slug=${slug} archived=${instance.archived} />
