@@ -1483,6 +1483,12 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .settings-radio input[disabled] { cursor: not-allowed; }
 .settings-radio .stamp { margin-left: 2px; }
 
+/* #117 — the running server's version, as a quiet footer line under the last section rather than a
+ * section of its own. Reuses `--text-muted`/`--font-mono`, the same secondary-text and
+ * identifier conventions every other incidental fact on these screens already uses. */
+.settings-version { color: var(--text-muted); font-size: 12px; }
+.settings-version .settings-version-number { font-family: var(--font-mono); }
+
 /*
  * ---------- Workspace Settings (#104, scoped to one workspace by #107) ----------
  * One `.workspace-row`: repo URL, then three `.workspace-field` blocks (owner, PAT override, ticketing-system override) — reuses `.wizard-input`/`.settings-radio-group`/`.stamp` wholesale rather than inventing parallel input/radio/badge styling. `.workspace-list` held one row per registered workspace under #104's old "list every workspace" tab; #107 narrows that same markup/CSS to exactly one row — the instance's own workspace — so `.workspace-list` here always wraps a single `.workspace-row`.
@@ -1503,6 +1509,20 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .workspace-field-row .wizard-input { flex: 1; }
 .workspace-pat-status, .workspace-ticketing-state { margin-bottom: 8px; }
 .workspace-field-status { margin-top: 6px; font-size: 12px; color: var(--text-muted); min-height: 1em; }
+
+/* #116 — the workspace's registry id (the key `GANTRY_BOOTSTRAP_PATS` / `GANTRY_WORKSPACE_PATS` are
+ * keyed by), sitting directly under the location it belongs to. Deliberately quieter than the
+ * editable fields beneath it — `--text-muted` + `--font-mono`, the same secondary-metadata pairing
+ * `.workspace-repo-url`, `.result-row .v` and `.settings-version` already use — because an id is
+ * configuration detail, not what the row is opened to see. `user-select: all` so one click selects
+ * the whole id, which is the fallback whenever the clipboard API isn't there (a plain-http server is
+ * not a secure context); the value is never hidden behind the Copy button. Only rendered for a remote
+ * workspace — a Local/server-directory one has no id (see settings.js's `workspaceCredentialMapId`). */
+.workspace-id { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-top: -6px; }
+.workspace-id-label { font-family: var(--font-display); font-weight: 600; font-size: 12px; color: var(--text-muted); }
+.workspace-id-value { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); word-break: break-all; user-select: all; }
+.workspace-id-status { font-size: 12px; color: var(--text-muted); }
+.workspace-id-hint { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--text-muted); }
 
 /*
  * ---------- Settings dropdown (#107) ----------

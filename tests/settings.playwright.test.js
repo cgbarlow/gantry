@@ -367,6 +367,107 @@ test('settings: Workspace Settings labels a GitLab workspace correctly and shows
   })
 })
 
+// ---------- Workspace id (#116) ----------
+// The id `GANTRY_BOOTSTRAP_PATS` (#113) and the MCP server's `GANTRY_WORKSPACE_PATS` (ADR-0043) are
+// keyed by. It was already in this screen's hands before #116 (the row's `data-workspace-id`, the PAT
+// storage key, the archive/restore calls) but never rendered, so the only browser route to it was
+// devtools — which is no use to the operator configuring a hosted deployment from a platform
+// dashboard, the exact person who needs it.
+//
+// `navigator.clipboard` is stubbed rather than granting Chromium clipboard permissions: it makes the
+// "no clipboard API at all" case (a non-secure context, i.e. any plain-http `gantry serve`) directly
+// reachable, which is the degradation path this ticket cares about, and keeps the success case an
+// assertion about what was actually written rather than about browser permission state.
+function stubClipboard(page) {
+  return page.addInitScript(() => {
+    window.__clipboardWrites = []
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text) => {
+          window.__clipboardWrites.push(text)
+        },
+      },
+    })
+  })
+}
+
+test('settings: Workspace Settings shows this workspace\'s id as selectable text, copyable in one click', async () => {
+  await withScratchServer(async (base, instancesDir) => {
+    const workspace = seedWorkspace(instancesDir)
+    registerInstance('remote-initiative', { kind: 'azureDevOps', workspaceId: workspace.id }, { instancesDir })
+
+    await withPage(async (page) => {
+      await stubClipboard(page)
+      await page.goto(`${base}/settings/workspace?slug=remote-initiative`)
+      const row = page.locator('.workspace-row')
+      await row.waitFor({ state: 'visible', timeout: 10_000 })
+
+      // Visible, readable text — not just an attribute only devtools can reach.
+      const value = row.locator('.workspace-id-value')
+      assert.ok(await value.isVisible())
+      assert.equal((await value.textContent()).trim(), workspace.id)
+
+      // …and it says what the id is for, naming both credential maps by their env-var names.
+      const hint = await row.locator('.workspace-id-hint').textContent()
+      assert.match(hint, /GANTRY_BOOTSTRAP_PATS/)
+      assert.match(hint, /GANTRY_WORKSPACE_PATS/)
+
+      await row.locator('.workspace-id').getByRole('button', { name: 'Copy' }).click()
+      await row.locator('.workspace-id-status:has-text("Copied.")').waitFor({ timeout: 5_000 })
+      assert.deepEqual(await page.evaluate(() => window.__clipboardWrites), [workspace.id])
+
+      // The id is configuration detail, not a credential: a PAT set for this very workspace is still
+      // nowhere in the rendered text of the screen.
+      await row.locator('.workspace-pat input[type=password]').fill('workspace-own-pat')
+      await row.getByRole('button', { name: 'Set PAT' }).click()
+      assert.match(await row.locator('.workspace-pat-status').textContent(), /SET/)
+      assert.doesNotMatch(await page.locator('.settings-page').textContent(), /workspace-own-pat/)
+    })(base)
+  })
+})
+
+test('settings: with no clipboard API available, the workspace id is still on screen and says how to copy it', async () => {
+  await withScratchServer(async (base, instancesDir) => {
+    const workspace = seedWorkspace(instancesDir)
+    registerInstance('remote-initiative', { kind: 'azureDevOps', workspaceId: workspace.id }, { instancesDir })
+
+    await withPage(async (page) => {
+      // A non-secure context: `navigator.clipboard` is absent entirely, not merely restricted.
+      await page.addInitScript(() => {
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
+      })
+      await page.goto(`${base}/settings/workspace?slug=remote-initiative`)
+      const row = page.locator('.workspace-row')
+      await row.waitFor({ state: 'visible', timeout: 10_000 })
+
+      await row.locator('.workspace-id').getByRole('button', { name: 'Copy' }).click()
+      // No thrown error (withPage would fail on one), no false "Copied." — and the id itself is
+      // untouched, still readable and selectable by hand.
+      await row.locator('.workspace-id-status:has-text("by hand")').waitFor({ timeout: 5_000 })
+      assert.doesNotMatch(await row.locator('.workspace-id-status').textContent(), /Copied\./)
+      assert.equal((await row.locator('.workspace-id-value').textContent()).trim(), workspace.id)
+    })(base)
+  })
+})
+
+test('settings: an instance with no remote workspace grows no empty or invented workspace id', async () => {
+  await withScratchServer(async (base, instancesDir) => {
+    // A Local / server-directory workspace has no registry record and needs no credential-map entry
+    // at all — so there must be no id field here to mislead whoever is writing that map.
+    createInstance('design', 'my-initiative', { instancesDir })
+
+    await withPage(async (page) => {
+      await page.goto(`${base}/settings/workspace?slug=my-initiative`)
+      await page.waitForSelector('.settings-section', { timeout: 10_000 })
+      await page.waitForSelector('.workspace-empty', { timeout: 10_000 })
+      assert.equal(await page.locator('.workspace-id').count(), 0)
+      assert.equal(await page.locator('.workspace-id-value').count(), 0)
+      assert.doesNotMatch(await page.locator('.settings-page').textContent(), /Workspace ID/)
+    })(base)
+  })
+})
+
 // ---------- Instance Settings (new, #107) ----------
 
 test('settings: Instance Settings hosts an editable Assignee, read-only instance info, and read-only work-item link details', async () => {
