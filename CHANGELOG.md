@@ -17,6 +17,65 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.8.0-beta — 2026-09-22
+
+### Changed
+
+- **`GANTRY_BOOTSTRAP_PATS` is renamed to `GANTRY_SHARED_WORKSPACE_PATS`, with no alias for the old
+  name.** If you already set `GANTRY_BOOTSTRAP_PATS` on a deployment, you must rename it to
+  `GANTRY_SHARED_WORKSPACE_PATS` when you upgrade — the old name is not read any more, silently or
+  otherwise, so a deployment left on the old name simply stops discovering and sharing that workspace.
+  The value and shape are unchanged, only the key. The rename reflects what the variable now does: it
+  used to be a boot-time discovery shortcut, and now it is also the credential a shared workspace is
+  actually read with on every unauthenticated request — a bigger claim than the old name let on, so the
+  name had to say so.
+
+### Added
+
+- **A workspace can be declared shared, so a deployment can serve it to visitors with no credential of
+  their own.** Add its id to `GANTRY_SHARED_WORKSPACE_PATS` and anyone who opens that workspace with no
+  PAT of their own still sees its designs and instances, read from the deployment's own stored
+  credential rather than being turned away. This is reading only: every edit still resolves the
+  visitor's own credential, and before an editing surface is offered at all, that credential is checked
+  against the Provider and confirmed to actually carry write access there — a personal PAT that happens
+  to be sitting in the browser but grants nothing on this particular repo is treated as read-only, not
+  as license to edit. A rejected credential and a merely-read-only one are kept visibly distinct, so a
+  visitor is never told their token is bad when it simply isn't a writer here.
+
+- **Every registered workspace now shows up on the main screen, including ones nothing could be read
+  from yet.** Previously a workspace with no readable instances — nothing registered in it yet, or
+  nothing the current request's credential could read — was left off the dashboard entirely, silently,
+  indistinguishable from a workspace that was never registered at all. It now gets its own row either
+  way, labelled to match what's actually true of it — nothing registered yet, or registered but
+  unreadable with the credential in hand — each paired with the action that fixes it: add a credential.
+
+- **A workspace's Settings can now be opened directly, by its workspace id, rather than only by way of
+  one of its instances.** `/settings/workspace?id=<workspaceId>` resolves straight to that workspace,
+  which matters most for exactly the workspace that needs it most — one with no instance yet to route
+  through, the same workspace this release's dashboard and shared-browsing changes now surface for the
+  first time. The existing `?slug=<instance-slug>` entry point is unchanged and still wins for an
+  instance's own "Workspace Settings" link.
+
+- **Shared-workspace reads are now cached, kept fresh by detecting change rather than by a timer.** A
+  shared workspace's content is served from a per-branch cache instead of calling the Provider on every
+  visitor's every read, so Provider read traffic no longer scales with how many people are looking —
+  only with how often the content actually changes. Freshness is a cheap check against the branch's
+  current commit, not a wait: an architect's own edit updates the cache immediately from the write
+  itself, and anything pushed outside Gantry is picked up the moment the branch ref moves. The
+  boundary is structural, not incidental — a request that brings its own credential never touches this
+  cache at all, and nothing about it changes how a write behaves.
+
+### Fixed
+
+- **A GitHub- or GitLab-backed instance could have several of its own routes silently read or write the
+  wrong data, or fail outright.** The synced-fields panel, gate checks, work-item linking, tag repair
+  and stage-advancement routes all used to recognise only "Azure DevOps, or else assume local" — so a
+  GitHub- or GitLab-backed instance sharing a slug with an unrelated local directory could have that
+  local directory read or written instead of its real data, and a genuinely unresolvable registry entry
+  could be mistaken for an ordinary local one rather than reported as broken. These routes now dispatch
+  by the instance's actual registered provider, the same way every other single-instance route already
+  did.
+
 ## 0.7.9-beta — 2026-09-22
 
 ### Added
