@@ -17,6 +17,31 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.7.9-beta — 2026-09-22
+
+### Added
+
+- **A Provider-backed workspace now shows its id in Settings, with a Copy button.** Open the
+  workspace's settings and the id sits directly under the repository location, as selectable
+  monospace text you can copy in one click. That id is the key both credential maps are keyed by —
+  the server's `GANTRY_BOOTSTRAP_PATS` and the MCP server's `GANTRY_WORKSPACE_PATS` — so on a hosted
+  deployment you can now read it off the screen and paste it into your platform's environment
+  settings without a shell, without devtools, and without digging it out of a deploy log. It
+  identifies the workspace and is not itself a credential, which the note beside it says plainly.
+  If the browser refuses the copy — plain-http `gantry serve` is not a secure context, so the
+  clipboard is simply unavailable there — it tells you so and points at the id, which never leaves
+  the screen. This is the browser-only counterpart to 0.7.8-beta's `gantry workspace-id` command,
+  for anyone who does have a shell. Local and server-directory workspaces have no registry id and
+  need no credential-map entry, so nothing is shown for them rather than something invented.
+
+- **Settings now reports which version of Gantry the server is actually running.** A quiet line at
+  the foot of the global Settings page, answered by the server itself on each visit rather than
+  baked into the page you may have cached, so it is the version of the build serving you right now.
+  Two things that were previously guesswork: confirming a redeploy really went out, and telling
+  whether a fix you have just read about in these notes is in the build you are on. A server that
+  cannot read its own package version says exactly that instead of showing a placeholder number,
+  because a confidently wrong version here would be worse than none.
+
 ## 0.7.8-beta — 2026-09-22
 
 ### Added
