@@ -7,6 +7,7 @@ import {
   normalizeProviderLocation,
   providerLocationsMatch,
   describeProviderLocation,
+  canonicalLocationKey,
 } from '../lib/provider.js'
 
 // ---------- provider enum (ADR-0037) ----------
@@ -212,4 +213,50 @@ test('providerLocationsMatch treats a different Jira site or project key as a no
   const base = { owner: 'acme', repository: 'repo', jiraSite: 'acme.atlassian.net', jiraProjectKey: 'PROJ' }
   assert.equal(providerLocationsMatch('atlassian', base, { ...base, jiraSite: 'other.atlassian.net' }), false)
   assert.equal(providerLocationsMatch('atlassian', base, { ...base, jiraProjectKey: 'OTHER' }), false)
+})
+
+// ---------- canonicalLocationKey (#110: a write-only, machine-readable key deriveWorkspaceId hashes) ----------
+
+test('canonicalLocationKey is deterministic — the same provider + location produces the exact same key twice', () => {
+  const location = { organization: 'org', project: 'proj', repository: 'repo' }
+  assert.equal(canonicalLocationKey('azure-devops', location), canonicalLocationKey('azure-devops', { ...location }))
+})
+
+test('canonicalLocationKey never lower-cases — case is preserved exactly', () => {
+  const key = canonicalLocationKey('github', { owner: 'OctoCat', repository: 'Fake-Repo' })
+  assert.ok(key.includes('OctoCat'))
+  assert.ok(key.includes('Fake-Repo'))
+  assert.ok(!key.includes('octocat'))
+})
+
+test('canonicalLocationKey differs for a different repository under the same provider', () => {
+  const a = canonicalLocationKey('github', { owner: 'octocat', repository: 'repo-a' })
+  const b = canonicalLocationKey('github', { owner: 'octocat', repository: 'repo-b' })
+  assert.notEqual(a, b)
+})
+
+test('canonicalLocationKey differs for the same repository name under two different providers', () => {
+  const gh = canonicalLocationKey('github', { owner: 'shared', repository: 'shared-repo' })
+  const gl = canonicalLocationKey('gitlab', { namespace: 'shared', repository: 'shared-repo' })
+  assert.notEqual(gh, gl)
+})
+
+test('canonicalLocationKey differs when an optional baseUrl is present vs absent', () => {
+  const withBaseUrl = canonicalLocationKey('github', { owner: 'octocat', repository: 'repo', baseUrl: 'https://ghe.example.internal' })
+  const withoutBaseUrl = canonicalLocationKey('github', { owner: 'octocat', repository: 'repo' })
+  assert.notEqual(withBaseUrl, withoutBaseUrl)
+})
+
+test('canonicalLocationKey covers every built provider\'s required location shape', () => {
+  const keys = [
+    canonicalLocationKey('azure-devops', { organization: 'org', project: 'proj', repository: 'repo' }),
+    canonicalLocationKey('github', { owner: 'octocat', repository: 'repo' }),
+    canonicalLocationKey('gitlab', { namespace: 'group/subgroup', repository: 'repo' }),
+    canonicalLocationKey('atlassian', { owner: 'acme', repository: 'repo', jiraSite: 'acme.atlassian.net', jiraProjectKey: 'PROJ' }),
+  ]
+  assert.equal(new Set(keys).size, keys.length)
+})
+
+test('canonicalLocationKey rejects an invalid location the same way normalizeProviderLocation does', () => {
+  assert.throws(() => canonicalLocationKey('github', { owner: 'octocat' }), /missing: repository/)
 })
