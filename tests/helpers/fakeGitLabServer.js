@@ -42,7 +42,21 @@ import { createServer } from 'node:http'
  * `lib/gitlabIdentityClient.js`'s own Reporter-or-above assignability gate. The fake's `query` param
  * handling matches real GitLab's own substring, case-insensitive match against `username` or `name`.
  */
-export function createFakeGitLabServer({ namespace, repository, validPat, files = {}, branchFiles = {}, repoExists = true, members = [], mergeRefusal = null } = {}) {
+export function createFakeGitLabServer({
+  namespace,
+  repository,
+  validPat,
+  files = {},
+  branchFiles = {},
+  repoExists = true,
+  members = [],
+  mergeRefusal = null,
+  // #126: the access level *this supplied PAT*'s account effectively has on the project — GitLab's own
+  // `permissions.project_access.access_level` field on the authenticated project-metadata response.
+  // Defaults to Developer (30), GitLab's own lowest level that can push to a non-protected branch; pass
+  // 20 (Reporter) or lower to simulate a read-only PAT.
+  viewerAccessLevel = 30,
+} = {}) {
   const branches = new Map() // branch name -> Map<path, Buffer>
   const branchTips = new Map() // branch name -> { commitId, committedDate, authoredDate }
   let commitCounter = 0
@@ -149,6 +163,7 @@ export function createFakeGitLabServer({ namespace, repository, validPat, files 
         path_with_namespace: `${namespace}/${repository}`,
         namespace: { full_path: namespace },
         default_branch: 'main',
+        permissions: { project_access: { access_level: viewerAccessLevel }, group_access: null },
       })
     }
 
@@ -533,9 +548,9 @@ export function createFakeGitLabServer({ namespace, repository, validPat, files 
 }
 
 /** Starts a `createFakeGitLabServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/helpers/fakeGitHubServer.js`'s own `withFakeGitHubServer` shape. */
-export function withFakeGitLabServer({ namespace, repository, validPat, files, branchFiles, repoExists, members, mergeRefusal }, fn) {
+export function withFakeGitLabServer({ namespace, repository, validPat, files, branchFiles, repoExists, members, mergeRefusal, viewerAccessLevel }, fn) {
   return new Promise((resolve, reject) => {
-    const server = createFakeGitLabServer({ namespace, repository, validPat, files, branchFiles, repoExists, members, mergeRefusal })
+    const server = createFakeGitLabServer({ namespace, repository, validPat, files, branchFiles, repoExists, members, mergeRefusal, viewerAccessLevel })
     server.listen(0, async () => {
       const { port } = server.address()
       try {

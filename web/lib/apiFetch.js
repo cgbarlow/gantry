@@ -88,6 +88,17 @@ export function cachedScopeForSlug(slug) {
   return instanceScopeBySlug.get(slug)?.scope ?? null
 }
 
+/**
+ * #126: the cached workspace id for `slug` (`null` for a local instance, or one nothing has looked up
+ * yet) — `cachedScopeForSlug`'s own sibling, reading `workspaceId` off the same cache entry instead of
+ * `scope`. Synchronous for the same reason: `web/lib/writeAccess.js`'s `ensureWriteAccessChecked` is
+ * called from a render-time effect once `instanceData` is already loaded (so by then
+ * `apiFetchForInstance` has already warmed this slug's cache entry), never awaited itself.
+ */
+export function cachedWorkspaceIdForSlug(slug) {
+  return instanceScopeBySlug.get(slug)?.workspaceId ?? null
+}
+
 // WI #366: carries the instance's workspace on the request, so the server resolves the slug within
 // that one workspace rather than searching every workspace for it (the deprecated path, which warns
 // on every call and breaks outright once two workspaces share a slug). Done here, once, rather than

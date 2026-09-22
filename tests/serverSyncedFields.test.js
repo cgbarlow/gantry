@@ -290,3 +290,61 @@ test('getStageSyncedFields recovers a Workspace work-item link from another stag
     }
   )
 })
+
+// #109 (docs/adr/0047) regression: the recovery write above must never fire when this call's own
+// credential resolved to nothing but a workspace's shared, read-only-intended one — `sharedCache.
+// cacheReads: true` is exactly the shape `lib/server.js`'s `sharedCacheContext` attaches to
+// `options.azureDevOps` for a request that carried no credential of its own against a shared
+// workspace (see `withAzureDevOpsCredential`). Before this guard, `getStageSyncedFields` — reachable
+// from the plain GET route #125 gave a shared-credential fallback to — would commit this recovery to
+// `main` using that shared credential, violating "never usable for a write" the moment a visitor with
+// no credential at all happened to open an instance whose work-item link lived only on another
+// stage's branch.
+test('getStageSyncedFields recovers a Workspace work-item link for THIS response but does not write it back when the credential is shared-only', async () => {
+  const workItem = {
+    organization: ORGANIZATION,
+    project: PROJECT,
+    workItemType: 'Task',
+    parentId: 41,
+    stages: { shape: 42, 'hld-define': 43 },
+  }
+  const mainYaml = `definition: design\nslug: ${SLUG}\nstage: shape\n`
+
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      files: { [`/gantry-workspace/${SLUG}/instance.yaml`]: mainYaml },
+    },
+    async (adoBaseUrl) => {
+      const azureDevOpsBase = {
+        organization: ORGANIZATION,
+        project: PROJECT,
+        repository: REPOSITORY,
+        pat: VALID_PAT,
+        baseUrl: adoBaseUrl,
+      }
+      const shapeBranch = `gantry-workspace/${SLUG}/shape`
+      const shapeYaml = `${mainYaml}workItem:\n  organization: ${ORGANIZATION}\n  project: ${PROJECT}\n  workItemType: Task\n  parentId: 41\n  baseUrl: ${adoBaseUrl}\n  stages:\n    shape: 42\n    hld-define: 43\n`
+      const git = createAzureDevOpsClient(azureDevOpsBase)
+      await git.createBranch(shapeBranch, { from: 'main' })
+      await git.writeFile(`gantry-workspace/${SLUG}/instance.yaml`, shapeYaml, { branch: shapeBranch })
+      workItem.baseUrl = adoBaseUrl
+
+      // The exact shape `withAzureDevOpsCredential`/`sharedCacheContext` produce for a request that
+      // carried no credential of its own, answered only by the workspace's shared PAT — see
+      // lib/server.js's own doc comments on both.
+      const azureDevOps = { ...azureDevOpsBase, sharedCache: { cacheReads: true } }
+
+      const fields = await getStageSyncedFields(SLUG, { azureDevOps, stageId: 'hld-define' })
+      // The response still reflects the recovered link — a shared-credential visitor sees correct
+      // data, they just don't cause a write.
+      assert.equal(fields.linked, true)
+      assert.equal(fields.workItemId, 43)
+      // But `main` was never committed to with the shared credential.
+      assert.equal((await readInstance(SLUG, { azureDevOps: azureDevOpsBase })).workItem, undefined)
+    }
+  )
+})

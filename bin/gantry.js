@@ -342,11 +342,11 @@ withInstanceOptions(
   })
 })
 
-// #115 (parent #109): `GANTRY_BOOTSTRAP_PATS` (#113) and `GANTRY_WORKSPACE_PATS` (ADR-0043) are both
+// #115 (parent #109): `GANTRY_SHARED_WORKSPACE_PATS` (#113) and `GANTRY_WORKSPACE_PATS` (ADR-0043) are both
 // keyed by **workspace id**. Since #110 that id is a pure function of provider + location
 // (`lib/workspaceRegistry.js`'s `deriveWorkspaceId`), but until this command the only way for an
 // operator to actually read one was the two-boot dance: set GANTRY_BOOTSTRAP_WORKSPACES, boot, hit
-// `GET /api/workspaces`, copy the id out, set GANTRY_BOOTSTRAP_PATS, restart. `gantry workspace-id`
+// `GET /api/workspaces`, copy the id out, set GANTRY_SHARED_WORKSPACE_PATS, restart. `gantry workspace-id`
 // computes the same id offline, with no server and no registry.
 //
 // The env-var mode deliberately goes through `parseBootstrapWorkspaces` — the exact function
@@ -370,7 +370,7 @@ function workspaceIdLocationFromOptions(options) {
 
 program
   .command('workspace-id')
-  .description('Print the workspace id derived from a provider + location — the key GANTRY_BOOTSTRAP_PATS and GANTRY_WORKSPACE_PATS entries are written against')
+  .description('Print the workspace id derived from a provider + location — the key GANTRY_SHARED_WORKSPACE_PATS and GANTRY_WORKSPACE_PATS entries are written against')
   .option('--provider <provider>', `provider the workspace lives on: ${PROVIDERS.join(', ')} (default: ${DEFAULT_PROVIDER})`)
   .option('--organization <organization>', 'location field (azure-devops)')
   .option('--project <project>', 'location field (azure-devops)')
@@ -380,11 +380,11 @@ program
   .option('--jira-site <site>', 'location field (atlassian)')
   .option('--jira-project-key <key>', 'location field (atlassian)')
   .option('--base-url <url>', 'optional location field (azure-devops, github, gitlab) — when set it is part of the id, so set it here exactly as the declaration does')
-  .option('--json', 'emit a GANTRY_BOOTSTRAP_PATS-shaped JSON object keyed by these ids, with empty-string placeholder values to fill in')
+  .option('--json', 'emit a GANTRY_SHARED_WORKSPACE_PATS-shaped JSON object keyed by these ids, with empty-string placeholder values to fill in')
   .addHelpText(
     'after',
     `
-A workspace id is what GANTRY_BOOTSTRAP_PATS and the MCP server's GANTRY_WORKSPACE_PATS
+A workspace id is what GANTRY_SHARED_WORKSPACE_PATS and the MCP server's GANTRY_WORKSPACE_PATS
 map a PAT to. It is derived from provider + location, so it is the same id on every
 machine and survives the registry file being deleted — this command computes it without
 starting a server or touching any registry.
@@ -394,7 +394,7 @@ one id is printed per declaration. Exactly one id is printed per line, id first.
 
   gantry workspace-id --provider github --owner cgbarlow --repository gantry-workspace-testing
   GANTRY_BOOTSTRAP_WORKSPACES='[...]' gantry workspace-id
-  GANTRY_BOOTSTRAP_WORKSPACES='[...]' gantry workspace-id --json   # paste as GANTRY_BOOTSTRAP_PATS, then fill in the tokens
+  GANTRY_BOOTSTRAP_WORKSPACES='[...]' gantry workspace-id --json   # paste as GANTRY_SHARED_WORKSPACE_PATS, then fill in the tokens
 
 This prints the id a declaration *would* derive. A workspace a given server already has
 registered at that location keeps whatever id it was first registered under — bootstrap

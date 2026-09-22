@@ -9,13 +9,65 @@ import {
   credentialStatusForWorkspace,
   setPatForWorkspace,
   clearPatForWorkspace,
+  hasConfirmedWriteAccess,
+  requestPat,
 } from '../lib/credential.js'
 import { advancedMode, setAdvancedMode } from '../lib/advancedMode.js'
 import { copyTextToClipboard } from '../lib/clipboard.js'
 import { renderEngine, setRenderEngine } from '../lib/renderEngine.js'
 import { pandocWasmState } from '../lib/pandocWasm.js'
-import { apiFetch, apiFetchForInstance } from '../lib/apiFetch.js'
+import { apiFetch, apiFetchForInstance, cachedWorkspaceIdForSlug } from '../lib/apiFetch.js'
+import { ensureWriteAccessChecked } from '../lib/writeAccess.js'
 import { IdentityPicker } from '../lib/identityPicker.js'
+
+// #126 (parent #109, docs/adr/0047): the Settings-screen twin of web/app.js's own
+// `isWriteAccessBlocked`/`writeAccessBlockedReason` — same rule (a shared instance's write-affecting
+// controls stay off until its stored credential is confirmed to write there), applied to this file's
+// own write-affecting controls (assignee, required reviewer) instead of the module editor's. Kept as
+// its own small pair here rather than importing app.js's (which also close over app.js's own
+// `instanceData`/`currentSlug` module signals, not this file's per-screen `instance`/`slug` state) —
+// both read the exact same three pieces of state (`instance.shared`, `hasConfirmedWriteAccess`,
+// `credentialStatusForWorkspace`), just sourced from this screen's own props instead.
+function writeAccessBlocked(instance, workspaceId) {
+  if (!instance?.shared) return false
+  return !hasConfirmedWriteAccess(workspaceId)
+}
+
+function writeAccessReason(instance, workspaceId) {
+  if (!writeAccessBlocked(instance, workspaceId)) return null
+  if (credentialStatusForWorkspace(workspaceId) === 'rejected') {
+    return 'This credential was rejected — add a working one to edit.'
+  }
+  if (hasPatForWorkspace(workspaceId)) {
+    return "This credential can read but can't write here — add one with write access to edit."
+  }
+  return 'Browsing without a credential — add one with write access to edit.'
+}
+
+// The same "run once per credential" trigger as web/app.js's own module-editor effect, scoped to
+// whichever instance a Settings screen is currently showing.
+// Deliberately no dependency array: this must re-run after *every* render of the calling screen, not
+// only when `instance`/`workspaceId` themselves change — otherwise entering a credential via
+// `<${WriteAccessBanner}>`'s "Add credential" action (which changes `patsByWorkspace`, not `instance`
+// or `workspaceId`) would leave this effect never re-firing, and so editing would stay off until the
+// screen was left and re-entered — exactly the reload #126's own acceptance criteria rule out.
+// `ensureWriteAccessChecked`'s own internal guards (already-checked, already-in-flight) are what keep
+// a call on every render cheap.
+function useWriteAccessCheck(instance, workspaceId) {
+  useEffect(() => {
+    if (!instance?.shared || !workspaceId) return
+    ensureWriteAccessChecked(workspaceId)
+  })
+}
+
+function WriteAccessBanner({ instance, workspaceId }) {
+  const reason = writeAccessReason(instance, workspaceId)
+  if (!reason) return null
+  return html`<div class="archived-banner write-access-banner" data-testid="write-access-banner">
+    ${reason}
+    <button type="button" class="btn small" onClick=${() => requestPat(workspaceId)}>Add credential</button>
+  </div>`
+}
 // #303 — the local-workspace-aware branches of Workspace/Instance Settings
 // below (ADR-0029, WI #293/A2's client-side registry). Aliased to `Local`
 // names for the same reason web/app.js's own local-instance wiring does:
@@ -503,7 +555,8 @@ export function GlobalSettingsPage({ query }) {
   `
 }
 
-// ---------- Workspace Settings (`/settings/workspace?slug=<instance-slug>`) ----------
+// ---------- Workspace Settings (`/settings/workspace?slug=<instance-slug>` or
+// `/settings/workspace?id=<workspaceId>`) ----------
 // Scoped to one instance's own workspace only — never a picker or listing
 // across every registered workspace (that whole-registry view is gone,
 // along with the tabbed shell it used to live in). `slug` names the
@@ -511,6 +564,16 @@ export function GlobalSettingsPage({ query }) {
 // /api/instance/workspace`, then looked up by id in `GET /api/workspaces` —
 // both pre-existing, uncredentialed registry reads, see their own route
 // comments in lib/server.js) is what's actually shown/edited.
+//
+// #123 (parent #109, ADR-0047): `slug` isn't the only way in any more. A workspace that has no
+// instance yet — exactly the one that needs a credential entered before it can have one (#121/#125's
+// whole premise) — can't be resolved through an instance at all, so `?id=<workspaceId>` resolves the
+// workspace directly via `fetchWorkspaceById`, skipping the instance-resolution step entirely. No new
+// server route: `GET /api/workspaces` is already an uncredentialed registry read, and `fetchWorkspaceById`
+// already did a client-side id lookup against it for the `slug` path once *it* had resolved a
+// workspaceId — this just reaches that same helper directly. `id` wins if both are present (there's no
+// meaningful way to want both); everything below it — owner, PAT entry/clear, archive/restore — reads
+// only `workspace.id`, never `slug`, so it's already agnostic to which entry mode produced it.
 
 async function fetchInstanceWorkspaceId(slug) {
   const res = await apiFetch(`/api/instance/workspace?slug=${encodeURIComponent(slug)}`)
@@ -631,8 +694,8 @@ const PAT_SCOPE_HELP = {
 // #116 (parent #109) — the id to show, or `null` for a workspace that genuinely has none.
 //
 // The id only means anything for a **remote workspace** (CONTEXT.md's "Workspace location"): a
-// registry record (`lib/workspaceRegistry.js`) keyed by the id that `GANTRY_BOOTSTRAP_PATS` (#113,
-// ADR-0046) and the MCP server's `GANTRY_WORKSPACE_PATS` (ADR-0043) are themselves keyed by. A Local
+// registry record (`lib/workspaceRegistry.js`) keyed by the id that `GANTRY_SHARED_WORKSPACE_PATS`
+// (#121, ADR-0047) and the MCP server's `GANTRY_WORKSPACE_PATS` (ADR-0043) are themselves keyed by. A Local
 // or server-directory workspace has no registry entry at all and needs no credential-map entry, so
 // there is nothing here to show and a blank or invented field would actively mislead the one person
 // who reads it — whoever is pasting a credential map into a hosting dashboard.
@@ -688,7 +751,7 @@ function WorkspaceIdField({ workspaceId }) {
       <button type="button" class="btn small ghost" onClick=${handleCopy}>Copy</button>
       <span class="workspace-id-status" role="status">${status}</span>
       <p class="workspace-id-hint">
-        This workspace's key in the server's <code>GANTRY_BOOTSTRAP_PATS</code> and the MCP server's
+        This workspace's key in the server's <code>GANTRY_SHARED_WORKSPACE_PATS</code> and the MCP server's
         <code>GANTRY_WORKSPACE_PATS</code> maps. It identifies the workspace; it isn't a credential.
       </p>
     </div>
@@ -699,6 +762,12 @@ function WorkspaceIdField({ workspaceId }) {
 // PAT (client-only, never touches the server — #9, ADR-0038: this is now the *only* place this
 // workspace's credential lives, there is no global default it could otherwise fall back to). The
 // owner field is an identity picker (#145 Part 2).
+//
+// `slug` is optional (#123): absent when this screen was opened via `?id=` rather than `?slug=`, since
+// there's no instance to name one. `IdentityPicker` already has a case for exactly this — `workspaceId`
+// scopes its search to that workspace's own stored PAT when no `slug` is available (its own doc comment:
+// "used once a real workspace already exists but no instance slug does yet") — passed alongside `slug`
+// below since `slug` wins whenever it *is* present, so this is a no-op for the existing `?slug=` path.
 function WorkspaceEditor({ workspace, onUpdated, slug }) {
   const [ownerDraft, setOwnerDraft] = useState(workspace.owner ?? '')
   const [ownerStatus, setOwnerStatus] = useState('')
@@ -768,6 +837,7 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
             }}
             placeholder="Unset"
             slug=${slug}
+            workspaceId=${workspace.id}
           />
           <button type="button" class="btn small" onClick=${handleSaveOwner}>Save owner</button>
         </div>
@@ -1008,19 +1078,60 @@ export function WorkspaceSettingsPage({ query }) {
   return html`<${RemoteWorkspaceSettingsPage} query=${query} />`
 }
 
+// #123 — which of the two entry modes this render is in, purely from `query` (no fetch, no state):
+// `id` wins over `slug` when both are present (there's no meaningful way to want both — see this
+// section's own header comment), and `neither` covers a bookmarked/direct `/settings/workspace` URL
+// with no identifying param at all. Pulled out as its own pure function (rather than inlined in the
+// effect below) so it's unit-testable without a DOM — see tests/settingsWorkspaceMode.test.js.
+export function workspaceSettingsEntryMode(query) {
+  if (query?.id) return 'id'
+  if (query?.slug) return 'slug'
+  return 'neither'
+}
+
 function RemoteWorkspaceSettingsPage({ query }) {
   const slug = query?.slug
-  const [state, setState] = useState('loading') // 'loading' | 'no-slug' | 'no-workspace' | 'ready' | 'error'
+  const workspaceIdParam = query?.id
+  const mode = workspaceSettingsEntryMode(query)
+  // 'no-slug': opened with neither `?slug=` nor `?id=` (unchanged from before #123). 'no-workspace':
+  // the `?slug=` path's instance genuinely has no remote workspace (a local instance) — unchanged.
+  // 'workspace-not-found': the `?id=` path's workspace id doesn't exist — a sibling of 'no-workspace'
+  // rather than a reuse of it, since the two mean different things (per the ticket's #3: "a distinct
+  // state, not... reusing one that means something else") and would otherwise render the same
+  // misleading "no remote workspace, data is local" copy for a plainly-wrong id.
+  const [state, setState] = useState('loading') // 'loading' | 'no-slug' | 'no-workspace' | 'workspace-not-found' | 'ready' | 'error'
   const [error, setError] = useState('')
   const [workspace, setWorkspace] = useState(null)
 
   useEffect(() => {
-    if (!slug) {
+    if (mode === 'neither') {
       setState('no-slug')
       return
     }
     let cancelled = false
     setState('loading')
+    if (mode === 'id') {
+      ;(async () => {
+        try {
+          const ws = await fetchWorkspaceById(workspaceIdParam)
+          if (cancelled) return
+          if (!ws) {
+            setState('workspace-not-found')
+            return
+          }
+          setWorkspace(ws)
+          setState('ready')
+        } catch (err) {
+          if (!cancelled) {
+            setError(err.message)
+            setState('error')
+          }
+        }
+      })()
+      return () => {
+        cancelled = true
+      }
+    }
     ;(async () => {
       try {
         const workspaceId = await fetchInstanceWorkspaceId(slug)
@@ -1046,7 +1157,7 @@ function RemoteWorkspaceSettingsPage({ query }) {
     return () => {
       cancelled = true
     }
-  }, [slug])
+  }, [mode, slug, workspaceIdParam])
 
   return html`
     <${SettingsHeader} title="Workspace Settings" backHref=${backHrefFrom(query)} />
@@ -1054,19 +1165,22 @@ function RemoteWorkspaceSettingsPage({ query }) {
       <section class="settings-section">
         <h2>Workspace</h2>
         <p class="guidance">
-          This instance's own workspace — its owner, repo URL and its own Workspace PAT. Not a picker
-          across every registered workspace: just the one this instance belongs to.
+          ${mode === 'id'
+            ? html`This workspace's own owner, repo URL and its own Workspace PAT.`
+            : html`This instance's own workspace — its owner, repo URL and its own Workspace PAT. Not a
+                picker across every registered workspace: just the one this instance belongs to.`}
         </p>
         ${state === 'no-slug' ? html`<p class="load-error">No instance was specified for these Workspace Settings.</p>` : null}
-        ${state === 'loading' ? html`<p class="loading">Loading\u2026</p>` : null}
+        ${state === 'loading' ? html`<p class="loading">Loading…</p>` : null}
         ${state === 'error' ? html`<p class="load-error">Failed to load: ${error}</p>` : null}
         ${state === 'no-workspace'
           ? html`<p class="workspace-empty">This instance has no remote workspace — its data is stored locally.</p>`
           : null}
+        ${state === 'workspace-not-found' ? html`<p class="load-error">No workspace was found for this id.</p>` : null}
         ${state === 'ready'
           ? html`
               <div class="workspace-list">
-                <${WorkspaceEditor} workspace=${workspace} onUpdated=${setWorkspace} slug=${slug} />
+                <${WorkspaceEditor} workspace=${workspace} onUpdated=${setWorkspace} slug=${mode === 'id' ? undefined : slug} />
               </div>
             `
           : null}
@@ -1127,7 +1241,7 @@ async function saveRequiredReviewer(slug, requiredReviewer) {
 // The instance's own stored Assignee — editable here, distinct from a
 // module's own frontmatter `owner` (the Design Authority sign-off
 // convention, untouched by this screen).
-function AssigneeSection({ slug, assignee }) {
+function AssigneeSection({ slug, assignee, disabled = false }) {
   const [draft, setDraft] = useState(assignee ?? '')
   const [status, setStatus] = useState('')
   const savingRef = useRef(false)
@@ -1161,6 +1275,7 @@ function AssigneeSection({ slug, assignee }) {
       <div class="workspace-field-row">
         <${IdentityPicker}
           value=${draft}
+          disabled=${disabled}
           onChange=${(uniqueName) => {
             setDraft(uniqueName)
             latestDraftRef.current = uniqueName
@@ -1170,7 +1285,7 @@ function AssigneeSection({ slug, assignee }) {
           placeholder="Unassigned"
           slug=${slug}
         />
-        <button type="button" class="btn small" onClick=${handleSave}>Save</button>
+        <button type="button" class="btn small" disabled=${disabled} onClick=${handleSave}>Save</button>
       </div>
       <div class="workspace-field-status">${status}</div>
     </section>
@@ -1183,7 +1298,7 @@ function AssigneeSection({ slug, assignee }) {
 // by emptying the field. The effective reviewer is resolved at PR-open time
 // in lib/stageApproval.js, so a stale or blank value here is caught then
 // with a clear error message, not silently ignored.
-function RequiredReviewerSection({ slug, requiredReviewer }) {
+function RequiredReviewerSection({ slug, requiredReviewer, disabled = false }) {
   const [draft, setDraft] = useState(requiredReviewer ?? '')
   const [status, setStatus] = useState('')
   const savingRef = useRef(false)
@@ -1221,6 +1336,7 @@ function RequiredReviewerSection({ slug, requiredReviewer }) {
       <div class="workspace-field-row">
         <${IdentityPicker}
           value=${draft}
+          disabled=${disabled}
           onChange=${(uniqueName) => {
             setDraft(uniqueName)
             latestDraftRef.current = uniqueName
@@ -1230,7 +1346,7 @@ function RequiredReviewerSection({ slug, requiredReviewer }) {
           placeholder=${'Falls back to workspace Owner'}
           slug=${slug}
         />
-        <button type="button" class="btn small" onClick=${handleSave}>Save</button>
+        <button type="button" class="btn small" disabled=${disabled} onClick=${handleSave}>Save</button>
       </div>
       <div class="workspace-field-status">${status}</div>
     </section>
@@ -1522,6 +1638,14 @@ function RemoteInstanceSettingsPage({ query }) {
     }
   }, [slug])
 
+  // #126: this instance's own workspace id, warmed by the `fetchInstanceDetail` call above (it goes
+  // through `apiFetchForInstance`, same as web/app.js's module editor) \u2014 `null` for a local instance,
+  // for which `writeAccessBlocked`/`useWriteAccessCheck` are both already no-ops (`instance.shared` is
+  // always `false` there, see lib/server.js's own local-instance response).
+  const workspaceId = cachedWorkspaceIdForSlug(slug)
+  useWriteAccessCheck(instance, workspaceId)
+  const blocked = writeAccessBlocked(instance, workspaceId)
+
   return html`
     <${SettingsHeader} title="Instance Settings" backHref=${backHrefFrom(query)} />
     <main class="settings-page">
@@ -1530,8 +1654,9 @@ function RemoteInstanceSettingsPage({ query }) {
       ${state === 'error' ? html`<p class="load-error">Failed to load: ${error}</p>` : null}
       ${state === 'ready'
         ? html`
-            <${AssigneeSection} slug=${slug} assignee=${instance.assignee} />
-            <${RequiredReviewerSection} slug=${slug} requiredReviewer=${instance.requiredReviewer} />
+            <${WriteAccessBanner} instance=${instance} workspaceId=${workspaceId} />
+            <${AssigneeSection} slug=${slug} assignee=${instance.assignee} disabled=${blocked} />
+            <${RequiredReviewerSection} slug=${slug} requiredReviewer=${instance.requiredReviewer} disabled=${blocked} />
             <${InstanceInfoSection} instance=${instance} />
             <${WorkItemLinkSection} instance=${instance} />
             <${InstanceArchiveSection} slug=${slug} archived=${instance.archived} />

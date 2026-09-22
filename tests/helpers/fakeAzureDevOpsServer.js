@@ -62,6 +62,11 @@ export function createFakeAzureDevOpsServer({
   repoExists = true,
   connectionDataUser,
   simulateMissingReviewStatusField = false,
+  // #126: whether this PAT's account has GenericContribute (push) access to this repository — the
+  // fake's answer to the Permissions "Has Permissions" endpoint `lib/azureDevOpsClient.js`'s own
+  // `hasWriteAccess` calls. Defaults to `true`; pass `false` to simulate a PAT that reads fine but
+  // cannot write.
+  canWrite = true,
 } = {}) {
   // One independent { store, objectId } per branch — a branch with no
   // entry here has never had a commit (mirrors the pre-#118 "commitCount
@@ -177,7 +182,7 @@ export function createFakeAzureDevOpsServer({
       if (!repoExists) {
         return json(404, { message: `TF401174: Repository ${repository} not found (fake server).` })
       }
-      return json(200, { id: repository, name: repository, defaultBranch: 'refs/heads/main' })
+      return json(200, { id: repository, name: repository, defaultBranch: 'refs/heads/main', project: { id: project, name: project } })
     }
 
     if (req.method === 'GET' && pathname === `${basePath}/commits`) {
@@ -766,6 +771,16 @@ export function createFakeAzureDevOpsServer({
       return json(200, { authenticatedUser: connectionDataUser ?? null })
     }
 
+    // Permissions "Has Permissions" endpoint (#126) — lib/azureDevOpsClient.js's own hasWriteAccess()
+    // calls this against the Git Repositories security namespace, asking about the GenericContribute
+    // bit. Matched loosely by prefix rather than the exact namespace-id/permission-bit path segments
+    // the real client sends, so this fake stays agnostic of which bit means what — `canWrite` (the
+    // fixture param, default `true`) is the fake's whole answer, mirroring the real endpoint's own
+    // bare-boolean response body.
+    if (req.method === 'GET' && pathname.startsWith(`/${organization}/_apis/permissions/`)) {
+      return json(200, canWrite)
+    }
+
     if (req.method === 'GET' && pathname === `/${organization}/_apis/identities`) {
       if (rejectIdentityRequests) return json(403, { message: 'TF400813: Identity scope rejected (fake server).' })
       const query = (url.searchParams.get('filterValue') ?? url.searchParams.get('query') ?? '').toLowerCase()
@@ -830,7 +845,7 @@ export function createFakeAzureDevOpsServer({
  * Starts a `createFakeAzureDevOpsServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/server.test.js`'s `withRunningServer` helper's shape (per #82's testing decisions). Shared by `tests/azureDevOpsClient.test.js` and `tests/instance.test.js` so this lifecycle isn't duplicated across both.
  */
 export function withFakeAzureDevOpsServer(
-  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes, denyReviewerVoteReset, rejectIdentityRequests, repoExists, connectionDataUser, simulateMissingReviewStatusField },
+  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes, denyReviewerVoteReset, rejectIdentityRequests, repoExists, connectionDataUser, simulateMissingReviewStatusField, canWrite },
   fn
 ) {
   return new Promise((resolve, reject) => {
@@ -849,6 +864,7 @@ export function withFakeAzureDevOpsServer(
       repoExists,
       connectionDataUser,
       simulateMissingReviewStatusField,
+      canWrite,
     })
     server.listen(0, async () => {
       const { port } = server.address()

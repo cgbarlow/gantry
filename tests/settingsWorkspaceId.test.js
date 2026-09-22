@@ -4,7 +4,7 @@ import { registerWorkspace, listWorkspaces } from '../lib/workspaceRegistry.js'
 import { workspaceCredentialMapId } from '../web/pages/settings.js'
 import { withScratchInstances } from './helpers/lifecycle.js'
 
-// #116 — which workspaces Settings shows an id for. The id is the key `GANTRY_BOOTSTRAP_PATS` (#113)
+// #116 — which workspaces Settings shows an id for. The id is the key `GANTRY_SHARED_WORKSPACE_PATS` (#113)
 // and the MCP server's `GANTRY_WORKSPACE_PATS` (ADR-0043) are both keyed by, so it only exists for a
 // remote workspace — one with a registry record. A Local or server-directory workspace has no
 // registry entry and needs no credential-map entry at all, and showing it a blank or invented id
@@ -17,7 +17,7 @@ import { withScratchInstances } from './helpers/lifecycle.js'
 test('a registered remote workspace shows the id its credential-map entry would be keyed by', async () => {
   await withScratchInstances((instancesDir) => {
     // A real registry record, not a hand-built literal: the id shown must be the one
-    // `GANTRY_BOOTSTRAP_PATS`/`GANTRY_WORKSPACE_PATS` are actually keyed by, so this reads it back
+    // `GANTRY_SHARED_WORKSPACE_PATS`/`GANTRY_WORKSPACE_PATS` are actually keyed by, so this reads it back
     // through the same `listWorkspaces` the Settings screen's own `/api/workspaces` fetch serves.
     const registered = registerWorkspace(
       { provider: 'github', location: { owner: 'octocat', repository: 'fake-repo' }, owner: 'a.architect' },

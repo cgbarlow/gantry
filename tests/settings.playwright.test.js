@@ -368,7 +368,7 @@ test('settings: Workspace Settings labels a GitLab workspace correctly and shows
 })
 
 // ---------- Workspace id (#116) ----------
-// The id `GANTRY_BOOTSTRAP_PATS` (#113) and the MCP server's `GANTRY_WORKSPACE_PATS` (ADR-0043) are
+// The id `GANTRY_SHARED_WORKSPACE_PATS` (#113) and the MCP server's `GANTRY_WORKSPACE_PATS` (ADR-0043) are
 // keyed by. It was already in this screen's hands before #116 (the row's `data-workspace-id`, the PAT
 // storage key, the archive/restore calls) but never rendered, so the only browser route to it was
 // devtools — which is no use to the operator configuring a hosted deployment from a platform
@@ -410,7 +410,7 @@ test('settings: Workspace Settings shows this workspace\'s id as selectable text
 
       // …and it says what the id is for, naming both credential maps by their env-var names.
       const hint = await row.locator('.workspace-id-hint').textContent()
-      assert.match(hint, /GANTRY_BOOTSTRAP_PATS/)
+      assert.match(hint, /GANTRY_SHARED_WORKSPACE_PATS/)
       assert.match(hint, /GANTRY_WORKSPACE_PATS/)
 
       await row.locator('.workspace-id').getByRole('button', { name: 'Copy' }).click()

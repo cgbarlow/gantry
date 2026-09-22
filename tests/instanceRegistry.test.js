@@ -17,6 +17,7 @@ import {
   scopeIdForDirectoryFolder,
   directoryFolderForScopeId,
   MIGRATED_DEFAULT_WORKSPACE_FOLDER,
+  workspaceHasRegisteredInstances,
 } from '../lib/instanceRegistry.js'
 import { LOCAL_SCOPE } from '../lib/numberRegistry.js'
 import { listWorkspaces, resolveWorkspace, findWorkspaceByLocation } from '../lib/workspaceRegistry.js'
@@ -523,5 +524,44 @@ test('an archived instance still resolves at resolveInstanceLocation (read-only-
       kind: 'directory',
       workspace: 'acme',
     })
+  })
+})
+
+// #122 (parent #109, docs/adr/0047): `workspaceHasRegisteredInstances` is what lets `GET
+// /api/workspaces` tell the dashboard "this workspace definitely has instances registered, even
+// though none of them built a row this time" apart from "nothing has ever been registered here" — see
+// its own doc comment in lib/instanceRegistry.js for exactly what it can and can't prove.
+
+test('workspaceHasRegisteredInstances is false for a workspace id with no registry entry at all', async () => {
+  await withScratchInstances((instancesDir) => {
+    assert.equal(workspaceHasRegisteredInstances('nonexistent-workspace-id', { instancesDir }), false)
+  })
+})
+
+test('workspaceHasRegisteredInstances is true once an Azure-DevOps-backed instance is registered against that workspace', async () => {
+  await withScratchInstances((instancesDir) => {
+    const location = { kind: 'azureDevOps', organization: 'fake-org', project: 'fake-project', repository: 'fake-repo' }
+    registerInstance('remote-initiative', location, { instancesDir })
+    const [workspace] = listWorkspaces({ instancesDir })
+    assert.equal(workspaceHasRegisteredInstances(workspace.id, { instancesDir }), true)
+  })
+})
+
+test('workspaceHasRegisteredInstances is true for a directory workspace once an instance is registered under it, false for an unrelated one', async () => {
+  await withScratchInstances((instancesDir) => {
+    seedWorkspace(instancesDir, 'acme')
+    seedWorkspace(instancesDir, 'other')
+    registerInstance('my-initiative', { kind: 'directory', workspace: 'acme' }, { instancesDir })
+    assert.equal(workspaceHasRegisteredInstances('acme', { instancesDir }), true)
+    assert.equal(workspaceHasRegisteredInstances('other', { instancesDir }), false)
+  })
+})
+
+test('workspaceHasRegisteredInstances stays true for a workspace whose only instance was later archived (#223: archived still counts as registered)', async () => {
+  await withScratchInstances((instancesDir) => {
+    seedWorkspace(instancesDir, 'acme')
+    registerInstance('my-initiative', { kind: 'directory', workspace: 'acme' }, { instancesDir })
+    archiveInstance('my-initiative', { instancesDir, workspace: 'acme' })
+    assert.equal(workspaceHasRegisteredInstances('acme', { instancesDir }), true)
   })
 })

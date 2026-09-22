@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { parseBootstrapWorkspaces, applyBootstrapWorkspaces, parseBootstrapPats, discoverBootstrapPatInstances } from '../lib/workspaceBootstrap.js'
+import { parseBootstrapWorkspaces, applyBootstrapWorkspaces, parseSharedWorkspacePats, discoverBootstrapPatInstances } from '../lib/workspaceBootstrap.js'
 import { deriveWorkspaceId, listWorkspaces, findWorkspaceByLocation, registerWorkspace } from '../lib/workspaceRegistry.js'
 import { listRegisteredInstances } from '../lib/instanceRegistry.js'
 import { createServer } from '../lib/server.js'
@@ -326,61 +326,61 @@ test('bootstrapping a workspace does not hide the bundled Examples workspace/ins
 })
 
 // ---------------------------------------------------------------------------
-// parseBootstrapPats (#113, parent #109, docs/adr/0046)
+// parseSharedWorkspacePats (#113, parent #109, docs/adr/0046)
 // ---------------------------------------------------------------------------
 
-test('parseBootstrapPats: unset/undefined is a no-op, not an error', () => {
-  assert.deepEqual(parseBootstrapPats(undefined), {})
+test('parseSharedWorkspacePats: unset/undefined is a no-op, not an error', () => {
+  assert.deepEqual(parseSharedWorkspacePats(undefined), {})
 })
 
-test('parseBootstrapPats: null is a no-op, not an error', () => {
-  assert.deepEqual(parseBootstrapPats(null), {})
+test('parseSharedWorkspacePats: null is a no-op, not an error', () => {
+  assert.deepEqual(parseSharedWorkspacePats(null), {})
 })
 
-test('parseBootstrapPats: empty/whitespace-only string is a no-op, not an error', () => {
-  assert.deepEqual(parseBootstrapPats(''), {})
-  assert.deepEqual(parseBootstrapPats('   \n '), {})
+test('parseSharedWorkspacePats: empty/whitespace-only string is a no-op, not an error', () => {
+  assert.deepEqual(parseSharedWorkspacePats(''), {})
+  assert.deepEqual(parseSharedWorkspacePats('   \n '), {})
 })
 
-test('parseBootstrapPats: a valid {workspaceId: pat} JSON object parses through unchanged', () => {
+test('parseSharedWorkspacePats: a valid {workspaceId: pat} JSON object parses through unchanged', () => {
   const raw = JSON.stringify({ 'workspace-a': 'pat-a', 'workspace-b': 'pat-b' })
-  assert.deepEqual(parseBootstrapPats(raw), { 'workspace-a': 'pat-a', 'workspace-b': 'pat-b' })
+  assert.deepEqual(parseSharedWorkspacePats(raw), { 'workspace-a': 'pat-a', 'workspace-b': 'pat-b' })
 })
 
-test('parseBootstrapPats: malformed JSON fails loud, one line naming GANTRY_BOOTSTRAP_PATS', () => {
+test('parseSharedWorkspacePats: malformed JSON fails loud, one line naming GANTRY_SHARED_WORKSPACE_PATS', () => {
   assert.throws(
-    () => parseBootstrapPats('{not json'),
+    () => parseSharedWorkspacePats('{not json'),
     (err) => {
-      assert.match(err.message, /^GANTRY_BOOTSTRAP_PATS must be valid JSON:/)
+      assert.match(err.message, /^GANTRY_SHARED_WORKSPACE_PATS must be valid JSON:/)
       assert.equal(err.message.split('\n').length, 1)
       return true
     }
   )
 })
 
-test('parseBootstrapPats: a JSON array (not an object) fails loud, naming the env var', () => {
+test('parseSharedWorkspacePats: a JSON array (not an object) fails loud, naming the env var', () => {
   assert.throws(
-    () => parseBootstrapPats(JSON.stringify(['workspace-a'])),
+    () => parseSharedWorkspacePats(JSON.stringify(['workspace-a'])),
     (err) => {
-      assert.match(err.message, /^GANTRY_BOOTSTRAP_PATS must be a JSON object mapping workspace id to PAT/)
+      assert.match(err.message, /^GANTRY_SHARED_WORKSPACE_PATS must be a JSON object mapping workspace id to PAT/)
       return true
     }
   )
 })
 
-test('parseBootstrapPats: an entry with a non-string value fails loud, naming the workspace id and the env var', () => {
+test('parseSharedWorkspacePats: an entry with a non-string value fails loud, naming the workspace id and the env var', () => {
   assert.throws(
-    () => parseBootstrapPats(JSON.stringify({ 'workspace-a': 12345 })),
+    () => parseSharedWorkspacePats(JSON.stringify({ 'workspace-a': 12345 })),
     (err) => {
-      assert.match(err.message, /^GANTRY_BOOTSTRAP_PATS entry for workspace "workspace-a" must be a non-empty string/)
+      assert.match(err.message, /^GANTRY_SHARED_WORKSPACE_PATS entry for workspace "workspace-a" must be a non-empty string/)
       return true
     }
   )
 })
 
-test('parseBootstrapPats: an entry with an empty-string value fails loud, naming the workspace id', () => {
+test('parseSharedWorkspacePats: an entry with an empty-string value fails loud, naming the workspace id', () => {
   assert.throws(
-    () => parseBootstrapPats(JSON.stringify({ 'workspace-a': '' })),
+    () => parseSharedWorkspacePats(JSON.stringify({ 'workspace-a': '' })),
     (err) => {
       assert.match(err.message, /entry for workspace "workspace-a" must be a non-empty string/)
       return true
@@ -389,11 +389,11 @@ test('parseBootstrapPats: an entry with an empty-string value fails loud, naming
 })
 
 // ---------------------------------------------------------------------------
-// createServer wiring: GANTRY_BOOTSTRAP_PATS boot-time discovery (#113, parent #109, docs/adr/0046)
+// createServer wiring: GANTRY_SHARED_WORKSPACE_PATS boot-time discovery (#113, parent #109, docs/adr/0046)
 //
 // A Provider-backed row still needs a per-request credential to actually *read* — `lib/registry.js`'s
 // `buildGitHubRow`/`buildAzureDevOpsRow` return `null` with no `pat` at all, registered or not, so an
-// unauthenticated `GET /api/instances` returns `[]` both with and without GANTRY_BOOTSTRAP_PATS. What
+// unauthenticated `GET /api/instances` returns `[]` both with and without GANTRY_SHARED_WORKSPACE_PATS. What
 // boot-time discovery changes is the *instance registry* itself (`lib/instanceRegistry.js`'s own
 // `found-one` entry): with it warm before any request arrives, the first authenticated request (the
 // architect's first real dashboard load, or the MCP server's first call) gets its row back without
@@ -402,7 +402,7 @@ test('parseBootstrapPats: an entry with an empty-string value fails loud, naming
 // `gantry-workspace/` folder-listing call count for "the first real request doesn't re-discover".
 // ---------------------------------------------------------------------------
 
-test('a declared workspace with a matching GANTRY_BOOTSTRAP_PATS entry has its instances discovered at boot — registered with no request at all, and the first authenticated request never has to re-list the repo', async () => {
+test('a declared workspace with a matching GANTRY_SHARED_WORKSPACE_PATS entry has its instances discovered at boot — registered with no request at all, and the first authenticated request never has to re-list the repo', async () => {
   await withScratchInstances(async (instancesDir) => {
     await withFakeGitHubServerCountingListFolder(
       { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: BOOT_PAT_SEED_FILES },
@@ -415,7 +415,7 @@ test('a declared workspace with a matching GANTRY_BOOTSTRAP_PATS entry has its i
           {
             instancesDir,
             bootstrapWorkspaces: JSON.stringify([declaration]),
-            bootstrapPats: JSON.stringify({ [workspaceId]: GITHUB_VALID_PAT }),
+            sharedWorkspacePats: JSON.stringify({ [workspaceId]: GITHUB_VALID_PAT }),
           },
           async (base) => {
             // No HTTP request made yet at all — poll the instance registry directly until boot-time
@@ -448,7 +448,7 @@ test('a declared workspace with a matching GANTRY_BOOTSTRAP_PATS entry has its i
   })
 })
 
-test('unset/empty GANTRY_BOOTSTRAP_PATS is a no-op — nothing is registered at boot, only via the request-credential path', async () => {
+test('unset/empty GANTRY_SHARED_WORKSPACE_PATS is a no-op — nothing is registered at boot, only via the request-credential path', async () => {
   await withScratchInstances(async (instancesDir) => {
     await withFakeGitHubServer(
       { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: BOOT_PAT_SEED_FILES },
@@ -490,7 +490,7 @@ test('a rejected/invalid boot PAT degrades — server starts cleanly and the wor
           {
             instancesDir,
             bootstrapWorkspaces: JSON.stringify([declaration]),
-            bootstrapPats: JSON.stringify({ [workspaceId]: 'not-the-real-pat' }),
+            sharedWorkspacePats: JSON.stringify({ [workspaceId]: 'not-the-real-pat' }),
           },
           async (base) => {
             // Server started fine (withRunningServer would have rejected/hung otherwise) and the
@@ -518,7 +518,7 @@ test('a rejected/invalid boot PAT degrades — server starts cleanly and the wor
   })
 })
 
-test('createServer throws (rather than starting) when GANTRY_BOOTSTRAP_PATS is malformed JSON', async () => {
+test('createServer throws (rather than starting) when GANTRY_SHARED_WORKSPACE_PATS is malformed JSON', async () => {
   await withScratchInstances((instancesDir) => {
     assert.throws(
       () =>
@@ -526,17 +526,17 @@ test('createServer throws (rather than starting) when GANTRY_BOOTSTRAP_PATS is m
           instancesDir,
           migrateWorkspacesOnStart: true,
           bootstrapWorkspaces: JSON.stringify([GITHUB_DECLARATION]),
-          bootstrapPats: '{not json',
+          sharedWorkspacePats: '{not json',
         }),
       (err) => {
-        assert.match(err.message, /^GANTRY_BOOTSTRAP_PATS must be valid JSON:/)
+        assert.match(err.message, /^GANTRY_SHARED_WORKSPACE_PATS must be valid JSON:/)
         return true
       }
     )
   })
 })
 
-test('createServer falls back to process.env.GANTRY_BOOTSTRAP_PATS when options.bootstrapPats is not supplied', async () => {
+test('createServer falls back to process.env.GANTRY_SHARED_WORKSPACE_PATS when options.sharedWorkspacePats is not supplied', async () => {
   await withScratchInstances(async (instancesDir) => {
     await withFakeGitHubServer(
       { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: BOOT_PAT_SEED_FILES },
@@ -545,16 +545,16 @@ test('createServer falls back to process.env.GANTRY_BOOTSTRAP_PATS when options.
         const workspaceId = deriveWorkspaceId('github', location)
         const declaration = { provider: 'github', location }
 
-        const prev = process.env.GANTRY_BOOTSTRAP_PATS
-        process.env.GANTRY_BOOTSTRAP_PATS = JSON.stringify({ [workspaceId]: GITHUB_VALID_PAT })
+        const prev = process.env.GANTRY_SHARED_WORKSPACE_PATS
+        process.env.GANTRY_SHARED_WORKSPACE_PATS = JSON.stringify({ [workspaceId]: GITHUB_VALID_PAT })
         try {
           await withRunningServer({ instancesDir, bootstrapWorkspaces: JSON.stringify([declaration]) }, async () => {
             const registered = await pollUntil(() => listRegisteredInstances({ instancesDir }).some((r) => r.slug === 'found-one'))
             assert.ok(registered, 'found-one registered at boot via the env var fallback')
           })
         } finally {
-          if (prev === undefined) delete process.env.GANTRY_BOOTSTRAP_PATS
-          else process.env.GANTRY_BOOTSTRAP_PATS = prev
+          if (prev === undefined) delete process.env.GANTRY_SHARED_WORKSPACE_PATS
+          else process.env.GANTRY_SHARED_WORKSPACE_PATS = prev
         }
       }
     )
@@ -579,7 +579,7 @@ test('the boot PAT never appears in any GET /api/* JSON response, nor in the raw
           {
             instancesDir,
             bootstrapWorkspaces: JSON.stringify([declaration]),
-            bootstrapPats: JSON.stringify({ [workspaceId]: secretPat }),
+            sharedWorkspacePats: JSON.stringify({ [workspaceId]: secretPat }),
           },
           async (base) => {
             await pollUntil(() => listRegisteredInstances({ instancesDir }).some((r) => r.slug === 'found-one'))
@@ -660,4 +660,35 @@ test('discoverBootstrapPatInstances scopes a boot PAT to its own declared worksp
       }
     )
   })
+})
+
+// ---------------------------------------------------------------------------
+// #121 (parent #109, docs/adr/0047): GANTRY_BOOTSTRAP_PATS is renamed, with no alias — the old name
+// must not survive anywhere it would actually be read or shown to an operator as live guidance.
+// docs/adr/0046 (the superseded decision) and CHANGELOG.md's own historical release entries are the
+// deliberate exceptions: they describe what the setting used to be called, not what it is called now.
+// ---------------------------------------------------------------------------
+
+const REPO_ROOT = new URL('..', import.meta.url).pathname
+const OLD_NAME = 'GANTRY_BOOTSTRAP' + '_PATS' // built at runtime so this file itself never contains the literal string being searched for
+const SCAN_ROOTS = ['lib', 'bin', 'web', 'README.md', 'CONTEXT.md']
+const EXCLUDED_FILES = new Set([join(REPO_ROOT, 'tests', 'workspaceBootstrap.test.js')])
+
+function walkFiles(path) {
+  const stat = statSync(path)
+  if (stat.isFile()) return [path]
+  if (!stat.isDirectory()) return []
+  return readdirSync(path).flatMap((entry) => walkFiles(join(path, entry)))
+}
+
+test('GANTRY_BOOTSTRAP_PATS (the pre-#121 name) does not survive anywhere in lib/, bin/, web/, README.md, or CONTEXT.md', () => {
+  const offenders = []
+  for (const root of SCAN_ROOTS) {
+    for (const file of walkFiles(join(REPO_ROOT, root))) {
+      if (EXCLUDED_FILES.has(file)) continue
+      const text = readFileSync(file, 'utf8')
+      if (text.includes(OLD_NAME)) offenders.push(file.replace(REPO_ROOT, ''))
+    }
+  }
+  assert.deepEqual(offenders, [], `found the pre-rename env var name in: ${offenders.join(', ')}`)
 })

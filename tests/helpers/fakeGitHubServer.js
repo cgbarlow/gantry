@@ -77,6 +77,7 @@ export function createFakeGitHubServer({
   permissions = {},
   subIssuesEnabled = true,
   mergeRefusal = null,
+  viewerPermissions = { admin: false, maintain: false, push: true, triage: true, pull: true },
 } = {}) {
   const issues = new Map() // number -> issue object
   const issueIdToNumber = new Map() // internal id -> number
@@ -178,6 +179,11 @@ export function createFakeGitHubServer({
         full_name: `${owner}/${repository}`,
         owner: { login: owner, type: ownerType },
         default_branch: 'main',
+        // #126: `permissions` — the effective access *this supplied PAT* has on the repo, real GitHub's
+        // own field on the authenticated repo-metadata response. `viewerPermissions` (default: push
+        // access) lets a test simulate a read-only PAT by passing `{ admin: false, push: false, pull:
+        // true }` instead.
+        permissions: viewerPermissions,
       })
     }
 
@@ -598,7 +604,7 @@ export function createFakeGitHubServer({
 
 /** Starts a `createFakeGitHubServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/helpers/fakeAzureDevOpsServer.js`'s own `withFakeAzureDevOpsServer` shape. */
 export function withFakeGitHubServer(
-  { owner, repository, validPat, files, branchFiles, repoExists, ownerType, collaborators, orgMembers, permissions, subIssuesEnabled, mergeRefusal },
+  { owner, repository, validPat, files, branchFiles, repoExists, ownerType, collaborators, orgMembers, permissions, subIssuesEnabled, mergeRefusal, viewerPermissions },
   fn
 ) {
   return new Promise((resolve, reject) => {
@@ -615,6 +621,7 @@ export function withFakeGitHubServer(
       permissions,
       subIssuesEnabled,
       mergeRefusal,
+      viewerPermissions,
     })
     server.listen(0, async () => {
       const { port } = server.address()

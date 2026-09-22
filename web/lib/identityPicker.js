@@ -37,6 +37,12 @@ export function IdentityPicker({
   enforceAssignability = false,
   className,
   id,
+  // #126: a caller gates this off (a shared workspace's editing affordances, gated on confirmed write
+  // access) the same way any other field-level control disables — a plain boolean, defaulted `false`
+  // so every existing caller is unaffected. Disables the input itself (blocking typing, focus and the
+  // debounced search this component would otherwise fire) rather than removing the component, so a
+  // pre-existing value still renders in place.
+  disabled = false,
 }) {
   const [query, setQuery] = useState(value ?? '')
   const [results, setResults] = useState([])
@@ -161,6 +167,7 @@ export function IdentityPicker({
         type="text"
         value=${query}
         placeholder=${placeholder ?? 'Search by name\u2026'}
+        disabled=${disabled}
         onInput=${handleInput}
         onFocus=${() => { if (query.trim() && results.length) setOpen(true) }}
         onBlur=${() => {

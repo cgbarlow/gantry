@@ -12,8 +12,19 @@ import { keymap } from '@codemirror/view'
 import { indentWithTab, undo, redo, undoDepth, redoDepth, isolateHistory } from '@codemirror/commands'
 import { syntaxTree } from '@codemirror/language'
 import { markdown } from '@codemirror/lang-markdown'
-import { promptContext, promptOpen, resolvePromptWith, migrateGlobalPatToWorkspaces } from './lib/credential.js'
-import { apiFetch, apiFetchForInstance, apiFetchForInstanceRef, cachedScopeForSlug } from './lib/apiFetch.js'
+import {
+  promptContext,
+  promptOpen,
+  resolvePromptWith,
+  migrateGlobalPatToWorkspaces,
+  hasPatForWorkspace,
+  hasConfirmedWriteAccess,
+  hasCheckedWriteAccess,
+  credentialStatusForWorkspace,
+  requestPat,
+} from './lib/credential.js'
+import { apiFetch, apiFetchForInstance, apiFetchForInstanceRef, cachedScopeForSlug, cachedWorkspaceIdForSlug } from './lib/apiFetch.js'
+import { ensureWriteAccessChecked } from './lib/writeAccess.js'
 import { renderMarkdown } from './lib/markdown.js'
 import { Dropdown } from './lib/dropdown.js'
 import { apply as applyMarkdownCommand, HEADING_LEVELS, findTable, diffRange } from './lib/markdownCommands.js'
@@ -24,6 +35,7 @@ import { LocalDefinitionEditorPage } from './pages/local-definition-editor.js'
 import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, workspaceRepoUrl } from './pages/settings.js'
 // Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79, #374) visual/split/markdown toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
+import { unrepresentedWorkspaceGroups } from './lib/dashboardWorkspaces.js'
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
 import { visualMode, refreshVisual, clearActiveCell, restoreActiveCell, activeCellSelection, focusTableCellAt } from './lib/visualMode.js'
 import { advancedMode } from './lib/advancedMode.js'
@@ -893,6 +905,86 @@ effect(() => {
 // An archived instance is read-only in every view (#374 — this replaced the retired read-only Rendered view). Genuinely read-only, not just visually hidden: `EditorState.readOnly` rejects direct-edit transactions and `EditorView.editable` drops `contenteditable` (and with it every Visual grid cell and table handle), so neither typing nor paste nor drag-drop can land a change.
 const isArchived = () => !!instanceData.value?.archived
 
+// #126 (parent #109, docs/adr/0047): the currently-viewed instance's own workspace id, or `null` for a
+// local instance — `web/lib/apiFetch.js`'s `cachedWorkspaceIdForSlug` reading off the same cache entry
+// `apiFetchForInstance` already warmed loading this instance's data, so this never triggers a request
+// of its own.
+const currentWorkspaceId = () => cachedWorkspaceIdForSlug(currentSlug.value)
+
+// #126: "shared" (`instanceData.value.shared`, set by lib/server.js's own `GET /api/instance` — this
+// workspace has a `GANTRY_SHARED_WORKSPACE_PATS` entry, i.e. it can be browsed with no credential at
+// all) is what tells an unshared workspace apart from the case this ticket exists for. An unshared
+// workspace's reads already 401-and-prompt (`apiFetch`'s existing `requestPat` flow) before any
+// instance data — and with it any editing affordance — ever renders, so by the time this function
+// could even be asked, an unshared instance always already holds a credential; gating on
+// `isSharedInstance()` (rather than gating unconditionally on write-access confirmation) is what keeps
+// that pre-existing flow's behaviour genuinely untouched, per #126's own explicit "unshared is
+// unaffected" requirement.
+const isSharedInstance = () => !!instanceData.value?.shared
+
+// #126: the single answer every editing affordance below gates on. `false` (never blocked) for a
+// local instance or an unshared one — see `isSharedInstance` above for why. For a shared instance,
+// blocked whenever this workspace's stored credential (if any) has not been *confirmed* to write here
+// — no credential at all and "checked, and it's read-only" collapse to the same UI state on purpose
+// (both get `writeAccessBlockedReason`'s "Add credential" action below); only a rejected credential
+// gets its own distinct wording, from the pre-existing `credentialStatusForWorkspace`.
+function isWriteAccessBlocked() {
+  if (!isSharedInstance()) return false
+  return !hasConfirmedWriteAccess(currentWorkspaceId())
+}
+
+// The union this file's editing affordances actually gate on: archived (unconditional, every
+// workspace) or, for a shared workspace, write access not yet confirmed for whatever credential (if
+// any) is currently stored. `isArchived()` itself is untouched and keeps meaning exactly "this
+// instance is archived" wherever this file still reads it directly (the archived banner's own text).
+const isEditingBlocked = () => isArchived() || isWriteAccessBlocked()
+
+// #126: the stated reason + action pairing every gated control's "why is this off, and what do I do
+// about it" reads from — `null` while editing isn't blocked at all (including "blocked because
+// archived", which already has its own banner and needs no second explanation here).
+function writeAccessBlockedReason() {
+  if (isArchived() || !isWriteAccessBlocked()) return null
+  const workspaceId = currentWorkspaceId()
+  if (credentialStatusForWorkspace(workspaceId) === 'rejected') {
+    return { reason: 'rejected', message: 'This credential was rejected — add a working one to edit.' }
+  }
+  if (hasPatForWorkspace(workspaceId)) {
+    return { reason: 'read-only', message: "This credential can read but can't write here — add one with write access to edit." }
+  }
+  return { reason: 'no-credential', message: 'Browsing without a credential — add one with write access to edit.' }
+}
+
+// #126: runs once per credential (web/lib/writeAccess.js's own in-flight/already-checked guards make
+// this cheap to call from every render of a shared instance's editor) — the "when a credential is
+// entered for a shared workspace, run this check ONCE" trigger, covering both a credential entered
+// just now via `<${AddCredentialAction}>` below and one this browser already held for this workspace
+// from an earlier visit that was simply never asked about yet.
+effect(() => {
+  const shared = instanceData.value?.shared
+  const slug = currentSlug.value
+  if (!shared || !slug) return
+  const workspaceId = cachedWorkspaceIdForSlug(slug)
+  if (!workspaceId) return
+  // Explicit, synchronous signal reads (rather than leaving this effect's dependency tracking to
+  // whatever `ensureWriteAccessChecked` itself happens to read before its first `await`) — this is
+  // what makes the effect re-run, and so re-trigger the check, the moment a credential is entered or
+  // changed for this workspace (`setPatForWorkspace`'s own `patsByWorkspace` signal write) rather than
+  // only when `instanceData`/`currentSlug` themselves change.
+  if (!hasPatForWorkspace(workspaceId)) return
+  if (hasCheckedWriteAccess(workspaceId)) return
+  ensureWriteAccessChecked(workspaceId)
+})
+
+// The "Add credential" action every gated control's reason pairs with (#126's own acceptance
+// criterion) — opens the same shared PAT-prompt modal `apiFetch`'s own 401 handling uses
+// (`requestPat`), so submitting here goes through the identical storage path as entering one in
+// response to a failed request. A granted submission's write-access check follows from the effect
+// above (`instanceData.value.shared` + the now-stored credential), not from anything this button does
+// directly — it only has to get a credential stored.
+function AddCredentialAction() {
+  return html`<button type="button" class="btn small" onClick=${() => requestPat(currentWorkspaceId())}>Add credential</button>`
+}
+
 function editableExtension(readOnly) {
   return [EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]
 }
@@ -1546,7 +1638,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
   // flag, refreshed from every selection/doc update below.
   const [inTable, setInTable] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
-  const readOnly = isArchived()
+  const readOnly = isEditingBlocked()
 
   useEffect(() => {
     const editableCompartment = new Compartment()
@@ -1563,7 +1655,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
         markdownToolbarKeymap,
         basicSetup,
         markdown(),
-        editableCompartment.of(editableExtension(isArchived())),
+        editableCompartment.of(editableExtension(isEditingBlocked())),
         wrapCompartment.of(wrap.value ? EditorView.lineWrapping : []),
         visualCompartment.of(viewMode.value === 'visual' ? visualLayer() : []),
         EditorView.updateListener.of((update) => {
@@ -1604,7 +1696,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
             markdownToolbarKeymap,
             basicSetup,
             markdown(),
-            splitEditableCompartment.of(editableExtension(isArchived())),
+            splitEditableCompartment.of(editableExtension(isEditingBlocked())),
             visualLayer(),
           ],
         }),
@@ -1645,11 +1737,14 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
       }
     })
 
-    // Archiving (or restoring) an instance while it is open flips read-only live.
+    // Archiving (or restoring) an instance while it is open flips read-only live — and so, per #126,
+    // does a write-access check resolving (in either direction) for a shared instance's stored
+    // credential: `isEditingBlocked()` reads `instanceData`/credential/write-access signals, so this
+    // effect re-runs and reconfigures the editor the moment any of them changes, with no reload.
     const stopEditableSync = effect(() => {
-      const archived = isArchived()
-      view.dispatch({ effects: editableCompartment.reconfigure(editableExtension(archived)) })
-      splitViewRef.current?.dispatch({ effects: splitEditableCompartment.reconfigure(editableExtension(archived)) })
+      const blocked = isEditingBlocked()
+      view.dispatch({ effects: editableCompartment.reconfigure(editableExtension(blocked)) })
+      splitViewRef.current?.dispatch({ effects: splitEditableCompartment.reconfigure(editableExtension(blocked)) })
     })
 
     const stopWrapSync = effect(() => {
@@ -1888,7 +1983,7 @@ function SingleSelectField({ field, moduleId, onRegister }) {
         : html`<label>${field.title}${field.required ? ' *' : ''}</label>`}
       ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
       <select
-        disabled=${isArchived()}
+        disabled=${isEditingBlocked()}
         value=${valueRef.current}
         onChange=${(e) => {
           valueRef.current = e.currentTarget.value
@@ -1954,7 +2049,7 @@ function MultiSelectField({ field, moduleId, onRegister }) {
             <label class="select-checkbox-row ${isOffList ? 'field-select-offlist' : ''}" key=${option}>
               <input
                 type="checkbox"
-                disabled=${isArchived()}
+                disabled=${isEditingBlocked()}
                 checked=${valuesRef.current.includes(option)}
                 onChange=${(e) => toggle(option, e.currentTarget.checked)}
               />
@@ -2000,7 +2095,7 @@ function TextField({ field, moduleId, onRegister }) {
       ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
       <input
         type="text"
-        disabled=${isArchived()}
+        disabled=${isEditingBlocked()}
         value=${valueRef.current}
         onInput=${(e) => {
           valueRef.current = e.currentTarget.value
@@ -2043,7 +2138,7 @@ function DateField({ field, moduleId, onRegister }) {
       ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
       <input
         type="date"
-        disabled=${isArchived()}
+        disabled=${isEditingBlocked()}
         value=${valueRef.current}
         onInput=${(e) => {
           valueRef.current = e.currentTarget.value
@@ -2107,22 +2202,22 @@ function ListField({ field, moduleId, onRegister, onRemove, onRequestSection, on
               <textarea
                 rows="1"
                 value=${value}
-                readOnly=${isArchived()}
+                readOnly=${isEditingBlocked()}
                 ref=${autosizeTextarea}
                 onInput=${(e) => {
                   autosizeTextarea(e.currentTarget)
                   updateRow(i, e.currentTarget.value)
                 }}
               ></textarea>
-              ${!isArchived()
+              ${!isEditingBlocked()
                 ? html`<button type="button" class="btn small" onClick=${() => removeRow(i)}>Remove</button>`
                 : null}
             </div>
           `
         )}
       </div>
-      ${!isArchived() ? html`<button type="button" class="btn small" onClick=${addRow}>Add</button>` : null}
-      ${!isArchived()
+      ${!isEditingBlocked() ? html`<button type="button" class="btn small" onClick=${addRow}>Add</button>` : null}
+      ${!isEditingBlocked()
         ? html`
             <div class="insert-bar">
               <${InsertDropdown}
@@ -3372,6 +3467,7 @@ function SyncedFieldsPanel({ instance }) {
                       type="text"
                       placeholder=${`${instance.slug} — ${instance.stage.title}`}
                       value=${titleDraft ?? data.title}
+                      disabled=${isEditingBlocked()}
                       onInput=${(e) => setTitleDraft(e.currentTarget.value)}
                       onBlur=${commitTitle}
                       onKeyDown=${(e) => e.key === 'Enter' && e.currentTarget.blur()}
@@ -3394,6 +3490,7 @@ function SyncedFieldsPanel({ instance }) {
                     <label class="field-label" for="synced-assignee">Assignee${data.assigneeInherited ? '' : ' · overridden'}</label>
                     <${IdentityPicker}
                       value=${assigneeDraft ?? data.assignee}
+                      disabled=${isEditingBlocked()}
                       onChange=${(uniqueName) => {
                         setAssigneeDraft(uniqueName)
                         // Commit immediately on select (no blur-based commit needed — the picker's selection is already definitive)
@@ -3427,7 +3524,7 @@ function SyncedFieldsPanel({ instance }) {
                 <div class="review-signoff-header">
                   <span class="field-label">Reviews</span>
                   ${isCurrentStage
-                    ? html`<button type="button" class="btn small" onClick=${openReviewDialog}>Request Review</button>`
+                    ? html`<button type="button" class="btn small" disabled=${isEditingBlocked()} onClick=${openReviewDialog}>Request Review</button>`
                     : null}
                 </div>
                 ${!instance.reviews?.length
@@ -3459,7 +3556,7 @@ function SyncedFieldsPanel({ instance }) {
                 <div class="review-signoff-header">
                   <span class="field-label">Sign-off</span>
                   ${!openPullRequestId && isCurrentStage
-                    ? html`<button type="button" class="btn small" onClick=${afterUnsavedCheck(handleCheckAndMaybeRequestSignoff)}>Request Sign-off</button>`
+                    ? html`<button type="button" class="btn small" disabled=${isEditingBlocked()} onClick=${afterUnsavedCheck(handleCheckAndMaybeRequestSignoff)}>Request Sign-off</button>`
                     : null}
                 </div>
                 ${openPullRequestId
@@ -3818,7 +3915,7 @@ function ReopenStagePanel({ instance }) {
   const viewedIdx = instance.stages.findIndex((s) => s.id === instance.stage.id)
   const currentIdx = instance.stages.findIndex((s) => s.id === instance.currentStageId)
   const isCompleted = viewedIdx !== -1 && currentIdx !== -1 && viewedIdx < currentIdx
-  const show = instance.workspaceBacked && isCompleted && !isArchived()
+  const show = instance.workspaceBacked && isCompleted && !isEditingBlocked()
   const [confirming, setConfirming] = useState(false)
   const [status, setStatus] = useState('')
   const [loading, setLoading] = useState(false)
@@ -3948,7 +4045,7 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
         ? html`<${SyncedFieldsPanel} key=${instance.workItem ? 'linked' : 'unlinked'} instance=${instance} />`
         : null}
       ${modules.length > 0
-        ? html`<div class="insert-bar top-insert-bar" data-testid="top-insert" hidden=${isArchived()}>
+        ? html`<div class="insert-bar top-insert-bar" data-testid="top-insert" hidden=${isEditingBlocked()}>
             <${InsertDropdown} onSection=${() => setTopSectionOpen(true)} onList=${() => setTopListOpen(true)} />
           </div>`
         : null}
@@ -4065,7 +4162,7 @@ function ViewModeToolbar({
   return html`
     <div class="toolbar">
       <div class="toolbar-left">
-        ${!isArchived() ? html`<${StageSaveButton} />` : null}
+        ${!isEditingBlocked() ? html`<${StageSaveButton} />` : null}
         <div class="toolbar-field">
           <span>Mode</span>
           <${Dropdown}
@@ -4561,7 +4658,7 @@ function ModuleEditorPage({ slug: routeRef }) {
     refreshDirty()
     const inst = instanceData.peek()
     const { dirtyModuleIds, phase } = stageSave.peek()
-    if (!inst?.stage || isArchived() || phase === 'saving') return false
+    if (!inst?.stage || isEditingBlocked() || phase === 'saving') return false
     if (dirtyModuleIds.length === 0) return true
     const key = stageKey(inst)
     const payloads = Object.fromEntries(
@@ -4857,10 +4954,16 @@ function ModuleEditorPage({ slug: routeRef }) {
           to make changes.
         </div>`
       : null}
+    ${!instance.archived && writeAccessBlockedReason()
+      ? html`<div class="archived-banner write-access-banner" data-testid="write-access-banner">
+          ${writeAccessBlockedReason().message}
+          <${AddCredentialAction} />
+        </div>`
+      : null}
     ${showStageSyncBanner
       ? html`<div class="archived-banner stage-sync-banner" role="status" data-testid="stage-sync-banner">
           This stage's working branch is behind main on ${stageSync.behindFiles.length} file(s). Sync to pull the latest.
-          <button type="button" class="btn small" disabled=${syncing} onClick=${handleSyncFromMain} data-testid="sync-from-main">
+          <button type="button" class="btn small" disabled=${syncing || isEditingBlocked()} onClick=${handleSyncFromMain} data-testid="sync-from-main">
             ${syncing ? 'Syncing…' : 'Sync from main'}
           </button>
           ${syncStatus ? html`<span class="save-status">${syncStatus}</span>` : null}
@@ -4904,6 +5007,20 @@ async function loadInstances(slug) {
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new Error(body.message ?? body.error ?? `Failed to load instances (${res.status})`)
+  }
+  return res.json()
+}
+
+// #122 (parent #109, docs/adr/0047): every workspace `GET /api/workspaces` knows about — needs no
+// credential itself (same uncredentialed route the legacy-PAT migration at the bottom of this file
+// already calls) — is what DashboardPage joins against `loadInstances`'s own result
+// (web/lib/dashboardWorkspaces.js's `unrepresentedWorkspaceGroups`) so a registered workspace
+// contributing zero rows to the instances listing still gets a row of its own.
+async function loadWorkspaces() {
+  const res = await apiFetch('/api/workspaces')
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.message ?? body.error ?? `Failed to load workspaces (${res.status})`)
   }
   return res.json()
 }
@@ -5098,14 +5215,21 @@ function groupSummaryText(group) {
     if (group.state === 'loading') return 'Opening…'
     if (group.state !== 'granted') return 'Needs permission'
   }
+  // #122: a registered-but-unrepresented workspace (web/lib/dashboardWorkspaces.js) has no instances
+  // of its own to summarize — its own two states get their own short list-pane text instead, distinct
+  // from each other the same way their detail-pane copy is (MasterDetailView, above).
+  if (group.kind === 'placeholder') {
+    return group.state === 'unreadable' ? "Can't read this workspace" : 'Nothing registered yet'
+  }
   const definitions = [...new Set(group.instances.map((inst) => inst.definition))]
   const count = group.instances.length
   return `${count} instance${count === 1 ? '' : 's'} · ${definitions.join(', ')}`
 }
 
-// A group's dot in the list pane reflects every one of its instances being complete, not just the first — a multi-instance workspace with even one outstanding instance is "in progress" as a whole. A local-workspace group has no per-instance `status` at all (ADR-0029) — its dot instead reflects whether its folder permission is currently granted.
+// A group's dot in the list pane reflects every one of its instances being complete, not just the first — a multi-instance workspace with even one outstanding instance is "in progress" as a whole. A local-workspace group has no per-instance `status` at all (ADR-0029) — its dot instead reflects whether its folder permission is currently granted. #122: a placeholder group's dot reflects its own `state` instead — `unreadable` gets the same red the Gate Ledger's `.stamp.error` already uses (`.dot.unreadable`, web/style.css), visually distinct from the neutral `draft` amber `empty` shares with "in progress" — deliberately, since "can't read this" and "still in progress" are different situations, but "nothing registered yet" and "in progress" are close enough in urgency to share a color.
 function groupStatusClass(group) {
   if (group.kind === 'local') return group.state === 'granted' ? 'agreed' : 'draft'
+  if (group.kind === 'placeholder') return group.state === 'unreadable' ? 'unreadable' : 'draft'
   return group.instances.every((inst) => inst.status === 'complete') ? 'agreed' : 'draft'
 }
 
@@ -5454,7 +5578,7 @@ function InstanceCard({ inst, editHref, checkStatus, onCheck }) {
   `
 }
 
-function MasterDetailView({ instances, localGroups }) {
+function MasterDetailView({ instances, localGroups, workspaceGroups = [] }) {
   const [filter, setFilter] = useState('')
   const [selectedKey, setSelectedKey] = useState(null)
   // Keyed by instance slug (not the single shared string the old flat list used) — several instances can be in flight for the *same* selected workspace at once (one Check or one Render), and each must report its own status independently.
@@ -5462,8 +5586,14 @@ function MasterDetailView({ instances, localGroups }) {
 
   // Local groups lead the list (WI #306's resolved design: position, not a
   // badge, is what marks them as local) — never interleaved alphabetically
-  // with the server-hosted groups that follow.
-  const groups = [...localGroups, ...groupInstancesByWorkspace(instances)]
+  // with the server-hosted groups that follow. #122: a registered-but-unrepresented workspace's
+  // placeholder group (web/lib/dashboardWorkspaces.js) sorts in among the populated server-hosted
+  // groups by the same title rule, rather than trailing them all in registration order — a workspace
+  // with no readable rows is still a workspace, not a lesser citizen of this list.
+  const groups = [
+    ...localGroups,
+    ...[...groupInstancesByWorkspace(instances), ...workspaceGroups].sort((a, b) => a.title.localeCompare(b.title)),
+  ]
 
   const needle = filter.trim().toLowerCase()
   const filtered = needle
@@ -5592,7 +5722,27 @@ function MasterDetailView({ instances, localGroups }) {
                     `
                   : null}
               `
-            : html`
+            : selectedGroup.kind === 'placeholder'
+              ? html`
+                  <h2>${selectedGroup.title}</h2>
+                  <p class="workspace-subtitle">${selectedGroup.subtitle}</p>
+                  <div class=${'local-workspace-recovery workspace-placeholder-' + selectedGroup.state}>
+                    <p>
+                      ${selectedGroup.state === 'unreadable'
+                        ? "Can't read this workspace — no credential (yours or the deployment's) could reach it, even though it has instances registered."
+                        : 'Nothing has been registered in this workspace yet — it may be genuinely empty, or it may just never have been checked with a credential.'}
+                    </p>
+                    <div class="detail-actions">
+                      <a
+                        class="btn primary"
+                        href=${`/settings/workspace?id=${encodeURIComponent(selectedGroup.workspaceId)}&from=${encodeURIComponent('/')}`}
+                      >
+                        Add a credential →
+                      </a>
+                    </div>
+                  </div>
+                `
+              : html`
               <h2>${selectedGroup.title}</h2>
               <p class="workspace-subtitle">${selectedGroup.subtitle}</p>
               ${(() => {
@@ -5893,14 +6043,19 @@ function ArchivedWorkspacesPanel({ onRestored }) {
 // ever renders.
 function DashboardPage() {
   const [instances, setInstances] = useState(null)
+  const [workspaces, setWorkspaces] = useState(null)
   const [error, setError] = useState(null)
   const { entries: localEntries, groups: localGroups, handleChange: onLocalChange, handleRemoved: onLocalRemoved } = useLocalGroups()
   const localCount = localEntries.length
 
+  // #122 (parent #109, docs/adr/0047): `instances` and `workspaces` load together, from the same
+  // reload trigger — a registered-but-unrepresented workspace row (see `workspaceGroups` below) has to
+  // stay in sync with the instances listing it's a complement of, not lag a click behind it.
   function reloadInstances() {
-    loadInstances()
-      .then((data) => {
-        setInstances(data)
+    Promise.all([loadInstances(), loadWorkspaces()])
+      .then(([instancesData, workspacesData]) => {
+        setInstances(instancesData)
+        setWorkspaces(workspacesData)
         setError(null)
       })
       .catch((err) => setError(err.message))
@@ -5915,6 +6070,16 @@ function DashboardPage() {
   // untouched `instances` for the archived panels below.
   const visibleInstances =
     instances && !advancedMode.value ? instances.filter((inst) => !isAzureDevOpsBacked(inst)) : instances
+
+  // #122: every registered workspace contributing zero rows to `instances` gets a placeholder group
+  // of its own (web/lib/dashboardWorkspaces.js) — computed from the *raw*, unfiltered `instances`,
+  // never `visibleInstances`, so an Azure-DevOps-backed workspace #301 is hiding populated rows for
+  // isn't miscounted as "unrepresented" merely because its own rows were filtered out above; its
+  // placeholder is filtered by the exact same #301 rule instead, right below.
+  const workspaceGroups =
+    instances && workspaces
+      ? unrepresentedWorkspaceGroups(instances, workspaces).filter((group) => advancedMode.value || !group.isAzureDevOps)
+      : []
 
   return html`
     <main class="dashboard">
@@ -5938,19 +6103,24 @@ function DashboardPage() {
       </div>
       ${error
         ? html`<p class="load-error">Failed to load: ${error}</p>`
-        : !instances
+        : !instances || !workspaces
           ? html`<p class="loading">Loading…</p>`
-          : visibleInstances.length === 0 && localCount === 0
+          : // #122: an entirely empty deployment (no instances, no local workspaces, and no
+            // registered workspace left unrepresented either) still reaches EmptyState — a
+            // registered-but-empty-or-unreadable workspace counting toward "there's something to
+            // show" is exactly what keeps this from regressing to a blank screen once #122 makes such
+            // a workspace visible at all.
+            visibleInstances.length === 0 && localCount === 0 && workspaceGroups.length === 0
             ? html`<${EmptyState} />`
             : // WI #306: remembered local workspaces are blended into
               // MasterDetailView's own list now (no separate section) — swimlane
               // view still groups only server-hosted instances by definition/stage
               // (groupInstancesByWorkspace never drove that view), so it's only
               // chosen once there's at least one server-hosted instance to show;
-              // master-detail is what renders local-only dashboards.
+              // master-detail is what renders local-only (and #122's placeholder-only) dashboards.
               dashboardViewMode.value === 'swimlanes' && visibleInstances.length > 0
               ? html`<${SwimlaneView} instances=${visibleInstances} />`
-              : html`<${MasterDetailView} instances=${visibleInstances} localGroups=${localGroups} />`}
+              : html`<${MasterDetailView} instances=${visibleInstances} localGroups=${localGroups} workspaceGroups=${workspaceGroups} />`}
       ${instances ? html`<${ArchivedInstancesPanel} onRestored=${reloadInstances} />` : null}
       ${instances ? html`<${ArchivedWorkspacesPanel} onRestored=${reloadInstances} />` : null}
     </main>

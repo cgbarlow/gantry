@@ -8,7 +8,9 @@ import { loadDefinition } from '../lib/definition.js'
 import { listRegistry } from '../lib/registry.js'
 import { registerInstance, archiveInstance } from '../lib/instanceRegistry.js'
 import { writeWorkspaceJson } from '../lib/workspaceDirectory.js'
+import { findWorkspaceByLocation } from '../lib/workspaceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { createFakeGitHubServer } from './helpers/fakeGitHubServer.js'
 import { withScratchInstances } from './helpers/lifecycle.js'
 
 // WI #356: a directory-backed instance now lives inside a real server workspace folder (a
@@ -361,4 +363,174 @@ test('listRegistry gives two instances registered against the same Azure DevOps 
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }
+})
+
+// ---------- #121 (parent #109, docs/adr/0047): options.sharedPats — a shared workspace renders its
+// listing with no viewer credential ----------
+//
+// `withFakeGitHubServer` (the shared helper other suites use) doesn't hand back the underlying
+// `node:http` server, so `withCountingFakeGitHubServer` below is a small local wrapper (mirroring
+// tests/workspaceBootstrap.test.js's own `withFakeGitHubServerCountingListFolder`) that does, purely
+// so the cross-workspace-leak test can prove a *different* workspace's own repo received zero
+// requests — not just that its row was omitted, which a credential-less buildGitHubRow already omits
+// before ever making a network call.
+function withCountingFakeGitHubServer(opts, fn) {
+  const server = createFakeGitHubServer(opts)
+  let requestCount = 0
+  server.on('request', () => {
+    requestCount++
+  })
+  return new Promise((resolve, reject) => {
+    server.listen(0, async () => {
+      const { port } = server.address()
+      try {
+        await fn({ baseUrl: `http://localhost:${port}`, requestCount: () => requestCount })
+        resolve()
+      } catch (err) {
+        reject(err)
+      } finally {
+        server.close()
+      }
+    })
+  })
+}
+
+const SHARED_GITHUB_OWN_PAT = 'own-request-pat'
+const SHARED_GITHUB_SHARED_PAT = 'deployment-shared-pat'
+const GITHUB_INITIATIVE_FILES = {
+  '/gantry-workspace/gh-initiative/instance.yaml': 'definition: design\nstage: shape\nassignee: c.barlow\n',
+}
+
+test('listRegistry: a request with no credential gets a shared workspace\'s rows, built with GANTRY_SHARED_WORKSPACE_PATS\' own entry', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    await withCountingFakeGitHubServer(
+      { owner: 'shared-owner', repository: 'shared-repo', validPat: SHARED_GITHUB_SHARED_PAT, files: GITHUB_INITIATIVE_FILES },
+      async ({ baseUrl }) => {
+        const location = { kind: 'github', owner: 'shared-owner', repository: 'shared-repo', baseUrl }
+        registerInstance('gh-initiative', location, { instancesDir })
+        const workspaceId = findWorkspaceByLocation(
+          { provider: 'github', location: { owner: 'shared-owner', repository: 'shared-repo', baseUrl } },
+          { instancesDir }
+        ).id
+
+        const registry = await listRegistry({ instancesDir, sharedPats: { [workspaceId]: SHARED_GITHUB_SHARED_PAT } })
+        assert.deepEqual(registry.map((r) => r.slug), ['gh-initiative'])
+      }
+    )
+  })
+})
+
+test('listRegistry: a request WITH its own credential uses its own, never the shared one, even when a (deliberately wrong) shared entry also exists', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    await withCountingFakeGitHubServer(
+      { owner: 'own-owner', repository: 'own-repo', validPat: SHARED_GITHUB_OWN_PAT, files: GITHUB_INITIATIVE_FILES },
+      async ({ baseUrl }) => {
+        const location = { kind: 'github', owner: 'own-owner', repository: 'own-repo', baseUrl }
+        registerInstance('gh-initiative', location, { instancesDir })
+        const workspaceId = findWorkspaceByLocation(
+          { provider: 'github', location: { owner: 'own-owner', repository: 'own-repo', baseUrl } },
+          { instancesDir }
+        ).id
+
+        // The shared entry is a PAT this fake server does not accept — if it were ever used instead of
+        // the request's own, the row would be silently omitted (buildGitHubRow's own "any read failure
+        // omits the row" contract) rather than merely built wrong, so its presence here is proof the
+        // request's own credential was actually the one used.
+        const registry = await listRegistry({
+          instancesDir,
+          pat: SHARED_GITHUB_OWN_PAT,
+          sharedPats: { [workspaceId]: 'not-a-real-pat-and-never-tried' },
+        })
+        assert.deepEqual(registry.map((r) => r.slug), ['gh-initiative'])
+      }
+    )
+  })
+})
+
+test('listRegistry: a workspace with no shared-credential entry is unchanged — its row is omitted for a credential-less request', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    await withCountingFakeGitHubServer(
+      { owner: 'unshared-owner', repository: 'unshared-repo', validPat: 'irrelevant-pat', files: GITHUB_INITIATIVE_FILES },
+      async ({ baseUrl }) => {
+        const location = { kind: 'github', owner: 'unshared-owner', repository: 'unshared-repo', baseUrl }
+        registerInstance('gh-initiative', location, { instancesDir })
+
+        // sharedPats has entries, just none for this workspace's own id.
+        const registry = await listRegistry({ instancesDir, sharedPats: { 'some-other-workspace-id': 'some-other-pat' } })
+        assert.deepEqual(registry, [])
+      }
+    )
+  })
+})
+
+test('listRegistry: with an empty/unset shared-credential map, behavior is identical to before this ticket — a credential-less request still sees nothing for a Provider-backed instance', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    await withCountingFakeGitHubServer(
+      { owner: 'plain-owner', repository: 'plain-repo', validPat: 'irrelevant-pat', files: GITHUB_INITIATIVE_FILES },
+      async ({ baseUrl }) => {
+        const location = { kind: 'github', owner: 'plain-owner', repository: 'plain-repo', baseUrl }
+        registerInstance('gh-initiative', location, { instancesDir })
+
+        // Neither call passes sharedPats at all — this is every caller of listRegistry before #121,
+        // and every write-path re-read in lib/server.js after it.
+        assert.deepEqual(await listRegistry({ instancesDir }), [])
+        assert.deepEqual(await listRegistry({ instancesDir, sharedPats: {} }), [])
+      }
+    )
+  })
+})
+
+test('listRegistry: a shared credential scoped to workspace A is never tried against workspace B\'s repo', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    await withCountingFakeGitHubServer(
+      { owner: 'workspace-a-owner', repository: 'workspace-a-repo', validPat: 'pat-for-a', files: GITHUB_INITIATIVE_FILES },
+      async ({ baseUrl: baseUrlA }) => {
+        await withCountingFakeGitHubServer(
+          {
+            owner: 'workspace-b-owner',
+            repository: 'workspace-b-repo',
+            validPat: 'pat-for-b',
+            files: { '/gantry-workspace/gh-initiative-b/instance.yaml': 'definition: design\nstage: shape\n' },
+          },
+          async ({ baseUrl: baseUrlB, requestCount: requestCountB }) => {
+            const locationA = { kind: 'github', owner: 'workspace-a-owner', repository: 'workspace-a-repo', baseUrl: baseUrlA }
+            const locationB = { kind: 'github', owner: 'workspace-b-owner', repository: 'workspace-b-repo', baseUrl: baseUrlB }
+            registerInstance('gh-initiative', locationA, { instancesDir })
+            registerInstance('gh-initiative-b', locationB, { instancesDir })
+            const workspaceIdA = findWorkspaceByLocation(
+              { provider: 'github', location: { owner: 'workspace-a-owner', repository: 'workspace-a-repo', baseUrl: baseUrlA } },
+              { instancesDir }
+            ).id
+
+            // Only A has a shared entry — B has none at all.
+            const registry = await listRegistry({ instancesDir, sharedPats: { [workspaceIdA]: 'pat-for-a' } })
+            assert.deepEqual(
+              registry.map((r) => r.slug),
+              ['gh-initiative']
+            )
+            assert.equal(requestCountB(), 0, "workspace A's shared credential must never be tried against workspace B's repo")
+          }
+        )
+      }
+    )
+  })
+})
+
+test('listRegistry: no shared credential ever appears in the built rows', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    await withCountingFakeGitHubServer(
+      { owner: 'secret-owner', repository: 'secret-repo', validPat: SHARED_GITHUB_SHARED_PAT, files: GITHUB_INITIATIVE_FILES },
+      async ({ baseUrl }) => {
+        const location = { kind: 'github', owner: 'secret-owner', repository: 'secret-repo', baseUrl }
+        registerInstance('gh-initiative', location, { instancesDir })
+        const workspaceId = findWorkspaceByLocation(
+          { provider: 'github', location: { owner: 'secret-owner', repository: 'secret-repo', baseUrl } },
+          { instancesDir }
+        ).id
+
+        const registry = await listRegistry({ instancesDir, sharedPats: { [workspaceId]: SHARED_GITHUB_SHARED_PAT } })
+        assert.ok(!JSON.stringify(registry).includes(SHARED_GITHUB_SHARED_PAT))
+      }
+    )
+  })
 })
