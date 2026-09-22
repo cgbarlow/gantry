@@ -1483,6 +1483,12 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .settings-radio input[disabled] { cursor: not-allowed; }
 .settings-radio .stamp { margin-left: 2px; }
 
+/* #117 — the running server's version, as a quiet footer line under the last section rather than a
+ * section of its own. Reuses `--text-muted`/`--font-mono`, the same secondary-text and
+ * identifier conventions every other incidental fact on these screens already uses. */
+.settings-version { color: var(--text-muted); font-size: 12px; }
+.settings-version .settings-version-number { font-family: var(--font-mono); }
+
 /*
  * ---------- Workspace Settings (#104, scoped to one workspace by #107) ----------
  * One `.workspace-row`: repo URL, then three `.workspace-field` blocks (owner, PAT override, ticketing-system override) — reuses `.wizard-input`/`.settings-radio-group`/`.stamp` wholesale rather than inventing parallel input/radio/badge styling. `.workspace-list` held one row per registered workspace under #104's old "list every workspace" tab; #107 narrows that same markup/CSS to exactly one row — the instance's own workspace — so `.workspace-list` here always wraps a single `.workspace-row`.

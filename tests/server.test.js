@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
-import { createServer } from '../lib/server.js'
+import { createServer, readPackageVersion } from '../lib/server.js'
 import { createInstance, readInstance, readModule } from '../lib/instance.js'
 import { loadDefinition } from '../lib/definition.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
@@ -2099,5 +2099,57 @@ test('a changed static file invalidates its ETag, so the browser is served the n
     })
   } finally {
     rmSync(webDir, { recursive: true, force: true })
+  }
+})
+
+// #117 — the running server's own version, the one fact no surface of the app could previously
+// report. The whole point is that it tracks the deployed build, so nothing here may hardcode a
+// version string: every assertion below reads `package.json` at test time, exactly as the route
+// does, so a release bump can never make this suite green against a stale literal (nor red against
+// a fresh one).
+
+test('GET /api/version reports the running install\'s own package version, not a hardcoded literal', async () => {
+  // Resolved from this file's own location rather than the working directory — same reason
+  // `readPackageVersion` resolves against `pkgRoot`: the question is what *this* install is.
+  const packageVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
+  assert.equal(typeof packageVersion, 'string')
+
+  await withRunningServer({}, async (base) => {
+    const res = await fetch(`${base}/api/version`)
+    assert.equal(res.status, 200)
+    // `deepEqual` on the whole body, not just the one field: this route must expose the version and
+    // nothing else — no paths, env vars, SHAs or other deployment metadata can slip in unnoticed.
+    assert.deepEqual(await res.json(), { version: packageVersion })
+  })
+})
+
+test('GET /api/version needs no credential — an anonymous visitor gets the version', async () => {
+  const packageVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
+
+  await withRunningServer({}, async (base) => {
+    // No Authorization header at all: gating this would defeat its purpose, since whoever is asking
+    // "what version are you on?" is typically the person who can't get any further than this.
+    const res = await fetch(`${base}/api/version`, { headers: { Accept: 'application/json' } })
+    assert.equal(res.status, 200, 'the version route must never answer 401')
+    assert.equal(res.headers.get('www-authenticate'), null)
+    assert.equal((await res.json()).version, packageVersion)
+  })
+})
+
+test('an install whose package.json cannot be read reports no version rather than a wrong one', async () => {
+  const emptyRoot = mkdtempSync(join(tmpdir(), 'gantry-pkgroot-'))
+  try {
+    // Shipped without a package.json at all.
+    assert.equal(readPackageVersion(emptyRoot), null)
+
+    // Present but unparseable — a truncated or half-written file.
+    writeFileSync(join(emptyRoot, 'package.json'), '{ "version": ')
+    assert.equal(readPackageVersion(emptyRoot), null)
+
+    // Parseable but carrying no version of its own.
+    writeFileSync(join(emptyRoot, 'package.json'), JSON.stringify({ name: 'gantry' }))
+    assert.equal(readPackageVersion(emptyRoot), null)
+  } finally {
+    rmSync(emptyRoot, { recursive: true, force: true })
   }
 })

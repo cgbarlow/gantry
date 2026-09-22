@@ -444,6 +444,52 @@ function LibraryReposSection() {
   `
 }
 
+// #117 — the version of gantry the *server* is running, so "what version are you on?" is answerable
+// from the UI (and so a redeploy can be confirmed as actually live). Fetched from `GET /api/version`
+// on every visit rather than compiled into this bundle: a browser holding a cached copy of this very
+// file from before a redeploy would otherwise confidently report the pre-deploy version.
+//
+// Plain `fetch`, not `apiFetch` — the route takes no credential, and an anonymous visitor is exactly
+// who needs the answer. Quiet by design: a muted footer line under the last section, not a section
+// of its own, since this is a fact you go looking for rather than something to announce.
+//
+// Three states, and nothing in between: still loading (render nothing at all — a version that
+// flickers from wrong to right is worse than one that appears a beat late), known, or genuinely
+// unknown. The unknown case says so in words instead of showing a placeholder number, per this
+// ticket's own "no misleading placeholder version"; either way the rest of Settings is untouched,
+// because a failed fetch here resolves this component's own state and never throws.
+function ServerVersionFooter() {
+  const [version, setVersion] = useState(undefined) // undefined = loading · string = known · null = unavailable
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/version')
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Failed to load version (${res.status})`)
+        return res.json()
+      })
+      .then((body) => {
+        if (!cancelled) setVersion(typeof body?.version === 'string' && body.version ? body.version : null)
+      })
+      .catch(() => {
+        if (!cancelled) setVersion(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  if (version === undefined) return null
+
+  return html`
+    <footer class="settings-version">
+      ${version
+        ? html`Gantry <span class="settings-version-number">${version}</span>`
+        : 'Gantry version unavailable — this server could not read its own package version.'}
+    </footer>
+  `
+}
+
 export function GlobalSettingsPage({ query }) {
   return html`
     <${SettingsHeader} title="Settings" backHref=${backHrefFrom(query)} />
@@ -451,6 +497,7 @@ export function GlobalSettingsPage({ query }) {
       <${AdvancedModeSection} />
       <${RenderEngineSection} />
       ${advancedMode.value ? html`<${LibraryReposSection} />` : null}
+      <${ServerVersionFooter} />
     </main>
   `
 }
