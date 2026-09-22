@@ -11,6 +11,7 @@ import {
   clearPatForWorkspace,
 } from '../lib/credential.js'
 import { advancedMode, setAdvancedMode } from '../lib/advancedMode.js'
+import { copyTextToClipboard } from '../lib/clipboard.js'
 import { renderEngine, setRenderEngine } from '../lib/renderEngine.js'
 import { pandocWasmState } from '../lib/pandocWasm.js'
 import { apiFetch, apiFetchForInstance } from '../lib/apiFetch.js'
@@ -627,6 +628,73 @@ const PAT_SCOPE_HELP = {
   atlassian: html`A Bitbucket API token needs <strong>Repositories (Read &amp; write)</strong>, <strong>Pull requests (Read &amp; write)</strong> scope. This workspace's separate Jira token isn't editable here yet.`,
 }
 
+// #116 (parent #109) — the id to show, or `null` for a workspace that genuinely has none.
+//
+// The id only means anything for a **remote workspace** (CONTEXT.md's "Workspace location"): a
+// registry record (`lib/workspaceRegistry.js`) keyed by the id that `GANTRY_BOOTSTRAP_PATS` (#113,
+// ADR-0046) and the MCP server's `GANTRY_WORKSPACE_PATS` (ADR-0043) are themselves keyed by. A Local
+// or server-directory workspace has no registry entry at all and needs no credential-map entry, so
+// there is nothing here to show and a blank or invented field would actively mislead the one person
+// who reads it — whoever is pasting a credential map into a hosting dashboard.
+//
+// In practice that case never reaches this function: `RemoteWorkspaceSettingsPage` only renders a row
+// once `fetchWorkspaceById` found a registry record, a local workspace is served by
+// `LocalWorkspaceSettingsPage` instead (no server record to look up), and a server-directory
+// workspace's scope id isn't in the registry so that page shows "no remote workspace". The provider/
+// location test below keeps that a property of the data rather than of the call site — the flat
+// `instance.workspace` shape (`{ kind: 'azureDevOps', organization, ... }`, see `workspaceRepoUrl`)
+// carries no `provider` and no id of its own, and must never be rendered as if it did.
+export function workspaceCredentialMapId(workspace) {
+  if (!workspace || typeof workspace !== 'object') return null
+  if (!workspace.provider || !workspace.location) return null
+  const id = workspace.id
+  return typeof id === 'string' && id.trim() !== '' ? id : null
+}
+
+// #116 — the id as readable, selectable text plus a one-click copy, for the operator configuring a
+// hosted deployment from a browser and a platform dashboard, who has no shell to run `gantry
+// workspace-id` (#115) in. Before this the id was in this very component's hands (the row's own
+// `data-workspace-id`, the PAT storage key, the archive/restore calls) but reachable only through
+// devtools.
+//
+// Deliberately quiet: a muted monospace line directly under the workspace's location, using the same
+// `--font-mono`/`--text-muted` metadata convention every other incidental identifier on these screens
+// uses — an id is configuration detail, not what you opened this row to look at. Labelled and
+// adjacent to the location rather than tucked at the bottom, so it's still findable by the person who
+// came looking for it.
+//
+// Copy state is advisory only and never hides the id: `copyTextToClipboard` reports honestly whether
+// the write happened (`navigator.clipboard` is undefined outside a secure context — a plain-http
+// `gantry serve` is exactly that), and the failure message points at the text, which is always on
+// screen and selectable, rather than claiming a copy that didn't happen.
+function WorkspaceIdField({ workspaceId }) {
+  const [status, setStatus] = useState('')
+  const timerRef = useRef(null)
+
+  useEffect(() => () => clearTimeout(timerRef.current), [])
+
+  async function handleCopy() {
+    const copied = await copyTextToClipboard(workspaceId)
+    setStatus(copied ? 'Copied.' : 'Couldn’t copy — select the id above and copy it by hand.')
+    clearTimeout(timerRef.current)
+    // Only the success message clears itself; a failure is an instruction to follow, not a flash.
+    if (copied) timerRef.current = setTimeout(() => setStatus(''), 3000)
+  }
+
+  return html`
+    <div class="workspace-id">
+      <span class="workspace-id-label">Workspace ID</span>
+      <code class="workspace-id-value">${workspaceId}</code>
+      <button type="button" class="btn small ghost" onClick=${handleCopy}>Copy</button>
+      <span class="workspace-id-status" role="status">${status}</span>
+      <p class="workspace-id-hint">
+        This workspace's key in the server's <code>GANTRY_BOOTSTRAP_PATS</code> and the MCP server's
+        <code>GANTRY_WORKSPACE_PATS</code> maps. It identifies the workspace; it isn't a credential.
+      </p>
+    </div>
+  `
+}
+
 // One workspace's editable fields: owner (server-persisted, identity-picker) and its own Workspace
 // PAT (client-only, never touches the server — #9, ADR-0038: this is now the *only* place this
 // workspace's credential lives, there is no global default it could otherwise fall back to). The
@@ -649,6 +717,7 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
     latestOwnerRef.current = workspace.owner ?? ''
   }, [workspace.owner])
 
+  const credentialMapId = workspaceCredentialMapId(workspace)
   const hasOwnPat = hasPatForWorkspace(workspace.id)
   const patStatusForDisplay = credentialStatusForWorkspace(workspace.id)
   // Keyed by provider rather than a github/else binary so a new provider's own label and PAT-scope
@@ -684,6 +753,7 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
       <a class="workspace-repo-url" href=${workspaceRepoUrl(workspace)} target="_blank" rel="noreferrer">
         ${workspaceLocationLabel(workspace)}
       </a>
+      ${credentialMapId ? html`<${WorkspaceIdField} workspaceId=${credentialMapId} />` : null}
 
       <div class="workspace-field workspace-owner">
         <label>Owner</label>
