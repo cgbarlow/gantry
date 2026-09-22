@@ -16,9 +16,10 @@ import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
 // definitions/recruitment-onboarding/2 — the point is to prove the bundled files themselves are
 // correct, not a fixture standing in for them.
 //
-// v2 is left as an unpublished draft (see its own definition.yaml and CHANGELOG.md for why), so
-// every test here passes `version: 2` explicitly rather than relying on
-// getLatestPublishedVersion, which would still resolve to v1.
+// v2 was published in #103, after the process-owner sign-off #90's own acceptance criteria
+// called for. Every test here still passes `version: 2` explicitly rather than relying on
+// getLatestPublishedVersion, since that's the whole point of these tests — proving the bundled
+// v2 files themselves, not whichever version happens to be latest.
 
 function withInstancesDir(fn) {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-ro-v2-'))
@@ -29,11 +30,11 @@ function withInstancesDir(fn) {
   }
 }
 
-test('recruitment-onboarding/2 exists on disk as an unpublished draft, and v1 is still published', () => {
+test('recruitment-onboarding/2 is published, and v1 is still published too', () => {
   const v1 = loadDefinition('recruitment-onboarding', { version: 1 })
   const v2 = loadDefinition('recruitment-onboarding', { version: 2 })
   assert.equal(v1.status, 'published')
-  assert.equal(v2.status, 'draft')
+  assert.equal(v2.status, 'published')
 })
 
 test('findDefinitionProblems reports zero problems for recruitment-onboarding/2', () => {
@@ -138,7 +139,7 @@ test('v1 is completely untouched by v2\'s changes — same field types and ids t
   assert.equal(v1.modules.get('contract').fields.some((f) => f.id === 'start-date-changes'), false)
 })
 
-// --- End to end: create an Instance against the draft v2, fill every field type, render, and
+// --- End to end: create an Instance against v2, fill every field type, render, and
 // assert the rendered filename — the ticket's own acceptance criterion taken literally. ---
 
 const FIELDS = {

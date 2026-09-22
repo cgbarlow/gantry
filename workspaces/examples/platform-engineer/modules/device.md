@@ -3,6 +3,7 @@ module: device
 status: agreed
 owner: m.walker
 ---
+
 # Device
 
 ## Specification
@@ -10,6 +11,10 @@ owner: m.walker
 Non-standard.
 
 The standard Technology issue is a 16GB laptop. This role builds and runs container images locally as a matter of course, and both incumbent Platform Engineers run 32GB machines that were themselves approved as exceptions. A 32GB machine was specified, otherwise identical to standard issue.
+
+Requested 13 April 2026 by automatic request when the directory record appeared. Ordered the same day; delivered 16 April. Built and configured 17 April by the service desk. Ready 17 April, three days before the start date.
+
+Five days from request to ready against the three the process assumes, the difference being the two-day order recorded below; the build itself took a single day.
 
 ## Non-standard hardware decision
 
@@ -23,6 +28,4 @@ Third exception in the same team on the same grounds. At some point the standard
 
 ## Build status
 
-Requested 13 April 2026 by automatic request when the directory record appeared. Ordered the same day; delivered 16 April. Built and configured 17 April by the service desk. Ready 17 April, three days before the start date.
-
-Five days from request to ready against the three the process assumes, the difference being the two-day order. The build itself took a single day.
+Ready

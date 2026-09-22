@@ -3,15 +3,15 @@ module: advertising
 status: agreed
 owner: h.terangi
 ---
+
 # Advertising
 
 ## Channels
 
-- Contoso careers site
-- Seek
-- LinkedIn — paid listing, three weeks
-- Internal vacancies list and the Technology all-hands channel
-- Two platform engineering community Slack workspaces, posted by Tomas Berg
+- Job boards
+- Careers site
+- Internal channels
+- Professional networks
 
 ## Advertising period
 
@@ -28,6 +28,8 @@ Fit was better than the team expected. Eleven were assessed as meeting the core 
 The community Slack posts produced four applications, three of which made the eleven. That is a much better hit rate than any other channel and is worth repeating.
 
 ## Notes
+
+Specific channels: Seek and a paid LinkedIn listing (three weeks) for job boards; the Contoso careers site; the internal vacancies list and Technology all-hands channel for internal channels; two platform engineering community Slack workspaces, posted by Tomas Berg, for professional networks.
 
 The internal vacancies list produced no applications, which is consistent with the last two Technology vacancies. Worth asking whether it is doing anything.
 

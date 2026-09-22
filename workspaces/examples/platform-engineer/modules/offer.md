@@ -3,6 +3,7 @@ module: offer
 status: agreed
 owner: h.terangi
 ---
+
 # Offer
 
 ## Offer terms
@@ -15,9 +16,11 @@ Proposed start date 20 April 2026, chosen to give four weeks' notice to her curr
 
 ## Status
 
-Extended 30 March 2026. Accepted 31 March 2026.
+Accepted
 
 ## Negotiation
+
+Extended 30 March 2026. Accepted 31 March 2026.
 
 One change between the offer extended and the offer accepted. Marama asked for the start date to move from 13 April to 20 April to complete a handover at her current employer. Agreed the same day by Tomas Berg; no change to any other term.
 

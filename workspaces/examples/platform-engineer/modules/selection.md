@@ -3,6 +3,7 @@ module: selection
 status: agreed
 owner: h.terangi
 ---
+
 # Selection
 
 ## Shortlist
@@ -26,9 +27,13 @@ Round two, 16 to 17 March: ninety minutes with Tomas Berg, Sam Okafor (Head of I
 
 Three of the four shortlisted attended both rounds; one withdrew after round one having accepted another offer.
 
-## Preferred candidate
+## Candidate name
 
-Marama Clarke, selected 18 March 2026.
+Marama Clarke
+
+## Selection rationale
+
+Selected 18 March 2026.
 
 Against the criteria: Marama has spent four years on a platform team of comparable size, and the work she walked through in round one was the self-service half of that platform rather than its infrastructure — the closest match in the field to what this role is actually for. In round two she took the credential rotation problem apart in a way the panel had not considered, and was explicit about what she did not know.
 
