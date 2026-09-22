@@ -503,7 +503,8 @@ export function GlobalSettingsPage({ query }) {
   `
 }
 
-// ---------- Workspace Settings (`/settings/workspace?slug=<instance-slug>`) ----------
+// ---------- Workspace Settings (`/settings/workspace?slug=<instance-slug>` or
+// `/settings/workspace?id=<workspaceId>`) ----------
 // Scoped to one instance's own workspace only — never a picker or listing
 // across every registered workspace (that whole-registry view is gone,
 // along with the tabbed shell it used to live in). `slug` names the
@@ -511,6 +512,16 @@ export function GlobalSettingsPage({ query }) {
 // /api/instance/workspace`, then looked up by id in `GET /api/workspaces` —
 // both pre-existing, uncredentialed registry reads, see their own route
 // comments in lib/server.js) is what's actually shown/edited.
+//
+// #123 (parent #109, ADR-0047): `slug` isn't the only way in any more. A workspace that has no
+// instance yet — exactly the one that needs a credential entered before it can have one (#121/#125's
+// whole premise) — can't be resolved through an instance at all, so `?id=<workspaceId>` resolves the
+// workspace directly via `fetchWorkspaceById`, skipping the instance-resolution step entirely. No new
+// server route: `GET /api/workspaces` is already an uncredentialed registry read, and `fetchWorkspaceById`
+// already did a client-side id lookup against it for the `slug` path once *it* had resolved a
+// workspaceId — this just reaches that same helper directly. `id` wins if both are present (there's no
+// meaningful way to want both); everything below it — owner, PAT entry/clear, archive/restore — reads
+// only `workspace.id`, never `slug`, so it's already agnostic to which entry mode produced it.
 
 async function fetchInstanceWorkspaceId(slug) {
   const res = await apiFetch(`/api/instance/workspace?slug=${encodeURIComponent(slug)}`)
@@ -699,6 +710,12 @@ function WorkspaceIdField({ workspaceId }) {
 // PAT (client-only, never touches the server — #9, ADR-0038: this is now the *only* place this
 // workspace's credential lives, there is no global default it could otherwise fall back to). The
 // owner field is an identity picker (#145 Part 2).
+//
+// `slug` is optional (#123): absent when this screen was opened via `?id=` rather than `?slug=`, since
+// there's no instance to name one. `IdentityPicker` already has a case for exactly this — `workspaceId`
+// scopes its search to that workspace's own stored PAT when no `slug` is available (its own doc comment:
+// "used once a real workspace already exists but no instance slug does yet") — passed alongside `slug`
+// below since `slug` wins whenever it *is* present, so this is a no-op for the existing `?slug=` path.
 function WorkspaceEditor({ workspace, onUpdated, slug }) {
   const [ownerDraft, setOwnerDraft] = useState(workspace.owner ?? '')
   const [ownerStatus, setOwnerStatus] = useState('')
@@ -768,6 +785,7 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
             }}
             placeholder="Unset"
             slug=${slug}
+            workspaceId=${workspace.id}
           />
           <button type="button" class="btn small" onClick=${handleSaveOwner}>Save owner</button>
         </div>
@@ -1008,19 +1026,60 @@ export function WorkspaceSettingsPage({ query }) {
   return html`<${RemoteWorkspaceSettingsPage} query=${query} />`
 }
 
+// #123 — which of the two entry modes this render is in, purely from `query` (no fetch, no state):
+// `id` wins over `slug` when both are present (there's no meaningful way to want both — see this
+// section's own header comment), and `neither` covers a bookmarked/direct `/settings/workspace` URL
+// with no identifying param at all. Pulled out as its own pure function (rather than inlined in the
+// effect below) so it's unit-testable without a DOM — see tests/settingsWorkspaceMode.test.js.
+export function workspaceSettingsEntryMode(query) {
+  if (query?.id) return 'id'
+  if (query?.slug) return 'slug'
+  return 'neither'
+}
+
 function RemoteWorkspaceSettingsPage({ query }) {
   const slug = query?.slug
-  const [state, setState] = useState('loading') // 'loading' | 'no-slug' | 'no-workspace' | 'ready' | 'error'
+  const workspaceIdParam = query?.id
+  const mode = workspaceSettingsEntryMode(query)
+  // 'no-slug': opened with neither `?slug=` nor `?id=` (unchanged from before #123). 'no-workspace':
+  // the `?slug=` path's instance genuinely has no remote workspace (a local instance) — unchanged.
+  // 'workspace-not-found': the `?id=` path's workspace id doesn't exist — a sibling of 'no-workspace'
+  // rather than a reuse of it, since the two mean different things (per the ticket's #3: "a distinct
+  // state, not... reusing one that means something else") and would otherwise render the same
+  // misleading "no remote workspace, data is local" copy for a plainly-wrong id.
+  const [state, setState] = useState('loading') // 'loading' | 'no-slug' | 'no-workspace' | 'workspace-not-found' | 'ready' | 'error'
   const [error, setError] = useState('')
   const [workspace, setWorkspace] = useState(null)
 
   useEffect(() => {
-    if (!slug) {
+    if (mode === 'neither') {
       setState('no-slug')
       return
     }
     let cancelled = false
     setState('loading')
+    if (mode === 'id') {
+      ;(async () => {
+        try {
+          const ws = await fetchWorkspaceById(workspaceIdParam)
+          if (cancelled) return
+          if (!ws) {
+            setState('workspace-not-found')
+            return
+          }
+          setWorkspace(ws)
+          setState('ready')
+        } catch (err) {
+          if (!cancelled) {
+            setError(err.message)
+            setState('error')
+          }
+        }
+      })()
+      return () => {
+        cancelled = true
+      }
+    }
     ;(async () => {
       try {
         const workspaceId = await fetchInstanceWorkspaceId(slug)
@@ -1046,7 +1105,7 @@ function RemoteWorkspaceSettingsPage({ query }) {
     return () => {
       cancelled = true
     }
-  }, [slug])
+  }, [mode, slug, workspaceIdParam])
 
   return html`
     <${SettingsHeader} title="Workspace Settings" backHref=${backHrefFrom(query)} />
@@ -1054,19 +1113,22 @@ function RemoteWorkspaceSettingsPage({ query }) {
       <section class="settings-section">
         <h2>Workspace</h2>
         <p class="guidance">
-          This instance's own workspace — its owner, repo URL and its own Workspace PAT. Not a picker
-          across every registered workspace: just the one this instance belongs to.
+          ${mode === 'id'
+            ? html`This workspace's own owner, repo URL and its own Workspace PAT.`
+            : html`This instance's own workspace — its owner, repo URL and its own Workspace PAT. Not a
+                picker across every registered workspace: just the one this instance belongs to.`}
         </p>
         ${state === 'no-slug' ? html`<p class="load-error">No instance was specified for these Workspace Settings.</p>` : null}
-        ${state === 'loading' ? html`<p class="loading">Loading\u2026</p>` : null}
+        ${state === 'loading' ? html`<p class="loading">Loading…</p>` : null}
         ${state === 'error' ? html`<p class="load-error">Failed to load: ${error}</p>` : null}
         ${state === 'no-workspace'
           ? html`<p class="workspace-empty">This instance has no remote workspace — its data is stored locally.</p>`
           : null}
+        ${state === 'workspace-not-found' ? html`<p class="load-error">No workspace was found for this id.</p>` : null}
         ${state === 'ready'
           ? html`
               <div class="workspace-list">
-                <${WorkspaceEditor} workspace=${workspace} onUpdated=${setWorkspace} slug=${slug} />
+                <${WorkspaceEditor} workspace=${workspace} onUpdated=${setWorkspace} slug=${mode === 'id' ? undefined : slug} />
               </div>
             `
           : null}
