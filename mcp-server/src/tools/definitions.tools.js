@@ -12,10 +12,14 @@ import { credentialErrorResult, errorResult, okResult, upstreamErrorResult } fro
 // route happens to require, never looked up), so it never touches `workspaceId`. `promote_definition`
 // only exists for a *server-workspace* definition (a library or Provider-backed-workspace row has
 // nothing to promote from — see lib/server.js's own doc comment on `promoteMatch`); the server
-// resolves that itself from the id, so this tool never takes `workspaceId` either. Listing definitions
-// inside a Provider-backed workspace (`GET /api/workspaces/:workspaceId/definitions`) is out of scope
-// here — call that out as a follow-up if it's ever needed; `list_definitions` only merges the library
-// with server-directory workspaces, per the ticket's own scope note.
+// resolves that itself from the id, so this tool never takes `workspaceId` either. `list_definitions`
+// also takes an optional `workspaceId` now (#105): omitted, it keeps its original library/
+// server-directory-workspace behaviour (`GET /api/definitions`, `includeWorkspaces` merges in
+// server-directory workspace rows). Supplied, it replaces that entirely — same non-additive contract
+// every other `workspaceId`-aware tool in this file already uses — and instead wraps `GET
+// /api/workspaces/:workspaceId/definitions`, resolving that workspace's PAT via gantryClient exactly
+// like get_definition/update_definition do; `includeWorkspaces` is meaningless in that shape (there's
+// only ever one workspace's own rows) and is ignored.
 
 function definitionPath(id, version, { workspaceId, suffix = '' } = {}) {
   const encodedId = encodeURIComponent(id)
@@ -25,14 +29,16 @@ function definitionPath(id, version, { workspaceId, suffix = '' } = {}) {
   return version === undefined ? `${base}${suffix}` : `${base}/versions/${encodeURIComponent(String(version))}${suffix}`
 }
 
-async function listDefinitions({ includeArchived, includeWorkspaces }, { gantryClient }) {
+async function listDefinitions({ includeArchived, includeWorkspaces, workspaceId }, { gantryClient }) {
   const res = await gantryClient.request({
-    path: '/api/definitions',
+    workspaceId,
+    path: workspaceId ? `/api/workspaces/${encodeURIComponent(workspaceId)}/definitions` : '/api/definitions',
     query: {
       archived: includeArchived ? '1' : undefined,
-      includeWorkspaces: includeWorkspaces ? '1' : undefined,
+      includeWorkspaces: workspaceId ? undefined : includeWorkspaces ? '1' : undefined,
     },
   })
+  if (res.credentialError) return credentialErrorResult(res.credentialError)
   if (!res.ok) return upstreamErrorResult(res)
   if (!Array.isArray(res.body)) {
     return errorResult('gantry serve returned an unexpected shape listing definitions', res.body)
@@ -123,11 +129,12 @@ export const tools = [
       '1. Lists every definition in the server library, merged with each server-directory workspace\'s own definitions (each row tagged "home"). ' +
       '2. Pass includeWorkspaces: true to include server-directory workspace rows; omitted, only the library is listed. ' +
       '3. Pass includeArchived: true to also include archived definitions. ' +
-      '4. A Provider-backed workspace\'s own definitions are not included here — list_workspaces + a future dedicated tool covers that. ' +
+      '4. Pass workspaceId (from list_workspaces) to list a Provider-backed workspace\'s own definitions instead — this replaces the library/server-directory-workspace listing entirely (it is not merged in), matching every other workspaceId-aware tool in this file; includeWorkspaces is ignored in this shape. Each row already comes back tagged "home". ' +
       '5. Use a result\'s "id" and a "versions" entry\'s "version" with get_definition / update_definition / etc.',
     inputSchema: {
       includeArchived: z.boolean().optional().describe('Include archived definitions (default false).'),
-      includeWorkspaces: z.boolean().optional().describe('Include server-directory workspaces\' own definitions, each tagged with its "home" (default false: library only).'),
+      includeWorkspaces: z.boolean().optional().describe('Include server-directory workspaces\' own definitions, each tagged with its "home" (default false: library only). Ignored if workspaceId is supplied.'),
+      workspaceId: workspaceIdField,
     },
     handler: listDefinitions,
   },
