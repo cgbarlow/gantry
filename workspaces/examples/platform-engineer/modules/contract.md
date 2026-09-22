@@ -3,6 +3,7 @@ module: contract
 status: agreed
 owner: h.terangi
 ---
+
 # Contract
 
 ## Terms
@@ -23,9 +24,11 @@ Both signatures were faster than the process assumes. Nothing in the delay that 
 
 ## Start date
 
-20 April 2026, as agreed during the offer negotiation. The original proposed date was 13 April.
+2026-04-20
 
-The date did not move after the contract was signed, though it came close — see the payroll rework.
+## Start date changes
+
+
 
 ## Elapsed time
 

@@ -3,6 +3,7 @@ module: payroll
 status: agreed
 owner: a.pihema
 ---
+
 # Payroll
 
 ## Details requested
@@ -13,11 +14,7 @@ Re-sent 8 April 2026 by Hana Te Rangi from her own mailbox, after the first requ
 
 ## Validation outcome
 
-Passed, 10 April 2026.
-
-The form was submitted 9 April and validated by Payroll the following day. The details supplied were correct and complete; nothing in the validation itself failed.
-
-The failure on this hire was that the request never reached the candidate, not that the information was wrong.
+Passed
 
 ## Rework
 
@@ -29,7 +26,11 @@ Cost: five days. The process budgets twenty-four hours for a payroll rework; thi
 
 This is the third time in six months that a payroll details request has gone to spam. The other two were caught in two and three days respectively, both by chance rather than by anything in the process.
 
+The failure on this hire was that the request never reached the candidate, not that the information was wrong.
+
 ## Payroll confirmation
+
+The form was submitted 9 April 2026 and validated by Payroll the following day; the details supplied were correct and complete.
 
 Confirmed 10 April 2026 by Anaru Pihema (Payroll Manager). Bank account and retirement savings scheme details validated against the candidate's identity verification; the starter can be paid from the first pay run after her start date.
 

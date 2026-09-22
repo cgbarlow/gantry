@@ -3,6 +3,7 @@ module: handover
 status: agreed
 owner: t.berg
 ---
+
 # Handover
 
 ## Manager actions
@@ -23,10 +24,8 @@ The morning is the laptop, sign-in, password change and the standard Technology 
 
 She is not on the on-call rotation and will not be until she has shadowed a full week, currently planned from 11 May. She was told this at offer.
 
+Readiness confirmed 17 April 2026 by Tomas Berg, three days before the start date. Account created and propagated, credentials issued, device built and configured, and all software and system entitlements in place — Marama can work from her first morning. One thing is not in place: the building access card, which will not be issued until 21 April; it is recorded in `access.outstanding` and a colleague will sign her in on the first day.
+
 ## Readiness confirmation
 
-Confirmed 17 April 2026 by Tomas Berg, three days before the start date.
-
-Account created and propagated, credentials issued, device built and configured, and all software and system entitlements in place. Marama can work from her first morning.
-
-One thing is not in place: the building access card, which will not be issued until 21 April. It is recorded in `access.outstanding` and a colleague will sign her in on the first day. Stating it here as well so that the confirmation is not read as meaning everything was ready, because it was not.
+Ready with outstanding items
