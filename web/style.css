@@ -871,6 +871,8 @@ main.dashboard {
 .master-detail .list-item .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .master-detail .list-item .dot.agreed { background: var(--stamp-agreed-bg); }
 .master-detail .list-item .dot.draft { background: var(--stamp-draft-bg); }
+/* #122: a registered-but-unrepresented workspace that's confirmed unreadable (web/lib/dashboardWorkspaces.js) — same red as .stamp.error, so "can't read this" reads as a distinct severity from the neutral .dot.draft its "nothing registered yet" sibling shares with "in progress". */
+.master-detail .list-item .dot.unreadable { background: var(--stamp-error-bg); }
 .master-detail .list-item .meta { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
 .master-detail .list-item .meta .name { font-family: var(--font-display); font-weight: 600; font-size: 14px; overflow-wrap: anywhere; min-width: 0; }
 .master-detail .list-item .meta .def { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); overflow-wrap: anywhere; min-width: 0; }

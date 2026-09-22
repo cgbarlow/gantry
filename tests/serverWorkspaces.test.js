@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { registerWorkspace } from '../lib/workspaceRegistry.js'
+import { registerInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withRunningServer, basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
@@ -164,6 +165,39 @@ test('GET /api/workspaces returns the nested provider/location shape', async () 
     assert.equal(listing.length, 1)
     assert.equal(listing[0].provider, 'azure-devops')
     assert.deepEqual(listing[0].location, { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY })
+  })
+})
+
+// #122 (parent #109, docs/adr/0047): `hasRegisteredInstances` is the signal the dashboard's client-side
+// join (web/lib/dashboardWorkspaces.js) uses to tell "this workspace has real content, just unreadable
+// right now" apart from "nothing has ever been registered here" for a workspace contributing zero rows
+// to GET /api/instances.
+
+test('GET /api/workspaces reports hasRegisteredInstances: false for a workspace with no registered instances', async () => {
+  await withScratchServer({}, async (base, instancesDir) => {
+    registerWorkspace({ location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }, owner: 'c.barlow' }, { instancesDir })
+
+    const listing = await (await fetch(`${base}/api/workspaces`)).json()
+    assert.equal(listing.length, 1)
+    assert.equal(listing[0].hasRegisteredInstances, false)
+  })
+})
+
+test('GET /api/workspaces reports hasRegisteredInstances: true once an instance is registered against that workspace', async () => {
+  await withScratchServer({}, async (base, instancesDir) => {
+    const workspace = registerWorkspace(
+      { location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }, owner: 'c.barlow' },
+      { instancesDir }
+    )
+    registerInstance(
+      'remote-initiative',
+      { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY },
+      { instancesDir }
+    )
+
+    const listing = await (await fetch(`${base}/api/workspaces`)).json()
+    const found = listing.find((w) => w.id === workspace.id)
+    assert.equal(found.hasRegisteredInstances, true)
   })
 })
 

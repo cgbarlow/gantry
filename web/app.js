@@ -24,6 +24,7 @@ import { LocalDefinitionEditorPage } from './pages/local-definition-editor.js'
 import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, workspaceRepoUrl } from './pages/settings.js'
 // Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79, #374) visual/split/markdown toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
+import { unrepresentedWorkspaceGroups } from './lib/dashboardWorkspaces.js'
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
 import { visualMode, refreshVisual, clearActiveCell, restoreActiveCell, activeCellSelection, focusTableCellAt } from './lib/visualMode.js'
 import { advancedMode } from './lib/advancedMode.js'
@@ -4908,6 +4909,20 @@ async function loadInstances(slug) {
   return res.json()
 }
 
+// #122 (parent #109, docs/adr/0047): every workspace `GET /api/workspaces` knows about — needs no
+// credential itself (same uncredentialed route the legacy-PAT migration at the bottom of this file
+// already calls) — is what DashboardPage joins against `loadInstances`'s own result
+// (web/lib/dashboardWorkspaces.js's `unrepresentedWorkspaceGroups`) so a registered workspace
+// contributing zero rows to the instances listing still gets a row of its own.
+async function loadWorkspaces() {
+  const res = await apiFetch('/api/workspaces')
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.message ?? body.error ?? `Failed to load workspaces (${res.status})`)
+  }
+  return res.json()
+}
+
 // Registry `status` is only ever 'complete'/'incomplete' (the current stage's requirements) — a different, coarser vocabulary than a module's own draft/review/agreed frontmatter status. Reuses the same `.stamp` tokens (agreed = done, draft = still in progress) rather than inventing a third visual language, since the Gate Ledger only defines those three.
 function statusStampClass(status) {
   return status === 'complete' ? 'agreed' : 'draft'
@@ -5098,14 +5113,21 @@ function groupSummaryText(group) {
     if (group.state === 'loading') return 'Opening…'
     if (group.state !== 'granted') return 'Needs permission'
   }
+  // #122: a registered-but-unrepresented workspace (web/lib/dashboardWorkspaces.js) has no instances
+  // of its own to summarize — its own two states get their own short list-pane text instead, distinct
+  // from each other the same way their detail-pane copy is (MasterDetailView, above).
+  if (group.kind === 'placeholder') {
+    return group.state === 'unreadable' ? "Can't read this workspace" : 'Nothing registered yet'
+  }
   const definitions = [...new Set(group.instances.map((inst) => inst.definition))]
   const count = group.instances.length
   return `${count} instance${count === 1 ? '' : 's'} · ${definitions.join(', ')}`
 }
 
-// A group's dot in the list pane reflects every one of its instances being complete, not just the first — a multi-instance workspace with even one outstanding instance is "in progress" as a whole. A local-workspace group has no per-instance `status` at all (ADR-0029) — its dot instead reflects whether its folder permission is currently granted.
+// A group's dot in the list pane reflects every one of its instances being complete, not just the first — a multi-instance workspace with even one outstanding instance is "in progress" as a whole. A local-workspace group has no per-instance `status` at all (ADR-0029) — its dot instead reflects whether its folder permission is currently granted. #122: a placeholder group's dot reflects its own `state` instead — `unreadable` gets the same red the Gate Ledger's `.stamp.error` already uses (`.dot.unreadable`, web/style.css), visually distinct from the neutral `draft` amber `empty` shares with "in progress" — deliberately, since "can't read this" and "still in progress" are different situations, but "nothing registered yet" and "in progress" are close enough in urgency to share a color.
 function groupStatusClass(group) {
   if (group.kind === 'local') return group.state === 'granted' ? 'agreed' : 'draft'
+  if (group.kind === 'placeholder') return group.state === 'unreadable' ? 'unreadable' : 'draft'
   return group.instances.every((inst) => inst.status === 'complete') ? 'agreed' : 'draft'
 }
 
@@ -5454,7 +5476,7 @@ function InstanceCard({ inst, editHref, checkStatus, onCheck }) {
   `
 }
 
-function MasterDetailView({ instances, localGroups }) {
+function MasterDetailView({ instances, localGroups, workspaceGroups = [] }) {
   const [filter, setFilter] = useState('')
   const [selectedKey, setSelectedKey] = useState(null)
   // Keyed by instance slug (not the single shared string the old flat list used) — several instances can be in flight for the *same* selected workspace at once (one Check or one Render), and each must report its own status independently.
@@ -5462,8 +5484,14 @@ function MasterDetailView({ instances, localGroups }) {
 
   // Local groups lead the list (WI #306's resolved design: position, not a
   // badge, is what marks them as local) — never interleaved alphabetically
-  // with the server-hosted groups that follow.
-  const groups = [...localGroups, ...groupInstancesByWorkspace(instances)]
+  // with the server-hosted groups that follow. #122: a registered-but-unrepresented workspace's
+  // placeholder group (web/lib/dashboardWorkspaces.js) sorts in among the populated server-hosted
+  // groups by the same title rule, rather than trailing them all in registration order — a workspace
+  // with no readable rows is still a workspace, not a lesser citizen of this list.
+  const groups = [
+    ...localGroups,
+    ...[...groupInstancesByWorkspace(instances), ...workspaceGroups].sort((a, b) => a.title.localeCompare(b.title)),
+  ]
 
   const needle = filter.trim().toLowerCase()
   const filtered = needle
@@ -5592,7 +5620,27 @@ function MasterDetailView({ instances, localGroups }) {
                     `
                   : null}
               `
-            : html`
+            : selectedGroup.kind === 'placeholder'
+              ? html`
+                  <h2>${selectedGroup.title}</h2>
+                  <p class="workspace-subtitle">${selectedGroup.subtitle}</p>
+                  <div class=${'local-workspace-recovery workspace-placeholder-' + selectedGroup.state}>
+                    <p>
+                      ${selectedGroup.state === 'unreadable'
+                        ? "Can't read this workspace — no credential (yours or the deployment's) could reach it, even though it has instances registered."
+                        : 'Nothing has been registered in this workspace yet — it may be genuinely empty, or it may just never have been checked with a credential.'}
+                    </p>
+                    <div class="detail-actions">
+                      <a
+                        class="btn primary"
+                        href=${`/settings/workspace?id=${encodeURIComponent(selectedGroup.workspaceId)}&from=${encodeURIComponent('/')}`}
+                      >
+                        Add a credential →
+                      </a>
+                    </div>
+                  </div>
+                `
+              : html`
               <h2>${selectedGroup.title}</h2>
               <p class="workspace-subtitle">${selectedGroup.subtitle}</p>
               ${(() => {
@@ -5893,14 +5941,19 @@ function ArchivedWorkspacesPanel({ onRestored }) {
 // ever renders.
 function DashboardPage() {
   const [instances, setInstances] = useState(null)
+  const [workspaces, setWorkspaces] = useState(null)
   const [error, setError] = useState(null)
   const { entries: localEntries, groups: localGroups, handleChange: onLocalChange, handleRemoved: onLocalRemoved } = useLocalGroups()
   const localCount = localEntries.length
 
+  // #122 (parent #109, docs/adr/0047): `instances` and `workspaces` load together, from the same
+  // reload trigger — a registered-but-unrepresented workspace row (see `workspaceGroups` below) has to
+  // stay in sync with the instances listing it's a complement of, not lag a click behind it.
   function reloadInstances() {
-    loadInstances()
-      .then((data) => {
-        setInstances(data)
+    Promise.all([loadInstances(), loadWorkspaces()])
+      .then(([instancesData, workspacesData]) => {
+        setInstances(instancesData)
+        setWorkspaces(workspacesData)
         setError(null)
       })
       .catch((err) => setError(err.message))
@@ -5915,6 +5968,16 @@ function DashboardPage() {
   // untouched `instances` for the archived panels below.
   const visibleInstances =
     instances && !advancedMode.value ? instances.filter((inst) => !isAzureDevOpsBacked(inst)) : instances
+
+  // #122: every registered workspace contributing zero rows to `instances` gets a placeholder group
+  // of its own (web/lib/dashboardWorkspaces.js) — computed from the *raw*, unfiltered `instances`,
+  // never `visibleInstances`, so an Azure-DevOps-backed workspace #301 is hiding populated rows for
+  // isn't miscounted as "unrepresented" merely because its own rows were filtered out above; its
+  // placeholder is filtered by the exact same #301 rule instead, right below.
+  const workspaceGroups =
+    instances && workspaces
+      ? unrepresentedWorkspaceGroups(instances, workspaces).filter((group) => advancedMode.value || !group.isAzureDevOps)
+      : []
 
   return html`
     <main class="dashboard">
@@ -5938,19 +6001,24 @@ function DashboardPage() {
       </div>
       ${error
         ? html`<p class="load-error">Failed to load: ${error}</p>`
-        : !instances
+        : !instances || !workspaces
           ? html`<p class="loading">Loading…</p>`
-          : visibleInstances.length === 0 && localCount === 0
+          : // #122: an entirely empty deployment (no instances, no local workspaces, and no
+            // registered workspace left unrepresented either) still reaches EmptyState — a
+            // registered-but-empty-or-unreadable workspace counting toward "there's something to
+            // show" is exactly what keeps this from regressing to a blank screen once #122 makes such
+            // a workspace visible at all.
+            visibleInstances.length === 0 && localCount === 0 && workspaceGroups.length === 0
             ? html`<${EmptyState} />`
             : // WI #306: remembered local workspaces are blended into
               // MasterDetailView's own list now (no separate section) — swimlane
               // view still groups only server-hosted instances by definition/stage
               // (groupInstancesByWorkspace never drove that view), so it's only
               // chosen once there's at least one server-hosted instance to show;
-              // master-detail is what renders local-only dashboards.
+              // master-detail is what renders local-only (and #122's placeholder-only) dashboards.
               dashboardViewMode.value === 'swimlanes' && visibleInstances.length > 0
               ? html`<${SwimlaneView} instances=${visibleInstances} />`
-              : html`<${MasterDetailView} instances=${visibleInstances} localGroups=${localGroups} />`}
+              : html`<${MasterDetailView} instances=${visibleInstances} localGroups=${localGroups} workspaceGroups=${workspaceGroups} />`}
       ${instances ? html`<${ArchivedInstancesPanel} onRestored=${reloadInstances} />` : null}
       ${instances ? html`<${ArchivedWorkspacesPanel} onRestored=${reloadInstances} />` : null}
     </main>
