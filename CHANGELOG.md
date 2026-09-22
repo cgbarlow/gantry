@@ -17,6 +17,26 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.7.6-beta — 2026-09-22
+
+### Added
+
+- **`recruitment-onboarding/2` is published.** 0.7.5-beta shipped it as a `draft`, pending
+  process-owner sign-off on its new dropdown wording — that sign-off is given, and it's now the
+  process's published, immutable second version. v1 stays published and unchanged, so Instances
+  already in flight against it are unaffected.
+
+- **The bundled `platform-engineer` example is now on v2.** Its content is migrated onto the new
+  typed Fields — dropdowns, a candidate name, a start date — with every piece of its original
+  detail kept, moved into whichever Field still takes prose where a typed Field replaced it. One
+  value, an identity-verification check with no matching dropdown option, is kept and flagged
+  rather than dropped, exactly as a hand-typed value outside a Field's option list always is.
+
+- **The Gantry MCP server can list a Provider-backed workspace's own Definitions.**
+  `list_definitions` now accepts an optional workspace, so an agent working against an Azure
+  DevOps, GitHub or GitLab workspace can discover what Definitions live there instead of needing
+  to already know a Definition's id.
+
 ## 0.7.5-beta — 2026-09-21
 
 ### Added
