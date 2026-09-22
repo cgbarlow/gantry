@@ -1,4 +1,4 @@
-// #115 (parent #109): `gantry workspace-id` prints the workspace id `GANTRY_BOOTSTRAP_PATS` and
+// #115 (parent #109): `gantry workspace-id` prints the workspace id `GANTRY_SHARED_WORKSPACE_PATS` and
 // `GANTRY_WORKSPACE_PATS` are keyed by, without booting a server first.
 //
 // The load-bearing test in this file is "CLI and applyBootstrapWorkspaces agree" below: the whole
@@ -27,7 +27,7 @@ const CLI = resolve('bin/gantry.js')
 function childEnv(env) {
   const merged = { ...process.env }
   delete merged.GANTRY_BOOTSTRAP_WORKSPACES
-  delete merged.GANTRY_BOOTSTRAP_PATS
+  delete merged.GANTRY_SHARED_WORKSPACE_PATS
   return { ...merged, ...env }
 }
 
@@ -103,7 +103,7 @@ test('the id the CLI prints is byte-identical to the id applyBootstrapWorkspaces
       const [printedId] = runCli(['workspace-id'], { GANTRY_BOOTSTRAP_WORKSPACES: raw }).split(/\s+/)
       assert.equal(printedId, registered.id, `env-var mode disagrees for ${provider}`)
 
-      // 3. --json mode: the key of the GANTRY_BOOTSTRAP_PATS skeleton is that same id, so the map an
+      // 3. --json mode: the key of the GANTRY_SHARED_WORKSPACE_PATS skeleton is that same id, so the map an
       //    operator pastes is keyed by what the server will look up.
       const skeleton = JSON.parse(runCli(['workspace-id', '--json'], { GANTRY_BOOTSTRAP_WORKSPACES: raw }))
       assert.deepEqual(Object.keys(skeleton), [registered.id], `--json mode disagrees for ${provider}`)
@@ -172,7 +172,7 @@ test('explicit location mode ignores GANTRY_BOOTSTRAP_WORKSPACES entirely', () =
   )
 })
 
-test('explicit location mode --json emits a one-entry GANTRY_BOOTSTRAP_PATS skeleton', () => {
+test('explicit location mode --json emits a one-entry GANTRY_SHARED_WORKSPACE_PATS skeleton', () => {
   const id = runCli(['workspace-id', ...PROVIDER_CASES[1].args])
   const parsed = JSON.parse(runCli(['workspace-id', '--json', ...PROVIDER_CASES[1].args]))
   assert.deepEqual(parsed, { [id]: '' })
@@ -203,7 +203,7 @@ test('env var mode prints one id per declaration, in declaration order, id first
   assert.match(lines[1], /azure-devops contoso\/Platform\/delivery$/)
 })
 
-test('env var mode --json emits a GANTRY_BOOTSTRAP_PATS skeleton with empty-string placeholders', () => {
+test('env var mode --json emits a GANTRY_SHARED_WORKSPACE_PATS skeleton with empty-string placeholders', () => {
   const raw = JSON.stringify([
     { provider: 'github', location: PROVIDER_CASES[1].location },
     { provider: 'gitlab', location: PROVIDER_CASES[2].location },
@@ -308,14 +308,14 @@ test('--json fails the same way on a malformed declaration rather than emitting 
 // No PAT, anywhere
 // ---------------------------------------------------------------------------------------------
 
-test('no PAT is read, printed, or logged — even with GANTRY_BOOTSTRAP_PATS set in the environment', () => {
+test('no PAT is read, printed, or logged — even with GANTRY_SHARED_WORKSPACE_PATS set in the environment', () => {
   const secret = 'ghp-do-not-print-me-0123456789'
   const raw = JSON.stringify([{ provider: 'github', location: PROVIDER_CASES[1].location }])
   const id = runCli(['workspace-id'], { GANTRY_BOOTSTRAP_WORKSPACES: raw }).split(/\s+/)[0]
   for (const args of [['workspace-id'], ['workspace-id', '--json'], ['workspace-id', ...PROVIDER_CASES[1].args]]) {
     const stdout = runCli(args, {
       GANTRY_BOOTSTRAP_WORKSPACES: raw,
-      GANTRY_BOOTSTRAP_PATS: JSON.stringify({ [id]: secret }),
+      GANTRY_SHARED_WORKSPACE_PATS: JSON.stringify({ [id]: secret }),
       GANTRY_WORKSPACE_PATS: JSON.stringify({ [id]: secret }),
     })
     assert.ok(!stdout.includes(secret), `a PAT leaked into: ${stdout}`)
@@ -323,13 +323,13 @@ test('no PAT is read, printed, or logged — even with GANTRY_BOOTSTRAP_PATS set
   }
   // The command's own source never reaches for a PAT env var either.
   const help = execFileSync(process.execPath, [CLI, 'workspace-id', '--help'], { encoding: 'utf8' })
-  assert.ok(!/GANTRY_BOOTSTRAP_PATS='?\{/.test(help))
+  assert.ok(!/GANTRY_SHARED_WORKSPACE_PATS='?\{/.test(help))
   assert.match(help, /No PAT is ever read, printed, or logged/)
 })
 
 test("--help explains what the id is for and which env vars are keyed by it", () => {
   const help = execFileSync(process.execPath, [CLI, 'workspace-id', '--help'], { encoding: 'utf8' })
-  assert.match(help, /GANTRY_BOOTSTRAP_PATS/)
+  assert.match(help, /GANTRY_SHARED_WORKSPACE_PATS/)
   assert.match(help, /GANTRY_WORKSPACE_PATS/)
   assert.match(help, /GANTRY_BOOTSTRAP_WORKSPACES/)
   // Honest about the one case where a running server's stored id differs from the derived one.

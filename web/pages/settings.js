@@ -631,8 +631,8 @@ const PAT_SCOPE_HELP = {
 // #116 (parent #109) — the id to show, or `null` for a workspace that genuinely has none.
 //
 // The id only means anything for a **remote workspace** (CONTEXT.md's "Workspace location"): a
-// registry record (`lib/workspaceRegistry.js`) keyed by the id that `GANTRY_BOOTSTRAP_PATS` (#113,
-// ADR-0046) and the MCP server's `GANTRY_WORKSPACE_PATS` (ADR-0043) are themselves keyed by. A Local
+// registry record (`lib/workspaceRegistry.js`) keyed by the id that `GANTRY_SHARED_WORKSPACE_PATS`
+// (#121, ADR-0047) and the MCP server's `GANTRY_WORKSPACE_PATS` (ADR-0043) are themselves keyed by. A Local
 // or server-directory workspace has no registry entry at all and needs no credential-map entry, so
 // there is nothing here to show and a blank or invented field would actively mislead the one person
 // who reads it — whoever is pasting a credential map into a hosting dashboard.
@@ -688,7 +688,7 @@ function WorkspaceIdField({ workspaceId }) {
       <button type="button" class="btn small ghost" onClick=${handleCopy}>Copy</button>
       <span class="workspace-id-status" role="status">${status}</span>
       <p class="workspace-id-hint">
-        This workspace's key in the server's <code>GANTRY_BOOTSTRAP_PATS</code> and the MCP server's
+        This workspace's key in the server's <code>GANTRY_SHARED_WORKSPACE_PATS</code> and the MCP server's
         <code>GANTRY_WORKSPACE_PATS</code> maps. It identifies the workspace; it isn't a credential.
       </p>
     </div>
