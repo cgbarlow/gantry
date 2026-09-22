@@ -744,6 +744,8 @@ docker run -d \
 
 A workspace registered this way derives a stable id from its provider + location, so a `GANTRY_WORKSPACE_PATS` entry keyed by that id (see the MCP server docs) survives a restart even with the registry file deleted. A malformed `GANTRY_BOOTSTRAP_WORKSPACES` — invalid JSON, an unknown `provider`, or a declaration missing its `location` — fails startup with a single actionable line rather than booting into a half-configured server.
 
+Registering a workspace this way (or restoring a workspace registration after the registry file was deleted) is not the same as having its instances show up on the dashboard: a Provider-backed workspace has no local directory for the usual instance-registry backfill to scan, so its instances are instead discovered by listing `gantry-workspace/` in its own repo — but only once a request actually carries a credential for it. That means a freshly bootstrapped workspace's instances appear on the *first authenticated request* against `GET /api/instances`, not at server boot — the container can be up and serving before anyone has supplied a PAT for that workspace, and its instances simply aren't listed yet. Once discovered, they're registered like any other instance and no later request re-lists the repo.
+
 ### Port
 
 Inside the container Gantry always listens on `3000` (`EXPOSE 3000`, `CMD ["serve", "--port", "3000"]`). Map it to any host port with `-p`:
