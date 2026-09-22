@@ -322,7 +322,17 @@ withInstanceOptions(
   // reserved `default` server workspace (WI #356/#358) — every other command, and
   // every test that constructs a server directly, opts in explicitly instead (see
   // lib/server.js's own createServer doc comment and tests/helpers/lifecycle.js).
-  const server = createServer({ slug, instancesDir, migrateWorkspacesOnStart: true })
+  // #111: a boot-time failure here (most commonly a malformed `GANTRY_BOOTSTRAP_WORKSPACES`) must fail
+  // loudly with a single actionable line, not an uncaught Error's raw Node stack trace — mirroring
+  // mcp-server/src/index.js's own boot-validation pattern. Scoped to just this `createServer` call, not
+  // every CLI command: every other command's own error handling is unchanged by this ticket.
+  let server
+  try {
+    server = createServer({ slug, instancesDir, migrateWorkspacesOnStart: true })
+  } catch (err) {
+    console.error(err.message)
+    process.exit(1)
+  }
   server.listen(port, () => {
     const label = slug ? `default instance for slug-less API requests: ${slug}` : 'no default instance'
     console.log(`gantry serve: http://localhost:${port} (${label})`)

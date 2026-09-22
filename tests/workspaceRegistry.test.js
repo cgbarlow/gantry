@@ -12,6 +12,7 @@ import {
   archiveWorkspace,
   restoreWorkspace,
   isWorkspaceArchived,
+  deriveWorkspaceId,
 } from '../lib/workspaceRegistry.js'
 import { withScratchInstances } from './helpers/lifecycle.js'
 
@@ -540,6 +541,117 @@ test('read-forward is idempotent — reading an already-migrated record twice pr
 
     assert.deepEqual(first, second)
     assert.equal(afterFirstRead, afterSecondRead)
+  })
+})
+
+// ---------- deriveWorkspaceId (#110, parent #109) ----------
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
+test('deriveWorkspaceId produces a well-formed UUIDv5 (version and variant bits set)', () => {
+  const id = deriveWorkspaceId('github', GITHUB_LOCATION)
+  assert.match(id, UUID_RE)
+})
+
+test('deriveWorkspaceId is deterministic — same provider + location produces the same id across two independent calls', () => {
+  const first = deriveWorkspaceId('github', GITHUB_LOCATION)
+  const second = deriveWorkspaceId('github', { ...GITHUB_LOCATION })
+  assert.equal(first, second)
+})
+
+test('deriveWorkspaceId differs for different locations under the same provider', () => {
+  const a = deriveWorkspaceId('github', { owner: 'octocat', repository: 'repo-a' })
+  const b = deriveWorkspaceId('github', { owner: 'octocat', repository: 'repo-b' })
+  assert.notEqual(a, b)
+})
+
+test('deriveWorkspaceId differs for the same repository name under two different providers', () => {
+  const gh = deriveWorkspaceId('github', { owner: 'shared', repository: 'shared-repo' })
+  const gl = deriveWorkspaceId('gitlab', { namespace: 'shared', repository: 'shared-repo' })
+  assert.notEqual(gh, gl)
+})
+
+test('deriveWorkspaceId covers every built provider\'s location shape with distinct ids', () => {
+  const ids = [
+    deriveWorkspaceId('azure-devops', LOCATION),
+    deriveWorkspaceId('github', GITHUB_LOCATION),
+    deriveWorkspaceId('gitlab', GITLAB_LOCATION),
+    deriveWorkspaceId('atlassian', ATLASSIAN_LOCATION),
+  ]
+  for (const id of ids) assert.match(id, UUID_RE)
+  assert.equal(new Set(ids).size, ids.length)
+})
+
+test('deriveWorkspaceId differs when an optional baseUrl is present vs absent', () => {
+  const withBaseUrl = deriveWorkspaceId('azure-devops', { ...LOCATION, baseUrl: 'https://ado.example.internal' })
+  const withoutBaseUrl = deriveWorkspaceId('azure-devops', LOCATION)
+  assert.notEqual(withBaseUrl, withoutBaseUrl)
+})
+
+// ---------- registerWorkspace with an explicit id (#110) ----------
+
+test('registerWorkspace uses an explicit options.id instead of minting a random one', async () => {
+  await withScratchInstances((instancesDir) => {
+    const id = deriveWorkspaceId('github', GITHUB_LOCATION)
+    const workspace = registerWorkspace({ provider: 'github', location: GITHUB_LOCATION }, { instancesDir, id })
+    assert.equal(workspace.id, id)
+  })
+})
+
+test('registerWorkspace with no id still mints a random UUID — existing callers see zero behavior change', async () => {
+  await withScratchInstances((instancesDir) => {
+    const first = registerWorkspace({ location: LOCATION }, { instancesDir })
+    const second = registerWorkspace({ location: LOCATION }, { instancesDir })
+    assert.notEqual(first.id, second.id)
+    assert.notEqual(first.id, deriveWorkspaceId('azure-devops', LOCATION))
+  })
+})
+
+test('registerWorkspace with an id already taken by a DIFFERENT location throws, never silently overwriting', async () => {
+  await withScratchInstances((instancesDir) => {
+    const id = deriveWorkspaceId('github', GITHUB_LOCATION)
+    registerWorkspace({ provider: 'github', location: GITHUB_LOCATION }, { instancesDir, id })
+
+    const otherLocation = { owner: 'someone-else', repository: 'other-repo' }
+    assert.throws(
+      () => registerWorkspace({ provider: 'github', location: otherLocation }, { instancesDir, id }),
+      /already registered to a different location/
+    )
+    // The original entry is untouched.
+    assert.deepEqual(resolveWorkspace(id, { instancesDir }).location, GITHUB_LOCATION)
+  })
+})
+
+test('registerWorkspace with an id already taken by the SAME provider + location is idempotent — no throw, same record back, no rewrite', async () => {
+  await withScratchInstances((instancesDir) => {
+    const id = deriveWorkspaceId('github', GITHUB_LOCATION)
+    const first = registerWorkspace({ provider: 'github', location: GITHUB_LOCATION, owner: 'c.barlow' }, { instancesDir, id })
+
+    const registryPath = join(instancesDir, 'workspace-registry.json')
+    const beforeSecondCall = readFileSync(registryPath, 'utf8')
+
+    const second = registerWorkspace({ provider: 'github', location: GITHUB_LOCATION }, { instancesDir, id })
+    assert.deepEqual(second, first)
+    assert.equal(readFileSync(registryPath, 'utf8'), beforeSecondCall)
+  })
+})
+
+// ---------- the #111 bootstrap composition pattern documented on deriveWorkspaceId ----------
+
+test('findWorkspaceByLocation-then-registerWorkspace-with-derived-id never re-keys a pre-existing random id', async () => {
+  await withScratchInstances((instancesDir) => {
+    const preexisting = registerWorkspace({ provider: 'github', location: GITHUB_LOCATION }, { instancesDir })
+
+    const existing = findWorkspaceByLocation({ provider: 'github', location: GITHUB_LOCATION }, { instancesDir })
+    const workspace =
+      existing ??
+      registerWorkspace(
+        { provider: 'github', location: GITHUB_LOCATION },
+        { instancesDir, id: deriveWorkspaceId('github', GITHUB_LOCATION) }
+      )
+
+    assert.equal(workspace.id, preexisting.id)
+    assert.notEqual(workspace.id, deriveWorkspaceId('github', GITHUB_LOCATION))
   })
 })
 

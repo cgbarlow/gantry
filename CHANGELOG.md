@@ -17,6 +17,30 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.7.7-beta — 2026-09-22
+
+### Added
+
+- **A Provider-backed workspace can now be declared in the environment and re-registers itself on
+  every server start.** The new `GANTRY_BOOTSTRAP_WORKSPACES` variable names a GitHub, GitLab or
+  Azure DevOps workspace once; from then on, every time the server boots, that workspace is
+  registered automatically rather than relying on whatever happened to survive in the registry.
+  Its id is derived from the provider and repo location it was declared with, so it's the same id
+  across restarts — a fully wiped registry comes back looking exactly like it did before, and
+  anything that referenced the workspace by id keeps working. The bundled Examples workspace isn't
+  a Provider-backed workspace and is unaffected either way.
+
+- **A redeclared workspace's instances now find their way back on their own.** Once a workspace is
+  registered — whether freshly bootstrapped or already there — its instances are discovered from
+  its repo automatically the first time a request carrying a working credential for it arrives, so
+  a restart no longer leaves a workspace looking empty until someone manually re-syncs it.
+
+- **Optionally, instance discovery can also run at boot, not just on first request.** The new
+  `GANTRY_BOOTSTRAP_PATS` variable is off by default; set it to map a bootstrapped workspace's id to
+  a credential, and that workspace's instances are discovered at startup instead of waiting for the
+  first authenticated visitor — useful for an unattended deployment, such as the hosted demo, where
+  nobody logs in right after a restart. Deployments that don't set it see no change in behaviour.
+
 ## 0.7.6-beta — 2026-09-22
 
 ### Added
