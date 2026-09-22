@@ -731,6 +731,19 @@ GANTRY_IMAGE=gantry:0.0.1 docker compose up -d
 - The runtime image runs as `USER node` (uid 1000) and does `mkdir -p workspaces && chown -R node:node /app` at build time, so the baked-in `workspaces/` is writable by `node`. For a **named volume** (`gantry-data:/data`), Docker initialises ownership correctly — no extra steps.
 - For a **bind mount** (`-v "$PWD/my-data:/data"`), the host directory must be writable by uid 1000: `mkdir -p my-data && chown 1000:1000 my-data` (or `chmod 777 my-data` if `chown` is not possible). Without this, writes from `USER node` will fail with `EACCES`.
 
+**Or, bootstrap workspaces from an env var instead of a volume.** Set `GANTRY_BOOTSTRAP_WORKSPACES` to a JSON array of workspace declarations and every `gantry serve` startup registers them again, idempotently — restarting twice creates no duplicates and keeps the same workspace ids, so an ephemeral container filesystem stops mattering for the workspaces you name here. Unlike the volume approach above, this never repoints `GANTRY_WORKSPACES_DIR`, so the bundled `Examples` workspace keeps working alongside whatever you declare. Each declaration is `{"provider", "location", "owner"}` (provider defaults to `azure-devops`; add an explicit `"id"` only if you need to pin a specific workspace id rather than the one derived from provider + location):
+
+```bash
+docker run -d \
+  --name gantry \
+  -p 3000:3000 \
+  -e GANTRY_BOOTSTRAP_WORKSPACES='[{"provider":"github","location":{"owner":"cgbarlow","repository":"gantry-workspace-testing"},"owner":"c.barlow"}]' \
+  --restart unless-stopped \
+  gantry
+```
+
+A workspace registered this way derives a stable id from its provider + location, so a `GANTRY_WORKSPACE_PATS` entry keyed by that id (see the MCP server docs) survives a restart even with the registry file deleted. A malformed `GANTRY_BOOTSTRAP_WORKSPACES` — invalid JSON, an unknown `provider`, or a declaration missing its `location` — fails startup with a single actionable line rather than booting into a half-configured server.
+
 ### Port
 
 Inside the container Gantry always listens on `3000` (`EXPOSE 3000`, `CMD ["serve", "--port", "3000"]`). Map it to any host port with `-p`:
