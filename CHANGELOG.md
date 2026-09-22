@@ -21,22 +21,30 @@ commit on `main`.
 
 ### Added
 
-- **Dropdowns, single-line text and date pickers, as Field types a Definition can declare.**
-  Until now every Field was either a paragraph or a bullet list, even where the Definition's own
-  guidance already named the only valid answers — an engagement type, an offer status, a vetting
-  outcome. A Field can now be `type: select`, offering a dropdown of the answers a Definition
-  author has decided are valid (optionally several at once, as tick-boxes), `type: text` for a
-  short single-line fact such as a name, or `type: date` for a calendar date entered through your
-  browser's own date picker rather than typed. A value that no longer matches a select's option
-  list — hand-edited, or left behind by a changed Definition — is kept and flagged rather than
-  silently discarded.
+- **Dropdowns, single-line text and date pickers, as Field types a Definition can declare —
+  including authoring them in the Definition editor.** Until now every Field was either a
+  paragraph or a bullet list, even where the Definition's own guidance already named the only
+  valid answers — an engagement type, an offer status, a vetting outcome. A Field can now be
+  `type: select`, offering a dropdown of the answers a Definition author has decided are valid
+  (optionally several at once, as tick-boxes, with an optional default), `type: text` for a short
+  single-line fact such as a name, or `type: date` for a calendar date entered through your
+  browser's own date picker rather than typed. The Definition editor's Field type picker offers
+  all three directly — adding, reordering and removing a select's options is a few clicks, no YAML
+  editing required. A value that no longer matches a select's option list — hand-edited, or left
+  behind by a changed Definition — is kept and flagged rather than silently discarded.
 
-- **Rendered documents can be named from their own content.** An Artefact may now declare a
-  `filename:` pattern such as `{selection.candidate-name} - Offer Pack - {contract.start-date}`,
-  resolved against the Instance's own data at render time — so a document that leaves your
-  organisation identifies itself (`Jane Smith - Offer Pack - 2026-11-03.docx`) instead of arriving
-  named only after the process that produced it. An Artefact with no pattern renders exactly what
-  it always has.
+- **Rendered documents can be named from their own content — and the editor helps you write the
+  pattern.** An Artefact may now declare a `filename:` pattern such as
+  `{selection.candidate-name} - Offer Pack - {contract.start-date}`, resolved against the
+  Instance's own data at render time — so a document that leaves your organisation identifies
+  itself (`Jane Smith - Offer Pack - 2026-11-03.docx`) instead of arriving named only after the
+  process that produced it. An Artefact with no pattern renders exactly what it always has. The
+  Definition editor shows which Fields are eligible as tokens for each Artefact and flags a
+  pattern immediately if it references a Field that doesn't exist, isn't the right type, or isn't
+  required by that Artefact. When a render's resolved name changes — a corrected candidate name, a
+  moved start date, an Instance renamed — the previously rendered document under the old name is
+  now removed automatically, so `out/` holds exactly one current document per Artefact rather than
+  an accumulating pile of near-duplicates.
 
 - **A second version of Recruitment and Onboarding**, `recruitment-onboarding/2`, built on both
   features above — seven Fields whose answers v1's own guidance already enumerated are now
@@ -53,11 +61,6 @@ commit on `main`.
 - **A Field's type is fixed by the Definition, not editable per Instance.** If a dropdown's
   choices look wrong, that's a change for whoever maintains the Definition, not something an
   Instance author can work around by typing something else.
-
-- **A changed filename doesn't yet clean up after itself.** Where a filename pattern's resolved
-  name changes between renders — a corrected candidate name, a moved start date — the previous
-  file currently stays in `out/` alongside the new one; automatically removing it is tracked
-  separately and not yet built.
 
 ## 0.7.4-beta — 2026-09-21
 
