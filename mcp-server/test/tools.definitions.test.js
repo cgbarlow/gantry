@@ -67,6 +67,72 @@ test('list_definitions surfaces an upstream error rather than throwing', async (
   }
 })
 
+test('list_definitions targets the Provider-backed workspace route family when workspaceId is given, replacing (not merging with) the library listing', async () => {
+  const rows = [{ id: 'design', title: 'Design', home: { kind: 'github-workspace', id: 'ws-1', name: 'acme/repo' } }]
+  const fetch = stubFetch(({ url, headers }) => {
+    if (url.pathname === '/api/workspaces') return { status: 200, body: [{ id: 'ws-1', provider: 'github' }] }
+    if (url.pathname === '/api/server-workspaces') return { status: 200, body: [] }
+    if (url.pathname === '/api/workspaces/ws-1/definitions') {
+      assert.equal(url.searchParams.get('archived'), '1')
+      // includeWorkspaces is meaningless in this shape and must not leak into the request.
+      assert.equal(url.searchParams.get('includeWorkspaces'), null)
+      assert.equal(headers.authorization, 'Basic ' + Buffer.from(':secret-pat').toString('base64'))
+      return { status: 200, body: rows }
+    }
+    // The credential-free library route must never be hit when workspaceId is supplied.
+    if (url.pathname === '/api/definitions') throw new Error('should not call the library route when workspaceId is given')
+    return undefined
+  })
+  try {
+    const result = await listDefinitionsTool.handler(
+      { workspaceId: 'ws-1', includeArchived: true, includeWorkspaces: true },
+      { gantryClient: client({ workspacePats: { 'ws-1': 'secret-pat' } }) }
+    )
+    assert.equal(result.isError, undefined)
+    const payload = JSON.parse(result.content[0].text)
+    assert.deepEqual(payload.definitions, rows)
+  } finally {
+    fetch.restore()
+  }
+})
+
+test('list_definitions surfaces credentialError without ever calling the target path', async () => {
+  const fetch = stubFetch(({ url }) => {
+    if (url.pathname === '/api/workspaces') return { status: 200, body: [{ id: 'ws-2', provider: 'azure-devops' }] }
+    if (url.pathname === '/api/server-workspaces') return { status: 200, body: [] }
+    return undefined
+  })
+  try {
+    const result = await listDefinitionsTool.handler({ workspaceId: 'ws-2' }, { gantryClient: client() })
+    assert.equal(result.isError, true)
+    const payload = JSON.parse(result.content[0].text)
+    assert.equal(payload.error, 'missing_workspace_pat')
+    assert.equal(payload.workspace, 'ws-2')
+    assert.equal(
+      fetch.calls.some((c) => c.url.pathname.includes('/definitions')),
+      false
+    )
+  } finally {
+    fetch.restore()
+  }
+})
+
+test('list_definitions surfaces an upstream error for a Provider-backed workspace listing', async () => {
+  const fetch = stubFetch(({ url }) => {
+    if (url.pathname === '/api/workspaces') return { status: 200, body: [{ id: 'ws-3', provider: 'gitlab' }] }
+    if (url.pathname === '/api/server-workspaces') return { status: 200, body: [] }
+    if (url.pathname === '/api/workspaces/ws-3/definitions') return { status: 400, body: { error: 'unsupported provider' } }
+    return undefined
+  })
+  try {
+    const result = await listDefinitionsTool.handler({ workspaceId: 'ws-3' }, { gantryClient: client({ workspacePats: { 'ws-3': 'p' } }) })
+    assert.equal(result.isError, true)
+    assert.match(JSON.parse(result.content[0].text).error, /400/)
+  } finally {
+    fetch.restore()
+  }
+})
+
 // ---- get_definition -------------------------------------------------------
 
 test('get_definition returns the same structure the visual editor reads (library route)', async () => {
