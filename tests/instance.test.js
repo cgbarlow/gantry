@@ -1334,6 +1334,41 @@ test('readModule against Azure DevOps performs the same lazy migration, pushing 
   )
 })
 
+// #109 (docs/adr/0047) regression: the migration push above must never fire when this call's own
+// credential resolved to nothing but a workspace's shared, read-only-intended one —
+// `sharedCache.cacheReads: true` is exactly the shape `lib/server.js`'s `sharedCacheContext` attaches
+// to `options.azureDevOps` for a request that carried no credential of its own against a shared
+// workspace (`withAzureDevOpsCredential`). Before this guard, every read call site #125 gave a
+// shared-credential fallback to — GET /api/instance chief among them — would commit this migration
+// using that shared credential the moment it happened to read an old-scale module, violating "never
+// usable for a write" on ordinary anonymous browsing rather than anything adversarial.
+test('readModule against Azure DevOps migrates for THIS read but does not push the commit when the credential is shared-only', async () => {
+  await withFakeRepo(
+    {
+      '/gantry-workspace/my-initiative/instance.yaml': 'definition: design\nslug: my-initiative\nstage: shape\n',
+      '/gantry-workspace/my-initiative/modules/background.md': OLD_SCALE_WITH_AUTHOR_HEADINGS,
+    },
+    async (baseUrl) => {
+      const azureDevOpsBase = azureDevOpsOptions(baseUrl)
+      // The exact shape `withAzureDevOpsCredential`/`sharedCacheContext` produce for a request that
+      // carried no credential of its own, answered only by the workspace's shared PAT — see
+      // lib/server.js's own doc comments on both.
+      const azureDevOps = { ...azureDevOpsBase, sharedCache: { cacheReads: true } }
+      const definition = loadDefinition('design')
+
+      // The response this read returns is still correctly migrated content — a shared-credential
+      // visitor sees the fix applied, they just don't cause a write.
+      const data = await readModule(definition, 'my-initiative', 'background', { azureDevOps })
+      assert.match(data.fields.problem, /^A new law requires this by June\.\n\n### An author heading/)
+
+      // But the repo itself was never committed to with the shared credential — still old-scale bytes.
+      const client = createAzureDevOpsClient(azureDevOpsBase)
+      const stored = await client.getFileContent('gantry-workspace/my-initiative/modules/background.md')
+      assert.equal(stored, OLD_SCALE_WITH_AUTHOR_HEADINGS)
+    }
+  )
+})
+
 test('readModule forwards options.strict to parseModuleFile on both the local and Azure DevOps-backed paths', async () => {
   // A duplicate defined-field heading is the anomaly strict mode exists to catch (#132 made unknown headings legal custom fields, so they can no longer play this role).
   const badModuleText =
