@@ -19,6 +19,9 @@ import {
 } from '../lib/instanceDataDir.js'
 import { parseInstanceAddress } from '../lib/slug.js'
 import { backfillNumberRegistry } from '../lib/numberRegistry.js'
+import { deriveWorkspaceId } from '../lib/workspaceRegistry.js'
+import { parseBootstrapWorkspaces } from '../lib/workspaceBootstrap.js'
+import { PROVIDERS, DEFAULT_PROVIDER, describeProviderLocation, normalizeProviderLocation } from '../lib/provider.js'
 
 export function resolveInstancesDir(cliInstancesDir) {
   return cliInstancesDir ?? process.env.GANTRY_INSTANCES_DIR ?? 'instances'
@@ -338,6 +341,119 @@ withInstanceOptions(
     console.log(`gantry serve: http://localhost:${port} (${label})`)
   })
 })
+
+// #115 (parent #109): `GANTRY_BOOTSTRAP_PATS` (#113) and `GANTRY_WORKSPACE_PATS` (ADR-0043) are both
+// keyed by **workspace id**. Since #110 that id is a pure function of provider + location
+// (`lib/workspaceRegistry.js`'s `deriveWorkspaceId`), but until this command the only way for an
+// operator to actually read one was the two-boot dance: set GANTRY_BOOTSTRAP_WORKSPACES, boot, hit
+// `GET /api/workspaces`, copy the id out, set GANTRY_BOOTSTRAP_PATS, restart. `gantry workspace-id`
+// computes the same id offline, with no server and no registry.
+//
+// The env-var mode deliberately goes through `parseBootstrapWorkspaces` — the exact function
+// `lib/server.js` parses that env var with — rather than doing its own `JSON.parse`, so the CLI and
+// the server can never disagree about what a declaration means or which malformed values they reject.
+// The id expression below (`declaration.id ?? deriveWorkspaceId(...)`) likewise mirrors
+// `applyBootstrapWorkspaces`'s own register branch line for line.
+const WORKSPACE_ID_LOCATION_KEYS = ['organization', 'project', 'repository', 'owner', 'namespace', 'jiraSite', 'jiraProjectKey', 'baseUrl']
+
+// The location options this command was actually given, as a location object. Deliberately unpruned
+// and unvalidated here: `deriveWorkspaceId` routes it through `lib/provider.js`'s
+// `normalizeProviderLocation`, which is what drops a field belonging to another provider and reports a
+// missing required one — so there is exactly one place that knows each provider's schema.
+function workspaceIdLocationFromOptions(options) {
+  const location = {}
+  for (const key of WORKSPACE_ID_LOCATION_KEYS) {
+    if (options[key] !== undefined) location[key] = options[key]
+  }
+  return location
+}
+
+program
+  .command('workspace-id')
+  .description('Print the workspace id derived from a provider + location — the key GANTRY_BOOTSTRAP_PATS and GANTRY_WORKSPACE_PATS entries are written against')
+  .option('--provider <provider>', `provider the workspace lives on: ${PROVIDERS.join(', ')} (default: ${DEFAULT_PROVIDER})`)
+  .option('--organization <organization>', 'location field (azure-devops)')
+  .option('--project <project>', 'location field (azure-devops)')
+  .option('--repository <repository>', 'location field (all providers)')
+  .option('--owner <owner>', 'location field (github, atlassian) — the repo owner / Bitbucket workspace slug, not the person a workspace is owned by')
+  .option('--namespace <namespace>', 'location field (gitlab) — the full group/subgroup path, as one string')
+  .option('--jira-site <site>', 'location field (atlassian)')
+  .option('--jira-project-key <key>', 'location field (atlassian)')
+  .option('--base-url <url>', 'optional location field (azure-devops, github, gitlab) — when set it is part of the id, so set it here exactly as the declaration does')
+  .option('--json', 'emit a GANTRY_BOOTSTRAP_PATS-shaped JSON object keyed by these ids, with empty-string placeholder values to fill in')
+  .addHelpText(
+    'after',
+    `
+A workspace id is what GANTRY_BOOTSTRAP_PATS and the MCP server's GANTRY_WORKSPACE_PATS
+map a PAT to. It is derived from provider + location, so it is the same id on every
+machine and survives the registry file being deleted — this command computes it without
+starting a server or touching any registry.
+
+With no location options, the declarations in GANTRY_BOOTSTRAP_WORKSPACES are read and
+one id is printed per declaration. Exactly one id is printed per line, id first.
+
+  gantry workspace-id --provider github --owner cgbarlow --repository gantry-workspace-testing
+  GANTRY_BOOTSTRAP_WORKSPACES='[...]' gantry workspace-id
+  GANTRY_BOOTSTRAP_WORKSPACES='[...]' gantry workspace-id --json   # paste as GANTRY_BOOTSTRAP_PATS, then fill in the tokens
+
+This prints the id a declaration *would* derive. A workspace a given server already has
+registered at that location keeps whatever id it was first registered under — bootstrap
+never re-keys an existing workspace — so for a server with pre-existing workspaces, check
+its startup log ("gantry serve: bootstrapped workspace ...") or GET /api/workspaces.
+
+No PAT is ever read, printed, or logged by this command.`
+  )
+  .action((options) => {
+    // Same try/catch + single-line + exit(1) posture as `serve` above: an unknown provider, a missing
+    // location field, or a malformed GANTRY_BOOTSTRAP_WORKSPACES is an operator typo, and the error
+    // each of those already carries is the whole message — no stack trace.
+    try {
+      const location = workspaceIdLocationFromOptions(options)
+      if (Object.keys(location).length > 0) {
+        const provider = options.provider ?? DEFAULT_PROVIDER
+        // Validated here purely so the failure names the provider whose schema wasn't satisfied ("A
+        // github workspace location is missing: repository") instead of the bare "A location is
+        // missing: repository" `deriveWorkspaceId`'s own internal call would raise — same function,
+        // same rules, just an `entityLabel` worth the extra call at a terminal.
+        normalizeProviderLocation(provider, location, { entityLabel: `A ${provider} workspace location` })
+        const id = deriveWorkspaceId(provider, location)
+        // Bare id on its own line in the default mode: the operator just typed the location, so there
+        // is nothing to disambiguate, and `ID=$(gantry workspace-id ...)` is the point of the mode.
+        console.log(options.json ? JSON.stringify({ [id]: '' }, null, 2) : id)
+        return
+      }
+      if (options.provider) {
+        throw new Error(
+          `--provider "${options.provider}" needs a location — name its location fields too (e.g. --owner/--repository for github), or drop --provider to read GANTRY_BOOTSTRAP_WORKSPACES instead`
+        )
+      }
+      const declarations = parseBootstrapWorkspaces(process.env.GANTRY_BOOTSTRAP_WORKSPACES)
+      const rows = declarations.map((declaration) => {
+        const provider = declaration.provider ?? DEFAULT_PROVIDER
+        return {
+          id: declaration.id ?? deriveWorkspaceId(provider, declaration.location),
+          provider,
+          location: describeProviderLocation(provider, declaration.location),
+        }
+      })
+      if (options.json) {
+        console.log(JSON.stringify(Object.fromEntries(rows.map((row) => [row.id, ''])), null, 2))
+        return
+      }
+      if (rows.length === 0) {
+        console.log(
+          'No workspaces declared in GANTRY_BOOTSTRAP_WORKSPACES — set it, or name a location on the command line (gantry workspace-id --help).'
+        )
+        return
+      }
+      for (const row of rows) {
+        console.log(`${row.id}  ${row.provider} ${row.location}`)
+      }
+    } catch (err) {
+      console.error(err.message)
+      process.exit(1)
+    }
+  })
 
 withDefinitionsOption(
   program
