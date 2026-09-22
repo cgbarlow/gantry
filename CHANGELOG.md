@@ -17,6 +17,28 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.7.8-beta — 2026-09-22
+
+### Added
+
+- **A workspace's id can now be read straight off the command line, without booting a server.**
+  `GANTRY_BOOTSTRAP_PATS` and the MCP server's `GANTRY_WORKSPACE_PATS` are both keyed by workspace
+  id, and until now the only way to find one was to set the workspace up, start the server, read
+  the id back out of the API, then restart with the credential map filled in. `gantry workspace-id
+  --provider github --owner <owner> --repository <repo>` prints that id directly — the same id the
+  server derives, on any machine, with no server and no registry file involved. Run it with no
+  location at all and it reads your existing `GANTRY_BOOTSTRAP_WORKSPACES` declaration and prints
+  one id per workspace; add `--json` and it emits a ready-to-paste `GANTRY_BOOTSTRAP_PATS` skeleton
+  that you only have to fill the tokens into. No PAT is read, printed, or logged by the command —
+  it deals in ids only.
+
+- **`gantry serve` now names each bootstrapped workspace and its id at startup.** One line per
+  workspace, giving the provider, the location, and the id it is actually registered under — so on
+  a hosted deployment where you have no shell, the deploy log alone is enough to key
+  `GANTRY_BOOTSTRAP_PATS`. Prefer that line over the command on a server that already has
+  workspaces registered: `gantry workspace-id` prints the id a declaration *would* derive, while a
+  workspace already registered at that location keeps the id it was first registered under.
+
 ## 0.7.7-beta — 2026-09-22
 
 ### Added

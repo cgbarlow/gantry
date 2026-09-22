@@ -744,16 +744,41 @@ docker run -d \
 
 A workspace registered this way derives a stable id from its provider + location, so a `GANTRY_WORKSPACE_PATS` entry keyed by that id (see the MCP server docs) survives a restart even with the registry file deleted. A malformed `GANTRY_BOOTSTRAP_WORKSPACES` — invalid JSON, an unknown `provider`, or a declaration missing its `location` — fails startup with a single actionable line rather than booting into a half-configured server.
 
+**To read those ids, use `gantry workspace-id` — no server, no registry, no boot required.** Both PAT maps below (`GANTRY_BOOTSTRAP_PATS` here, `GANTRY_WORKSPACE_PATS` in the MCP server) are keyed by workspace id, and this command computes the same id the server derives. Name a location on the command line, for any provider:
+
+```bash
+gantry workspace-id --provider github --owner cgbarlow --repository gantry-workspace-testing
+# 017ed5e6-a18c-573a-9621-4c91c47ab907
+```
+
+…or give it no location at all and it reads the same `GANTRY_BOOTSTRAP_WORKSPACES` value the server reads, printing one id per declaration — with `--json` emitting a ready-to-paste `GANTRY_BOOTSTRAP_PATS` skeleton you fill the tokens into rather than transcribing UUIDs:
+
+```bash
+export GANTRY_BOOTSTRAP_WORKSPACES='[{"provider":"github","location":{"owner":"cgbarlow","repository":"gantry-workspace-testing"},"owner":"c.barlow"}]'
+
+gantry workspace-id
+# 017ed5e6-a18c-573a-9621-4c91c47ab907  github cgbarlow/gantry-workspace-testing
+
+gantry workspace-id --json
+# {
+#   "017ed5e6-a18c-573a-9621-4c91c47ab907": ""
+# }
+```
+
+An unknown `--provider`, a missing location field, or a malformed `GANTRY_BOOTSTRAP_WORKSPACES` fails with the same single actionable line startup would give. No PAT is read, printed, or logged by this command — it deals in ids only.
+
+`gantry serve` also logs one line per bootstrapped workspace at startup, naming the location and the id it is registered under (`gantry serve: bootstrapped workspace github cgbarlow/gantry-workspace-testing — id 017ed5e6-…`), so on a hosted platform the deploy log is enough. Prefer that line over the command when a server already has workspaces registered: `gantry workspace-id` prints the id a declaration *would* derive, while a workspace already registered at that location keeps whatever id it was first registered under — bootstrap never re-keys an existing workspace.
+
 Registering a workspace this way (or restoring a workspace registration after the registry file was deleted) is not the same as having its instances show up on the dashboard: a Provider-backed workspace has no local directory for the usual instance-registry backfill to scan, so its instances are instead discovered by listing `gantry-workspace/` in its own repo — but only once a request actually carries a credential for it. That means a freshly bootstrapped workspace's instances appear on the *first authenticated request* against `GET /api/instances`, not at server boot — the container can be up and serving before anyone has supplied a PAT for that workspace, and its instances simply aren't listed yet. Once discovered, they're registered like any other instance and no later request re-lists the repo.
 
-**Optionally, discover those instances at boot instead of waiting for the first authenticated request.** Set `GANTRY_BOOTSTRAP_PATS` — off by default, opt in only if you need it — to a JSON object mapping workspace id to PAT, `{"<workspaceId>": "<pat>", ...}`, the same shape as `GANTRY_WORKSPACE_PATS` (see the MCP server docs). For any workspace `GANTRY_BOOTSTRAP_WORKSPACES` just registered that also has an entry here, `gantry serve` runs the same discovery pass immediately at startup, so `GET /api/instances` already has that workspace's rows in its registry before anyone has loaded the dashboard — useful for an unattended deployment (the hosted demo, for one) where "restored" and "still empty" would otherwise look identical until someone with a PAT shows up. This is a genuine trade-off, not a free win: it means the server itself briefly holds a credential at startup, which `docs/adr/0038-per-workspace-pat-no-global-credential.md`'s "no server-side credential, no fallback" deliberately avoided everywhere else — see `docs/adr/0046-boot-time-bootstrap-pats-amend-adr-0038.md` for why this one narrow, opt-in, startup-only exception is scoped the way it is. Each PAT is used at most once, only for that one workspace's discovery pass, then never touched again — it is never returned by any API response, never written to any registry file, and never logged. A workspace whose boot PAT is missing, rejected, or expired simply isn't discovered at boot; startup itself never fails because of it, and the request-credential path above still works normally afterward:
+**Optionally, discover those instances at boot instead of waiting for the first authenticated request.** Set `GANTRY_BOOTSTRAP_PATS` — off by default, opt in only if you need it — to a JSON object mapping workspace id to PAT, `{"<workspaceId>": "<pat>", ...}`, the same shape as `GANTRY_WORKSPACE_PATS` (see the MCP server docs). Get the ids to key it by from `gantry workspace-id --json` above (or the `gantry serve` startup log) — you never have to boot the server and read `GET /api/workspaces` to find them. For any workspace `GANTRY_BOOTSTRAP_WORKSPACES` just registered that also has an entry here, `gantry serve` runs the same discovery pass immediately at startup, so `GET /api/instances` already has that workspace's rows in its registry before anyone has loaded the dashboard — useful for an unattended deployment (the hosted demo, for one) where "restored" and "still empty" would otherwise look identical until someone with a PAT shows up. This is a genuine trade-off, not a free win: it means the server itself briefly holds a credential at startup, which `docs/adr/0038-per-workspace-pat-no-global-credential.md`'s "no server-side credential, no fallback" deliberately avoided everywhere else — see `docs/adr/0046-boot-time-bootstrap-pats-amend-adr-0038.md` for why this one narrow, opt-in, startup-only exception is scoped the way it is. Each PAT is used at most once, only for that one workspace's discovery pass, then never touched again — it is never returned by any API response, never written to any registry file, and never logged. A workspace whose boot PAT is missing, rejected, or expired simply isn't discovered at boot; startup itself never fails because of it, and the request-credential path above still works normally afterward:
 
 ```bash
 docker run -d \
   --name gantry \
   -p 3000:3000 \
   -e GANTRY_BOOTSTRAP_WORKSPACES='[{"provider":"github","location":{"owner":"cgbarlow","repository":"gantry-workspace-testing"},"owner":"c.barlow"}]' \
-  -e GANTRY_BOOTSTRAP_PATS='{"<the-workspace-id-derived-above>":"<its-github-pat>"}' \
+  -e GANTRY_BOOTSTRAP_PATS='{"017ed5e6-a18c-573a-9621-4c91c47ab907":"<its-github-pat>"}' \
   --restart unless-stopped \
   gantry
 ```
