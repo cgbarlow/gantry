@@ -1,19 +1,19 @@
 # <%~ it.instance.name || it.instance.slug %>: Appointment Case
 <%
-  /* The internal half of the `onboarding-approved` gate: the document whoever signs this stage
-     off reads before doing so. Leads with the case for appointing this candidate, then the
-     commitments made on the strength of it — offer, contract, payroll. It carries no approval
-     section, because the approval is the sign-off on the stage this document belongs to. See
-     definition.yaml.
+  /* v3 (#155): the case put to executive approval at `approved-to-appoint`, before any offer is
+     made — v2's single Appointment stage is split, see CHANGELOG.md. The only document at its
+     gate. Candidate, rationale, vetting outcome and the proposed offer terms are bare: the
+     executive decision turns on them. Role and engagement are carried context, referenced `?`.
+     `open-questions.process-gaps?` is in `requires` for authoring scope only, not printed (the
+     Hire Record prints it): without it the editor would never offer the field at this stage.
 
-     Payroll's rework section is `?` and suppresses entirely on a hire where validation passed
-     first time, which is the outcome this process is aiming for and, per the source model, not
-     the common one.
-
-     v2 (#90): `selection.preferred-candidate` split into `candidate-name` (text, also what
-     names this document — see definition.yaml's `filename:`) and `rationale` (markdown).
-     `contract.start-date` is now a date, formatted here with `formatDate()` for human reading;
-     what's stored on disk stays ISO. `contract.start-date-changes` is a new optional field. */
+     The offer outcome, contract and payroll moved to the Onboarding Case at
+     `onboarding-approved`. No approval section: the approval is the sign-off on this stage. The
+     term heading shows whenever the type is not Permanent, and the Vetting conditions heading
+     whenever the outcome is Cleared with conditions — each printing "— not stated —" when blank,
+     so a missing term or condition is visible to the approver. */
+  const apType = it.modules.engagement.type
+  const apTerm = it.modules.engagement.term
 %>
 # The appointment
 
@@ -27,8 +27,12 @@
 
 ## Engagement type
 
-<%~ na(it.modules.engagement.type) %>
+<%~ na(apType) %>
+<% if (apTerm || (apType && apType !== 'Permanent')) { %>
+## Term or expected duration
 
+<%~ apTerm || '— not stated —' %>
+<% } %>
 ## Candidate name
 
 <%~ na(it.modules.selection['candidate-name']) %>
@@ -40,56 +44,16 @@
 ## Vetting outcome
 
 <%~ na(it.modules.vetting.outcome) %>
+<% if (it.modules.vetting.conditions || it.modules.vetting.outcome === 'Cleared with conditions') { %>
+## Vetting conditions
 
-# Offer
+<%~ it.modules.vetting.conditions || '— not stated —' %>
+<% } %>
+# Proposed terms
 
 ## Offer terms
 
 <%~ na(it.modules.offer.terms) %>
-
-## Status
-
-<%~ na(it.modules.offer.status) %>
-<% if (it.modules.offer.negotiation) { %>
-## Negotiation
-
-<%~ it.modules.offer.negotiation %>
-<% } %>
-# Contract
-
-## Terms
-
-<%~ na(it.modules.contract['terms-summary']) %>
-
-## Signatures
-
-<%~ na(it.modules.contract.signatures) %>
-
-## Start date
-
-<%~ na(formatDate(it.modules.contract['start-date'])) %>
-<% if (it.modules.contract['start-date-changes']) { %>
-## Start date changes
-
-<%~ it.modules.contract['start-date-changes'] %>
-<% } %>
-# Payroll
-
-## Details requested
-
-<%~ na(it.modules.payroll['details-requested']) %>
-
-## Validation outcome
-
-<%~ na(it.modules.payroll['validation-outcome']) %>
-<% if (it.modules.payroll.rework) { %>
-## Rework
-
-<%~ it.modules.payroll.rework %>
-<% } %>
-## Payroll confirmation
-
-<%~ na(it.modules.payroll.confirmed) %>
 <% if (it.modules['open-questions'].questions && it.modules['open-questions'].questions.length) { %>
 # Open questions
 

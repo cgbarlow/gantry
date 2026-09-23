@@ -12,7 +12,7 @@ Permanent, full time, Technology Band 4.
 
 Base remuneration at the midpoint of the band, as recommended by the panel. Forty hours per week. Based at the Wellington office with the team's standard arrangement of two days in the office and three remote. On-call rotation one week in three, with the standard on-call allowance.
 
-Proposed start date 20 April 2026, chosen to give four weeks' notice to her current employer.
+Proposed start date 13 April 2026, to allow for notice to her current employer.
 
 ## Status
 

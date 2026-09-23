@@ -40,10 +40,19 @@ const SLUG = 'platform-engineer'
 const GATES = [
   { gate: 'approved-to-recruit', satisfiedBy: ['requisition-brief'], bars: { 'requisition-brief': 8 } },
   { gate: 'candidate-selected', satisfiedBy: ['selection-report'], bars: { 'selection-report': 9 } },
+  // #155: the executive approval, before any offer. The Appointment Case has 4 bare Fields (see
+  // BARE below); its bar is 5 because engagement.type, in scope as `?`, is still `required: true`
+  // until #159 moves it to its home Gate. role.summary and role.team are required only at
+  // approved-to-recruit (#157), so they don't count here.
+  { gate: 'approved-to-appoint', satisfiedBy: ['appointment-case'], bars: { 'appointment-case': 5 } },
+  // #155: onboarding approval, after the contract is signed and payroll validates, passes through
+  // the new internal Onboarding Case. Its bar is its 8 bare Fields plus engagement.type (`?`,
+  // still `required: true` until #159). The Offer Pack still satisfies this Gate, at a higher
+  // bar, until #156 replaces it with an Appointment Confirmation that doesn't count toward it.
   {
     gate: 'onboarding-approved',
-    satisfiedBy: ['appointment-case', 'offer-pack'],
-    bars: { 'appointment-case': 14, 'offer-pack': 13 },
+    satisfiedBy: ['onboarding-case', 'offer-pack'],
+    bars: { 'onboarding-case': 9, 'offer-pack': 13 },
   },
   {
     gate: 'ready-to-start',
@@ -56,6 +65,22 @@ const GATES = [
 // the Modules Provisioning writes, so neither is the easier way through the Gate. The spec's
 // "13-Field bar" is those 11 plus the two filename tokens.
 const PROVISIONING_MODULES = ['identity', 'device', 'access', 'handover']
+
+// The bare Fields — `requires` entries without `?` — of the Artefacts a ticket pins exactly. These
+// are what the Gate always asks of that Artefact, whatever the carried Fields' own `required` says.
+const BARE = {
+  'appointment-case': ['selection.candidate-name', 'selection.rationale', 'vetting.outcome', 'offer.terms'],
+  'onboarding-case': [
+    'selection.candidate-name',
+    'offer.status',
+    'contract.terms-summary',
+    'contract.manager-signed',
+    'contract.candidate-signed',
+    'contract.start-date',
+    'payroll.details-requested',
+    'payroll.confirmed',
+  ],
+}
 
 const today = new Date().toISOString().slice(0, 10)
 
@@ -86,13 +111,55 @@ const DOCUMENTS = {
   },
   'appointment-case': {
     basename: 'Marama Clarke - Appointment Case',
-    present: [...CONTROL, '# The appointment', '# Offer', '# Contract', '## Signatures', '# Payroll', '# Open questions'],
-    absent: [],
+    present: [
+      ...CONTROL,
+      '# The appointment',
+      '## Role',
+      '## Team and reporting line',
+      '## Engagement type',
+      '## Candidate name',
+      '## Selection rationale',
+      '## Vetting outcome',
+      '# Proposed terms',
+      '## Offer terms',
+      '# Open questions',
+    ],
+    // The offer outcome, contract and payroll moved to the Onboarding Case; the worked hire is
+    // Permanent, so the term marker doesn't show.
+    absent: ['# Offer', '# Contract', '# Payroll', '## Term or expected duration'],
   },
+  'onboarding-case': {
+    basename: 'Marama Clarke - Onboarding Case',
+    present: [
+      ...CONTROL,
+      '# The appointment',
+      '## Candidate name',
+      '## Engagement type',
+      '# Offer',
+      '## Offer terms as extended',
+      '## Status',
+      '## Negotiation',
+      '# Contract',
+      '## Contract terms',
+      '## Variations from the offer',
+      '## Manager signed',
+      '## Candidate signed',
+      '## Start date',
+      '# Payroll',
+      '## Details requested',
+      '## Rework',
+      '## Payroll confirmation',
+      '# Open questions',
+    ],
+    // Authoring scope only (printed in the Hire Record), the case for appointing, which was
+    // approved at the Stage before, and the term marker, as the worked hire is Permanent.
+    absent: ['## Term or expected duration', '## Validation outcome', '## Elapsed time', '## Selection rationale', '## Vetting outcome', '## Signatures'],
+  },
+  // Left as v2's Offer Pack until #156, with only the signature dates replacing `signatures`.
   'offer-pack': {
     basename: 'Marama Clarke - Offer Pack - 2026-04-20',
-    present: [...CONTROL, '# Your role', '# Your offer', '# Your contract', '# Payroll', '# Open questions'],
-    absent: [],
+    present: [...CONTROL, '# Your role', '# Your offer', '# Your contract', '## Manager signed', '## Candidate signed', '# Payroll', '# Open questions'],
+    absent: ['## Signatures'],
   },
   'starter-readiness': {
     basename: 'Marama Clarke - Starter Readiness - 2026-04-20',
@@ -133,6 +200,9 @@ const DOCUMENTS = {
       '## Route variation',
       '# Selection',
       '# Appointment',
+      '## Variations from the offer',
+      '## Manager signed',
+      '## Candidate signed',
       '# Provisioning',
       '## User ID',
       '## Standard or non-standard device',
@@ -142,7 +212,7 @@ const DOCUMENTS = {
       '# Open questions and process gaps',
     ],
     // The worked hire is Permanent with no term.
-    absent: ['## Approval route', '## Term or expected duration', '## Readiness confirmation', '## Outstanding at start date'],
+    absent: ['## Signatures', '## Approval route', '## Term or expected duration', '## Readiness confirmation', '## Outstanding at start date'],
   },
 }
 
@@ -210,6 +280,43 @@ test('the harness pins the worked hire to v3 and covers every v3 Gate and Artefa
   assert.deepEqual(GATES.map((g) => g.gate), def.stages.map((s) => s.gate))
   assert.deepEqual(Object.keys(DOCUMENTS).sort(), def.artefacts.map((a) => a.id).sort())
 })
+
+test('v3 splits Appointment into the executive approval and Offer, Contract and Payroll', () => {
+  const { stages } = loadDefinition('recruitment-onboarding', { version: VERSION })
+  assert.deepEqual(
+    stages.map((s) => [s.id, s.gate]),
+    [
+      ['requisition', 'approved-to-recruit'],
+      ['selection', 'candidate-selected'],
+      ['appointment', 'approved-to-appoint'],
+      ['offer-contract-payroll', 'onboarding-approved'],
+      ['provisioning', 'ready-to-start'],
+    ]
+  )
+  // Selection stays mounted at Offer, Contract and Payroll so reserve finalists can be recorded as
+  // released once the offer is accepted.
+  const ocp = stages.find((s) => s.id === 'offer-contract-payroll')
+  assert.deepEqual(ocp.modules, ['role', 'engagement', 'selection', 'offer', 'contract', 'payroll', 'open-questions'])
+})
+
+for (const [id, bare] of Object.entries(BARE)) {
+  test(`${id} has exactly ${bare.length} bare Fields`, () => {
+    const artefact = loadDefinition('recruitment-onboarding', { version: VERSION }).artefacts.find((a) => a.id === id)
+    assert.deepEqual(
+      artefact.requires.filter((r) => !r.endsWith('?')),
+      bare
+    )
+  })
+}
+
+// Process gaps can be written at every Stage, and the editor offers only the Fields in a Stage's
+// Artefacts' `requires` — so each internal case this round owns carries the Field in scope.
+for (const id of ['appointment-case', 'onboarding-case']) {
+  test(`${id} has open-questions.process-gaps in authoring scope`, () => {
+    const artefact = loadDefinition('recruitment-onboarding', { version: VERSION }).artefacts.find((a) => a.id === id)
+    assert.ok(artefact.requires.includes('open-questions.process-gaps?'))
+  })
+}
 
 for (const { gate, satisfiedBy, bars } of GATES) {
   test(`the worked hire, pinned to v3, passes ${gate}`, () => {
@@ -467,4 +574,26 @@ test('the Selection Report warns when vetting reads Not cleared', () => {
     edit('vetting', { outcome: 'Not cleared' })
     assert.match(render('selection-report'), /\*\*Warning:\*\* vetting did not clear this candidate/)
   })
+})
+
+// #155: Appointment, and Offer, Contract and Payroll.
+
+test('the Appointment and Onboarding Cases show a blank term for a non-permanent hire, and the Appointment Case a blank condition for a conditional clearance', () => {
+  const changes = { engagement: { type: 'Fixed term', term: '' }, vetting: { outcome: 'Cleared with conditions', conditions: '' } }
+  const appointment = renderVariant('appointment-case', changes)
+  assert.match(appointment, /## Term or expected duration\n\n— not stated —/)
+  assert.match(appointment, /## Vetting conditions\n\n— not stated —/)
+  assert.match(renderVariant('onboarding-case', changes), /## Term or expected duration\n\n— not stated —/)
+})
+
+test('the Onboarding Case warns when the offer has not been accepted, and only then', () => {
+  const warning = /the offer has not been accepted/
+  assert.doesNotMatch(renderArtefact(SLUG, 'onboarding-case', { instancesDir: FIXTURE, dryRun: true }).markdown, warning)
+  assert.match(renderVariant('onboarding-case', { offer: { status: 'Extended' } }), warning)
+})
+
+test('the Offer Pack shows the payroll validation outcome only when it is filled', () => {
+  const outline = headings(renderVariant('offer-pack', { payroll: { 'validation-outcome': '' } }))
+  assert.ok(!outline.has('## Validation outcome'))
+  assert.ok(outline.has('## Confirmation'))
 })

@@ -4,7 +4,8 @@ status: draft
 title: Recruitment and Onboarding
 description: >
   Turning an identified vacancy into a starter who can work on their first day,
-  from requisition through selection and appointment to provisioning.
+  from requisition through selection, executive approval, and offer, contract
+  and payroll to provisioning.
   Instances hold HR personal data, and need HR-file access and retention
   controls wherever they are stored.
 stages:
@@ -44,15 +45,34 @@ stages:
   - id: appointment
     title: Appointment
     purpose: >
-      Put the case for appointing the preferred candidate, agree and sign the
-      contract, and confirm the starter can be paid. Owned by HR, with Payroll
-      validating. Signing this stage off is the approval to appoint.
-    gate: onboarding-approved
+      Put the case for appointing the preferred candidate to executive approval before any
+      offer is made: who was selected and why, what vetting returned, and the terms proposed.
+      Owned by the requesting department, which raises the appointment request. Signing this
+      stage off is the executive approval to appoint. The offer terms written here are the
+      terms HR extends; they are not edited afterwards.
+    gate: approved-to-appoint
     modules:
       - role
       - engagement
       - selection
       - vetting
+      - offer
+      - open-questions
+  - id: offer-contract-payroll
+    title: Offer, Contract and Payroll
+    purpose: >
+      Extend the approved offer, draw and sign the contract, and confirm the starter can be
+      paid. Owned by HR, with Payroll validating. Signing this stage off is onboarding
+      approval, which releases IT setup; do not sign it off unless the offer reads Accepted.
+      The Onboarding Case is the document put to whoever approves onboarding. The offer terms
+      were approved at Appointment and are not edited here; later changes go in the offer's
+      negotiation. Selection stays open so that finalists held in reserve can be recorded as
+      released once the offer is accepted.
+    gate: onboarding-approved
+    modules:
+      - role
+      - engagement
+      - selection
       - offer
       - contract
       - payroll
@@ -130,30 +150,54 @@ artefacts:
   - id: appointment-case
     title: Appointment Case
     purpose: >
-      Present the case for appointing this candidate, and the contract and
-      payroll position that releases onboarding.
+      The case put to executive approval before any offer is made: the preferred candidate,
+      why they were chosen, what vetting returned and any conditions, and the terms proposed
+      for the offer.
     template: templates/appointment-case.md.tmpl
-    gate: onboarding-approved
+    gate: approved-to-appoint
     requires:
-      - role.summary
-      - role.team
-      - engagement.type
+      - role.summary?
+      - role.team?
+      - engagement.type?
+      - engagement.term?
       - selection.candidate-name
       - selection.rationale
       - vetting.outcome
+      - vetting.conditions?
       - offer.terms
+      - open-questions.questions?
+      - open-questions.process-gaps?
+    filename: "{selection.candidate-name} - Appointment Case"
+  - id: onboarding-case
+    title: Onboarding Case
+    purpose: >
+      The internal record put to whoever approves onboarding: the offer terms as extended and
+      what changed in negotiation, the contract as drawn and signed, the agreed start date, and
+      Payroll's confirmation that the starter can be paid.
+    template: templates/onboarding-case.md.tmpl
+    gate: onboarding-approved
+    requires:
+      - selection.candidate-name
+      - engagement.type?
+      - engagement.term?
+      - offer.terms?
       - offer.status
       - offer.negotiation?
       - contract.terms-summary
-      - contract.signatures
+      - contract.variations?
+      - contract.manager-signed
+      - contract.candidate-signed
       - contract.start-date
       - contract.start-date-changes?
       - payroll.details-requested
-      - payroll.validation-outcome
       - payroll.rework?
       - payroll.confirmed
       - open-questions.questions?
-    filename: "{selection.candidate-name} - Appointment Case"
+      - selection.unsuccessful?
+      - contract.elapsed?
+      - payroll.validation-outcome?
+      - open-questions.process-gaps?
+    filename: "{selection.candidate-name} - Onboarding Case"
   - id: offer-pack
     title: Offer Pack
     purpose: >
@@ -170,11 +214,12 @@ artefacts:
       - offer.terms
       - offer.status
       - contract.terms-summary
-      - contract.signatures
+      - contract.manager-signed
+      - contract.candidate-signed
       - contract.start-date
       - contract.start-date-changes?
       - payroll.details-requested
-      - payroll.validation-outcome
+      - payroll.validation-outcome?
       - payroll.confirmed
       - open-questions.questions?
     filename: "{selection.candidate-name} - Offer Pack - {contract.start-date}"
@@ -267,12 +312,14 @@ artefacts:
       - offer.status
       - offer.negotiation?
       - contract.terms-summary
-      - contract.signatures
+      - contract.variations?
+      - contract.manager-signed
+      - contract.candidate-signed
       - contract.start-date
       - contract.start-date-changes?
       - contract.elapsed?
       - payroll.details-requested
-      - payroll.validation-outcome
+      - payroll.validation-outcome?
       - payroll.rework?
       - payroll.confirmed
       - identity.user-id
