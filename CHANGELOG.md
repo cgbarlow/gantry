@@ -17,6 +17,22 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.8.3-beta — 2026-09-23
+
+### Fixed
+
+- **A GitHub-linked design now shows the issue it hangs off, instead of an empty "#".** Gantry
+  records the parent it links a design to using each provider's own vocabulary — an issue number for
+  GitHub, a work item id for Azure DevOps — and has always written both correctly. Every screen that
+  *displayed* one only knew the Azure DevOps spelling, so for a GitHub-linked design the Work item
+  details panel showed a bare "#" with nothing after it, Instance Settings showed "#undefined"
+  beneath an "Azure DevOps work item" heading and three blank rows, and the dashboard's "Track Work
+  Item" link was hidden altogether. All four now read whichever the design actually has, link
+  straight through to the issue, and label it the way that provider does — "Parent issue" over an
+  owner and repository for GitHub, "Parent work item" over an organization and project for Azure
+  DevOps. GitHub issues have no work-item type and no longer pretend to: that row is simply absent
+  rather than blank. A design with no parent at all now reads as "—" rather than as a broken link.
+
 ## 0.8.2-beta — 2026-09-23
 
 ### Fixed

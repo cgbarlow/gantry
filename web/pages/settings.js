@@ -14,6 +14,7 @@ import {
 } from '../lib/credential.js'
 import { advancedMode, setAdvancedMode } from '../lib/advancedMode.js'
 import { copyTextToClipboard } from '../lib/clipboard.js'
+import { workItemParentRef, describeWorkItemLink } from '../lib/provider.js'
 import { renderEngine, setRenderEngine } from '../lib/renderEngine.js'
 import { pandocWasmState } from '../lib/pandocWasm.js'
 import { apiFetch, apiFetchForInstance, cachedWorkspaceIdForSlug } from '../lib/apiFetch.js'
@@ -1384,18 +1385,27 @@ function InstanceInfoSection({ instance }) {
 // own child work item id.
 function WorkItemLinkSection({ instance }) {
   const workItem = instance.workItem
+  // #136: this screen was hardcoded to the Azure DevOps link shape — heading, Organization/Project/
+  // Work-item-type rows and `parentId` alike — so a GitHub-linked instance (docs/adr/0040, which
+  // records `{provider:'github', owner, repository, parentNumber}` and deliberately has no work-item
+  // type at all) rendered an "Azure DevOps work item" heading over three blank rows and "#undefined".
+  const described = describeWorkItemLink(workItem)
+  const parentRef = workItemParentRef(workItem)
 
   return html`
     <section class="settings-section">
-      <h2>Azure DevOps work item</h2>
+      <h2>${described?.heading ?? 'Work item'}</h2>
       ${!workItem
-        ? html`<p class="guidance">This instance isn't linked to an Azure DevOps work item.</p>`
+        ? html`<p class="guidance">This instance isn't linked to a work item.</p>`
         : html`
             <div class="result-card">
-              <div class="result-row"><span class="k">Organization</span><span class="v">${workItem.organization}</span></div>
-              <div class="result-row"><span class="k">Project</span><span class="v">${workItem.project}</span></div>
-              <div class="result-row"><span class="k">Work item type</span><span class="v">${workItem.workItemType}</span></div>
-              <div class="result-row"><span class="k">Parent work item</span><span class="v">#${workItem.parentId}</span></div>
+              ${described.rows.map(
+                (row) => html`<div class="result-row" key=${row.k}><span class="k">${row.k}</span><span class="v">${row.v ?? '\u2014'}</span></div>`
+              )}
+              <div class="result-row">
+                <span class="k">${described.parentLabel}</span>
+                <span class="v">${parentRef == null ? '\u2014' : `#${parentRef}`}</span>
+              </div>
               ${instance.stages.map(
                 (stage) => html`
                   <div class="result-row" key=${stage.id}>

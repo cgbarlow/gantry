@@ -36,6 +36,7 @@ import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, worksp
 // Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79, #374) visual/split/markdown toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
 import { unrepresentedWorkspaceGroups, describeInstanceRowWorkspace } from './lib/dashboardWorkspaces.js'
+import { workItemParentRef, describeWorkItemLink } from './lib/provider.js'
 import { loadWorkspaceScopedInstances } from './lib/workspaceDiscovery.js'
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
 import { visualMode, refreshVisual, clearActiveCell, restoreActiveCell, activeCellSelection, focusTableCellAt } from './lib/visualMode.js'
@@ -3503,12 +3504,16 @@ function SyncedFieldsPanel({ instance }) {
                     />
                   </div>
                   <div class="synced-field">
-                    <span class="field-label">Parent work item</span>
+                    <span class="field-label">${describeWorkItemLink(instance.workItem)?.parentLabel ?? 'Parent work item'}</span>
                     ${(() => {
-                      const wiUrl = workItemWebUrlFor(instance.workItem, instance.workItem.parentId)
+                      // #136: GitHub records the parent as `parentNumber`, Azure DevOps as `parentId`.
+                      // Reading only the latter rendered a bare "#" for every GitHub-linked instance.
+                      const parentRef = workItemParentRef(instance.workItem)
+                      if (parentRef == null) return html`<span class="synced-value">—</span>`
+                      const wiUrl = workItemWebUrlFor(instance.workItem, parentRef)
                       return wiUrl
-                        ? html`<a class="synced-value" href=${wiUrl} target="_blank" rel="noreferrer">#${instance.workItem.parentId}</a>`
-                        : html`<span class="synced-value">#${instance.workItem.parentId}</span>`
+                        ? html`<a class="synced-value" href=${wiUrl} target="_blank" rel="noreferrer">#${parentRef}</a>`
+                        : html`<span class="synced-value">#${parentRef}</span>`
                     })()}
                   </div>
                 </div>
@@ -5529,7 +5534,8 @@ function InstanceCard({ inst, editHref, checkStatus, onCheck }) {
   // (Show files is Azure-DevOps-only; Track Work Item needs a linked work item) — an empty
   // "Manage" panel with no links is a useless UI element, so the whole card is hidden rather
   // than shown blank.
-  const hasManageLinks = Boolean(inst.workItem?.parentId) || inst.workspace?.kind === 'azureDevOps'
+  // #136: `workItemParentRef` so a GitHub-linked instance isn't gated out of its own Manage links.
+  const hasManageLinks = workItemParentRef(inst.workItem) != null || inst.workspace?.kind === 'azureDevOps'
   return html`
     <div class="instance-card" key=${inst.slug}>
       <div class="instance-card-content">
@@ -5559,11 +5565,11 @@ function InstanceCard({ inst, editHref, checkStatus, onCheck }) {
       ${advancedMode.value && hasManageLinks
         ? html`<div class="manage-card">
         <h3>Manage</h3>
-        ${inst.workItem?.parentId
+        ${workItemParentRef(inst.workItem) != null
           ? html`
               <a
                 class="manage-link"
-                href=${workItemWebUrlFor(inst.workItem, inst.workItem.parentId)}
+                href=${workItemWebUrlFor(inst.workItem, workItemParentRef(inst.workItem))}
                 target="_blank"
                 rel="noreferrer"
               >
