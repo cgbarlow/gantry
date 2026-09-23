@@ -46,13 +46,15 @@ const GATES = [
   // approved-to-recruit (#157), so they don't count here.
   { gate: 'approved-to-appoint', satisfiedBy: ['appointment-case'], bars: { 'appointment-case': 5 } },
   // #155: onboarding approval, after the contract is signed and payroll validates, passes through
-  // the new internal Onboarding Case. Its bar is its 8 bare Fields plus engagement.type (`?`,
-  // still `required: true` until #159). The Offer Pack still satisfies this Gate, at a higher
-  // bar, until #156 replaces it with an Appointment Confirmation that doesn't count toward it.
+  // the internal Onboarding Case. Its bar is its 8 bare Fields plus engagement.type (`?`, still
+  // `required: true` until #159). #156 replaces the Offer Pack with the Appointment Confirmation,
+  // which is `satisfies-gate: false` (its own bar is its 8 bare Fields — every `requires` entry
+  // except `engagement.term?`) — the loop below proves it complete on a blank Instance never
+  // passes the Gate on its own.
   {
     gate: 'onboarding-approved',
-    satisfiedBy: ['onboarding-case', 'offer-pack'],
-    bars: { 'onboarding-case': 9, 'offer-pack': 13 },
+    satisfiedBy: ['onboarding-case'],
+    bars: { 'onboarding-case': 9, 'appointment-confirmation': 8 },
   },
   {
     gate: 'ready-to-start',
@@ -155,11 +157,30 @@ const DOCUMENTS = {
     // approved at the Stage before, and the term marker, as the worked hire is Permanent.
     absent: ['## Term or expected duration', '## Validation outcome', '## Elapsed time', '## Selection rationale', '## Vetting outcome', '## Signatures'],
   },
-  // Left as v2's Offer Pack until #156, with only the signature dates replacing `signatures`.
-  'offer-pack': {
-    basename: 'Marama Clarke - Offer Pack - 2026-04-20',
-    present: [...CONTROL, '# Your role', '# Your offer', '# Your contract', '## Manager signed', '## Candidate signed', '# Payroll', '# Open questions'],
-    absent: ['## Signatures'],
+  // #156: replaces the Offer Pack. `document-control: false` and `satisfies-gate: false`, so it
+  // carries no Document Control or sign-off tables and never counts toward onboarding-approved —
+  // the only Artefact in this Definition where CONTROL is deliberately absent.
+  'appointment-confirmation': {
+    basename: 'Marama Clarke - Appointment Confirmation - 2026-04-20',
+    present: ['# Your role', '## Role summary', '## Team and reporting line', '## Key responsibilities', '## Engagement type', '# Your terms', '## Start date', '## Terms', '# What happens next'],
+    // No open questions, payroll history, staff names, offer terms or status, signatures,
+    // start-date changes, or the Document Control / sign-off tables that every other Artefact
+    // carries. The worked hire is Permanent, so the term marker doesn't show either.
+    absent: [
+      ...CONTROL,
+      '# Open questions',
+      '# Your offer',
+      '## Offer terms',
+      '## Status',
+      '## Details requested',
+      '## Validation outcome',
+      '## Payroll confirmation',
+      '## Manager signed',
+      '## Candidate signed',
+      '## Signatures',
+      '## Start date changes',
+      '## Term or expected duration',
+    ],
   },
   'starter-readiness': {
     basename: 'Marama Clarke - Starter Readiness - 2026-04-20',
@@ -592,8 +613,63 @@ test('the Onboarding Case warns when the offer has not been accepted, and only t
   assert.match(renderVariant('onboarding-case', { offer: { status: 'Extended' } }), warning)
 })
 
-test('the Offer Pack shows the payroll validation outcome only when it is filled', () => {
-  const outline = headings(renderVariant('offer-pack', { payroll: { 'validation-outcome': '' } }))
-  assert.ok(!outline.has('## Validation outcome'))
-  assert.ok(outline.has('## Confirmation'))
+// #156: the Appointment Confirmation replaces the Offer Pack, opts out of Document Control and
+// of satisfying its Gate, and carries only what a candidate needs — never the organisation's
+// internal record of how they got there. Overturns v1's "same core field set" for the two
+// audience Artefacts at a shared Gate, and v2's "never as a rendered section" for the candidate's
+// own name in this document. See CHANGELOG.md v3.
+
+test('the Appointment Confirmation opts out of Document Control and of satisfying its Gate', () => {
+  const artefact = loadDefinition('recruitment-onboarding', { version: VERSION }).artefacts.find(
+    (a) => a.id === 'appointment-confirmation'
+  )
+  assert.equal(artefact.documentControl, false)
+  assert.equal(artefact.satisfiesGate, false)
+  assert.deepEqual(artefact.requires, [
+    'selection.candidate-name',
+    'role.summary',
+    'role.team',
+    'role.responsibilities',
+    'engagement.type',
+    'engagement.term?',
+    'contract.start-date',
+    'contract.terms-summary',
+    'payroll.confirmed',
+  ])
+})
+
+test('onboarding-approved never passes through the Appointment Confirmation alone, even complete', () => {
+  const result = checkGate(SLUG, { instancesDir: FIXTURE, gate: 'onboarding-approved' })
+  const confirmation = result.artefacts.find((a) => a.id === 'appointment-confirmation')
+  assert.equal(confirmation.complete, true)
+  assert.equal(confirmation.satisfiesGate, false)
+  assert.equal(result.pass, true)
+  // Pass comes from the Onboarding Case, not from the Appointment Confirmation.
+  assert.equal(result.artefacts.find((a) => a.id === 'onboarding-case').complete, true)
+})
+
+test('the Appointment Confirmation names the candidate as "For {name}", and shows the term only when filled', () => {
+  const worked = renderArtefact(SLUG, 'appointment-confirmation', { instancesDir: FIXTURE, dryRun: true }).markdown
+  assert.match(worked, /^For Marama Clarke\n/m)
+  assert.ok(!headings(worked).has('## Term or expected duration'), 'the worked hire is Permanent')
+  const fixedTerm = renderVariant('appointment-confirmation', { engagement: { type: 'Fixed term', term: 'Twelve months.' } })
+  assert.equal(section(fixedTerm, '## Term or expected duration'), 'Twelve months.')
+  const noTerm = renderVariant('appointment-confirmation', { engagement: { type: 'Fixed term', term: '' } })
+  // Never an internal "— not stated —" marker in a document a candidate reads.
+  assert.ok(!headings(noTerm).has('## Term or expected duration'))
+})
+
+test('the Appointment Confirmation carries no staff name, payroll history or open question from the worked hire', () => {
+  const worked = renderArtefact(SLUG, 'appointment-confirmation', { instancesDir: FIXTURE, dryRun: true }).markdown
+  for (const name of ['Anaru Pihema', 'Hana Te Rangi', 'Mereana Walker']) assert.doesNotMatch(worked, new RegExp(name))
+  assert.doesNotMatch(worked, /spam folder/)
+  assert.doesNotMatch(worked, /Should the 32GB machine/)
+  assert.doesNotMatch(worked, /full time, Technology Band 4/)
+})
+
+test('the Appointment Confirmation shows the fixed payroll-validated sentence only when payroll is confirmed', () => {
+  const worked = renderArtefact(SLUG, 'appointment-confirmation', { instancesDir: FIXTURE, dryRun: true }).markdown
+  assert.match(worked, /Your payroll details have been received and validated\./)
+  const unconfirmed = renderVariant('appointment-confirmation', { payroll: { confirmed: '' } })
+  assert.doesNotMatch(unconfirmed, /Your payroll details have been received and validated\./)
 })

@@ -185,6 +185,44 @@ Guidance rewritten:
 - `payroll.confirmed` does not record onboarding approval: that is the sign-off on the stage.
 - `contract.elapsed` is measured to the agreed start date and filled before onboarding approval.
 
+### The Appointment Confirmation replaces the Offer Pack (#156)
+
+The Offer Pack printed the case for hiring, not the outcome of it: the offer terms and status
+that HR and the candidate had already agreed and moved past, the two signature dates without
+what either party had actually confirmed, and the raw payroll validation outcome rather than a
+plain statement that it was done. None of it is what a starter needs on their way in. It is
+removed from v3 and replaced by the **Appointment Confirmation**, at the same `onboarding-approved`
+gate.
+
+- **It opts out of both new switches.** `document-control: false`, so it carries no Document
+  Control or Review & sign-off table — only the H1 and the content below it. `satisfies-gate:
+  false`, so it is rendered and linked in the approval request once complete, exactly as before,
+  but completing it alone can never pass onboarding-approved; only the Onboarding Case can.
+  `requires` is exactly what it prints, plus the two filename tokens — no field is carried just
+  to hold the gate open.
+- **What it prints, in order:** an opening line addressed to the candidate by name; their role
+  (summary, team, responsibilities, engagement type, and the term or expected duration, shown
+  only when one is filled — never an internal "— not stated —" marker in a document a candidate
+  reads); their terms (start date, the terms summary, and a fixed sentence that the signed
+  agreement takes precedence over this summary); a further fixed sentence that payroll details
+  have been received and validated, shown once `payroll.confirmed` is filled, naming no one and
+  carrying none of Payroll's back-office history; and a closing fixed paragraph on what happens
+  next, pointing back to the manager named under Team and reporting line.
+- **What it drops from the Offer Pack:** the offer terms and status, both signature dates,
+  start-date changes, the raw payroll validation outcome, Payroll's request and rework history,
+  and open questions. None of it is the candidate's business, and printing any of it was the
+  root problem this ticket exists to fix.
+- **This overturns v1's "same core field set" for the two audience Artefacts at a shared Gate**
+  (the v1 section below, "The gates are strict"): the Appointment Confirmation and the Onboarding
+  Case no longer owe the same bare Fields at onboarding-approved, because the Appointment
+  Confirmation no longer counts toward the gate at all. It also **overturns v2's "never as a
+  rendered section" for `selection.candidate-name`** in this document (the v2 section below,
+  "Filename patterns"): the candidate's own name is now the printed addressee ("For {name}"),
+  not just a token reached through `requires` to build the filename.
+- The worked hire needed no field migration for this change — the Offer Pack and the Appointment
+  Confirmation read the same Fields the fixture already carried; only the rendered document and
+  its place in the Gate arithmetic changed.
+
 ## v2
 
 Typed Fields and filename patterns (#90, epic #77), applied on top of v1's process — same four
