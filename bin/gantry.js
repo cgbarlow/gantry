@@ -342,7 +342,7 @@ withInstanceOptions(
   })
 })
 
-// #115 (parent #109): `GANTRY_SHARED_WORKSPACE_PATS` (#113) and `GANTRY_WORKSPACE_PATS` (ADR-0043) are both
+// #115 (parent #109): `GANTRY_SHARED_WORKSPACE_PATS` (#113) and `GANTRY_MCP_WORKSPACE_PATS` (ADR-0043) are both
 // keyed by **workspace id**. Since #110 that id is a pure function of provider + location
 // (`lib/workspaceRegistry.js`'s `deriveWorkspaceId`), but until this command the only way for an
 // operator to actually read one was the two-boot dance: set GANTRY_BOOTSTRAP_WORKSPACES, boot, hit
@@ -370,7 +370,7 @@ function workspaceIdLocationFromOptions(options) {
 
 program
   .command('workspace-id')
-  .description('Print the workspace id derived from a provider + location — the key GANTRY_SHARED_WORKSPACE_PATS and GANTRY_WORKSPACE_PATS entries are written against')
+  .description('Print the workspace id derived from a provider + location — the key GANTRY_SHARED_WORKSPACE_PATS and GANTRY_MCP_WORKSPACE_PATS entries are written against')
   .option('--provider <provider>', `provider the workspace lives on: ${PROVIDERS.join(', ')} (default: ${DEFAULT_PROVIDER})`)
   .option('--organization <organization>', 'location field (azure-devops)')
   .option('--project <project>', 'location field (azure-devops)')
@@ -384,7 +384,7 @@ program
   .addHelpText(
     'after',
     `
-A workspace id is what GANTRY_SHARED_WORKSPACE_PATS and the MCP server's GANTRY_WORKSPACE_PATS
+A workspace id is what GANTRY_SHARED_WORKSPACE_PATS and the MCP server's GANTRY_MCP_WORKSPACE_PATS
 map a PAT to. It is derived from provider + location, so it is the same id on every
 machine and survives the registry file being deleted — this command computes it without
 starting a server or touching any registry.

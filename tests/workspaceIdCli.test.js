@@ -1,5 +1,5 @@
 // #115 (parent #109): `gantry workspace-id` prints the workspace id `GANTRY_SHARED_WORKSPACE_PATS` and
-// `GANTRY_WORKSPACE_PATS` are keyed by, without booting a server first.
+// `GANTRY_MCP_WORKSPACE_PATS` are keyed by, without booting a server first.
 //
 // The load-bearing test in this file is "CLI and applyBootstrapWorkspaces agree" below: the whole
 // value of the command is that the id it prints is the id the server actually registers, so that one
@@ -316,7 +316,7 @@ test('no PAT is read, printed, or logged — even with GANTRY_SHARED_WORKSPACE_P
     const stdout = runCli(args, {
       GANTRY_BOOTSTRAP_WORKSPACES: raw,
       GANTRY_SHARED_WORKSPACE_PATS: JSON.stringify({ [id]: secret }),
-      GANTRY_WORKSPACE_PATS: JSON.stringify({ [id]: secret }),
+      GANTRY_MCP_WORKSPACE_PATS: JSON.stringify({ [id]: secret }),
     })
     assert.ok(!stdout.includes(secret), `a PAT leaked into: ${stdout}`)
     assert.ok(!stdout.includes('pat'), `output mentions a PAT: ${stdout}`)
@@ -330,7 +330,7 @@ test('no PAT is read, printed, or logged — even with GANTRY_SHARED_WORKSPACE_P
 test("--help explains what the id is for and which env vars are keyed by it", () => {
   const help = execFileSync(process.execPath, [CLI, 'workspace-id', '--help'], { encoding: 'utf8' })
   assert.match(help, /GANTRY_SHARED_WORKSPACE_PATS/)
-  assert.match(help, /GANTRY_WORKSPACE_PATS/)
+  assert.match(help, /GANTRY_MCP_WORKSPACE_PATS/)
   assert.match(help, /GANTRY_BOOTSTRAP_WORKSPACES/)
   // Honest about the one case where a running server's stored id differs from the derived one.
   assert.match(help, /keeps whatever id it was first registered under/)

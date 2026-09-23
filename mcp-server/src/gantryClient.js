@@ -5,7 +5,7 @@ const CLASSIFY_CACHE_TTL_MS = 30_000
 
 /**
  * Creates a client bound to one `gantry serve` deployment. `workspacePats` is the parsed
- * `GANTRY_WORKSPACE_PATS` map (workspace id -> PAT), read once at startup and held only here.
+ * `GANTRY_MCP_WORKSPACE_PATS` map (workspace id -> PAT), read once at startup and held only here.
  */
 export function createGantryClient({ baseUrl, workspacePats = {}, fetchImpl = fetch }) {
   if (!baseUrl) throw new Error('createGantryClient requires a baseUrl')
@@ -76,8 +76,8 @@ export function createGantryClient({ baseUrl, workspacePats = {}, fetchImpl = fe
           error: {
             error: 'missing_workspace_pat',
             workspace: workspaceId,
-            envVar: 'GANTRY_WORKSPACE_PATS',
-            message: `No Personal Access Token is configured for Provider-backed workspace "${workspaceId}". Add an entry for it to the GANTRY_WORKSPACE_PATS env var and restart the MCP server.`,
+            envVar: 'GANTRY_MCP_WORKSPACE_PATS',
+            message: `No Personal Access Token is configured for Provider-backed workspace "${workspaceId}". Add an entry for it to the GANTRY_MCP_WORKSPACE_PATS env var and restart the MCP server.`,
           },
         }
       }
@@ -107,7 +107,7 @@ export function createGantryClient({ baseUrl, workspacePats = {}, fetchImpl = fe
    *   back instead, so a missing/rejected PAT never reaches the actual action.
    * - `patOverride`: bypasses credential resolution and attaches this PAT directly — the one seam
    *   `check_repo`/`create_workspace` need, since they validate a PAT for a workspace that doesn't
-   *   exist yet and so isn't in `GANTRY_WORKSPACE_PATS`.
+   *   exist yet and so isn't in `GANTRY_MCP_WORKSPACE_PATS`.
    */
   async function request({ workspaceId, path, method = 'GET', query, body, patOverride } = {}) {
     let authorization

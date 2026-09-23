@@ -57,12 +57,12 @@ export function createApp({ baseUrl, accessToken, workspacePats, fetchImpl }) {
 }
 
 function main() {
-  const baseUrl = process.env.GANTRY_BASE_URL
+  const baseUrl = process.env.GANTRY_MCP_BASE_URL
   const accessToken = process.env.GANTRY_MCP_ACCESS_TOKEN
   const port = Number(process.env.PORT ?? 3100)
 
   if (!baseUrl) {
-    console.error('GANTRY_BASE_URL is required (the gantry serve deployment this server is a client of)')
+    console.error('GANTRY_MCP_BASE_URL is required (the gantry serve deployment this server is a client of)')
     process.exit(1)
   }
   if (!accessToken) {
@@ -72,7 +72,7 @@ function main() {
 
   let workspacePats
   try {
-    workspacePats = parseWorkspacePats(process.env.GANTRY_WORKSPACE_PATS)
+    workspacePats = parseWorkspacePats(process.env.GANTRY_MCP_WORKSPACE_PATS)
   } catch (err) {
     console.error(err.message)
     process.exit(1)
