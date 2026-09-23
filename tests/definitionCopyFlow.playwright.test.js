@@ -412,3 +412,23 @@ test('Dropping a field onto an artefact adds a module.field requirement and brin
     assert.match(await moduleNode.textContent(), /from source v1/)
   })
 }))
+
+// #161: with the Map expanded the Library panel is hidden, but the Map's own "From another
+// definition…" pickers are still there — a copy started from one must still show its confirm step
+// (the modal can't live inside the hidden panel) and land in the Map without collapsing it.
+test('A copy started from the expanded Map still shows its confirm step and lands in the Map', withCopyFixtures(async (base) => {
+  await withPage(base, async (page, pageErrors) => {
+    await openTargetDefinition(page, base)
+    await page.getByRole('button', { name: 'Map', exact: true }).click()
+    await page.waitForSelector('.defn-workbench-map', { timeout: 10_000 })
+    await page.getByRole('button', { name: 'Expand map' }).click()
+    await page.locator('.defn-bottom').waitFor({ state: 'hidden' })
+
+    await page.locator('.defn-map-add-row').getByLabel('From another definition: module').selectOption({ label: 'Extra Module (source)' })
+    await confirmCopy(page)
+
+    await page.locator('.defn-map-chip').filter({ hasText: 'Extra Module' }).waitFor({ state: 'visible', timeout: 10_000 })
+    assert.equal(await page.getByRole('button', { name: 'Expand map' }).getAttribute('aria-pressed'), 'true', 'the Map stays expanded')
+    assert.deepEqual(pageErrors, [])
+  })
+}))

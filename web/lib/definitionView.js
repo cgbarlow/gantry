@@ -49,3 +49,18 @@ effect(() => {
 export function setDefnView(next) {
   if (DEFN_VIEWS.includes(next)) defnView.value = next
 }
+
+// Map view only: whether the Map takes the whole workbench, hiding the focus pane and Library panel
+// beneath it. Remembered per user the same way as the view choice above, since someone who expands
+// the Map to read a definition's shape usually wants it that way next time too.
+const MAP_EXPANDED_KEY = 'gantry:defnMapExpanded'
+
+export const defnMapExpanded = signal(safeGetItem(MAP_EXPANDED_KEY) === 'true')
+
+effect(() => {
+  safeSetItem(MAP_EXPANDED_KEY, String(defnMapExpanded.value))
+})
+
+export function setDefnMapExpanded(next) {
+  defnMapExpanded.value = next === true
+}
