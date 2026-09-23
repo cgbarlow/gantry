@@ -197,6 +197,8 @@ function buildArtefactStatus(modulesById, stage, artefact, moduleData) {
     requires: artefact.requires,
     outstanding: [...new Set(outstanding)],
     complete: outstanding.length === 0,
+    // #151 (ADR-0051): the projection carries `satisfiesGate` only when it is false.
+    satisfiesGate: artefact.satisfiesGate !== false,
   }
 }
 
@@ -205,6 +207,11 @@ function evaluateArtefacts(modulesById, stage, artefacts, moduleData) {
   return (artefacts ?? [])
     .filter((artefact) => artefact.gate === stage.gate)
     .map((artefact) => buildArtefactStatus(modulesById, stage, artefact, moduleData))
+}
+
+// Verbatim port of lib/status.js's (private) gatePasses.
+function gatePasses(artefacts) {
+  return artefacts.some((artefact) => artefact.satisfiesGate && artefact.complete)
 }
 
 /**
@@ -226,7 +233,7 @@ export function evaluateLocalStage(structure, stage, moduleData) {
   return {
     modules,
     artefacts,
-    complete: artefacts.some((artefact) => artefact.complete),
+    complete: gatePasses(artefacts),
     warnings: modules.flatMap((m) => m.warnings),
   }
 }
@@ -340,16 +347,20 @@ export async function checkLocalGate(handle, slug, structure, instanceStageId, o
 
 /**
  * Verbatim port of `lib/check.js`'s `formatGateOutstanding` — reports the
- * closest incomplete artefact rather than the stage's full union of modules.
+ * closest incomplete artefact that can pass the gate (#151, ADR-0051) rather
+ * than the stage's full union of modules.
  */
 export function formatLocalGateOutstanding(checkResult) {
-  const incomplete = (checkResult.artefacts ?? []).filter((artefact) => !artefact.complete)
+  const artefacts = checkResult.artefacts ?? []
+  const satisfying = artefacts.filter((artefact) => artefact.satisfiesGate !== false)
+  const incomplete = satisfying.filter((artefact) => !artefact.complete)
   if (incomplete.length) {
     const closest = incomplete.reduce((best, artefact) =>
       artefact.outstanding.length < best.outstanding.length ? artefact : best
     )
     return `${closest.title}: ${closest.outstanding.join(', ') || 'see required modules'}`
   }
+  if (artefacts.length && !satisfying.length) return 'no artefact counts toward this gate'
 
   const outstanding = (checkResult.modules ?? []).filter((module) => !module.complete).map((module) => module.title)
   return outstanding.join(', ') || 'see modules'
@@ -438,6 +449,15 @@ function gateReferenceProblems(stages, artefacts, modules) {
         message: `Artefact "${artefact.id}" has gate "${artefact.gate}", which is not any stage's gate (${gateList})`,
       })
     }
+  }
+  // #151 (ADR-0051): unsatisfiable-gate.
+  for (const stage of stages) {
+    const atGate = artefacts.filter((artefact) => typeof stage.gate === 'string' && stage.gate !== '' && artefact.gate === stage.gate)
+    if (atGate.length === 0 || atGate.some((artefact) => artefact.satisfiesGate !== false)) continue
+    problems.push({
+      type: 'unsatisfiable-gate',
+      message: `Stage "${stage.id}" has gate "${stage.gate}", but every artefact at that gate (${atGate.map((artefact) => `"${artefact.id}"`).join(', ')}) sets "satisfies-gate: false", so the gate can never pass — let at least one of them count toward the gate`,
+    })
   }
   for (const mod of modules) {
     for (const field of mod.fields ?? []) {

@@ -37,6 +37,14 @@ function providerWorkspaceStub(workspaceId, extra) {
 // check_gate
 // ---------------------------------------------------------------------------
 
+// #151 (ADR-0051): a model reading check_gate's result must know an artefact can be complete without
+// the gate passing, and which flag says so.
+test('check_gate\'s description explains satisfies-gate: false', () => {
+  assert.match(checkGateTool.description, /"satisfiesGate": false/)
+  assert.match(checkGateTool.description, /satisfies-gate: false/)
+  assert.match(checkGateTool.description, /never passes the gate/)
+})
+
 test('check_gate rejects a call with neither slug nor ref, without touching the network', async () => {
   const fetch = stubFetch(() => {
     throw new Error('should not be called')

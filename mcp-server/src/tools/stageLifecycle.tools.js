@@ -188,7 +188,8 @@ export const tools = [
       '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref". ' +
       '3. Pass "gate" (a gate id) to check a specific gate instead of the stage\'s own default. ' +
       '4. A local/server-directory instance needs no credential; a Provider-backed instance reads its module content from that Provider and so needs the usual PAT — a missing/rejected one is reported as "missing_workspace_pat"/"authentication_required", never guessed. ' +
-      '5. Use the response\'s "complete" field before calling advance_stage or request_approval — both re-check server-side and reject if the gate hasn\'t passed, but this lets you explain why up front.',
+      '5. Use the response\'s "complete" field before calling advance_stage or request_approval — both re-check server-side and reject if the gate hasn\'t passed, but this lets you explain why up front. ' +
+      '6. The gate passes when any one artefact that counts toward it is complete. Each entry in "artefacts" reports its own "complete" and "outstanding", and "satisfiesGate": false marks one whose definition sets "satisfies-gate: false" — typically a document for someone outside the process, such as a candidate. Completing that artefact alone never passes the gate, though it is still rendered and linked in the approval request once complete; to pass, complete an artefact with "satisfiesGate": true.',
     inputSchema: {
       ...slugRefShape,
       gate: z.string().optional().describe('A specific gate id to check, instead of the stage\'s own default.'),

@@ -453,6 +453,16 @@ function ArtefactEditor({ handle, definitionId, version, artefact, modules, gate
         }} />
         Print the Document Control and Review & sign-off tables
       </label>
+      <label class="field-label defn-satisfies-gate">
+        <input type="checkbox" checked=${artefact.satisfiesGate !== false} disabled=${readOnly} onChange=${(e) => {
+          // #151 (ADR-0051): the same switch as the server-hosted editor's — absent means it counts.
+          const next = { ...artefact }
+          if (e.currentTarget.checked) delete next.satisfiesGate
+          else next.satisfiesGate = false
+          onChange(next)
+        }} />
+        Completing this artefact passes its gate
+      </label>
       <button type="button" class="btn small ghost" onClick=${() => setExpanded(!expanded)}>${expanded ? 'Hide template' : 'Edit template'}</button>
       ${expanded ? html`<${ArtefactTemplateEditor} handle=${handle} definitionId=${definitionId} version=${version} artefact=${artefact} readOnly=${readOnly} />` : null}
     </div>
