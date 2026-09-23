@@ -5,8 +5,10 @@ purpose: >
   short on this particular hire.
 
   Mounted at every stage and required at none. A hire with no open questions is a real and
-  common outcome, and forcing an entry would only produce invented ones. Both fields are in
-  scope of every artefact and block no gate.
+  common outcome, and forcing an entry would only produce invented ones. `questions` is in scope
+  of every internal document and never the candidate's own — an organisation-wide open question
+  is not this recipient's business. `process-gaps` can be written at the stage where the gap
+  happens, whichever stage that is, but is printed only in the Hire Record.
 
 fields:
   - id: questions

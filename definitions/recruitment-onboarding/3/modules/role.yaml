@@ -36,7 +36,8 @@ fields:
   - id: responsibilities
     title: Key responsibilities
     type: list
-    required: true
+    required-at:
+      - approved-to-recruit
     guidance: >
       The handful of things this role is accountable for. Five or six entries, not a job
       description — the detail belongs in the advertisement. Also read by the new starter.
@@ -44,7 +45,8 @@ fields:
   - id: justification
     title: Justification
     type: markdown
-    required: true
+    required-at:
+      - approved-to-recruit
     guidance: >
       Why recruit now, and what happens if the role is not filled. This is the substance the
       approval chain is actually deciding on, so be concrete about the consequence of doing

@@ -31,7 +31,13 @@
 
      v3 (#155): `contract.signatures` is replaced by the `manager-signed` and `candidate-signed`
      dates, and the new `contract.variations` is printed under the contract terms when filled.
-     `payroll.validation-outcome` is optional, so its section shows only when filled. */
+     `payroll.validation-outcome` is optional, so its section shows only when filled.
+
+     v3 (#159/#160): the outline now has five sections, one per Stage, matching the split of
+     Appointment from Offer, Contract and Payroll (#155): Requisition, Selection, Appointment
+     ("Offer terms as approved" — the one Field actually authored at that Stage), Offer, Contract
+     and Payroll, then Provisioning. The closing section is retitled "Questions still open at
+     sign-off". */
   const hrType = it.modules.engagement.type
   const hrTerm = it.modules.engagement.term
   const hrRoute = (hrType === 'Fixed term' || hrType === 'Permanent') ? 'Full approval chain'
@@ -139,9 +145,11 @@
 <% } %>
 # Appointment
 
-## Offer terms
+## Offer terms as approved
 
 <%~ na(it.modules.offer.terms) %>
+
+# Offer, Contract and Payroll
 
 ## Offer status
 
@@ -255,7 +263,7 @@
 
 <%~ na(it.modules.handover['day-one']) %>
 <% if ((it.modules['open-questions'].questions && it.modules['open-questions'].questions.length) || it.modules['open-questions']['process-gaps']) { %>
-# Open questions and process gaps
+# Questions still open at sign-off
 <% if (it.modules['open-questions'].questions && it.modules['open-questions'].questions.length) { %>
 ## Questions
 

@@ -13,7 +13,8 @@ fields:
     title: Channels
     type: select
     multiple: true
-    required: true
+    required-at:
+      - candidate-selected
     options:
       - Job boards
       - Careers site
@@ -26,7 +27,8 @@ fields:
   - id: period
     title: Advertising period
     type: markdown
-    required: true
+    required-at:
+      - candidate-selected
     guidance: >
       Open and close dates. If the period was extended or the advertisement re-run, record each
       extension and why it was needed — a re-run is usually the first sign the role or the
@@ -35,7 +37,8 @@ fields:
   - id: response
     title: Response
     type: markdown
-    required: true
+    required-at:
+      - candidate-selected
     guidance: >
       How many applications were received and an honest assessment of their fit. Numbers alone
       are not useful; a shortlist of two from forty applications and a shortlist of two from

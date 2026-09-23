@@ -14,7 +14,8 @@ fields:
   - id: type
     title: Engagement type
     type: select
-    required: true
+    required-at:
+      - approved-to-recruit
     options:
       - Fixed term
       - Permanent
@@ -37,7 +38,8 @@ fields:
   - id: rationale
     title: Rationale
     type: markdown
-    required: true
+    required-at:
+      - approved-to-recruit
     guidance: >
       Why this engagement type and not another. If a contractor or vendor engagement is
       covering work that is ongoing, say so — that is a recurring pattern worth being able to

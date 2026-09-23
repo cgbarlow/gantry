@@ -8,6 +8,7 @@ import { createInstance, writeModule, readModule, readInstance } from '../lib/in
 import { renderArtefact } from '../lib/render.js'
 import { checkGate } from '../lib/check.js'
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
+import { readOnlyModuleAt, readOnlyWriteRefusal } from '../web/lib/readOnlyModules.js'
 
 // #153 (spec #147): the harness every recruitment-onboarding v3 ticket extends. `definitions/
 // recruitment-onboarding/3` starts as a draft copy of v2, and tests/fixtures/recruitment-
@@ -40,21 +41,21 @@ const SLUG = 'platform-engineer'
 const GATES = [
   { gate: 'approved-to-recruit', satisfiedBy: ['requisition-brief'], bars: { 'requisition-brief': 8 } },
   { gate: 'candidate-selected', satisfiedBy: ['selection-report'], bars: { 'selection-report': 9 } },
-  // #155: the executive approval, before any offer. The Appointment Case has 4 bare Fields (see
-  // BARE below); its bar is 5 because engagement.type, in scope as `?`, is still `required: true`
-  // until #159 moves it to its home Gate. role.summary and role.team are required only at
-  // approved-to-recruit (#157), so they don't count here.
-  { gate: 'approved-to-appoint', satisfiedBy: ['appointment-case'], bars: { 'appointment-case': 5 } },
+  // #155: the executive approval, before any offer. The Appointment Case's bar is its 4 bare
+  // Fields (see BARE below). engagement.type, role.summary and role.team are all in scope as `?`
+  // and are required only at their home Gate, approved-to-recruit (#157, #159), so none of them
+  // count here.
+  { gate: 'approved-to-appoint', satisfiedBy: ['appointment-case'], bars: { 'appointment-case': 4 } },
   // #155: onboarding approval, after the contract is signed and payroll validates, passes through
-  // the internal Onboarding Case. Its bar is its 8 bare Fields plus engagement.type (`?`, still
-  // `required: true` until #159). #156 replaces the Offer Pack with the Appointment Confirmation,
-  // which is `satisfies-gate: false` (its own bar is its 8 bare Fields — every `requires` entry
-  // except `engagement.term?`) — the loop below proves it complete on a blank Instance never
-  // passes the Gate on its own.
+  // the internal Onboarding Case. Its bar is its 8 bare Fields — engagement.type is in scope as
+  // `?` but required only at its home Gate, approved-to-recruit (#159), so it doesn't count here.
+  // #156 replaces the Offer Pack with the Appointment Confirmation, which is `satisfies-gate:
+  // false` (its own bar is its 8 bare Fields — every `requires` entry except `engagement.term?`)
+  // — the loop below proves it complete on a blank Instance never passes the Gate on its own.
   {
     gate: 'onboarding-approved',
     satisfiedBy: ['onboarding-case'],
-    bars: { 'onboarding-case': 9, 'appointment-confirmation': 8 },
+    bars: { 'onboarding-case': 8, 'appointment-confirmation': 8 },
   },
   // #158: the Manager Handover opts out of satisfying the Gate (`satisfies-gate: false`), so it
   // stays in `bars` (it is still checked and reported) but drops out of `satisfiedBy` — proving,
@@ -239,6 +240,8 @@ const DOCUMENTS = {
       '## Route variation',
       '# Selection',
       '# Appointment',
+      '## Offer terms as approved',
+      '# Offer, Contract and Payroll',
       '## Variations from the offer',
       '## Manager signed',
       '## Candidate signed',
@@ -248,7 +251,7 @@ const DOCUMENTS = {
       '## Non-standard hardware decision',
       '## Device build notes',
       '## Not in place by the start date',
-      '# Open questions and process gaps',
+      '# Questions still open at sign-off',
     ],
     // The worked hire is Permanent with no term.
     absent: ['## Signatures', '## Approval route', '## Term or expected duration', '## Readiness confirmation', '## Outstanding at start date'],
@@ -746,4 +749,111 @@ test('the Appointment Confirmation shows the fixed payroll-validated sentence on
   assert.match(worked, /Your payroll details have been received and validated\./)
   const unconfirmed = renderVariant('appointment-confirmation', { payroll: { confirmed: '' } })
   assert.doesNotMatch(unconfirmed, /Your payroll details have been received and validated\./)
+})
+
+// #159: carried-forward Fields are required only at their home Gate, and each later Stage lists
+// its carried Modules read-only per the spec's Stage table.
+
+test('the gate-arithmetic table matches the spec exactly: 8 / 9 / 4 / 8 / 13', () => {
+  // The spec's "bare Fields in the bar" column is the primary satisfying Artefact's own bar —
+  // `satisfiedBy[0]` at every Gate here (the internal case or record, never an audience document).
+  assert.deepEqual(
+    GATES.map((g) => g.bars[g.satisfiedBy[0]]),
+    [8, 9, 4, 8, 13]
+  )
+})
+
+// Every Stage's `read-only-modules`, exactly as the spec's Stage table lists it. `open-questions`
+// is never read-only, and `selection` stays editable at offer-contract-payroll.
+const READ_ONLY_MODULES = {
+  requisition: undefined,
+  selection: ['role'],
+  appointment: ['role', 'engagement', 'selection', 'vetting'],
+  'offer-contract-payroll': ['role', 'engagement'],
+  provisioning: ['role', 'engagement', 'role-evaluation', 'advertising', 'selection', 'vetting', 'offer', 'contract', 'payroll'],
+}
+
+test('each Stage lists its carried Modules read-only exactly as the spec Stage table says', () => {
+  const { stages } = loadDefinition('recruitment-onboarding', { version: VERSION })
+  for (const stage of stages) {
+    assert.deepEqual(stage.readOnlyModules, READ_ONLY_MODULES[stage.id], stage.id)
+    assert.ok(!(stage.readOnlyModules ?? []).includes('open-questions'), `${stage.id}: open-questions is never read-only`)
+  }
+  const ocp = stages.find((s) => s.id === 'offer-contract-payroll')
+  assert.ok(!ocp.readOnlyModules.includes('selection'), 'selection stays editable at offer-contract-payroll')
+})
+
+// The editor's own formula (lib/server.js buildModuleEntry): a read-only Module's Fields are never
+// marked required, whatever their own `required`/`required-at` says.
+function editorRequired(stages, stageId, gate, moduleId, field) {
+  const readOnly = readOnlyModuleAt(stages, stageId, moduleId)
+  return !readOnly && (Boolean(field.required) || Boolean(field.requiredAt?.includes(gate)))
+}
+
+test('a later Stage never marks a carried Module\'s Fields required in the instance editor', () => {
+  const def = loadDefinition('recruitment-onboarding', { version: VERSION })
+  for (const stage of def.stages) {
+    for (const moduleId of stage.readOnlyModules ?? []) {
+      for (const field of def.modules.get(moduleId).fields) {
+        assert.equal(
+          editorRequired(def.stages, stage.id, stage.gate, moduleId, field),
+          false,
+          `${stage.id}: ${moduleId}.${field.id} is read-only there, so it must not show as required`
+        )
+      }
+    }
+  }
+})
+
+// Carried-forward Fields (every multi-Stage-mounted Module's Fields except the two filename
+// tokens) are required only at their home Gate — so a Stage that keeps a carried Module editable
+// (selection at offer-contract-payroll) still doesn't ask for its earlier content again.
+test('selection.shortlist/interviews/rationale are required only at candidate-selected, so offer-contract-payroll (where selection is editable) doesn\'t re-ask for them', () => {
+  const def = loadDefinition('recruitment-onboarding', { version: VERSION })
+  const ocp = def.stages.find((s) => s.id === 'offer-contract-payroll')
+  assert.ok(!(ocp.readOnlyModules ?? []).includes('selection'))
+  for (const fieldId of ['shortlist', 'interviews', 'rationale']) {
+    const field = def.modules.get('selection').fields.find((f) => f.id === fieldId)
+    assert.equal(editorRequired(def.stages, 'offer-contract-payroll', ocp.gate, 'selection', field), false, fieldId)
+    assert.equal(editorRequired(def.stages, 'selection', 'candidate-selected', 'selection', field), true, fieldId)
+  }
+  // The two exceptions stay `required: true` everywhere, because filenames use them.
+  const candidateName = def.modules.get('selection').fields.find((f) => f.id === 'candidate-name')
+  assert.equal(candidateName.required, true)
+  const startDate = def.modules.get('contract').fields.find((f) => f.id === 'start-date')
+  assert.equal(startDate.required, true)
+})
+
+test('engagement.type is required only at approved-to-recruit, not carried into later Gates', () => {
+  const def = loadDefinition('recruitment-onboarding', { version: VERSION })
+  const type = def.modules.get('engagement').fields.find((f) => f.id === 'type')
+  assert.deepEqual(type.requiredAt, ['approved-to-recruit'])
+  assert.equal(type.required, undefined)
+})
+
+// The server refuses a write to a read-only Module and names the home Stage — the same route MCP's
+// update_instance_modules goes through.
+test('each Stage with carried Modules says in its purpose that they are read-only, reopened at the Stage that owns them', () => {
+  const { stages } = loadDefinition('recruitment-onboarding', { version: VERSION })
+  for (const stage of stages) {
+    if (!(stage.readOnlyModules ?? []).length) continue
+    assert.match(stage.purpose, /read-only/, stage.id)
+    assert.match(stage.purpose, /reopen/, stage.id)
+  }
+})
+
+test('the Hire Record\'s purpose says it is the record as at readiness sign-off, and to confirm completeness before requesting approval', () => {
+  const artefact = loadDefinition('recruitment-onboarding', { version: VERSION }).artefacts.find((a) => a.id === 'hire-record')
+  assert.match(artefact.purpose, /record as at readiness sign-off/)
+  assert.match(artefact.purpose, /gantry check --json|check_gate/)
+})
+
+test('writing to a carried Module at a later Stage is refused, naming the Stage that owns it', () => {
+  const def = loadDefinition('recruitment-onboarding', { version: VERSION })
+  const appointment = def.stages.find((s) => s.id === 'appointment')
+  const refusal = readOnlyWriteRefusal(def.stages, appointment, ['role'], (id) => def.modules.get(id)?.title ?? id)
+  assert.match(refusal, /read-only at stage "Appointment"/)
+  assert.match(refusal, /carried forward from stage "Requisition"/)
+  // Writing to a Module the Stage doesn't carry read-only (its own, or one it owns) is never refused.
+  assert.equal(readOnlyWriteRefusal(def.stages, appointment, ['offer']), null)
 })

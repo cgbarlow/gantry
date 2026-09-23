@@ -106,6 +106,43 @@ device choice are in their own Fields, and the build timing is in the build note
 The approved-to-recruit bar drops from v2's 9 bare Fields to 8, the candidate-selected bar from
 10 to 9, and the Hire Record owes one Field fewer at ready-to-start.
 
+### Carried-forward Fields required only at their home Gate, and read-only elsewhere (#159)
+
+Later Stages no longer ask for earlier Stages' content, and no longer let it be edited.
+
+- **Home gates.** Every carried-forward Field is now `required-at: [home gate]` instead of a
+  blanket `required: true`: `role.*`, `engagement.type`/`rationale` and
+  `role-evaluation.method`/`outcome` at `approved-to-recruit`; `advertising.channels`/`period`/
+  `response` and `selection.shortlist`/`interviews`/`rationale` and
+  `vetting.checks-required`/`outcome` at `candidate-selected`. `offer.terms` (`approved-to-appoint`)
+  and `offer.status`/`contract.terms-summary`/`contract.manager-signed`/`contract.candidate-signed`/
+  `payroll.details-requested`/`payroll.confirmed` (`onboarding-approved`) were already scoped this
+  way by #155/#156/#158. `selection.candidate-name` and `contract.start-date` are the only two
+  fields left as a blanket `required: true`, because the filename patterns need them wherever
+  they're read.
+  - **This fixes the Appointment Case's and the Onboarding Case's own bars.** `engagement.type` is
+    in scope as `?` at both, but a blanket `required: true` made it gate there too. Their bars drop
+    from 5 to 4 and from 9 to 8 respectively, matching the spec's gate-arithmetic table exactly:
+    8 / 9 / 4 / 8 / 13.
+  - This also stops `selection.shortlist`/`interviews`/`rationale` being marked required again at
+    Offer, Contract and Payroll, where `selection` stays mounted and editable (so reserve
+    finalists can be recorded in `selection.unsuccessful`) but its earlier-stage content shouldn't
+    be re-asked for.
+- **`read-only-modules` added to every Stage that carries earlier content**, per the spec's Stage
+  table: Selection (`role`), Appointment (`role`, `engagement`, `selection`, `vetting`), Offer,
+  Contract and Payroll (`role`, `engagement`), and Provisioning (every earlier Module:  `role`,
+  `engagement`, `role-evaluation`, `advertising`, `selection`, `vetting`, `offer`, `contract`,
+  `payroll`). `open-questions` is never read-only, and `selection` stays editable at Offer,
+  Contract and Payroll. In the instance editor a read-only Module's Fields show read-only and never
+  required; a write to one is refused, naming the Stage that owns it — the route MCP's
+  `update_instance_modules` shares.
+- **Stage purposes now say so.** Selection, Appointment, Offer, Contract and Payroll and
+  Provisioning each state that their carried Modules are read-only and name reopening the owning
+  Stage as how to change them.
+- **The `open-questions` purpose is restated:** `questions` is in scope of every internal document
+  and never the candidate's own; `process-gaps` can be written at the Stage where the gap happens
+  and is printed only in the Hire Record.
+
 ### Correction to v2 (E5)
 
 v2's changelog says `selection.candidate-name?` in the `requires` of `offer-pack`,
@@ -253,6 +290,38 @@ gate.
 - The worked hire needed no field migration for this change — the Offer Pack and the Appointment
   Confirmation read the same Fields the fixture already carried; only the rendered document and
   its place in the Gate arithmetic changed.
+
+### Hire Record process order, guidance sweep and final verification (#160)
+
+v3's last ticket: the Hire Record's outline catches up with the Appointment split (#155), the
+spec's remaining guidance rewrites are swept in, and the harness proves the whole draft.
+
+- **The Hire Record now has five sections, one per Stage**, matching the Appointment split: it
+  used to hold Offer, Contract and Payroll content under a stale "# Appointment" heading left over
+  from v1/v2's four-stage process. "# Appointment" now carries only what is actually authored at
+  that Stage — "Offer terms as approved" — and a new "# Offer, Contract and Payroll" heading opens
+  before Offer status, so the record reads in true process order: Requisition, Selection,
+  Appointment, Offer, Contract and Payroll, Provisioning.
+- **The closing section is retitled "Questions still open at sign-off"**, in place of "Open
+  questions and process gaps", so the record's own final word matches the spec's outline.
+- **The Hire Record's purpose now says it is the record as at readiness sign-off**, and to request
+  Provisioning's approval only once it is complete, confirming with `gantry check --json` or
+  `check_gate` first. Provisioning's own purpose says the same about requesting its approval.
+- **Guidance rewrites already carried by #154/#155/#158** — band not figure, never attach the
+  executed contract, vetting conditions as the requirement to meet, credentials as channel/sender/
+  date, the candidate name with no other identifiers, decline and rework reason categories, and a
+  delegation recorded as to whom rather than why — are confirmed present; the one still missing,
+  the `open-questions` purpose restatement, is added by #159 above.
+- **The harness now asserts the full gate-arithmetic table directly**: 8 / 9 / 4 / 8 / 13,
+  read from the same `GATES` table every ticket has extended, plus the read-only-modules table,
+  the two carried-Field checks, and the write-refusal each #159 change needed proving.
+- **Verification for this round:** `findDefinitionProblems` and the Local Workspace twin both
+  report zero problems for v3; all 8 Artefacts render against the worked hire; every Gate passes
+  at its spec bar; `definitions/recruitment-onboarding/2` is untouched (`git diff` is empty); no
+  v3 Gate is lower than v2's own bar except where a recommendation deliberately changed it
+  (`approved-to-recruit` 9→8, `candidate-selected` 10→9, both named above).
+- **Out of scope, as the ticket says:** publishing v3 and migrating the platform-engineer worked
+  example to it remain the process owner's step, unchanged from every earlier v3 ticket.
 
 ## v2
 

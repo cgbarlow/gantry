@@ -34,7 +34,8 @@ stages:
       candidate, and complete pre-employment checks on them. Owned by HR. Do
       not sign this stage off while vetting reads Not cleared. Finalists held
       in reserve can be recorded as released later, once the offer is
-      accepted.
+      accepted. Role carries forward from Requisition and is shown read-only
+      here; to change it, reopen Requisition.
     gate: candidate-selected
     modules:
       - role
@@ -42,6 +43,8 @@ stages:
       - selection
       - vetting
       - open-questions
+    read-only-modules:
+      - role
   - id: appointment
     title: Appointment
     purpose: >
@@ -49,7 +52,9 @@ stages:
       offer is made: who was selected and why, what vetting returned, and the terms proposed.
       Owned by the requesting department, which raises the appointment request. Signing this
       stage off is the executive approval to appoint. The offer terms written here are the
-      terms HR extends; they are not edited afterwards.
+      terms HR extends; they are not edited afterwards. Role, engagement, selection and vetting
+      carry forward from earlier stages and are shown read-only here; to change one of them,
+      reopen the stage that owns it.
     gate: approved-to-appoint
     modules:
       - role
@@ -58,6 +63,11 @@ stages:
       - vetting
       - offer
       - open-questions
+    read-only-modules:
+      - role
+      - engagement
+      - selection
+      - vetting
   - id: offer-contract-payroll
     title: Offer, Contract and Payroll
     purpose: >
@@ -67,7 +77,8 @@ stages:
       The Onboarding Case is the document put to whoever approves onboarding. The offer terms
       were approved at Appointment and are not edited here; later changes go in the offer's
       negotiation. Selection stays open so that finalists held in reserve can be recorded as
-      released once the offer is accepted.
+      released once the offer is accepted. Role and engagement carry forward from Requisition
+      and are shown read-only here; to change either, reopen Requisition.
     gate: onboarding-approved
     modules:
       - role
@@ -77,13 +88,19 @@ stages:
       - contract
       - payroll
       - open-questions
+    read-only-modules:
+      - role
+      - engagement
   - id: provisioning
     title: Provisioning
     purpose: >
       Create the starter's identity, issue their device and access, and confirm
       they can work from their first day. Owned by Technology. Render the
       Manager Handover and send it to the hiring manager as soon as the account
-      exists, then re-send it at sign-off.
+      exists, then re-send it at sign-off. Request this stage's approval only
+      once the Hire Record is complete, confirming with `gantry check --json`
+      or `check_gate` first. Every earlier stage's Modules carry forward and
+      are shown read-only here; to change one, reopen the stage that owns it.
     gate: ready-to-start
     modules:
       - role
@@ -100,6 +117,16 @@ stages:
       - access
       - handover
       - open-questions
+    read-only-modules:
+      - role
+      - engagement
+      - role-evaluation
+      - advertising
+      - selection
+      - vetting
+      - offer
+      - contract
+      - payroll
 artefacts:
   - id: requisition-brief
     title: Requisition Brief
@@ -279,7 +306,9 @@ artefacts:
     title: Hire Record
     purpose: >
       Assemble the complete record of the hire, in process order, as the file
-      that is kept.
+      that is kept: the record as at readiness sign-off. Request Provisioning's
+      approval only once this record is complete, confirming with
+      `gantry check --json` or `check_gate` first.
     template: templates/hire-record.md.tmpl
     gate: ready-to-start
     requires:
