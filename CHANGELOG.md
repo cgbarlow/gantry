@@ -17,6 +17,16 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.14-beta — 2026-09-23
+
+### Fixed
+
+- **Unmatched or wrong-method `/api/` requests now get a real JSON 404, not the web app's HTML.**
+  Previously, a typo'd API path, a retired endpoint, or a route called with the wrong HTTP
+  method silently returned a 200 `index.html`, which made a failing integration (an MCP client
+  call, a `/api/version` health check) look like it had succeeded. Every request under `/api/`
+  that no route recognizes now gets a JSON error body with a 404 status instead. (#141)
+
 ## 0.9.13-beta — 2026-09-23
 
 ### Added
