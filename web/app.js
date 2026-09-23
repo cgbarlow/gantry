@@ -35,7 +35,7 @@ import { LocalDefinitionEditorPage } from './pages/local-definition-editor.js'
 import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, workspaceRepoUrl } from './pages/settings.js'
 // Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79, #374) visual/split/markdown toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
-import { unrepresentedWorkspaceGroups } from './lib/dashboardWorkspaces.js'
+import { unrepresentedWorkspaceGroups, describeInstanceRowWorkspace } from './lib/dashboardWorkspaces.js'
 import { loadWorkspaceScopedInstances } from './lib/workspaceDiscovery.js'
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
 import { visualMode, refreshVisual, clearActiveCell, restoreActiveCell, activeCellSelection, focusTableCellAt } from './lib/visualMode.js'
@@ -5178,7 +5178,12 @@ function isAzureDevOpsBacked(inst) {
 // rule as that function's own title, factored out so the two can't drift.
 function workspaceLabel(workspace) {
   if (!workspace) return null
-  return workspace.kind === 'azureDevOps' ? `${workspace.organization}/${workspace.project}` : workspace.name
+  // #135: `subtitle` is the "where" line for every kind — an Azure DevOps workspace's
+  // `organization/project`, a GitHub one's owner, a GitLab one's namespace — and `title` is the
+  // server-directory name this used to return directly. See `describeInstanceRowWorkspace`'s own
+  // comment for why reading `.name` for every non-Azure-DevOps kind was wrong.
+  const { title, subtitle } = describeInstanceRowWorkspace(workspace)
+  return workspace.kind === 'azureDevOps' ? subtitle : title
 }
 
 // ---------- Grouping instances by workspace (#102, WI #357) ----------
@@ -5194,20 +5199,25 @@ function groupInstancesByWorkspace(instances) {
   for (const inst of instances) {
     const key = inst.workspace ? `workspace:${inst.workspace.id}` : `local:${inst.slug}`
     if (!groups.has(key)) {
+      // #135: one branch per row-workspace shape, in web/lib/dashboardWorkspaces.js so it is unit
+      // testable (this file is the bundle entry and imports preact, so it isn't) and so it sits beside
+      // `describeRegisteredWorkspace`, its placeholder-row twin — the two describe the same workspace
+      // from two different payloads and drifted apart, which is what produced the crash.
+      const { title, subtitle } = describeInstanceRowWorkspace(inst.workspace)
       groups.set(key, {
         key,
-        title: inst.workspace ? (inst.workspace.kind === 'azureDevOps' ? inst.workspace.repository : inst.workspace.name) : inst.slug,
-        subtitle: inst.workspace
-          ? inst.workspace.kind === 'azureDevOps'
-            ? `${inst.workspace.organization}/${inst.workspace.project}`
-            : (inst.workspace.description || 'Server workspace')
-          : 'Server instance',
+        title: inst.workspace ? title : inst.slug,
+        subtitle: inst.workspace ? subtitle : 'Server instance',
         instances: [],
       })
     }
     groups.get(key).instances.push(inst)
   }
-  return [...groups.values()].sort((a, b) => a.title.localeCompare(b.title))
+  // #135: a group whose title is somehow still absent must not take the whole dashboard down — the
+  // original failure here was an uncaught `undefined.localeCompare` inside this sort, which killed
+  // every row rather than mislabelling one. `describeInstanceRowWorkspace` now always returns
+  // something for a known shape; this is the belt-and-braces for a shape nobody has invented yet.
+  return [...groups.values()].sort((a, b) => String(a.title ?? '').localeCompare(String(b.title ?? '')))
 }
 
 // The list-pane row's secondary line — deliberately the same shape whether the group holds one instance or several (count · distinct definitions), rather than branching into a one-off "single instance" format, so a single-instance workspace is never visually singled out from a multi-instance one (the ticket's own "no special-casing visible to the user" acceptance criterion). A local-workspace group (see useLocalGroups below) has its own recovery states (not yet resolved / permission needed), so those still get their own, simpler text — but once its instances *are* resolved, each one's `instance.yaml` carries a `definition` just like a server-hosted instance's own record does, so the "· <definitions>" suffix applies here too rather than silently omitting it.
