@@ -130,6 +130,9 @@ test(
       await repoRow.click()
 
       await page.waitForFunction(() => document.querySelector('.defn-switcher .defname')?.textContent === 'Widget Process', { timeout: 10_000 })
+      // The switcher name changes before the library-repo definition's detail replaces the
+      // previously open workspace draft, so wait on the read-only toolbar, not just any outline.
+      await page.locator('.defn-toolbar .guidance', { hasText: 'Read-only — published.' }).waitFor({ state: 'visible', timeout: 10_000 })
       await page.waitForSelector('.defn-outline-node', { timeout: 10_000 })
       const bodyText = await page.locator('body').innerText()
       assert.match(bodyText, /Kickoff/, 'the library-repo definition\'s own stage renders')
