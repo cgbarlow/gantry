@@ -33,6 +33,7 @@
 //     can consume a local instance unchanged.
 import { parse as parseYAML, stringify as stringifyYAML } from 'yaml'
 import { parseFieldBody, serialiseFieldBody, emptyFieldValue } from './fieldShape.js'
+import { readOnlyModuleAt } from './readOnlyModules.js'
 
 // Recursively sort every plain object's keys — the exact shape of
 // `lib/instance.js`'s `canonicalizeForSerialization`.
@@ -290,14 +291,18 @@ function fieldValue(field, data) {
  * the `{ id, title, purpose, status, owner, fields }` shape `GET
  * /api/instance` already returns, so `ModuleEditorPage` renders a local
  * instance's modules with no shape difference from a server-backed one.
+ * `stages` is the definition's full stage list, for a Module the stage mounts
+ * read-only (#152): its `readOnly: { homeStage }` names the earlier stage that
+ * owns it, exactly as the server's entry does.
  */
-export function buildLocalModuleEntry(moduleSpec, stage, data, exampleData) {
+export function buildLocalModuleEntry(moduleSpec, stage, data, exampleData, stages = []) {
+  const readOnly = readOnlyModuleAt(stages, stage.id, moduleSpec.id)
   const definedById = new Map(moduleSpec.fields.map((field) => [field.id, field]))
   const entryForDefined = (field) => ({
     id: field.id,
     title: field.title,
     type: field.type,
-    required: Boolean(field.required) || Boolean(field.requiredAt?.includes(stage.gate)),
+    required: !readOnly && (Boolean(field.required) || Boolean(field.requiredAt?.includes(stage.gate))),
     guidance: field.guidance,
     value: fieldValue(field, data),
     example: exampleData ? fieldValue(field, exampleData) : null,
@@ -336,5 +341,6 @@ export function buildLocalModuleEntry(moduleSpec, stage, data, exampleData) {
     status: data.status ?? 'draft',
     owner: data.owner ?? '',
     fields: entries,
+    ...(readOnly ? { readOnly } : {}),
   }
 }

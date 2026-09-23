@@ -34,6 +34,7 @@
 import { readTextFile } from './localWorkspace.js'
 import { parseLocalModuleFile } from './localInstanceFiles.js'
 import { isMultiValuedField } from './fieldShape.js'
+import { readOnlyModuleProblems } from './readOnlyModules.js'
 
 // ---------------------------------------------------------------------------
 // definition/module lookup — the projection's `modules` is a plain array;
@@ -364,8 +365,9 @@ export function formatLocalGateOutstanding(checkResult) {
 // once from the server's bundled `definitions/`. Since `loadDefinition`
 // itself fails fast on the first such problem, a `structure` a local
 // workspace ever actually has in hand is, by construction, always already
-// free of them — bar the authoring-only gate-reference problems (#149,
-// lib/definition.js's AUTHORING_ONLY_PROBLEM_TYPES), which loadDefinition
+// free of them — bar the authoring-only gate-reference (#149) and
+// read-only-modules (#152) problems (lib/definition.js's
+// AUTHORING_ONLY_PROBLEM_TYPES), which loadDefinition
 // deliberately lets through so existing instances keep loading. This ports
 // the same checks `findDefinitionProblems` runs (over `structure` instead of
 // raw per-module YAML files) for full parity with the server-side function's
@@ -556,6 +558,8 @@ export function findLocalDefinitionProblems(structure) {
   }
 
   problems.push(...gateReferenceProblems(stages, artefacts, [...modulesById.values()]))
+  // #152: shared with lib/definition.js rather than ported — see web/lib/readOnlyModules.js.
+  problems.push(...readOnlyModuleProblems(stages))
 
   return problems
 }
