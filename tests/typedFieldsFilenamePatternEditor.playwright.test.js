@@ -220,6 +220,16 @@ test('Local Workspace editor: eligible tokens, click-to-insert, inline validatio
       const editorRoot = page.locator('.local-definition-editor')
       const modulesSection = editorRoot.locator('section').filter({ has: page.locator('h2', { hasText: 'Modules' }) })
 
+      // #149: a Stage first, so the Artefact below has a real Stage gate to name — an Artefact gate
+      // that names no Stage gate is itself a validation problem.
+      const stagesSection = editorRoot.locator('section').filter({ has: page.locator('h2', { hasText: 'Stages' }) })
+      await stagesSection.getByRole('button', { name: '+ Add stage' }).click()
+      const stageEl = stagesSection.locator('.local-def-element').first()
+      await stageEl.locator('input').nth(0).fill('offer')
+      await stageEl.locator('input').nth(1).fill('Offer')
+      // Not GATES[0], so the Artefact's gate list below can only have come from the Stages' own gates.
+      await stageEl.locator('select').first().selectOption('design-review')
+
       await modulesSection.getByRole('button', { name: '+ Add module' }).click()
       const moduleEl = modulesSection.locator('.local-def-element').first()
       await moduleEl.locator('input').nth(0).fill('candidate')
@@ -234,6 +244,10 @@ test('Local Workspace editor: eligible tokens, click-to-insert, inline validatio
       const artefactsSection = editorRoot.locator('section').filter({ has: page.locator('h2', { hasText: 'Artefacts' }) })
       await artefactsSection.getByRole('button', { name: '+ Add artefact' }).click()
       const artefactEl = artefactsSection.locator('.local-def-element').first()
+      // #149: the Artefact starts on, and may only pick, a gate some Stage has.
+      const artefactGate = artefactEl.locator('select').first()
+      assert.equal(await artefactGate.inputValue(), 'design-review')
+      assert.deepEqual(await artefactGate.locator('option').evaluateAll((options) => options.map((o) => o.value)), ['', 'design-review'])
       const textInputs = artefactEl.locator('input[type="text"]')
       await textInputs.nth(0).fill('offer-pack')
       await textInputs.nth(1).fill('Offer Pack')

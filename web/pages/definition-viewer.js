@@ -102,6 +102,21 @@ function problemTarget(problem) {
   return { type: m[1].toLowerCase(), id: m[2] }
 }
 
+// #149: the gates an Artefact's `gate` and a Field's `required-at` may name — each Stage's own gate,
+// in Stage order, blanks skipped. Anything else is what gateReferenceProblems (lib/definition.js)
+// reports, so the editor offers exactly these rather than free text.
+function stageGates(d) {
+  return [...new Set(d.stages.map((s) => s.gate).filter((gate) => typeof gate === 'string' && gate !== ''))]
+}
+
+// #149: a Field's `required-at` as the list of gates the editor shows, or null when it has none. A bare
+// string (the invalid-required-at problem — the engine substring-matches it) reads as the one gate it
+// names, so the Required control shows what the Field really does and one tick converts it to a list.
+function requiredAtGates(f) {
+  if (typeof f.requiredAt === 'string') return [f.requiredAt]
+  return Array.isArray(f.requiredAt) ? f.requiredAt : null
+}
+
 // #89 (ADR-0045): the three filename: built-ins filenamePatternProblems (lib/definition.js)
 // always accepts, regardless of what the artefact requires.
 const FILENAME_BUILTIN_TOKENS = [
@@ -1617,7 +1632,7 @@ export function DefinitionViewerPage() {
         <div class="defn-outline-group">
           <div class=${'defn-outline-group-head' + (isEditable && dropTarget === 'library-drop:stage' ? ' defn-drop-target' : '')} ...${isEditable ? topLevelLibraryDropZone('stage') : {}}>
             <span class="kicker">Stages · ${d.stages.length}</span>
-            ${isEditable ? html`<button class="btn small ghost" aria-label="Add stage" onClick=${() => updateDraft((dd) => { const id = `new-stage-${dd.stages.length + 1}`; dd.stages.push({ id, title: 'New Stage', purpose: '', gate: '', modules: [] }); select('stage', id) })}>+</button>` : null}
+            ${isEditable ? html`<button class="btn small ghost" aria-label="Add stage" onClick=${() => updateDraft((dd) => { const id = `new-stage-${dd.stages.length + 1}`; dd.stages.push({ id, title: 'New Stage', purpose: '', gate: `${id}-gate`, modules: [] }); select('stage', id) })}>+</button>` : null}
             ${isEditable ? libraryPicker('stage', (id) => startLibraryCopy('stage', { id }, null)) : null}
           </div>
           ${d.stages.map((s, si) =>
@@ -1637,7 +1652,7 @@ export function DefinitionViewerPage() {
         <div class="defn-outline-group">
           <div class=${'defn-outline-group-head' + (isEditable && dropTarget === 'library-drop:artefact' ? ' defn-drop-target' : '')} ...${isEditable ? topLevelLibraryDropZone('artefact') : {}}>
             <span class="kicker">Artefacts · ${d.artefacts.length}</span>
-            ${isEditable ? html`<button class="btn small ghost" aria-label="Add artefact" onClick=${() => updateDraft((dd) => { const id = `new-artefact-${dd.artefacts.length + 1}`; dd.artefacts.push({ id, title: 'New Artefact', purpose: '', template: '', gate: '', requires: [] }); select('artefact', id) })}>+</button>` : null}
+            ${isEditable ? html`<button class="btn small ghost" aria-label="Add artefact" onClick=${() => updateDraft((dd) => { const id = `new-artefact-${dd.artefacts.length + 1}`; dd.artefacts.push({ id, title: 'New Artefact', purpose: '', template: '', gate: stageGates(dd)[0] ?? '', requires: [] }); select('artefact', id) })}>+</button>` : null}
             ${isEditable ? libraryPicker('artefact', (id) => startLibraryCopy('artefact', { id }, null)) : null}
           </div>
           ${d.artefacts.map((a, ai) =>
@@ -1747,9 +1762,9 @@ export function DefinitionViewerPage() {
           ${unused.length === 0 ? html`<span class="muted">—</span>` : null}
           ${isEditable ? html`
             <div class="defn-map-add-row">
-              <button class="btn small ghost" onClick=${() => updateDraft((dd) => { const id = `new-stage-${dd.stages.length + 1}`; dd.stages.push({ id, title: 'New Stage', purpose: '', gate: '', modules: [] }); select('stage', id) })}>+ Stage</button>
+              <button class="btn small ghost" onClick=${() => updateDraft((dd) => { const id = `new-stage-${dd.stages.length + 1}`; dd.stages.push({ id, title: 'New Stage', purpose: '', gate: `${id}-gate`, modules: [] }); select('stage', id) })}>+ Stage</button>
               <button class="btn small ghost" onClick=${() => updateDraft((dd) => { const id = `new-module-${dd.modules.length + 1}`; dd.modules.push({ id, title: 'New Module', purpose: '', fields: [] }); select('module', id) })}>+ Module</button>
-              <button class="btn small ghost" onClick=${() => updateDraft((dd) => { const id = `new-artefact-${dd.artefacts.length + 1}`; dd.artefacts.push({ id, title: 'New Artefact', purpose: '', template: '', gate: '', requires: [] }); select('artefact', id) })}>+ Artefact</button>
+              <button class="btn small ghost" onClick=${() => updateDraft((dd) => { const id = `new-artefact-${dd.artefacts.length + 1}`; dd.artefacts.push({ id, title: 'New Artefact', purpose: '', template: '', gate: stageGates(dd)[0] ?? '', requires: [] }); select('artefact', id) })}>+ Artefact</button>
               ${libraryPicker('module', (id) => startLibraryCopy('module', { id }, null))}
               ${libraryPicker('stage', (id) => startLibraryCopy('stage', { id }, null))}
               ${libraryPicker('artefact', (id) => startLibraryCopy('artefact', { id }, null))}
@@ -1764,7 +1779,7 @@ export function DefinitionViewerPage() {
   function fieldRow(mIndex, m, f, fi) {
     const key = `${m.id}.${f.id}`
     const open = openFieldKey === key
-    const req = f.required ? 'required' : Array.isArray(f.requiredAt) && f.requiredAt.length ? `required at ${f.requiredAt.length} gate(s)` : 'optional'
+    const req = f.required ? 'required' : requiredAtGates(f)?.length ? `required at ${requiredAtGates(f).length} gate(s)` : 'optional'
     return html`
       <div key=${f.id} class=${'defn-field-row' + (open ? ' open' : '')} ...${isEditable ? reorderFieldZone(mIndex, m.id, fi) : {}}>
         <div class="defn-field-row-head" role="button" tabindex="0" onClick=${() => toggleField(m.id, f.id)}>
@@ -1871,28 +1886,29 @@ export function DefinitionViewerPage() {
             </select>
           ` : null}
           <label class="field-label">Required</label>
-          <select class="wizard-input" value=${f.required === true ? 'required' : Array.isArray(f.requiredAt) ? 'required-at' : 'optional'} onChange=${(e) => {
+          <select class="wizard-input" value=${f.required === true ? 'required' : requiredAtGates(f) ? 'required-at' : 'optional'} onChange=${(e) => {
             const v = e.currentTarget.value
             updateDraft((d) => {
               const field = d.modules[mIndex].fields[fi]
               if (v === 'optional') { delete field.required; delete field.requiredAt }
               else if (v === 'required') { field.required = true; delete field.requiredAt }
-              else if (v === 'required-at') { delete field.required; field.requiredAt = Array.isArray(field.requiredAt) ? field.requiredAt : [] }
+              else if (v === 'required-at') { delete field.required; field.requiredAt = requiredAtGates(field) ?? [] }
             })
           }}>
             <option value="optional">optional</option>
             <option value="required">required (always)</option>
             <option value="required-at">required at gate(s)</option>
           </select>
-          ${Array.isArray(f.requiredAt)
+          ${requiredAtGates(f)
             ? html`
                 <label class="field-label">At gate(s)</label>
                 <div class="defn-gate-checks">
-                  ${[...new Set(working.stages.map((s) => s.gate))].map((gate) => html`
-                    <label key=${gate}><input type="checkbox" checked=${f.requiredAt.includes(gate)} onChange=${(e) => updateDraft((d) => {
+                  ${[...new Set([...stageGates(working), ...requiredAtGates(f)])].map((gate) => html`
+                    <label key=${gate}><input type="checkbox" checked=${requiredAtGates(f).includes(gate)} onChange=${(e) => updateDraft((d) => {
                       const field = d.modules[mIndex].fields[fi]
-                      field.requiredAt = e.currentTarget.checked ? [...field.requiredAt, gate] : field.requiredAt.filter((g) => g !== gate)
-                    })} /> ${gate}</label>
+                      const current = requiredAtGates(field) ?? []
+                      field.requiredAt = e.currentTarget.checked ? [...current, gate] : current.filter((g) => g !== gate)
+                    })} /> ${gate}${stageGates(working).includes(gate) ? '' : ' (not a stage gate)'}</label>
                   `)}
                 </div>
               `
@@ -2070,6 +2086,7 @@ export function DefinitionViewerPage() {
     // token is explained where it's authored, not just flagged elsewhere.
     const filenameProblems = validationProblems.filter((p) => typeof p.type === 'string' && p.type.startsWith('filename-') && problemTarget(p)?.type === 'artefact' && problemTarget(p)?.id === a.id)
     const filenameTokens = [...FILENAME_BUILTIN_TOKENS, ...eligibleFilenameFields(d, a)]
+    const gates = stageGates(d)
     return html`
       <div class="defn-focus">
         <span class="kicker">Artefact</span>
@@ -2080,7 +2097,10 @@ export function DefinitionViewerPage() {
                 <label class="field-label">Id</label>
                 <input class="wizard-input mono" value=${a.id} onInput=${(e) => { const val = e.currentTarget.value; if (selection.id === a.id) setSelection({ type: 'artefact', id: val }); updateDraft((dd) => { dd.artefacts[ai].id = val }) }} />
                 <label class="field-label">Gate</label>
-                <input class="wizard-input mono" value=${a.gate ?? ''} onInput=${(e) => updateDraft((dd) => { dd.artefacts[ai].gate = e.currentTarget.value })} />
+                <select class="wizard-input mono defn-artefact-gate" aria-label="Gate" value=${a.gate ?? ''} onChange=${(e) => updateDraft((dd) => { dd.artefacts[ai].gate = e.currentTarget.value })}>
+                  ${gates.includes(a.gate) ? null : html`<option value=${a.gate ?? ''}>${a.gate ? `${a.gate} (not a stage gate)` : 'choose a gate…'}</option>`}
+                  ${gates.map((gate) => html`<option key=${gate} value=${gate}>${gate}</option>`)}
+                </select>
                 <label class="field-label">Purpose</label>
                 <textarea class="wizard-input" rows="2" value=${a.purpose ?? ''} onInput=${(e) => updateDraft((dd) => { dd.artefacts[ai].purpose = e.currentTarget.value })}></textarea>
                 <label class="field-label">Template</label>
