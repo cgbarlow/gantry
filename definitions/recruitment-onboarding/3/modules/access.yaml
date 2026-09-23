@@ -6,7 +6,9 @@ purpose: >
 
   Access administration is manual. Nothing raises a flag when an entitlement is missed; it
   surfaces on the first day when the starter cannot get into something. `outstanding` is the
-  only early warning this process has.
+  only early warning this process has. It covers anything not in place by the first day —
+  device and identity too, not only entitlements — and it is the one channel the Manager
+  Handover uses for anything the hiring manager must act on.
 
 fields:
   - id: entitlements
@@ -16,7 +18,7 @@ fields:
     guidance: >
       Every entitlement the starter needs: access card, software licences, email groups,
       shared drives, systems. One per line, named specifically enough that someone else could
-      verify it.
+      verify it. Printed in the Manager Handover.
 
   - id: setup
     title: Setup
@@ -27,10 +29,12 @@ fields:
       so — a second pass usually means the list above was incomplete when the work started.
 
   - id: outstanding
-    title: Outstanding at start date
+    title: Not in place by the start date
     type: markdown
     required: false
     guidance: >
-      Anything not in place by the first day, why, and when it is expected. Leave empty only
-      when everything was genuinely ready — this field is the one that makes a partial
-      provisioning visible before the starter finds it.
+      Anything that will not be in place by the first day — an entitlement, the device or the
+      identity — why, when it is expected, and any workaround. Leave empty only when
+      everything is genuinely ready — this field is the one that makes a partial provisioning
+      visible before the starter finds it. Printed in the Manager Handover: state what is
+      missing and when, not whose dependency it is.

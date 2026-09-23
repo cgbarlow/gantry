@@ -17,6 +17,35 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.4-beta — 2026-09-23
+
+### Changed
+
+- **Recruitment-onboarding v3 draft: Starter Readiness is now written for Technology** (#157). It
+  names the starter and the team they join, and records the user ID and whether the device is
+  standard or non-standard as their own Fields. Build timing moves out of the device
+  specification into new optional build notes. The manager's to-do list and first-day plan are no
+  longer printed, though they still count toward ready-to-start. A warning appears when the
+  device isn't Ready and nothing is listed as not in place by the start date, and a non-standard
+  device with no recorded decision shows "— not stated —". The Hire Record prints the same new
+  Fields.
+- **"Outstanding at start date" is now "Not in place by the start date"** in the v3 draft (#157),
+  and it covers the device and the identity as well as access. It is the one place to flag
+  anything that won't be ready for the starter's first day: what is missing and when, not whose
+  dependency it is.
+- **The v3 draft asks for the role summary and team at approval to recruit** (#157), where they
+  were simply required before. They are still owed there, and Starter Readiness now shows them
+  without making ready-to-start owe them a second time.
+
+### Removed
+
+- **The v3 draft drops the separate readiness confirmation** (#157). Signing off the Provisioning
+  Stage is itself the confirmation that the starter is ready, so the extra Field only repeated it.
+  Starter Readiness and the Hire Record now owe the same Provisioning Fields, so neither document
+  is the easier way through ready-to-start, and the bar stays at 13 Fields, as in v2. The Manager
+  Handover loses the confirmation too; its fuller rework, including printing the user ID, comes
+  in a later release. v2 is unchanged, so Instances pinned to it are unaffected.
+
 ## 0.9.3-beta — 2026-09-23
 
 ### Fixed

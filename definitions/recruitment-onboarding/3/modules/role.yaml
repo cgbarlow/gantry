@@ -13,7 +13,8 @@ fields:
   - id: summary
     title: Role summary
     type: markdown
-    required: true
+    required-at:
+      - approved-to-recruit
     guidance: >
       One line naming the role, then a short paragraph on what it exists to do. State the
       role, not the person — this is written before there is a candidate and is reused
@@ -22,7 +23,8 @@ fields:
   - id: team
     title: Team and reporting line
     type: markdown
-    required: true
+    required-at:
+      - approved-to-recruit
     guidance: >
       Which department and team the role sits in, who it reports to, and who the hiring
       manager is. Name the hiring manager explicitly: three later steps depend on knowing

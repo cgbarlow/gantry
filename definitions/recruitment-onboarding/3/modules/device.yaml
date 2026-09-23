@@ -1,7 +1,7 @@
 id: device
 title: Device
 purpose: >
-  The hardware issued to the starter: what was specified, whether it was standard, and where
+  The hardware issued to the starter: whether it was standard, what was specified, and where
   the build got to.
 
   The process asks whether non-standard hardware is needed but has never said what happens
@@ -9,21 +9,34 @@ purpose: >
   unpredictable — record what was actually done so the answer can eventually be written down.
 
 fields:
+  - id: standard
+    title: Standard or non-standard
+    type: select
+    required: true
+    options:
+      - Standard
+      - Non-standard
+    guidance: >
+      Whether the hardware is standard issue. The rest of this module depends on the answer: a
+      non-standard device needs `non-standard-decision` filled in.
+
   - id: specification
     title: Specification
     type: markdown
     required: true
     guidance: >
-      What was specified, and whether it is standard issue or not. Say which explicitly — the
-      whole of the rest of this module depends on that answer.
+      What was specified — the device, and anything that differs from standard issue. No
+      timing: request and ready dates go in `build-notes`. Printed in the Manager Handover;
+      keep internal commentary out.
 
   - id: non-standard-decision
     title: Non-standard hardware decision
     type: markdown
     required: false
     guidance: >
-      Where the hardware is non-standard: who decided, what they approved, what it changed
-      about the build, and how much longer it took. Leave empty for a standard build.
+      Where the hardware is non-standard: who decided, what they approved, and what it changed
+      about the build. Leave empty for a standard build. How long the build took goes in
+      `build-notes`, not here.
 
       There is no defined path for this. What you write here is the nearest thing to one.
 
@@ -37,5 +50,16 @@ fields:
       - Configured
       - Ready
     guidance: >
-      Where the device got to — requested, built, configured, ready. Three days is the
-      assumption from request to ready; note in `specification` above when that did not hold.
+      Where the device got to — requested, built, configured, ready. At ready-to-start sign-off
+      this should read Ready; if it does not, the stage should not be signed off unless the
+      device is listed in `access.outstanding` with when it is expected. Printed in the Manager
+      Handover.
+
+  - id: build-notes
+    title: Build notes
+    type: markdown
+    required: false
+    guidance: >
+      The request and ready dates, any overrun against the three days the process assumes from
+      request to ready, and any delay at the manual IT service portal step. Not printed in the
+      Manager Handover.
