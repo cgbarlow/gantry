@@ -939,11 +939,21 @@ function isWriteAccessBlocked() {
   return !hasConfirmedWriteAccess(currentWorkspaceId())
 }
 
+// #142: whether the screen is browsing a completed Stage — one the instance has already advanced
+// past, whose editor now shows main's approved content rather than a live editable branch. Set by
+// `GET /api/instance`'s `stageCompleted` (lib/server.js), only for a Workspace-backed instance — a
+// local instance has no main/branch split to complete against, so this is always `false` there.
+// Re-open (see ReopenStagePanel) is the only path back to editing it — the server's own module-write
+// routes refuse a save aimed here the same way (web/lib/stageCompletion.js's `completedStageRefusal`),
+// so gating the fields here too is belt-and-braces, not the only thing standing in the way.
+const isViewingCompletedStage = () => Boolean(instanceData.value?.workspaceBacked && instanceData.value?.stageCompleted)
+
 // The union this file's editing affordances actually gate on: archived (unconditional, every
-// workspace) or, for a shared workspace, write access not yet confirmed for whatever credential (if
-// any) is currently stored. `isArchived()` itself is untouched and keeps meaning exactly "this
-// instance is archived" wherever this file still reads it directly (the archived banner's own text).
-const isEditingBlocked = () => isArchived() || isWriteAccessBlocked()
+// workspace), a shared workspace's write access not yet confirmed for whatever credential (if any) is
+// currently stored, or (#142) a completed Stage being browsed. `isArchived()` itself is untouched and
+// keeps meaning exactly "this instance is archived" wherever this file still reads it directly (the
+// archived banner's own text).
+const isEditingBlocked = () => isArchived() || isWriteAccessBlocked() || isViewingCompletedStage()
 
 // #126: the stated reason + action pairing every gated control's "why is this off, and what do I do
 // about it" reads from — `null` while editing isn't blocked at all (including "blocked because
@@ -3989,10 +3999,11 @@ function StageNavigation({ modules, visibleFieldIds }) {
 
 // ---------- Re-open a signed-off stage (WI265, docs/adr/0026) ----------
 function ReopenStagePanel({ instance }) {
-  const viewedIdx = instance.stages.findIndex((s) => s.id === instance.stage.id)
-  const currentIdx = instance.stages.findIndex((s) => s.id === instance.currentStageId)
-  const isCompleted = viewedIdx !== -1 && currentIdx !== -1 && viewedIdx < currentIdx
-  const show = instance.workspaceBacked && isCompleted && !isEditingBlocked()
+  // #142: `instance.stageCompleted` (not `isEditingBlocked()`) — that union now includes this very
+  // completed-Stage state (so the fields themselves go read-only), and gating this panel's own
+  // visibility on it too would mean it could never show at all: Re-open must appear *because* the
+  // Stage is completed, not only once something else has already blocked editing.
+  const show = instance.workspaceBacked && instance.stageCompleted && !isArchived() && !isWriteAccessBlocked()
   const [confirming, setConfirming] = useState(false)
   const [status, setStatus] = useState('')
   const [loading, setLoading] = useState(false)
@@ -5047,6 +5058,14 @@ function ModuleEditorPage({ slug: routeRef }) {
           This instance is <strong>archived</strong> and hidden from the dashboard. Restore it from
           <a href=${`/settings/instance?slug=${encodeURIComponent(instance.slug)}&from=${encodeURIComponent('/instance/' + instance.slug)}`}>Instance Settings</a>
           to make changes.
+        </div>`
+      : null}
+    ${!instance.archived && instance.workspaceBacked && instance.stageCompleted
+      ? html`<div class="archived-banner completed-stage-banner" role="status" data-testid="completed-stage-banner">
+          This stage is <strong>complete</strong> — it shows the approved version on main.
+          ${instance.crossStageEdit
+            ? html` <strong>${instance.crossStageEdit.title}</strong> has changes to modules shown here that haven't reached main yet — check there for the latest.`
+            : null}
         </div>`
       : null}
     ${!instance.archived && writeAccessBlockedReason()
