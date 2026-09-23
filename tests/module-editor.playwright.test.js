@@ -626,6 +626,9 @@ test('Render and Clear all fields live in the view-toggle bar; Render opens a di
           await dialog.locator('.render-artefact-list button').allTextContents(),
           ['Solution on a Page', 'Full Solution on a Page']
         )
+        // #143 — browsing the instance's own current stage (never advanced from `shape` in this
+        // test), so the dialog names it plainly, with no "current stage" callout needed.
+        assert.equal(await dialog.locator('.render-source').textContent(), 'Renders from the SOAP stage.')
 
         // The per-artefact button toggles selection — it does not render immediately.
         const soapToggle = dialog.getByRole('button', { name: 'Solution on a Page', exact: true })
@@ -645,6 +648,9 @@ test('Render and Clear all fields live in the view-toggle bar; Render opens a di
         }
 
         // Navigate to the Detailed Design stage, which shares one gate between two artefacts (sad, ssad) — the dialog lists both.
+        // The instance's current stage is still `shape` (nothing here ever advances it), so this
+        // is exactly #143's browsed-stage ≠ current-stage case: the dialog must say so explicitly,
+        // naming the *current* stage (SOAP) rather than the one being browsed (Detailed Design).
         await page.locator('#stage-nav button', { hasText: 'Detailed Design' }).click()
         await page.waitForSelector('.module', { timeout: 10_000 })
 
@@ -654,6 +660,10 @@ test('Render and Clear all fields live in the view-toggle bar; Render opens a di
         assert.deepEqual(
           await secondDialog.locator('.render-artefact-list button').allTextContents(),
           ['Solution Architecture Document', 'Solution Support Architecture Document']
+        )
+        assert.equal(
+          await secondDialog.locator('.render-source').textContent(),
+          'Renders from the SOAP stage — the current stage.'
         )
         await page.keyboard.press('Escape')
         try {

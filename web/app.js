@@ -2780,6 +2780,21 @@ function RenderDialog({ instance, onClose }) {
   // null}` in the editor toolbar) and remounts with fresh `useState` the next time it opens.
   const [format, setFormat] = useState('docx')
 
+  // #143 — Render always commits to the instance's *current* stage, regardless of which
+  // stage tab is browsed (see handleRenderBatch's `renderAzureArtefactViaEngine`/
+  // `renderLocalArtefactViaEngine` calls, which never take the browsed stage into account).
+  // That's the right behaviour but was silent, so name it here: a real branch only exists
+  // for a workspace-backed instance (`instance.workspaceBacked`) — everything else (a plain
+  // local instance, or an ADR-0029 File System Access one) just has a stage, no branch — and
+  // when the browsed stage isn't the current one, say so explicitly rather than let the user
+  // assume the artefact list they're looking at is what gets committed.
+  const isCurrentStage = instance.stage.id === instance.currentStageId
+  const currentStage = isCurrentStage ? instance.stage : instance.stages.find((s) => s.id === instance.currentStageId)
+  const sourceUnit = instance.workspaceBacked ? 'branch' : 'stage'
+  const renderSourceLine = isCurrentStage
+    ? `Renders from the ${instance.stage.title} ${sourceUnit}.`
+    : `Renders from the ${currentStage?.title ?? instance.currentStageId} ${sourceUnit} — the current stage.`
+
   function toggleArtefact(artefactId) {
     setSelectedIds((prev) => {
       const next = new Set(prev)
@@ -2829,6 +2844,7 @@ function RenderDialog({ instance, onClose }) {
     <div class="modal-backdrop" role="presentation" onClick=${(e) => e.target === e.currentTarget && onClose()}>
       <div class="modal" role="dialog" aria-modal="true" aria-label="Render an artefact">
         <h3>Render</h3>
+        <p class="guidance render-source">${renderSourceLine}</p>
         ${instance.artefacts.length
           ? html`
               <ul class="render-artefact-list">
