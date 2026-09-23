@@ -17,7 +17,11 @@
      it (definition.yaml's `filename:`). `selection.preferred-candidate` split into
      `candidate-name` and `rationale`; `engagement.term` is a new optional field beside
      `engagement.type`; `contract.start-date` is now a date, formatted here with
-     `formatDate()`. */
+     `formatDate()`.
+
+     v3 (#157): Provisioning prints the new `identity.user-id`, `device.standard` and
+     `device.build-notes`, and `access.outstanding` under its new title. The readiness
+     confirmation is gone: readiness is the ready-to-start sign-off itself. */
 %>
 # Requisition
 
@@ -168,6 +172,10 @@
 
 # Provisioning
 
+## User ID
+
+<%~ na(it.modules.identity['user-id']) %>
+
 ## Account
 
 <%~ na(it.modules.identity.account) %>
@@ -180,18 +188,26 @@
 
 <%~ na(it.modules.identity['credential-issue']) %>
 
+## Standard or non-standard device
+
+<%~ na(it.modules.device.standard) %>
+
 ## Device specification
 
 <%~ na(it.modules.device.specification) %>
-<% if (it.modules.device['non-standard-decision']) { %>
+<% if (it.modules.device['non-standard-decision'] || it.modules.device.standard === 'Non-standard') { %>
 ## Non-standard hardware decision
 
-<%~ it.modules.device['non-standard-decision'] %>
+<%~ it.modules.device['non-standard-decision'] || '— not stated —' %>
 <% } %>
 ## Device build status
 
 <%~ na(it.modules.device['build-status']) %>
+<% if (it.modules.device['build-notes']) { %>
+## Device build notes
 
+<%~ it.modules.device['build-notes'] %>
+<% } %>
 ## Entitlements
 
 <% it.modules.access.entitlements.forEach(function(item) { %>- <%~ item %>
@@ -200,7 +216,7 @@
 
 <%~ na(it.modules.access.setup) %>
 <% if (it.modules.access.outstanding) { %>
-## Outstanding at start date
+## Not in place by the start date
 
 <%~ it.modules.access.outstanding %>
 <% } %>
@@ -211,10 +227,6 @@
 ## First day
 
 <%~ na(it.modules.handover['day-one']) %>
-
-## Readiness confirmation
-
-<%~ na(it.modules.handover['readiness-confirmation']) %>
 <% if ((it.modules['open-questions'].questions && it.modules['open-questions'].questions.length) || it.modules['open-questions']['process-gaps']) { %>
 # Open questions and process gaps
 <% if (it.modules['open-questions'].questions && it.modules['open-questions'].questions.length) { %>

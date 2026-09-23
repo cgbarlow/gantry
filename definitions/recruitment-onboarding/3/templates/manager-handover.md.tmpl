@@ -13,7 +13,10 @@
      start date, since it can be re-sent close to the start date and the date it was produced
      is the more useful fact for a manager filing it. `selection.candidate-name` is `?` in
      `requires`, purely so the pattern can reach it — this document carries no other selection
-     content, matching v1. `contract.start-date` is formatted with `formatDate()`. */
+     content, matching v1. `contract.start-date` is formatted with `formatDate()`.
+
+     v3 (#157): the readiness confirmation is gone from the definition, so it is gone from here;
+     the rest of this document is rewritten for the hiring manager separately (#158). */
 %>
 # Your new starter
 
@@ -36,10 +39,6 @@
 ## The first day
 
 <%~ na(it.modules.handover['day-one']) %>
-
-## Readiness confirmation
-
-<%~ na(it.modules.handover['readiness-confirmation']) %>
 
 # What is already in place
 

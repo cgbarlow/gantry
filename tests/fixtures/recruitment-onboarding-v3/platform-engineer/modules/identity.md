@@ -5,9 +5,13 @@ owner: m.walker
 ---
 # Identity
 
+## User ID
+
+mclarke
+
 ## Account
 
-User ID `mclarke` created 13 April 2026 in the identity governance platform by Cloud Operations, on the provisioning request raised automatically when onboarding was approved on 10 April.
+Account created 13 April 2026 in the identity governance platform by Cloud Operations, on the provisioning request raised automatically when onboarding was approved on 10 April.
 
 Three days between onboarding approval and account creation, of which two were a weekend. The request itself sat for under a day.
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { loadDefinition, definitionVersionProjection, findDefinitionProblems } from '../lib/definition.js'
@@ -30,8 +30,9 @@ const VERSION = 3
 const FIXTURE = 'tests/fixtures/recruitment-onboarding-v3'
 const SLUG = 'platform-engineer'
 
-// While v3 is a copy of v2, these are v2's bars, and every Artefact at a Gate satisfies it: the
-// Gate passes when any one of `satisfiedBy` is complete (ADR-0019).
+// Until the audience documents opt out of satisfying their Gate, every Artefact at a Gate
+// satisfies it: the Gate passes when any one of `satisfiedBy` is complete (ADR-0019). Bars are
+// v2's except where a v3 ticket changes them; ready-to-start's are #157's.
 const GATES = [
   { gate: 'approved-to-recruit', satisfiedBy: ['requisition-brief'], bars: { 'requisition-brief': 9 } },
   { gate: 'candidate-selected', satisfiedBy: ['selection-report'], bars: { 'selection-report': 10 } },
@@ -43,9 +44,14 @@ const GATES = [
   {
     gate: 'ready-to-start',
     satisfiedBy: ['starter-readiness', 'manager-handover', 'hire-record'],
-    bars: { 'starter-readiness': 13, 'manager-handover': 14, 'hire-record': 36 },
+    bars: { 'starter-readiness': 13, 'manager-handover': 13, 'hire-record': 37 },
   },
 ]
+
+// #157: at ready-to-start, Starter Readiness and the Hire Record owe the same bare Fields from
+// the Modules Provisioning writes, so neither is the easier way through the Gate. The spec's
+// "13-Field bar" is those 11 plus the two filename tokens.
+const PROVISIONING_MODULES = ['identity', 'device', 'access', 'handover']
 
 const today = new Date().toISOString().slice(0, 10)
 
@@ -76,18 +82,50 @@ const DOCUMENTS = {
   },
   'starter-readiness': {
     basename: 'Marama Clarke - Starter Readiness - 2026-04-20',
-    present: [...CONTROL, '# The starter', '# Identity', '# Device', '# Access', '# Handover', '# Open questions'],
-    absent: [],
+    present: [
+      ...CONTROL,
+      '# The starter',
+      '## Starter',
+      '## Role',
+      '## Team and reporting line',
+      '## Start date',
+      '# Identity',
+      '## User ID',
+      '# Device',
+      '## Standard or non-standard',
+      '## Specification',
+      '## Non-standard hardware decision',
+      '## Build status',
+      '## Build notes',
+      '# Access',
+      '## Not in place by the start date',
+      '# Open questions',
+    ],
+    // Technology acts on neither the manager's actions nor the first day, and readiness is the
+    // sign-off itself.
+    absent: ['# Handover', '## Manager actions', '## First day', '## Readiness confirmation', '## Outstanding at start date'],
   },
   'manager-handover': {
     basename: `Marama Clarke - Manager Handover - ${today}`,
     present: [...CONTROL, '# Your new starter', '# What you need to do', '# What is already in place', '# Open questions'],
-    absent: [],
+    absent: ['## Readiness confirmation'],
   },
   'hire-record': {
     basename: 'Marama Clarke - Hire Record',
-    present: [...CONTROL, '# Requisition', '# Selection', '# Appointment', '# Provisioning', '# Open questions and process gaps'],
-    absent: [],
+    present: [
+      ...CONTROL,
+      '# Requisition',
+      '# Selection',
+      '# Appointment',
+      '# Provisioning',
+      '## User ID',
+      '## Standard or non-standard device',
+      '## Non-standard hardware decision',
+      '## Device build notes',
+      '## Not in place by the start date',
+      '# Open questions and process gaps',
+    ],
+    absent: ['## Readiness confirmation', '## Outstanding at start date'],
   },
 }
 
@@ -113,6 +151,20 @@ function withInstancesDir(fn) {
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }
+}
+
+// Renders one Artefact from a copy of the worked hire with some Fields changed, as a variation a
+// real hire could reach that the worked hire itself doesn't.
+function renderVariant(artefactId, changes) {
+  return withInstancesDir((instancesDir) => {
+    cpSync(join(FIXTURE, SLUG), join(instancesDir, SLUG), { recursive: true })
+    const def = loadDefinition('recruitment-onboarding', { version: VERSION })
+    for (const [moduleId, fields] of Object.entries(changes)) {
+      const worked = readModule(def, SLUG, moduleId, { instancesDir })
+      writeModule(def, SLUG, moduleId, { ...worked, fields: { ...worked.fields, ...fields } }, { instancesDir })
+    }
+    return renderArtefact(SLUG, artefactId, { instancesDir, dryRun: true }).markdown
+  })
 }
 
 test('recruitment-onboarding/3 is a draft, and v2 stays published', () => {
@@ -195,3 +247,74 @@ for (const [id, { basename, present, absent }] of Object.entries(DOCUMENTS)) {
     for (const heading of absent) assert.ok(!outline.has(heading), `${id} has no "${heading}"`)
   })
 }
+
+test('ready-to-start has a 13-Field bar, and Starter Readiness and the Hire Record owe the same 11 Provisioning Fields', () => {
+  withInstancesDir((instancesDir) => {
+    writeBlankInstance(instancesDir)
+    const { artefacts } = checkGate('blank', { instancesDir, gate: 'ready-to-start' })
+    const owed = (id) => artefacts.find((a) => a.id === id).outstanding
+    const sameStage = (id) => owed(id).filter((reference) => PROVISIONING_MODULES.includes(reference.split('.')[0])).sort()
+    assert.deepEqual(owed('starter-readiness').sort(), [
+      'access.entitlements',
+      'access.setup',
+      'contract.start-date',
+      'device.build-status',
+      'device.specification',
+      'device.standard',
+      'handover.day-one',
+      'handover.manager-actions',
+      'identity.account',
+      'identity.credential-issue',
+      'identity.propagation',
+      'identity.user-id',
+      'selection.candidate-name',
+    ])
+    assert.equal(sameStage('starter-readiness').length, 11)
+    assert.deepEqual(sameStage('hire-record'), sameStage('starter-readiness'))
+  })
+})
+
+test('the new Provisioning Fields lead their Modules, and handover.day-one stays required', () => {
+  const { modules } = loadDefinition('recruitment-onboarding', { version: VERSION })
+  const field = (moduleId, fieldId) => modules.get(moduleId).fields.find((f) => f.id === fieldId)
+  const [userId] = modules.get('identity').fields
+  assert.deepEqual([userId.id, userId.type, userId.required], ['user-id', 'text', true])
+  const [standard] = modules.get('device').fields
+  assert.deepEqual([standard.id, standard.type, standard.required], ['standard', 'select', true])
+  assert.deepEqual(standard.options, ['Standard', 'Non-standard'])
+  assert.equal(field('device', 'build-notes').required, false)
+  assert.equal(field('handover', 'day-one').required, true)
+})
+
+test('Starter Readiness names the starter, their team, the user ID and the standard/non-standard line', () => {
+  const { markdown } = renderArtefact(SLUG, 'starter-readiness', { instancesDir: FIXTURE, dryRun: true })
+  assert.match(markdown, /## Starter\n\nMarama Clarke\n/)
+  assert.match(markdown, /## Team and reporting line\n\nPlatform Engineering, within Technology/)
+  assert.match(markdown, /## User ID\n\nmclarke\n/)
+  assert.match(markdown, /## Standard or non-standard\n\nNon-standard\n/)
+  // The manager's to-do list and first day stay in scope but are not printed.
+  assert.doesNotMatch(markdown, /Meet the starter in reception/)
+  assert.doesNotMatch(markdown, /walkthrough of the container platform/)
+})
+
+test('Starter Readiness warns when the device is not Ready and nothing is listed as not in place', () => {
+  const WARNING = /\*\*Warning:\*\* the device is not Ready/
+  const worked = renderArtefact(SLUG, 'starter-readiness', { instancesDir: FIXTURE, dryRun: true }).markdown
+  assert.doesNotMatch(worked, WARNING, 'the worked hire\'s device is Ready')
+  const unlisted = renderVariant('starter-readiness', { device: { 'build-status': 'Configured' }, access: { outstanding: '' } })
+  assert.match(unlisted, WARNING)
+  const listed = renderVariant('starter-readiness', { device: { 'build-status': 'Configured' } })
+  assert.doesNotMatch(listed, WARNING, 'the worked hire lists the access card as not in place')
+})
+
+test('Starter Readiness marks a non-standard device with no recorded decision, and omits the heading for a standard one', () => {
+  const blank = renderVariant('starter-readiness', { device: { 'non-standard-decision': '' } })
+  assert.match(blank, /## Non-standard hardware decision\n\n— not stated —/)
+  const standard = renderVariant('starter-readiness', { device: { standard: 'Standard', 'non-standard-decision': '' } })
+  assert.ok(!headings(standard).has('## Non-standard hardware decision'))
+})
+
+test('the Hire Record also marks a non-standard device with no recorded decision', () => {
+  const blank = renderVariant('hire-record', { device: { 'non-standard-decision': '' } })
+  assert.match(blank, /## Non-standard hardware decision\n\n— not stated —/)
+})

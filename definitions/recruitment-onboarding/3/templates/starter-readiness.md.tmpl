@@ -1,30 +1,44 @@
 # <%~ it.instance.name || it.instance.slug %>: Starter Readiness
 <%
-  /* The provisioning record. Identity, device and access run in parallel in the source model;
-     they are rendered in sequence here because a document has one order and Gantry has no fork
-     to preserve. The order below is identity first, because device and access both depend on
-     the directory record existing.
-     `access.outstanding` is `?` and suppresses when empty — but modules/access.yaml asks for it
-     to be filled whenever anything is genuinely late, since it is this process's only warning
-     that a starter will arrive to a partial setup.
+  /* Technology's provisioning record. Identity, device and access run in parallel in the source
+     model; they are rendered in sequence because a document has one order. Identity first,
+     because device and access both depend on the directory record existing.
 
-     v2 (#90): named from the candidate and the start date (definition.yaml's `filename:`) —
-     `selection.candidate-name` is in `requires` as `?` purely so the pattern can reach it; this
-     document carries no other selection content, matching v1. `contract.start-date` is
-     formatted with `formatDate()`. `device.build-status` and `handover.readiness-confirmation`
-     are now selects — both still plain strings, so the interpolation below is unchanged. */
+     v3 (#157): prints who the starter is and which team they join (email groups, shared drives
+     and directory placement follow the team). Printing the candidate name overturns the v2
+     CHANGELOG's "never as a rendered section" for this document. `handover.manager-actions`
+     and `handover.day-one` stay bare in `requires` so this document and the Hire Record hold
+     the same same-stage bar, but are not printed: Technology acts on neither, and the Hire
+     Record prints both. `open-questions.process-gaps?` is authoring scope only.
+
+     `handover.readiness-confirmation` is gone: readiness is the ready-to-start sign-off itself.
+     `access.outstanding` is retitled "Not in place by the start date". Warns when the device
+     is not Ready and nothing is listed under "Not in place by the start date". */
+  const srStandard = it.modules.device.standard
 %>
 # The starter
+
+## Starter
+
+<%~ na(it.modules.selection['candidate-name']) %>
 
 ## Role
 
 <%~ na(it.modules.role.summary) %>
+
+## Team and reporting line
+
+<%~ na(it.modules.role.team) %>
 
 ## Start date
 
 <%~ na(formatDate(it.modules.contract['start-date'])) %>
 
 # Identity
+
+## User ID
+
+<%~ na(it.modules.identity['user-id']) %>
 
 ## Account
 
@@ -40,45 +54,43 @@
 
 # Device
 
+## Standard or non-standard
+
+<%~ na(srStandard) %>
+
 ## Specification
 
 <%~ na(it.modules.device.specification) %>
-<% if (it.modules.device['non-standard-decision']) { %>
+<% if (it.modules.device['non-standard-decision'] || srStandard === 'Non-standard') { %>
 ## Non-standard hardware decision
 
-<%~ it.modules.device['non-standard-decision'] %>
+<%~ it.modules.device['non-standard-decision'] || '— not stated —' %>
 <% } %>
 ## Build status
 
 <%~ na(it.modules.device['build-status']) %>
+<% if (it.modules.device['build-status'] !== 'Ready' && !it.modules.access.outstanding) { %>
+**Warning:** the device is not Ready and is not listed under "Not in place by the start date". This stage should not be signed off.
+<% } %>
+<% if (it.modules.device['build-notes']) { %>
+## Build notes
 
+<%~ it.modules.device['build-notes'] %>
+<% } %>
 # Access
 
 ## Entitlements
 
-<% it.modules.access.entitlements.forEach(function(item) { %>- <%~ item %>
+<% (it.modules.access.entitlements || []).forEach(function(item) { %>- <%~ item %>
 <% }) %>
 ## Setup
 
 <%~ na(it.modules.access.setup) %>
 <% if (it.modules.access.outstanding) { %>
-## Outstanding at start date
+## Not in place by the start date
 
 <%~ it.modules.access.outstanding %>
 <% } %>
-# Handover
-
-## Manager actions
-
-<% it.modules.handover['manager-actions'].forEach(function(item) { %>- <%~ item %>
-<% }) %>
-## First day
-
-<%~ na(it.modules.handover['day-one']) %>
-
-## Readiness confirmation
-
-<%~ na(it.modules.handover['readiness-confirmation']) %>
 <% if (it.modules['open-questions'].questions && it.modules['open-questions'].questions.length) { %>
 # Open questions
 

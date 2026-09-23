@@ -15,6 +15,53 @@ The description now says that instances hold HR personal data and need HR-file a
 retention controls wherever they are stored. It's in the description rather than a YAML comment
 because comments don't survive publishing.
 
+### Starter Readiness is written for Technology (#157)
+
+Starter Readiness is Technology's provisioning record, so it now carries what Technology
+provisions and nothing else.
+
+- **It names the starter and their team.** Email groups, shared drives and directory placement
+  follow the team, so Technology needs it. `selection.candidate-name` is now bare and printed,
+  which **overturns v2's "never as a rendered section"** for this document. `role.summary` and
+  `role.team` are in scope as `?`.
+- **It no longer prints the manager's to-do list or the first day.** Technology acts on neither.
+  `handover.manager-actions` and `handover.day-one` stay bare in its `requires`, unprinted, so it
+  and the Hire Record owe the same Fields at ready-to-start. The Hire Record prints both.
+- **A warning** appears when the device isn't Ready and nothing is listed as not in place by
+  the start date: the stage shouldn't be signed off like that.
+- **A non-standard device with no recorded decision** prints the Non-standard hardware decision
+  heading with "— not stated —", so the gap is visible.
+
+New Fields:
+
+| Field | Type | Why |
+|---|---|---|
+| `identity.user-id` | text, required, first in the Module | The user ID on its own, so it can be printed for the hiring manager without the account's internal timing. Never the password. |
+| `device.standard` | select (Standard, Non-standard), required, first in the Module | Whether the hardware is standard, as a choice rather than a phrase in the specification, so non-standard builds can be counted. |
+| `device.build-notes` | markdown, optional | Request and ready dates and any overrun. Build timing moves out of `specification`, which the hiring manager reads. |
+
+Changed and removed:
+
+- **`handover.readiness-confirmation` is removed.** Readiness is the ready-to-start sign-off
+  itself, and the Field only restated it. `handover.day-one` stays required but no longer asks
+  who confirmed readiness, which **overturns v1's "who confirmed" readiness**.
+- **`access.outstanding` is retitled "Not in place by the start date".** Its guidance now covers
+  the device and the identity as well as entitlements, so it is the one early warning for
+  anything missing.
+- **Narrower guidance** for `identity.account` (when and where, not the user ID),
+  `device.specification` (what was specified, no timing) and `device.non-standard-decision` (who
+  decided and what changed, not how long it took). `identity.credential-issue` records the
+  channel, sender and date, never the password or the address.
+- **`role.summary` and `role.team` are required at approved-to-recruit** rather than at every
+  Gate, so Starter Readiness can reference them `?` without them counting at ready-to-start.
+  The bare references at the other Gates are unchanged.
+
+The Hire Record gains `identity.user-id` and `device.standard` bare and `device.build-notes?`,
+and prints them. At ready-to-start, Starter Readiness and the Hire Record now owe the same 11
+Provisioning Fields, and the Gate's bar is 13: those 11 plus the candidate name and start date
+that name the documents. v2's bar was also 13. The worked hire is migrated: its user ID and
+device choice are in their own Fields, and the build timing is in the build notes.
+
 ### Correction to v2 (E5)
 
 v2's changelog says `selection.candidate-name?` in the `requires` of `offer-pack`,

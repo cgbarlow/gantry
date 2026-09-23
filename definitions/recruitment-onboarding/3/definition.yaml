@@ -169,27 +169,32 @@ artefacts:
   - id: starter-readiness
     title: Starter Readiness
     purpose: >
-      Record the identity, device and access provisioned for the starter and
-      confirm they can work from their first day.
+      Technology's provisioning record: who the starter is and which team they
+      join, the identity, device and access provisioned for them, and anything
+      not in place by the start date.
     template: templates/starter-readiness.md.tmpl
     gate: ready-to-start
     requires:
-      - role.summary
-      - selection.candidate-name?
+      - selection.candidate-name
+      - role.summary?
+      - role.team?
       - contract.start-date
+      - identity.user-id
       - identity.account
       - identity.propagation
       - identity.credential-issue
+      - device.standard
       - device.specification
       - device.non-standard-decision?
       - device.build-status
+      - device.build-notes?
       - access.entitlements
       - access.setup
       - access.outstanding?
+      - open-questions.questions?
       - handover.manager-actions
       - handover.day-one
-      - handover.readiness-confirmation
-      - open-questions.questions?
+      - open-questions.process-gaps?
     filename: "{selection.candidate-name} - Starter Readiness - {contract.start-date}"
   - id: manager-handover
     title: Manager Handover
@@ -205,7 +210,6 @@ artefacts:
       - contract.start-date
       - handover.manager-actions
       - handover.day-one
-      - handover.readiness-confirmation
       - identity.account
       - identity.credential-issue
       - identity.propagation
@@ -259,18 +263,20 @@ artefacts:
       - payroll.validation-outcome
       - payroll.rework?
       - payroll.confirmed
+      - identity.user-id
       - identity.account
       - identity.propagation
       - identity.credential-issue
+      - device.standard
       - device.specification
       - device.non-standard-decision?
       - device.build-status
+      - device.build-notes?
       - access.entitlements
       - access.setup
       - access.outstanding?
       - handover.manager-actions
       - handover.day-one
-      - handover.readiness-confirmation
       - open-questions.questions?
       - open-questions.process-gaps?
     filename: "{selection.candidate-name} - Hire Record"
