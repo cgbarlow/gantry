@@ -17,6 +17,17 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.17-beta — 2026-09-23
+
+### Changed
+
+- **The Render dialog now says which stage — and branch, where one exists — it renders from and
+  commits to** (#143). Render has always committed to the instance's *current* stage no matter
+  which stage tab you're browsing, which is useful (a re-opened stage's revised content flows
+  into another stage's artefacts) but was previously invisible. The dialog now names that stage
+  plainly, and when the stage you're browsing isn't the current one, it says so explicitly rather
+  than leaving you to guess from the artefact list alone.
+
 ## 0.9.16-beta — 2026-09-23
 
 ### Fixed
