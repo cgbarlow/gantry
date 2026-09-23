@@ -335,6 +335,147 @@ test('Outline / Map view switch changes the layout and is remembered across a re
   })
 })
 
+// Each module chip on the Map counts its fields; selecting a document switches every chip to
+// "used/total" for that document and ghosts the modules it draws nothing from.
+test('Map module chips count fields, and show used/total with unused modules ghosted for a selected document', async () => {
+  const withRecruitment = withDraftDesignV2((definitionsDir) => {
+    cpSync('definitions/recruitment-onboarding/2', join(definitionsDir, 'recruitment-onboarding/2'), { recursive: true })
+  })
+  await withRecruitment(async (base) => {
+    await withPage(base, async (page, pageErrors) => {
+      await page.goto(`${base}/definitions`)
+      await page.waitForSelector('.defn-toolbar', { timeout: 10_000 })
+      await openSwitcher(page)
+      await page.locator('.defn-switcher-row', { hasText: 'Recruitment and Onboarding' }).click()
+      await page.waitForSelector('.defn-outline', { timeout: 10_000 })
+      await page.getByRole('button', { name: 'Map', exact: true }).first().click()
+      // Recruitment-specific content, so the Map being read is this definition's, not the one that loaded first.
+      await page.locator('.defn-map-col-head', { hasText: 'Appointment' }).waitFor({ timeout: 10_000 })
+
+      const appointment = page.locator('.defn-map-col', { has: page.locator('.defn-map-col-head', { hasText: 'Appointment' }) })
+      const chip = (name) => appointment.locator('.defn-map-chip', { hasText: name })
+      const count = async (name) => (await chip(name).locator('.defn-field-count').textContent()).trim()
+      const isGhost = async (name) => /\bghost\b/.test(await chip(name).getAttribute('class'))
+      const selectDocument = (title) => appointment.locator('.defn-map-achip', { hasText: title }).click()
+
+      assert.equal(await count('Offer'), '3', "at rest a chip shows its module's total field count")
+      assert.equal(await count('Vetting'), '3')
+      assert.equal(await page.locator('.defn-map-chip.ghost').count(), 0, 'nothing is ghosted without a selected document')
+
+      await selectDocument('Offer Pack')
+      await chip('Offer').locator('.defn-field-count', { hasText: '2/3' }).waitFor()
+      assert.equal(await count('Contract'), '4/5')
+      assert.equal(await count('Vetting'), '0/3')
+      assert.ok(await isGhost('Vetting'), 'a module the document draws nothing from is ghosted')
+      assert.ok(!(await isGhost('Offer')))
+      // The Offer Pack reaches Selection only through `selection.candidate-name?` (for its filename):
+      // an optional-only ref is still a use, so the module counts it and stays solid.
+      assert.equal(await count('Selection'), '1/5', 'an optional-only ref still counts as used')
+      assert.ok(!(await isGhost('Selection')))
+      const offerTitle = await chip('Offer').getAttribute('title')
+      assert.match(offerTitle, /\b2 of 3\b/)
+      assert.match(offerTitle, /Offer Pack/)
+      assert.match(await chip('Contract').getAttribute('title'), /\(1 optional\)/)
+
+      // Straight from one document to another: the counts follow the new selection.
+      await selectDocument('Appointment Case')
+      await chip('Vetting').locator('.defn-field-count', { hasText: '1/3' }).waitFor()
+      assert.equal(await count('Offer'), '3/3')
+      assert.ok(!(await isGhost('Vetting')))
+
+      await chip('Offer').click()
+      await chip('Offer').locator('.defn-field-count', { hasText: /^3$/ }).waitFor()
+      assert.equal(await page.locator('.defn-map-chip.ghost').count(), 0, 'selecting something other than a document returns to totals')
+
+      assert.deepEqual(pageErrors, [])
+    })
+  })
+})
+
+// The Outline's module rows carry the same counts as the Map's chips (one shared helper), so the
+// field-use view is there whichever view the page opens in.
+test('Outline module rows count fields, and show used/total with unused modules ghosted for a selected document', async () => {
+  const withRecruitment = withDraftDesignV2((definitionsDir) => {
+    cpSync('definitions/recruitment-onboarding/2', join(definitionsDir, 'recruitment-onboarding/2'), { recursive: true })
+  })
+  await withRecruitment(async (base) => {
+    await withPage(base, async (page, pageErrors) => {
+      await page.goto(`${base}/definitions`)
+      await page.waitForSelector('.defn-toolbar', { timeout: 10_000 })
+      await openSwitcher(page)
+      await page.locator('.defn-switcher-row', { hasText: 'Recruitment and Onboarding' }).click()
+      const artefacts = page.locator('.defn-outline-group', { has: page.locator('.kicker', { hasText: /^Artefacts/ }) })
+      const modules = page.locator('.defn-outline-group', { has: page.locator('.kicker', { hasText: /Modules/ }) })
+      await artefacts.locator('.defn-outline-node', { hasText: 'Offer Pack' }).waitFor({ timeout: 10_000 })
+
+      const row = (name) => modules.locator('.defn-outline-node', { has: page.locator('.defn-outline-label', { hasText: new RegExp(`^${name}$`) }) })
+      const count = async (name) => (await row(name).locator('.defn-field-count').textContent()).trim()
+      const isGhost = async (name) => /\bghost\b/.test(await row(name).getAttribute('class'))
+
+      assert.equal(await count('Offer'), '3')
+      assert.equal(await count('Vetting'), '3')
+      assert.equal(await modules.locator('.defn-outline-node.ghost').count(), 0)
+
+      await artefacts.locator('.defn-outline-node', { hasText: 'Offer Pack' }).click()
+      await row('Offer').locator('.defn-field-count', { hasText: '2/3' }).waitFor()
+      assert.equal(await count('Vetting'), '0/3')
+      assert.ok(await isGhost('Vetting'))
+      assert.equal(await count('Selection'), '1/5')
+      assert.ok(!(await isGhost('Selection')))
+      assert.match(await row('Offer').getAttribute('title'), /\b2 of 3\b.*Offer Pack/)
+
+      await row('Offer').click()
+      await row('Offer').locator('.defn-field-count', { hasText: /^3$/ }).waitFor()
+      assert.equal(await modules.locator('.defn-outline-node.ghost').count(), 0)
+
+      assert.deepEqual(pageErrors, [])
+    })
+  })
+})
+
+// On a draft every chip is also a drag handle. The handle's props must not replace the chip's own
+// class and title, or ghosting and the usage tooltip silently vanish while editing.
+test('Map field counts and ghosting also work on an editable draft, including "Not in any stage"', async () => {
+  await withDraftDesignV2()(async (base) => {
+    await withPage(base, async (page, pageErrors) => {
+      await page.goto(`${base}/definitions`)
+      await page.waitForSelector('#defn-version-select', { timeout: 10_000 })
+      await page.locator('#defn-version-select').selectOption('2')
+      await page.waitForSelector('.defn-focus-title-input', { timeout: 10_000 })
+      await page.getByRole('button', { name: 'Map', exact: true }).first().click()
+      await page.locator('.defn-map-col-head', { hasText: 'SOAP' }).waitFor({ timeout: 10_000 })
+
+      const col = (title) => page.locator('.defn-map-col', { has: page.locator('.defn-map-col-head', { hasText: title }) })
+      const chip = (colTitle, name) => col(colTitle).locator('.defn-map-chip', { hasText: name }).first()
+      const count = async (colTitle, name) => (await chip(colTitle, name).locator('.defn-field-count').textContent()).trim()
+      const isGhost = async (colTitle, name) => /\bghost\b/.test(await chip(colTitle, name).getAttribute('class'))
+
+      await page.getByRole('button', { name: '+ Module', exact: true }).click()
+      await chip('Not in any stage', 'New Module').waitFor()
+      assert.equal(await count('Not in any stage', 'New Module'), '0')
+      assert.ok(!(await isGhost('Not in any stage', 'New Module')))
+      assert.equal(await chip('SOAP', 'Dependencies').getAttribute('draggable'), 'true', 'a draft chip is still a drag handle')
+      assert.equal(await count('SOAP', 'Dependencies'), '2')
+
+      await col('SOAP').locator('.defn-map-achip', { hasText: /◇\s*Solution on a Page/ }).click()
+      await chip('SOAP', 'Dependencies').locator('.defn-field-count', { hasText: '0/2' }).waitFor()
+      assert.ok(await isGhost('SOAP', 'Dependencies'), 'ghosting survives the drag-handle props on a draft')
+      assert.match(await chip('SOAP', 'Dependencies').getAttribute('title'), /0 of 2 fields used by Solution on a Page/)
+      assert.match(await chip('SOAP', 'Dependencies').getAttribute('title'), /Drag onto a stage or artefact/, 'the drag hint is kept')
+      assert.equal(await count('SOAP', 'Background'), '2/4')
+      assert.equal(await count('Not in any stage', 'New Module'), '0/0')
+      assert.ok(await isGhost('Not in any stage', 'New Module'))
+
+      // High Level Design names whole modules in its requires: a whole-module ref uses every field.
+      await col('High-level Design').locator('.defn-map-achip', { hasText: 'High Level Design' }).click()
+      await chip('High-level Design', 'Background').locator('.defn-field-count', { hasText: '4/4' }).waitFor()
+      assert.ok(!(await isGhost('High-level Design', 'Background')))
+
+      assert.deepEqual(pageErrors, [])
+    })
+  })
+})
+
 test('Field rows are compact, expanding one at a time', async () => {
   await withDraftDesignV2()(async (base) => {
     await withPage(base, async (page) => {

@@ -6,6 +6,7 @@ import { markdown } from '@codemirror/lang-markdown'
 import { renderMarkdown } from '../lib/markdown.js'
 import { reorder } from '../lib/reorder.js'
 import { Dropdown } from '../lib/dropdown.js'
+import { moduleFieldUsage } from '../lib/moduleFieldUsage.js'
 import { defnView, setDefnView } from '../lib/definitionView.js'
 import { planCopy, resolveCollision, applyPlan, isResolved } from '../lib/copyPlanner.js'
 
@@ -1541,14 +1542,42 @@ export function DefinitionViewerPage() {
   }
 
   // -------------------------------------------------------------------------------- Outline nav
-  function outlineNode({ type, id, label, draggable, dropZone, extra, moveButtons, badge }) {
+  // -------------------------------------------------------------------------------- Field use
+  // Field-use focus, shared by the Map's module chips and the Outline's module rows: with a document
+  // selected, each module reads "used/total" for that document and one it draws nothing from is
+  // ghosted; otherwise each reads its total field count. Only a document focuses — the page always
+  // has a stage selected by default, so a stage-driven focus would leave the plain totals unreachable.
+  // Returns (moduleId, module) => { ghost, count, title }.
+  function moduleUsageView(d) {
+    const focusArtefacts = selection.type === 'artefact' ? d.artefacts.filter((a) => a.id === selection.id) : []
+    const focused = focusArtefacts.length > 0
+    const focusLabel = focusArtefacts.map((a) => a.title || a.id).join(' and ')
+    const usage = moduleFieldUsage(d.modules, focusArtefacts)
+    return (mid, mod) => {
+      const u = usage.get(mid)
+      if (!u) return { ghost: false, count: null, title: undefined }
+      const name = mod?.title ?? mid
+      return focused
+        ? {
+            ghost: u.used === 0,
+            count: `${u.used}/${u.total}`,
+            title: `${name}: ${u.used} of ${u.total} field${u.total === 1 ? '' : 's'} used by ${focusLabel}${u.optional ? ` (${u.optional} optional)` : ''}`,
+          }
+        : { ghost: false, count: String(u.total), title: `${name}: ${u.total} field${u.total === 1 ? '' : 's'}` }
+    }
+  }
+  const usageCount = (count) => (count === null || count === undefined ? null : html`<span class="defn-field-count mono">${count}</span>`)
+
+  // -------------------------------------------------------------------------------- Outline nav
+  function outlineNode({ type, id, label, draggable, dropZone, extra, moveButtons, badge, usage }) {
     const selected = selection.type === type && selection.id === id
     const key = draggable ? dragHandleProps(draggable.payload, draggable.kind) : null
     return html`
       <div
-        class=${'defn-outline-node' + (selected ? ' selected' : '') + (dropTarget && dropZone && dropTarget === dropZone.key ? ' defn-drop-target' : '')}
+        class=${'defn-outline-node' + (selected ? ' selected' : '') + (usage?.ghost ? ' ghost' : '') + (dropTarget && dropZone && dropTarget === dropZone.key ? ' defn-drop-target' : '')}
         role="button"
         tabindex="0"
+        title=${usage?.title}
         onClick=${() => select(type, id)}
         onKeyDown=${(e) => { if (e.key === 'Enter') select(type, id) }}
         ...${dropZone ? dropZone.props : {}}
@@ -1557,6 +1586,7 @@ export function DefinitionViewerPage() {
         ${extra ?? null}
         <span class="defn-outline-label">${label}</span>
         ${badge ?? null}
+        ${usage ? usageCount(usage.count) : null}
         ${hasProblem(type, id) ? html`<span class="defn-problem-dot" title="Has a validation problem"></span>` : null}
         ${moveButtons ? html`
           <span class="defn-move-btns">
@@ -1571,6 +1601,7 @@ export function DefinitionViewerPage() {
   function renderOutline() {
     const d = working
     const modulesCollapsed = collapsedGroups.modules
+    const moduleUsageProps = moduleUsageView(d)
     return html`
       <nav class="defn-outline" aria-label="Definition outline">
         <div class="defn-outline-group">
@@ -1627,6 +1658,7 @@ export function DefinitionViewerPage() {
                 dropZone: isEditable ? { key: `module-drop:${mi}`, props: moduleFieldsDropZone(mi, m.id) } : null,
                 extra: isEditable ? html`<span ...${dragHandleProps({ id: m.id }, 'module')} title="Drag onto a stage or artefact">⠿</span>` : null,
                 badge: copiedFromBadge(m),
+                usage: moduleUsageProps(m.id, m),
                 moveButtons: isEditable ? {
                   kind: 'module', upDisabled: mi === 0, downDisabled: mi === d.modules.length - 1,
                   onUp: () => updateDraft((dd) => { dd.modules = reorder(dd.modules, mi, mi - 1) }),
@@ -1654,13 +1686,29 @@ export function DefinitionViewerPage() {
     const d = working
     const usedIds = new Set(d.stages.flatMap((s) => s.modules))
     const unused = d.modules.filter((m) => !usedIds.has(m.id))
+    const moduleUsageProps = moduleUsageView(d)
+    // One module chip, for a stage column or "Not in any stage". On a draft the drag-handle props
+    // are spread FIRST: htm applies props in order, so spreading them last would replace the chip's
+    // own class (losing its styling and the ghost state), title and accessible name. The drag hint
+    // rides along on the title instead.
+    const moduleChip = (mid, mod) => {
+      const u = moduleUsageProps(mid, mod)
+      const title = isEditable ? `${u.title ?? mod?.title ?? mid} — ${DRAG_HANDLE_TITLES.module}` : u.title
+      return html`
+        <div key=${mid} ...${isEditable ? dragHandleProps({ id: mid }, 'module') : {}}
+          class=${'defn-map-chip' + (selection.type === 'module' && selection.id === mid ? ' selected' : '') + (u.ghost ? ' ghost' : '')}
+          role="button" tabindex="0" title=${title} aria-label=${isEditable ? title : undefined} onClick=${() => select('module', mid)}>
+          ${mod?.title ?? mid} ${copiedFromBadge(mod)}${hasProblem('module', mid) ? html`<span class="defn-problem-dot"></span>` : null}${usageCount(u.count)}
+        </div>
+      `
+    }
     return html`
       <div class="defn-map">
         ${d.stages.map((s, si) => html`
           <div key=${s.id} class=${'defn-map-col' + (selection.type === 'stage' && selection.id === s.id ? ' selected' : '') + (dropTarget === `stage-drop:${si}` ? ' defn-drop-target' : '')} ...${stageDropZone(si)}>
             <div class="defn-map-col-head" role="button" tabindex="0" onClick=${() => select('stage', s.id)}>
               <span class="t">${s.title}</span>
-              <span class="mono muted">${s.modules.length}</span>
+              <span class="mono muted" title=${`${s.modules.length} module${s.modules.length === 1 ? '' : 's'} in this stage`}>${s.modules.length}</span>
               ${hasProblem('stage', s.id) ? html`<span class="defn-problem-dot"></span>` : null}
             </div>
             ${isEditable ? html`
@@ -1669,23 +1717,14 @@ export function DefinitionViewerPage() {
                 <button class="btn small ghost" aria-label=${`Move stage "${s.title}" down`} disabled=${si === d.stages.length - 1} onClick=${() => updateDraft((dd) => { dd.stages = reorder(dd.stages, si, si + 1) })}>↓</button>
               </span>
             ` : null}
-            ${s.modules.map((mid) => {
-              const mod = d.modules.find((m) => m.id === mid)
-              return html`
-                <div key=${mid} class=${'defn-map-chip' + (selection.type === 'module' && selection.id === mid ? ' selected' : '')}
-                  role="button" tabindex="0" onClick=${() => select('module', mid)}
-                  ...${isEditable ? dragHandleProps({ id: mid }, 'module') : {}}>
-                  ${mod?.title ?? mid} ${copiedFromBadge(mod)}${hasProblem('module', mid) ? html`<span class="defn-problem-dot"></span>` : null}
-                </div>
-              `
-            })}
+            ${s.modules.map((mid) => moduleChip(mid, d.modules.find((m) => m.id === mid)))}
             <div class="defn-map-gate">
               <span class="kicker">Gate · ${s.gate}</span>
               ${d.artefacts.map((a, ai) => a.gate === s.gate
                 ? html`
                     <div key=${a.id} class=${'defn-map-achip' + (selection.type === 'artefact' && selection.id === a.id ? ' selected' : '') + (dropTarget === `artefact-drop:${ai}` ? ' defn-drop-target' : '')}
                       role="button" tabindex="0" onClick=${() => select('artefact', a.id)} ...${artefactDropZone(ai)}>
-                      ◇ ${a.title} <span class="mono muted">${a.requires.length}</span> ${copiedFromBadge(a)}${hasProblem('artefact', a.id) ? html`<span class="defn-problem-dot"></span>` : null}
+                      ◇ ${a.title} <span class="mono muted" title=${`${a.requires.length} field requirement${a.requires.length === 1 ? '' : 's'}`}>${a.requires.length}</span> ${copiedFromBadge(a)}${hasProblem('artefact', a.id) ? html`<span class="defn-problem-dot"></span>` : null}
                     </div>
                   `
                 : null)}
@@ -1694,7 +1733,7 @@ export function DefinitionViewerPage() {
         `)}
         <div class=${'defn-map-col defn-map-col-unused' + (isEditable && dropTarget === 'library-drop:module' ? ' defn-drop-target' : '')} ...${isEditable ? topLevelLibraryDropZone('module') : {}}>
           <div class="defn-map-col-head"><span class="t muted">Not in any stage</span></div>
-          ${unused.map((m) => html`<div key=${m.id} class=${'defn-map-chip' + (selection.type === 'module' && selection.id === m.id ? ' selected' : '')} role="button" tabindex="0" onClick=${() => select('module', m.id)} ...${isEditable ? dragHandleProps({ id: m.id }, 'module') : {}}>${m.title} ${copiedFromBadge(m)}</div>`)}
+          ${unused.map((m) => moduleChip(m.id, m))}
           ${unused.length === 0 ? html`<span class="muted">—</span>` : null}
           ${isEditable ? html`
             <div class="defn-map-add-row">

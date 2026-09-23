@@ -64,7 +64,7 @@ export function artefactFieldIds(modules = [], artefact) {
     if (fieldId) {
       ids.add(`${moduleId}.${fieldId}`)
     } else if (module) {
-      for (const field of module.fields) ids.add(`${moduleId}.${field.id}`)
+      for (const field of module.fields ?? []) ids.add(`${moduleId}.${field.id}`)
     }
   }
 

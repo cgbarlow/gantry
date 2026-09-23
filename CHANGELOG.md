@@ -17,6 +17,28 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.0-beta — 2026-09-23
+
+### Added
+
+- **The Definitions page shows how many fields each module has, and how many of them a document
+  uses** (#139). Every module, on both the Map and the Outline, now carries its field count, so
+  "Offer 3" means the Offer module has three fields. Select a document and each module switches to
+  how many of its fields that document asks for: with the Offer Pack selected, Offer reads 2/3 and
+  Contract 4/5. Modules the document doesn't use at all are greyed out, so it's easy to spot a
+  stage that loads a module none of its documents need, or a document that is quietly missing
+  something. Hover over a count for the detail, including how many of the used fields are optional.
+  A field counts as used whenever the document asks for it, even if it's only there to name the
+  file: that's why the Offer Pack shows Selection 1/5 (the candidate's name). Select anything other
+  than a document to go back to the plain totals.
+
+### Fixed
+
+- **Map module chips on a draft definition look and behave like the ones on a published one.** On
+  a draft, every module chip on the Map lost its own styling and its tooltip to the drag handle it
+  also carries, so drafts showed plain, borderless module names. They now keep their normal look,
+  and their tooltip still mentions that they can be dragged onto a stage or document.
+
 ## 0.8.5-beta — 2026-09-23
 
 ### Fixed
