@@ -19,36 +19,42 @@ fields:
   - id: details-requested
     title: Details requested
     type: markdown
-    required: true
+    required-at:
+      - onboarding-approved
     guidance: >
-      When the request was sent and by what channel. If it was re-sent, record each attempt —
-      a second send usually means the first was never seen.
+      The date and channel of each send, one line each, with no cause or commentary. Why a
+      send had to be repeated belongs in `rework`.
 
   - id: validation-outcome
     title: Validation outcome
     type: select
-    required: true
+    required: false
     options:
       - Passed
       - Failed
     guidance: >
-      Passed or failed. Where it failed, say which of the known causes applied — spam folder,
-      incorrect information, form not submitted correctly — or name a new one, in `rework`
-      below.
+      Passed or failed — kept for the permanent record. Only Passed can reach onboarding
+      approval, because a failure loops back to the details request; the gate checks
+      `confirmed` below, not this. Where it failed, record which of the known causes applied in
+      `rework`.
 
   - id: rework
     title: Rework
     type: markdown
     required: false
     guidance: >
-      Each validation failure, which of the known causes applied (or a new one), and the delay
-      it added. Leave empty where validation passed first time. Filling this in honestly is the
-      only way the cost of this loop ever becomes visible.
+      Each validation failure: its cause category — spam folder, incorrect information, form
+      not submitted correctly, or a new one — and the delay it added. The cause category and
+      the delay only; never the values supplied. Leave empty where validation passed first
+      time. Filling this in honestly is the only way the cost of this loop ever becomes
+      visible.
 
   - id: confirmed
     title: Payroll confirmation
     type: markdown
-    required: true
+    required-at:
+      - onboarding-approved
     guidance: >
-      Payroll's confirmation that the details are valid and the starter can be paid, with the
-      date and who confirmed it. This is what releases onboarding approval.
+      Payroll's confirmation that the details are valid and the starter can be paid — the
+      date, who in Payroll confirmed it, and from which pay run the starter will be paid. Do
+      not record onboarding approval here: that is the sign-off on this stage.

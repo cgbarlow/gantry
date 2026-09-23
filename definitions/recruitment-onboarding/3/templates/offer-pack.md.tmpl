@@ -1,16 +1,19 @@
 # <%~ it.instance.name || it.instance.slug %>: Offer Pack
 <%
   /* The outward-facing half of the `onboarding-approved` gate, written for the appointed
-     candidate. Carries the same core field set as `appointment-case` so it cannot become
-     the soft path through the gate (see the artefact's comment in definition.yaml), but
-     deliberately carries no selection or vetting content — nothing about how other candidates
-     were assessed belongs in a document that leaves the organisation.
+     candidate. Deliberately carries no selection or vetting content — nothing about how other
+     candidates were assessed belongs in a document that leaves the organisation.
 
      v2 (#90): named from the candidate and the start date (definition.yaml's `filename:`) —
      `selection.candidate-name` is in `requires` as `?` purely so the pattern can reach it; it
      is deliberately not rendered as a section below, for the same reason this document carries
      no other selection content. `contract.start-date` is formatted with `formatDate()` so a
-     candidate reads "3 November 2026" rather than the stored ISO value. */
+     candidate reads "3 November 2026" rather than the stored ISO value.
+
+     v3 (#155): kept as v2's Offer Pack until #156 replaces it, with only the `manager-signed` and
+     `candidate-signed` dates in place of the removed `contract.signatures`, and the now-optional
+     `payroll.validation-outcome` shown only when filled. The internal document at this gate is
+     now `onboarding-case`; until #156 the Offer Pack still satisfies the gate, at a higher bar. */
 %>
 # Your role
 
@@ -46,9 +49,13 @@
 
 <%~ na(it.modules.contract['terms-summary']) %>
 
-## Signatures
+## Manager signed
 
-<%~ na(it.modules.contract.signatures) %>
+<%~ na(formatDate(it.modules.contract['manager-signed'])) %>
+
+## Candidate signed
+
+<%~ na(formatDate(it.modules.contract['candidate-signed'])) %>
 
 ## Start date
 
@@ -63,11 +70,11 @@
 ## Details requested from you
 
 <%~ na(it.modules.payroll['details-requested']) %>
-
+<% if (it.modules.payroll['validation-outcome']) { %>
 ## Validation outcome
 
-<%~ na(it.modules.payroll['validation-outcome']) %>
-
+<%~ it.modules.payroll['validation-outcome'] %>
+<% } %>
 ## Confirmation
 
 <%~ na(it.modules.payroll.confirmed) %>

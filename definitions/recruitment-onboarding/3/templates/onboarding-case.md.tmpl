@@ -1,0 +1,94 @@
+# <%~ it.instance.name || it.instance.slug %>: Onboarding Case
+<%
+  /* v3 (#155), new: the internal record put to whoever approves onboarding at
+     `onboarding-approved`, once the contract is signed and Payroll has validated. The offer terms
+     approved at Appointment are printed first, as extended, so the approver can check the
+     negotiation and the contract as drawn against them.
+
+     In `requires` for authoring scope only, not printed: `selection.unsuccessful?` (reserve
+     finalists released once the offer is accepted), `contract.elapsed?`,
+     `payroll.validation-outcome?` (optional since v3) and `open-questions.process-gaps?` — the
+     last three are printed in the Hire Record. Without these entries the editor would never
+     offer those fields at this stage.
+
+     Prints a warning when the offer status is not Accepted. Signature dates and the start date
+     go through `formatDate()`; what is stored stays ISO. The term heading shows whenever the type
+     is not Permanent, printing "— not stated —" when blank. */
+  const obType = it.modules.engagement.type
+  const obTerm = it.modules.engagement.term
+%>
+# The appointment
+
+## Candidate name
+
+<%~ na(it.modules.selection['candidate-name']) %>
+
+## Engagement type
+
+<%~ na(obType) %>
+<% if (obTerm || (obType && obType !== 'Permanent')) { %>
+## Term or expected duration
+
+<%~ obTerm || '— not stated —' %>
+<% } %>
+# Offer
+
+## Offer terms as extended
+
+<%~ na(it.modules.offer.terms) %>
+
+## Status
+
+<%~ na(it.modules.offer.status) %>
+<% if (it.modules.offer.status !== 'Accepted') { %>
+**Warning:** the offer has not been accepted. Do not approve onboarding until it is.
+<% } %>
+<% if (it.modules.offer.negotiation) { %>
+## Negotiation
+
+<%~ it.modules.offer.negotiation %>
+<% } %>
+# Contract
+
+## Contract terms
+
+<%~ na(it.modules.contract['terms-summary']) %>
+<% if (it.modules.contract.variations) { %>
+## Variations from the offer
+
+<%~ it.modules.contract.variations %>
+<% } %>
+## Manager signed
+
+<%~ na(formatDate(it.modules.contract['manager-signed'])) %>
+
+## Candidate signed
+
+<%~ na(formatDate(it.modules.contract['candidate-signed'])) %>
+
+## Start date
+
+<%~ na(formatDate(it.modules.contract['start-date'])) %>
+<% if (it.modules.contract['start-date-changes']) { %>
+## Start date changes
+
+<%~ it.modules.contract['start-date-changes'] %>
+<% } %>
+# Payroll
+
+## Details requested
+
+<%~ na(it.modules.payroll['details-requested']) %>
+<% if (it.modules.payroll.rework) { %>
+## Rework
+
+<%~ it.modules.payroll.rework %>
+<% } %>
+## Payroll confirmation
+
+<%~ na(it.modules.payroll.confirmed) %>
+<% if (it.modules['open-questions'].questions && it.modules['open-questions'].questions.length) { %>
+# Open questions
+
+<% it.modules['open-questions'].questions.forEach(function(item) { %>- <%~ item %>
+<% }) %><% } %>

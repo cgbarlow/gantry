@@ -17,6 +17,30 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.6-beta — 2026-09-23
+
+### Changed
+
+- **The recruitment-onboarding v3 draft now gets executive approval before any offer is made**
+  (#155). v2's single Appointment stage couldn't be signed off until the contract was signed and
+  payroll had validated, so the executive approval the process calls for had nowhere to happen.
+  v3 splits it in two, giving five stages. **Appointment** (gate `approved-to-appoint`, owned by
+  the requesting department) puts the Appointment Case to the approver: the candidate, why they
+  were chosen, what vetting returned and the proposed offer terms, with "— not stated —" shown
+  for a missing term or vetting condition. **Offer, Contract and Payroll** (gate
+  `onboarding-approved`, HR with Payroll) follows, with a new internal **Onboarding Case**. It
+  shows the offer terms as extended, a warning if the offer isn't Accepted, the contract and its
+  variations from the offer, both signature dates and Payroll's confirmation. Process gaps can be
+  written at both stages, and reserve finalists can still be recorded as released at the second.
+- **v3's contract and payroll Fields are tighter** (#155). The contract's free-text Signatures
+  Field is now two dates, manager signed and candidate signed, and a new optional Variations Field
+  records how the contract differs from the accepted offer. Payroll's validation outcome is no
+  longer required, since Payroll's confirmation already carries the gate; the Offer Pack and Hire
+  Record print it only when filled. The Hire Record also prints the signature dates and any
+  variations. The offer, contract and payroll guidance now steers authors to a pay band rather
+  than a salary figure, away from attaching the signed contract, and to one line per payroll
+  request. v1 and v2 are unchanged, and v3 stays a draft.
+
 ## 0.9.5-beta — 2026-09-23
 
 ### Changed

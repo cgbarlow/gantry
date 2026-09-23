@@ -114,6 +114,77 @@ gate-completeness bar". That is false. The `?` only exempts a field that isn't o
 at the gate, and `candidate-name` is `required: true`, so it gated all three documents all along.
 v2 is immutable, so the correction is recorded here rather than there.
 
+### Appointment split into the executive approval and Offer, Contract and Payroll (#155)
+
+The source model has Executive Approval before any offer is made and Onboarding Approved after
+payroll validates, but v2's single Appointment stage could only gate on the later one: nothing
+could be signed off until the contract was signed and payroll validated. v3 has five stages:
+
+| Stage | Gate | Owner |
+|---|---|---|
+| Requisition | `approved-to-recruit` | The requesting department |
+| Selection | `candidate-selected` | HR |
+| Appointment | `approved-to-appoint` (new) | The requesting department |
+| Offer, Contract and Payroll | `onboarding-approved` | HR, with Payroll validating |
+| Provisioning | `ready-to-start` | Technology |
+
+This overturns v1's **"Four stages, not the source model's three phases"**. The reasoning that
+split Phase 1 at "Approved to Recruit" (one gate per stage means a stage holding two approvals
+can only gate on the later one) applies equally to Phase 2, so Phase 2 is split at Executive
+Approval. The stage id is `offer-contract-payroll` rather than `onboarding` because the source
+model's glossary uses "Onboarding" for Phases 2 and 3 together.
+
+- **Appointment Case** moves to `approved-to-appoint` and becomes the case put to executive
+  approval before any offer: the candidate name, selection rationale, vetting outcome and the
+  proposed offer terms are bare (4 fields); role, team, engagement type and term, and vetting
+  conditions are in scope as `?`. It prints a term heading for any non-permanent engagement and a
+  Vetting conditions heading for "Cleared with conditions", each reading "— not stated —" when
+  blank, so the approver can see what is missing. The offer outcome, contract and payroll are no
+  longer in it.
+- **Onboarding Case** (new, internal) is the record put to whoever approves onboarding: the offer
+  terms as extended, the status (with a warning when it isn't Accepted) and negotiation, the
+  contract terms, variations and signature dates, the start date and its changes, and Payroll's
+  requests, rework and confirmation. Its 8 bare fields are the candidate name, offer status,
+  contract terms, both signature dates, start date, details requested and payroll confirmation.
+  `selection.unsuccessful`, `contract.elapsed`, `payroll.validation-outcome` and process gaps are
+  in its `requires` so they can be written at this stage, but it doesn't print them.
+- **`selection`** stays mounted at Offer, Contract and Payroll, so finalists held in reserve can
+  be recorded as released once the offer is accepted.
+- **The Offer Pack** stays at `onboarding-approved` as v2 had it, changed only for the field
+  changes below, until the Appointment Confirmation replaces it. Until then it can still satisfy
+  the gate on its own, at a higher bar than the Onboarding Case.
+- **The Hire Record** prints the two signature dates in place of the signatures, the contract's
+  variations from the offer when there are any, and the payroll validation outcome only when it
+  is filled.
+
+### Offer, contract and payroll fields (#155)
+
+- **`contract.signatures` is replaced** by `contract.manager-signed` and
+  `contract.candidate-signed`, both dates, so the gap between them can be measured rather than
+  described. Any comment on timing belongs in `elapsed`.
+- **`contract.variations`** (new, optional) records how the agreement as drawn differs from the
+  accepted offer, separately from `terms-summary`, so the summary can be shown to the starter.
+- **`payroll.validation-outcome` is now `required: false`.** Only Passed can reach onboarding
+  approval, because a failure loops back to the details request, so as a gating field it could
+  only ever restate `payroll.confirmed`. It stays for the permanent record.
+- **Home gates.** `offer.terms` is required at `approved-to-appoint`; `offer.status`,
+  `contract.terms-summary`, both signature dates, `payroll.details-requested` and
+  `payroll.confirmed` are required at `onboarding-approved`.
+
+Guidance rewritten:
+
+- `offer.terms` is written at Appointment, extended unchanged, and not edited afterwards; every
+  later change goes in `negotiation`. A decline is recorded with a reason category, not the
+  candidate's personal reasons.
+- `offer.terms` and `contract.terms-summary` give remuneration as the band and position in band,
+  never the salary figure.
+- The contract module never has the executed contract, or an image of it, attached: it carries
+  the starter's personal details and instance content is committed to git.
+- `payroll.details-requested` is one line per send, date and channel only; why a send was
+  repeated belongs in `rework`, recorded as a cause category and the delay.
+- `payroll.confirmed` does not record onboarding approval: that is the sign-off on the stage.
+- `contract.elapsed` is measured to the agreed start date and filled before onboarding approval.
+
 ## v2
 
 Typed Fields and filename patterns (#90, epic #77), applied on top of v1's process — same four

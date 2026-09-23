@@ -8,9 +8,9 @@
      the process against its own stated fifteen days, the other records where it did not hold
      up. See the current-state note in v1's definition.yaml.
 
-     There are no approval sections anywhere in this record. Each of the four stages was signed
-     off by a merged pull request, and that history is a better account of who approved what
-     than a field restating it would be.
+     There are no approval sections anywhere in this record. Each stage was signed off by a
+     merged pull request, and that history is a better account of who approved what than a
+     field restating it would be.
 
      v2 (#90): named from the candidate alone, not the start date — this document is filed once
      and kept, and a moved start date recorded in `contract.start-date-changes` shouldn't rename
@@ -27,7 +27,11 @@
      removed `engagement.approval-route`, with `engagement.route-variation` under it when
      present. The term shows whenever the type is not Permanent, and the vetting conditions
      whenever the outcome is Cleared with conditions, each with "— not stated —" when blank, as
-     is the route line until a type is chosen. */
+     is the route line until a type is chosen.
+
+     v3 (#155): `contract.signatures` is replaced by the `manager-signed` and `candidate-signed`
+     dates, and the new `contract.variations` is printed under the contract terms when filled.
+     `payroll.validation-outcome` is optional, so its section shows only when filled. */
   const hrType = it.modules.engagement.type
   const hrTerm = it.modules.engagement.term
   const hrRoute = (hrType === 'Fixed term' || hrType === 'Permanent') ? 'Full approval chain'
@@ -150,10 +154,18 @@
 ## Contract terms
 
 <%~ na(it.modules.contract['terms-summary']) %>
+<% if (it.modules.contract.variations) { %>
+## Variations from the offer
 
-## Signatures
+<%~ it.modules.contract.variations %>
+<% } %>
+## Manager signed
 
-<%~ na(it.modules.contract.signatures) %>
+<%~ na(formatDate(it.modules.contract['manager-signed'])) %>
+
+## Candidate signed
+
+<%~ na(formatDate(it.modules.contract['candidate-signed'])) %>
 
 ## Start date
 
@@ -172,10 +184,11 @@
 
 <%~ na(it.modules.payroll['details-requested']) %>
 
+<% if (it.modules.payroll['validation-outcome']) { %>
 ## Payroll validation outcome
 
-<%~ na(it.modules.payroll['validation-outcome']) %>
-<% if (it.modules.payroll.rework) { %>
+<%~ it.modules.payroll['validation-outcome'] %>
+<% } %><% if (it.modules.payroll.rework) { %>
 ## Payroll rework
 
 <%~ it.modules.payroll.rework %>
