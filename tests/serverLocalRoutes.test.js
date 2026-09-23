@@ -188,8 +188,10 @@ test('a failing request (unknown artefact) still tears the sandbox down', async 
 test('GET on a /api/local/* route is not handled as a compute request', async () => {
   await withRunningServer({}, async (base) => {
     const res = await fetch(`${base}/api/local/status`)
-    // Falls through to the static/app-shell handler — never a 200 JSON result.
-    assert.notEqual(res.headers.get('content-type'), 'application/json; charset=utf-8')
+    // Not a 200 compute result — this route only handles POST. It's still a JSON error rather
+    // than the app shell, per the /api/ 404 guard (#141), not the earlier HTML fallback.
+    assert.notEqual(res.status, 200)
+    assert.match(res.headers.get('content-type') ?? '', /application\/json/)
   })
 })
 

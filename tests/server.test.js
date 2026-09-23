@@ -492,6 +492,36 @@ test('GET /instance/<slug> (a client-side preact-iso route, not a real file) ser
   })
 })
 
+test('GET /api/does-not-exist (an unmatched API path) gets a JSON 404, not the app shell (#141)', async () => {
+  await withRunningExamplesServer({}, async (base) => {
+    const res = await fetch(`${base}/api/does-not-exist`)
+    assert.equal(res.status, 404)
+    assert.match(res.headers.get('content-type') ?? '', /application\/json/)
+    const body = await res.json()
+    assert.match(body.error, /\S/)
+  })
+})
+
+test('POST /api/does-not-exist (an unmatched API path, non-GET) also gets a JSON 404 (#141)', async () => {
+  await withRunningExamplesServer({}, async (base) => {
+    const res = await fetch(`${base}/api/does-not-exist`, { method: 'POST' })
+    assert.equal(res.status, 404)
+    assert.match(res.headers.get('content-type') ?? '', /application\/json/)
+    const body = await res.json()
+    assert.match(body.error, /\S/)
+  })
+})
+
+test('POST /api/instance (a real route called with the wrong method) gets a JSON error, not the app shell (#141)', async () => {
+  await withRunningExamplesServer({}, async (base) => {
+    const res = await fetch(`${base}/api/instance`, { method: 'POST' })
+    assert.ok(res.status === 404 || res.status === 405, `expected 404/405, got ${res.status}`)
+    assert.match(res.headers.get('content-type') ?? '', /application\/json/)
+    const body = await res.json()
+    assert.match(body.error, /\S/)
+  })
+})
+
 test('GET /app.js serves the web form script from web/', async () => {
   await withRunningExamplesServer({}, async (base) => {
     const res = await fetch(`${base}/app.js`)
