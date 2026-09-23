@@ -179,6 +179,19 @@ function setStageModuleReadOnly(stage, moduleId, readOnly) {
   else delete stage.readOnlyModules
 }
 
+// #151 (ADR-0051): an Artefact's `satisfies-gate:` switch. Ticked (the default, the key absent)
+// means completing this Artefact passes its Gate; unticked stores `satisfiesGate: false` — an
+// audience document that is still rendered and linked for approval, but never passes the Gate on its
+// own. `onToggle` null shows it read-only, as on a published version.
+function satisfiesGateCheckbox(artefact, onToggle) {
+  return html`
+    <label class="defn-satisfies-gate">
+      <input type="checkbox" checked=${artefact.satisfiesGate !== false} disabled=${!onToggle} onChange=${onToggle ? (e) => onToggle(e.currentTarget.checked) : undefined} />
+      Completing this artefact passes its gate
+    </label>
+  `
+}
+
 // -- list addressing for reorder-in-place drags/buttons --------------------------------------
 function getList(d, listPath) {
   if (listPath === 'stages') return d.stages
@@ -2140,6 +2153,11 @@ export function DefinitionViewerPage() {
                   if (checked) delete dd.artefacts[ai].documentControl
                   else dd.artefacts[ai].documentControl = false
                 }))}
+                <label class="field-label">Counts toward gate</label>
+                ${satisfiesGateCheckbox(a, (checked) => updateDraft((dd) => {
+                  if (checked) delete dd.artefacts[ai].satisfiesGate
+                  else dd.artefacts[ai].satisfiesGate = false
+                }))}
               </div>
             `
           : html`
@@ -2150,6 +2168,7 @@ export function DefinitionViewerPage() {
               ${renderReferenceDocxRow(a.id, false)}
               ${a.filename ? html`<p><span class="field-label">Filename pattern</span> <code>${a.filename}</code></p>` : null}
               <p><span class="field-label">Document Control</span> ${documentControlCheckbox(a, null)}</p>
+              <p><span class="field-label">Counts toward gate</span> ${satisfiesGateCheckbox(a, null)}</p>
             `}
         <div class="defn-focus-section">
           <div class="defn-focus-section-head">

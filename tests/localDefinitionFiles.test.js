@@ -307,6 +307,8 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
           id: 'letter', title: 'Letter', purpose: 'For the reader', template: 'templates/letter.md.tmpl', gate: 'sign-off', requires: ['background.summary'],
           filename: '{instance.name} - Letter', documentControl: false, satisfiesGate: false, copiedFrom: provenance,
         },
+        // #151: what passes sign-off, so the Letter opting out doesn't make the gate unsatisfiable.
+        { id: 'record', title: 'Record', purpose: 'The record', template: 'templates/main.md.tmpl', gate: 'sign-off', requires: ['background.summary'] },
       ],
     }
 

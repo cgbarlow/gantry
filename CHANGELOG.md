@@ -17,6 +17,36 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.10-beta — 2026-09-23
+
+### Added
+
+- **An Artefact can be kept from passing its Stage's Gate** (#151). Set `satisfies-gate: false` on
+  that Artefact in `definition.yaml`, or untick its new **Completing this artefact passes its gate**
+  checkbox on the Definitions page. Use this for a document written for someone outside the process,
+  such as a candidate's confirmation letter: it can then carry only what its reader needs without
+  becoming the easy way through the Gate. It's still written in the editor, where the Artefact
+  selector marks it "doesn't count toward the gate", and once complete it's still rendered and
+  linked in the sign-off request beside the document the Gate actually passed on, so the approver
+  sees what will be sent. Completing it alone never passes the Gate. The checkbox is editable on a
+  draft and read-only once published, and the Local Workspace definition editor has the same
+  checkbox. Existing Definitions behave exactly as before. See ADR-0051, which amends ADR-0019.
+- **`gantry check` lists every Artefact at the Gate** (#151), with whether it's complete, what it's
+  missing, and whether it counts toward the Gate. On FAIL it now also names the Artefact the Gate is
+  waiting on. `gantry check --json` carries the same as `satisfiesGate` on each Artefact, and the MCP
+  `check_gate` tool's description explains it.
+- **A Stage whose Artefacts all opt out of its Gate is reported as a problem** (#151), because that
+  Gate could never pass. `gantry validate` and a Local Workspace report it, the Definitions page
+  marks the Stage, and it blocks Save and Publish. A Definition an existing instance already uses
+  keeps loading. A Stage with no Artefacts at all isn't flagged.
+
+### Changed
+
+- **A failed Gate now names an Artefact that can actually pass it** (#151). The messages from
+  **Check**, **Advance to next stage**, **Request Sign-off**, `gantry check` and the approval
+  request point at the closest incomplete Artefact that counts toward the Gate. They never name one
+  that doesn't count, however close to complete it is.
+
 ## 0.9.9-beta — 2026-09-23
 
 ### Added

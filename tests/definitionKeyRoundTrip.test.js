@@ -96,6 +96,14 @@ artefacts:
       definition: elsewhere
       version: 2
       element: artefact:letter
+  # #151: the Artefact that passes second-gate, so the Letter opting out doesn't leave the gate unsatisfiable.
+  - id: record
+    title: Record
+    purpose: The internal record
+    template: templates/brief.md.tmpl
+    gate: second-gate
+    requires:
+      - notes
 `
 }
 

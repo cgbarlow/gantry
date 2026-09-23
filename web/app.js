@@ -247,7 +247,7 @@ async function loadLocalInstance(workspaceId, slug, requestedStageId) {
     // `definitionsDir` on the server; a local instance has no equivalent
     // client-side signal for it) — a local instance's Render dialog can
     // list an artefact fractionally earlier than a server-hosted one would.
-    artefacts: structure.artefacts.filter((a) => a.gate === stage.gate).map((a) => ({ id: a.id, title: a.title, requires: a.requires })),
+    artefacts: structure.artefacts.filter((a) => a.gate === stage.gate).map((a) => ({ id: a.id, title: a.title, requires: a.requires, ...(a.satisfiesGate === false ? { satisfiesGate: false } : {}) })),
     modules,
     workItem: null,
     pullRequests: {},
@@ -4155,6 +4155,9 @@ function ViewModeToolbar({
   const [artefactOpen, setArtefactOpen] = useState(false)
   const artefacts = sortArtefacts(instance.artefacts)
   const showArtefactSelector = artefactsHaveDifferentRequirements(instance.modules, artefacts)
+  // #151 (ADR-0051): an audience document (`satisfies-gate: false`) stays selectable and editable
+  // like any other, with a hint that completing it alone won't pass the gate.
+  const selectedExcludedFromGate = selectedArtefact?.satisfiesGate === false
   const navModules = visibleFieldIds
     ? instance.modules.filter((mod) => mod.fields.some((field) => visibleFieldIds.has(`${mod.id}.${field.id}`)))
     : instance.modules
@@ -4283,12 +4286,14 @@ function ViewModeToolbar({
                               }}
                             >
                               ${artefact.title}
+                              ${artefact.satisfiesGate === false ? html` <span class="artefact-gate-hint">— doesn't count toward the gate</span>` : null}
                             </button>
                           `
                         )}
                       <//>
                     `
                   : html`<span class="artefact-value" aria-label="Artefact">${selectedArtefact?.title ?? ''}</span>`}
+                ${selectedExcludedFromGate ? html`<span class="artefact-gate-hint" title="Completing this artefact alone won't pass the gate — another artefact at this gate has to be complete">Doesn't count toward the gate</span>` : null}
               </div>
             `
           : null}
@@ -5167,8 +5172,13 @@ function EmptyState() {
 }
 
 // Runs an instance's Check or Render action against the registry-listing API's slug (not the module editor's shared signals, which only track whichever single instance is currently open) — the dashboard can trigger either action for any listed instance without navigating away from it.
+// Names the closest incomplete artefact that can pass the gate — never a `satisfies-gate: false` one
+// (#151, ADR-0051), the same rule as lib/check.js's formatGateOutstanding.
 function formatGateFailure(body) {
-  const incomplete = (body.artefacts ?? []).filter((artefact) => !artefact.complete)
+  const artefacts = body.artefacts ?? []
+  const satisfying = artefacts.filter((artefact) => artefact.satisfiesGate !== false)
+  const incomplete = satisfying.filter((artefact) => !artefact.complete)
+  if (artefacts.length && !satisfying.length) return 'FAIL — no artefact counts toward this gate'
   if (incomplete.length) {
     const closest = incomplete.reduce((best, artefact) =>
       artefact.outstanding.length < best.outstanding.length ? artefact : best

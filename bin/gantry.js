@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { Command } from 'commander'
 import { renderArtefact } from '../lib/render.js'
 import { getStatus } from '../lib/status.js'
-import { checkGate } from '../lib/check.js'
+import { checkGate, formatGateOutstanding } from '../lib/check.js'
 import { validateDefinition } from '../lib/validate.js'
 import { listDefinitions, resolveDefinitionsDir } from '../lib/definition.js'
 import { createServer } from '../lib/server.js'
@@ -269,13 +269,30 @@ withInstanceOptions(
     return
   }
   console.log(result.pass ? 'PASS' : 'FAIL')
+  // The same "closest Artefact that can pass the gate" line every gate refusal carries.
+  if (!result.pass) console.log(`  outstanding: ${formatGateOutstanding(result)}`)
   console.log(`${result.slug} — ${result.definition} / ${result.stage.title} (gate: ${result.gate})`)
   printModules(result.modules)
+  printArtefacts(result.artefacts)
   for (const warning of result.warnings ?? []) {
     console.log(`  warning: ${warning}`)
   }
   if (!result.pass) process.exitCode = 1
 })
+
+// #151 (ADR-0051): each gate Artefact's own completeness, and which of them can pass the gate — so
+// an author can see that an audience document (`satisfies-gate: false`) is complete while the record
+// the gate is actually signed on is not.
+function printArtefacts(artefacts) {
+  if (!artefacts?.length) return
+  console.log('Artefacts:')
+  for (const artefact of artefacts) {
+    const marker = artefact.complete ? '[complete]' : '[incomplete]'
+    const counts = artefact.satisfiesGate === false ? " (doesn't count toward the gate)" : ''
+    console.log(`  ${marker} ${artefact.title}${counts}`)
+    if (!artefact.complete) console.log(`      outstanding: ${artefact.outstanding.join(', ')}`)
+  }
+}
 
 // The per-module completeness block `status` and `check` both print, identically.
 function printModules(modules) {
