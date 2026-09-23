@@ -480,7 +480,7 @@ Modules can be shared between definitions where the content genuinely is the sam
 
 A module can be required at more than one gate (e.g. `nfrs` at both `hld-arb-approved` and `build-ready-checklist`), with a field expected to be filled in progressively — light at the earlier gate, complete by the later one. `required: true|false` alone can't express that: it's one value, applied wherever the module appears.
 
-For a field whose requiredness genuinely differs by gate, use `required-at` instead of `required` — a list of the gate ids at which the field becomes required. At any other gate the module is also required at, the field is optional.
+For a field whose requiredness genuinely differs by gate, use `required-at` instead of `required` — a list of the gate ids at which the field becomes required. At any other gate the module is also required at, the field is optional. Each id must be one of the stages' `gate` values, and the value must be a list even for one gate (`required-at: [build-ready-checklist]`, not `required-at: build-ready-checklist`); validation reports anything else (#149).
 
 ```yaml
   - id: disaster-recovery-and-backup
@@ -572,7 +572,7 @@ npm test               # node --test with no filter — runs every *.test.js, Pl
 
 ## Validating definitions and instances
 
-`gantry validate <definition> [--json]` reports every structural problem with a definition in one pass — a missing module reference, an invalid field type, a `required`/`required-at` conflict — instead of fixing one, rerunning, and hitting the next.
+`gantry validate <definition> [--json]` reports every structural problem with a definition in one pass — a missing module reference, an invalid field type, a `required`/`required-at` conflict, an artefact `gate` or a `required-at` entry that names no stage's gate — instead of fixing one, rerunning, and hitting the next.
 
 `gantry check <slug> [--gate <id>] [--json]` validates an instance against a gate's requirements, PASS/FAIL with a matching exit code. Defaults to the instance's current stage; `--gate` resolves any stage's gate, so you can check readiness for a later gate before the instance actually gets there.
 

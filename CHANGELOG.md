@@ -17,6 +17,31 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.8-beta — 2026-09-23
+
+### Added
+
+- **Gantry now catches a gate id that points at no Stage** (#149). A mistyped Artefact `gate:`,
+  or a mistyped entry in a Field's `required-at:`, used to switch that requirement off with no
+  warning: the Artefact never counted toward any Gate, or the Field was never required anywhere.
+  `gantry validate`, Save and Publish on the Definitions page, publishing to a Provider, and a
+  Local Workspace now report these as problems, and so does an Artefact with no gate at all. So
+  does a `required-at:` written as a single string instead of a list: a bare string used to match
+  any gate whose id merely contained it. Each problem shows as a marker on the Artefact or Module
+  it belongs to. An instance already running on a Definition that has one of these problems keeps
+  loading, so fix the Definition in a new draft when it suits you. Every bundled Definition passes.
+
+### Changed
+
+- **Pick an Artefact's gate from a list on the Definitions page** (#149). The Gate field is now a
+  dropdown of the Stages' gates. A new Artefact starts on the first Stage gate instead of blank,
+  and a new Stage starts with a placeholder gate (such as `new-stage-3-gate`) for you to rename.
+  A gate that matches no Stage is labelled "(not a stage gate)" until you pick a real one. A
+  Field's required-at checkboxes also list any gate that no longer exists, so you can untick it,
+  and a `required-at:` written as a single string shows as required at the gate it names:
+  ticking or unticking a gate saves it as a proper list. The Local Workspace Definition editor
+  now offers an Artefact only its own Stages' gates, and a new Artefact starts on the first.
+
 ## 0.9.7-beta — 2026-09-23
 
 ### Added

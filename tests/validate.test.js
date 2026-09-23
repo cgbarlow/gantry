@@ -160,7 +160,12 @@ test('reports duplicate artefact ids', () => {
       [
         'id: dup-artefact',
         'title: Dup Artefact',
-        'stages: []',
+        // #149: a real stage gate for both artefacts to name, so the only problem is the duplicate id.
+        'stages:',
+        '  - id: only',
+        '    title: Only',
+        '    gate: g',
+        '    modules: []',
         'artefacts:',
         '  - id: art',
         '    title: First',

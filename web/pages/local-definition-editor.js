@@ -38,6 +38,12 @@ import {
 } from '../lib/localDefinitionFiles.js'
 
 const GATES = ['business-case', 'design-review', 'implementation-ready']
+// #149: an Artefact's gate must name one of this definition's own Stage gates (validation reports
+// anything else), so the Artefact gate <select> offers those rather than the fixed GATES list a
+// Stage picks from — mirrors web/pages/definition-viewer.js's stageGates.
+function stageGates(structure) {
+  return [...new Set(structure.stages.map((s) => s.gate).filter((gate) => typeof gate === 'string' && gate !== ''))]
+}
 // #86 (ADR-0044): select/text/date join the local-workspace editor's own field-type vocabulary,
 // mirroring web/pages/definition-viewer.js's server-hosted editor — see that page's own Type
 // <select> for the identical list.
@@ -399,7 +405,7 @@ function ArtefactTemplateEditor({ handle, definitionId, version, artefact, readO
   `
 }
 
-function ArtefactEditor({ handle, definitionId, version, artefact, modules, readOnly, onChange, onRemove }) {
+function ArtefactEditor({ handle, definitionId, version, artefact, modules, gates, readOnly, onChange, onRemove }) {
   const [expanded, setExpanded] = useState(false)
   const filenameTokens = [...FILENAME_BUILTIN_TOKENS, ...eligibleFilenameFields(modules, artefact)]
   return html`
@@ -409,7 +415,8 @@ function ArtefactEditor({ handle, definitionId, version, artefact, modules, read
         <input class="wizard-input" type="text" value=${artefact.title ?? ''} placeholder="Title" readOnly=${readOnly} onInput=${(e) => onChange({ ...artefact, title: e.currentTarget.value })} />
         <select class="wizard-input" value=${artefact.gate ?? ''} disabled=${readOnly} onChange=${(e) => onChange({ ...artefact, gate: e.currentTarget.value })}>
           <option value="">gate…</option>
-          ${GATES.map((g) => html`<option value=${g}>${g}</option>`)}
+          ${artefact.gate && !gates.includes(artefact.gate) ? html`<option value=${artefact.gate}>${artefact.gate} (not a stage gate)</option>` : null}
+          ${gates.map((g) => html`<option value=${g}>${g}</option>`)}
         </select>
         ${readOnly ? null : html`<button type="button" class="btn small ghost" onClick=${onRemove}>Remove artefact</button>`}
       </div>
@@ -530,7 +537,7 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
   }
   function addArtefact() {
     const id = ''
-    update({ artefacts: [...structure.artefacts, { id, title: '', purpose: '', template: `templates/${templateFileName(id)}`, gate: GATES[0], requires: [] }] })
+    update({ artefacts: [...structure.artefacts, { id, title: '', purpose: '', template: `templates/${templateFileName(id)}`, gate: stageGates(structure)[0] ?? '', requires: [] }] })
   }
 
   return html`
@@ -614,6 +621,7 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
               version=${version}
               artefact=${artefact}
               modules=${structure.modules}
+              gates=${stageGates(structure)}
               readOnly=${readOnly}
               onChange=${(next) => {
                 const artefacts = structure.artefacts.slice()

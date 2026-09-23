@@ -364,10 +364,13 @@ export function formatLocalGateOutstanding(checkResult) {
 // once from the server's bundled `definitions/`. Since `loadDefinition`
 // itself fails fast on the first such problem, a `structure` a local
 // workspace ever actually has in hand is, by construction, always already
-// free of them — but this still ports the same checks `findDefinitionProblems`
-// runs (over `structure` instead of raw per-module YAML files) for full
-// parity with the server-side function's contract and test coverage, rather
-// than assuming that invariant everywhere it's used.
+// free of them — bar the authoring-only gate-reference problems (#149,
+// lib/definition.js's AUTHORING_ONLY_PROBLEM_TYPES), which loadDefinition
+// deliberately lets through so existing instances keep loading. This ports
+// the same checks `findDefinitionProblems` runs (over `structure` instead of
+// raw per-module YAML files) for full parity with the server-side function's
+// contract and test coverage, rather than assuming that invariant everywhere
+// it's used.
 // ---------------------------------------------------------------------------
 
 // Verbatim port of lib/definition.js's artefactRequiresField (ADR-0045 §4).
@@ -410,6 +413,48 @@ function filenamePatternProblems(artefact, findField) {
         type: 'filename-field-not-required',
         message: `Artefact "${artefact.id}" filename: references "{${token}}", but "${moduleId}.${fieldId}" is not in this artefact's own "requires" list`,
       })
+    }
+  }
+  return problems
+}
+
+// Verbatim port of lib/definition.js's gateReferenceProblems (#149) — see that file for the full
+// rationale. `modules` is this structure's own module list, already in the camelCase shape it takes.
+function gateReferenceProblems(stages, artefacts, modules) {
+  const problems = []
+  const stageGates = [...new Set(stages.map((stage) => stage.gate).filter((gate) => typeof gate === 'string' && gate !== ''))]
+  const gateList = stageGates.length > 0 ? `the stages' gates are ${stageGates.map((gate) => `"${gate}"`).join(', ')}` : "this definition's stages declare no gates yet"
+  for (const artefact of artefacts) {
+    if (typeof artefact.gate !== 'string' || artefact.gate.trim() === '') {
+      problems.push({
+        type: 'unknown-artefact-gate',
+        message: `Artefact "${artefact.id}" has no gate — set it to one of the stages' gates (${gateList})`,
+      })
+    } else if (!stageGates.includes(artefact.gate)) {
+      problems.push({
+        type: 'unknown-artefact-gate',
+        message: `Artefact "${artefact.id}" has gate "${artefact.gate}", which is not any stage's gate (${gateList})`,
+      })
+    }
+  }
+  for (const mod of modules) {
+    for (const field of mod.fields ?? []) {
+      const requiredAt = field.requiredAt
+      if (requiredAt === undefined || requiredAt === null) continue
+      if (!Array.isArray(requiredAt) || !requiredAt.every((gate) => typeof gate === 'string' && gate !== '')) {
+        problems.push({
+          type: 'invalid-required-at',
+          message: `Module "${mod.id}" field "${field.id}" has "required-at: ${JSON.stringify(requiredAt)}", which is not a list of gate ids — write it as a list, e.g. "required-at: [${stageGates[0] ?? 'gate-id'}]"`,
+        })
+        continue
+      }
+      for (const gate of requiredAt) {
+        if (stageGates.includes(gate)) continue
+        problems.push({
+          type: 'unknown-required-at-gate',
+          message: `Module "${mod.id}" field "${field.id}" is required at gate "${gate}", which is not any stage's gate (${gateList})`,
+        })
+      }
     }
   }
   return problems
@@ -509,6 +554,8 @@ export function findLocalDefinitionProblems(structure) {
       })
     }
   }
+
+  problems.push(...gateReferenceProblems(stages, artefacts, [...modulesById.values()]))
 
   return problems
 }

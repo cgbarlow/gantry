@@ -12,8 +12,8 @@ import { findDefinitionProblemsInStructure, createBlankDefinition, loadDefinitio
 
 test('findDefinitionProblemsInStructure: clean structure has no problems', () => {
   const problems = findDefinitionProblemsInStructure({
-    stages: [{ id: 'shape', modules: ['background'] }],
-    artefacts: [{ id: 'soap', requires: ['background.problem'] }],
+    stages: [{ id: 'shape', gate: 'business-case', modules: ['background'] }],
+    artefacts: [{ id: 'soap', gate: 'business-case', requires: ['background.problem'] }],
     modules: [{ id: 'background', fields: [{ id: 'problem', type: 'markdown', required: true }] }],
   })
   assert.deepEqual(problems, [])
@@ -21,9 +21,9 @@ test('findDefinitionProblemsInStructure: clean structure has no problems', () =>
 
 test('findDefinitionProblemsInStructure: reports every problem type in one pass', () => {
   const problems = findDefinitionProblemsInStructure({
-    stages: [{ id: 'shape', modules: ['missing-one'] }],
+    stages: [{ id: 'shape', gate: 'business-case', modules: ['missing-one'] }],
     artefacts: [
-      { id: 'soap', requires: ['also-missing', 'background.no-such-field', 'background?'] },
+      { id: 'soap', gate: 'busines-case', requires: ['also-missing', 'background.no-such-field', 'background?'] },
     ],
     modules: [
       {
@@ -31,18 +31,22 @@ test('findDefinitionProblemsInStructure: reports every problem type in one pass'
         fields: [
           { id: 'weird', type: 'freeform' },
           { id: 'both', type: 'markdown', required: true, requiredAt: ['shape'] },
+          { id: 'substring', type: 'markdown', requiredAt: 'business-case' },
         ],
       },
     ],
   })
   const types = problems.map((p) => p.type).sort()
   assert.deepEqual(types, [
+    'invalid-required-at',
     'missing-field',
     'missing-module',
     'missing-module',
     'mutually-exclusive-required',
     'optional-whole-module',
+    'unknown-artefact-gate',
     'unknown-field-type',
+    'unknown-required-at-gate',
   ])
 })
 
@@ -77,12 +81,12 @@ test('findDefinitionProblemsInStructure: reports duplicate module ids even when 
 test('findDefinitionProblemsInStructure: reports duplicate stage ids, artefact ids, and field ids within a module', () => {
   const problems = findDefinitionProblemsInStructure({
     stages: [
-      { id: 'shape', modules: [] },
-      { id: 'shape', modules: [] },
+      { id: 'shape', gate: 'business-case', modules: [] },
+      { id: 'shape', gate: 'business-case', modules: [] },
     ],
     artefacts: [
-      { id: 'soap', requires: [] },
-      { id: 'soap', requires: [] },
+      { id: 'soap', gate: 'business-case', requires: [] },
+      { id: 'soap', gate: 'business-case', requires: [] },
     ],
     modules: [
       { id: 'background', fields: [{ id: 'problem', type: 'markdown' }, { id: 'problem', type: 'markdown' }] },

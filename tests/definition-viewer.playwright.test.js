@@ -1090,3 +1090,82 @@ test('The "+" on each outline group creates a brand-new stage, artefact and modu
     })
   })
 })
+
+// #149: an Artefact's gate names one of the Stages' gates. A new Artefact starts on a real Stage gate
+// (so it doesn't fail save the moment it's added), the Gate control offers only Stage gates, and a gate
+// that names none is marked on the Artefact and cleared by picking a real one.
+test('A new artefact starts on a real stage gate, and an artefact gate that names no stage gate is marked until fixed', async () => {
+  const withTypo = (definitionsDir) => {
+    const path = join(definitionsDir, 'design/2/definition.yaml')
+    writeFileSync(path, readFileSync(path, 'utf8').replace('template: templates/hld.md.tmpl\n    gate: hld-tac-approved', 'template: templates/hld.md.tmpl\n    gate: hld-tac-aproved'))
+  }
+  await withDraftDesignV2(withTypo)(async (base) => {
+    await withPage(base, async (page) => {
+      await page.goto(`${base}/definitions`)
+      await page.waitForSelector('#defn-version-select', { timeout: 10_000 })
+      await page.locator('#defn-version-select').selectOption('2')
+      await page.waitForSelector('.defn-outline', { timeout: 10_000 })
+
+      const artefactsGroup = page.locator('.defn-outline-group').nth(1)
+      const hldRow = artefactsGroup.locator('.defn-outline-node').filter({ hasText: 'High Level Design' }).first()
+      await hldRow.locator('.defn-problem-dot').waitFor({ state: 'visible', timeout: 10_000 })
+      assert.match(await page.locator('.defn-problems').textContent(), /1 problem\b/)
+
+      await hldRow.click()
+      const gateSelect = page.locator('.defn-focus select.defn-artefact-gate')
+      await gateSelect.waitFor({ state: 'visible', timeout: 5000 })
+      assert.equal(await gateSelect.inputValue(), 'hld-tac-aproved')
+      assert.match(await gateSelect.locator('option:checked').textContent(), /not a stage gate/)
+      assert.deepEqual(
+        await gateSelect.locator('option').evaluateAll((options) => options.map((o) => o.value)),
+        ['hld-tac-aproved', 'business-case', 'hld-tac-approved', 'build-ready-checklist', 'operational-handover']
+      )
+
+      await gateSelect.selectOption('hld-tac-approved')
+      await page.waitForSelector('.defn-no-problems', { timeout: 10_000 })
+      assert.equal(await hldRow.locator('.defn-problem-dot').count(), 0)
+
+      const beforeArtefacts = await artefactsGroup.locator('.defn-outline-node').count()
+      await artefactsGroup.getByRole('button', { name: 'Add artefact' }).click()
+      await page.waitForFunction((n) => document.querySelectorAll('.defn-outline-group')[1].querySelectorAll('.defn-outline-node').length === n, beforeArtefacts + 1, { timeout: 5000 })
+      await gateSelect.waitFor({ state: 'visible', timeout: 5000 })
+      assert.equal(await gateSelect.inputValue(), 'business-case', 'a new artefact starts on the first stage gate, not blank')
+      await page.waitForSelector('.defn-no-problems', { timeout: 10_000 })
+    })
+  })
+})
+
+// #149: a bare-string `required-at` (the invalid-required-at problem) still requires the Field at the gate
+// it names, so the Required control shows "required at gate(s)" with that gate ticked rather than
+// "optional", and ticking another gate turns it into the valid list form, clearing the marker.
+test('A field whose required-at is a bare string shows that gate ticked, and ticking a gate turns it into a list', async () => {
+  const withBareString = (definitionsDir) => {
+    const path = join(definitionsDir, 'design/2/modules/dependencies.yaml')
+    writeFileSync(path, readFileSync(path, 'utf8').replace('required-at: [build-ready-checklist]', 'required-at: build-ready-checklist'))
+  }
+  await withDraftDesignV2(withBareString)(async (base) => {
+    await withPage(base, async (page) => {
+      await page.goto(`${base}/definitions`)
+      await page.waitForSelector('#defn-version-select', { timeout: 10_000 })
+      await page.locator('#defn-version-select').selectOption('2')
+      await page.waitForSelector('.defn-outline', { timeout: 10_000 })
+      await page.locator('.defn-problems', { hasText: /1 problem\b/ }).waitFor({ state: 'visible', timeout: 10_000 })
+
+      await page.locator('.defn-outline-group').nth(2).locator('.defn-outline-node').filter({ hasText: 'Dependencies' }).first().click()
+      const row = page.locator('.defn-field-row').filter({ hasText: 'dependency-list' })
+      await row.waitFor({ state: 'visible', timeout: 10_000 })
+      assert.equal(await row.locator('.defn-required').textContent(), 'required at 1 gate(s)')
+      await row.locator('.defn-field-row-head').click()
+
+      const checks = row.locator('.defn-gate-checks label')
+      await checks.first().waitFor({ state: 'visible', timeout: 5000 })
+      const checked = await row.locator('.defn-gate-checks input:checked').evaluateAll((inputs) => inputs.map((i) => i.parentElement.textContent.trim()))
+      assert.deepEqual(checked, ['build-ready-checklist'])
+
+      await checks.filter({ hasText: 'operational-handover' }).locator('input').check()
+      await page.waitForSelector('.defn-no-problems', { timeout: 10_000 })
+      const checkedAfter = await row.locator('.defn-gate-checks input:checked').evaluateAll((inputs) => inputs.map((i) => i.parentElement.textContent.trim()))
+      assert.deepEqual(checkedAfter, ['build-ready-checklist', 'operational-handover'])
+    })
+  })
+})
