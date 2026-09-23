@@ -17,6 +17,17 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.22-beta — 2026-09-23
+
+### Added
+
+- **A "+ New Instance" button beside the workspace you're looking at on the dashboard** (#185).
+  Select a workspace and the button sits next to its name; it opens the New Instance step already
+  pointed at that workspace, so you no longer go through "+ New Workspace" and pick it again. It
+  appears for workspaces connected to Azure DevOps, GitHub, GitLab or Atlassian (including one with
+  nothing in it yet) and for a local workspace once its folder is open. The bundled Examples
+  workspace doesn't show it, because new instances can't be created there.
+
 ## 0.9.21-beta — 2026-09-23
 
 ### Changed

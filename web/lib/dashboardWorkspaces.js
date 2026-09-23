@@ -158,3 +158,19 @@ export function describeInstanceRowWorkspace(workspace) {
       }
   }
 }
+
+// The dashboard's "+ New Instance" button in a selected workspace's header: the same `/new-instance`
+// shortcut the Instance Switcher's own "+ New Instance" link uses, which opens the wizard's New
+// Instance step already scoped to that workspace. Returns null wherever that shortcut can't create
+// into the workspace: a server directory workspace such as the bundled Examples (the wizard only
+// resolves `?workspace=` against `GET /api/workspaces`, which lists Provider workspaces), and a local
+// workspace whose folder isn't granted yet.
+export function workspaceNewInstanceHref(group) {
+  if (group.kind === 'local') {
+    return group.state === 'granted' ? `/new-instance?local=${encodeURIComponent(group.entry.id)}` : null
+  }
+  if (group.kind === 'placeholder') return `/new-instance?workspace=${encodeURIComponent(group.workspaceId)}`
+  const workspace = group.instances.find((inst) => inst.workspace)?.workspace
+  if (!workspace || workspace.kind === 'directory') return null
+  return `/new-instance?workspace=${encodeURIComponent(workspace.id)}`
+}

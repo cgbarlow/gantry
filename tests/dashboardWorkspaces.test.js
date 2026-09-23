@@ -6,6 +6,7 @@ import {
   unrepresentedWorkspaceGroups,
   workspacesNeedingOwnListing,
   describeInstanceRowWorkspace,
+  workspaceNewInstanceHref,
 } from '../web/lib/dashboardWorkspaces.js'
 
 // #122 (parent #109, docs/adr/0047): the dashboard's client-side join between `GET /api/workspaces`
@@ -247,4 +248,32 @@ test('describeInstanceRowWorkspace: an unrecognised kind degrades to its id rath
   // labelling it `undefined` crashes the page, which is the failure this whole function exists for.
   const { title } = describeInstanceRowWorkspace({ kind: 'some-future-provider', id: 'ws-9' })
   assert.equal(title, 'ws-9')
+})
+
+// The dashboard's "+ New Instance" button in a selected workspace's header opens the New Instance
+// step already scoped to that workspace — the same `/new-instance` shortcut the Instance Switcher's
+// own "+ New Instance" link uses. Only where that shortcut can actually create into the workspace.
+
+test('workspaceNewInstanceHref: a Provider workspace with instances links to its own New Instance step', () => {
+  for (const kind of ['azureDevOps', 'github', 'gitlab', 'atlassian']) {
+    const group = { key: 'workspace:acme', instances: [{ slug: 'a', workspace: { kind, id: 'acme' } }] }
+    assert.equal(workspaceNewInstanceHref(group), '/new-instance?workspace=acme', kind)
+  }
+})
+
+test('workspaceNewInstanceHref: a registered workspace with nothing listed yet links by its id', () => {
+  const group = { key: 'workspace:acme wiki', kind: 'placeholder', state: 'empty', workspaceId: 'acme wiki', instances: [] }
+  assert.equal(workspaceNewInstanceHref(group), '/new-instance?workspace=acme%20wiki')
+})
+
+test('workspaceNewInstanceHref: a local workspace links with ?local= once its folder is granted', () => {
+  const group = (state) => ({ key: 'local-workspace:lw1', kind: 'local', state, entry: { id: 'lw1' }, instances: [] })
+  assert.equal(workspaceNewInstanceHref(group('granted')), '/new-instance?local=lw1')
+  for (const state of ['loading', 'prompt', 'denied', 'missing']) assert.equal(workspaceNewInstanceHref(group(state)), null, state)
+})
+
+test('workspaceNewInstanceHref: no button for a server directory workspace such as the bundled Examples', () => {
+  const group = { key: 'workspace:examples', instances: [{ slug: 'gantry', workspace: { kind: 'directory', id: 'examples', name: 'Examples' } }] }
+  assert.equal(workspaceNewInstanceHref(group), null)
+  assert.equal(workspaceNewInstanceHref({ key: 'local:legacy', instances: [{ slug: 'legacy' }] }), null)
 })

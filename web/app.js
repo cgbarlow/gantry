@@ -35,7 +35,7 @@ import { LocalDefinitionEditorPage } from './pages/local-definition-editor.js'
 import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, workspaceRepoUrl } from './pages/settings.js'
 // Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79, #374) visual/split/markdown toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
-import { unrepresentedWorkspaceGroups, describeInstanceRowWorkspace } from './lib/dashboardWorkspaces.js'
+import { unrepresentedWorkspaceGroups, describeInstanceRowWorkspace, workspaceNewInstanceHref } from './lib/dashboardWorkspaces.js'
 import { workItemParentRef, describeWorkItemLink } from './lib/provider.js'
 import { loadWorkspaceScopedInstances, setWorkspaceDiscoveryRetryHandler } from './lib/workspaceDiscovery.js'
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
@@ -5339,6 +5339,23 @@ function groupInstancesByWorkspace(instances) {
 }
 
 // The list-pane row's secondary line — deliberately the same shape whether the group holds one instance or several (count · distinct definitions), rather than branching into a one-off "single instance" format, so a single-instance workspace is never visually singled out from a multi-instance one (the ticket's own "no special-casing visible to the user" acceptance criterion). A local-workspace group (see useLocalGroups below) has its own recovery states (not yet resolved / permission needed), so those still get their own, simpler text — but once its instances *are* resolved, each one's `instance.yaml` carries a `definition` just like a server-hosted instance's own record does, so the "· <definitions>" suffix applies here too rather than silently omitting it.
+// The selected workspace's title and subtitle in the dashboard's detail pane, with a "+ New Instance"
+// button beside them wherever the New Instance step can create straight into that workspace (see
+// `workspaceNewInstanceHref`) — so adding one to the workspace you're looking at doesn't mean going
+// through "+ New Workspace" and picking it again.
+function WorkspaceDetailHead({ group }) {
+  const newInstanceHref = workspaceNewInstanceHref(group)
+  return html`
+    <div class="workspace-detail-head">
+      <div>
+        <h2>${group.title}</h2>
+        <p class="workspace-subtitle">${group.subtitle}</p>
+      </div>
+      ${newInstanceHref ? html`<a class="btn small" href=${newInstanceHref}>+ New Instance</a>` : null}
+    </div>
+  `
+}
+
 function groupSummaryText(group) {
   if (group.kind === 'local') {
     if (group.state === 'loading') return 'Opening…'
@@ -5804,8 +5821,7 @@ function MasterDetailView({ instances, localGroups, workspaceGroups = [] }) {
           ? html`<div class="placeholder">Select a workspace to see its instances.</div>`
           : selectedGroup.kind === 'local'
             ? html`
-                <h2>${selectedGroup.title}</h2>
-                <p class="workspace-subtitle">${selectedGroup.subtitle}</p>
+                <${WorkspaceDetailHead} group=${selectedGroup} />
                 ${selectedGroup.state === 'loading' ? html`<p class="loading">Opening…</p>` : null}
                 ${selectedGroup.state === 'prompt'
                   ? html`
@@ -5858,8 +5874,7 @@ function MasterDetailView({ instances, localGroups, workspaceGroups = [] }) {
               `
             : selectedGroup.kind === 'placeholder'
               ? html`
-                  <h2>${selectedGroup.title}</h2>
-                  <p class="workspace-subtitle">${selectedGroup.subtitle}</p>
+                  <${WorkspaceDetailHead} group=${selectedGroup} />
                   <div class=${'local-workspace-recovery workspace-placeholder-' + selectedGroup.state}>
                     <p>
                       ${selectedGroup.state === 'unreadable'
@@ -5877,8 +5892,7 @@ function MasterDetailView({ instances, localGroups, workspaceGroups = [] }) {
                   </div>
                 `
               : html`
-              <h2>${selectedGroup.title}</h2>
-              <p class="workspace-subtitle">${selectedGroup.subtitle}</p>
+              <${WorkspaceDetailHead} group=${selectedGroup} />
               ${(() => {
                 // A path to Workspace Settings (where archive / owner / ticketing-system live) from
                 // the dashboard — Azure DevOps workspaces only (a server workspace, WI #356, has no
