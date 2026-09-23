@@ -49,6 +49,40 @@ export function isAzureDevOpsProviderWorkspace(workspace) {
   return workspace.provider === 'azure-devops'
 }
 
+// #131 (parent #109, docs/adr/0047): the providers whose repos gantry can actually list instances out
+// of — `lib/instanceRegistry.js`'s own `PROVIDER_ENTRY_KIND` keys, mirrored here so the dashboard never
+// asks for a workspace-scoped listing the server would only reject with a 400 (an Atlassian workspace
+// has no instance-registry entry kind yet). Mirrored by hand rather than fetched, exactly as
+// `describeRegisteredWorkspace` above mirrors `lib/provider.js`'s own enum.
+const LISTABLE_PROVIDERS = ['azure-devops', 'github', 'gitlab']
+
+/**
+ * #131: which workspaces the dashboard should fetch its own, credentialed, workspace-scoped listing
+ * for (`GET /api/workspaces/:id/instances`) — the ids of every registered workspace that
+ *
+ *   (a) the browser holds a stored credential for (`hasCredential`, injected so this stays a pure
+ *       function over plain data — web/lib/credential.js is a signals module, and this file
+ *       deliberately imports nothing), and
+ *   (b) contributes no row at all to the unscoped `GET /api/instances` listing.
+ *
+ * (b) is the same set `unrepresentedWorkspaceGroups` above turns into placeholder rows — i.e. exactly
+ * the workspaces the dashboard is currently unable to show anything for. A workspace the shared
+ * listing can already show (its rows are there, whether read with the request's own credential or a
+ * deployment-held one, #121) is never asked for again, so a deployment with a shared credential
+ * configured issues no extra requests at all, and neither does a dashboard of purely local
+ * workspaces. The bound on request volume is therefore "at most one per credentialed Provider-backed
+ * workspace the dashboard cannot otherwise show" — and web/lib/workspaceDiscovery.js caps even that at
+ * one attempt per workspace per page-session.
+ */
+export function workspacesNeedingOwnListing(instances, workspaces, hasCredential) {
+  const representedIds = new Set((instances ?? []).map((inst) => inst.workspace?.id).filter(Boolean))
+  return (workspaces ?? [])
+    .filter((workspace) => workspace?.id && !representedIds.has(workspace.id))
+    .filter((workspace) => LISTABLE_PROVIDERS.includes(workspace.provider))
+    .filter((workspace) => hasCredential(workspace.id))
+    .map((workspace) => workspace.id)
+}
+
 // The join itself: every workspace in `workspaces` (a `GET /api/workspaces` listing — archived ones
 // excluded by the caller not passing `?archived=1`, the same convention `ArchivedWorkspacesPanel`'s own
 // separate fetch already uses) that has no row at all in `instances` (`GET /api/instances`) becomes its

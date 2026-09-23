@@ -36,6 +36,7 @@ import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, worksp
 // Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79, #374) visual/split/markdown toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
 import { unrepresentedWorkspaceGroups } from './lib/dashboardWorkspaces.js'
+import { loadWorkspaceScopedInstances } from './lib/workspaceDiscovery.js'
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
 import { visualMode, refreshVisual, clearActiveCell, restoreActiveCell, activeCellSelection, focusTableCellAt } from './lib/visualMode.js'
 import { advancedMode } from './lib/advancedMode.js'
@@ -6044,6 +6045,9 @@ function ArchivedWorkspacesPanel({ onRestored }) {
 function DashboardPage() {
   const [instances, setInstances] = useState(null)
   const [workspaces, setWorkspaces] = useState(null)
+  // #131: rows from the per-workspace credentialed listings, kept separate from `instances` (the
+  // unscoped listing) so a reload of one never discards the other.
+  const [workspaceScopedInstances, setWorkspaceScopedInstances] = useState([])
   const [error, setError] = useState(null)
   const { entries: localEntries, groups: localGroups, handleChange: onLocalChange, handleRemoved: onLocalRemoved } = useLocalGroups()
   const localCount = localEntries.length
@@ -6051,17 +6055,36 @@ function DashboardPage() {
   // #122 (parent #109, docs/adr/0047): `instances` and `workspaces` load together, from the same
   // reload trigger — a registered-but-unrepresented workspace row (see `workspaceGroups` below) has to
   // stay in sync with the instances listing it's a complement of, not lag a click behind it.
+  //
+  // #131: `loadInstances()` is the *unscoped* listing, which carries no credential for any workspace
+  // (there is no global default to attach — docs/adr/0038) and so can show nothing for a
+  // Provider-backed workspace unless the deployment holds a shared credential for it (#121).
+  // `loadWorkspaceScopedInstances` fills exactly that hole, and only that hole: one credentialed,
+  // workspace-scoped listing per workspace the browser holds a credential for and this listing showed
+  // nothing for, merged in below. It issues no request at all when nothing qualifies, and at most one
+  // per qualifying workspace per page-session — see web/lib/workspaceDiscovery.js for those bounds.
   function reloadInstances() {
     Promise.all([loadInstances(), loadWorkspaces()])
       .then(([instancesData, workspacesData]) => {
         setInstances(instancesData)
         setWorkspaces(workspacesData)
         setError(null)
+        return loadWorkspaceScopedInstances(instancesData, workspacesData)
       })
+      .then((scopedRows) => setWorkspaceScopedInstances(scopedRows))
+      // Only the unscoped listing above can land here: `loadWorkspaceScopedInstances` never rejects —
+      // a workspace whose own listing fails simply contributes no rows and keeps the placeholder row
+      // #122 gives it, rather than failing a dashboard that has already rendered.
       .catch((err) => setError(err.message))
   }
 
   useEffect(reloadInstances, [])
+
+  // #131: the two listings joined — the unscoped one plus each credentialed, workspace-scoped one.
+  // They can never overlap by construction (a scoped listing is only ever fetched for a workspace the
+  // unscoped one contributed no row for), so this is a plain concatenation rather than a merge with
+  // its own identity rule to keep correct.
+  const allInstances = instances ? [...instances, ...workspaceScopedInstances] : instances
 
   // #301: with advanced mode off the dashboard listing shows only local
   // instances — Azure-DevOps-backed rows are hidden until it's turned on.
@@ -6069,16 +6092,20 @@ function DashboardPage() {
   // master-detail and swimlane views from one place, and leaves the
   // untouched `instances` for the archived panels below.
   const visibleInstances =
-    instances && !advancedMode.value ? instances.filter((inst) => !isAzureDevOpsBacked(inst)) : instances
+    allInstances && !advancedMode.value ? allInstances.filter((inst) => !isAzureDevOpsBacked(inst)) : allInstances
 
   // #122: every registered workspace contributing zero rows to `instances` gets a placeholder group
   // of its own (web/lib/dashboardWorkspaces.js) — computed from the *raw*, unfiltered `instances`,
   // never `visibleInstances`, so an Azure-DevOps-backed workspace #301 is hiding populated rows for
   // isn't miscounted as "unrepresented" merely because its own rows were filtered out above; its
   // placeholder is filtered by the exact same #301 rule instead, right below.
+  //
+  // #131: computed from `allInstances`, so a workspace whose own credentialed listing just supplied
+  // its rows stops being "unrepresented" and loses its placeholder — which is the whole point of
+  // fetching them.
   const workspaceGroups =
-    instances && workspaces
-      ? unrepresentedWorkspaceGroups(instances, workspaces).filter((group) => advancedMode.value || !group.isAzureDevOps)
+    allInstances && workspaces
+      ? unrepresentedWorkspaceGroups(allInstances, workspaces).filter((group) => advancedMode.value || !group.isAzureDevOps)
       : []
 
   return html`

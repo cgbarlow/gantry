@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { listRegistry } from '../lib/registry.js'
 import { listRegisteredInstances, registerInstance } from '../lib/instanceRegistry.js'
 import { registerWorkspace } from '../lib/workspaceRegistry.js'
+import { AuthenticationError } from '../lib/providerErrors.js'
 import { withScratchInstances } from './helpers/lifecycle.js'
 import { createFakeGitHubServer, withFakeGitHubServer, GITHUB_OWNER, GITHUB_REPOSITORY, GITHUB_VALID_PAT } from './helpers/fakeGitHubServer.js'
 import { withFakeGitLabServer, GITLAB_NAMESPACE, GITLAB_REPOSITORY, GITLAB_VALID_PAT } from './helpers/fakeGitLabServer.js'
@@ -167,5 +168,99 @@ test('listRegistry never re-discovers a workspace that already has a registered 
         assert.equal(listFolderCalls(), 0)
       }
     )
+  })
+})
+
+// ---------- #131: a workspace-scoped listing ----------
+// `listRegistry`'s own `options.workspaceId` — what `GET /api/workspaces/:id/instances` is built on.
+// The credential a scoped listing carries belongs to exactly one workspace (docs/adr/0038), so the
+// listing it drives must never reach beyond that workspace, for discovery or for rows.
+
+test('listRegistry scoped to one workspace discovers and lists that workspace only — a second workspace\'s repo is never touched', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    await withFakeGitHubServerCountingListFolder(
+      { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: 'pat-for-a', files: SEED_FILES },
+      async ({ baseUrl: baseUrlA, listFolderCalls: listFolderCallsA }) => {
+        await withFakeGitHubServerCountingListFolder(
+          // B's repo only accepts its own credential — it must never get the chance to reject A's.
+          { owner: 'other-owner', repository: 'other-repo', validPat: 'pat-for-b', files: SEED_FILES },
+          async ({ baseUrl: baseUrlB, listFolderCalls: listFolderCallsB }) => {
+            const workspaceA = registerWorkspace(
+              { provider: 'github', location: { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, baseUrl: baseUrlA } },
+              { instancesDir }
+            )
+            registerWorkspace(
+              { provider: 'github', location: { owner: 'other-owner', repository: 'other-repo', baseUrl: baseUrlB } },
+              { instancesDir }
+            )
+
+            const rows = await listRegistry({ instancesDir, pat: 'pat-for-a', workspaceId: workspaceA.id })
+            assert.deepEqual(rows.map((row) => row.slug), ['found-one'])
+            assert.equal(rows[0].workspace.id, workspaceA.id)
+
+            assert.equal(listFolderCallsA(), 1)
+            // B was never listed, so A's credential was never attempted against it.
+            assert.equal(listFolderCallsB(), 0)
+            assert.deepEqual(
+              listRegisteredInstances({ instancesDir }).map((entry) => entry.scopeId),
+              [workspaceA.id]
+            )
+          }
+        )
+      }
+    )
+  })
+})
+
+test('listRegistry scoped to one workspace leaves every other workspace\'s already-registered rows out of the result', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    await withFakeGitHubServer({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: SEED_FILES }, async (baseUrl) => {
+      const workspace = registerWorkspace(
+        { provider: 'github', location: { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, baseUrl } },
+        { instancesDir }
+      )
+      const other = registerWorkspace(
+        { provider: 'github', location: { owner: 'other-owner', repository: 'other-repo', baseUrl } },
+        { instancesDir }
+      )
+      registerInstance('someone-elses', { kind: 'github', workspaceId: other.id }, { instancesDir })
+
+      const rows = await listRegistry({ instancesDir, pat: GITHUB_VALID_PAT, workspaceId: workspace.id })
+      assert.deepEqual(rows.map((row) => row.slug), ['found-one'])
+    })
+  })
+})
+
+test('listRegistry unscoped is unchanged by #131 — it still spans every workspace and still swallows a rejected credential', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    await withFakeGitHubServer({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: SEED_FILES }, async (baseUrl) => {
+      registerWorkspace({ provider: 'github', location: { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, baseUrl } }, { instancesDir })
+      // No `surfaceAuthenticationErrors`: a rejected credential must shorten the listing, never fail
+      // the whole request — the pre-#131 contract every `GET /api/instances` caller relies on.
+      assert.deepEqual(await listRegistry({ instancesDir, pat: 'not-the-real-pat' }), [])
+    })
+  })
+})
+
+test('listRegistry with surfaceAuthenticationErrors rethrows a rejected credential instead of reporting an empty workspace', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    await withFakeGitHubServer({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: SEED_FILES }, async (baseUrl) => {
+      const workspace = registerWorkspace(
+        { provider: 'github', location: { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, baseUrl } },
+        { instancesDir }
+      )
+      await assert.rejects(
+        () => listRegistry({ instancesDir, pat: 'not-the-real-pat', workspaceId: workspace.id, surfaceAuthenticationErrors: true }),
+        (err) => {
+          assert.ok(err instanceof AuthenticationError)
+          // The credential never appears in the error a caller would go on to log or render.
+          assert.ok(!err.message.includes('not-the-real-pat'))
+          return true
+        }
+      )
+      // Nothing was registered on a failed attempt — a later request with a working credential still
+      // discovers this workspace from scratch.
+      assert.deepEqual(listRegisteredInstances({ instancesDir }), [])
+    })
   })
 })

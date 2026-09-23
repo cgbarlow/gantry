@@ -18,6 +18,7 @@ import { renderEngine, setRenderEngine } from '../lib/renderEngine.js'
 import { pandocWasmState } from '../lib/pandocWasm.js'
 import { apiFetch, apiFetchForInstance, cachedWorkspaceIdForSlug } from '../lib/apiFetch.js'
 import { ensureWriteAccessChecked } from '../lib/writeAccess.js'
+import { resetWorkspaceDiscovery } from '../lib/workspaceDiscovery.js'
 import { IdentityPicker } from '../lib/identityPicker.js'
 
 // #126 (parent #109, docs/adr/0047): the Settings-screen twin of web/app.js's own
@@ -807,6 +808,11 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
 
   function handleSetPat() {
     setPatForWorkspace(workspace.id, patDraft)
+    // #131: a newly entered credential is genuinely something new to try, so the dashboard's
+    // once-per-page-session bound on this workspace's own listing request is lifted — otherwise
+    // correcting a credential the Provider had rejected would need a full page reload before that
+    // workspace's designs could appear.
+    resetWorkspaceDiscovery(workspace.id)
     setPatDraft('')
     setPatStatus('PAT saved \u2014 used for this workspace\u2019s instances from now on.')
   }
