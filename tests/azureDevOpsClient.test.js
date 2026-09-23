@@ -521,3 +521,50 @@ test('listBranchCommits returns commits on a branch diffed against main (WI198)'
     assert.deepEqual(empty, [])
   })
 })
+
+test('getCommitDiffs reports ahead/behind counts and merge-base-relative changes between two branches (#140)', async () => {
+  await withFakeAzureDevOpsServer({ '/a.md': 'v1\n' }, async (baseUrl) => {
+    const c = client(baseUrl)
+    await c.createBranch('feature')
+    // main and the branch each pick up their own, independent edit after the fork.
+    await c.writeFile('/a.md', 'main v2\n', { branch: 'main' })
+    await c.writeFile('/b.md', 'feature only\n', { branch: 'feature' })
+
+    const diff = await c.getCommitDiffs('feature', 'main', { diffCommonCommit: true })
+    assert.equal(diff.aheadCount, 1) // main has one commit feature lacks
+    assert.equal(diff.behindCount, 1) // feature has one commit main lacks
+    assert.equal(typeof diff.commonCommit, 'string')
+    // Merge-base-relative (diffCommonCommit: true): only what main changed since the fork —
+    // never feature's own /b.md addition, the #140 bug this call replaced.
+    assert.deepEqual(diff.changes, [{ item: { path: '/a.md', isFolder: false }, changeType: 'edit' }])
+    assert.equal(diff.allChangesIncluded, true)
+  })
+})
+
+test('getCommitDiffs warns when Azure DevOps truncates the diff (allChangesIncluded: false, more than $top=2000 changed paths)', async () => {
+  const seedFiles = Object.fromEntries(Array.from({ length: 2001 }, (_, i) => [`/f${i}.md`, 'v1\n']))
+  await withFakeAzureDevOpsServer(seedFiles, async (baseUrl) => {
+    const c = client(baseUrl)
+    await c.createBranch('stage')
+    // main picks up 2001 independent edits after the fork — one more than getCommitDiffs's own $top=2000.
+    await c.writeFiles(
+      Object.keys(seedFiles).map((path) => ({ path, content: 'v2\n' })),
+      { branch: 'main', message: 'bulk update' }
+    )
+
+    const warnings = []
+    const originalWarn = console.warn
+    console.warn = (msg) => warnings.push(msg)
+    let diff
+    try {
+      diff = await c.getCommitDiffs('stage', 'main', { diffCommonCommit: true })
+    } finally {
+      console.warn = originalWarn
+    }
+
+    assert.equal(diff.allChangesIncluded, false)
+    assert.equal(diff.changes.length, 2000)
+    assert.equal(warnings.length, 1)
+    assert.match(warnings[0], /allChangesIncluded/)
+  })
+})

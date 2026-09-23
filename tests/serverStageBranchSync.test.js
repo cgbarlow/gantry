@@ -71,6 +71,51 @@ test('GET /api/instance stageSync.behind + behindFiles correct when behind (main
   }
 })
 
+test('#140: GET /api/instance stageSync.behindFiles never lists the branch\'s own edits, only main\'s, when both have diverged', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-sync-'))
+  try {
+    await withFakeAzureDevOpsServer(
+      {
+        organization: ORGANIZATION,
+        project: PROJECT,
+        repository: REPOSITORY,
+        validPat: VALID_PAT,
+        files: {
+          '/gantry-workspace/my-slug/instance.yaml': 'definition: design\nslug: my-slug\nstage: shape\n',
+          '/gantry-workspace/my-slug/modules/context.md': moduleContent('old'),
+          '/gantry-workspace/my-slug/modules/other.md': moduleContent('old other'),
+        },
+      },
+      async (adoBaseUrl) => {
+        registerInstance('my-slug', { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl }, { instancesDir })
+        const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
+        await client.createBranch('gantry-workspace/my-slug/shape')
+        // #140's exact reported bug: a re-opened stage resolving review comments
+        // on its own files (here: two) saw every one of those files reported
+        // "behind main", once main had picked up any commit of its own at all —
+        // the old snapshot-diff-with-no-merge-base couldn't tell "the branch
+        // changed this" from "main changed this".
+        await client.writeFile('/gantry-workspace/my-slug/modules/context.md', moduleContent('resolved on stage'), { branch: 'gantry-workspace/my-slug/shape' })
+        await client.writeFile('/gantry-workspace/my-slug/modules/other.md', moduleContent('also resolved on stage'), { branch: 'gantry-workspace/my-slug/shape' })
+        // Main, independently, gains one real new file the branch never saw.
+        await client.writeFile('/gantry-workspace/my-slug/modules/extra.md', moduleContent('extra on main'), { branch: 'main' })
+
+        await withServer(instancesDir, adoBaseUrl, async (base) => {
+          const res = await fetch(`${base}/api/instance?slug=my-slug&stage=shape`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })
+          assert.equal(res.status, 200)
+          const body = await res.json()
+          assert.equal(body.stageSync.ahead, true)
+          assert.equal(body.stageSync.behind, true)
+          // Only main's own new file — never the branch's own two edits.
+          assert.deepEqual(body.stageSync.behindFiles, ['/gantry-workspace/my-slug/modules/extra.md'])
+        })
+      }
+    )
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
 test('GET /api/instance stageSync.behind:false when main is ahead only outside this instance\'s workspace path (WI #286)', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-sync-'))
   try {
@@ -281,6 +326,9 @@ test('POST /api/instance/stage-branch/sync merges divergent non-conflicting chan
           const before = await (await fetch(`${base}/api/instance?slug=my-slug&stage=shape`, { headers: { Authorization: basicAuthHeader(VALID_PAT) } })).json()
           assert.equal(before.stageSync.behind, true)
           assert.equal(before.stageSync.ahead, true)
+          // #140: only main's own change (other.md) — never the branch's own
+          // divergent edit to context.md.
+          assert.deepEqual(before.stageSync.behindFiles, ['/gantry-workspace/my-slug/modules/other.md'])
 
           const syncRes = await fetch(`${base}/api/instance/stage-branch/sync?slug=my-slug&stage=shape`, { method: 'POST', headers: { Authorization: basicAuthHeader(VALID_PAT) } })
           assert.equal(syncRes.status, 200)

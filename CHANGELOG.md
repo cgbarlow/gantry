@@ -17,6 +17,17 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.16-beta — 2026-09-23
+
+### Fixed
+
+- **The Azure DevOps stage-sync advisory no longer reports a stage branch's own edits as "behind
+  main"** (#140). Resolving review comments — or making any other edit — on a re-opened stage
+  used to trip the "Sync to pull the latest" banner and list every file the stage itself had just
+  changed, even when main hadn't moved. The advisory, and "Sync from main"'s own choice between a
+  fast-forward and a pull request, now agree on the true ahead/behind direction and list only the
+  files main actually changed since the stage branch diverged from it.
+
 ## 0.9.15-beta — 2026-09-23
 
 ### Fixed
