@@ -66,6 +66,9 @@ test('dashboard: titled "Workspaces", master-detail is the default view, and its
         // instances it holds show up as their own cards in the detail column, sorted by slug.
         await page.waitForSelector('.instance-card', { timeout: 10_000 })
         assert.equal(await page.locator('.detail-pane h2').textContent(), 'default')
+        // A server directory workspace can't be created into from the New Instance step, so it gets no
+        // "+ New Instance" button (the topbar's "+ New Workspace" is the way in).
+        assert.equal(await page.locator('.workspace-detail-head').getByRole('link', { name: '+ New Instance' }).count(), 0)
         assert.equal(await page.locator('.instance-card').count(), 2)
         const card = page.locator('.instance-card').filter({ hasText: 'alpha-initiative' })
         assert.equal(await card.locator('.name').textContent(), 'alpha-initiative')
@@ -185,6 +188,9 @@ test('dashboard: selecting a workspace with multiple instances shows every one o
             await page.waitForSelector('.instance-card', { timeout: 10_000 })
             assert.equal(await page.locator('.detail-pane h2').textContent(), REPOSITORY)
             assert.match(await page.locator('.workspace-subtitle').textContent(), new RegExp(`${ORGANIZATION}/${PROJECT}`))
+            // "+ New Instance" beside the workspace's title opens the New Instance step scoped to it.
+            const newInstance = page.locator('.workspace-detail-head').getByRole('link', { name: '+ New Instance' })
+            assert.match(await newInstance.getAttribute('href'), /^\/new-instance\?workspace=[^&]+$/)
 
             // Both instances, each its own card, each independently showing definition/assignee/status and its own Check/Edit actions.
             const cards = page.locator('.instance-card')

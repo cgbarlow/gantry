@@ -900,6 +900,8 @@ main.dashboard {
 .master-detail .detail-pane { padding: 28px; }
 .master-detail .detail-pane h2 { font-family: var(--font-display); font-weight: 600; font-size: 20px; margin: 0 0 4px; }
 .master-detail .workspace-subtitle { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); margin: 0 0 8px; }
+.master-detail .workspace-detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.master-detail .workspace-detail-head .btn { flex: none; }
 .master-detail .workspace-settings-link { font-size: 13px; margin: 0 0 20px; }
 .instance-card .field-label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 2px; }
 .instance-card .assignee { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
