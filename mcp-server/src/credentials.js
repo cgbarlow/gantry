@@ -7,8 +7,17 @@ export function parseWorkspacePats(raw) {
   let parsed
   try {
     parsed = JSON.parse(raw)
-  } catch (err) {
-    throw new Error(`GANTRY_MCP_WORKSPACE_PATS must be valid JSON: ${err.message}`)
+  } catch {
+    // #130's rule 1 ("names only, never values") applies to this message too. `JSON.parse`'s own
+    // error text embeds the first ~10 characters of its input (`Unexpected token 'g',
+    // "ghp_ABCDEF"... is not valid JSON`), so interpolating it here printed a prefix of the
+    // operator's PAT straight into the deploy log — and the likeliest way to reach this branch at
+    // all is pasting a bare PAT where the map was expected. Mirrors `lib/workspaceBootstrap.js`'s
+    // `parseSharedWorkspacePats`, by hand, for the reason given in that function's own doc comment.
+    throw new Error(
+      'GANTRY_MCP_WORKSPACE_PATS must be valid JSON: a JSON object mapping workspace id to PAT, {"<workspaceId>":"<pat>"}. ' +
+        'The value it is set to is deliberately not shown here — it holds credentials.'
+    )
   }
 
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {

@@ -358,6 +358,27 @@ test('parseSharedWorkspacePats: malformed JSON fails loud, one line naming GANTR
   )
 })
 
+// #130's rule 1 ("names only, never values") applied to this parser's own error. The likeliest way to
+// reach the invalid-JSON branch is pasting a bare PAT where the map was expected — and `JSON.parse`'s
+// own message embeds the first ~10 characters of its input, which used to be interpolated straight
+// into this error and from there into the deploy log.
+test('parseSharedWorkspacePats: an invalid-JSON error never echoes any part of the value — it holds credentials', () => {
+  const pastedBarePat = 'ghp_SECRETTOKENVALUE0123456789'
+  assert.throws(
+    () => parseSharedWorkspacePats(pastedBarePat),
+    (err) => {
+      assert.equal(err.message.includes(pastedBarePat), false, 'full value leaked')
+      // Any run of 4+ characters of the value is already too much of a credential to log.
+      for (let i = 0; i + 4 <= pastedBarePat.length; i += 1) {
+        const fragment = pastedBarePat.slice(i, i + 4)
+        assert.equal(err.message.includes(fragment), false, `value fragment "${fragment}" leaked into: ${err.message}`)
+      }
+      assert.match(err.message, /^GANTRY_SHARED_WORKSPACE_PATS must be valid JSON:/)
+      return true
+    }
+  )
+})
+
 test('parseSharedWorkspacePats: a JSON array (not an object) fails loud, naming the env var', () => {
   assert.throws(
     () => parseSharedWorkspacePats(JSON.stringify(['workspace-a'])),
