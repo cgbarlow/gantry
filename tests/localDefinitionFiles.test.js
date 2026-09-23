@@ -287,6 +287,80 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
       assert.deepEqual(read.modules, diskProjection.modules)
     })
   })
+
+  // #148 (spec #147): the local-workspace Definition copy keeps every key the server-side lifecycle
+  // does — Stage `read-only-modules` and `copied-from`, Artefact `filename`, `document-control`,
+  // `satisfies-gate` and `copied-from` — and projects them exactly as the server does, so the two
+  // booleans appear only when false.
+  test('round-trips every Stage and Artefact key, and matches the server-side projection for the same structure', async () => {
+    const provenance = { definition: 'elsewhere', version: 2, element: 'artefact:letter' }
+    const withEveryKey = {
+      ...FIXTURE_STRUCTURE,
+      stages: [
+        FIXTURE_STRUCTURE.stages[0],
+        { id: 'review', title: 'Review', purpose: 'Review it', gate: 'sign-off', modules: ['background'], readOnlyModules: ['background'], copiedFrom: { ...provenance, element: 'stage:review' } },
+      ],
+      artefacts: [
+        FIXTURE_STRUCTURE.artefacts[0],
+        {
+          id: 'letter', title: 'Letter', purpose: 'For the reader', template: 'templates/letter.md.tmpl', gate: 'sign-off', requires: ['background.summary'],
+          filename: '{instance.name} - Letter', documentControl: false, satisfiesGate: false, copiedFrom: provenance,
+        },
+      ],
+    }
+
+    const handle = new MemDirHandle()
+    await writeLocalDefinitionStructure(handle, 'wi384-fixture', 1, withEveryKey)
+    const yamlText = await (await (await (await (await (await handle.getDirectoryHandle('definitions')).getDirectoryHandle('wi384-fixture')).getDirectoryHandle('1')).getFileHandle('definition.yaml')).getFile()).text()
+    assert.match(yamlText, /read-only-modules:/)
+    assert.match(yamlText, /document-control: false/)
+    assert.match(yamlText, /satisfies-gate: false/)
+
+    const read = await readLocalDefinitionStructure(handle, 'wi384-fixture', 1)
+    const review = read.stages.find((s) => s.id === 'review')
+    const letter = read.artefacts.find((a) => a.id === 'letter')
+    assert.deepEqual(review.readOnlyModules, ['background'])
+    assert.equal('readOnlyModules' in read.stages[0], false)
+    assert.equal(letter.filename, '{instance.name} - Letter')
+    assert.equal(letter.documentControl, false)
+    assert.equal(letter.satisfiesGate, false)
+    assert.deepEqual(letter.copiedFrom, provenance)
+    assert.equal('documentControl' in read.artefacts[0], false)
+    assert.equal('satisfiesGate' in read.artefacts[0], false)
+
+    await withScratchInstances(async (definitionsDir) => {
+      createBlankDefinition('wi384-fixture', { definitionsDir })
+      writeDefinitionVersion('wi384-fixture', 1, withEveryKey, { definitionsDir })
+      const diskProjection = definitionVersionProjection(loadDefinition('wi384-fixture', { definitionsDir, version: 1 }))
+      assert.deepEqual(read, diskProjection)
+    })
+  })
+
+  // #148: an explicit `true` on disk is kept in the file but left out of the projection, as
+  // lib/definition.js's definitionVersionProjection does — only `false` is projected.
+  test('keeps document-control / satisfies-gate: true on disk but leaves them out of the projection, matching the server', async () => {
+    const withTrue = {
+      ...FIXTURE_STRUCTURE,
+      artefacts: [{ ...FIXTURE_STRUCTURE.artefacts[0], documentControl: true, satisfiesGate: true }],
+    }
+
+    const handle = new MemDirHandle()
+    await writeLocalDefinitionStructure(handle, 'wi384-fixture', 1, withTrue)
+    const yamlText = await (await (await (await (await (await handle.getDirectoryHandle('definitions')).getDirectoryHandle('wi384-fixture')).getDirectoryHandle('1')).getFileHandle('definition.yaml')).getFile()).text()
+    assert.match(yamlText, /document-control: true/)
+    assert.match(yamlText, /satisfies-gate: true/)
+
+    const read = await readLocalDefinitionStructure(handle, 'wi384-fixture', 1)
+    assert.equal('documentControl' in read.artefacts[0], false)
+    assert.equal('satisfiesGate' in read.artefacts[0], false)
+
+    await withScratchInstances(async (definitionsDir) => {
+      createBlankDefinition('wi384-fixture', { definitionsDir })
+      writeDefinitionVersion('wi384-fixture', 1, withTrue, { definitionsDir })
+      const diskProjection = definitionVersionProjection(loadDefinition('wi384-fixture', { definitionsDir, version: 1 }))
+      assert.deepEqual(read, diskProjection)
+    })
+  })
 })
 
 describe('templates and reference docx', () => {

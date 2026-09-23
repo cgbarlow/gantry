@@ -17,6 +17,30 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.3-beta — 2026-09-23
+
+### Fixed
+
+- **Publishing a Definition keeps where its Stages and Artefacts were copied from** (#148).
+  Publishing a draft used to drop the "from <definition> v<n>" provenance on copied Stages and
+  Artefacts, though it was kept on Modules and Fields. It now survives publish, a new draft
+  version and clone, like every other key.
+- **Library repo Definitions keep their filename patterns and select options** (#148). Reading a
+  Definition from an Azure DevOps, GitHub, GitLab or Bitbucket repo lost each Artefact's
+  `filename:` pattern and each select Field's `options`, `multiple` and `default`. So a Library
+  copy of any Definition with select Fields, recruitment-onboarding included, failed to load, and
+  publishing one in a Provider workspace was refused. All of them now come through intact.
+  Publishing in a Provider workspace now also checks filename patterns, as a local workspace
+  already did.
+
+### Changed
+
+- **Every Definition key now survives save, new draft, clone, publish, promote and Library
+  load** (#148), in a local workspace's own Definition copy too. Three keys used by the upcoming
+  recruitment-onboarding v3 (`document-control` and `satisfies-gate` on an Artefact,
+  `read-only-modules` on a Stage) are now kept everywhere, though they don't change anything yet.
+  Existing Definitions load and render exactly as before.
+
 ## 0.9.2-beta — 2026-09-23
 
 ### Added

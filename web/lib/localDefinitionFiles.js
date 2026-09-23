@@ -99,7 +99,7 @@ export function blankLocalDefinitionStructure(id, title) {
 // loadDefinition/findDefinitionProblems both start from.
 // ---------------------------------------------------------------------------
 
-/** Verbatim port of `lib/definition.js`'s `buildDefinitionYamlObject`, minus the disk-only `onDiskRaw` fallback (a local-workspace caller always has the full structure already in memory — see this file's header comment). */
+/** Port of `lib/definition.js`'s `buildDefinitionYamlObject`, minus the disk-only `onDiskRaw` fallback (a local-workspace caller always has the full structure already in memory — see this file's header comment) and minus its `keyOf` kebab-case input form (#148): this takes only the camelCase structure, so a raw parsed `definition.yaml` loses `read-only-modules`, `copied-from`, `document-control` and `satisfies-gate` here. */
 export function renderDefinitionYaml(structure) {
   const obj = {}
   obj.id = structure.id
@@ -109,6 +109,7 @@ export function renderDefinitionYaml(structure) {
   obj.description = structure.description
   obj.stages = (structure.stages ?? []).map((s) => {
     const entry = { id: s.id, title: s.title, purpose: s.purpose, gate: s.gate, modules: s.modules ?? [] }
+    if (s.readOnlyModules !== undefined) entry['read-only-modules'] = s.readOnlyModules
     if (s.example !== undefined) entry.example = s.example
     if (s.copiedFrom !== undefined) entry['copied-from'] = s.copiedFrom
     return entry
@@ -116,6 +117,8 @@ export function renderDefinitionYaml(structure) {
   obj.artefacts = (structure.artefacts ?? []).map((a) => {
     const entry = { id: a.id, title: a.title, purpose: a.purpose, template: a.template, gate: a.gate, requires: a.requires ?? [] }
     if (a.filename !== undefined) entry.filename = a.filename
+    if (a.documentControl !== undefined) entry['document-control'] = a.documentControl
+    if (a.satisfiesGate !== undefined) entry['satisfies-gate'] = a.satisfiesGate
     if (a.copiedFrom !== undefined) entry['copied-from'] = a.copiedFrom
     return entry
   })
@@ -127,7 +130,7 @@ export function parseDefinitionYaml(text) {
   return parseYAML(text) ?? {}
 }
 
-/** Verbatim port of `lib/definition.js`'s `buildModuleYamlObject`. */
+/** Port of `lib/definition.js`'s `buildModuleYamlObject`, minus its `keyOf` kebab-case input form (#148): this takes only the camelCase module, so a raw parsed module YAML loses `required-at` and `copied-from` here. */
 export function renderModuleYaml(mod) {
   const obj = { id: mod.id, title: mod.title, purpose: mod.purpose }
   obj.fields = (mod.fields ?? []).map((f) => {
@@ -282,13 +285,19 @@ export async function readLocalDefinitionStructure(handle, definitionId, version
     stages: (raw.stages ?? []).map((s) =>
       withOptional(
         { id: s.id, title: s.title, purpose: s.purpose, gate: s.gate, modules: s.modules ?? [] },
-        { example: s.example, copiedFrom: s['copied-from'] }
+        { readOnlyModules: s['read-only-modules'], example: s.example, copiedFrom: s['copied-from'] }
       )
     ),
     artefacts: (raw.artefacts ?? []).map((a) =>
       withOptional(
         { id: a.id, title: a.title, purpose: a.purpose, template: a.template, gate: a.gate, requires: a.requires ?? [] },
-        { filename: a.filename, copiedFrom: a['copied-from'] }
+        // #148: projected only when false, as lib/definition.js's definitionVersionProjection does.
+        {
+          filename: a.filename,
+          documentControl: a['document-control'] === false ? false : undefined,
+          satisfiesGate: a['satisfies-gate'] === false ? false : undefined,
+          copiedFrom: a['copied-from'],
+        }
       )
     ),
     modules,
