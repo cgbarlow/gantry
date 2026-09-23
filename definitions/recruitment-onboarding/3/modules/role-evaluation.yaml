@@ -1,0 +1,35 @@
+id: role-evaluation
+title: Role Evaluation
+purpose: >
+  Record how the role was evaluated and what the evaluation concluded — the band, level or
+  grade, and the decision that followed.
+
+  Role evaluation is one of two steps in this process that is known to contain more detail than
+  anyone has written down. Until it is documented properly, this module is the only record that
+  it happened at all, so err towards saying too much in `method`.
+
+fields:
+  - id: method
+    title: How it was evaluated
+    type: markdown
+    required: true
+    guidance: >
+      What the evaluation actually involved, who carried it out, and against what. If the
+      answer is "the usual process", write down what the usual process is — this step has no
+      documented definition, and the next person will be reading this to find one.
+
+  - id: outcome
+    title: Outcome
+    type: markdown
+    required: true
+    guidance: >
+      The band, level or grade the role evaluated to, and the date. If the evaluation changed
+      the role as originally described, say what changed.
+
+  - id: notes
+    title: Notes
+    type: markdown
+    required: false
+    guidance: >
+      Anything the evaluation surfaced that does not belong in the outcome — a comparison that
+      was hard to make, a precedent set, a disagreement resolved.

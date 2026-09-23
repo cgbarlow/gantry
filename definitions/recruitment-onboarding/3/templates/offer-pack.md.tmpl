@@ -1,0 +1,78 @@
+# <%~ it.instance.name || it.instance.slug %>: Offer Pack
+<%
+  /* The outward-facing half of the `onboarding-approved` gate, written for the appointed
+     candidate. Carries the same core field set as `appointment-case` so it cannot become
+     the soft path through the gate (see the artefact's comment in definition.yaml), but
+     deliberately carries no selection or vetting content — nothing about how other candidates
+     were assessed belongs in a document that leaves the organisation.
+
+     v2 (#90): named from the candidate and the start date (definition.yaml's `filename:`) —
+     `selection.candidate-name` is in `requires` as `?` purely so the pattern can reach it; it
+     is deliberately not rendered as a section below, for the same reason this document carries
+     no other selection content. `contract.start-date` is formatted with `formatDate()` so a
+     candidate reads "3 November 2026" rather than the stored ISO value. */
+%>
+# Your role
+
+## Role summary
+
+<%~ na(it.modules.role.summary) %>
+
+## Team and reporting line
+
+<%~ na(it.modules.role.team) %>
+
+## Key responsibilities
+
+<% it.modules.role.responsibilities.forEach(function(item) { %>- <%~ item %>
+<% }) %>
+## Engagement type
+
+<%~ na(it.modules.engagement.type) %>
+
+# Your offer
+
+## Terms
+
+<%~ na(it.modules.offer.terms) %>
+
+## Status
+
+<%~ na(it.modules.offer.status) %>
+
+# Your contract
+
+## Terms
+
+<%~ na(it.modules.contract['terms-summary']) %>
+
+## Signatures
+
+<%~ na(it.modules.contract.signatures) %>
+
+## Start date
+
+<%~ na(formatDate(it.modules.contract['start-date'])) %>
+<% if (it.modules.contract['start-date-changes']) { %>
+## Start date changes
+
+<%~ it.modules.contract['start-date-changes'] %>
+<% } %>
+# Payroll
+
+## Details requested from you
+
+<%~ na(it.modules.payroll['details-requested']) %>
+
+## Validation outcome
+
+<%~ na(it.modules.payroll['validation-outcome']) %>
+
+## Confirmation
+
+<%~ na(it.modules.payroll.confirmed) %>
+<% if (it.modules['open-questions'].questions && it.modules['open-questions'].questions.length) { %>
+# Open questions
+
+<% it.modules['open-questions'].questions.forEach(function(item) { %>- <%~ item %>
+<% }) %><% } %>
