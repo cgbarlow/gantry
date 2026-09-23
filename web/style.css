@@ -1639,9 +1639,15 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-map-col-head .t { font-family: var(--font-display); font-weight: 600; font-size: 13px; }
 .defn-map-chip { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg); font-size: 12px; cursor: pointer; }
 .defn-map-chip.selected { background: var(--text); color: var(--bg); border-color: var(--text); }
+.defn-field-count { margin-left: auto; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.defn-map-chip.selected .defn-field-count, .defn-outline-node.selected .defn-field-count { color: inherit; }
+/* A module the focused document(s) draw no fields from: still clickable, visibly out of the flow. */
+.defn-map-chip.ghost { opacity: 0.4; border-style: dashed; background: transparent; }
+.defn-outline-node.ghost { opacity: 0.4; }
 .defn-map-gate { margin-top: 6px; padding-top: 6px; border-top: var(--hairline) solid var(--line); }
 .defn-map-achip { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: var(--radius); font-size: 12px; cursor: pointer; margin-top: 3px; border: var(--hairline) solid transparent; }
 .defn-map-achip.selected { background: var(--text); color: var(--bg); }
+.defn-map-achip.selected .muted { color: inherit; opacity: 0.75; }
 
 /* Focus pane */
 .defn-focus { padding: 14px 18px 30px; }
