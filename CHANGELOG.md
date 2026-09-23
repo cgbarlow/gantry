@@ -17,6 +17,34 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.5-beta — 2026-09-23
+
+### Changed
+
+- **The recruitment-onboarding v3 draft works out the approval route from the engagement type
+  instead of asking for it** (#154). The Requisition Brief and Hire Record now print "Standard
+  approval route for this engagement type": Full approval chain for Fixed term or Permanent,
+  Shortened approval chain for Vendor or Contractor, and "— not stated —" until a type is chosen.
+  The separate Approval route Field is gone, so it can't contradict the type. A new optional
+  **Route variation** Field records a delegation within the chain, or a deliberate change to the
+  route, and who accepted it. It is printed under the route line only when filled.
+- **v3's Requisition sign-off is now called the "Approved to Recruit" confirmation** (#154). The
+  Stage and the Requisition Brief say that the approval chain decides first and role evaluation
+  follows. The brief ends with a "How the role was evaluated" section.
+- **v3's internal documents now show when something is missing** (#154). For any non-permanent
+  engagement, the Requisition Brief and Hire Record always show the term, and print
+  "— not stated —" when it is blank. For a "Cleared with conditions" vetting outcome, the
+  Selection Report and Hire Record always show the conditions heading the same way, and the
+  Selection Report warns when vetting reads Not cleared.
+- **v3 vetting offers "Identity verification" as a check**, and reserve finalists released after
+  the offer is accepted can be recorded later (#154). Process gaps can now be written at
+  Requisition and Selection; they are still printed only in the Hire Record.
+- **v3's first two Gates each owe one Field fewer** (#154): approved-to-recruit
+  drops from 9 to 8 with the approval route gone, and candidate-selected from 10 to 9 because the
+  Selection Report no longer owes the role summary, which Requisition already signed off. The
+  Hire Record also owes one fewer at ready-to-start. v2 is unchanged, so Instances pinned to it
+  are unaffected.
+
 ## 0.9.4-beta — 2026-09-23
 
 ### Changed

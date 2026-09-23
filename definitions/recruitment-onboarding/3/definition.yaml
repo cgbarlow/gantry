@@ -12,8 +12,14 @@ stages:
     title: Requisition
     purpose: >
       Establish what the role is, how the person will be engaged, and what it
-      evaluated to, as the case for recruiting. Owned by the requesting
-      department. Signing this stage off is the approval to recruit.
+      evaluated to. Owned by the requesting department. In the current process
+      the approval chain (full or shortened, as the engagement type fixes)
+      decides on the request first and role evaluation follows; signing this
+      stage off is the "Approved to Recruit" confirmation that comes after both,
+      not the chain's own decision. Where the chain's decision is wanted before
+      evaluation, request advisory reviews on the draft Requisition Brief: a
+      review checks no gate, and each reviewer appears in the document's Review
+      and sign-off table.
     gate: approved-to-recruit
     modules:
       - role
@@ -24,7 +30,10 @@ stages:
     title: Selection
     purpose: >
       Take the approved role to market, narrow the field to one preferred
-      candidate, and complete pre-employment checks on them. Owned by HR.
+      candidate, and complete pre-employment checks on them. Owned by HR. Do
+      not sign this stage off while vetting reads Not cleared. Finalists held
+      in reserve can be recorded as released later, once the offer is
+      accepted.
     gate: candidate-selected
     modules:
       - role
@@ -73,9 +82,10 @@ artefacts:
   - id: requisition-brief
     title: Requisition Brief
     purpose: >
-      State the role, how the person will be engaged, and what the role
-      evaluated to, as the case for recruiting put to whoever signs this stage
-      off.
+      The case for recruiting, put to whoever signs this stage off as the
+      "Approved to Recruit" confirmation: the role, how the person will be
+      engaged and the approval route that fixes, and what the role evaluated
+      to.
     template: templates/requisition-brief.md.tmpl
     gate: approved-to-recruit
     requires:
@@ -86,11 +96,12 @@ artefacts:
       - engagement.type
       - engagement.term?
       - engagement.rationale
-      - engagement.approval-route
-      - role-evaluation.method
+      - engagement.route-variation?
       - role-evaluation.outcome
       - role-evaluation.notes?
+      - role-evaluation.method
       - open-questions.questions?
+      - open-questions.process-gaps?
     filename: "{instance.name} - Requisition Brief"
   - id: selection-report
     title: Selection Report
@@ -100,7 +111,7 @@ artefacts:
     template: templates/selection-report.md.tmpl
     gate: candidate-selected
     requires:
-      - role.summary
+      - role.summary?
       - advertising.channels
       - advertising.period
       - advertising.response
@@ -114,6 +125,7 @@ artefacts:
       - vetting.outcome
       - vetting.conditions?
       - open-questions.questions?
+      - open-questions.process-gaps?
     filename: "{instance.name} - Selection Report"
   - id: appointment-case
     title: Appointment Case
@@ -235,7 +247,7 @@ artefacts:
       - engagement.type
       - engagement.term?
       - engagement.rationale
-      - engagement.approval-route
+      - engagement.route-variation?
       - role-evaluation.method
       - role-evaluation.outcome
       - role-evaluation.notes?

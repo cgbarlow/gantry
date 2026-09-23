@@ -62,6 +62,50 @@ Provisioning Fields, and the Gate's bar is 13: those 11 plus the candidate name 
 that name the documents. v2's bar was also 13. The worked hire is migrated: its user ID and
 device choice are in their own Fields, and the build timing is in the build notes.
 
+### Requisition and Selection (#154)
+
+- **`engagement.approval-route` is removed.** The engagement type already fixes the route: Fixed
+  term or Permanent takes the full approval chain, Vendor or Contractor the shortened one. The
+  Requisition Brief and the Hire Record now print a derived "Standard approval route for this
+  engagement type" line instead, so the route can't be re-entered wrongly or contradict the type.
+  This overturns v1's "the one part that is genuinely content" (the v1 section below) and v2's
+  option list for the field.
+- **`engagement.route-variation` is added** (optional). A deliberate variation to the standard
+  route, or a delegation within the chain, and who accepted it, recorded as to whom and never
+  why. It is printed under the route line only when filled. The delegation sentence moves out of
+  `engagement.rationale`'s guidance, and the worked hire's delegation moves with it.
+- **The Requisition sign-off is the "Approved to Recruit" confirmation.** The Stage and Requisition
+  Brief purposes now say so, and record the model's order: the approval chain decides first and
+  role evaluation follows. Where the chain's decision is wanted before evaluation, an advisory
+  review on the draft brief carries it.
+- **The Requisition Brief** closes with "How the role was evaluated" (the method, still printed)
+  after the outcome.
+- **`vetting.checks-required` gains "Identity verification"**, which the worked hire had stored
+  outside the list.
+- **The Selection Report** always shows the Conditions heading for "Cleared with conditions",
+  printing "— not stated —" when none is written, and warns when vetting reads Not cleared, since
+  the gate can't restrict which option a select holds. The Hire Record's vetting conditions
+  follow the same rule.
+- **The term is shown for every non-permanent engagement** in the Requisition Brief and the Hire
+  Record, printing "— not stated —" when blank, so a missing term is visible to the approver.
+  These markers are deliberately not `na()`'s "— n/a —": the Field is optional, and the gap is
+  still worth showing.
+- **Reserve finalists.** `selection.unsuccessful` can be completed after Selection, once the offer
+  is accepted and finalists held in reserve are released. The Selection stage purpose says not to
+  sign off while vetting reads Not cleared.
+- **Process gaps are written where they happen.** `open-questions.process-gaps?` is in the
+  Requisition Brief's and the Selection Report's scope, so it can be written at those stages. It
+  is still printed only in the Hire Record.
+- **The Selection Report references `role.summary?`.** The summary belongs to Requisition, and
+  it is required only at approved-to-recruit (#157), so it no longer gates candidate-selected.
+- **Guidance:** the role Fields and `engagement.term` are also read by the new starter, so
+  internal remarks are kept out, and the term gives an end date where there is one. The candidate
+  name carries no other identifiers. Vetting conditions are named as the requirement to meet,
+  with who accepted it and the date, never what a check returned.
+
+The approved-to-recruit bar drops from v2's 9 bare Fields to 8, the candidate-selected bar from
+10 to 9, and the Hire Record owes one Field fewer at ready-to-start.
+
 ### Correction to v2 (E5)
 
 v2's changelog says `selection.candidate-name?` in the `requires` of `offer-pack`,

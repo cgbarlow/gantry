@@ -1,13 +1,14 @@
 id: engagement
 title: Engagement
 purpose: >
-  Record how the person will be engaged — fixed term, permanent, vendor or contractor — and
-  which approval route that choice commits the request to.
+  Record how the person will be engaged — fixed term, permanent, vendor or contractor.
 
-  The engagement type is the first branch in the process and it is consequential: a fixed-term
-  or permanent appointment takes the full approval chain, while a vendor or contractor
-  engagement takes a shortened one. Classify deliberately rather than by habit; the shortened
-  route is not a convenience.
+  The engagement type is the first branch in the process and it fixes the approval route: a
+  fixed-term or permanent appointment takes the full approval chain, while a vendor or
+  contractor engagement takes a shortened one. The route is not recorded separately — every
+  document that shows it prints it from the type. A deliberate variation to that route, or a
+  delegation within the chain, goes in `route-variation`. Classify deliberately rather than by
+  habit; the shortened route is not a convenience.
 
 fields:
   - id: type
@@ -20,16 +21,18 @@ fields:
       - Vendor
       - Contractor
     guidance: >
-      One of fixed term, permanent, vendor or contractor. For a fixed term, vendor or
-      contractor engagement, state the term or the expected duration in `term` below.
+      One of fixed term, permanent, vendor or contractor. This also fixes the approval route.
+      For a fixed term, vendor or contractor engagement, state the term or the expected
+      duration in `term` below.
 
   - id: term
     title: Term or expected duration
     type: markdown
     required: false
     guidance: >
-      For a fixed term, vendor or contractor engagement, state the term or the expected
-      duration. Leave empty for a permanent engagement.
+      For a fixed term, vendor or contractor engagement, the term or the expected duration,
+      with the end date where there is one. Leave empty for a permanent engagement. Also read
+      by the new starter, so write it as they should read it.
 
   - id: rationale
     title: Rationale
@@ -38,20 +41,17 @@ fields:
     guidance: >
       Why this engagement type and not another. If a contractor or vendor engagement is
       covering work that is ongoing, say so — that is a recurring pattern worth being able to
-      count later. Record any delegation or variation to the standard approval route here too,
-      since `approval-route` below cannot show one.
+      count later.
 
-  - id: approval-route
-    title: Approval route
-    type: select
-    required: true
-    options:
-      - Full approval chain
-      - Shortened approval chain
+  - id: route-variation
+    title: Route variation
+    type: markdown
+    required: false
     guidance: >
-      Which route this engagement type commits the request to — the full approval chain, or the
-      shortened chain used for vendor and contractor engagements — confirming that the route
-      taken matches the type recorded above.
+      Any deliberate variation to the standard approval route for this engagement type, or a
+      delegation within the chain, and who accepted it. Record that a delegation applied and
+      to whom, not why the delegator was absent. Leave empty where the standard route was
+      followed as it stands.
 
       The route, not the outcome. Who signed this stage off, and when, is the merged pull
       request behind the gate; nothing about it is written here.

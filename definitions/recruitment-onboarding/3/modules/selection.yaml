@@ -29,8 +29,10 @@ fields:
     type: text
     required: true
     guidance: >
-      Who was selected, recorded here as a short fact rather than folded into the rationale
-      below — this is also what names the documents rendered from this stage onward.
+      Who was selected: the name as it will appear on the offer, recorded here as a short fact
+      rather than folded into the rationale below. No other identifiers — not an address, date
+      of birth, personal email or phone. This names every document rendered from Selection
+      onward.
 
   - id: rationale
     title: Selection rationale
@@ -46,6 +48,7 @@ fields:
     type: markdown
     required: false
     guidance: >
-      How unsuccessful candidates were handled and when they were told. No names and no
-      individual feedback — this is a record that the process closed properly, not a file on
-      people who were not hired.
+      How unsuccessful candidates were handled and when they were told. Finalists held in
+      reserve until the offer is accepted are recorded when they are released, which may be
+      after this stage, once the offer is accepted. No names and no individual feedback — this
+      is a record that the process closed properly, not a file on people who were not hired.

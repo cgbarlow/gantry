@@ -1,17 +1,32 @@
 # <%~ it.instance.name || it.instance.slug %>: Requisition Brief
 <%
-  /* Section order follows `requisition-brief.requires` in definition.yaml, which is written in
-     render order — the list is the outline. `na()` is injected once as an Eta functionHeader by
-     lib/render.js and is in scope here without redefinition; it renders a literal "— n/a —"
-     under the heading when a bare (gate-blocking) field is blank, so a document is never
-     silently short a section. `?` entries are suppress-when-blank `<% if %>` blocks instead,
-     since they never block the gate and an empty heading would be noise.
+  /* `requisition-brief.requires` in definition.yaml is this document's authoring and Gate
+     scope, and mostly follows render order; the v3 paragraph below lists where it doesn't.
+     `na()` is injected once as an Eta functionHeader by lib/render.js and is in scope here
+     without redefinition; it renders a literal "— n/a —" under the heading when a bare
+     (gate-blocking) field is blank, so a document is never silently short a section. `?`
+     entries are mostly suppress-when-blank `<% if %>` blocks instead, since they never block
+     the gate and an empty heading would be noise.
 
      No approval section, by design. This document is the case put to whoever signs the
-     requisition stage off; the approval is that sign-off. See definition.yaml.
+     requisition stage off, as the "Approved to Recruit" confirmation; the approval is that
+     sign-off. See definition.yaml.
 
      v2 (#90): `engagement.type` is now a select, `engagement.term` is a new optional prose
-     field beside it — see modules/engagement.yaml. */
+     field beside it — see modules/engagement.yaml.
+
+     v3 (#154): `engagement.approval-route` is gone. The standard route is printed from the type
+     (Fixed term / Permanent -> full chain; Vendor / Contractor -> shortened), with
+     `engagement.route-variation` under it when present. The term heading shows whenever the
+     type is not Permanent, with "— not stated —" (not na()'s "— n/a —") when blank, so a
+     missing term is visible; the route line likewise reads "— not stated —" until a type is
+     chosen. `role-evaluation.method` moved to a closing record section after the outcome.
+     `open-questions.process-gaps?` is in `requires` so the requesting department can record a
+     gap where it happens; it is printed only in the Hire Record. */
+  const reqType = it.modules.engagement.type
+  const reqTerm = it.modules.engagement.term
+  const reqRoute = (reqType === 'Fixed term' || reqType === 'Permanent') ? 'Full approval chain'
+    : (reqType === 'Vendor' || reqType === 'Contractor') ? 'Shortened approval chain' : '— not stated —'
 %>
 # The role
 
@@ -35,25 +50,25 @@
 
 ## Engagement type
 
-<%~ na(it.modules.engagement.type) %>
-<% if (it.modules.engagement.term) { %>
+<%~ na(reqType) %>
+<% if (reqTerm || (reqType && reqType !== 'Permanent')) { %>
 ## Term or expected duration
 
-<%~ it.modules.engagement.term %>
+<%~ reqTerm || '— not stated —' %>
 <% } %>
 ## Rationale
 
 <%~ na(it.modules.engagement.rationale) %>
 
-## Approval route
+## Standard approval route for this engagement type
 
-<%~ na(it.modules.engagement['approval-route']) %>
+<%~ reqRoute %>
+<% if (it.modules.engagement['route-variation']) { %>
+## Route variation
 
+<%~ it.modules.engagement['route-variation'] %>
+<% } %>
 # Role evaluation
-
-## How it was evaluated
-
-<%~ na(it.modules['role-evaluation'].method) %>
 
 ## Outcome
 
@@ -63,6 +78,9 @@
 
 <%~ it.modules['role-evaluation'].notes %>
 <% } %>
+# How the role was evaluated
+
+<%~ na(it.modules['role-evaluation'].method) %>
 <% if (it.modules['open-questions'].questions && it.modules['open-questions'].questions.length) { %>
 # Open questions
 

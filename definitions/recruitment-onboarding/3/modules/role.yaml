@@ -7,7 +7,8 @@ purpose: >
 
   Mounted at every stage. Fill it at Requisition and leave it alone unless the role itself
   changes — if it does, say so in `open-questions`, because a role that shifts after approval
-  has usually invalidated the approval.
+  has usually invalidated the approval. The summary, team and responsibilities are also printed
+  in the document sent to the new starter.
 
 fields:
   - id: summary
@@ -18,7 +19,8 @@ fields:
     guidance: >
       One line naming the role, then a short paragraph on what it exists to do. State the
       role, not the person — this is written before there is a candidate and is reused
-      unchanged after there is one.
+      unchanged after there is one. Also read by the new starter; keep internal-only remarks
+      out.
 
   - id: team
     title: Team and reporting line
@@ -28,7 +30,8 @@ fields:
     guidance: >
       Which department and team the role sits in, who it reports to, and who the hiring
       manager is. Name the hiring manager explicitly: three later steps depend on knowing
-      who they are, including the credential handover.
+      who they are, including the credential handover, and the new starter is told who their
+      manager is from here. Also read by the new starter; keep internal-only remarks out.
 
   - id: responsibilities
     title: Key responsibilities
@@ -36,7 +39,7 @@ fields:
     required: true
     guidance: >
       The handful of things this role is accountable for. Five or six entries, not a job
-      description — the detail belongs in the advertisement.
+      description — the detail belongs in the advertisement. Also read by the new starter.
 
   - id: justification
     title: Justification
