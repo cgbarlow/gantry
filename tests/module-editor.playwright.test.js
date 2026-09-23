@@ -352,7 +352,10 @@ test('the ported module editor page loads with no errors and a markdown field sa
         await page.goto(`${base}/instance/examples`)
         await page.waitForSelector('.module', { timeout: 10_000 })
 
-        assert.equal(await page.locator('header h1').textContent(), 'examples — design')
+        // #145: the fixture's own instance.yaml carries `name: Kiwi Cover Mutual` — the header now
+        // shows that display name, with the slug still visible in its own secondary badge.
+        assert.equal(await page.locator('header h1').textContent(), 'Kiwi Cover Mutual — design')
+        assert.equal(await page.locator('header .instance-slug').textContent(), 'examples')
         assert.deepEqual(pageErrors, [])
 
         // Edit the Context module's "Problem statement" markdown field via its real CodeMirror 6 editor, then save.

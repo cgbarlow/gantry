@@ -95,6 +95,9 @@ class MemDirHandle {
 // under test, so both sides evaluate byte-identical file content.
 async function memHandleFromInstance(instancesDir, slug) {
   const root = new MemDirHandle()
+  // #145: getLocalStatus now reads instance.yaml itself (for the instance's optional display
+  // name) — mirrored here the same way the modules below are, from the real on-disk fixture.
+  await writeTextFile(root, `gantry-workspace/${slug}/instance.yaml`, readFileSync(join(instancesDir, slug, 'instance.yaml'), 'utf8'))
   const modulesDir = join(instancesDir, slug, 'modules')
   let names = []
   try {
@@ -419,7 +422,7 @@ describe('checkLocalGate matches checkGate', () => {
   // — the `module.field?` branch of artefactRequirements (a field that's in
   // an artefact's scope but only gates when independently required at this
   // gate via `required-at`).
-  function withOptionalRefDefinition(requires, fn) {
+  async function withOptionalRefDefinition(requires, fn) {
     const root = mkdtempSync(join(tmpdir(), 'gantry-definition-'))
     const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
     const definitionsDir = join(root, 'definitions')
@@ -466,7 +469,10 @@ describe('checkLocalGate matches checkGate', () => {
     )
     try {
       createInstance('optref', 'my-initiative', { instancesDir, definitionsDir })
-      return fn({ instancesDir, definitionsDir })
+      // Mirrors withAnyArtefactDefinition's own `await` above — this must finish reading
+      // instancesDir before the `finally` below deletes it (#145 exposed the ordering:
+      // memHandleFromInstance's now-earlier `await` gives that cleanup a chance to run first).
+      return await fn({ instancesDir, definitionsDir })
     } finally {
       rmSync(root, { recursive: true, force: true })
       rmSync(instancesDir, { recursive: true, force: true })

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { unlinkSync } from 'node:fs'
+import { unlinkSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createInstance } from '../lib/instance.js'
 import { loadDefinition } from '../lib/definition.js'
@@ -23,6 +23,20 @@ test('a freshly-created instance is incomplete, with every required field outsta
     assert.equal(background.exists, true)
     assert.equal(background.complete, false)
     assert.deepEqual(background.outstanding, ['problem', 'affected-domains'])
+  })
+})
+
+// #145: `name` is the instance's optional display name (`name:` in instance.yaml) verbatim, or
+// `null` when unset — the field `gantry status`/the web form's status routes need to show the
+// display name instead of only the slug they already report.
+test('getStatus reports the instance\'s name, or null when instance.yaml has no name: set', async () => {
+  await withScratchInstances((instancesDir) => {
+    createInstance('design', 'my-initiative', { instancesDir })
+    assert.equal(getStatus('my-initiative', { instancesDir }).name, null)
+
+    const instancePath = join(instancesDir, 'my-initiative', 'instance.yaml')
+    writeFileSync(instancePath, readFileSync(instancePath, 'utf8') + 'name: Trerado EA Platform\n')
+    assert.equal(getStatus('my-initiative', { instancesDir }).name, 'Trerado EA Platform')
   })
 })
 

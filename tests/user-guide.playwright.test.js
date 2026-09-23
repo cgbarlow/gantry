@@ -228,7 +228,9 @@ test('User Guide: landing and instance headers place the link before Settings', 
       await page.waitForSelector('.instance-switcher')
       assert.deepEqual(await page.locator('header > .brand > a, header > .brand > h1, header > .brand > .instance-switcher, header > .brand > .settings-menu').allTextContents(), [
         '← Workspaces',
-        'examples — design',
+        // #145: the fixture's own instance.yaml carries `name: Kiwi Cover Mutual` — the header
+        // now shows that display name, not the slug ("examples").
+        'Kiwi Cover Mutual — design',
         'Switch instance ▾',
         'User Guide',
         'Settings',
