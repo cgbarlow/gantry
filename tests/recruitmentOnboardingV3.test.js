@@ -52,10 +52,12 @@ const GATES = [
   // #156 replaces the Offer Pack with the Appointment Confirmation, which is `satisfies-gate:
   // false` (its own bar is its 8 bare Fields — every `requires` entry except `engagement.term?`)
   // — the loop below proves it complete on a blank Instance never passes the Gate on its own.
+  // The Offer Pack is back, trimmed to the offer itself (#184), and opts out the same way: its bar
+  // is its 6 bare Fields, every `requires` entry except `engagement.term?`.
   {
     gate: 'onboarding-approved',
     satisfiedBy: ['onboarding-case'],
-    bars: { 'onboarding-case': 8, 'appointment-confirmation': 8 },
+    bars: { 'onboarding-case': 8, 'offer-pack': 6, 'appointment-confirmation': 8 },
   },
   // #158: the Manager Handover opts out of satisfying the Gate (`satisfies-gate: false`), so it
   // stays in `bars` (it is still checked and reported) but drops out of `satisfiedBy` — proving,
@@ -186,6 +188,28 @@ const DOCUMENTS = {
       '## Candidate signed',
       '## Signatures',
       '## Start date changes',
+      '## Term or expected duration',
+    ],
+  },
+  // #184: the Offer Pack is kept for the candidate at the offer, trimmed to the offer itself. Like
+  // the Appointment Confirmation it has no Document Control or sign-off tables.
+  'offer-pack': {
+    basename: 'Marama Clarke - Offer Pack',
+    present: ['# Your role', '## Role summary', '## Team and reporting line', '## Key responsibilities', '## Engagement type', '# Your offer', '## Offer terms', '# What happens next'],
+    absent: [
+      ...CONTROL,
+      '# Open questions',
+      '## Status',
+      '## Negotiation',
+      '# Your contract',
+      '## Signatures',
+      '## Manager signed',
+      '## Candidate signed',
+      '## Start date changes',
+      '# Payroll',
+      '## Details requested',
+      '## Validation outcome',
+      '## Payroll confirmation',
       '## Term or expected duration',
     ],
   },
@@ -749,6 +773,55 @@ test('the Appointment Confirmation shows the fixed payroll-validated sentence on
   assert.match(worked, /Your payroll details have been received and validated\./)
   const unconfirmed = renderVariant('appointment-confirmation', { payroll: { confirmed: '' } })
   assert.doesNotMatch(unconfirmed, /Your payroll details have been received and validated\./)
+})
+
+// #184: the Offer Pack stays in v3 for the candidate at the offer, trimmed to what they need to
+// decide: the role, the engagement and the offer terms. The review asked for its unneeded Fields
+// to go, not the document; #156 took "replaces" too literally. It goes out when the offer is
+// extended, before any contract, so it prints nothing from the contract, payroll or the
+// organisation's own record of the offer.
+
+test('the Offer Pack opts out of Document Control and of satisfying its Gate, and requires only what it prints', () => {
+  const artefact = loadDefinition('recruitment-onboarding', { version: VERSION }).artefacts.find((a) => a.id === 'offer-pack')
+  assert.equal(artefact.documentControl, false)
+  assert.equal(artefact.satisfiesGate, false)
+  assert.equal(artefact.gate, 'onboarding-approved')
+  assert.deepEqual(artefact.requires, [
+    'selection.candidate-name',
+    'role.summary',
+    'role.team',
+    'role.responsibilities',
+    'engagement.type',
+    'engagement.term?',
+    'offer.terms',
+  ])
+})
+
+test('onboarding-approved never passes through the Offer Pack alone, even complete', () => {
+  const result = checkGate(SLUG, { instancesDir: FIXTURE, gate: 'onboarding-approved' })
+  const pack = result.artefacts.find((a) => a.id === 'offer-pack')
+  assert.equal(pack.complete, true)
+  assert.equal(pack.satisfiesGate, false)
+})
+
+test('the Offer Pack names the candidate, prints the offer terms, and shows the term only when filled', () => {
+  const worked = renderArtefact(SLUG, 'offer-pack', { instancesDir: FIXTURE, dryRun: true }).markdown
+  assert.match(worked, /^For Marama Clarke\n/m)
+  assert.match(section(worked, '## Offer terms'), /Technology Band 4/)
+  const fixedTerm = renderVariant('offer-pack', { engagement: { type: 'Fixed term', term: 'Twelve months.' } })
+  assert.equal(section(fixedTerm, '## Term or expected duration'), 'Twelve months.')
+  const noTerm = renderVariant('offer-pack', { engagement: { type: 'Fixed term', term: '' } })
+  assert.ok(!headings(noTerm).has('## Term or expected duration'))
+})
+
+test('the Offer Pack carries no staff name, negotiation, contract or payroll content from the worked hire', () => {
+  const worked = renderArtefact(SLUG, 'offer-pack', { instancesDir: FIXTURE, dryRun: true }).markdown
+  for (const name of ['Anaru Pihema', 'Hana Te Rangi', 'Mereana Walker']) assert.doesNotMatch(worked, new RegExp(name))
+  // Its own manager, named under Team and reporting line, is the one name a candidate should see.
+  assert.doesNotMatch(worked, /Accepted 31 March/)
+  assert.doesNotMatch(worked, /consume the whole of the schedule/)
+  assert.doesNotMatch(worked, /spam folder/)
+  assert.doesNotMatch(worked, /Should the 32GB machine/)
 })
 
 // #159: carried-forward Fields are required only at their home Gate, and each later Stage lists

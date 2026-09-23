@@ -227,6 +227,27 @@ artefacts:
       - payroll.validation-outcome?
       - open-questions.process-gaps?
     filename: "{selection.candidate-name} - Onboarding Case"
+  - id: offer-pack
+    title: Offer Pack
+    purpose: >
+      The offer as the candidate receives it: the role, the engagement and the offer terms, and
+      what happens next. Render and send it when the offer is extended, before any contract. The
+      terms state the band and position in band, never the salary figure; add the figure to the
+      copy you send, outside the repository. It leaves the organisation, so it carries no internal
+      content and no Document Control or sign-off tables, and it never counts toward the gate.
+    template: templates/offer-pack.md.tmpl
+    gate: onboarding-approved
+    document-control: false
+    satisfies-gate: false
+    requires:
+      - selection.candidate-name
+      - role.summary
+      - role.team
+      - role.responsibilities
+      - engagement.type
+      - engagement.term?
+      - offer.terms
+    filename: "{selection.candidate-name} - Offer Pack"
   - id: appointment-confirmation
     title: Appointment Confirmation
     purpose: >
