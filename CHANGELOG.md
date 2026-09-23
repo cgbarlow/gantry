@@ -17,6 +17,39 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.9-beta — 2026-09-23
+
+### Added
+
+- **A Stage can show earlier Stages' Modules read-only** (#152). A Definition can now list, under a
+  Stage's new `read-only-modules:`, the Modules that Stage only needs so its documents render and its
+  Gate can be checked. The instance editor shows them as saved content with no editing controls and
+  no required markers, plus a note naming the earlier Stage where each one is edited ("carried
+  forward from Appointment"). Gantry refuses a save of one at that Stage, whether it comes from the
+  editor, the API or the MCP server's `update_instance_modules`, on local and Provider-backed
+  instances alike, and the error names the Stage to edit it at. Nothing is written when a save is
+  refused, not even the editable Modules sent with it. Gates and rendered documents are unaffected: a
+  read-only Module still counts toward its Gate and still prints.
+- **A "read-only" checkbox for each Module a Stage lists on the Definitions page** (#152). Tick it
+  on a draft to mark the Module read-only at that Stage. The marking survives Save and Publish, and a
+  published version shows it without the checkbox. Removing a Module from a Stage also clears its
+  read-only marking. Validation flags a read-only entry for a Module the Stage doesn't list, or a
+  `read-only-modules:` that isn't a list, as a marker on the Stage, and blocks Save, Publish and
+  `gantry validate` until it's fixed. An instance whose Definition already has such an entry keeps
+  loading.
+
+It's opt-in: `design` and `recruitment-onboarding` v1 and v2 don't use it and behave exactly as
+before. The reasons for listing read-only Modules explicitly, rather than inferring them from Stage
+order, are recorded in ADR-0050.
+
+### Fixed
+
+- **A module save naming a Stage the Definition doesn't have is refused before it writes** (#152).
+  On a local instance, a save to `PUT /api/instance/modules` or `/api/instance/modules/<id>` with a
+  `?stage=` the Definition doesn't have used to write the Modules and then fail with a server error.
+  It now returns a 400 naming the missing Stage and writes nothing, as Provider-backed instances
+  already refused it before writing.
+
 ## 0.9.8-beta — 2026-09-23
 
 ### Added

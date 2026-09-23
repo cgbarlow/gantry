@@ -167,6 +167,18 @@ function documentControlCheckbox(artefact, onToggle) {
   `
 }
 
+// #152 (docs/adr/0050): marks or unmarks one of a stage's mounted modules read-only, keeping
+// `readOnlyModules` in the stage's own module order and dropping the key once it is empty — so a stage
+// nobody marks read-only saves exactly as it did before the key existed (opt-in).
+function setStageModuleReadOnly(stage, moduleId, readOnly) {
+  const listed = new Set(stage.readOnlyModules ?? [])
+  if (readOnly) listed.add(moduleId)
+  else listed.delete(moduleId)
+  const next = stage.modules.filter((id) => listed.has(id))
+  if (next.length) stage.readOnlyModules = next
+  else delete stage.readOnlyModules
+}
+
 // -- list addressing for reorder-in-place drags/buttons --------------------------------------
 function getList(d, listPath) {
   if (listPath === 'stages') return d.stages
@@ -1991,17 +2003,22 @@ export function DefinitionViewerPage() {
           <div class=${'defn-chips defn-droplist' + (dropTarget === `stage-drop:${si}` ? ' defn-drop-target' : '')} ...${isEditable ? stageDropZone(si) : {}}>
             ${s.modules.map((mid, mi) => {
               const mod = d.modules.find((m) => m.id === mid)
+              const readOnly = (s.readOnlyModules ?? []).includes(mid)
               return html`
-                <span key=${mid} class="defn-chip" ...${isEditable ? reorderZone(`stage-modules:${si}`, mi) : {}}>
+                <span key=${mid} class=${'defn-chip' + (readOnly ? ' read-only' : '')} ...${isEditable ? reorderZone(`stage-modules:${si}`, mi) : {}}>
                   ${isEditable ? html`<span ...${dragHandleProps({ listPath: `stage-modules:${si}`, index: mi }, 'reorder')}>⠿</span>` : null}
                   <span role="button" tabindex="0" onClick=${() => select('module', mid)}>${mod?.title ?? mid}</span>
                   ${isEditable ? html`
+                    <label class="defn-read-only-toggle" title="Mounted so this stage's documents and gate can use it, but edited at an earlier stage">
+                      <input type="checkbox" aria-label=${`Read-only at this stage: ${mod?.title ?? mid}`} checked=${readOnly} onChange=${(e) => { const on = e.currentTarget.checked; updateDraft((dd) => setStageModuleReadOnly(dd.stages[si], mid, on)) }} />
+                      read-only
+                    </label>
                     <span class="defn-move-btns">
                       <button class="btn small ghost" aria-label=${`Move module ref "${mid}" up`} disabled=${mi === 0} onClick=${() => updateDraft((dd) => { dd.stages[si].modules = reorder(dd.stages[si].modules, mi, mi - 1) })}>↑</button>
                       <button class="btn small ghost" aria-label=${`Move module ref "${mid}" down`} disabled=${mi === s.modules.length - 1} onClick=${() => updateDraft((dd) => { dd.stages[si].modules = reorder(dd.stages[si].modules, mi, mi + 1) })}>↓</button>
                     </span>
-                    <button class="btn small ghost" aria-label=${`Remove module ref "${mid}"`} onClick=${() => updateDraft((dd) => { dd.stages[si].modules.splice(mi, 1) })}>✕</button>
-                  ` : null}
+                    <button class="btn small ghost" aria-label=${`Remove module ref "${mid}"`} onClick=${() => updateDraft((dd) => { dd.stages[si].modules.splice(mi, 1); setStageModuleReadOnly(dd.stages[si], mid, false) })}>✕</button>
+                  ` : readOnly ? html`<span class="muted defn-hint">read-only</span>` : null}
                 </span>
               `
             })}

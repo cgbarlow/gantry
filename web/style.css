@@ -299,6 +299,13 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .module { border-top: var(--hairline) solid var(--line); padding-top: 20px; margin-top: 28px; }
 .module h2 { font-family: var(--font-display); font-weight: 600; font-size: 17px; margin: 0 0 4px; }
 .module .purpose { color: var(--text-muted); font-style: italic; font-size: 13px; margin: 0 0 16px; }
+/* #152: a module the stage mounts read-only — its saved content, no editors, and a note naming the
+ * earlier stage where it is edited. */
+.module .read-only-note { font-size: 12px; color: var(--text-muted); background: var(--bg-raised); border-left: var(--border-strong) solid var(--line-strong); padding: 6px 10px; margin: 4px 0 12px; }
+.field-read-only .read-only-value { font-size: 14px; margin: 0; }
+.field-read-only .read-only-value.muted { color: var(--text-muted); font-style: italic; font-size: 13px; }
+.field-read-only .read-only-value > :first-child { margin-top: 0; }
+.field-read-only .read-only-value > :last-child { margin-bottom: 0; }
 
 /* Render dialog (#114) — the artefact list inside the modal opened by the
  * toolbar's "Render" button. */
@@ -1673,6 +1680,10 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .defn-chip { display: inline-flex; align-items: center; gap: 6px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); padding: 3px 8px; font-size: 12px; background: var(--bg-raised); }
 .defn-chip.optional { border-style: dashed; }
+/* #152: a module a stage mounts read-only (carried forward, edited at an earlier stage). */
+.defn-chip.read-only { border-style: dotted; }
+.defn-read-only-toggle { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--text-muted); cursor: pointer; }
+.defn-read-only-toggle input { margin: 0; }
 .defn-droplist { border: var(--hairline) dashed var(--line); padding: 8px; border-radius: var(--radius); min-height: 38px; }
 .defn-requires-group { margin: 8px 0; }
 .defn-requires-group .kicker { display: block; margin-bottom: 4px; cursor: pointer; }

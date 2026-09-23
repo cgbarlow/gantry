@@ -229,7 +229,7 @@ async function loadLocalInstance(workspaceId, slug, requestedStageId) {
     } catch {
       // No saved data yet for this module — the blank draft above stands, matching GET /api/instance's own "no module file yet" default.
     }
-    modules.push(buildLocalModuleEntry(moduleSpec, stage, data, null))
+    modules.push(buildLocalModuleEntry(moduleSpec, stage, data, null, structure.stages))
   }
 
   return {
@@ -2234,6 +2234,57 @@ function ListField({ field, moduleId, onRegister, onRemove, onRequestSection, on
   `
 }
 
+// ---------- Read-only carried-forward module (#152, docs/adr/0050) ----------
+// A module the viewed stage lists in `read-only-modules`: mounted so the stage's documents render and
+// its gate can be evaluated, but owned — and edited — at an earlier stage. Shown as its saved content
+// with no editors, no required markers and no Insert ▾, plus a note naming the home stage. Its fields
+// never register an editor control, so the centralised Save never sees it as changed and never sends
+// it (the server would refuse it anyway). Headings keep their usual ids so Navigation still jumps here.
+function ReadOnlyFieldValue({ field }) {
+  const ref = useRef(null)
+  const value = field.value
+  const isEmpty = Array.isArray(value) ? value.length === 0 : !String(value ?? '').trim()
+  // Lists and markdown go through the same preview renderer the editors' Visual view uses; select,
+  // text and date values are plain strings (a multi-select is a list of them).
+  const markdown = isEmpty
+    ? ''
+    : field.type === 'list'
+      ? value.map((item) => `- ${item}`).join('\n')
+      : field.type === 'markdown' || field.custom
+        ? String(value)
+        : null
+  useEffect(() => {
+    if (markdown !== null) renderPreview(ref.current, markdown)
+  }, [markdown, assetSources.value])
+  if (isEmpty) return html`<p class="read-only-value muted">Not filled in.</p>`
+  if (markdown !== null) return html`<div class="read-only-value" ref=${ref}></div>`
+  return html`<p class="read-only-value">${Array.isArray(value) ? value.join(', ') : value}</p>`
+}
+
+function ReadOnlyModuleCard({ mod, visibleFieldIds }) {
+  const home = mod.readOnly.homeStage
+  return html`
+    <section class="module module-read-only" data-read-only="true">
+      <h2 id=${headingId(mod.id, mod.title)}>${mod.title}</h2>
+      <p class="read-only-note">
+        ${home
+          ? html`Read-only at this stage — carried forward from <strong>${home.title}</strong>, where it is edited.`
+          : 'Read-only at this stage.'}
+      </p>
+      ${mod.purpose ? html`<p class="purpose">${mod.purpose}</p>` : null}
+      ${mod.fields.filter((field) => !visibleFieldIds || visibleFieldIds.has(`${mod.id}.${field.id}`)).map(
+        (field) => html`
+          <div key=${field.id} class="field field-read-only">
+            <h3 id=${headingId(mod.id, field.title)} class="field-heading">${field.title}</h3>
+            <label class="visually-hidden" style="display:none">${field.title}</label>
+            <${ReadOnlyFieldValue} field=${field} />
+          </div>
+        `
+      )}
+    </section>
+  `
+}
+
 // ---------- One module's card: fields + its save status line ----------
 // Saving is stage-wide (WI #376, the toolbar's Save); the card keeps only the
 // "Saved — complete / outstanding" line for its own module.
@@ -3992,9 +4043,11 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
   const modules = visibleFieldIds
     ? instance.modules.filter((mod) => mod.fields.some((field) => visibleFieldIds.has(`${mod.id}.${field.id}`)))
     : instance.modules
+  // The top Insert ▾ adds to the first module this stage can edit — never a read-only one (#152).
+  const editableModules = modules.filter((mod) => !mod.readOnly)
 
   function handleTopInsertSection(title) {
-    const targetModuleId = modules[0]?.id ?? instance.modules[0]?.id
+    const targetModuleId = editableModules[0]?.id ?? instance.modules.find((mod) => !mod.readOnly)?.id
     if (!targetModuleId) return
     const newField = {
       id: uniqueCustomFieldClientId(),
@@ -4020,7 +4073,7 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
   }
 
   function handleTopInsertList(title) {
-    const targetModuleId = modules[0]?.id ?? instance.modules[0]?.id
+    const targetModuleId = editableModules[0]?.id ?? instance.modules.find((mod) => !mod.readOnly)?.id
     if (!targetModuleId) return
     const newField = {
       id: uniqueCustomFieldClientId(),
@@ -4050,13 +4103,15 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
       ${advancedMode.value
         ? html`<${SyncedFieldsPanel} key=${instance.workItem ? 'linked' : 'unlinked'} instance=${instance} />`
         : null}
-      ${modules.length > 0
+      ${editableModules.length > 0
         ? html`<div class="insert-bar top-insert-bar" data-testid="top-insert" hidden=${isEditingBlocked()}>
             <${InsertDropdown} onSection=${() => setTopSectionOpen(true)} onList=${() => setTopListOpen(true)} />
           </div>`
         : null}
-      ${modules.map(
-        (mod) => html`
+      ${modules.map((mod) =>
+        mod.readOnly
+          ? html`<${ReadOnlyModuleCard} key=${mod.id} mod=${mod} visibleFieldIds=${visibleFieldIds} />`
+          : html`
           <${ModuleCard}
             key=${mod.id}
             mod=${mod}

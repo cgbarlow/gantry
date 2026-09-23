@@ -121,6 +121,7 @@ export const tools = [
       '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref". ' +
       '3. "modules" is required and must be non-empty: an object keyed by moduleId, each value a partial module record — { status?, owner?, fields?, layout? } — only the keys you supply are changed. ' +
       '4. Pass "stage" (a stage id) to target a stage other than the instance\'s current one; the definition must actually declare each moduleId on that stage, or gantry serve rejects the whole call with a 400. ' +
+      '4a. A module the stage mounts read-only (its "read-only-modules" in the definition; get_instance marks it "readOnly" with its "homeStage") is carried forward from an earlier stage: gantry serve rejects the whole call with a 400 naming that home stage — write it there instead. ' +
       '5. This never renders an artefact — call render_artefact separately once content is saved. ' +
       '6. The written content is reflected on the very next get_instance call for the same instance/stage.',
     inputSchema: {
