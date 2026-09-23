@@ -118,3 +118,43 @@ export function unrepresentedWorkspaceGroups(instances, workspaces) {
       }
     })
 }
+
+// #135: the populated-row counterpart of `describeRegisteredWorkspace` above, over an *instance row's*
+// denormalized `workspace` (lib/registry.js's `rowWorkspace`/`rowGitHubWorkspace`/`rowGitLabWorkspace`/
+// `rowServerWorkspace`) rather than a `GET /api/workspaces` record. The two shapes genuinely differ and
+// only three of the four row shapes carry anything usable at the top level: the Azure DevOps shape
+// denormalizes `repository`/`organization`/`project`, a server-directory one carries `name`/
+// `description`, and the GitHub and GitLab ones carry neither — their repo lives under `location`, the
+// same as a `GET /api/workspaces` record's does.
+//
+// web/app.js's `groupInstancesByWorkspace` used to read `.name` for every kind that wasn't Azure
+// DevOps, which left `title` `undefined` for a GitHub- or GitLab-backed workspace and threw in that
+// function's own `sort` (`a.title.localeCompare`). It was unreachable until #131: before it, a
+// Provider-backed row needed a credential the dashboard's own listing request never carried, so these
+// rows never reached the grouping at all. #131 made them reachable and the latent bug became a crash
+// that took the whole dashboard down.
+//
+// Falls back to the workspace id rather than an empty string for an unrecognised shape: a row labelled
+// with an id is recoverable, a row labelled `undefined` crashes the page and a row labelled '' is
+// invisible.
+export function describeInstanceRowWorkspace(workspace) {
+  if (!workspace) return { title: null, subtitle: 'Server instance' }
+  const location = workspace.location ?? {}
+  switch (workspace.kind) {
+    case 'azureDevOps':
+      return { title: workspace.repository, subtitle: `${workspace.organization}/${workspace.project}` }
+    case 'github':
+      return { title: location.repository ?? workspace.id, subtitle: location.owner ?? 'GitHub' }
+    case 'gitlab':
+      return { title: location.repository ?? workspace.id, subtitle: location.namespace ?? 'GitLab' }
+    case 'atlassian':
+      return { title: location.repository ?? workspace.id, subtitle: location.owner ?? 'Atlassian' }
+    case 'directory':
+      return { title: workspace.name, subtitle: workspace.description || 'Server workspace' }
+    default:
+      return {
+        title: workspace.name ?? location.repository ?? workspace.id,
+        subtitle: workspace.kind ?? 'Workspace',
+      }
+  }
+}

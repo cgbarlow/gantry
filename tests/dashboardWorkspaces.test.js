@@ -5,6 +5,7 @@ import {
   isAzureDevOpsProviderWorkspace,
   unrepresentedWorkspaceGroups,
   workspacesNeedingOwnListing,
+  describeInstanceRowWorkspace,
 } from '../web/lib/dashboardWorkspaces.js'
 
 // #122 (parent #109, docs/adr/0047): the dashboard's client-side join between `GET /api/workspaces`
@@ -176,4 +177,74 @@ test('workspacesNeedingOwnListing: a credentialed Provider-backed workspace with
   for (const workspace of workspaces) {
     assert.deepEqual(workspacesNeedingOwnListing([], [workspace], hasCredential), ['ws-cred'])
   }
+})
+
+
+// ---------------------------------------------------------------------------
+// #135: `describeInstanceRowWorkspace` — the populated-row counterpart of
+// `describeRegisteredWorkspace` above. These two describe the same workspace from two different
+// payloads, and the reason this function exists is that they drifted: web/app.js read `.name` for
+// every row-workspace kind that wasn't Azure DevOps, which is a field only the server-directory shape
+// has. A GitHub- or GitLab-backed row therefore produced `title: undefined`, and
+// `groupInstancesByWorkspace`'s own `sort` threw `undefined.localeCompare` — taking the entire
+// dashboard down rather than mislabelling one row. Unreachable until #131 made Provider-backed rows
+// appear on the dashboard at all.
+// ---------------------------------------------------------------------------
+
+test('describeInstanceRowWorkspace: a GitHub row titles on its repository, not the absent name field', () => {
+  // The exact shape lib/registry.js's `rowGitHubWorkspace` emits: no `name`, no top-level
+  // `repository` — the repo lives under `location`, and reading `.name` here is what crashed #131.
+  const workspace = { kind: 'github', id: 'ws-1', location: { owner: 'cgbarlow', repository: 'gantry-workspace-testing' }, owner: 'c.barlow' }
+  assert.deepEqual(describeInstanceRowWorkspace(workspace), { title: 'gantry-workspace-testing', subtitle: 'cgbarlow' })
+})
+
+test('describeInstanceRowWorkspace: a GitLab row titles on its repository, subtitles on its namespace', () => {
+  const workspace = { kind: 'gitlab', id: 'ws-2', location: { namespace: 'acme-group', repository: 'acme-repo' }, owner: 'someone' }
+  assert.deepEqual(describeInstanceRowWorkspace(workspace), { title: 'acme-repo', subtitle: 'acme-group' })
+})
+
+test('describeInstanceRowWorkspace: Azure DevOps keeps reading its denormalized top-level fields', () => {
+  // This shape alone denormalizes repository/organization/project to the top level — the one kind the
+  // pre-#135 code got right, pinned so the fix cannot regress it.
+  const workspace = { kind: 'azureDevOps', id: 'ws-3', organization: 'acme-org', project: 'acme-project', repository: 'acme-repo' }
+  assert.deepEqual(describeInstanceRowWorkspace(workspace), { title: 'acme-repo', subtitle: 'acme-org/acme-project' })
+})
+
+test('describeInstanceRowWorkspace: a server-directory row keeps its name and description', () => {
+  const workspace = { kind: 'directory', id: 'examples', name: 'Examples', description: 'Bundled with Gantry' }
+  assert.deepEqual(describeInstanceRowWorkspace(workspace), { title: 'Examples', subtitle: 'Bundled with Gantry' })
+})
+
+test('describeInstanceRowWorkspace: a server-directory row with no description falls back, as before', () => {
+  const workspace = { kind: 'directory', id: 'examples', name: 'Examples' }
+  assert.deepEqual(describeInstanceRowWorkspace(workspace), { title: 'Examples', subtitle: 'Server workspace' })
+})
+
+test('describeInstanceRowWorkspace: no workspace at all is the local-instance case', () => {
+  assert.deepEqual(describeInstanceRowWorkspace(undefined), { title: null, subtitle: 'Server instance' })
+})
+
+test('describeInstanceRowWorkspace: every known kind yields a sortable, non-empty title', () => {
+  // The actual regression guard. `groupInstancesByWorkspace` sorts on `title`, so a kind that yields
+  // `undefined` is not a cosmetic defect — it throws and the dashboard renders nothing at all.
+  const rows = [
+    { kind: 'github', id: 'a', location: { owner: 'o', repository: 'r' } },
+    { kind: 'gitlab', id: 'b', location: { namespace: 'n', repository: 'r' } },
+    { kind: 'azureDevOps', id: 'c', organization: 'o', project: 'p', repository: 'r' },
+    { kind: 'atlassian', id: 'd', location: { owner: 'o', repository: 'r' } },
+    { kind: 'directory', id: 'e', name: 'Examples' },
+  ]
+  for (const workspace of rows) {
+    const { title } = describeInstanceRowWorkspace(workspace)
+    assert.equal(typeof title, 'string', `kind ${workspace.kind} produced a non-string title`)
+    assert.ok(title.length > 0, `kind ${workspace.kind} produced an empty title`)
+    assert.doesNotThrow(() => title.localeCompare('x'), `kind ${workspace.kind} produced an unsortable title`)
+  }
+})
+
+test('describeInstanceRowWorkspace: an unrecognised kind degrades to its id rather than to undefined', () => {
+  // A shape nobody has invented yet must still sort. Labelling a row with an id is recoverable;
+  // labelling it `undefined` crashes the page, which is the failure this whole function exists for.
+  const { title } = describeInstanceRowWorkspace({ kind: 'some-future-provider', id: 'ws-9' })
+  assert.equal(title, 'ws-9')
 })

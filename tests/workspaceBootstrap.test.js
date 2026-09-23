@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseBootstrapWorkspaces, applyBootstrapWorkspaces, parseSharedWorkspacePats, discoverBootstrapPatInstances } from '../lib/workspaceBootstrap.js'
 import { deriveWorkspaceId, listWorkspaces, findWorkspaceByLocation, registerWorkspace } from '../lib/workspaceRegistry.js'
@@ -702,7 +702,14 @@ const EXCLUDED_FILES = new Set([
   join(REPO_ROOT, 'lib', 'envVarCheck.js'),
 ])
 
+// #135: an absent scan root is skipped rather than thrown on. The container image's own test stage
+// (ContainerFile's `FROM source AS test`) never receives README.md or CONTEXT.md — the root
+// `.dockerignore` excludes both — so this guard threw ENOENT in every image build since #121. It went
+// unnoticed only because that stage swallows its exit code by design ("the stage always exits 0 so
+// results are available regardless of test outcome"), which meant a broken guard looked identical to a
+// passing one. `scannedAnything` below is what keeps this tolerance from silently disabling the guard.
 function walkFiles(path) {
+  if (!existsSync(path)) return []
   const stat = statSync(path)
   if (stat.isFile()) return [path]
   if (!stat.isDirectory()) return []
@@ -711,12 +718,17 @@ function walkFiles(path) {
 
 test('GANTRY_BOOTSTRAP_PATS (the pre-#121 name) does not survive anywhere in lib/, bin/, web/, README.md, or CONTEXT.md', () => {
   const offenders = []
+  let scannedAnything = false
   for (const root of SCAN_ROOTS) {
     for (const file of walkFiles(join(REPO_ROOT, root))) {
+      scannedAnything = true
       if (EXCLUDED_FILES.has(file)) continue
       const text = readFileSync(file, 'utf8')
       if (text.includes(OLD_NAME)) offenders.push(file.replace(REPO_ROOT, ''))
     }
   }
   assert.deepEqual(offenders, [], `found the pre-rename env var name in: ${offenders.join(', ')}`)
+  // #135: skipping an absent root is deliberate; scanning nothing at all means this guard has
+  // silently stopped guarding anything.
+  assert.ok(scannedAnything, `no scan root existed — checked: ${SCAN_ROOTS.join(', ')}`)
 })

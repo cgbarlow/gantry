@@ -6,7 +6,7 @@
 // the drift guards that keep the declared lists honest against what the code actually reads.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   READ_ENV_VARS,
@@ -16,9 +16,18 @@ import {
   warnAboutUnreadEnvVars,
 } from '../lib/envVarCheck.js'
 import { createServer } from '../lib/server.js'
-import * as mcpEnvVarCheck from '../mcp-server/src/envVarCheck.js'
-
+// #135: loaded on demand rather than statically imported. `mcp-server/` is a separately-deployed
+// package and is not copied into the Gantry image's own test stage (ContainerFile copies bin/, lib/,
+// web/, tests/ and friends, never mcp-server/) — a static import therefore failed to resolve and took
+// this entire file down in every image build since #130, silently, because that stage swallows its
+// exit code by design. Importing across packages is still safe *as a test* (it adds no runtime
+// dependency in either direction); it just cannot be assumed to be resolvable everywhere this file
+// runs. The two tests that need it skip explicitly when it isn't there, so an absent package reads as
+// "not checked here" rather than as a pass.
 const REPO_ROOT = new URL('..', import.meta.url).pathname
+const MCP_ENV_VAR_CHECK = join(REPO_ROOT, 'mcp-server', 'src', 'envVarCheck.js')
+const mcpPackagePresent = existsSync(MCP_ENV_VAR_CHECK)
+const loadMcpEnvVarCheck = () => import(MCP_ENV_VAR_CHECK)
 
 function captureStderr(fn) {
   const logged = []
@@ -176,17 +185,21 @@ test('READ_ENV_VARS matches every GANTRY_ variable lib/ and bin/ actually read',
   assert.deepEqual(envVarsReadIn(['lib', 'bin']), [...READ_ENV_VARS].sort())
 })
 
-test('the MCP package\'s READ_ENV_VARS matches every GANTRY_ variable its own src/ actually reads', () => {
+test('the MCP package\'s READ_ENV_VARS matches every GANTRY_ variable its own src/ actually reads', async (t) => {
+  if (!mcpPackagePresent) return t.skip('mcp-server/ is not present in this build context')
+  const mcpEnvVarCheck = await loadMcpEnvVarCheck()
   assert.deepEqual(envVarsReadIn(['mcp-server/src']), [...mcpEnvVarCheck.READ_ENV_VARS].sort())
 })
 
-test('the two packages\' copies of the check agree about who reads what', () => {
+test('the two packages\' copies of the check agree about who reads what', async (t) => {
   // `lib/envVarCheck.js` and `mcp-server/src/envVarCheck.js` are deliberately duplicated rather than
   // shared (the packages do not import across each other at runtime — see `lib/workspaceBootstrap.js`).
   // This test is the seam that keeps the duplication honest: each service's "belongs to the other
   // service" list must be exactly the other service's read set, or a misplaced variable gets reported
   // as merely unknown by the service it was misplaced on. Importing across packages is safe here
   // precisely because it is a test: it adds no runtime dependency in either direction.
+  if (!mcpPackagePresent) return t.skip('mcp-server/ is not present in this build context')
+  const mcpEnvVarCheck = await loadMcpEnvVarCheck()
   assert.deepEqual([...mcpEnvVarCheck.OTHER_SERVICE_ENV_VARS].sort(), [...READ_ENV_VARS].sort())
   assert.deepEqual([...OTHER_SERVICE_ENV_VARS].sort(), [...mcpEnvVarCheck.READ_ENV_VARS].sort())
   assert.deepEqual(mcpEnvVarCheck.RETIRED_ENV_VARS, RETIRED_ENV_VARS)

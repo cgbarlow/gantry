@@ -17,6 +17,33 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.8.2-beta — 2026-09-23
+
+### Fixed
+
+- **The dashboard no longer goes blank when a GitHub- or GitLab-backed workspace has designs to
+  show.** With 0.8.1-beta, entering a credential finally made those designs reachable — and reaching
+  them was the first time the dashboard had ever had to draw one. It couldn't: it looked for a display
+  name on a field only a server-hosted workspace carries, found nothing, and threw while sorting the
+  list, which took down every row on the page rather than mislabelling the one. The visible result was
+  a workspace stuck reporting "Can't read this workspace" while the browser console filled with
+  errors — the designs had in fact arrived, and the crash happened on the way to drawing them. A
+  GitHub- or GitLab-backed workspace now shows its repository name, with its owner or namespace
+  beneath, and a workspace shape this version has never seen falls back to something sortable instead
+  of taking the page with it.
+
+- **The MCP server builds and deploys again.** A check added in 0.8.1-beta, guarding against the
+  renamed environment variables reappearing, read a file that is deliberately not copied into the
+  container image. The check failed there for that reason alone, and because the MCP server's build
+  runs its tests as a build step, the whole deploy failed with it. The check now skips a file that
+  isn't present in a given build, while still failing loudly if it ends up with nothing at all to
+  check.
+
+- **Two equivalent checks in the Gantry image had been failing silently since 0.8.0-beta.** They read
+  files the image deliberately excludes, and the Gantry image's test stage reports results rather than
+  halting on them, so a broken check looked exactly like a passing one. Both now behave in a container
+  the same way they do in a checkout.
+
 ## 0.8.1-beta — 2026-09-23
 
 ### Fixed
