@@ -1608,6 +1608,9 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-workbench-outline { display: grid; grid-template-columns: 260px minmax(0, 1fr) 280px; gap: 14px; align-items: start; min-height: 60vh; }
 .defn-workbench-map { display: grid; grid-template-rows: minmax(180px, 40vh) minmax(0, 1fr); gap: 14px; min-height: 60vh; }
 .defn-workbench-map .defn-bottom { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 14px; min-height: 0; }
+/* Expanded: the Map takes the whole workbench at its full height; the panes below stay mounted but hidden. */
+.defn-workbench-map.expanded { grid-template-rows: auto; }
+.defn-workbench-map .defn-bottom[hidden] { display: none; }
 .defn-outline, .defn-focus-pane, .defn-library, .defn-map-pane { border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg-raised); }
 .defn-focus-pane { background: var(--bg); padding: 4px 4px 20px; }
 @media (max-width: 960px) {

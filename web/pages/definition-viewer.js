@@ -7,7 +7,7 @@ import { renderMarkdown } from '../lib/markdown.js'
 import { reorder } from '../lib/reorder.js'
 import { Dropdown } from '../lib/dropdown.js'
 import { moduleFieldUsage } from '../lib/moduleFieldUsage.js'
-import { defnView, setDefnView } from '../lib/definitionView.js'
+import { defnView, setDefnView, defnMapExpanded, setDefnMapExpanded } from '../lib/definitionView.js'
 import { planCopy, resolveCollision, applyPlan, isResolved } from '../lib/copyPlanner.js'
 
 // The rebuilt Definitions page (WI #381, Feature #380's grilling session). Primary source:
@@ -1446,10 +1446,7 @@ export function DefinitionViewerPage() {
         <div class="defn-toolbar-right">
           ${isEditable
             ? html`
-                <div class="defn-view-toggle" role="group" aria-label="Outline or Map view">
-                  <button class=${'btn small' + (defnView.value === 'outline' ? ' primary' : ' ghost')} aria-pressed=${defnView.value === 'outline'} onClick=${() => setDefnView('outline')}>Outline</button>
-                  <button class=${'btn small' + (defnView.value === 'map' ? ' primary' : ' ghost')} aria-pressed=${defnView.value === 'map'} onClick=${() => setDefnView('map')}>Map</button>
-                </div>
+                ${renderViewToggle()}
                 ${isDirty ? html`<span class="muted">Unsaved changes</span>` : null}
                 ${isDirty ? html`<button class="btn small ghost" onClick=${handleDiscard} disabled=${saving}>Discard</button>` : null}
                 <button class="btn primary" onClick=${handleSave} disabled=${saving || !isDirty}>${saving ? 'Saving…' : 'Save'}</button>
@@ -1457,10 +1454,7 @@ export function DefinitionViewerPage() {
               `
             : detail
               ? html`
-                  <div class="defn-view-toggle" role="group" aria-label="Outline or Map view">
-                    <button class=${'btn small' + (defnView.value === 'outline' ? ' primary' : ' ghost')} aria-pressed=${defnView.value === 'outline'} onClick=${() => setDefnView('outline')}>Outline</button>
-                    <button class=${'btn small' + (defnView.value === 'map' ? ' primary' : ' ghost')} aria-pressed=${defnView.value === 'map'} onClick=${() => setDefnView('map')}>Map</button>
-                  </div>
+                  ${renderViewToggle()}
                   <p class="guidance">Read-only — published.</p>
                   ${selectedDef?.home?.kind === 'server-workspace' ? html`<button class="btn small" onClick=${handleOpenPromote}>Promote…</button>` : null}
                 `
@@ -2349,12 +2343,29 @@ export function DefinitionViewerPage() {
   }
 
   // -------------------------------------------------------------------------------- Layout
+  // The Outline/Map switch, plus — in Map view only — the toggle that lets the Map take the whole
+  // workbench. Expanding hides the focus pane and Library panel rather than unmounting them, so an
+  // edit in progress down there is exactly as it was when they come back.
+  function renderViewToggle() {
+    return html`
+      <div class="defn-view-toggle" role="group" aria-label="Outline or Map view">
+        <button class=${'btn small' + (defnView.value === 'outline' ? ' primary' : ' ghost')} aria-pressed=${defnView.value === 'outline'} onClick=${() => setDefnView('outline')}>Outline</button>
+        <button class=${'btn small' + (defnView.value === 'map' ? ' primary' : ' ghost')} aria-pressed=${defnView.value === 'map'} onClick=${() => setDefnView('map')}>Map</button>
+      </div>
+      ${defnView.value === 'map'
+        ? html`<button class=${'btn small defn-map-expand' + (defnMapExpanded.value ? ' primary' : ' ghost')} aria-pressed=${defnMapExpanded.value}
+            title=${defnMapExpanded.value ? 'Show the detail and Library panes below the map again' : 'Hide the detail and Library panes and give the map the whole workbench'}
+            onClick=${() => setDefnMapExpanded(!defnMapExpanded.value)}>Expand map</button>`
+        : null}
+    `
+  }
+
   function renderWorkbench() {
     if (defnView.value === 'map') {
       return html`
-        <div class="defn-workbench defn-workbench-map">
+        <div class=${'defn-workbench defn-workbench-map' + (defnMapExpanded.value ? ' expanded' : '')}>
           <div class="defn-map-pane pane">${renderMap()}</div>
-          <div class="defn-bottom">
+          <div class="defn-bottom" hidden=${defnMapExpanded.value}>
             <div class="defn-focus-pane pane">${renderFocusPane()}</div>
             ${renderLibraryPanel()}
           </div>
