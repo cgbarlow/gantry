@@ -672,7 +672,14 @@ test('discoverBootstrapPatInstances scopes a boot PAT to its own declared worksp
 const REPO_ROOT = new URL('..', import.meta.url).pathname
 const OLD_NAME = 'GANTRY_BOOTSTRAP' + '_PATS' // built at runtime so this file itself never contains the literal string being searched for
 const SCAN_ROOTS = ['lib', 'bin', 'web', 'README.md', 'CONTEXT.md']
-const EXCLUDED_FILES = new Set([join(REPO_ROOT, 'tests', 'workspaceBootstrap.test.js')])
+const EXCLUDED_FILES = new Set([
+  join(REPO_ROOT, 'tests', 'workspaceBootstrap.test.js'),
+  // #130: the one place the retired name is *supposed* to survive — a table of retired names mapped to
+  // what replaced them, so an operator who still has the old one set is told so at startup rather than
+  // met with silence. It is named there as history, never as live guidance, which is the distinction
+  // this guard is actually protecting.
+  join(REPO_ROOT, 'lib', 'envVarCheck.js'),
+])
 
 function walkFiles(path) {
   const stat = statSync(path)

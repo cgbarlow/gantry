@@ -13,6 +13,11 @@ const PACKAGE_ROOT = new URL('..', import.meta.url).pathname
 // Built at runtime so this file itself never contains the literal strings being searched for.
 const OLD_NAMES = ['GANTRY' + '_WORKSPACE_PATS', 'GANTRY' + '_BASE_URL']
 const SCAN_ROOTS = ['src', '.env.example']
+// #130: the one place the retired names are *supposed* to survive — a table of retired names mapped to
+// what replaced them, so an operator who still has an old one set is told so at startup rather than met
+// with silence. They are named there as history, never as live guidance, which is the distinction this
+// guard is actually protecting.
+const EXCLUDED_FILES = new Set([join(PACKAGE_ROOT, 'src', 'envVarCheck.js')])
 
 function walkFiles(path) {
   const stat = statSync(path)
@@ -26,6 +31,7 @@ for (const oldName of OLD_NAMES) {
     const offenders = []
     for (const root of SCAN_ROOTS) {
       for (const file of walkFiles(join(PACKAGE_ROOT, root))) {
+        if (EXCLUDED_FILES.has(file)) continue
         const text = readFileSync(file, 'utf8')
         // `GANTRY_MCP_WORKSPACE_PATS` does not contain either old name as a substring, so a plain
         // `includes` needs no word-boundary handling.
