@@ -13,7 +13,8 @@ fields:
     title: Checks required
     type: select
     multiple: true
-    required: true
+    required-at:
+      - candidate-selected
     options:
       - Right to work
       - Criminal record
@@ -28,7 +29,8 @@ fields:
   - id: outcome
     title: Outcome
     type: select
-    required: true
+    required-at:
+      - candidate-selected
     options:
       - Cleared
       - Cleared with conditions

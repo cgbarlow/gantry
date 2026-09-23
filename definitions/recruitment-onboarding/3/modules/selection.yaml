@@ -11,7 +11,8 @@ fields:
   - id: shortlist
     title: Shortlist
     type: markdown
-    required: true
+    required-at:
+      - candidate-selected
     guidance: >
       How many were shortlisted and against what criteria. State the criteria explicitly: they
       are what makes the choice defensible, and they are the first thing anyone reviewing this
@@ -20,7 +21,8 @@ fields:
   - id: interviews
     title: Interviews
     type: markdown
-    required: true
+    required-at:
+      - candidate-selected
     guidance: >
       Format, panel, how many rounds, and when. Name the panel members by role.
 
@@ -37,7 +39,8 @@ fields:
   - id: rationale
     title: Selection rationale
     type: markdown
-    required: true
+    required-at:
+      - candidate-selected
     guidance: >
       Why the candidate above was selected, against the criteria stated in `shortlist`. Keep
       this to the decision and its basis — the role fit, the panel's reasoning. Nothing about

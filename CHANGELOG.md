@@ -17,6 +17,30 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.13-beta — 2026-09-23
+
+### Added
+
+- **Recruitment-onboarding v3 draft: carried-forward fields are required only at the stage
+  that first asks for them** (#159). A field carried forward from an earlier stage — the role
+  description, the engagement type, the vetting outcome, and similar — no longer nags a later
+  stage to re-fill it. Every later stage now shows the modules it only carries forward as
+  read-only, and names the stage to reopen to change them.
+- **The v3 draft's Hire Record now follows the process's true five-stage order** — Requisition,
+  Selection, Appointment, Offer/Contract/Payroll, Provisioning — and its closing section is
+  retitled "Questions still open at sign-off" (#160).
+
+### Fixed
+
+- **The v3 draft's Appointment Case and Onboarding Case no longer count the engagement type
+  against their own completeness bar**, even though it's only carried there for reference
+  (#159). Their gates drop from 5→4 and 9→8, matching the draft's specified 8/9/4/8/13 table.
+
+### Changed
+
+- **The v3 draft's Hire Record and Provisioning stage now say to request approval only once
+  the record is complete**, confirmed first with `gantry check` or `check_gate` (#160).
+
 ## 0.9.12-beta — 2026-09-23
 
 ### Changed

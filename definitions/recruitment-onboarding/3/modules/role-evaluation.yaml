@@ -12,7 +12,8 @@ fields:
   - id: method
     title: How it was evaluated
     type: markdown
-    required: true
+    required-at:
+      - approved-to-recruit
     guidance: >
       What the evaluation actually involved, who carried it out, and against what. If the
       answer is "the usual process", write down what the usual process is — this step has no
@@ -21,7 +22,8 @@ fields:
   - id: outcome
     title: Outcome
     type: markdown
-    required: true
+    required-at:
+      - approved-to-recruit
     guidance: >
       The band, level or grade the role evaluated to, and the date. If the evaluation changed
       the role as originally described, say what changed.
