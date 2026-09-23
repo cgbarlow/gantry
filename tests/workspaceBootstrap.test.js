@@ -358,6 +358,27 @@ test('parseSharedWorkspacePats: malformed JSON fails loud, one line naming GANTR
   )
 })
 
+// #130's rule 1 ("names only, never values") applied to this parser's own error. The likeliest way to
+// reach the invalid-JSON branch is pasting a bare PAT where the map was expected — and `JSON.parse`'s
+// own message embeds the first ~10 characters of its input, which used to be interpolated straight
+// into this error and from there into the deploy log.
+test('parseSharedWorkspacePats: an invalid-JSON error never echoes any part of the value — it holds credentials', () => {
+  const pastedBarePat = 'ghp_SECRETTOKENVALUE0123456789'
+  assert.throws(
+    () => parseSharedWorkspacePats(pastedBarePat),
+    (err) => {
+      assert.equal(err.message.includes(pastedBarePat), false, 'full value leaked')
+      // Any run of 4+ characters of the value is already too much of a credential to log.
+      for (let i = 0; i + 4 <= pastedBarePat.length; i += 1) {
+        const fragment = pastedBarePat.slice(i, i + 4)
+        assert.equal(err.message.includes(fragment), false, `value fragment "${fragment}" leaked into: ${err.message}`)
+      }
+      assert.match(err.message, /^GANTRY_SHARED_WORKSPACE_PATS must be valid JSON:/)
+      return true
+    }
+  )
+})
+
 test('parseSharedWorkspacePats: a JSON array (not an object) fails loud, naming the env var', () => {
   assert.throws(
     () => parseSharedWorkspacePats(JSON.stringify(['workspace-a'])),
@@ -672,7 +693,14 @@ test('discoverBootstrapPatInstances scopes a boot PAT to its own declared worksp
 const REPO_ROOT = new URL('..', import.meta.url).pathname
 const OLD_NAME = 'GANTRY_BOOTSTRAP' + '_PATS' // built at runtime so this file itself never contains the literal string being searched for
 const SCAN_ROOTS = ['lib', 'bin', 'web', 'README.md', 'CONTEXT.md']
-const EXCLUDED_FILES = new Set([join(REPO_ROOT, 'tests', 'workspaceBootstrap.test.js')])
+const EXCLUDED_FILES = new Set([
+  join(REPO_ROOT, 'tests', 'workspaceBootstrap.test.js'),
+  // #130: the one place the retired name is *supposed* to survive — a table of retired names mapped to
+  // what replaced them, so an operator who still has the old one set is told so at startup rather than
+  // met with silence. It is named there as history, never as live guidance, which is the distinction
+  // this guard is actually protecting.
+  join(REPO_ROOT, 'lib', 'envVarCheck.js'),
+])
 
 function walkFiles(path) {
   const stat = statSync(path)

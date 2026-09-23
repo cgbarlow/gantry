@@ -111,7 +111,7 @@ const workspaceIdField = z
   .string()
   .optional()
   .describe(
-    'Optional. Omit to target the server library / a server-directory workspace\'s own definitions. Supply a Provider-backed workspace id (from list_workspaces) to target that workspace\'s own definitions instead — its PAT is resolved from GANTRY_WORKSPACE_PATS automatically.'
+    'Optional. Omit to target the server library / a server-directory workspace\'s own definitions. Supply a Provider-backed workspace id (from list_workspaces) to target that workspace\'s own definitions instead — its PAT is resolved from GANTRY_MCP_WORKSPACE_PATS automatically.'
   )
 
 const versionField = z.number().int().positive().describe('The definition version number (from list_definitions / get_definition, e.g. 1, 2, 3).')

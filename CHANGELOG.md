@@ -17,6 +17,65 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.8.1-beta — 2026-09-23
+
+### Fixed
+
+- **Entering a credential in the browser for a Provider-backed workspace now actually fills that
+  workspace in on the main screen.** What you saw before: you opened the workspace's Settings, pasted
+  a Personal Access Token, saved it — and went back to the dashboard to find the workspace still
+  reporting that nothing was registered in it. Not briefly, either: it stayed that way through
+  reloads, through re-entering the token, indefinitely, with nothing anywhere to say why. The reason
+  was invisible from the outside. The dashboard's listing request asks for every workspace at once, so
+  there is no single workspace whose credential it could attach, and it attached none — and with no
+  credential the server can neither discover a Provider-backed workspace's designs nor read them back.
+  Put plainly: until this release, a deployment with no shared credential configured could not show a
+  Provider-backed workspace at all, whatever you typed into the browser. The dashboard now follows up
+  with one extra listing request per workspace that it holds a credential for and could not otherwise
+  show anything for — naming that workspace, carrying only that workspace's credential — and folds the
+  designs it finds into the main listing, replacing the "nothing registered yet" row. A credential the
+  Provider turns down is now reported as rejected in Settings rather than looking like an empty
+  workspace, and correcting it re-tries immediately instead of needing a page reload. Nothing extra is
+  requested for a purely local dashboard, for a deployment that already shares that workspace's
+  credential, or for a workspace the main listing could already show.
+
+- **A malformed credential-map environment variable no longer echoes part of its own value into the
+  deploy log.** Set `GANTRY_SHARED_WORKSPACE_PATS` (Gantry) or `GANTRY_MCP_WORKSPACE_PATS` (the MCP
+  server) to something that isn't valid JSON — pasting a bare token where the workspace-id-to-token
+  map was expected being the easiest way to do it — and the startup error used to quote the JSON
+  parser's own complaint, which embeds the first several characters of what it was given. On a hosted
+  deployment that put a prefix of your token into whatever log your platform keeps. Both services now
+  state the shape they expected instead, and say outright that the value is being withheld because it
+  holds credentials.
+
+### Changed
+
+- **The MCP server's `GANTRY_WORKSPACE_PATS` and `GANTRY_BASE_URL` are renamed to
+  `GANTRY_MCP_WORKSPACE_PATS` and `GANTRY_MCP_BASE_URL`, with no aliases for the old names.** These
+  are the *MCP server's* variables, not the Gantry server's — the MCP server is a separate process
+  with its own deployment and its own environment, and this rename changes nothing about the variables
+  `gantry serve` itself reads. If you run the MCP server, you must rename these two wherever you set
+  them before you upgrade it: the old names are not read at all, so the server exits at startup saying
+  `GANTRY_MCP_BASE_URL` is missing, and if it gets past that, every Provider-backed workspace fails
+  with `missing_workspace_pat`. The values and their shapes are unchanged, only the keys. The reason
+  for the churn is the mistake the old names invited: they read as though they belonged to the Gantry
+  web service, and an operator who set them there got no error, no warning and no effect at all —
+  silence, and a workspace that never showed its designs. An alias would have kept the confusable name
+  in circulation, which is the thing being fixed.
+
+### Added
+
+- **Each service now tells you at startup about any `GANTRY_`-prefixed variable it doesn't read.** One
+  line per variable, in the deploy log, at the moment you are still looking at it. A variable that
+  belongs to the other service is named as such — "it belongs to the Gantry MCP server, a separate
+  process. Set it there instead." — and a name that has been retired is answered with the name that
+  replaced it, which covers anyone upgrading past this release's rename or 0.8.0-beta's. A near-miss
+  on a real name gets the name you probably meant. This is a warning and never anything more: it does
+  not block startup, because setting your own variables on your own deployment is legitimate. It never
+  prints a value, only a name — several of these variables hold credentials, and a startup check that
+  leaked one would be worse than the silence it replaces. A correctly configured deployment prints
+  nothing at all.
+
 ## 0.8.0-beta — 2026-09-22
 
 ### Changed

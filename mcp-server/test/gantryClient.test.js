@@ -62,7 +62,7 @@ test('request() returns a structured error and never calls the target route when
     assert.equal(res.ok, false)
     assert.equal(res.credentialError.error, 'missing_workspace_pat')
     assert.equal(res.credentialError.workspace, 'ws-2')
-    assert.equal(res.credentialError.envVar, 'GANTRY_WORKSPACE_PATS')
+    assert.equal(res.credentialError.envVar, 'GANTRY_MCP_WORKSPACE_PATS')
     assert.equal(
       fetch.calls.some((c) => c.url.pathname === '/api/instance/advance-stage'),
       false,

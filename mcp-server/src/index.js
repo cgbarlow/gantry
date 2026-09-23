@@ -4,6 +4,7 @@ import { createGantryClient } from './gantryClient.js'
 import { parseWorkspacePats } from './credentials.js'
 import { isAuthorizedAccessToken } from './accessAuth.js'
 import { buildMcpServer } from './mcpServer.js'
+import { warnAboutUnreadEnvVars } from './envVarCheck.js'
 
 function sendJSON(res, status, body) {
   res.writeHead(status, { 'content-type': 'application/json' })
@@ -57,12 +58,21 @@ export function createApp({ baseUrl, accessToken, workspacePats, fetchImpl }) {
 }
 
 function main() {
-  const baseUrl = process.env.GANTRY_BASE_URL
+  // #130: the very first thing this process does is name, on stderr, every `GANTRY_`-prefixed
+  // variable set in its environment that it does not read. Before the required-variable checks
+  // below, deliberately: an operator still carrying a pre-#129 name is about to be told
+  // `GANTRY_MCP_BASE_URL` is required, and the line that says the name they set is retired and what
+  // replaced it is exactly what turns that into a one-minute fix. Variable *names* only, never
+  // values (several are credentials), and warning-only — an unrecognised variable never blocks
+  // startup. A correctly configured deployment prints nothing here at all.
+  warnAboutUnreadEnvVars(process.env)
+
+  const baseUrl = process.env.GANTRY_MCP_BASE_URL
   const accessToken = process.env.GANTRY_MCP_ACCESS_TOKEN
   const port = Number(process.env.PORT ?? 3100)
 
   if (!baseUrl) {
-    console.error('GANTRY_BASE_URL is required (the gantry serve deployment this server is a client of)')
+    console.error('GANTRY_MCP_BASE_URL is required (the gantry serve deployment this server is a client of)')
     process.exit(1)
   }
   if (!accessToken) {
@@ -72,7 +82,7 @@ function main() {
 
   let workspacePats
   try {
-    workspacePats = parseWorkspacePats(process.env.GANTRY_WORKSPACE_PATS)
+    workspacePats = parseWorkspacePats(process.env.GANTRY_MCP_WORKSPACE_PATS)
   } catch (err) {
     console.error(err.message)
     process.exit(1)

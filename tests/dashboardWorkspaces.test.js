@@ -4,6 +4,7 @@ import {
   describeRegisteredWorkspace,
   isAzureDevOpsProviderWorkspace,
   unrepresentedWorkspaceGroups,
+  workspacesNeedingOwnListing,
 } from '../web/lib/dashboardWorkspaces.js'
 
 // #122 (parent #109, docs/adr/0047): the dashboard's client-side join between `GET /api/workspaces`
@@ -114,4 +115,65 @@ test('unrepresentedWorkspaceGroups ignores instances with no workspace at all (l
     groups.map((g) => g.workspaceId),
     ['ws-1']
   )
+})
+
+// ---------- #131: which workspaces get their own credentialed listing ----------
+// `workspacesNeedingOwnListing` is the dashboard's bound on how many workspace-scoped listing requests
+// it may issue — the pure half of web/lib/workspaceDiscovery.js. Every acceptance criterion about
+// *which* workspaces are touched (and, just as importantly, which are left entirely alone) is decided
+// here, which is why it's a plain function over plain data rather than logic buried in a component.
+
+const CREDENTIALS = new Set(['ws-cred'])
+const hasCredential = (id) => CREDENTIALS.has(id)
+
+test('workspacesNeedingOwnListing selects a credentialed workspace the unscoped listing shows nothing for', () => {
+  const workspaces = [{ id: 'ws-cred', provider: 'github', location: { owner: 'octocat', repository: 'r' } }]
+  assert.deepEqual(workspacesNeedingOwnListing([], workspaces, hasCredential), ['ws-cred'])
+})
+
+test('workspacesNeedingOwnListing leaves a workspace the browser holds NO credential for entirely alone', () => {
+  const workspaces = [
+    { id: 'ws-cred', provider: 'github', location: {} },
+    { id: 'ws-no-cred', provider: 'github', location: {} },
+  ]
+  assert.deepEqual(workspacesNeedingOwnListing([], workspaces, hasCredential), ['ws-cred'])
+})
+
+test('workspacesNeedingOwnListing skips a workspace the unscoped listing already has rows for — no second, redundant request', () => {
+  const instances = [{ slug: 'a', workspace: { id: 'ws-cred' } }]
+  const workspaces = [{ id: 'ws-cred', provider: 'github', location: {} }]
+  assert.deepEqual(workspacesNeedingOwnListing(instances, workspaces, hasCredential), [])
+})
+
+test('workspacesNeedingOwnListing skips a provider gantry cannot list instances for at all (atlassian)', () => {
+  const workspaces = [{ id: 'ws-cred', provider: 'atlassian', location: {} }]
+  assert.deepEqual(workspacesNeedingOwnListing([], workspaces, hasCredential), [])
+})
+
+test('workspacesNeedingOwnListing covers every listable provider', () => {
+  const workspaces = ['azure-devops', 'github', 'gitlab'].map((provider) => ({ id: 'ws-cred', provider, location: {} }))
+  for (const workspace of workspaces) {
+    assert.deepEqual(workspacesNeedingOwnListing([], [workspace], hasCredential), ['ws-cred'])
+  }
+})
+
+test('workspacesNeedingOwnListing issues nothing for an empty or missing listing/workspace set', () => {
+  assert.deepEqual(workspacesNeedingOwnListing([], [], hasCredential), [])
+  assert.deepEqual(workspacesNeedingOwnListing(null, null, hasCredential), [])
+})
+
+// The regression guard the ticket asks for: if the dashboard ever reverted to issuing its listing
+// request with no credential available for any workspace, this set would be the *only* thing left that
+// could still reach a Provider-backed workspace — so it must never silently collapse to empty while a
+// credentialed, unrepresented workspace exists.
+test('workspacesNeedingOwnListing: a credentialed Provider-backed workspace with nothing shown for it is never skipped', () => {
+  const workspaces = [
+    { id: 'ws-cred', provider: 'github', location: {}, hasRegisteredInstances: false },
+    { id: 'ws-cred', provider: 'github', location: {}, hasRegisteredInstances: true },
+  ]
+  // Regardless of whether the server reports anything registered — a workspace whose instances were
+  // discovered but are unreadable by the unscoped listing still needs its own credentialed one.
+  for (const workspace of workspaces) {
+    assert.deepEqual(workspacesNeedingOwnListing([], [workspace], hasCredential), ['ws-cred'])
+  }
 })

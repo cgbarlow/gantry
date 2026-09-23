@@ -18,6 +18,7 @@ import { renderEngine, setRenderEngine } from '../lib/renderEngine.js'
 import { pandocWasmState } from '../lib/pandocWasm.js'
 import { apiFetch, apiFetchForInstance, cachedWorkspaceIdForSlug } from '../lib/apiFetch.js'
 import { ensureWriteAccessChecked } from '../lib/writeAccess.js'
+import { resetWorkspaceDiscovery } from '../lib/workspaceDiscovery.js'
 import { IdentityPicker } from '../lib/identityPicker.js'
 
 // #126 (parent #109, docs/adr/0047): the Settings-screen twin of web/app.js's own
@@ -695,7 +696,7 @@ const PAT_SCOPE_HELP = {
 //
 // The id only means anything for a **remote workspace** (CONTEXT.md's "Workspace location"): a
 // registry record (`lib/workspaceRegistry.js`) keyed by the id that `GANTRY_SHARED_WORKSPACE_PATS`
-// (#121, ADR-0047) and the MCP server's `GANTRY_WORKSPACE_PATS` (ADR-0043) are themselves keyed by. A Local
+// (#121, ADR-0047) and the MCP server's `GANTRY_MCP_WORKSPACE_PATS` (ADR-0043) are themselves keyed by. A Local
 // or server-directory workspace has no registry entry at all and needs no credential-map entry, so
 // there is nothing here to show and a blank or invented field would actively mislead the one person
 // who reads it — whoever is pasting a credential map into a hosting dashboard.
@@ -752,7 +753,7 @@ function WorkspaceIdField({ workspaceId }) {
       <span class="workspace-id-status" role="status">${status}</span>
       <p class="workspace-id-hint">
         This workspace's key in the server's <code>GANTRY_SHARED_WORKSPACE_PATS</code> and the MCP server's
-        <code>GANTRY_WORKSPACE_PATS</code> maps. It identifies the workspace; it isn't a credential.
+        <code>GANTRY_MCP_WORKSPACE_PATS</code> maps. It identifies the workspace; it isn't a credential.
       </p>
     </div>
   `
@@ -807,6 +808,11 @@ function WorkspaceEditor({ workspace, onUpdated, slug }) {
 
   function handleSetPat() {
     setPatForWorkspace(workspace.id, patDraft)
+    // #131: a newly entered credential is genuinely something new to try, so the dashboard's
+    // once-per-page-session bound on this workspace's own listing request is lifted — otherwise
+    // correcting a credential the Provider had rejected would need a full page reload before that
+    // workspace's designs could appear.
+    resetWorkspaceDiscovery(workspace.id)
     setPatDraft('')
     setPatStatus('PAT saved \u2014 used for this workspace\u2019s instances from now on.')
   }
