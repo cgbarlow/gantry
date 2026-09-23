@@ -1,0 +1,259 @@
+# <%~ it.instance.name || it.instance.slug %>: Hire Record
+<%
+  /* The permanent file: every module in the definition, in the order the process ran, grouped
+     by stage so it reads as a chronology. It is the record as at readiness sign-off; anything
+     learned after the first day is added by reopening Provisioning.
+
+     Carried-forward entries stay bare in `requires` (unlike every other later document), so
+     the kept file is complete whenever it is complete. That also makes it the strictest
+     document at ready-to-start: the gate can pass on Starter Readiness alone, and only complete
+     documents are rendered into the approval request — hence the stage purpose's "request
+     approval only once the Hire Record is complete".
+
+     The only document that prints `contract.elapsed`, `open-questions.process-gaps` and
+     `payroll.validation-outcome` (optional since v3). No approval sections: each stage's
+     sign-off is its merged pull request.
+
+     v3: derived approval-route line replaces `engagement.approval-route`; two signature dates
+     replace `contract.signatures`; `handover.readiness-confirmation` is gone; `identity.user-id`,
+     `device.standard`, `device.build-notes`, `engagement.route-variation` and
+     `contract.variations` are new. Named from the candidate alone: a moved start date should
+     not rename the kept file. */
+  const hrType = it.modules.engagement.type
+  const hrTerm = it.modules.engagement.term
+  const hrRoute = (hrType === 'Fixed term' || hrType === 'Permanent') ? 'Full approval chain'
+    : (hrType === 'Vendor' || hrType === 'Contractor') ? 'Shortened approval chain' : '— n/a —'
+  const hrQuestions = it.modules['open-questions'].questions || []
+  const hrGaps = it.modules['open-questions']['process-gaps']
+%>
+# Requisition
+
+## Role summary
+
+<%~ na(it.modules.role.summary) %>
+
+## Team and reporting line
+
+<%~ na(it.modules.role.team) %>
+
+## Key responsibilities
+
+<% (it.modules.role.responsibilities || []).forEach(function(item) { %>- <%~ item %>
+<% }) %>
+## Justification
+
+<%~ na(it.modules.role.justification) %>
+
+## Engagement type
+
+<%~ na(hrType) %>
+<% if (hrTerm || (hrType && hrType !== 'Permanent')) { %>
+## Term or expected duration
+
+<%~ hrTerm || '— not stated —' %>
+<% } %>
+## Engagement rationale
+
+<%~ na(it.modules.engagement.rationale) %>
+
+## Standard approval route for this engagement type
+
+<%~ hrRoute %>
+<% if (it.modules.engagement['route-variation']) { %>
+## Route variation
+
+<%~ it.modules.engagement['route-variation'] %>
+<% } %>
+## Role evaluation method
+
+<%~ na(it.modules['role-evaluation'].method) %>
+
+## Role evaluation outcome
+
+<%~ na(it.modules['role-evaluation'].outcome) %>
+<% if (it.modules['role-evaluation'].notes) { %>
+## Role evaluation notes
+
+<%~ it.modules['role-evaluation'].notes %>
+<% } %>
+# Selection
+
+## Advertising channels
+
+<% (it.modules.advertising.channels || []).forEach(function(item) { %>- <%~ item %>
+<% }) %>
+## Advertising period
+
+<%~ na(it.modules.advertising.period) %>
+
+## Response
+
+<%~ na(it.modules.advertising.response) %>
+<% if (it.modules.advertising.notes) { %>
+## Advertising notes
+
+<%~ it.modules.advertising.notes %>
+<% } %>
+## Shortlist
+
+<%~ na(it.modules.selection.shortlist) %>
+
+## Interviews
+
+<%~ na(it.modules.selection.interviews) %>
+
+## Candidate name
+
+<%~ na(it.modules.selection['candidate-name']) %>
+
+## Selection rationale
+
+<%~ na(it.modules.selection.rationale) %>
+<% if (it.modules.selection.unsuccessful) { %>
+## Unsuccessful candidates
+
+<%~ it.modules.selection.unsuccessful %>
+<% } %>
+## Checks required
+
+<% (it.modules.vetting['checks-required'] || []).forEach(function(item) { %>- <%~ item %>
+<% }) %>
+## Vetting outcome
+
+<%~ na(it.modules.vetting.outcome) %>
+<% if (it.modules.vetting.conditions || it.modules.vetting.outcome === 'Cleared with conditions') { %>
+## Vetting conditions
+
+<%~ it.modules.vetting.conditions || '— not stated —' %>
+<% } %>
+# Appointment
+
+## Offer terms as approved
+
+<%~ na(it.modules.offer.terms) %>
+
+# Offer, contract and payroll
+
+## Offer status
+
+<%~ na(it.modules.offer.status) %>
+<% if (it.modules.offer.negotiation) { %>
+## Negotiation
+
+<%~ it.modules.offer.negotiation %>
+<% } %>
+## Contract terms
+
+<%~ na(it.modules.contract['terms-summary']) %>
+<% if (it.modules.contract.variations) { %>
+## Variations from the offer
+
+<%~ it.modules.contract.variations %>
+<% } %>
+## Manager signed
+
+<%~ na(formatDate(it.modules.contract['manager-signed'])) %>
+
+## Candidate signed
+
+<%~ na(formatDate(it.modules.contract['candidate-signed'])) %>
+
+## Start date
+
+<%~ na(formatDate(it.modules.contract['start-date'])) %>
+<% if (it.modules.contract['start-date-changes']) { %>
+## Start date changes
+
+<%~ it.modules.contract['start-date-changes'] %>
+<% } %>
+<% if (it.modules.contract.elapsed) { %>
+## Elapsed time
+
+<%~ it.modules.contract.elapsed %>
+<% } %>
+## Payroll details requested
+
+<%~ na(it.modules.payroll['details-requested']) %>
+<% if (it.modules.payroll['validation-outcome']) { %>
+## Payroll validation outcome
+
+<%~ it.modules.payroll['validation-outcome'] %>
+<% } %>
+<% if (it.modules.payroll.rework) { %>
+## Payroll rework
+
+<%~ it.modules.payroll.rework %>
+<% } %>
+## Payroll confirmation
+
+<%~ na(it.modules.payroll.confirmed) %>
+
+# Provisioning
+
+## User ID
+
+<%~ na(it.modules.identity['user-id']) %>
+
+## Account
+
+<%~ na(it.modules.identity.account) %>
+
+## Propagation
+
+<%~ na(it.modules.identity.propagation) %>
+
+## Credential issue
+
+<%~ na(it.modules.identity['credential-issue']) %>
+
+## Standard or non-standard device
+
+<%~ na(it.modules.device.standard) %>
+
+## Device specification
+
+<%~ na(it.modules.device.specification) %>
+<% if (it.modules.device['non-standard-decision'] || it.modules.device.standard === 'Non-standard') { %>
+## Non-standard hardware decision
+
+<%~ it.modules.device['non-standard-decision'] || '— not stated —' %>
+<% } %>
+## Device build status
+
+<%~ na(it.modules.device['build-status']) %>
+<% if (it.modules.device['build-notes']) { %>
+## Device build notes
+
+<%~ it.modules.device['build-notes'] %>
+<% } %>
+## Entitlements
+
+<% (it.modules.access.entitlements || []).forEach(function(item) { %>- <%~ item %>
+<% }) %>
+## Access setup
+
+<%~ na(it.modules.access.setup) %>
+<% if (it.modules.access.outstanding) { %>
+## Not in place by the start date
+
+<%~ it.modules.access.outstanding %>
+<% } %>
+## Manager actions
+
+<% (it.modules.handover['manager-actions'] || []).forEach(function(item) { %>- <%~ item %>
+<% }) %>
+## First day
+
+<%~ na(it.modules.handover['day-one']) %>
+<% if (hrQuestions.length || hrGaps) { %>
+# Open questions and process gaps
+<% if (hrQuestions.length) { %>
+## Questions still open at sign-off
+
+<% hrQuestions.forEach(function(item) { %>- <%~ item %>
+<% }) %><% } %>
+<% if (hrGaps) { %>
+## Process gaps
+
+<%~ hrGaps %>
+<% } %><% } %>

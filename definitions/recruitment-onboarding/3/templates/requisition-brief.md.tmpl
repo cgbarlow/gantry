@@ -1,0 +1,81 @@
+# <%~ it.instance.name || it.instance.slug %>: Requisition Brief
+<%
+  /* The case put to whoever signs Requisition off, as the "Approved to Recruit" confirmation
+     (see the stage purpose and CHANGELOG.md v3). `na()` and `formatDate()` are injected by
+     lib/render.js as an Eta functionHeader. A bare (gate-blocking) field prints "— n/a —"
+     under its heading when blank; a `?` field is a suppress-when-blank block.
+
+     `requires` is the authoring and gate scope, not quite the outline: `open-questions.
+     process-gaps?` is in scope so the requesting department can record a gap where it
+     happens, and is printed only in the Hire Record. Every bare field IS printed here —
+     this is the only document at approved-to-recruit, so whoever signs sees all of it.
+
+     v3: `engagement.approval-route` is gone. The standard route is printed from the type
+     (Fixed term / Permanent -> full chain; Vendor / Contractor -> shortened), with
+     `engagement.route-variation` under it when present. The term heading shows whenever the
+     type is not Permanent, with "— not stated —" (not na()'s "— n/a —") when blank.
+     `role-evaluation.method` moved to a closing record section after the outcome. No approval
+     section, by design: the approval is the sign-off. */
+  const reqType = it.modules.engagement.type
+  const reqTerm = it.modules.engagement.term
+  const reqRoute = (reqType === 'Fixed term' || reqType === 'Permanent') ? 'Full approval chain'
+    : (reqType === 'Vendor' || reqType === 'Contractor') ? 'Shortened approval chain' : '— n/a —'
+%>
+# The role
+
+## Role summary
+
+<%~ na(it.modules.role.summary) %>
+
+## Team and reporting line
+
+<%~ na(it.modules.role.team) %>
+
+## Key responsibilities
+
+<% (it.modules.role.responsibilities || []).forEach(function(item) { %>- <%~ item %>
+<% }) %>
+## Justification
+
+<%~ na(it.modules.role.justification) %>
+
+# Engagement
+
+## Engagement type
+
+<%~ na(reqType) %>
+<% if (reqTerm || (reqType && reqType !== 'Permanent')) { %>
+## Term or expected duration
+
+<%~ reqTerm || '— not stated —' %>
+<% } %>
+## Rationale
+
+<%~ na(it.modules.engagement.rationale) %>
+
+## Standard approval route for this engagement type
+
+<%~ reqRoute %>
+<% if (it.modules.engagement['route-variation']) { %>
+## Route variation
+
+<%~ it.modules.engagement['route-variation'] %>
+<% } %>
+# Role evaluation
+
+## Outcome
+
+<%~ na(it.modules['role-evaluation'].outcome) %>
+<% if (it.modules['role-evaluation'].notes) { %>
+## Notes
+
+<%~ it.modules['role-evaluation'].notes %>
+<% } %>
+# How the role was evaluated
+
+<%~ na(it.modules['role-evaluation'].method) %>
+<% if (it.modules['open-questions'].questions && it.modules['open-questions'].questions.length) { %>
+# Open questions
+
+<% it.modules['open-questions'].questions.forEach(function(item) { %>- <%~ item %>
+<% }) %><% } %>

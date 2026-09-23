@@ -1,0 +1,53 @@
+id: vetting
+title: Vetting
+purpose: >
+  Record which pre-employment checks applied to this role and what they returned.
+
+  Record the outcome, never the particulars. "Criminal record check: cleared, 14 March" is the
+  record this process needs. What a check actually surfaced is not content for a repository, and
+  nothing downstream of here needs it. Vetting is never printed in the document sent to the
+  new starter.
+
+fields:
+  - id: checks-required
+    title: Checks required
+    type: select
+    multiple: true
+    required-at:
+      - candidate-selected
+    options:
+      - Right to work
+      - Identity verification
+      - Criminal record
+      - Credit
+      - Professional registration
+      - Referee checks
+    guidance: >
+      Which pre-employment checks apply to this role. If a check that normally applies was
+      waived, say so in `conditions` below — a waiver is part of the record.
+
+  - id: outcome
+    title: Outcome
+    type: select
+    required-at:
+      - candidate-selected
+    options:
+      - Cleared
+      - Cleared with conditions
+      - Not cleared
+    guidance: >
+      Cleared, cleared with conditions, or not cleared. The outcome only — not what any check
+      returned. A conditional clearance must name each condition, and who accepted it, in
+      `conditions` below. Not cleared means Selection must not be signed off. Record the date
+      each check completed in `conditions` below.
+
+  - id: conditions
+    title: Conditions
+    type: markdown
+    required: false
+    guidance: >
+      Name each condition as the requirement to be met (for example "provide X by date Y"),
+      who accepted it and the date; never what a check returned. Record the date each check
+      completed here too, and note a waiver of a normally-applicable check and why it was
+      waived. A condition the starter must still meet is stated to them in the contract terms,
+      not here.

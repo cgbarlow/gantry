@@ -1,0 +1,81 @@
+# <%~ it.instance.name || it.instance.slug %>: Selection Report
+<%
+  /* Opens with the role summary so the report stands alone for a reader who has not seen the
+     Requisition Brief. v3: `role.summary` is carried (required-at approved-to-recruit) and
+     referenced `?`, so it no longer gates here, but it is still printed. Vetting records
+     outcomes only; see modules/vetting.yaml.
+
+     `open-questions.process-gaps?` is in `requires` for authoring scope only and is printed
+     in the Hire Record. `selection.unsuccessful` may be completed later, at Offer, Contract
+     and Payroll, once reserve finalists are released.
+
+     v3: prints a warning when vetting reads Not cleared (the gate cannot restrict a select's
+     values per gate), and always shows the Conditions heading when the outcome is Cleared with
+     conditions, with "— not stated —" when blank. */
+%>
+# The role
+
+<%~ na(it.modules.role.summary) %>
+
+# Advertising
+
+## Channels
+
+<% (it.modules.advertising.channels || []).forEach(function(item) { %>- <%~ item %>
+<% }) %>
+## Advertising period
+
+<%~ na(it.modules.advertising.period) %>
+
+## Response
+
+<%~ na(it.modules.advertising.response) %>
+<% if (it.modules.advertising.notes) { %>
+## Notes
+
+<%~ it.modules.advertising.notes %>
+<% } %>
+# Selection
+
+## Shortlist
+
+<%~ na(it.modules.selection.shortlist) %>
+
+## Interviews
+
+<%~ na(it.modules.selection.interviews) %>
+
+## Candidate name
+
+<%~ na(it.modules.selection['candidate-name']) %>
+
+## Selection rationale
+
+<%~ na(it.modules.selection.rationale) %>
+<% if (it.modules.selection.unsuccessful) { %>
+## Unsuccessful candidates
+
+<%~ it.modules.selection.unsuccessful %>
+<% } %>
+# Vetting
+
+## Checks required
+
+<% (it.modules.vetting['checks-required'] || []).forEach(function(item) { %>- <%~ item %>
+<% }) %>
+## Outcome
+
+<%~ na(it.modules.vetting.outcome) %>
+<% if (it.modules.vetting.outcome === 'Not cleared') { %>
+**Warning:** vetting did not clear this candidate. This stage should not be signed off.
+<% } %>
+<% if (it.modules.vetting.conditions || it.modules.vetting.outcome === 'Cleared with conditions') { %>
+## Conditions
+
+<%~ it.modules.vetting.conditions || '— not stated —' %>
+<% } %>
+<% if (it.modules['open-questions'].questions && it.modules['open-questions'].questions.length) { %>
+# Open questions
+
+<% it.modules['open-questions'].questions.forEach(function(item) { %>- <%~ item %>
+<% }) %><% } %>

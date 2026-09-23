@@ -1,0 +1,33 @@
+id: handover
+title: Handover
+purpose: >
+  What the hiring manager has to do before and on the starter's first day.
+
+  Written by the hiring manager and printed back to them in the Manager Handover, which is
+  rendered and sent as soon as the account exists and re-sent at sign-off. The hiring manager
+  has been a participant since the requisition but has not been following the stages, so state
+  their obligations plainly and with dates. Whether the starter is ready is not a field here:
+  it is the Provisioning sign-off itself, and anything not in place is listed in
+  `access.outstanding`.
+
+fields:
+  - id: manager-actions
+    title: Manager actions
+    type: list
+    required: true
+    guidance: >
+      What the hiring manager must do and by when — issue credentials (the user ID and initial
+      password), arrange the first-day meeting, confirm the desk or workspace, brief the team,
+      arrange the first week — and any open question the hiring manager owes an answer to, with
+      its deadline. One per line, each with a deadline relative to the start date. At sign-off,
+      an action already completed may be stated as done, with its date. Printed in the Manager
+      Handover.
+
+  - id: day-one
+    title: First day
+    type: markdown
+    required: true
+    guidance: >
+      What happens on the first day: where the starter goes, who meets them, what they are
+      given, what they are expected to complete. Written for the starter's manager to act on,
+      not as a process description. Printed in the Manager Handover.

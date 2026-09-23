@@ -1,0 +1,61 @@
+id: selection
+title: Selection
+purpose: >
+  Record how the field was narrowed to one preferred candidate: the shortlist, the interviews,
+  and the reasoning behind the choice.
+
+  Record the decision, not the people. Enough to show the selection was made on stated criteria
+  and to remind a reader later why this person was chosen — not a file on everyone who applied.
+  Written at Selection. It stays open at Offer, Contract and Payroll only so that finalists held
+  in reserve can be recorded in `unsuccessful` once the offer is accepted; everything else here
+  is changed by reopening Selection.
+
+fields:
+  - id: shortlist
+    title: Shortlist
+    type: markdown
+    required-at:
+      - candidate-selected
+    guidance: >
+      How many were shortlisted and against what criteria. State the criteria explicitly: they
+      are what makes the choice defensible, and they are the first thing anyone reviewing this
+      later will look for.
+
+  - id: interviews
+    title: Interviews
+    type: markdown
+    required-at:
+      - candidate-selected
+    guidance: >
+      Format, panel, how many rounds, and when. Name the panel members by role.
+
+  - id: candidate-name
+    title: Candidate name
+    type: text
+    required: true
+    guidance: >
+      Who was selected: the name as it will appear on the offer, recorded here as a short fact
+      rather than folded into the rationale below. No other identifiers — not an address, date
+      of birth, personal email or phone. This names every document rendered from Selection
+      onward, and it is printed in the Appointment Confirmation and Starter Readiness.
+
+  - id: rationale
+    title: Selection rationale
+    type: markdown
+    required-at:
+      - candidate-selected
+    guidance: >
+      Why the candidate above was selected, against the criteria stated in `shortlist`. Keep
+      this to the decision and its basis — the role fit, the panel's reasoning. Nothing about
+      them that the decision did not turn on.
+
+  - id: unsuccessful
+    title: Unsuccessful candidates
+    type: markdown
+    required: false
+    guidance: >
+      How unsuccessful candidates were handled and when they were told. Finalists held in
+      reserve until the offer is accepted are recorded when they are released, which may be
+      after this stage, at Offer, Contract and Payroll. No names and no individual feedback —
+      this is a record that the process closed properly, not a file on people who were not
+      hired.

@@ -1,0 +1,59 @@
+# <%~ it.instance.name || it.instance.slug %>: Manager Handover
+<%
+  /* Written for the hiring manager. v3: `document-control: false` and `satisfies-gate:
+     false`, so `requires` is exactly what this prints plus the filename token
+     `selection.candidate-name` (not printed: the manager chose the candidate). Rendered and
+     sent as soon as the account exists, and re-sent at sign-off — hence `{today}` in the
+     filename.
+
+     Deliberately not printed (Technology's own record, printed in Starter Readiness and the
+     Hire Record): the reporting line (the manager wrote it), `identity.account`,
+     `identity.propagation`, `identity.credential-issue` (the manager is told to send the
+     credentials, not told that they were sent), `access.setup`, and open questions (any the
+     manager owes are in their actions). The headline is derived from what is outstanding;
+     `handover.readiness-confirmation` no longer exists. */
+  const mhInPlace = !it.modules.access.outstanding && it.modules.device['build-status'] === 'Ready'
+%>
+<%~ mhInPlace ? 'Everything is in place for the start date.' : 'Some items are not yet in place. See below.' %>
+
+# Your new starter
+
+## Role
+
+<%~ na(it.modules.role.summary) %>
+
+## Start date
+
+<%~ na(formatDate(it.modules.contract['start-date'])) %>
+
+# What you need to do
+
+<% (it.modules.handover['manager-actions'] || []).forEach(function(item) { %>- <%~ item %>
+<% }) %>
+## The first day
+
+<%~ na(it.modules.handover['day-one']) %>
+
+# What is already in place
+
+## User ID
+
+<%~ na(it.modules.identity['user-id']) %>
+
+## Device
+
+<%~ na(it.modules.device.specification) %>
+
+## Device build
+
+<%~ na(it.modules.device['build-status']) %>
+
+## Access
+
+<% (it.modules.access.entitlements || []).forEach(function(item) { %>- <%~ item %>
+<% }) %>
+<% if (it.modules.access.outstanding) { %>
+## Not in place by the start date
+
+<%~ it.modules.access.outstanding %>
+<% } %>

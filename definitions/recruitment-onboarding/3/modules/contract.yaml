@@ -1,0 +1,83 @@
+id: contract
+title: Contract
+purpose: >
+  The employment agreement: its terms, its two signatures, and the start date it sets.
+
+  Contract creation starts the clock. Roughly fifteen days run from here to the start date when
+  nothing goes wrong — about three for the contract itself, one to two for the manager's
+  signature, one to three for the candidate's, and the rest for payroll and provisioning. There
+  is very little slack in that, which is why a single payroll failure is usually what moves a
+  start date.
+
+  Never attach the executed contract or an image of it. It carries the starter's personal
+  details, and instance content is committed to git as plain files; the signed agreement stays
+  in HR's own system.
+
+fields:
+  - id: terms-summary
+    title: Terms
+    type: markdown
+    required-at:
+      - onboarding-approved
+    guidance: >
+      A plain summary of the executed terms — remuneration as the band and position in band
+      (never the salary figure), hours, location, on-call, the term for a fixed-term engagement,
+      and any condition of employment the starter must still satisfy (for example "subject to
+      providing X by Y"; never what a check returned). Printed in the Appointment Confirmation,
+      so write it so it can be shown to the starter, and record no storage or process remarks
+      here. Differences from the accepted offer go in `variations`. Do not attach the executed
+      contract: the signed agreement stays in HR's own system.
+
+  - id: variations
+    title: Variations from the offer
+    type: markdown
+    required: false
+    guidance: >
+      Any way the agreement as drawn differs from the offer accepted, and who agreed it. Leave
+      empty where the agreement matches the offer.
+
+  - id: manager-signed
+    title: Manager signed
+    type: date
+    required-at:
+      - onboarding-approved
+    guidance: >
+      The date the hiring manager signed the agreement. The date only — any comment on how long
+      signing took belongs in `elapsed`.
+
+  - id: candidate-signed
+    title: Candidate signed
+    type: date
+    required-at:
+      - onboarding-approved
+    guidance: >
+      The date the candidate returned their electronic signature. The date only — any comment
+      on how long signing took belongs in `elapsed`.
+
+  - id: start-date
+    title: Start date
+    type: date
+    required: true
+    guidance: >
+      The agreed first day. If it moves after being agreed, record the change in
+      `start-date-changes` below rather than here.
+
+  - id: start-date-changes
+    title: Start date changes
+    type: markdown
+    required: false
+    guidance: >
+      If the start date moved after being agreed, record the original date, the new one, and
+      what moved it. Leave empty where the date has not moved.
+
+  - id: elapsed
+    title: Elapsed time
+    type: markdown
+    required: false
+    guidance: >
+      Elapsed time from contract creation to the agreed start date (`start-date`), against the
+      fifteen days the process assumes, and where the difference sat — including the gap
+      between the two signatures where it mattered. Both ends are known once the start date is
+      agreed, so fill it before onboarding approval; if the start date moves later, reopen this
+      stage and update it. Worth filling even when it went to plan — the baseline is only
+      useful if something is measured against it.

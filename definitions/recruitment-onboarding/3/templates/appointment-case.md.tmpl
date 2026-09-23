@@ -1,0 +1,58 @@
+# <%~ it.instance.name || it.instance.slug %>: Appointment Case
+<%
+  /* v3: the case put to EXECUTIVE approval at approved-to-appoint, before any offer is made
+     (the v2 Appointment stage is split; see CHANGELOG.md v3). The only document at its gate.
+     Candidate, rationale, vetting outcome and the proposed offer terms are bare — the
+     executive decision turns on them. Role and engagement are carried context, referenced `?`.
+
+     The offer outcome, contract and payroll moved to the Onboarding Case at
+     onboarding-approved. No approval section: the approval is the sign-off. The term heading
+     shows whenever the type is not Permanent ("— not stated —" when blank); the Conditions
+     heading always shows for Cleared with conditions. */
+  const apType = it.modules.engagement.type
+  const apTerm = it.modules.engagement.term
+%>
+# The appointment
+
+## Role
+
+<%~ na(it.modules.role.summary) %>
+
+## Team and reporting line
+
+<%~ na(it.modules.role.team) %>
+
+## Engagement type
+
+<%~ na(apType) %>
+<% if (apTerm || (apType && apType !== 'Permanent')) { %>
+## Term or expected duration
+
+<%~ apTerm || '— not stated —' %>
+<% } %>
+## Candidate name
+
+<%~ na(it.modules.selection['candidate-name']) %>
+
+## Selection rationale
+
+<%~ na(it.modules.selection.rationale) %>
+
+## Vetting outcome
+
+<%~ na(it.modules.vetting.outcome) %>
+<% if (it.modules.vetting.conditions || it.modules.vetting.outcome === 'Cleared with conditions') { %>
+## Vetting conditions
+
+<%~ it.modules.vetting.conditions || '— not stated —' %>
+<% } %>
+# Proposed terms
+
+## Offer terms
+
+<%~ na(it.modules.offer.terms) %>
+<% if (it.modules['open-questions'].questions && it.modules['open-questions'].questions.length) { %>
+# Open questions
+
+<% it.modules['open-questions'].questions.forEach(function(item) { %>- <%~ item %>
+<% }) %><% } %>

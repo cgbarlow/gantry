@@ -1,0 +1,383 @@
+id: recruitment-onboarding
+version: 3
+status: draft
+title: Recruitment and Onboarding
+description: >
+  Turning an identified vacancy into a starter who can work on their first day, from
+  requisition through selection, executive approval, offer, contract and payroll to
+  provisioning. Instances hold HR personal data and need HR-file access and retention controls.
+
+# v3: applies the field-by-field review of v2 (23 September 2026). See CHANGELOG.md — this
+# header is NOT durable: publishDefinitionVersion/createDraftVersion rebuild this file through
+# buildDefinitionYamlObject (lib/definition.js), which drops every comment. CHANGELOG.md and
+# the template comments are the durable homes for the rules below.
+#
+# Gate rules (ADR-0019 as qualified by `satisfies-gate`):
+# - A gate passes when any ONE artefact with gate == stage.gate and without
+#   `satisfies-gate: false` is complete. The two audience documents (appointment-confirmation,
+#   manager-handover) never count; their `requires` is exactly what they print, plus filename
+#   tokens.
+# - Among satisfying documents, the shared bare set covers same-stage fields only; carried
+#   fields are required-at their home gate and referenced with `?` later, except the filename
+#   tokens selection.candidate-name and contract.start-date (required: true) and the Hire
+#   Record, which keeps every carried entry bare.
+# - Every bare field at a gate is printed by at least one internal document at that gate.
+# - Only complete gate artefacts are auto-rendered into the approval pull request.
+#
+# Personal data: instance repositories hold HR personal data (the candidate's name, the
+# selection rationale, the offer terms). They need HR-file access and retention controls, and
+# erasure has to cover git history, including superseded filenames (ADR-0045 §7).
+
+stages:
+  - id: requisition
+    title: Requisition
+    purpose: >
+      Establish what the role is, how the person will be engaged, and what it evaluated to.
+      Owned by the requesting department. In the current process the approval chain (full or
+      shortened, as the engagement type fixes) decides on the request first and role
+      evaluation follows; signing this stage off is the "Approved to Recruit" confirmation that
+      comes after both, not the chain's own decision. Where the chain's decision is wanted
+      before evaluation, request advisory reviews on the draft Requisition Brief: a review
+      checks no gate, and each reviewer appears in the document's Review and sign-off table.
+    gate: approved-to-recruit
+    modules:
+      - role
+      - engagement
+      - role-evaluation
+      - open-questions
+  - id: selection
+    title: Selection
+    purpose: >
+      Take the approved role to market, narrow the field to one preferred candidate, and
+      complete pre-employment checks on them. Owned by HR. Do not sign this stage off while
+      vetting reads Not cleared. The role is carried forward read-only; change it by reopening
+      Requisition. Finalists held in reserve until the offer is accepted can be recorded as
+      released later, at Offer, Contract and Payroll.
+    gate: candidate-selected
+    modules:
+      - role
+      - advertising
+      - selection
+      - vetting
+      - open-questions
+    read-only-modules:
+      - role
+  - id: appointment
+    title: Appointment
+    purpose: >
+      Put the case for appointing the preferred candidate to executive approval before any
+      offer is made: who was selected and why, what vetting returned, and the terms proposed.
+      Owned by the requesting department, which raises the appointment request. Signing this
+      stage off is the executive approval to appoint. The offer terms written here are the
+      terms HR extends; they are not edited afterwards. Role, engagement, selection and
+      vetting are carried forward read-only; change them by reopening the stage that owns them.
+    gate: approved-to-appoint
+    modules:
+      - role
+      - engagement
+      - selection
+      - vetting
+      - offer
+      - open-questions
+    read-only-modules:
+      - role
+      - engagement
+      - selection
+      - vetting
+  - id: offer-contract-payroll
+    title: Offer, Contract and Payroll
+    purpose: >
+      Extend the approved offer, draw and sign the contract, and confirm the starter can be
+      paid. Owned by HR, with Payroll validating. Signing this stage off is onboarding
+      approval, which releases IT setup. The Onboarding Case is the only document that
+      satisfies this gate; the Appointment Confirmation is sent to the starter once onboarding
+      is approved. Role and engagement are carried forward read-only; the offer terms were
+      approved at Appointment and are not edited here. Selection stays open only so that
+      finalists held in reserve can be recorded as released once the offer is accepted.
+    gate: onboarding-approved
+    modules:
+      - role
+      - engagement
+      - selection
+      - offer
+      - contract
+      - payroll
+      - open-questions
+    read-only-modules:
+      - role
+      - engagement
+  - id: provisioning
+    title: Provisioning
+    purpose: >
+      Create the starter's identity, issue their device and access, and confirm they can work
+      from their first day. Owned by Technology; the hiring manager writes the handover. Role,
+      engagement, role evaluation, advertising, selection, vetting, offer, contract and
+      payroll are carried forward for the Hire Record and are read-only; change them by
+      reopening their own stage. Render the Manager Handover and send it as soon as the account
+      exists and the manager's actions are written, then re-send it at sign-off; its filename
+      carries the date for that reason. Request approval only once the Hire Record is
+      complete: the approval request includes only complete documents, and this stage can
+      otherwise pass on Starter Readiness alone. Confirm with gantry check or check_gate first.
+    gate: ready-to-start
+    modules:
+      - role
+      - engagement
+      - role-evaluation
+      - advertising
+      - selection
+      - vetting
+      - offer
+      - contract
+      - payroll
+      - identity
+      - device
+      - access
+      - handover
+      - open-questions
+    read-only-modules:
+      - role
+      - engagement
+      - role-evaluation
+      - advertising
+      - selection
+      - vetting
+      - offer
+      - contract
+      - payroll
+artefacts:
+  - id: requisition-brief
+    title: Requisition Brief
+    purpose: >
+      The case for recruiting, put to whoever signs this stage off as the "Approved to
+      Recruit" confirmation: the role, how the person will be engaged and the approval route
+      that fixes, and what the role evaluated to.
+    template: templates/requisition-brief.md.tmpl
+    gate: approved-to-recruit
+    requires:
+      - role.summary
+      - role.team
+      - role.responsibilities
+      - role.justification
+      - engagement.type
+      - engagement.term?
+      - engagement.rationale
+      - engagement.route-variation?
+      - role-evaluation.outcome
+      - role-evaluation.notes?
+      - role-evaluation.method
+      - open-questions.questions?
+      - open-questions.process-gaps?
+    filename: "{instance.name} - Requisition Brief"
+  - id: selection-report
+    title: Selection Report
+    purpose: >
+      Record how the role was advertised, how the preferred candidate was chosen, and what
+      vetting returned.
+    template: templates/selection-report.md.tmpl
+    gate: candidate-selected
+    requires:
+      - role.summary?
+      - advertising.channels
+      - advertising.period
+      - advertising.response
+      - advertising.notes?
+      - selection.shortlist
+      - selection.interviews
+      - selection.candidate-name
+      - selection.rationale
+      - selection.unsuccessful?
+      - vetting.checks-required
+      - vetting.outcome
+      - vetting.conditions?
+      - open-questions.questions?
+      - open-questions.process-gaps?
+    filename: "{instance.name} - Selection Report"
+  - id: appointment-case
+    title: Appointment Case
+    purpose: >
+      The case put to executive approval before any offer is made: the preferred candidate,
+      why they were chosen, what vetting returned and any conditions, and the terms proposed
+      for the offer.
+    template: templates/appointment-case.md.tmpl
+    gate: approved-to-appoint
+    requires:
+      - role.summary?
+      - role.team?
+      - engagement.type?
+      - engagement.term?
+      - selection.candidate-name
+      - selection.rationale
+      - vetting.outcome
+      - vetting.conditions?
+      - offer.terms
+      - open-questions.questions?
+      - open-questions.process-gaps?
+    filename: "{selection.candidate-name} - Appointment Case"
+  - id: onboarding-case
+    title: Onboarding Case
+    purpose: >
+      The internal record put to whoever approves onboarding: the offer as approved and what
+      changed in negotiation, the contract as drawn and signed, the agreed start date, and
+      Payroll's confirmation that the starter can be paid.
+    template: templates/onboarding-case.md.tmpl
+    gate: onboarding-approved
+    requires:
+      - selection.candidate-name
+      - engagement.type?
+      - engagement.term?
+      - offer.terms?
+      - offer.status
+      - offer.negotiation?
+      - contract.terms-summary
+      - contract.variations?
+      - contract.manager-signed
+      - contract.candidate-signed
+      - contract.start-date
+      - contract.start-date-changes?
+      - payroll.details-requested
+      - payroll.rework?
+      - payroll.confirmed
+      - open-questions.questions?
+      - selection.unsuccessful?
+      - contract.elapsed?
+      - payroll.validation-outcome?
+      - open-questions.process-gaps?
+    filename: "{selection.candidate-name} - Onboarding Case"
+  - id: appointment-confirmation
+    title: Appointment Confirmation
+    purpose: >
+      Confirm to the new starter their role, manager, start date and the terms they signed,
+      and what happens next. Sent once onboarding is approved. It leaves the organisation, so
+      it carries no internal content and no Document Control or sign-off tables, and it never
+      counts toward the gate.
+    template: templates/appointment-confirmation.md.tmpl
+    gate: onboarding-approved
+    document-control: false
+    satisfies-gate: false
+    requires:
+      - selection.candidate-name
+      - role.summary
+      - role.team
+      - role.responsibilities
+      - engagement.type
+      - engagement.term?
+      - contract.start-date
+      - contract.terms-summary
+      - payroll.confirmed
+    filename: "{selection.candidate-name} - Appointment Confirmation - {contract.start-date}"
+  - id: starter-readiness
+    title: Starter Readiness
+    purpose: >
+      Technology's provisioning record: who the starter is and which team they join, the
+      identity, device and access provisioned for them, and anything not in place by the start
+      date.
+    template: templates/starter-readiness.md.tmpl
+    gate: ready-to-start
+    requires:
+      - selection.candidate-name
+      - role.summary?
+      - role.team?
+      - contract.start-date
+      - identity.user-id
+      - identity.account
+      - identity.propagation
+      - identity.credential-issue
+      - device.standard
+      - device.specification
+      - device.non-standard-decision?
+      - device.build-status
+      - device.build-notes?
+      - access.entitlements
+      - access.setup
+      - access.outstanding?
+      - open-questions.questions?
+      - handover.manager-actions
+      - handover.day-one
+      - open-questions.process-gaps?
+    filename: "{selection.candidate-name} - Starter Readiness - {contract.start-date}"
+  - id: manager-handover
+    title: Manager Handover
+    purpose: >
+      Tell the hiring manager what they must do before the start date, the starter's user ID,
+      and what is and is not in place. Rendered and sent as soon as the account exists, and
+      re-sent at sign-off; it never counts toward the gate.
+    template: templates/manager-handover.md.tmpl
+    gate: ready-to-start
+    document-control: false
+    satisfies-gate: false
+    requires:
+      - selection.candidate-name
+      - role.summary
+      - contract.start-date
+      - handover.manager-actions
+      - handover.day-one
+      - identity.user-id
+      - device.specification
+      - device.build-status
+      - access.entitlements
+      - access.outstanding?
+    filename: "{selection.candidate-name} - Manager Handover - {today}"
+  - id: hire-record
+    title: Hire Record
+    purpose: >
+      Assemble the complete record of the hire, in process order, as the file that is kept.
+      It is the record as at readiness sign-off; anything learned after the first day is added
+      by reopening Provisioning. Request Provisioning approval only once this document is
+      complete.
+    template: templates/hire-record.md.tmpl
+    gate: ready-to-start
+    requires:
+      - role.summary
+      - role.team
+      - role.responsibilities
+      - role.justification
+      - engagement.type
+      - engagement.term?
+      - engagement.rationale
+      - engagement.route-variation?
+      - role-evaluation.method
+      - role-evaluation.outcome
+      - role-evaluation.notes?
+      - advertising.channels
+      - advertising.period
+      - advertising.response
+      - advertising.notes?
+      - selection.shortlist
+      - selection.interviews
+      - selection.candidate-name
+      - selection.rationale
+      - selection.unsuccessful?
+      - vetting.checks-required
+      - vetting.outcome
+      - vetting.conditions?
+      - offer.terms
+      - offer.status
+      - offer.negotiation?
+      - contract.terms-summary
+      - contract.variations?
+      - contract.manager-signed
+      - contract.candidate-signed
+      - contract.start-date
+      - contract.start-date-changes?
+      - contract.elapsed?
+      - payroll.details-requested
+      - payroll.validation-outcome?
+      - payroll.rework?
+      - payroll.confirmed
+      - identity.user-id
+      - identity.account
+      - identity.propagation
+      - identity.credential-issue
+      - device.standard
+      - device.specification
+      - device.non-standard-decision?
+      - device.build-status
+      - device.build-notes?
+      - access.entitlements
+      - access.setup
+      - access.outstanding?
+      - handover.manager-actions
+      - handover.day-one
+      - open-questions.questions?
+      - open-questions.process-gaps?
+    filename: "{selection.candidate-name} - Hire Record"

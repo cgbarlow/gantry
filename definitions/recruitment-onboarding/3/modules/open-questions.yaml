@@ -1,0 +1,36 @@
+id: open-questions
+title: Open Questions
+purpose: >
+  Questions raised at any stage that are not yet answered, and the places this process fell
+  short on this particular hire.
+
+  Mounted at every stage and required at none. A hire with no open questions is a real and
+  common outcome, and forcing an entry would only produce invented ones. `questions` is in
+  scope of every internal document except the Manager Handover, and never the document sent to
+  the new starter; `process-gaps` can be written at every stage and is printed only in the Hire
+  Record. Neither blocks any gate.
+
+fields:
+  - id: questions
+    title: Questions
+    type: list
+    required: false
+    guidance: >
+      Questions still open, each with who raised it, when, and who owes the answer. Remove an
+      entry once it is answered rather than annotating it — this is a live list, not a log. A
+      question the hiring manager owes goes in `handover.manager-actions` as well, since the
+      Manager Handover does not print this list.
+
+  - id: process-gaps
+    title: Process gaps
+    type: markdown
+    required: false
+    guidance: >
+      Where the process itself did not hold up on this hire: a step with no owner, a decision
+      with no defined path, a handoff that needed chasing, a delay nobody had budgeted for.
+      Write it at the stage where it happens.
+
+      This is deliberately about the process rather than the hire. The known weak points are
+      already documented — the manual credential issue, the payroll rework loop, the
+      undocumented role evaluation and advertising steps, the unresolved non-standard hardware
+      decision. Anything you hit that is not on that list is worth writing down here.
