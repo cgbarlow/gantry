@@ -4,29 +4,27 @@
      not been following the stages. It leads with what they have to do and only then reports
      what is already in place — the reverse of `starter-readiness`, which is the same core
      field set written for the people who did the provisioning.
-     Deliberately not a lighter document than the one it sits beside: see the gate strictness
-     note in v1's definition.yaml for why the shortest artefact at a gate must not be the
-     easiest.
 
-     v2 (#90): named from the candidate and today's date (definition.yaml's `filename:`) —
-     unlike the other candidate-named documents this one carries `{today}` rather than the
-     start date, since it can be re-sent close to the start date and the date it was produced
-     is the more useful fact for a manager filing it. `selection.candidate-name` is `?` in
-     `requires`, purely so the pattern can reach it — this document carries no other selection
-     content, matching v1. `contract.start-date` is formatted with `formatDate()`.
+     v3 (#158): `document-control: false` and `satisfies-gate: false` (spec #147) — this is an
+     audience document, and Starter Readiness or the Hire Record still has to carry the gate.
+     `requires` is exactly what this prints plus the filename tokens `selection.candidate-name`
+     (the manager chose the candidate; not printed) and `contract.start-date`.
 
-     v3 (#157): the readiness confirmation is gone from the definition, so it is gone from here;
-     the rest of this document is rewritten for the hiring manager separately (#158). */
+     Deliberately not printed, all of it Technology's own record and printed in Starter
+     Readiness and the Hire Record instead: the reporting line (the manager wrote it),
+     `identity.account`, `identity.propagation`, `identity.credential-issue` (the manager is
+     told to send the credentials, not told that they already were), `access.setup`, and open
+     questions (any the manager owes are in their own actions instead). The headline is derived
+     from what is outstanding; `handover.readiness-confirmation` no longer exists (#157). */
+  const inPlace = !it.modules.access.outstanding && it.modules.device['build-status'] === 'Ready'
 %>
+<%~ inPlace ? 'Everything is in place for the start date.' : 'Some items are not yet in place. See below.' %>
+
 # Your new starter
 
 ## Role
 
 <%~ na(it.modules.role.summary) %>
-
-## Team and reporting line
-
-<%~ na(it.modules.role.team) %>
 
 ## Start date
 
@@ -42,17 +40,9 @@
 
 # What is already in place
 
-## Account
+## User ID
 
-<%~ na(it.modules.identity.account) %>
-
-## Credentials
-
-<%~ na(it.modules.identity['credential-issue']) %>
-
-## Systems and directory
-
-<%~ na(it.modules.identity.propagation) %>
+<%~ na(it.modules.identity['user-id']) %>
 
 ## Device
 
@@ -66,16 +56,8 @@
 
 <% it.modules.access.entitlements.forEach(function(item) { %>- <%~ item %>
 <% }) %>
-## Access setup
-
-<%~ na(it.modules.access.setup) %>
 <% if (it.modules.access.outstanding) { %>
-## Still outstanding
+## Not in place by the start date
 
 <%~ it.modules.access.outstanding %>
 <% } %>
-<% if (it.modules['open-questions'].questions && it.modules['open-questions'].questions.length) { %>
-# Open questions
-
-<% it.modules['open-questions'].questions.forEach(function(item) { %>- <%~ item %>
-<% }) %><% } %>

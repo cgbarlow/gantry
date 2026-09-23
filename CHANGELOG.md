@@ -17,6 +17,32 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.12-beta — 2026-09-23
+
+### Changed
+
+- **Recruitment-onboarding v3 draft: the Manager Handover is now a document the hiring manager
+  can act on** (#158), and it no longer counts toward ready-to-start — Starter Readiness or the
+  Hire Record still has to. It opens with a derived headline, "Everything is in place for the
+  start date." or "Some items are not yet in place. See below.", and prints only the starter's
+  role and start date, the manager's own actions and first day, and what Technology has in
+  place: the user ID, the device, its build status, entitlements, and anything not in place by
+  the start date.
+- **The credential step is now the hiring manager's own action, stated once** (#158). Sending
+  the starter's credentials, and any open question the manager personally owes, now belong in
+  the manager's action list, which can also record an action already done by sign-off — so the
+  handover can no longer say credentials were sent while also listing sending them as still to
+  do.
+- **Provisioning's purpose (v3 draft) now says to render and send the Manager Handover as soon
+  as the account exists, and re-send it at sign-off** (#158).
+
+### Removed
+
+- **The v3 draft Manager Handover drops the reporting line, Technology's account, propagation
+  and credential-history detail, access setup, open questions, and its Document Control and
+  Review & sign-off tables** (#158). All of it still lives in Starter Readiness and the Hire
+  Record; the handover now carries only what its reader, the hiring manager, needs.
+
 ## 0.9.11-beta — 2026-09-23
 
 ### Changed

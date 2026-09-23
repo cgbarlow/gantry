@@ -56,10 +56,16 @@ const GATES = [
     satisfiedBy: ['onboarding-case'],
     bars: { 'onboarding-case': 9, 'appointment-confirmation': 8 },
   },
+  // #158: the Manager Handover opts out of satisfying the Gate (`satisfies-gate: false`), so it
+  // stays in `bars` (it is still checked and reported) but drops out of `satisfiedBy` — proving,
+  // via the `satisfiedBy`-driven test below, that completing it alone never passes ready-to-start.
+  // Its own bar is its 9 bare Fields: the two filename tokens, role.summary (bare here though its
+  // home gate is approved-to-recruit — a bare `module.field` always gates, per `status.js`), the
+  // manager's own actions and first day, and the four Provisioning Fields it still prints.
   {
     gate: 'ready-to-start',
-    satisfiedBy: ['starter-readiness', 'manager-handover', 'hire-record'],
-    bars: { 'starter-readiness': 13, 'manager-handover': 13, 'hire-record': 36 },
+    satisfiedBy: ['starter-readiness', 'hire-record'],
+    bars: { 'starter-readiness': 13, 'manager-handover': 9, 'hire-record': 36 },
   },
 ]
 
@@ -207,10 +213,22 @@ const DOCUMENTS = {
     // sign-off itself.
     absent: ['# Handover', '## Manager actions', '## First day', '## Readiness confirmation', '## Outstanding at start date'],
   },
+  // #158: an audience document (`document-control: false`, `satisfies-gate: false`), so it carries
+  // neither the Document Control/Review & sign-off tables nor anything Technology's own record
+  // (Starter Readiness, the Hire Record) already carries in full.
   'manager-handover': {
     basename: `Marama Clarke - Manager Handover - ${today}`,
-    present: [...CONTROL, '# Your new starter', '# What you need to do', '# What is already in place', '# Open questions'],
-    absent: ['## Readiness confirmation'],
+    present: ['# Your new starter', '## Role', '## Start date', '# What you need to do', '## The first day', '# What is already in place', '## User ID', '## Device', '## Device build', '## Access'],
+    absent: [
+      ...CONTROL,
+      '## Team and reporting line',
+      '## Account',
+      '## Credentials',
+      '## Systems and directory',
+      '## Access setup',
+      '# Open questions',
+      '## Readiness confirmation',
+    ],
   },
   'hire-record': {
     basename: 'Marama Clarke - Hire Record',
@@ -457,6 +475,62 @@ test('Starter Readiness marks a non-standard device with no recorded decision, a
   assert.match(blank, /## Non-standard hardware decision\n\n— not stated —/)
   const standard = renderVariant('starter-readiness', { device: { standard: 'Standard', 'non-standard-decision': '' } })
   assert.ok(!headings(standard).has('## Non-standard hardware decision'))
+})
+
+// #158: Manager Handover.
+
+test('manager-handover opts out of Document Control and of satisfying its Gate', () => {
+  const artefact = loadDefinition('recruitment-onboarding', { version: VERSION }).artefacts.find((a) => a.id === 'manager-handover')
+  assert.equal(artefact.documentControl, false)
+  assert.equal(artefact.satisfiesGate, false)
+})
+
+test('completing the Manager Handover alone on a blank Instance never passes ready-to-start', () => {
+  withInstancesDir((instancesDir) => {
+    const def = writeBlankInstance(instancesDir)
+    const owed = checkGate('blank', { instancesDir, gate: 'ready-to-start' }).artefacts.find((a) => a.id === 'manager-handover').outstanding
+    const byModule = Map.groupBy(owed, (reference) => reference.split('.')[0])
+    for (const [moduleId, references] of byModule) {
+      const worked = readModule(def, SLUG, moduleId, { instancesDir: FIXTURE })
+      const fields = Object.fromEntries(
+        references.map((reference) => reference.split('.')[1]).map((fieldId) => [fieldId, worked.fields[fieldId]])
+      )
+      writeModule(def, 'blank', moduleId, { status: 'draft', owner: '', fields }, { instancesDir })
+    }
+    const result = checkGate('blank', { instancesDir, gate: 'ready-to-start' })
+    assert.equal(result.artefacts.find((a) => a.id === 'manager-handover').complete, true, 'the handover is complete')
+    assert.equal(result.pass, false, 'a complete handover, alone, does not pass the gate')
+  })
+})
+
+test('the Manager Handover\'s headline is derived from what is outstanding', () => {
+  const worked = renderArtefact(SLUG, 'manager-handover', { instancesDir: FIXTURE, dryRun: true }).markdown
+  // The worked hire's device is Ready but the access card isn't in place by the start date.
+  assert.match(worked, /Some items are not yet in place\. See below\./)
+  assert.doesNotMatch(worked, /Everything is in place for the start date\./)
+  const ready = renderVariant('manager-handover', { access: { outstanding: '' } })
+  assert.match(ready, /Everything is in place for the start date\./)
+  assert.doesNotMatch(ready, /Some items are not yet in place\./)
+  const notReady = renderVariant('manager-handover', { access: { outstanding: '' }, device: { 'build-status': 'Configured' } })
+  assert.match(notReady, /Some items are not yet in place\. See below\./)
+})
+
+test('the Manager Handover prints the user ID but not the reporting line or account detail', () => {
+  const { markdown } = renderArtefact(SLUG, 'manager-handover', { instancesDir: FIXTURE, dryRun: true })
+  assert.match(markdown, /## User ID\n\nmclarke\n/)
+  assert.doesNotMatch(markdown, /Platform Engineering, within Technology/, 'the reporting line is not printed')
+})
+
+test('handover.manager-actions asks for open questions the manager owes, and allows a completed action to be stated as done', () => {
+  const field = loadDefinition('recruitment-onboarding', { version: VERSION }).modules.get('handover').fields.find((f) => f.id === 'manager-actions')
+  assert.match(field.guidance, /open question the hiring manager (personally )?owes/)
+  assert.match(field.guidance, /already completed|already done/)
+})
+
+test('the Provisioning purpose says to render and re-send the Manager Handover', () => {
+  const { purpose } = loadDefinition('recruitment-onboarding', { version: VERSION }).stages.find((s) => s.id === 'provisioning')
+  assert.match(purpose, /[Rr]ender the Manager Handover/)
+  assert.match(purpose, /re-send it at sign-off/)
 })
 
 test('the Hire Record also marks a non-standard device with no recorded decision', () => {

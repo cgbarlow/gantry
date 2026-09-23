@@ -185,6 +185,37 @@ Guidance rewritten:
 - `payroll.confirmed` does not record onboarding approval: that is the sign-off on the stage.
 - `contract.elapsed` is measured to the agreed start date and filled before onboarding approval.
 
+### Manager Handover for the hiring manager (#158)
+
+The Manager Handover becomes a document the hiring manager can act on, and stops counting toward
+the gate — the first of v3's two audience documents (`document-control: false` and
+`satisfies-gate: false`); the Appointment Confirmation is the other.
+
+- **`requires` is now exactly what it prints, plus the filename tokens.** Gone from it:
+  `role.team`, `identity.account`, `identity.propagation`, `identity.credential-issue` and
+  `access.setup` — all Technology's own record, which Starter Readiness and the Hire Record still
+  carry in full. `identity.user-id` is added: the one Technology field the manager does need, to
+  pass on to the starter.
+- **A derived headline** opens the document: "Everything is in place for the start date." when
+  the device reads Ready and nothing is listed as not in place by the start date, otherwise "Some
+  items are not yet in place. See below." — so the manager doesn't have to read the whole document
+  to know which applies.
+- **Gone from the rendered document:** the reporting line (the manager wrote it), the account and
+  propagation detail, the credential-issue history, access setup, open questions, and, with every
+  v3 audience document, the Document Control and Review & sign-off tables.
+- **The credential step now appears once, as the manager's own action.**
+  `handover.manager-actions`'s guidance now asks for issuing the credentials as a dated action, for
+  any open question the hiring manager personally owes an answer to, and it now allows an action
+  already done by sign-off to be stated as done with its date — so the document can no longer say
+  the credentials were sent while also listing sending them as something still to do.
+- **Provisioning's purpose** now says to render the handover and send it to the hiring manager as
+  soon as the account exists, then re-send it at sign-off.
+
+This overturns v1's rule that every artefact at a gate shares the same core field set (see "The
+gates are strict" in the v1 section below), for this document: it no longer shares a bare set
+with Starter Readiness at all, now that it opts out of satisfying the gate. The harness proves it
+can't: completing the Manager Handover alone on a blank instance never passes ready-to-start.
+
 ### The Appointment Confirmation replaces the Offer Pack (#156)
 
 The Offer Pack printed the case for hiring, not the outcome of it: the offer terms and status
