@@ -17,6 +17,18 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.15-beta — 2026-09-23
+
+### Fixed
+
+- **A shared credential now finds a workspace's designs no matter how that workspace was
+  registered.** Configuring `GANTRY_SHARED_WORKSPACE_PATS` for a workspace used to only trigger
+  discovery if the same workspace was also listed in `GANTRY_BOOTSTRAP_WORKSPACES` at startup — a
+  workspace added through the New Workspace wizard, or already known to Gantry some other way, never
+  had its designs discovered at all, with nothing in the UI to explain why. Gantry now discovers a
+  shared workspace's designs the first time any request reaches it, and a shared workspace whose repo
+  genuinely holds no designs is checked once rather than on every page load. (#133)
+
 ## 0.9.14-beta — 2026-09-23
 
 ### Fixed
