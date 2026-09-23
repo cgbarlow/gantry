@@ -436,6 +436,16 @@ function ArtefactEditor({ handle, definitionId, version, artefact, modules, read
           ${filenameTokens.map((t) => html`<button key=${t.token} type="button" class="btn small ghost defn-filename-token" title=${t.label} onClick=${() => onChange({ ...artefact, filename: `${artefact.filename ?? ''}{${t.token}}` })}>{${t.token}}</button>`)}
         </div>
       `}
+      <label class="field-label defn-document-control">
+        <input type="checkbox" checked=${artefact.documentControl !== false} disabled=${readOnly} onChange=${(e) => {
+          // #150 (ADR-0049): the same switch as the server-hosted editor's — absent means print both tables.
+          const next = { ...artefact }
+          if (e.currentTarget.checked) delete next.documentControl
+          else next.documentControl = false
+          onChange(next)
+        }} />
+        Print the Document Control and Review & sign-off tables
+      </label>
       <button type="button" class="btn small ghost" onClick=${() => setExpanded(!expanded)}>${expanded ? 'Hide template' : 'Edit template'}</button>
       ${expanded ? html`<${ArtefactTemplateEditor} handle=${handle} definitionId=${definitionId} version=${version} artefact=${artefact} readOnly=${readOnly} />` : null}
     </div>

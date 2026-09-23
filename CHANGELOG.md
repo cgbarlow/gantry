@@ -17,6 +17,29 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.7-beta — 2026-09-23
+
+### Added
+
+- **One Artefact can now leave out the Document Control and Review & sign-off tables** (#150).
+  Set `document-control: false` on that Artefact in `definition.yaml`, or untick its new
+  **Document Control** checkbox on the Definitions page. That document then renders with its
+  title and content only, while every other Artefact keeps both tables. Use this for documents
+  that leave the organisation, such as a candidate's Offer Pack, where the commit hash,
+  "Status: Draft" and an empty sign-off table used to need deleting by hand. It applies wherever
+  the document is rendered: locally, on Azure DevOps, GitHub, GitLab or Bitbucket, in the
+  browser, from `gantry render`, and in the automatic render when you request sign-off. The
+  checkbox is editable on a draft and read-only once the version is published, and the setting
+  survives save, new draft, clone, publish and promote. The Local Workspace definition editor has
+  the same checkbox. Leaving out every document's tables at once with an empty
+  `templates/_documentControl.md.tmpl` still works. Existing Definitions render exactly as
+  before. See ADR-0049.
+- **A `document-control` value other than `true` or `false` is reported as a problem** (#150),
+  rather than being quietly read as "keep the tables". An unquoted `no` is the likeliest slip.
+  `gantry validate` and a Local Workspace report it, the Definitions page marks it on a draft,
+  and it blocks Save and Publish. A Definition that carries it won't load, and neither will its
+  instances, until the value is fixed; the error names the Artefact and the value.
+
 ## 0.9.6-beta — 2026-09-23
 
 ### Changed

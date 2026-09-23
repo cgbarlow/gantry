@@ -25,6 +25,7 @@ import {
   resolveDefinitionStructure,
   listLocalDefinitionRows,
 } from '../web/lib/localDefinitionFiles.js'
+import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
 
 // ---------------------------------------------------------------------------
 // In-memory File System Access API stub — same minimal shape
@@ -360,6 +361,33 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
       const diskProjection = definitionVersionProjection(loadDefinition('wi384-fixture', { definitionsDir, version: 1 }))
       assert.deepEqual(read, diskProjection)
     })
+  })
+})
+
+// #150 (ADR-0049): a hand-edited `document-control:` that isn't a boolean — unquoted `no` reads
+// as the string "no" under YAML 1.2 — must reach the Local Workspace's validation as it is, not be
+// projected away as if it were absent. Otherwise the render prints both tables with no warning and
+// the next Save quietly deletes the author's key.
+describe('a non-boolean document-control read from a Local Workspace folder', () => {
+  test('is kept by readLocalDefinitionStructure, reported by findLocalDefinitionProblems, and survives a write', async () => {
+    const handle = new MemDirHandle()
+    await writeLocalDefinitionStructure(handle, 'wi384-fixture', 1, FIXTURE_STRUCTURE)
+    const fileHandle = await (await (await (await handle.getDirectoryHandle('definitions')).getDirectoryHandle('wi384-fixture')).getDirectoryHandle('1')).getFileHandle('definition.yaml')
+    const yamlText = await (await fileHandle.getFile()).text()
+    const edited = yamlText.replace('    requires:\n', '    document-control: no\n    requires:\n')
+    assert.notEqual(edited, yamlText, 'the fixture edit must land')
+    const writable = await fileHandle.createWritable()
+    await writable.write(edited)
+    await writable.close()
+
+    const read = await readLocalDefinitionStructure(handle, 'wi384-fixture', 1)
+    assert.equal(read.artefacts[0].documentControl, 'no')
+    const problems = findLocalDefinitionProblems(read)
+    assert.deepEqual(problems.map((p) => p.type), ['invalid-document-control'])
+    assert.match(problems[0].message, /^Artefact "soap" sets "document-control" to "no"/)
+
+    await writeLocalDefinitionStructure(handle, 'wi384-fixture', 1, read)
+    assert.match(await (await fileHandle.getFile()).text(), /document-control: no/)
   })
 })
 

@@ -292,9 +292,11 @@ export async function readLocalDefinitionStructure(handle, definitionId, version
       withOptional(
         { id: a.id, title: a.title, purpose: a.purpose, template: a.template, gate: a.gate, requires: a.requires ?? [] },
         // #148: projected only when false, as lib/definition.js's definitionVersionProjection does.
+        // #150: a non-boolean `document-control` ("no") is kept as it is, as there, so
+        // findLocalDefinitionProblems reports it and a Save doesn't quietly drop it.
         {
           filename: a.filename,
-          documentControl: a['document-control'] === false ? false : undefined,
+          documentControl: a['document-control'] === true ? undefined : a['document-control'],
           satisfiesGate: a['satisfies-gate'] === false ? false : undefined,
           copiedFrom: a['copied-from'],
         }
