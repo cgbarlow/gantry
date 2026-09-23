@@ -1284,12 +1284,12 @@ export function DefinitionViewerPage() {
   }
 
   // ---------------------------------------------------------------- selection helpers
-  // Picking or adding something always wants the focus pane to show it, so an expanded Map (#161)
-  // gives the panes back rather than selecting into one the user can't see.
+  // An expanded Map (#161) stays expanded when something is picked or added in it: the pick shows
+  // as the Map's selection (and switches its field counts), and the focus pane below shows it once
+  // the author turns Expand map off.
   function select(type, id) {
     setSelection({ type, id })
     setTemplateView(null)
-    if (defnView.value === 'map' && defnMapExpanded.value) setDefnMapExpanded(false)
   }
   function selectField(moduleId, fieldId) {
     setSelection({ type: 'module', id: moduleId })
