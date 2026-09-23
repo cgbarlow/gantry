@@ -476,6 +476,120 @@ test('Map field counts and ghosting also work on an editable draft, including "N
   })
 })
 
+// "Expand map" lets the Map take the whole workbench: the focus pane and Library panel below are
+// hidden (not unmounted, so an unsaved edit survives), the Map shows every row without scrolling
+// inside its pane, and the choice is remembered like the Outline/Map choice itself.
+test('Expand map hides the panes below the Map, keeps unsaved edits, and is remembered across a reload', async () => {
+  await withDraftDesignV2()(async (base) => {
+    await withPage(base, async (page, pageErrors) => {
+      await page.setViewportSize({ width: 1280, height: 720 })
+      await page.goto(`${base}/definitions`)
+      await page.waitForSelector('#defn-version-select', { timeout: 10_000 })
+      await page.locator('#defn-version-select').selectOption('2')
+      await page.waitForSelector('.defn-focus-title-input', { timeout: 10_000 })
+      assert.equal(await page.getByRole('button', { name: 'Expand map' }).count(), 0, 'Outline view has no Expand map toggle')
+
+      await page.getByRole('button', { name: 'Map', exact: true }).click()
+      await page.waitForSelector('.defn-workbench-map', { timeout: 10_000 })
+      const expand = page.getByRole('button', { name: 'Expand map' })
+      assert.equal(await expand.getAttribute('aria-pressed'), 'false')
+      const mapOverflows = () => page.locator('.defn-map-pane, .defn-map').evaluateAll((els) => els.some((el) => el.scrollHeight > el.clientHeight + 1))
+      assert.ok(await mapOverflows(), 'at 720px tall the collapsed Map scrolls inside its pane (precondition)')
+
+      // An unsaved edit in the focus pane below
+      await page.locator('.defn-focus-title-input').fill('Renamed while collapsed')
+      const titleInput = await page.locator('.defn-focus-title-input').elementHandle()
+
+      await expand.click()
+      await page.locator('.defn-bottom').waitFor({ state: 'hidden' })
+      assert.equal(await expand.getAttribute('aria-pressed'), 'true')
+      assert.equal(await page.locator('.defn-focus-pane').isVisible(), false)
+      assert.equal(await page.locator('.defn-library').isVisible(), false)
+      assert.equal(await mapOverflows(), false, 'expanded, the Map shows every row without an inner scroll')
+
+      await expand.click()
+      await page.locator('.defn-bottom').waitFor({ state: 'visible' })
+      assert.equal(await page.locator('.defn-focus-title-input').inputValue(), 'Renamed while collapsed', 'the edit survives being hidden')
+      assert.equal(await titleInput.evaluate((el) => el.isConnected), true, 'the panes were hidden, not unmounted')
+      await page.getByRole('button', { name: 'Discard' }).click()
+
+      await expand.click()
+      await page.locator('.defn-bottom').waitFor({ state: 'hidden' })
+      await page.reload()
+      await page.waitForSelector('#defn-version-select', { timeout: 10_000 })
+      await page.waitForSelector('.defn-workbench-map.expanded', { timeout: 10_000 })
+      assert.equal(await page.getByRole('button', { name: 'Expand map' }).getAttribute('aria-pressed'), 'true', 'remembered across a reload')
+      assert.equal(await page.locator('.defn-bottom').isVisible(), false)
+
+      // A published (read-only) version offers the same toggle
+      await page.locator('#defn-version-select').selectOption('1')
+      await page.waitForSelector('.defn-workbench-map.expanded', { timeout: 10_000 })
+      assert.equal(await page.getByRole('button', { name: 'Expand map' }).getAttribute('aria-pressed'), 'true')
+      await page.getByRole('button', { name: 'Expand map' }).click()
+      await page.locator('.defn-bottom').waitFor({ state: 'visible' })
+
+      await page.getByRole('button', { name: 'Outline', exact: true }).click()
+      await page.waitForSelector('.defn-workbench-outline', { timeout: 10_000 })
+      assert.equal(await page.getByRole('button', { name: 'Expand map' }).count(), 0)
+      assert.deepEqual(pageErrors, [])
+    })
+  })
+})
+
+// #161: the expanded Map hides the panes, but anything you pick or add in it needs the focus pane
+// to show or edit it — so doing that brings the panes back rather than selecting into a hidden pane.
+// The toggle itself is a plain button: Enter/Space work it and focus stays on it as the panes hide.
+test('Picking or adding something in the expanded Map brings the panes back (not in Outline view); the toggle works from the keyboard', async () => {
+  await withDraftDesignV2()(async (base) => {
+    await withPage(base, async (page, pageErrors) => {
+      await page.goto(`${base}/definitions`)
+      await page.waitForSelector('#defn-version-select', { timeout: 10_000 })
+      await page.locator('#defn-version-select').selectOption('2')
+      await page.waitForSelector('.defn-focus-title-input', { timeout: 10_000 })
+      await page.getByRole('button', { name: 'Map', exact: true }).click()
+      await page.waitForSelector('.defn-workbench-map', { timeout: 10_000 })
+
+      const expand = page.getByRole('button', { name: 'Expand map' })
+      await expand.focus()
+      await page.keyboard.press('Enter')
+      await page.locator('.defn-bottom').waitFor({ state: 'hidden' })
+      assert.equal(await expand.getAttribute('aria-pressed'), 'true')
+      assert.equal(await expand.evaluate((el) => el === document.activeElement), true, 'focus stays on the toggle')
+      await page.keyboard.press('Space')
+      await page.locator('.defn-bottom').waitFor({ state: 'visible' })
+      assert.equal(await expand.getAttribute('aria-pressed'), 'false')
+      assert.equal(await expand.evaluate((el) => el === document.activeElement), true)
+
+      // "+ Stage" in the expanded Map: the new stage opens in the focus pane, ready to name
+      await expand.click()
+      await page.locator('.defn-bottom').waitFor({ state: 'hidden' })
+      await page.locator('.defn-map-add-row').getByRole('button', { name: '+ Stage' }).click()
+      await page.locator('.defn-bottom').waitFor({ state: 'visible' })
+      assert.equal(await page.locator('.defn-focus-title-input').inputValue(), 'New Stage')
+      assert.equal(await expand.getAttribute('aria-pressed'), 'false')
+
+      // Clicking a module chip in the expanded Map shows that module below
+      await expand.click()
+      await page.locator('.defn-bottom').waitFor({ state: 'hidden' })
+      const chip = page.locator('.defn-map-chip').first()
+      const chipTitle = (await chip.textContent()).trim()
+      await chip.click()
+      await page.locator('.defn-bottom').waitFor({ state: 'visible' })
+      assert.ok(chipTitle.startsWith(await page.locator('.defn-focus-title-input').inputValue()), 'the clicked module is in the focus pane')
+
+      // Picking something in Outline view leaves the remembered Map choice alone
+      await expand.click()
+      await page.locator('.defn-bottom').waitFor({ state: 'hidden' })
+      await page.getByRole('button', { name: 'Outline', exact: true }).click()
+      await page.waitForSelector('.defn-workbench-outline', { timeout: 10_000 })
+      await page.locator('.defn-outline-node').first().click()
+      await page.getByRole('button', { name: 'Map', exact: true }).click()
+      await page.waitForSelector('.defn-workbench-map.expanded', { timeout: 10_000 })
+      assert.deepEqual(pageErrors, [])
+    })
+  })
+})
+
 test('Field rows are compact, expanding one at a time', async () => {
   await withDraftDesignV2()(async (base) => {
     await withPage(base, async (page) => {

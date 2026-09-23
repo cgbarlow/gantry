@@ -17,6 +17,19 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.1-beta — 2026-09-23
+
+### Added
+
+- **Expand map: give the Map the whole Definitions page** (#161). In Map view, a new **Expand map**
+  button next to Outline | Map hides the detail pane and the Library panel, so a large definition
+  reads in full without scrolling inside the Map. Anything you were editing below is kept exactly
+  as it was, and is there again when you collapse the Map. Picking something in the Map, or adding
+  a new stage, module or artefact, brings the panes back so you can see and edit it. A copy started
+  from the Map's own "From another definition…" picker confirms over the expanded Map and lands
+  there, without collapsing it. The button works on draft and published versions, from the
+  keyboard as well as the mouse, and is remembered per browser, like the Outline/Map choice.
+
 ## 0.9.0-beta — 2026-09-23
 
 ### Added
