@@ -198,6 +198,72 @@ export function createFakeAzureDevOpsServer({
       return json(200, { count: commits.length, value: commits.slice().reverse().slice(0, top) })
     }
 
+    // #140: the Diffs "commit-diffs" endpoint lib/azureDevOpsClient.js's
+    // getCommitDiffs talks to — modeled on real Azure DevOps's own documented
+    // contract (learn.microsoft.com/.../git/diffs/get): `aheadCount` is how
+    // many commits `targetVersion` has that `baseVersion` lacks, `behindCount`
+    // the reverse, and `commonCommit` their merge base. Both `baseVersion` and
+    // `targetVersion` here are always one of this fake's own branch names (its
+    // one real caller, WI256/#140's stage-sync code, never asks it for a bare
+    // commit id) — each branch's `commits` array is itself a full, ordered
+    // history back to the repo's root (branch-creation clones its source's
+    // array, a push appends to it), so two branches' shared history is always
+    // an exact, same-order prefix of both arrays, making "the last commit at
+    // which the two arrays still agree" a correct merge base for this fake's
+    // model (never a real 3-way-merge DAG, but git-diffs/get.md#140's one
+    // caller never sees a case that would need one).
+    if (req.method === 'GET' && pathname === `${basePath}/diffs/commits`) {
+      const baseVersion = url.searchParams.get('baseVersion')
+      const targetVersion = url.searchParams.get('targetVersion')
+      const diffCommonCommit = url.searchParams.get('diffCommonCommit') === 'true'
+      const baseBranch = branches.get(baseVersion)
+      const targetBranch = branches.get(targetVersion)
+      const baseCommits = baseBranch?.commits ?? []
+      const targetCommits = targetBranch?.commits ?? []
+      const baseIds = new Set(baseCommits.map((c) => c.commitId))
+      const targetIds = new Set(targetCommits.map((c) => c.commitId))
+      const aheadCount = targetCommits.filter((c) => !baseIds.has(c.commitId)).length
+      const behindCount = baseCommits.filter((c) => !targetIds.has(c.commitId)).length
+      let commonCommit = null
+      const sharedLen = Math.min(baseCommits.length, targetCommits.length)
+      for (let i = 0; i < sharedLen; i++) {
+        if (baseCommits[i].commitId === targetCommits[i].commitId) commonCommit = baseCommits[i].commitId
+        else break
+      }
+      // The tree at `commonCommit`: whichever of the two branches actually
+      // diverged from it still has that exact snapshot in its own `baseStore`
+      // (captured once, at branch-creation/last-fast-forward time, and never
+      // touched by a later push to either side — see `seedBranch`/the refs
+      // and pushes handlers above). Diffing straight `baseVersion`→`targetVersion`
+      // (diffCommonCommit: false) needs no such lookup — it just compares
+      // both branches' current stores directly.
+      let oldStore
+      if (diffCommonCommit) {
+        if (baseBranch?.baseObjectId === commonCommit) oldStore = baseBranch.baseStore
+        else if (targetBranch?.baseObjectId === commonCommit) oldStore = targetBranch.baseStore
+        else oldStore = new Map()
+      } else {
+        oldStore = baseBranch?.store ?? new Map()
+      }
+      const newStore = targetBranch?.store ?? new Map()
+      const changes = []
+      const allPaths = new Set([...oldStore.keys(), ...newStore.keys()])
+      for (const path of allPaths) {
+        const before = oldStore.get(path)
+        const after = newStore.get(path)
+        if (before === after) continue
+        changes.push({ item: { path, isFolder: false }, changeType: before === undefined ? 'add' : after === undefined ? 'delete' : 'edit' })
+      }
+      changes.sort((a, b) => a.item.path.localeCompare(b.item.path))
+      // Mirrors the real endpoint's own `$top`/`allChangesIncluded` contract (learn.microsoft.com/.../git/diffs/get):
+      // more changed paths than `$top` asked for means the page sent back is a truncated prefix, and
+      // `allChangesIncluded` says so — lib/azureDevOpsClient.js's getCommitDiffs (its `$top=2000`) and its
+      // callers (#140's stage-sync advisory) rely on this flag to notice when `changes` might be incomplete.
+      const top = Number(url.searchParams.get('$top') ?? changes.length)
+      const allChangesIncluded = changes.length <= top
+      return json(200, { aheadCount, behindCount, commonCommit, changes: changes.slice(0, top), allChangesIncluded })
+    }
+
     if (req.method === 'GET' && pathname === `${basePath}/items`) {
       // Every real call here (lib/azureDevOpsClient.js's getFileContent/
       // listFolder) always sends `versionDescriptor.version` — defaulting

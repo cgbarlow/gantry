@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { NotFoundError } from '../lib/providerErrors.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { loadDefinition } from '../lib/definition.js'
-import { stageBranchName, findStageBranch, resolveStageBranch } from '../lib/stageBranch.js'
+import { stageBranchName, findStageBranch, resolveStageBranch, getStageSyncStatus } from '../lib/stageBranch.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
@@ -152,6 +152,37 @@ test('resolveStageBranch propagates a rejected PAT as AuthenticationError, the s
         throw err
       }
     })
+  })
+})
+
+test('#140: getStageSyncStatus reports no advisory for a branch that is only ahead of main (its own edits, nothing new on main)', async () => {
+  await withServer({ files: { '/gantry-workspace/my-initiative/instance.yaml': 'slug: my-initiative\nstage: shape\n' } }, async (baseUrl) => {
+    const azureDevOps = locationFor(baseUrl)
+    const branch = await resolveStageBranch(azureDevOps, definition, SLUG, SHAPE.id)
+    const client = createAzureDevOpsClient(azureDevOps)
+    // The branch's own edit — main is never touched.
+    await client.writeFile('/gantry-workspace/my-initiative/instance.yaml', 'slug: my-initiative\nstage: shape\nedited: true\n', { branch })
+
+    const status = await getStageSyncStatus(azureDevOps, SLUG, SHAPE.id)
+    assert.deepEqual(status, { behind: false, behindFiles: [], ahead: true })
+  })
+})
+
+test('#140: getStageSyncStatus lists only main\'s own changes as behindFiles, never the branch\'s own edits, once both have diverged', async () => {
+  await withServer({ files: { '/gantry-workspace/my-initiative/instance.yaml': 'slug: my-initiative\nstage: shape\n' } }, async (baseUrl) => {
+    const azureDevOps = locationFor(baseUrl)
+    const branch = await resolveStageBranch(azureDevOps, definition, SLUG, SHAPE.id)
+    const client = createAzureDevOpsClient(azureDevOps)
+
+    // The branch resolves its own review comments (its own edit)...
+    await client.writeFile('/gantry-workspace/my-initiative/instance.yaml', 'slug: my-initiative\nstage: shape\nresolved: true\n', { branch })
+    // ...while main, independently, picks up a real new file the branch never saw.
+    await client.writeFile('/gantry-workspace/my-initiative/extra.md', 'extra on main\n', { branch: 'main' })
+
+    const status = await getStageSyncStatus(azureDevOps, SLUG, SHAPE.id)
+    assert.equal(status.ahead, true)
+    assert.equal(status.behind, true)
+    assert.deepEqual(status.behindFiles, ['/gantry-workspace/my-initiative/extra.md'])
   })
 })
 
