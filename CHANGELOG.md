@@ -17,6 +17,16 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.20-beta — 2026-09-23
+
+### Changed
+
+- **Expand map stays on while you click around the Map.** Picking a document, stage or module in
+  the expanded Map used to switch Expand map off and bring the panes below back. Now the Map stays
+  expanded: what you pick is highlighted there, and picking a document still switches every module
+  to that document's field counts. Adding a stage with **+ Stage** keeps it expanded too. Turn
+  Expand map off whenever you want to edit, and the pane below shows whatever you last picked.
+
 ## 0.9.19-beta — 2026-09-23
 
 ### Fixed

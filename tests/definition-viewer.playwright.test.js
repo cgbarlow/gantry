@@ -536,10 +536,11 @@ test('Expand map hides the panes below the Map, keeps unsaved edits, and is reme
   })
 })
 
-// #161: the expanded Map hides the panes, but anything you pick or add in it needs the focus pane
-// to show or edit it — so doing that brings the panes back rather than selecting into a hidden pane.
-// The toggle itself is a plain button: Enter/Space work it and focus stays on it as the panes hide.
-test('Picking or adding something in the expanded Map brings the panes back (not in Outline view); the toggle works from the keyboard', async () => {
+// #161: Expand map is sticky. Picking a document, stage or module chip in the expanded Map highlights
+// it there (and switches the field counts) without collapsing the Map; the panes come back only when
+// the author turns the toggle off, and then show what was picked. The toggle itself is a plain
+// button: Enter/Space work it and focus stays on it as the panes hide.
+test('The expanded Map stays expanded when something is picked or added in it; the toggle works from the keyboard', async () => {
   await withDraftDesignV2()(async (base) => {
     await withPage(base, async (page, pageErrors) => {
       await page.goto(`${base}/definitions`)
@@ -560,26 +561,36 @@ test('Picking or adding something in the expanded Map brings the panes back (not
       assert.equal(await expand.getAttribute('aria-pressed'), 'false')
       assert.equal(await expand.evaluate((el) => el === document.activeElement), true)
 
-      // "+ Stage" in the expanded Map: the new stage opens in the focus pane, ready to name
       await expand.click()
       await page.locator('.defn-bottom').waitFor({ state: 'hidden' })
-      await page.locator('.defn-map-add-row').getByRole('button', { name: '+ Stage' }).click()
-      await page.locator('.defn-bottom').waitFor({ state: 'visible' })
-      assert.equal(await page.locator('.defn-focus-title-input').inputValue(), 'New Stage')
-      assert.equal(await expand.getAttribute('aria-pressed'), 'false')
 
-      // Clicking a module chip in the expanded Map shows that module below
-      await expand.click()
-      await page.locator('.defn-bottom').waitFor({ state: 'hidden' })
+      // Clicking a document chip selects it in the Map, and the Map stays expanded
+      const achip = page.locator('.defn-map-achip').first()
+      await achip.click()
+      await page.locator('.defn-map-achip.selected').first().waitFor({ timeout: 10_000 })
+      assert.equal(await expand.getAttribute('aria-pressed'), 'true', 'picking a document keeps the Map expanded')
+      assert.equal(await page.locator('.defn-bottom').isVisible(), false)
+
+      // Clicking a module chip: still expanded; turning the toggle off shows that module below
       const chip = page.locator('.defn-map-chip').first()
       const chipTitle = (await chip.textContent()).trim()
       await chip.click()
+      await page.locator('.defn-map-chip.selected').first().waitFor({ timeout: 10_000 })
+      assert.equal(await expand.getAttribute('aria-pressed'), 'true', 'picking a module keeps the Map expanded')
+      assert.equal(await page.locator('.defn-bottom').isVisible(), false)
+      await expand.click()
       await page.locator('.defn-bottom').waitFor({ state: 'visible' })
-      assert.ok(chipTitle.startsWith(await page.locator('.defn-focus-title-input').inputValue()), 'the clicked module is in the focus pane')
+      assert.ok(chipTitle.startsWith(await page.locator('.defn-focus-title-input').inputValue()), 'the picked module is in the focus pane once the panes are back')
 
-      // Picking something in Outline view leaves the remembered Map choice alone
+      // "+ Stage" in the expanded Map adds the stage without collapsing it
       await expand.click()
       await page.locator('.defn-bottom').waitFor({ state: 'hidden' })
+      await page.locator('.defn-map-add-row').getByRole('button', { name: '+ Stage' }).click()
+      await page.locator('.defn-map-col', { hasText: 'New Stage' }).first().waitFor({ timeout: 10_000 })
+      assert.equal(await expand.getAttribute('aria-pressed'), 'true', 'adding a stage keeps the Map expanded')
+      assert.equal(await page.locator('.defn-bottom').isVisible(), false)
+
+      // Picking something in Outline view leaves the remembered Map choice alone
       await page.getByRole('button', { name: 'Outline', exact: true }).click()
       await page.waitForSelector('.defn-workbench-outline', { timeout: 10_000 })
       await page.locator('.defn-outline-node').first().click()
