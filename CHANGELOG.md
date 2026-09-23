@@ -17,6 +17,16 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.18-beta — 2026-09-23
+
+### Added
+
+- **Instance display names now show throughout the web form, not just rendered documents** (#145).
+  If an instance's `instance.yaml` sets `name:`, that display name now appears in the editor
+  header (with the slug moved to a small badge alongside the instance reference), the instance
+  switcher, and the dashboard/swimlane cards — everywhere an instance used to show only its slug.
+  An instance with no `name:` set looks exactly as it always has.
+
 ## 0.9.17-beta — 2026-09-23
 
 ### Changed

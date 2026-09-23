@@ -104,6 +104,9 @@ test('opening an Azure-DevOps-backed instance with no stored PAT prompts for one
 
       await page.waitForSelector('.module', { timeout: 10_000 })
       assert.equal(await page.locator('header h1').textContent(), 'my-initiative — design')
+      // #145: no `name:` set on this instance — the header looks exactly as it always has, with no
+      // secondary slug badge (that only appears once a display name is actually shown).
+      assert.equal(await page.locator('header .instance-slug').count(), 0)
       await modal.waitFor({ state: 'hidden', timeout: 5_000 })
 
       // Persisted client-side against this specific workspace, so a fresh load of the same instance doesn't re-prompt.

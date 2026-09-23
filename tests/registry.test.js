@@ -31,12 +31,13 @@ test('listRegistry lists every instance, sorted by slug, with definition, curren
 
     const registry = listRegistry({ instancesDir })
     assert.deepEqual(
-      registry.map(({ slug, definition, stage, status, assignee, workspaceNumber, instanceNumber, ref }) => ({
+      registry.map(({ slug, definition, stage, status, assignee, name, workspaceNumber, instanceNumber, ref }) => ({
         slug,
         definition,
         stage,
         status,
         assignee,
+        name,
         workspaceNumber,
         instanceNumber,
         ref,
@@ -48,6 +49,7 @@ test('listRegistry lists every instance, sorted by slug, with definition, curren
           stage: 'shape',
           status: 'incomplete',
           assignee: 'c.barlow',
+          name: null,
           workspaceNumber: 0,
           instanceNumber: 1,
           ref: 'w0i1',
@@ -58,6 +60,7 @@ test('listRegistry lists every instance, sorted by slug, with definition, curren
           stage: 'shape',
           status: 'incomplete',
           assignee: '',
+          name: null,
           workspaceNumber: 0,
           instanceNumber: 2,
           ref: 'w0i2',
@@ -132,6 +135,24 @@ test('listRegistry falls back to \'\' for assignee when the instance record has 
 
     const registry = listRegistry({ instancesDir })
     assert.equal(registry[0].assignee, '')
+  })
+})
+
+// #145: the row's own `name` field is the instance's optional display name (`name:` in
+// instance.yaml) verbatim — `null`, not the slug, when unset, so a listing screen can decide its own
+// slug fallback rather than this row silently baking one in.
+test('listRegistry surfaces the instance\'s display name, or null when instance.yaml has no name: set', async () => {
+  await withScratchInstances((instancesDir) => {
+    const workspaceDir = seedWorkspace(instancesDir)
+    createInstance('design', 'my-initiative', { instancesDir: workspaceDir })
+    const instancePath = join(workspaceDir, 'my-initiative', 'instance.yaml')
+    writeFileSync(instancePath, readFileSync(instancePath, 'utf8') + 'name: Trerado EA Platform\n')
+
+    createInstance('design', 'unnamed-initiative', { instancesDir: workspaceDir })
+
+    const registry = listRegistry({ instancesDir })
+    assert.equal(registry.find((i) => i.slug === 'my-initiative').name, 'Trerado EA Platform')
+    assert.equal(registry.find((i) => i.slug === 'unnamed-initiative').name, null)
   })
 })
 

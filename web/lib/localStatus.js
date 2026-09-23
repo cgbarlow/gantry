@@ -32,7 +32,7 @@
 // adds no new parsing logic of its own.
 
 import { readTextFile } from './localWorkspace.js'
-import { parseLocalModuleFile } from './localInstanceFiles.js'
+import { parseLocalModuleFile, parseInstanceYaml } from './localInstanceFiles.js'
 import { isMultiValuedField } from './fieldShape.js'
 import { readOnlyModuleProblems } from './readOnlyModules.js'
 
@@ -285,11 +285,19 @@ export async function getLocalStatus(handle, slug, structure, stageId) {
     throw new Error(`Instance "${slug}" has no stage "${stageId}"`)
   }
 
+  // #145: matches `getStatus`'s own `name` field (the instance's optional display name,
+  // `name:` in instance.yaml, or `null` when unset) — read directly off instance.yaml rather than
+  // taking it as a parameter, the same way `getStatus` itself reads its own instance record rather
+  // than a caller-supplied one.
+  const instanceYamlText = await readTextFile(handle, `gantry-workspace/${slug}/instance.yaml`)
+  const record = parseInstanceYaml(instanceYamlText)
+
   const moduleData = await readLocalModuleData(handle, slug, stage, structure, { strict: false })
   const { modules, artefacts, complete } = evaluateLocalStage(structure, stage, moduleData)
 
   return {
     slug,
+    name: record.name ?? null,
     definition: structure.id,
     stage: { id: stage.id, title: stage.title, gate: stage.gate },
     modules,

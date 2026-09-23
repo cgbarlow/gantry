@@ -19,6 +19,9 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
     const body = await res.json()
     assert.equal(body.slug, 'examples')
     assert.equal(body.definition, 'design')
+    // #145: the fixture's own instance.yaml carries `name: Kiwi Cover Mutual` — the display name the
+    // web form is now expected to surface alongside the slug, rather than only the slug.
+    assert.equal(body.name, 'Kiwi Cover Mutual')
     assert.deepEqual(body.stage, { id: 'shape', title: 'SOAP', gate: 'business-case', number: 1 })
     assert.deepEqual(body.artefacts, [
       {
@@ -78,6 +81,24 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
     assert.ok(Array.isArray(teams.value))
     assert.ok(teams.value.length > 0)
   })
+})
+
+// #145: an instance with no `name:` set at all — the overwhelming majority of existing instances —
+// must report `name: null` rather than the response silently omitting the field or defaulting it to
+// the slug itself; the client, not this route, decides the slug fallback.
+test('GET /api/instance reports name: null for an instance with no name: set in instance.yaml', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'my-initiative', { instancesDir })
+    await withRunningServer({ instancesDir }, async (base) => {
+      const res = await fetch(`${base}/api/instance?slug=my-initiative`)
+      assert.equal(res.status, 200)
+      const body = await res.json()
+      assert.equal(body.name, null)
+    })
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
 })
 
 test('GET /api/instance?stage=<id> browses a different stage\'s modules without changing the instance\'s persisted stage', async () => {

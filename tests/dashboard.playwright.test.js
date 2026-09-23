@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
@@ -227,6 +227,30 @@ test('dashboard: an instance card displays its assignee without an inline editor
         assert.equal(await page.locator('.instance-card .assignee').textContent(), 'Unassigned')
         assert.equal(await page.locator('.instance-card .identity-picker').count(), 0)
         assert.equal(await page.locator('.instance-card .assignee-save-status').count(), 0)
+      })
+    )
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// #145: an instance's card shows its display name (`name:` in instance.yaml) instead of only the
+// slug, once one is set — an instance with none set (every other test in this file) looks exactly
+// as it always has, per its own acceptance criteria.
+test('dashboard: an instance card shows the instance\'s display name (name:) instead of the slug once one is set', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'trerado-ea', { instancesDir })
+    const instancePath = join(instancesDir, 'trerado-ea', 'instance.yaml')
+    writeFileSync(instancePath, readFileSync(instancePath, 'utf8') + 'name: Trerado EA Platform\n')
+
+    await withRunningServer(
+      { instancesDir },
+      withPage(async (page, base) => {
+        await page.goto(base)
+        await page.waitForSelector('.instance-card', { timeout: 10_000 })
+
+        assert.equal(await page.locator('.instance-card .name').textContent(), 'Trerado EA Platform')
       })
     )
   } finally {

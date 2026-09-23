@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
@@ -146,6 +146,35 @@ test('instance switcher: two bare instances migrated into the same "default" ser
         // Clicking outside the panel closes it.
         await page.locator('body').click({ position: { x: 5, y: 5 } })
         await menu.waitFor({ state: 'hidden', timeout: 2_000 })
+      })
+    )
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// #145: the switcher's own sibling links show a sibling's display name (`name:` in instance.yaml)
+// once one is set — an instance with none set (every other test in this file) looks exactly as it
+// always has, per its own acceptance criteria.
+test('instance switcher: a sibling with a display name (name:) is shown by that name, not its slug', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    createInstance('design', 'alpha-initiative', { instancesDir })
+    createInstance('design', 'zebra-initiative', { instancesDir })
+    const instancePath = join(instancesDir, 'zebra-initiative', 'instance.yaml')
+    writeFileSync(instancePath, readFileSync(instancePath, 'utf8') + 'name: Trerado EA Platform\n')
+
+    await withRunningServer(
+      { instancesDir },
+      withPage(async (page, base) => {
+        await page.goto(`${base}/instance/alpha-initiative`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+
+        await page.getByRole('button', { name: 'Switch instance' }).click()
+        const menu = page.locator('.instance-switcher .menu')
+        await menu.waitFor({ state: 'visible', timeout: 5_000 })
+
+        assert.equal(await menu.locator('.switcher-item .name').textContent(), 'Trerado EA Platform')
       })
     )
   } finally {

@@ -234,6 +234,10 @@ async function loadLocalInstance(workspaceId, slug, requestedStageId) {
 
   return {
     slug,
+    // #145: the same optional display-name field GET /api/instance returns (`name:` in
+    // instance.yaml, or `null` when unset) — read straight off the already-parsed local
+    // instance.yaml instead of a server round trip.
+    name: record.name ?? null,
     definition: definitionId,
     stage: { id: stage.id, title: stage.title, gate: stage.gate, number: structure.stages.findIndex((s) => s.id === stage.id) + 1 },
     currentStageId: record.stage,
@@ -4464,10 +4468,12 @@ function InstanceSwitcher({ slug, instance, open, onOpenChange }) {
       ? `/new-instance?local=${encodeURIComponent(localWorkspaceIdForSwitch)}`
       : '/new-instance'
 
+  // #145: the instance's display name (falling back to its slug, exactly as before, when it has no
+  // `name:` set) — not the slug itself, which used to be all this menu ever showed.
   function renderInstanceLink(inst) {
     return html`
       <a key=${inst.slug} class="switcher-item" href=${instanceHref(inst)} onClick=${() => onOpenChange(false)}>
-        <span class="name">${inst.slug}</span>
+        <span class="name">${inst.name || inst.slug}</span>
         <span class="def">${inst.definition}</span>
       </a>
     `
@@ -4540,6 +4546,10 @@ function GantryBrandIcon() {
   `
 }
 
+// #145: the title shows the instance's display name (`instance.name`, its optional `name:` in
+// instance.yaml) rather than only the slug — falling back to the slug, unchanged, when no name is
+// set. Once a name is shown, the slug moves to its own small badge beside `.instance-ref` so it's
+// still visible, just no longer the primary label.
 function AppHeader({ instance }) {
   const [openMenu, setOpenMenu] = useState(null)
 
@@ -4548,7 +4558,10 @@ function AppHeader({ instance }) {
       <div class="brand">
         <${GantryBrandIcon} />
         <a class="btn small ghost" href="/">← Workspaces</a>
-        <h1>${instance.slug} — ${instance.definition}</h1>
+        <h1>${instance.name || instance.slug} — ${instance.definition}</h1>
+        ${instance.name
+          ? html`<span class="instance-slug" title="Instance slug">${instance.slug}</span>`
+          : null}
         <span class="instance-ref" title="Numeric reference (WI200) — the canonical short URL for this instance">${instance.ref}</span>
         <${InstanceSwitcher}
           slug=${instance.slug}
@@ -5393,6 +5406,9 @@ async function buildLocalInstanceRow(handle, slug, structureCache) {
     stage: localStatus.stage.id,
     status: localStatus.complete ? 'complete' : 'incomplete',
     assignee: record.assignee ?? '',
+    // #145: the instance's optional display name (`name:` in instance.yaml) verbatim, or `null` —
+    // same field, same fallback-to-slug contract, as a server-hosted row's.
+    name: record.name ?? null,
     stageNumber: stageIndex + 1,
     stageCount: structure.stages.length,
     stageTitle: localStatus.stage.title,
@@ -5621,7 +5637,8 @@ function InstanceCard({ inst, editHref, checkStatus, onCheck }) {
     <div class="instance-card" key=${inst.slug}>
       <div class="instance-card-content">
         <div class="instance-card-header">
-          <span class="name">${inst.slug}</span>
+          <!-- #145: the instance's display name, falling back to its slug exactly as before when it has no display name set. -->
+          <span class="name">${inst.name || inst.slug}</span>
           <span class="ref" title="Numeric reference (WI200)">${inst.ref}</span>
           <span class="def">${inst.definition}</span>
           <span class="instance-card-status">

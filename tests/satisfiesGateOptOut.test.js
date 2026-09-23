@@ -168,6 +168,9 @@ class MemDir {
 // the browser would read them, and the Definition as the projection the browser holds.
 async function localTwin(ctx) {
   const handle = new MemDir()
+  // #145: getLocalStatus now reads instance.yaml itself (for the instance's optional display
+  // name) — mirrored here the same way the modules below are, from the real on-disk fixture.
+  await writeTextFile(handle, `gantry-workspace/${SLUG}/instance.yaml`, readFileSync(join(ctx.instancesDir, SLUG, 'instance.yaml'), 'utf8'))
   const modulesDir = join(ctx.instancesDir, SLUG, 'modules')
   for (const name of readdirSync(modulesDir)) {
     await writeTextFile(handle, `gantry-workspace/${SLUG}/modules/${name}`, readFileSync(join(modulesDir, name), 'utf8'))
