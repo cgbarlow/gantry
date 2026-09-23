@@ -500,6 +500,14 @@ export function findLocalDefinitionProblems(structure) {
   const findFilenameField = (moduleId, fieldId) => modulesById.get(moduleId)?.fields?.find((field) => field.id === fieldId)
   for (const artefact of artefacts) {
     problems.push(...filenamePatternProblems(artefact, findFilenameField))
+    // Port of lib/definition.js's documentControlProblem (#150, ADR-0049).
+    const documentControl = artefact.documentControl
+    if (documentControl !== undefined && typeof documentControl !== 'boolean') {
+      problems.push({
+        type: 'invalid-document-control',
+        message: `Artefact "${artefact.id}" sets "document-control" to ${JSON.stringify(documentControl)} — it must be true or false`,
+      })
+    }
   }
 
   return problems

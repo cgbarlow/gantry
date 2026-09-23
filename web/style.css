@@ -1702,6 +1702,7 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-filename-tokens { display: flex; flex-wrap: wrap; gap: 6px; }
 .defn-filename-token { font-family: var(--font-mono); }
 .defn-filename-problems { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.defn-document-control { display: inline-flex; align-items: center; gap: 6px; }
 
 /* Drag and drop */
 .defn-drag-handle { cursor: grab; user-select: none; padding: 2px 6px; font-size: 14px; color: var(--text-muted); border: var(--hairline) solid transparent; border-radius: var(--radius); }

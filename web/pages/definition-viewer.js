@@ -139,6 +139,19 @@ function eligibleFilenameFields(d, artefact) {
   return results
 }
 
+// #150 (ADR-0049): an Artefact's `document-control:` switch. Ticked (the default, the key absent)
+// prints the Document Control and Review & sign-off tables; unticked stores `documentControl:
+// false`, which leaves both out of that Artefact's render. `onToggle` null shows it read-only, as
+// on a published version.
+function documentControlCheckbox(artefact, onToggle) {
+  return html`
+    <label class="defn-document-control">
+      <input type="checkbox" checked=${artefact.documentControl !== false} disabled=${!onToggle} onChange=${onToggle ? (e) => onToggle(e.currentTarget.checked) : undefined} />
+      Print the Document Control and Review & sign-off tables
+    </label>
+  `
+}
+
 // -- list addressing for reorder-in-place drags/buttons --------------------------------------
 function getList(d, listPath) {
   if (listPath === 'stages') return d.stages
@@ -2085,6 +2098,11 @@ export function DefinitionViewerPage() {
                   </div>
                   ${filenameProblems.length ? html`<ul class="defn-filename-problems">${filenameProblems.map((p) => html`<li class="inline-error">${p.message}</li>`)}</ul>` : null}
                 </div>
+                <label class="field-label">Document Control</label>
+                ${documentControlCheckbox(a, (checked) => updateDraft((dd) => {
+                  if (checked) delete dd.artefacts[ai].documentControl
+                  else dd.artefacts[ai].documentControl = false
+                }))}
               </div>
             `
           : html`
@@ -2094,6 +2112,7 @@ export function DefinitionViewerPage() {
               <p><span class="field-label">Reference docx</span></p>
               ${renderReferenceDocxRow(a.id, false)}
               ${a.filename ? html`<p><span class="field-label">Filename pattern</span> <code>${a.filename}</code></p>` : null}
+              <p><span class="field-label">Document Control</span> ${documentControlCheckbox(a, null)}</p>
             `}
         <div class="defn-focus-section">
           <div class="defn-focus-section-head">
