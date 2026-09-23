@@ -17,6 +17,19 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.11-beta — 2026-09-23
+
+### Changed
+
+- **The candidate's Appointment Confirmation replaces the Offer Pack** in the recruitment-onboarding
+  v3 draft. Sent once onboarding is approved, it tells the new starter their role, manager, start
+  date, terms and what happens next — and nothing else. It carries no Document Control or
+  sign-off table, and completing it alone can never pass the onboarding-approved gate; only the
+  internal Onboarding Case can. Dropped entirely from the candidate's view: the offer terms and
+  status, both signature dates, start-date changes, Payroll's raw validation outcome and its
+  request/rework history, and any open question. v3 is still a draft; v1 and v2 are unaffected.
+  (#156)
+
 ## 0.9.10-beta — 2026-09-23
 
 ### Added

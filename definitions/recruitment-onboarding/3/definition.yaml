@@ -198,31 +198,28 @@ artefacts:
       - payroll.validation-outcome?
       - open-questions.process-gaps?
     filename: "{selection.candidate-name} - Onboarding Case"
-  - id: offer-pack
-    title: Offer Pack
+  - id: appointment-confirmation
+    title: Appointment Confirmation
     purpose: >
-      Set out for the appointed candidate what the role is, what was agreed, and
-      what has been confirmed on their behalf.
-    template: templates/offer-pack.md.tmpl
+      Confirm to the new starter their role, manager, start date and the terms they signed,
+      and what happens next. Sent once onboarding is approved. It leaves the organisation, so
+      it carries no internal content and no Document Control or sign-off tables, and it never
+      counts toward the gate.
+    template: templates/appointment-confirmation.md.tmpl
     gate: onboarding-approved
+    document-control: false
+    satisfies-gate: false
     requires:
+      - selection.candidate-name
       - role.summary
       - role.team
       - role.responsibilities
       - engagement.type
-      - selection.candidate-name?
-      - offer.terms
-      - offer.status
-      - contract.terms-summary
-      - contract.manager-signed
-      - contract.candidate-signed
+      - engagement.term?
       - contract.start-date
-      - contract.start-date-changes?
-      - payroll.details-requested
-      - payroll.validation-outcome?
+      - contract.terms-summary
       - payroll.confirmed
-      - open-questions.questions?
-    filename: "{selection.candidate-name} - Offer Pack - {contract.start-date}"
+    filename: "{selection.candidate-name} - Appointment Confirmation - {contract.start-date}"
   - id: starter-readiness
     title: Starter Readiness
     purpose: >

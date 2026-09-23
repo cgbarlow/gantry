@@ -1,0 +1,57 @@
+# <%~ it.instance.name || it.instance.slug %>: Appointment Confirmation
+<%
+  /* v3 (replaces v2's offer-pack): written for the new starter, outside the organisation.
+     `document-control: false` (no Document Control or Review and sign-off tables) and
+     `satisfies-gate: false` (rendered at onboarding-approved but never counts toward it), so
+     `requires` is exactly what this prints plus the two filename tokens — no internal field is
+     carried just to hold the gate. See CHANGELOG.md v3.
+
+     Never add selection rationale, vetting, payroll history, open questions, the offer terms
+     or the start-date change history here. The payroll line is fixed text shown once
+     `payroll.confirmed` is filled; it names nobody. The term shows only when filled: an
+     internal "— not stated —" marker never goes to a starter. The candidate's own name is
+     printed as the addressee, which overturns the v2 CHANGELOG's "never as a rendered
+     section" for this document. */
+%>
+For <%~ na(it.modules.selection['candidate-name']) %>
+
+# Your role
+
+## Role summary
+
+<%~ na(it.modules.role.summary) %>
+
+## Team and reporting line
+
+<%~ na(it.modules.role.team) %>
+
+## Key responsibilities
+
+<% (it.modules.role.responsibilities || []).forEach(function(item) { %>- <%~ item %>
+<% }) %>
+## Engagement type
+
+<%~ na(it.modules.engagement.type) %>
+<% if (it.modules.engagement.term) { %>
+## Term or expected duration
+
+<%~ it.modules.engagement.term %>
+<% } %>
+# Your terms
+
+## Start date
+
+<%~ na(formatDate(it.modules.contract['start-date'])) %>
+
+## Terms
+
+<%~ na(it.modules.contract['terms-summary']) %>
+
+This is a summary. Your signed employment agreement takes precedence over it.
+<% if (it.modules.payroll.confirmed) { %>
+Your payroll details have been received and validated.
+<% } %>
+# What happens next
+
+Your manager (named above under Team and reporting line) will send your login details and
+first-day arrangements before your start date.
