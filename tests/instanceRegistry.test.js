@@ -18,9 +18,11 @@ import {
   directoryFolderForScopeId,
   MIGRATED_DEFAULT_WORKSPACE_FOLDER,
   workspaceHasRegisteredInstances,
+  hasUndiscoveredProviderWorkspaces,
 } from '../lib/instanceRegistry.js'
 import { LOCAL_SCOPE } from '../lib/numberRegistry.js'
 import { listWorkspaces, resolveWorkspace, findWorkspaceByLocation } from '../lib/workspaceRegistry.js'
+import { localFilesystemStorage } from '../lib/storage.js'
 import { withScratchInstances } from './helpers/lifecycle.js'
 
 // A server workspace directory (lib/workspaceDirectory.js, #355) is just a folder with a
@@ -563,5 +565,45 @@ test('workspaceHasRegisteredInstances stays true for a workspace whose only inst
     registerInstance('my-initiative', { kind: 'directory', workspace: 'acme' }, { instancesDir })
     archiveInstance('my-initiative', { instancesDir, workspace: 'acme' })
     assert.equal(workspaceHasRegisteredInstances('acme', { instancesDir }), true)
+  })
+})
+
+// #133 regression: `lib/registry.js`'s `listRegistry` always passes a `sharedPats` object (`{}` by
+// default — see its own comment on that default), so the early-exit guard here must key off whether
+// there is an actual credential to try (an `options.pat`, or at least one `options.sharedPats` entry),
+// not merely off whether a `sharedPats` object was passed at all — otherwise every request pays for a
+// full `loadWithBackfill` (registry-file read + directory scan) for no reason, even though the
+// returned answer (`false`) is unchanged either way.
+test('hasUndiscoveredProviderWorkspaces stays synchronous-cheap (no registry read, no directory scan) when neither options.pat nor any GANTRY_SHARED_WORKSPACE_PATS entry is present', async () => {
+  await withScratchInstances((instancesDir) => {
+    seedWorkspace(instancesDir, 'acme')
+    registerInstance('my-initiative', { kind: 'directory', workspace: 'acme' }, { instancesDir })
+
+    const realExists = localFilesystemStorage.exists
+    const realListDir = localFilesystemStorage.listDir
+    let storageCalls = 0
+    localFilesystemStorage.exists = (...args) => {
+      storageCalls++
+      return realExists(...args)
+    }
+    localFilesystemStorage.listDir = (...args) => {
+      storageCalls++
+      return realListDir(...args)
+    }
+    try {
+      // Exactly how `lib/registry.js`'s `listRegistry` calls this today: no `options.pat`, and a
+      // `sharedPats` object that is present but empty (the common "GANTRY_SHARED_WORKSPACE_PATS unset"
+      // case), not simply omitted.
+      const result = hasUndiscoveredProviderWorkspaces({ instancesDir, sharedPats: {} })
+      assert.equal(result, false)
+      assert.equal(
+        storageCalls,
+        0,
+        'no filesystem read or directory scan should happen when this request carries no credential at all'
+      )
+    } finally {
+      localFilesystemStorage.exists = realExists
+      localFilesystemStorage.listDir = realListDir
+    }
   })
 })

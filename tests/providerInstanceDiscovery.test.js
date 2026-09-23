@@ -264,3 +264,134 @@ test('listRegistry with surfaceAuthenticationErrors rethrows a rejected credenti
     })
   })
 })
+
+// ---------- #133 (parent #109): request-time discovery reaches a shared credential too ----------
+//
+// #131's own request-time discovery only ever tried `options.pat` (the request's own credential).
+// A workspace with a `GANTRY_SHARED_WORKSPACE_PATS` entry but not also declared in
+// `GANTRY_BOOTSTRAP_WORKSPACES` — registered instead through the New Workspace wizard, or already
+// present in the registry some other way — was never discovered at all: boot-time discovery only
+// iterates the workspaces bootstrap just registered, and request-time discovery never consulted
+// `sharedPats`. These tests exercise `listRegistry`'s discovery branch with `sharedPats` and no
+// request `pat`, the shape a credential-less browser request actually carries.
+
+test('listRegistry discovers a workspace registered outside GANTRY_BOOTSTRAP_WORKSPACES from its own GANTRY_SHARED_WORKSPACE_PATS entry, with no request credential at all', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    await withFakeGitHubServer({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: SEED_FILES }, async (baseUrl) => {
+      // registerWorkspace, not a bootstrap declaration — the "registered some other way" case #133
+      // names explicitly (New Workspace wizard, or already present in the registry).
+      const workspace = registerWorkspace(
+        { provider: 'github', location: { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, baseUrl } },
+        { instancesDir }
+      )
+      assert.deepEqual(listRegisteredInstances({ instancesDir }), [])
+
+      const registry = await listRegistry({ instancesDir, sharedPats: { [workspace.id]: GITHUB_VALID_PAT } })
+      assert.deepEqual(registry.map((row) => row.slug), ['found-one'])
+
+      const registered = listRegisteredInstances({ instancesDir })
+      assert.deepEqual(registered.map((r) => r.slug), ['found-one'])
+    })
+  })
+})
+
+test('listRegistry lists a genuinely empty shared workspace once, then never re-lists its repo on later requests', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    await withFakeGitHubServerCountingListFolder(
+      { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: {} },
+      async ({ baseUrl, listFolderCalls }) => {
+        const workspace = registerWorkspace(
+          { provider: 'github', location: { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, baseUrl } },
+          { instancesDir }
+        )
+        const sharedPats = { [workspace.id]: GITHUB_VALID_PAT }
+
+        const first = await listRegistry({ instancesDir, sharedPats })
+        assert.deepEqual(first, [])
+        assert.equal(listFolderCalls(), 1)
+
+        const second = await listRegistry({ instancesDir, sharedPats })
+        assert.deepEqual(second, [])
+        // The empty repo was not re-listed — the discovered-and-empty marker stopped it.
+        assert.equal(listFolderCalls(), 1)
+
+        const third = await listRegistry({ instancesDir, sharedPats })
+        assert.deepEqual(third, [])
+        assert.equal(listFolderCalls(), 1)
+      }
+    )
+  })
+})
+
+test('listRegistry never re-discovers a shared workspace that already has a registered instance', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    await withFakeGitHubServerCountingListFolder(
+      { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: SEED_FILES },
+      async ({ baseUrl, listFolderCalls }) => {
+        const workspace = registerWorkspace(
+          { provider: 'github', location: { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, baseUrl } },
+          { instancesDir }
+        )
+        registerInstance('already-known', { kind: 'github', workspaceId: workspace.id }, { instancesDir })
+
+        await listRegistry({ instancesDir, sharedPats: { [workspace.id]: GITHUB_VALID_PAT } })
+        assert.deepEqual(
+          listRegisteredInstances({ instancesDir }).map((r) => r.slug),
+          ['already-known']
+        )
+        assert.equal(listFolderCalls(), 0)
+      }
+    )
+  })
+})
+
+test('listRegistry: a shared credential declared for workspace A is never tried against an undiscovered workspace B', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    await withFakeGitHubServerCountingListFolder(
+      { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: 'pat-for-a', files: SEED_FILES },
+      async ({ baseUrl: baseUrlA, listFolderCalls: listFolderCallsA }) => {
+        await withFakeGitHubServerCountingListFolder(
+          // B's repo only accepts its own credential — it must never get the chance to reject A's.
+          { owner: 'other-owner', repository: 'other-repo', validPat: 'pat-for-b', files: SEED_FILES },
+          async ({ baseUrl: baseUrlB, listFolderCalls: listFolderCallsB }) => {
+            const workspaceA = registerWorkspace(
+              { provider: 'github', location: { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, baseUrl: baseUrlA } },
+              { instancesDir }
+            )
+            const workspaceB = registerWorkspace(
+              { provider: 'github', location: { owner: 'other-owner', repository: 'other-repo', baseUrl: baseUrlB } },
+              { instancesDir }
+            )
+
+            const registry = await listRegistry({ instancesDir, sharedPats: { [workspaceA.id]: 'pat-for-a' } })
+            assert.deepEqual(registry.map((row) => row.slug), ['found-one'])
+            assert.equal(registry[0].workspace.id, workspaceA.id)
+
+            assert.equal(listFolderCallsA(), 1)
+            // B has no shared entry of its own — A's credential must never be tried against it.
+            assert.equal(listFolderCallsB(), 0)
+            assert.deepEqual(
+              listRegisteredInstances({ instancesDir }).map((entry) => entry.scopeId),
+              [workspaceA.id]
+            )
+            void workspaceB
+          }
+        )
+      }
+    )
+  })
+})
+
+test('listRegistry: no shared credential appears anywhere in the built rows when it was used only for discovery', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    await withFakeGitHubServer({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: SEED_FILES }, async (baseUrl) => {
+      const workspace = registerWorkspace(
+        { provider: 'github', location: { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, baseUrl } },
+        { instancesDir }
+      )
+
+      const registry = await listRegistry({ instancesDir, sharedPats: { [workspace.id]: GITHUB_VALID_PAT } })
+      assert.ok(!JSON.stringify(registry).includes(GITHUB_VALID_PAT))
+    })
+  })
+})

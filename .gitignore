@@ -12,10 +12,12 @@ instances/*/out/
 instances/instance-registry.json
 instances/workspace-registry.json
 instances/number-registry.json
+instances/discovered-empty-workspaces.json
 workspaces/*/*/out/
 workspaces/instance-registry.json
 workspaces/workspace-registry.json
 workspaces/number-registry.json
+workspaces/discovered-empty-workspaces.json
 
 # WI #386: Global Settings' library repos and their on-disk cache — deployment data, never repo
 # content, the same as the registries above.
