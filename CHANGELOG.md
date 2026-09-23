@@ -17,6 +17,20 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.21-beta — 2026-09-23
+
+### Changed
+
+- **The recruitment-onboarding v3 draft keeps the Offer Pack, trimmed to the offer** (#184). The
+  v3 draft had dropped the Offer Pack in favour of the Appointment Confirmation, but the candidate
+  still needs a document when the offer is made, before any contract. v3 now has both: the Offer
+  Pack, sent when the offer is extended, carries only the role, the engagement and the offer
+  terms, and says what happens next; the Appointment Confirmation still follows once the contract
+  is signed and payroll validates. Neither has the Document Control or sign-off tables, and
+  neither counts toward the onboarding gate. The offer terms give the band and position in band,
+  not the salary figure, so add the figure to the copy you send. v2 is unchanged, and v3 is still
+  a draft.
+
 ## 0.9.20-beta — 2026-09-23
 
 ### Changed

@@ -291,6 +291,28 @@ gate.
   Confirmation read the same Fields the fixture already carried; only the rendered document and
   its place in the Gate arithmetic changed.
 
+### The Offer Pack is kept, trimmed to the offer (#184)
+
+Correction to #156 below. The field review asked for the Offer Pack's unneeded Fields to be
+removed, not the document, and the offer is a real step in the process: the candidate is made an
+offer and accepts or declines it before any contract is drawn. The Appointment Confirmation comes
+after the contract is signed and payroll validates, so it cannot stand in for that moment.
+v3 therefore has both candidate documents, at `onboarding-approved`:
+
+- **Offer Pack**, sent when the offer is extended: "For {candidate name}", the role (summary,
+  team and reporting line, responsibilities, engagement type, the term when filled), the offer
+  terms, and what happens next (accept, then an employment agreement to sign).
+- **Appointment Confirmation**, sent once onboarding is approved, unchanged from #156.
+
+The Offer Pack drops everything v2's printed that the candidate doesn't need at the offer: the
+offer status and negotiation (the organisation's own record of the offer), the contract terms,
+signatures and start-date changes, the payroll history, and open questions. It sets
+`document-control: false` and `satisfies-gate: false`, so it has no Document Control or sign-off
+tables and never counts toward the gate; `requires` is exactly what it prints (its bar is 6 bare
+Fields). The offer terms state the band and position in band, never the salary figure; HR adds
+the figure to the copy they send, outside the repository. Its filename is
+`{selection.candidate-name} - Offer Pack`: the start date isn't agreed yet when it goes out.
+
 ### Hire Record process order, guidance sweep and final verification (#160)
 
 v3's last ticket: the Hire Record's outline catches up with the Appointment split (#155), the
