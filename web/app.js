@@ -37,7 +37,7 @@ import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, worksp
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
 import { unrepresentedWorkspaceGroups, describeInstanceRowWorkspace } from './lib/dashboardWorkspaces.js'
 import { workItemParentRef, describeWorkItemLink } from './lib/provider.js'
-import { loadWorkspaceScopedInstances } from './lib/workspaceDiscovery.js'
+import { loadWorkspaceScopedInstances, setWorkspaceDiscoveryRetryHandler } from './lib/workspaceDiscovery.js'
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
 import { visualMode, refreshVisual, clearActiveCell, restoreActiveCell, activeCellSelection, focusTableCellAt } from './lib/visualMode.js'
 import { advancedMode } from './lib/advancedMode.js'
@@ -6095,6 +6095,18 @@ function DashboardPage() {
   }
 
   useEffect(reloadInstances, [])
+
+  // #137: a workspace whose scoped listing couldn't be answered — the server still coming up after a
+  // redeploy being the case that forced this — asks to be tried again shortly. Re-running the same
+  // load the mount-time effect runs is all that's needed; web/lib/workspaceDiscovery.js owns the
+  // bounds (a handful of attempts per workspace, backed off, and only for failures that say nothing
+  // about whether the workspace has designs). Before this, one unlucky mount-time request left the
+  // workspace blank until a full reload — or until a perfectly good credential was re-entered, which
+  // is the only other thing that cleared the latch and so looked like the credential's fault.
+  useEffect(() => {
+    setWorkspaceDiscoveryRetryHandler(() => reloadInstances())
+    return () => setWorkspaceDiscoveryRetryHandler(null)
+  }, [])
 
   // #131: the two listings joined — the unscoped one plus each credentialed, workspace-scoped one.
   // They can never overlap by construction (a scoped listing is only ever fetched for a workspace the
