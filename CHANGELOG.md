@@ -17,6 +17,24 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.2-beta — 2026-09-23
+
+### Added
+
+- **A draft third version of Recruitment and Onboarding** (#153). `recruitment-onboarding/3` now
+  appears as a draft next to the published v2. For now it is the same process as v2. The upcoming
+  releases will reshape it from the field-by-field review of v2:
+  - an executive approval before any offer;
+  - a candidate-facing Appointment Confirmation;
+  - a Manager Handover and Starter Readiness trimmed to their readers;
+  - guidance that keeps personal data out of the repository.
+
+  Its description now states that Instances of this process hold HR personal data and need
+  HR-file access and retention controls wherever they are stored. Its changelog carries the full
+  v2 and v1 history. It also corrects a v2 note that wrongly said a document's candidate-name
+  reference didn't count toward its gate. v2 is unchanged, so Instances pinned to it are
+  unaffected. v3 stays a draft until the process owner publishes it.
+
 ## 0.9.1-beta — 2026-09-23
 
 ### Added

@@ -1,0 +1,39 @@
+id: offer
+title: Offer
+purpose: >
+  The offer of employment made to the preferred candidate, and what happened to it.
+
+  Nothing binds until the offer is accepted, so this module is the boundary between a selection
+  decision and a commitment. Keep `status` current: several later steps assume acceptance, and
+  a stale status here is how a provisioning run starts for someone who declined.
+
+fields:
+  - id: terms
+    title: Offer terms
+    type: markdown
+    required: true
+    guidance: >
+      What was offered — remuneration, hours, location, the proposed start date, and anything
+      negotiated as a condition of accepting. Enough that the contract can be drawn from it
+      without going back to anyone.
+
+  - id: status
+    title: Status
+    type: select
+    required: true
+    options:
+      - Extended
+      - Accepted
+      - Declined
+    guidance: >
+      Extended, accepted or declined — the current state of this offer. Record the date of each
+      change, and the reason for a decline where known, in `negotiation` below.
+
+  - id: negotiation
+    title: Negotiation
+    type: markdown
+    required: false
+    guidance: >
+      What changed between the offer extended and the offer accepted, and who agreed the
+      change — or, if the offer was declined, what is known about why and when. Leave empty
+      where the offer was accepted as made with nothing to record.

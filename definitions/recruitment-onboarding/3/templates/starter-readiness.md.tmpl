@@ -1,0 +1,86 @@
+# <%~ it.instance.name || it.instance.slug %>: Starter Readiness
+<%
+  /* The provisioning record. Identity, device and access run in parallel in the source model;
+     they are rendered in sequence here because a document has one order and Gantry has no fork
+     to preserve. The order below is identity first, because device and access both depend on
+     the directory record existing.
+     `access.outstanding` is `?` and suppresses when empty — but modules/access.yaml asks for it
+     to be filled whenever anything is genuinely late, since it is this process's only warning
+     that a starter will arrive to a partial setup.
+
+     v2 (#90): named from the candidate and the start date (definition.yaml's `filename:`) —
+     `selection.candidate-name` is in `requires` as `?` purely so the pattern can reach it; this
+     document carries no other selection content, matching v1. `contract.start-date` is
+     formatted with `formatDate()`. `device.build-status` and `handover.readiness-confirmation`
+     are now selects — both still plain strings, so the interpolation below is unchanged. */
+%>
+# The starter
+
+## Role
+
+<%~ na(it.modules.role.summary) %>
+
+## Start date
+
+<%~ na(formatDate(it.modules.contract['start-date'])) %>
+
+# Identity
+
+## Account
+
+<%~ na(it.modules.identity.account) %>
+
+## Propagation
+
+<%~ na(it.modules.identity.propagation) %>
+
+## Credential issue
+
+<%~ na(it.modules.identity['credential-issue']) %>
+
+# Device
+
+## Specification
+
+<%~ na(it.modules.device.specification) %>
+<% if (it.modules.device['non-standard-decision']) { %>
+## Non-standard hardware decision
+
+<%~ it.modules.device['non-standard-decision'] %>
+<% } %>
+## Build status
+
+<%~ na(it.modules.device['build-status']) %>
+
+# Access
+
+## Entitlements
+
+<% it.modules.access.entitlements.forEach(function(item) { %>- <%~ item %>
+<% }) %>
+## Setup
+
+<%~ na(it.modules.access.setup) %>
+<% if (it.modules.access.outstanding) { %>
+## Outstanding at start date
+
+<%~ it.modules.access.outstanding %>
+<% } %>
+# Handover
+
+## Manager actions
+
+<% it.modules.handover['manager-actions'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+## First day
+
+<%~ na(it.modules.handover['day-one']) %>
+
+## Readiness confirmation
+
+<%~ na(it.modules.handover['readiness-confirmation']) %>
+<% if (it.modules['open-questions'].questions && it.modules['open-questions'].questions.length) { %>
+# Open questions
+
+<% it.modules['open-questions'].questions.forEach(function(item) { %>- <%~ item %>
+<% }) %><% } %>
