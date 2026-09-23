@@ -1580,8 +1580,9 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 10px 14px; border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg-raised); margin-bottom: 14px; }
 .defn-toolbar-left, .defn-toolbar-right { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 .defn-toolbar #defn-version-select { max-width: 200px; }
+.defn-switcher { position: relative; }
 .defn-switcher .defname { font-family: var(--font-display); font-weight: 600; }
-.defn-switcher .menu { display: none; position: absolute; top: calc(100% + 4px); left: 0; min-width: 320px; max-width: 90vw; background: var(--bg-raised); border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18); z-index: 20; padding: 8px; max-height: 70vh; overflow: auto; }
+.defn-switcher .menu { display: none; position: absolute; top: calc(100% + 4px); left: 0; width: max-content; min-width: 320px; max-width: min(480px, 90vw); background: var(--bg-raised); border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18); z-index: 20; padding: 8px; max-height: 70vh; overflow: auto; }
 .defn-switcher.menu-open .menu { display: block; }
 .defn-switcher-menu { display: flex; flex-direction: column; gap: 8px; }
 .defn-switcher-group .kicker { display: block; margin: 4px 0; }
@@ -1589,7 +1590,8 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-switcher-row:hover { background: var(--bg); }
 .defn-switcher-row.selected { border-color: var(--line-strong); background: var(--bg); }
 .defn-switcher-row.archived { opacity: 0.6; border-style: dashed; }
-.defn-switcher-row-title { font-family: var(--font-display); font-weight: 600; font-size: 13px; flex: 1; min-width: 0; }
+.defn-switcher-row-title { font-family: var(--font-display); font-weight: 600; font-size: 13px; flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; }
+.defn-switcher-row > .btn { margin-left: auto; }
 .defn-rail-badges { display: flex; flex-wrap: wrap; gap: 6px; }
 .defn-rail-badges .stamp.small { font-size: 10px; }
 .defn-switcher-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: var(--hairline) solid var(--line); padding-top: 8px; margin-top: 4px; }

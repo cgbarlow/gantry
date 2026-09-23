@@ -17,6 +17,21 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.8.5-beta — 2026-09-23
+
+### Fixed
+
+- **The definition switcher on the Definitions page opens where you can see it again.** Clicking the
+  definition name at the top of the page (for example "Solution Design ▾") appeared to do nothing, so
+  there was no way to move to another definition. The menu was in fact opening, but just below the
+  bottom edge of the window, where nobody would think to scroll. It had done this at every window
+  size since the Definitions page was rebuilt. It now drops down directly beneath the button, like
+  every other menu in Gantry (#138).
+- **Long definition names in that switcher are no longer cut off.** Each name was squeezed into
+  whatever width its version badges left over, so a longer name like "Recruitment and Onboarding"
+  was clipped and partly hidden behind its badges. Each definition now shows its full name on its own
+  line, with its version badges and Archive button beneath it.
+
 ## 0.8.4-beta — 2026-09-23
 
 ### Fixed

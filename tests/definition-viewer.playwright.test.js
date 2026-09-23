@@ -95,6 +95,73 @@ test('Definitions page renders the switcher with badges; published detail is rea
   })
 })
 
+// The switcher's menu is absolutely positioned at `top: calc(100% + 4px)`; without its own
+// positioned ancestor it anchors to the viewport and opens just below the fold, where nobody can
+// see it. `openSwitcher` alone can't catch that: Playwright counts an off-screen box as visible and
+// scrolls anything it clicks into view.
+test('The definition switcher opens its menu directly under its trigger, on screen', async () => {
+  await withDraftDesignV2()(async (base) => {
+    await withPage(base, async (page) => {
+      await page.setViewportSize({ width: 1280, height: 720 })
+      await page.goto(`${base}/definitions`)
+      await page.waitForSelector('.defn-toolbar', { timeout: 10_000 })
+
+      await openSwitcher(page)
+      const placement = await page.evaluate(() => {
+        const trigger = document.querySelector('.defn-switcher [data-dropdown-trigger]').getBoundingClientRect()
+        const menu = document.querySelector('.defn-switcher .menu')
+        const box = menu.getBoundingClientRect()
+        const row = menu.querySelector('.defn-switcher-row').getBoundingClientRect()
+        const hit = document.elementFromPoint(row.left + row.width / 2, row.top + row.height / 2)
+        return {
+          gap: box.top - trigger.bottom,
+          leftOffset: box.left - trigger.left,
+          rowOnScreen: row.top >= 0 && row.bottom <= window.innerHeight,
+          rowIsTopmost: !!hit && menu.contains(hit),
+        }
+      })
+      assert.ok(placement.gap >= 0 && placement.gap <= 8, `menu should open just below its trigger (gap ${placement.gap}px)`)
+      assert.ok(Math.abs(placement.leftOffset) <= 1, `menu should line up with its trigger (offset ${placement.leftOffset}px)`)
+      assert.ok(placement.rowOnScreen, 'the first definition row should be inside the viewport')
+      assert.ok(placement.rowIsTopmost, 'the first definition row should not be covered by anything')
+    })
+  })
+})
+
+// A title is laid out beside its version badges; a long word in a squeezed title used to overflow
+// its own box and be painted over by the badges ("Recruitment and Onboardi…").
+test('Definition switcher rows show each title in full, clear of its badges', async () => {
+  const withRecruitment = withDraftDesignV2((definitionsDir) => {
+    cpSync('definitions/recruitment-onboarding/1', join(definitionsDir, 'recruitment-onboarding/1'), { recursive: true })
+    cpSync('definitions/recruitment-onboarding/2', join(definitionsDir, 'recruitment-onboarding/2'), { recursive: true })
+  })
+  await withRecruitment(async (base) => {
+    await withPage(base, async (page) => {
+      await page.setViewportSize({ width: 1280, height: 720 })
+      await page.goto(`${base}/definitions`)
+      await page.waitForSelector('.defn-toolbar', { timeout: 10_000 })
+
+      await openSwitcher(page)
+      const rows = await page.evaluate(() =>
+        [...document.querySelectorAll('.defn-switcher-row')].map((row) => {
+          const title = row.querySelector('.defn-switcher-row-title')
+          const t = title.getBoundingClientRect()
+          const overlaps = [...row.querySelectorAll('.defn-rail-badges .stamp, .btn')].some((el) => {
+            const b = el.getBoundingClientRect()
+            return b.left < t.right && b.right > t.left && b.top < t.bottom && b.bottom > t.top
+          })
+          return { title: title.textContent.trim(), overflows: title.scrollWidth > title.clientWidth + 1, overlaps }
+        })
+      )
+      assert.ok(rows.some((r) => r.title.startsWith('Recruitment and Onboarding')), 'the long-titled definition should be listed')
+      for (const r of rows) {
+        assert.ok(!r.overflows, `"${r.title}" should fit inside its own title box`)
+        assert.ok(!r.overlaps, `"${r.title}" should not sit under its badges or buttons`)
+      }
+    })
+  })
+})
+
 test('Definitions page drops the old /definition-editor route', async () => {
   await withDraftDesignV2()(async (base) => {
     await withPage(base, async (page) => {
