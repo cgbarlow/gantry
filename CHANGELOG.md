@@ -17,6 +17,19 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.19-beta — 2026-09-23
+
+### Fixed
+
+- **A completed stage's screen now says so, and saving there can no longer recreate its branch**
+  (#142). Browsing a stage the instance has already advanced past used to look exactly like a live
+  editable one — a shared module reworded on the current stage's branch would look untouched here,
+  because the screen was silently showing the approved content on `main` instead. It now shows a
+  banner naming that fact, and names the other stage when it holds unmerged changes to a module
+  shown here. Editing and saving are switched off on a completed stage — Re-open it to make further
+  edits — closing a hazard where a stray save recreated an already-merged-and-cleaned-up stage
+  branch, which then made a later re-open of that stage fail with "branch already exists".
+
 ## 0.9.18-beta — 2026-09-23
 
 ### Added
