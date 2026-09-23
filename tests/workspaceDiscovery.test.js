@@ -208,7 +208,11 @@ test('loadWorkspaceScopedInstances: a credential already known to be rejected is
   }
 })
 
-test('loadWorkspaceScopedInstances: a failed request is not retried, and never rejects its caller', async () => {
+// #137 amended this from "a failed request is not retried" to the distinction that was missing: a
+// failure the server could recover from IS retried (bounded — see the budget test below), and what
+// must never happen is a rejection reaching the caller. Latching every failure alike is precisely
+// what made a redeploy look like a broken credential, so the original assertion encoded the bug.
+test('loadWorkspaceScopedInstances: a failed request never rejects its caller, and is retried but bounded', async () => {
   clearPatForWorkspace('ws-a')
   setPatForWorkspace('ws-a', 'pat-a')
   try {
@@ -220,7 +224,9 @@ test('loadWorkspaceScopedInstances: a failed request is not retried, and never r
         const { loadWorkspaceScopedInstances } = await freshModule()
         assert.deepEqual(await loadWorkspaceScopedInstances([], [workspace('ws-a')]), [])
         assert.deepEqual(await loadWorkspaceScopedInstances([], [workspace('ws-a')]), [])
-        assert.equal(calls.length, 1)
+        // Retried rather than latched, but still bounded — never an unchecked loop.
+        assert.ok(calls.length >= 2, 'a network failure says nothing about the workspace; try again')
+        assert.ok(calls.length <= 4, `retries must stay bounded, saw ${calls.length}`)
       }
     )
   } finally {
@@ -263,4 +269,127 @@ test('loadWorkspaceScopedInstances: nothing to do issues no request at all — a
     assert.deepEqual(await loadWorkspaceScopedInstances([{ slug: 'local-one', workspace: null }], []), [])
     assert.equal(calls.length, 0)
   })
+})
+
+// ---------------------------------------------------------------------------
+// #137: a failure that says nothing about whether the workspace has designs — the server still coming
+// up after a redeploy, above all — must not be latched the way a real answer is. Before this, every
+// failure mode was treated identically to a successful empty listing, so one unlucky mount-time
+// request left the workspace blank for the whole page session. The only escape was
+// `resetWorkspaceDiscovery`, which fires only when a credential is entered, so re-typing a perfectly
+// good PAT appeared to fix it — the credential was never the problem.
+// ---------------------------------------------------------------------------
+
+/** Fails the first `n` requests with `status`, then serves rows — a container finishing its boot. */
+function failThenSucceed(n, status) {
+  let seen = 0
+  return async () => {
+    seen += 1
+    if (seen <= n) return new Response('', { status })
+    return new Response(JSON.stringify(ROWS), { status: 200 })
+  }
+}
+
+for (const status of [404, 500, 503]) {
+  test(`loadWorkspaceScopedInstances: a ${status} is not latched — the workspace is re-armed and asks to be retried`, async () => {
+    clearPatForWorkspace('ws-a')
+    setPatForWorkspace('ws-a', 'pat-a')
+    try {
+      await withFetch(failThenSucceed(1, status), async (calls) => {
+        const { loadWorkspaceScopedInstances, setWorkspaceDiscoveryRetryHandler } = await freshModule()
+        let retryAsked = null
+        setWorkspaceDiscoveryRetryHandler((id) => {
+          retryAsked = id
+        })
+
+        const first = await loadWorkspaceScopedInstances([], [workspace('ws-a')])
+        assert.deepEqual(first, [], `a ${status} contributes no rows on the failing attempt`)
+
+        // The retry is scheduled on a timer; the load itself must be immediately re-armed, which is
+        // what makes the next dashboard load (or the scheduled retry) genuinely re-request.
+        const second = await loadWorkspaceScopedInstances([], [workspace('ws-a')])
+        assert.deepEqual(second, ROWS, `a ${status} must be retried, not treated as "no designs"`)
+        assert.equal(calls.length, 2)
+
+        await new Promise((resolve) => setTimeout(resolve, 1200))
+        assert.equal(retryAsked, 'ws-a', 'the dashboard is asked to re-run its own load')
+        setWorkspaceDiscoveryRetryHandler(null)
+      })
+    } finally {
+      clearPatForWorkspace('ws-a')
+    }
+  })
+}
+
+test('loadWorkspaceScopedInstances: a thrown fetch (offline) is transient too, not a verdict', async () => {
+  clearPatForWorkspace('ws-a')
+  setPatForWorkspace('ws-a', 'pat-a')
+  let seen = 0
+  const offlineThenUp = async () => {
+    seen += 1
+    if (seen === 1) throw new TypeError('Failed to fetch')
+    return new Response(JSON.stringify(ROWS), { status: 200 })
+  }
+  try {
+    await withFetch(offlineThenUp, async () => {
+      const { loadWorkspaceScopedInstances } = await freshModule()
+      assert.deepEqual(await loadWorkspaceScopedInstances([], [workspace('ws-a')]), [])
+      assert.deepEqual(await loadWorkspaceScopedInstances([], [workspace('ws-a')]), ROWS)
+    })
+  } finally {
+    clearPatForWorkspace('ws-a')
+  }
+})
+
+test('loadWorkspaceScopedInstances: a rejected credential IS latched — retrying would re-send a refused credential', async () => {
+  clearPatForWorkspace('ws-a')
+  setPatForWorkspace('ws-a', 'pat-a')
+  const rejected = async () =>
+    new Response(JSON.stringify({ error: 'authentication_required', credentialStatus: 'rejected' }), { status: 401 })
+  try {
+    await withFetch(rejected, async (calls) => {
+      const { loadWorkspaceScopedInstances } = await freshModule()
+      await loadWorkspaceScopedInstances([], [workspace('ws-a')])
+      await loadWorkspaceScopedInstances([], [workspace('ws-a')])
+      assert.equal(calls.length, 1, 'a refused credential must not be sent again')
+      assert.equal(credentialStatusForWorkspace('ws-a'), 'rejected')
+    })
+  } finally {
+    clearPatForWorkspace('ws-a')
+    markCredentialRejected('ws-a')
+    clearPatForWorkspace('ws-a')
+  }
+})
+
+test('loadWorkspaceScopedInstances: a genuinely empty workspace IS latched — 200 with no rows is a real answer', async () => {
+  clearPatForWorkspace('ws-a')
+  setPatForWorkspace('ws-a', 'pat-a')
+  const empty = async () => new Response('[]', { status: 200 })
+  try {
+    await withFetch(empty, async (calls) => {
+      const { loadWorkspaceScopedInstances } = await freshModule()
+      await loadWorkspaceScopedInstances([], [workspace('ws-a')])
+      await loadWorkspaceScopedInstances([], [workspace('ws-a')])
+      assert.equal(calls.length, 1, 'an empty-but-successful listing is not a failure to retry')
+    })
+  } finally {
+    clearPatForWorkspace('ws-a')
+  }
+})
+
+test('loadWorkspaceScopedInstances: transient retries are bounded — an unreachable server is not asked forever', async () => {
+  clearPatForWorkspace('ws-a')
+  setPatForWorkspace('ws-a', 'pat-a')
+  const alwaysDown = async () => new Response('', { status: 503 })
+  try {
+    await withFetch(alwaysDown, async (calls) => {
+      const { loadWorkspaceScopedInstances } = await freshModule()
+      // Far more loads than the budget allows; the request count must stop climbing.
+      for (let i = 0; i < 10; i += 1) await loadWorkspaceScopedInstances([], [workspace('ws-a')])
+      assert.ok(calls.length <= 4, `expected the retry budget to cap requests, saw ${calls.length}`)
+      assert.ok(calls.length > 1, 'but it must genuinely retry at least once')
+    })
+  } finally {
+    clearPatForWorkspace('ws-a')
+  }
 })

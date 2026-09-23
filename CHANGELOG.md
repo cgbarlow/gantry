@@ -17,6 +17,22 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.8.4-beta — 2026-09-23
+
+### Fixed
+
+- **A workspace no longer goes blank for the rest of the page just because the server was still
+  starting up.** After a redeploy, the dashboard's one attempt to read a workspace could land before
+  the server had finished registering it. That attempt failed — and Gantry treated the failure as
+  though it were an answer, concluding there was nothing to show and not asking again. The workspace
+  stayed empty however many times the page re-rendered. Two things made it look like a credential
+  problem when it never was: reloading the page a few times eventually produced an attempt that
+  didn't lose the race, and re-entering the token happened to be the only action that cleared the
+  stuck state. Gantry now tells the two situations apart. A turned-down token, or a workspace that
+  genuinely holds nothing, is still a final answer and is still asked only once. A server that
+  couldn't answer — still booting, briefly unreachable, temporarily overloaded — is retried shortly
+  afterwards, a few times, and the workspace fills itself in without a reload or a re-typed token.
+
 ## 0.8.3-beta — 2026-09-23
 
 ### Fixed

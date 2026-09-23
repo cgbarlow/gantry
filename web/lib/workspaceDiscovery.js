@@ -31,6 +31,64 @@ import { workspacesNeedingOwnListing } from './dashboardWorkspaces.js'
 // new to try then).
 const attempted = new Set()
 
+// #137: how many times a *transient* failure may be re-attempted for one workspace in a page session.
+// A redeploy is the case that forced this: the dashboard's single mount-time load can land while the
+// server is still coming up — the container is reachable (so the page renders) but the workspace is
+// not registered yet, so the scoped listing 404s. Before this, every failure mode was latched
+// identically to a successful empty answer, so that one unlucky request left the workspace blank for
+// the rest of the page session. The only way back in was `resetWorkspaceDiscovery`, which fires only
+// when a credential is entered — which is why re-typing a perfectly good PAT appeared to "fix" it.
+// The credential was never the problem; re-entering it was just the sole available way to clear this
+// latch.
+const MAX_TRANSIENT_ATTEMPTS = 3
+const transientAttempts = new Map()
+
+// Delays before each re-attempt, indexed by how many transient failures this workspace has already
+// had. Short enough that a boot race resolves before anyone reaches for the reload button, bounded so
+// a genuinely unreachable server is asked a handful of times and then left alone.
+const RETRY_DELAYS_MS = [800, 2500]
+
+// Set while a re-attempt is pending for a workspace, so the dashboard can be told to re-run its own
+// load once rather than each caller scheduling its own timer.
+const retryTimers = new Map()
+
+// Notified when a scheduled re-attempt is due. The dashboard registers one of these (web/app.js) and
+// re-runs the same load it ran on mount; this module deliberately doesn't own that state itself.
+let onRetryDue = null
+
+/**
+ * Registers the callback fired when a transiently-failed workspace is due another attempt (#137).
+ * Called once by the dashboard. Passing `null` deregisters.
+ */
+export function setWorkspaceDiscoveryRetryHandler(handler) {
+  onRetryDue = handler
+}
+
+// `res.ok` is a definitive answer and so is a rejected credential; everything else here is the server
+// being unavailable or not yet ready, which says nothing about whether this workspace has designs.
+// 404 is included deliberately: on a freshly-restarted container it means "not registered yet", not
+// "no such workspace", and the two are indistinguishable from here.
+function isTransientStatus(status) {
+  return status === 404 || status === 408 || status === 429 || status >= 500
+}
+
+function scheduleRetry(workspaceId) {
+  const failures = transientAttempts.get(workspaceId) ?? 0
+  if (failures >= MAX_TRANSIENT_ATTEMPTS) return
+  if (retryTimers.has(workspaceId)) return
+  transientAttempts.set(workspaceId, failures + 1)
+  // Re-arm so the next load genuinely re-requests this workspace rather than treating it as attempted.
+  attempted.delete(workspaceId)
+  const delay = RETRY_DELAYS_MS[Math.min(failures, RETRY_DELAYS_MS.length - 1)]
+  const timer = setTimeout(() => {
+    retryTimers.delete(workspaceId)
+    if (typeof onRetryDue === 'function') onRetryDue(workspaceId)
+  }, delay)
+  // Never hold the process open for this in a test/SSR context that polyfills timers with Node's.
+  if (typeof timer?.unref === 'function') timer.unref()
+  retryTimers.set(workspaceId, timer)
+}
+
 // The rows each attempted workspace came back with, so a later reload of the dashboard listing (an
 // archive/restore, say) keeps showing them without re-issuing the request — `attempted` alone would
 // otherwise make those rows disappear on the second load, which is exactly the "designs appear, then
@@ -51,6 +109,14 @@ export function resetWorkspaceDiscovery(workspaceId) {
   if (!workspaceId) return
   attempted.delete(workspaceId)
   rowsByWorkspace.delete(workspaceId)
+  // #137: a new credential also restores the transient-retry budget — this is a genuinely new thing
+  // to try, and any earlier unavailability says nothing about whether it will work now.
+  transientAttempts.delete(workspaceId)
+  const timer = retryTimers.get(workspaceId)
+  if (timer !== undefined) {
+    clearTimeout(timer)
+    retryTimers.delete(workspaceId)
+  }
 }
 
 // `untracked()` for every credential read, for exactly the reason web/lib/apiFetch.js's own
@@ -61,6 +127,9 @@ function credentialStatus(workspaceId) {
   return untracked(() => credentialStatusForWorkspace(workspaceId))
 }
 
+// #137: returns `{ rows, transient }` rather than rows alone. `transient` is what separates "this
+// workspace has nothing to show" from "this server could not answer just now" — the distinction whose
+// absence made a redeploy look like a broken credential.
 async function fetchWorkspaceRows(workspaceId) {
   const auth = untracked(() => authHeaderForWorkspace(workspaceId))
   const res = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/instances`, {
@@ -76,11 +145,13 @@ async function fetchWorkspaceRows(workspaceId) {
     if (body?.error === 'authentication_required' && body?.credentialStatus === 'rejected') {
       markCredentialRejected(workspaceId)
     }
-    return []
+    // A turned-down credential is a real answer: never retried, because retrying sends a credential
+    // this Provider has already refused.
+    return { rows: [], transient: false }
   }
-  if (!res.ok) return []
+  if (!res.ok) return { rows: [], transient: isTransientStatus(res.status) }
   const body = await res.json().catch(() => null)
-  return Array.isArray(body) ? body : []
+  return { rows: Array.isArray(body) ? body : [], transient: false }
 }
 
 /**
@@ -112,11 +183,18 @@ export async function loadWorkspaceScopedInstances(instances, workspaces) {
       if (inFlight.has(id)) return inFlight.get(id)
       attempted.add(id)
       const request = fetchWorkspaceRows(id)
-        .catch(() => [])
-        .then((rows) => {
+        // #137: a thrown fetch is the network being unavailable — the most transient failure there is,
+        // and previously the one most likely to latch a workspace blank across a redeploy.
+        .catch(() => ({ rows: [], transient: true }))
+        .then(({ rows, transient }) => {
           // Only a non-empty result is worth remembering: an empty one is either a genuinely empty
           // workspace or a failure, and neither is a row the dashboard needs to keep showing.
           if (rows.length > 0) rowsByWorkspace.set(id, rows)
+          // #137: re-arm and schedule another attempt when the server simply couldn't answer. A
+          // definitive answer — rows, a genuinely empty workspace, or a refused credential — stays
+          // latched exactly as before, so the "at most one request per workspace" bound still holds
+          // for every case that isn't the server being unavailable.
+          if (transient) scheduleRetry(id)
           return rows
         })
         .finally(() => inFlight.delete(id))
