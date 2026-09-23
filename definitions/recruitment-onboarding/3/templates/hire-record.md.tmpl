@@ -21,7 +21,17 @@
 
      v3 (#157): Provisioning prints the new `identity.user-id`, `device.standard` and
      `device.build-notes`, and `access.outstanding` under its new title. The readiness
-     confirmation is gone: readiness is the ready-to-start sign-off itself. */
+     confirmation is gone: readiness is the ready-to-start sign-off itself.
+
+     v3 (#154): the standard approval route is printed from `engagement.type` in place of the
+     removed `engagement.approval-route`, with `engagement.route-variation` under it when
+     present. The term shows whenever the type is not Permanent, and the vetting conditions
+     whenever the outcome is Cleared with conditions, each with "— not stated —" when blank, as
+     is the route line until a type is chosen. */
+  const hrType = it.modules.engagement.type
+  const hrTerm = it.modules.engagement.term
+  const hrRoute = (hrType === 'Fixed term' || hrType === 'Permanent') ? 'Full approval chain'
+    : (hrType === 'Vendor' || hrType === 'Contractor') ? 'Shortened approval chain' : '— not stated —'
 %>
 # Requisition
 
@@ -43,20 +53,24 @@
 
 ## Engagement type
 
-<%~ na(it.modules.engagement.type) %>
-<% if (it.modules.engagement.term) { %>
+<%~ na(hrType) %>
+<% if (hrTerm || (hrType && hrType !== 'Permanent')) { %>
 ## Term or expected duration
 
-<%~ it.modules.engagement.term %>
+<%~ hrTerm || '— not stated —' %>
 <% } %>
 ## Engagement rationale
 
 <%~ na(it.modules.engagement.rationale) %>
 
-## Approval route
+## Standard approval route for this engagement type
 
-<%~ na(it.modules.engagement['approval-route']) %>
+<%~ hrRoute %>
+<% if (it.modules.engagement['route-variation']) { %>
+## Route variation
 
+<%~ it.modules.engagement['route-variation'] %>
+<% } %>
 ## Role evaluation method
 
 <%~ na(it.modules['role-evaluation'].method) %>
@@ -114,10 +128,10 @@
 ## Vetting outcome
 
 <%~ na(it.modules.vetting.outcome) %>
-<% if (it.modules.vetting.conditions) { %>
+<% if (it.modules.vetting.conditions || it.modules.vetting.outcome === 'Cleared with conditions') { %>
 ## Vetting conditions
 
-<%~ it.modules.vetting.conditions %>
+<%~ it.modules.vetting.conditions || '— not stated —' %>
 <% } %>
 # Appointment
 

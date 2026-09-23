@@ -8,7 +8,15 @@
      v2 (#90): `selection.preferred-candidate` split into `candidate-name` (text) and
      `rationale` (markdown) — see modules/selection.yaml. `advertising.channels` and
      `vetting.checks-required` are now select/multiple: true, storing bullets exactly as
-     `list` did, so the loops below are unchanged. */
+     `list` did, so the loops below are unchanged.
+
+     v3 (#154): prints a warning when vetting reads Not cleared (the gate cannot restrict a
+     select's values), and always shows the Conditions heading when the outcome is Cleared with
+     conditions, with "— not stated —" when blank, so a missing condition is visible.
+     `role.summary` is referenced `?` because it belongs to Requisition; it is still printed.
+     `open-questions.process-gaps?` is in `requires` for authoring scope only and is printed in
+     the Hire Record. `selection.unsuccessful` may be completed later, once reserve finalists
+     are released after the offer is accepted. */
 %>
 # The role
 
@@ -63,10 +71,13 @@
 ## Outcome
 
 <%~ na(it.modules.vetting.outcome) %>
-<% if (it.modules.vetting.conditions) { %>
+<% if (it.modules.vetting.outcome === 'Not cleared') { %>
+**Warning:** vetting did not clear this candidate. This stage should not be signed off.
+<% } %>
+<% if (it.modules.vetting.conditions || it.modules.vetting.outcome === 'Cleared with conditions') { %>
 ## Conditions
 
-<%~ it.modules.vetting.conditions %>
+<%~ it.modules.vetting.conditions || '— not stated —' %>
 <% } %>
 <% if (it.modules['open-questions'].questions && it.modules['open-questions'].questions.length) { %>
 # Open questions

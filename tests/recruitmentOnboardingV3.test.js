@@ -32,10 +32,14 @@ const SLUG = 'platform-engineer'
 
 // Until the audience documents opt out of satisfying their Gate, every Artefact at a Gate
 // satisfies it: the Gate passes when any one of `satisfiedBy` is complete (ADR-0019). Bars are
-// v2's except where a v3 ticket changes them; ready-to-start's are #157's.
+// v2's except where a v3 ticket changes them:
+//   - approved-to-recruit: 8, v2's 9 less `engagement.approval-route` (#154).
+//   - candidate-selected: 9, v2's 10 less `role.summary`. The Selection Report references it
+//     `role.summary?` (#154), and it is required only at approved-to-recruit (#157).
+//   - ready-to-start: #157's, with the Hire Record's 37 less `engagement.approval-route` (#154).
 const GATES = [
-  { gate: 'approved-to-recruit', satisfiedBy: ['requisition-brief'], bars: { 'requisition-brief': 9 } },
-  { gate: 'candidate-selected', satisfiedBy: ['selection-report'], bars: { 'selection-report': 10 } },
+  { gate: 'approved-to-recruit', satisfiedBy: ['requisition-brief'], bars: { 'requisition-brief': 8 } },
+  { gate: 'candidate-selected', satisfiedBy: ['selection-report'], bars: { 'selection-report': 9 } },
   {
     gate: 'onboarding-approved',
     satisfiedBy: ['appointment-case', 'offer-pack'],
@@ -44,7 +48,7 @@ const GATES = [
   {
     gate: 'ready-to-start',
     satisfiedBy: ['starter-readiness', 'manager-handover', 'hire-record'],
-    bars: { 'starter-readiness': 13, 'manager-handover': 13, 'hire-record': 37 },
+    bars: { 'starter-readiness': 13, 'manager-handover': 13, 'hire-record': 36 },
   },
 ]
 
@@ -62,13 +66,23 @@ const CONTROL = ['## Document Control', '## Review & sign-off']
 const DOCUMENTS = {
   'requisition-brief': {
     basename: 'Platform Engineer - Requisition Brief',
-    present: [...CONTROL, '# The role', '# Engagement', '## Approval route', '# Role evaluation', '# Open questions'],
-    absent: [],
+    present: [
+      ...CONTROL,
+      '# The role',
+      '# Engagement',
+      '## Standard approval route for this engagement type',
+      '## Route variation',
+      '# Role evaluation',
+      '# How the role was evaluated',
+      '# Open questions',
+    ],
+    // The worked hire is Permanent, followed the standard route, and has a delegation on record.
+    absent: ['## Approval route', '## Term or expected duration', '## Process gaps'],
   },
   'selection-report': {
     basename: 'Platform Engineer - Selection Report',
     present: [...CONTROL, '# Advertising', '# Selection', '## Candidate name', '# Vetting', '## Conditions', '# Open questions'],
-    absent: [],
+    absent: ['## Process gaps'],
   },
   'appointment-case': {
     basename: 'Marama Clarke - Appointment Case',
@@ -115,6 +129,8 @@ const DOCUMENTS = {
     present: [
       ...CONTROL,
       '# Requisition',
+      '## Standard approval route for this engagement type',
+      '## Route variation',
       '# Selection',
       '# Appointment',
       '# Provisioning',
@@ -125,7 +141,8 @@ const DOCUMENTS = {
       '## Not in place by the start date',
       '# Open questions and process gaps',
     ],
-    absent: ['## Readiness confirmation', '## Outstanding at start date'],
+    // The worked hire is Permanent with no term.
+    absent: ['## Approval route', '## Term or expected duration', '## Readiness confirmation', '## Outstanding at start date'],
   },
 }
 
@@ -317,4 +334,137 @@ test('Starter Readiness marks a non-standard device with no recorded decision, a
 test('the Hire Record also marks a non-standard device with no recorded decision', () => {
   const blank = renderVariant('hire-record', { device: { 'non-standard-decision': '' } })
   assert.match(blank, /## Non-standard hardware decision\n\n— not stated —/)
+})
+
+// #154: Requisition and Selection. The worked hire is Permanent, followed the standard route with
+// one delegation, and cleared vetting outright, so the variations below each change one module of
+// a copy of it and read the rendered document.
+
+function withWorkedHire(fn) {
+  return withInstancesDir((instancesDir) => {
+    cpSync(join(FIXTURE, SLUG), join(instancesDir, SLUG), { recursive: true })
+    const def = loadDefinition('recruitment-onboarding', { version: VERSION })
+    const edit = (moduleId, fields) => {
+      const current = readModule(def, SLUG, moduleId, { instancesDir })
+      writeModule(def, SLUG, moduleId, { ...current, fields: { ...current.fields, ...fields } }, { instancesDir })
+    }
+    const render = (id) => renderArtefact(SLUG, id, { instancesDir, dryRun: true }).markdown
+    return fn({ edit, render })
+  })
+}
+
+// The body printed under `heading`, up to the next heading of any level.
+function section(markdown, heading) {
+  const lines = markdown.split('\n')
+  const start = lines.indexOf(heading)
+  if (start === -1) return undefined
+  const end = lines.findIndex((line, i) => i > start && line.startsWith('#'))
+  return lines.slice(start + 1, end === -1 ? undefined : end).join('\n').trim()
+}
+
+test('v3 drops engagement.approval-route and adds an optional engagement.route-variation', () => {
+  const def = loadDefinition('recruitment-onboarding', { version: VERSION })
+  const fields = def.modules.get('engagement').fields
+  assert.equal(fields.find((f) => f.id === 'approval-route'), undefined)
+  const variation = fields.find((f) => f.id === 'route-variation')
+  assert.equal(variation.type, 'markdown')
+  assert.equal(variation.required, false)
+  assert.match(variation.guidance, /delegation/)
+  assert.doesNotMatch(fields.find((f) => f.id === 'rationale').guidance, /delegation/)
+})
+
+test('the Requisition sign-off is the "Approved to Recruit" confirmation', () => {
+  const def = loadDefinition('recruitment-onboarding', { version: VERSION })
+  assert.match(def.stages.find((s) => s.id === 'requisition').purpose, /"Approved to Recruit" confirmation/)
+  assert.match(def.artefacts.find((a) => a.id === 'requisition-brief').purpose, /"Approved to Recruit" confirmation/)
+})
+
+test('vetting.checks-required offers "Identity verification"', () => {
+  const def = loadDefinition('recruitment-onboarding', { version: VERSION })
+  const checks = def.modules.get('vetting').fields.find((f) => f.id === 'checks-required')
+  assert.ok(checks.options.includes('Identity verification'))
+})
+
+test('selection.unsuccessful lets reserve finalists be recorded after Selection', () => {
+  const def = loadDefinition('recruitment-onboarding', { version: VERSION })
+  const unsuccessful = def.modules.get('selection').fields.find((f) => f.id === 'unsuccessful')
+  assert.match(unsuccessful.guidance, /reserve/)
+  assert.match(unsuccessful.guidance, /after this stage/)
+})
+
+for (const id of ['requisition-brief', 'selection-report']) {
+  test(`process gaps are in the ${id}'s scope but never printed in it`, () => {
+    const def = loadDefinition('recruitment-onboarding', { version: VERSION })
+    assert.ok(def.artefacts.find((a) => a.id === id).requires.includes('open-questions.process-gaps?'))
+    withWorkedHire(({ render }) => {
+      assert.doesNotMatch(render(id), /Nothing detects an unseen payroll request/)
+    })
+  })
+}
+
+for (const [type, route] of [
+  ['Permanent', 'Full approval chain'],
+  ['Fixed term', 'Full approval chain'],
+  ['Vendor', 'Shortened approval chain'],
+  ['Contractor', 'Shortened approval chain'],
+]) {
+  test(`a ${type} engagement prints the ${route} as its standard route`, () => {
+    withWorkedHire(({ edit, render }) => {
+      edit('engagement', { type })
+      for (const id of ['requisition-brief', 'hire-record']) {
+        assert.equal(section(render(id), '## Standard approval route for this engagement type'), route, id)
+      }
+    })
+  })
+}
+
+test('a draft with no engagement type yet marks its standard route as not stated', () => {
+  withWorkedHire(({ edit, render }) => {
+    edit('engagement', { type: '' })
+    for (const id of ['requisition-brief', 'hire-record']) {
+      assert.equal(section(render(id), '## Standard approval route for this engagement type'), '— not stated —', id)
+    }
+  })
+})
+
+test('the route variation is printed only when one is recorded', () => {
+  withWorkedHire(({ edit, render }) => {
+    assert.match(section(render('requisition-brief'), '## Route variation'), /Sam Okafor/)
+    edit('engagement', { 'route-variation': '' })
+    for (const id of ['requisition-brief', 'hire-record']) {
+      assert.ok(!headings(render(id)).has('## Route variation'), id)
+    }
+  })
+})
+
+test('a non-permanent engagement always shows its term, marked when not stated', () => {
+  withWorkedHire(({ edit, render }) => {
+    for (const type of ['Fixed term', 'Vendor', 'Contractor']) {
+      edit('engagement', { type, term: '' })
+      for (const id of ['requisition-brief', 'hire-record']) {
+        assert.equal(section(render(id), '## Term or expected duration'), '— not stated —', `${type}: ${id}`)
+      }
+    }
+    edit('engagement', { type: 'Fixed term', term: 'Twelve months, ending 19 April 2027.' })
+    assert.equal(section(render('requisition-brief'), '## Term or expected duration'), 'Twelve months, ending 19 April 2027.')
+  })
+})
+
+test('a conditional clearance always shows its Conditions, marked when not stated', () => {
+  withWorkedHire(({ edit, render }) => {
+    edit('vetting', { outcome: 'Cleared with conditions', conditions: '' })
+    assert.equal(section(render('selection-report'), '## Conditions'), '— not stated —')
+    assert.equal(section(render('hire-record'), '## Vetting conditions'), '— not stated —')
+    edit('vetting', { outcome: 'Cleared', conditions: '' })
+    assert.ok(!headings(render('selection-report')).has('## Conditions'))
+    assert.ok(!headings(render('hire-record')).has('## Vetting conditions'))
+  })
+})
+
+test('the Selection Report warns when vetting reads Not cleared', () => {
+  withWorkedHire(({ edit, render }) => {
+    assert.doesNotMatch(render('selection-report'), /\*\*Warning:\*\*/)
+    edit('vetting', { outcome: 'Not cleared' })
+    assert.match(render('selection-report'), /\*\*Warning:\*\* vetting did not clear this candidate/)
+  })
 })
