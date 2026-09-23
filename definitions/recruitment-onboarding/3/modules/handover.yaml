@@ -7,7 +7,8 @@ purpose: >
   hiring manager has been a participant since the requisition but has not been following the
   stages, so state their obligations plainly and with dates. Whether the starter is ready is not
   a field here: it is the Provisioning sign-off itself, and anything not in place is listed in
-  `access.outstanding`.
+  `access.outstanding`. Printed back to the hiring manager in the Manager Handover, which is
+  rendered and sent as soon as the account exists and re-sent at sign-off.
 
 fields:
   - id: manager-actions
@@ -15,9 +16,12 @@ fields:
     type: list
     required: true
     guidance: >
-      What the hiring manager must do and by when — issue credentials, arrange the first-day
-      meeting, confirm the desk or workspace, brief the team, arrange the first week. One per
-      line, each with a deadline relative to the start date.
+      What the hiring manager must do and by when — issue credentials (the user ID and initial
+      password), arrange the first-day meeting, confirm the desk or workspace, brief the team,
+      arrange the first week — and any open question the hiring manager owes an answer to, with
+      its deadline. One per line, each with a deadline relative to the start date. An action
+      already completed by sign-off may be stated as done, with its date, rather than removed:
+      the credential step should appear here once, not also as something still to send.
 
   - id: day-one
     title: First day

@@ -81,7 +81,9 @@ stages:
     title: Provisioning
     purpose: >
       Create the starter's identity, issue their device and access, and confirm
-      they can work from their first day. Owned by Technology.
+      they can work from their first day. Owned by Technology. Render the
+      Manager Handover and send it to the hiring manager as soon as the account
+      exists, then re-send it at sign-off.
     gate: ready-to-start
     modules:
       - role
@@ -253,26 +255,25 @@ artefacts:
   - id: manager-handover
     title: Manager Handover
     purpose: >
-      Tell the hiring manager what they must do before the start date and what
-      is already in place.
+      Tell the hiring manager what they must do before the start date, the
+      starter's user ID, and what is and is not in place. Rendered and sent as
+      soon as the account exists, and re-sent at sign-off; it never counts
+      toward the gate.
     template: templates/manager-handover.md.tmpl
     gate: ready-to-start
+    document-control: false
+    satisfies-gate: false
     requires:
+      - selection.candidate-name
       - role.summary
-      - role.team
-      - selection.candidate-name?
       - contract.start-date
       - handover.manager-actions
       - handover.day-one
-      - identity.account
-      - identity.credential-issue
-      - identity.propagation
+      - identity.user-id
       - device.specification
       - device.build-status
       - access.entitlements
-      - access.setup
       - access.outstanding?
-      - open-questions.questions?
     filename: "{selection.candidate-name} - Manager Handover - {today}"
   - id: hire-record
     title: Hire Record
