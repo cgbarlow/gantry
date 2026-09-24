@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { createInstance, recordInstanceWorkItemLink } from '../lib/instance.js'
-import { registerInstance } from '../lib/instanceRegistry.js'
+import { registerInstance, archiveInstance } from '../lib/instanceRegistry.js'
+import { registerWorkspace } from '../lib/workspaceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withRunningServer, basicAuthHeader } from './helpers/lifecycle.js'
 
@@ -399,6 +400,40 @@ test('dashboard: topbar "new workspace" link works even when instances are alrea
         await page.locator('.dashboard-topbar').getByRole('link', { name: '+ New Workspace' }).click()
         await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
         assert.equal(page.url(), `${base}/new-workspace`)
+      })
+    )
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})
+
+// #187: a Provider workspace whose instances are all archived was emptied on purpose. It shows as an
+// ordinary empty workspace, with "+ New Instance", never "Can't read this workspace" or a prompt to
+// add a credential.
+test('dashboard: a workspace whose instances are all archived shows as an empty workspace, not an unreadable one', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+  try {
+    const location = { owner: 'octocat', repository: 'emptied-workspace' }
+    registerWorkspace({ provider: 'github', location, owner: 'c.barlow' }, { instancesDir })
+    for (const slug of ['first-hire', 'second-hire']) {
+      registerInstance(slug, { kind: 'github', ...location }, { instancesDir })
+      archiveInstance(slug, { instancesDir })
+    }
+
+    await withRunningServer(
+      { instancesDir },
+      withPage(async (page, base) => {
+        await page.addInitScript(() => localStorage.setItem('gantry:advancedMode', 'true'))
+        await page.goto(base)
+        const row = page.locator('.instance-list .list-item', { hasText: 'emptied-workspace' })
+        await row.waitFor({ timeout: 10_000 })
+        assert.match(await row.textContent(), /No instances/)
+        await row.click()
+        await page.locator('.detail-pane', { hasText: 'No instances in this workspace yet.' }).waitFor({ timeout: 10_000 })
+        const detail = await page.locator('.detail-pane').textContent()
+        assert.doesNotMatch(detail, /Can't read this workspace/)
+        assert.equal(await page.locator('.detail-pane').getByRole('link', { name: /Add a credential/ }).count(), 0)
+        assert.match(await page.locator('.workspace-detail-head').getByRole('link', { name: '+ New Instance' }).getAttribute('href'), /^\/new-instance\?workspace=/)
       })
     )
   } finally {

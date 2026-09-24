@@ -18,6 +18,7 @@ import {
   directoryFolderForScopeId,
   MIGRATED_DEFAULT_WORKSPACE_FOLDER,
   workspaceHasRegisteredInstances,
+  workspaceHasArchivedInstances,
   hasUndiscoveredProviderWorkspaces,
 } from '../lib/instanceRegistry.js'
 import { LOCAL_SCOPE } from '../lib/numberRegistry.js'
@@ -559,12 +560,17 @@ test('workspaceHasRegisteredInstances is true for a directory workspace once an 
   })
 })
 
-test('workspaceHasRegisteredInstances stays true for a workspace whose only instance was later archived (#223: archived still counts as registered)', async () => {
+// #187 reverses #223's rule here: a workspace whose only instance is archived was emptied on purpose,
+// so it no longer counts as having registered instances (the dashboard would otherwise call it
+// unreadable). workspaceHasArchivedInstances reports the archived one instead.
+test('workspaceHasRegisteredInstances is false once a workspace\'s only instance is archived; workspaceHasArchivedInstances is true', async () => {
   await withScratchInstances((instancesDir) => {
     seedWorkspace(instancesDir, 'acme')
     registerInstance('my-initiative', { kind: 'directory', workspace: 'acme' }, { instancesDir })
+    assert.equal(workspaceHasArchivedInstances('acme', { instancesDir }), false)
     archiveInstance('my-initiative', { instancesDir, workspace: 'acme' })
-    assert.equal(workspaceHasRegisteredInstances('acme', { instancesDir }), true)
+    assert.equal(workspaceHasRegisteredInstances('acme', { instancesDir }), false)
+    assert.equal(workspaceHasArchivedInstances('acme', { instancesDir }), true)
   })
 })
 

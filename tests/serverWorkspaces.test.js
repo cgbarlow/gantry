@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { registerWorkspace } from '../lib/workspaceRegistry.js'
-import { registerInstance } from '../lib/instanceRegistry.js'
+import { registerInstance, archiveInstance } from '../lib/instanceRegistry.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { withRunningServer, basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 
@@ -180,6 +180,31 @@ test('GET /api/workspaces reports hasRegisteredInstances: false for a workspace 
     const listing = await (await fetch(`${base}/api/workspaces`)).json()
     assert.equal(listing.length, 1)
     assert.equal(listing[0].hasRegisteredInstances, false)
+  })
+})
+
+// #187: archived instances don't count. A workspace whose instances are all archived is one the owner
+// has emptied on purpose, so it must read as empty ("hasRegisteredInstances: false"), never as a
+// workspace with content this request can't read. `hasArchivedInstances` says why it is empty.
+test('GET /api/workspaces reports a workspace whose instances are all archived as having none, with hasArchivedInstances', async () => {
+  await withScratchServer({}, async (base, instancesDir) => {
+    const workspace = registerWorkspace(
+      { location: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }, owner: 'c.barlow' },
+      { instancesDir }
+    )
+    const location = { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY }
+    registerInstance('first-initiative', location, { instancesDir })
+    registerInstance('second-initiative', location, { instancesDir })
+    archiveInstance('first-initiative', { instancesDir })
+
+    let found = (await (await fetch(`${base}/api/workspaces`)).json()).find((w) => w.id === workspace.id)
+    assert.equal(found.hasRegisteredInstances, true, 'one instance is still live')
+    assert.equal(found.hasArchivedInstances, true)
+
+    archiveInstance('second-initiative', { instancesDir })
+    found = (await (await fetch(`${base}/api/workspaces`)).json()).find((w) => w.id === workspace.id)
+    assert.equal(found.hasRegisteredInstances, false, 'every instance is archived')
+    assert.equal(found.hasArchivedInstances, true)
   })
 })
 

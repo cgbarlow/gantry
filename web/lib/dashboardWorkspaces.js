@@ -109,7 +109,8 @@ export function unrepresentedWorkspaceGroups(instances, workspaces) {
       return {
         key: `workspace:${workspace.id}`,
         kind: 'placeholder',
-        state: workspace.hasRegisteredInstances ? 'unreadable' : 'empty',
+        // #187: 'blank' — every instance here is archived, so it is simply an empty workspace.
+        state: workspace.hasRegisteredInstances ? 'unreadable' : workspace.hasArchivedInstances ? 'blank' : 'empty',
         title,
         subtitle,
         workspaceId: workspace.id,

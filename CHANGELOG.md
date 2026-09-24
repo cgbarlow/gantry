@@ -17,6 +17,16 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.24-beta — 2026-09-24
+
+### Fixed
+
+- **A workspace whose instances are all archived shows as an empty workspace** (#187). The
+  dashboard used to say "Can't read this workspace" and ask for a credential, because the archived
+  instances counted as content it couldn't show. It now shows the workspace like any other empty
+  one, with "No instances in this workspace yet." and the **+ New Instance** button, and no
+  credential prompt. A workspace with instances you genuinely can't read still says so.
+
 ## 0.9.23-beta — 2026-09-24
 
 ### Changed

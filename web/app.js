@@ -5365,6 +5365,8 @@ function groupSummaryText(group) {
   // of its own to summarize — its own two states get their own short list-pane text instead, distinct
   // from each other the same way their detail-pane copy is (MasterDetailView, above).
   if (group.kind === 'placeholder') {
+    // #187: 'blank' — every instance here is archived; it reads like any other empty workspace.
+    if (group.state === 'blank') return 'No instances'
     return group.state === 'unreadable' ? "Can't read this workspace" : 'Nothing registered yet'
   }
   const definitions = [...new Set(group.instances.map((inst) => inst.definition))]
@@ -5872,6 +5874,13 @@ function MasterDetailView({ instances, localGroups, workspaceGroups = [] }) {
                     `
                   : null}
               `
+            : selectedGroup.kind === 'placeholder' && selectedGroup.state === 'blank'
+              ? html`
+                  <${WorkspaceDetailHead} group=${selectedGroup} />
+                  <div class="workspace-instances">
+                    <p class="loading">No instances in this workspace yet.</p>
+                  </div>
+                `
             : selectedGroup.kind === 'placeholder'
               ? html`
                   <${WorkspaceDetailHead} group=${selectedGroup} />
