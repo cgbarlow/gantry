@@ -8,8 +8,9 @@ owner: a.pihema
 
 ## Details requested
 
-- 3 April 2026, automated email from the HR system.
-- 8 April 2026, email from HR.
+Requested 3 April 2026 by automated email from the HR system, immediately after the contract was signed, with a link to the online form for bank account and retirement savings scheme details.
+
+Re-sent 8 April 2026 by Hana Te Rangi from her own mailbox, after the first request went unanswered for five days and a telephone call established that the candidate had never seen it.
 
 ## Validation outcome
 
@@ -32,3 +33,5 @@ The failure on this hire was that the request never reached the candidate, not t
 The form was submitted 9 April 2026 and validated by Payroll the following day; the details supplied were correct and complete.
 
 Confirmed 10 April 2026 by Anaru Pihema (Payroll Manager). Bank account and retirement savings scheme details validated against the candidate's identity verification; the starter can be paid from the first pay run after her start date.
+
+Onboarding approved the same day.

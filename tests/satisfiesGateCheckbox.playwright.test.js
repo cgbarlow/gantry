@@ -168,7 +168,8 @@ test('instance editor: an Artefact that doesn\'t count toward the gate is hinted
     writeFileSync(yamlPath, optedOut)
 
     await withScratchInstances(async (instancesDir) => {
-      cpSync('workspaces/examples/platform-engineer', join(instancesDir, 'platform-engineer'), { recursive: true })
+      // The worked hire as it stood on v2 (#186 moved the example itself to v3).
+      cpSync('tests/fixtures/recruitment-onboarding-v2/platform-engineer', join(instancesDir, 'platform-engineer'), { recursive: true })
       rmSync(join(instancesDir, 'platform-engineer', 'modules', 'vetting.md'))
       const instanceYaml = join(instancesDir, 'platform-engineer', 'instance.yaml')
       writeFileSync(instanceYaml, readFileSync(instanceYaml, 'utf8').replace('stage: provisioning', 'stage: appointment'))

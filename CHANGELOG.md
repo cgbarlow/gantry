@@ -17,6 +17,22 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.23-beta — 2026-09-24
+
+### Changed
+
+- **Recruitment and Onboarding v3 is published** (#186). v3 was a draft; it is now the latest
+  published version, so new recruitment-onboarding instances can be created on it. It carries out
+  the v2 field review: an executive approval before any offer, a candidate-facing Offer Pack and
+  Appointment Confirmation, a Manager Handover and Starter Readiness written for their readers,
+  earlier stages' content read-only later, and privacy-safe guidance throughout (see the v3
+  changelog on the Definitions page). v2 stays published and unchanged, so existing v2
+  instances keep working exactly as before.
+- **The bundled Platform Engineer example now runs on v3** (#186). The worked hire in the Examples
+  workspace has moved to v3: its contract signatures are now two dates, it has a user ID and a
+  standard-device choice, and it passes all five v3 gates, including the new executive approval.
+  Open it to see every v3 document, the Offer Pack and Appointment Confirmation included.
+
 ## 0.9.22-beta — 2026-09-23
 
 ### Added

@@ -1,13 +1,12 @@
 id: recruitment-onboarding
 version: 3
-status: draft
+status: published
 title: Recruitment and Onboarding
 description: >
   Turning an identified vacancy into a starter who can work on their first day,
   from requisition through selection, executive approval, and offer, contract
-  and payroll to provisioning.
-  Instances hold HR personal data, and need HR-file access and retention
-  controls wherever they are stored.
+  and payroll to provisioning. Instances hold HR personal data, and need HR-file
+  access and retention controls wherever they are stored.
 stages:
   - id: requisition
     title: Requisition
@@ -31,11 +30,11 @@ stages:
     title: Selection
     purpose: >
       Take the approved role to market, narrow the field to one preferred
-      candidate, and complete pre-employment checks on them. Owned by HR. Do
-      not sign this stage off while vetting reads Not cleared. Finalists held
-      in reserve can be recorded as released later, once the offer is
-      accepted. Role carries forward from Requisition and is shown read-only
-      here; to change it, reopen Requisition.
+      candidate, and complete pre-employment checks on them. Owned by HR. Do not
+      sign this stage off while vetting reads Not cleared. Finalists held in
+      reserve can be recorded as released later, once the offer is accepted.
+      Role carries forward from Requisition and is shown read-only here; to
+      change it, reopen Requisition.
     gate: candidate-selected
     modules:
       - role
@@ -48,13 +47,14 @@ stages:
   - id: appointment
     title: Appointment
     purpose: >
-      Put the case for appointing the preferred candidate to executive approval before any
-      offer is made: who was selected and why, what vetting returned, and the terms proposed.
-      Owned by the requesting department, which raises the appointment request. Signing this
-      stage off is the executive approval to appoint. The offer terms written here are the
-      terms HR extends; they are not edited afterwards. Role, engagement, selection and vetting
-      carry forward from earlier stages and are shown read-only here; to change one of them,
-      reopen the stage that owns it.
+      Put the case for appointing the preferred candidate to executive approval
+      before any offer is made: who was selected and why, what vetting returned,
+      and the terms proposed. Owned by the requesting department, which raises
+      the appointment request. Signing this stage off is the executive approval
+      to appoint. The offer terms written here are the terms HR extends; they
+      are not edited afterwards. Role, engagement, selection and vetting carry
+      forward from earlier stages and are shown read-only here; to change one of
+      them, reopen the stage that owns it.
     gate: approved-to-appoint
     modules:
       - role
@@ -71,14 +71,16 @@ stages:
   - id: offer-contract-payroll
     title: Offer, Contract and Payroll
     purpose: >
-      Extend the approved offer, draw and sign the contract, and confirm the starter can be
-      paid. Owned by HR, with Payroll validating. Signing this stage off is onboarding
-      approval, which releases IT setup; do not sign it off unless the offer reads Accepted.
-      The Onboarding Case is the document put to whoever approves onboarding. The offer terms
-      were approved at Appointment and are not edited here; later changes go in the offer's
-      negotiation. Selection stays open so that finalists held in reserve can be recorded as
-      released once the offer is accepted. Role and engagement carry forward from Requisition
-      and are shown read-only here; to change either, reopen Requisition.
+      Extend the approved offer, draw and sign the contract, and confirm the
+      starter can be paid. Owned by HR, with Payroll validating. Signing this
+      stage off is onboarding approval, which releases IT setup; do not sign it
+      off unless the offer reads Accepted. The Onboarding Case is the document
+      put to whoever approves onboarding. The offer terms were approved at
+      Appointment and are not edited here; later changes go in the offer's
+      negotiation. Selection stays open so that finalists held in reserve can be
+      recorded as released once the offer is accepted. Role and engagement carry
+      forward from Requisition and are shown read-only here; to change either,
+      reopen Requisition.
     gate: onboarding-approved
     modules:
       - role
@@ -98,9 +100,9 @@ stages:
       they can work from their first day. Owned by Technology. Render the
       Manager Handover and send it to the hiring manager as soon as the account
       exists, then re-send it at sign-off. Request this stage's approval only
-      once the Hire Record is complete, confirming with `gantry check --json`
-      or `check_gate` first. Every earlier stage's Modules carry forward and
-      are shown read-only here; to change one, reopen the stage that owns it.
+      once the Hire Record is complete, confirming with `gantry check --json` or
+      `check_gate` first. Every earlier stage's Modules carry forward and are
+      shown read-only here; to change one, reopen the stage that owns it.
     gate: ready-to-start
     modules:
       - role
@@ -133,8 +135,7 @@ artefacts:
     purpose: >
       The case for recruiting, put to whoever signs this stage off as the
       "Approved to Recruit" confirmation: the role, how the person will be
-      engaged and the approval route that fixes, and what the role evaluated
-      to.
+      engaged and the approval route that fixes, and what the role evaluated to.
     template: templates/requisition-brief.md.tmpl
     gate: approved-to-recruit
     requires:
@@ -179,9 +180,9 @@ artefacts:
   - id: appointment-case
     title: Appointment Case
     purpose: >
-      The case put to executive approval before any offer is made: the preferred candidate,
-      why they were chosen, what vetting returned and any conditions, and the terms proposed
-      for the offer.
+      The case put to executive approval before any offer is made: the preferred
+      candidate, why they were chosen, what vetting returned and any conditions,
+      and the terms proposed for the offer.
     template: templates/appointment-case.md.tmpl
     gate: approved-to-appoint
     requires:
@@ -200,9 +201,10 @@ artefacts:
   - id: onboarding-case
     title: Onboarding Case
     purpose: >
-      The internal record put to whoever approves onboarding: the offer terms as extended and
-      what changed in negotiation, the contract as drawn and signed, the agreed start date, and
-      Payroll's confirmation that the starter can be paid.
+      The internal record put to whoever approves onboarding: the offer terms as
+      extended and what changed in negotiation, the contract as drawn and
+      signed, the agreed start date, and Payroll's confirmation that the starter
+      can be paid.
     template: templates/onboarding-case.md.tmpl
     gate: onboarding-approved
     requires:
@@ -230,15 +232,15 @@ artefacts:
   - id: offer-pack
     title: Offer Pack
     purpose: >
-      The offer as the candidate receives it: the role, the engagement and the offer terms, and
-      what happens next. Render and send it when the offer is extended, before any contract. The
-      terms state the band and position in band, never the salary figure; add the figure to the
-      copy you send, outside the repository. It leaves the organisation, so it carries no internal
-      content and no Document Control or sign-off tables, and it never counts toward the gate.
+      The offer as the candidate receives it: the role, the engagement and the
+      offer terms, and what happens next. Render and send it when the offer is
+      extended, before any contract. The terms state the band and position in
+      band, never the salary figure; add the figure to the copy you send,
+      outside the repository. It leaves the organisation, so it carries no
+      internal content and no Document Control or sign-off tables, and it never
+      counts toward the gate.
     template: templates/offer-pack.md.tmpl
     gate: onboarding-approved
-    document-control: false
-    satisfies-gate: false
     requires:
       - selection.candidate-name
       - role.summary
@@ -248,17 +250,17 @@ artefacts:
       - engagement.term?
       - offer.terms
     filename: "{selection.candidate-name} - Offer Pack"
+    document-control: false
+    satisfies-gate: false
   - id: appointment-confirmation
     title: Appointment Confirmation
     purpose: >
-      Confirm to the new starter their role, manager, start date and the terms they signed,
-      and what happens next. Sent once onboarding is approved. It leaves the organisation, so
-      it carries no internal content and no Document Control or sign-off tables, and it never
-      counts toward the gate.
+      Confirm to the new starter their role, manager, start date and the terms
+      they signed, and what happens next. Sent once onboarding is approved. It
+      leaves the organisation, so it carries no internal content and no Document
+      Control or sign-off tables, and it never counts toward the gate.
     template: templates/appointment-confirmation.md.tmpl
     gate: onboarding-approved
-    document-control: false
-    satisfies-gate: false
     requires:
       - selection.candidate-name
       - role.summary
@@ -269,7 +271,10 @@ artefacts:
       - contract.start-date
       - contract.terms-summary
       - payroll.confirmed
-    filename: "{selection.candidate-name} - Appointment Confirmation - {contract.start-date}"
+    filename: "{selection.candidate-name} - Appointment Confirmation -
+      {contract.start-date}"
+    document-control: false
+    satisfies-gate: false
   - id: starter-readiness
     title: Starter Readiness
     purpose: >
@@ -309,8 +314,6 @@ artefacts:
       toward the gate.
     template: templates/manager-handover.md.tmpl
     gate: ready-to-start
-    document-control: false
-    satisfies-gate: false
     requires:
       - selection.candidate-name
       - role.summary
@@ -323,13 +326,15 @@ artefacts:
       - access.entitlements
       - access.outstanding?
     filename: "{selection.candidate-name} - Manager Handover - {today}"
+    document-control: false
+    satisfies-gate: false
   - id: hire-record
     title: Hire Record
     purpose: >
       Assemble the complete record of the hire, in process order, as the file
       that is kept: the record as at readiness sign-off. Request Provisioning's
-      approval only once this record is complete, confirming with
-      `gantry check --json` or `check_gate` first.
+      approval only once this record is complete, confirming with `gantry check
+      --json` or `check_gate` first.
     template: templates/hire-record.md.tmpl
     gate: ready-to-start
     requires:
