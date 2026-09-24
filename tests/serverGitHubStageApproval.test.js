@@ -6,6 +6,8 @@ import { join } from 'node:path'
 import { registerInstance } from '../lib/instanceRegistry.js'
 import { loadDefinition } from '../lib/definition.js'
 import { createGitHubClient } from '../lib/githubClient.js'
+import { createGitHubWorkItemsClient } from '../lib/githubWorkItemsClient.js'
+import { readInstance } from '../lib/instance.js'
 import { resolveGitHubStageBranch } from '../lib/githubStageBranch.js'
 import {
   withRunningServerForProvider,
@@ -231,6 +233,49 @@ test('POST /api/instance/stage/reopen (GitHub workspace) re-opens a completed st
 
       const instance = await (await fetch(`${gantryBase}/api/instance?slug=${SLUG}`, { headers: authHeader })).json()
       assert.equal(instance.currentStageId, 'shape')
+    },
+    { fakeServerOptions: { files: seedFiles() } }
+  )
+})
+
+test('GET /api/instance/check (GitHub workspace) reads the stage branch the edits were saved to, not main', async () => {
+  await withScratchGitHubServer(
+    async ({ gantryBase, providerBaseUrl, instancesDir }) => {
+      registerInstance(SLUG, { kind: 'github', owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, baseUrl: providerBaseUrl }, { instancesDir })
+      const github = { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl: providerBaseUrl }
+      const branch = await resolveGitHubStageBranch(github, definition, SLUG, SHAPE.id)
+      await fillShapeStage(github, branch)
+
+      const res = await fetch(`${gantryBase}/api/instance/check?slug=${SLUG}`, { headers: authHeader })
+      assert.equal(res.status, 200)
+      const body = await res.json()
+      assert.equal(body.stage.id ?? body.stage, 'shape')
+      assert.equal(body.complete, true)
+    },
+    { fakeServerOptions: { files: seedFiles() } }
+  )
+})
+
+test('POST /api/instance/work-items/link (GitHub workspace) records the link on an already-open stage branch too, so the instance page sees it', async () => {
+  await withScratchGitHubServer(
+    async ({ gantryBase, providerBaseUrl, instancesDir }) => {
+      registerInstance(SLUG, { kind: 'github', owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, baseUrl: providerBaseUrl }, { instancesDir })
+      const github = { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl: providerBaseUrl }
+      const branch = await resolveGitHubStageBranch(github, definition, SLUG, SHAPE.id)
+      await fillShapeStage(github, branch)
+      const parent = await createGitHubWorkItemsClient(github).createIssue({ title: 'Parent initiative', body: '' })
+
+      const res = await fetch(`${gantryBase}/api/instance/work-items/link?slug=${SLUG}`, {
+        method: 'POST',
+        headers: { ...authHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'github', owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, parentNumber: parent.number, baseUrl: providerBaseUrl }),
+      })
+      assert.equal(res.status, 200)
+
+      assert.equal((await readInstance(SLUG, { github: { ...github, branch } })).workItem?.parentNumber, parent.number)
+      assert.equal((await readInstance(SLUG, { github })).workItem?.parentNumber, parent.number)
+      const page = await (await fetch(`${gantryBase}/api/instance?slug=${SLUG}`, { headers: authHeader })).json()
+      assert.equal(page.workItem?.parentNumber, parent.number)
     },
     { fakeServerOptions: { files: seedFiles() } }
   )

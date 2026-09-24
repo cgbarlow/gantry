@@ -17,6 +17,30 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.25-beta — 2026-09-24
+
+### Fixed
+
+- **Check reads a GitHub or GitLab stage's saved work** (#188). Your edits to a stage are saved to
+  that stage's own branch until its Pull Request (or Merge Request) merges, but **Check** read
+  `main`, so every field you had filled in still showed as outstanding. It now reads the stage's
+  branch, as it already did for Azure DevOps. Request Sign-off was never affected.
+- **Linking a work item after work has started now shows on the instance** (#188). The link was
+  saved only to `main`, while the instance page reads the stage branch you're working on, so the
+  instance kept saying it wasn't linked. The link is now written to every open stage branch too.
+- **An instance keeps its reference (such as `w1i3`) across server restarts** (#188). References
+  were stored only on the server's own disk. A host that wipes its disk on each redeploy, like the
+  hosted demo, handed them out again in whatever order they were next requested. An old bookmark or
+  shared ref could then open a different instance. A new instance now records its number in its own
+  `instance.yaml`, and the server numbers workspaces in a fixed order when it starts. Instances
+  created before this release have no recorded number. They keep being numbered as before, but can
+  no longer take a number a newer instance has recorded.
+- **The MCP server reports a redirect instead of silently turning a change into a read** (#188).
+  If `GANTRY_MCP_BASE_URL` pointed at an address that redirects, requests that change something
+  (`create_instance`, `validate_definition`, `request_approval` and the rest) reached Gantry as
+  reads. `create_instance` then "succeeded" with a list of instances and created nothing. The MCP
+  server now stops at the redirect and names the address to use instead.
+
 ## 0.9.24-beta — 2026-09-24
 
 ### Fixed
