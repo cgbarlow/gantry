@@ -17,6 +17,19 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.9.26-beta — 2026-09-24
+
+### Fixed
+
+- **The MCP server finds instances in GitHub, GitLab and Azure DevOps workspaces again** (#189).
+  After Gantry restarted, it only knew about a Provider-backed workspace's instances once someone
+  listed that workspace with a credential that could read it. The MCP server's `list_instances`,
+  its lookups by slug and `list_workspaces` sent no credential. So those instances were missing
+  from `list_instances`, a lookup by slug failed with "No instance … at workspaces/…", and
+  `list_workspaces` reported `hasRegisteredInstances: false`. The MCP server now lists once with
+  each PAT in `GANTRY_MCP_WORKSPACE_PATS`, which makes Gantry discover those instances, and retries
+  a slug lookup afterwards. Looking up by `ref` already worked and is unchanged.
+
 ## 0.9.25-beta — 2026-09-24
 
 ### Fixed

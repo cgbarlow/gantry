@@ -29,7 +29,18 @@ async function listInstances({ includeArchived }, { gantryClient }) {
   if (!Array.isArray(res.body)) {
     return errorResult('gantry serve returned an unexpected shape listing instances', res.body)
   }
-  return okResult({ instances: res.body })
+  // #189: the listing above carries no credential, so it only has Provider-backed instances gantry
+  // serve already knew about — merge in what a credentialed listing per configured PAT turns up.
+  const discovered = await gantryClient.discoverProviderInstances({ includeArchived: Boolean(includeArchived), force: true })
+  const key = (row) => row.ref ?? `${row.workspace?.id ?? ''}/${row.slug}`
+  const instances = [...res.body]
+  const seen = new Set(instances.map(key))
+  for (const row of discovered) {
+    if (seen.has(key(row))) continue
+    seen.add(key(row))
+    instances.push(row)
+  }
+  return okResult({ instances })
 }
 
 async function getInstance(args, { gantryClient }) {
