@@ -10,19 +10,17 @@ owner: h.terangi
 
 Permanent employment agreement on Contoso's standard terms for Technology Band 4, drawn 1 April 2026.
 
-The agreement reflects the offer as accepted, including the revised start date of 20 April.
+The agreement reflects the offer as accepted, including the revised start date of 20 April. One difference from the offer: the on-call allowance is expressed in the agreement as a schedule reference rather than a figure, which is standard and was explained to the candidate before signing.
 
-## Variations from the offer
+The executed agreement is held by HR. It is not attached to this instance.
 
-The on-call allowance is expressed in the agreement as a schedule reference rather than a figure. Agreed by HR.
+## Signatures
 
-## Manager signed
+Hiring manager signed 2 April 2026 (Tomas Berg) — one day after the contract was drawn.
 
-2026-04-02
+Candidate returned her electronic signature 3 April 2026, the day after it was issued.
 
-## Candidate signed
-
-2026-04-03
+Both signatures were faster than the process assumes. Nothing in the delay that followed was caused by the contract.
 
 ## Start date
 

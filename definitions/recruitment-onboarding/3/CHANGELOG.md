@@ -6,8 +6,9 @@ Carries out the field-by-field review of v2 against the Contoso Test Organisatio
 (spec #147). v3 starts as a copy of v2 (#153), and each later ticket records its change here.
 v2 stays published and unchanged, so live v2 instances are unaffected.
 
-**Status: draft, not published.** Publishing it, and migrating the platform-engineer worked
-example and live v2 instances to it, is the process owner's step once the work is complete.
+**Status: published** (#186). New instances can be created on v3. Existing v2 instances
+stay on v2; moving any of them to v3 is a separate, per-instance step for the process owner.
+The bundled platform-engineer worked example has been moved to v3.
 
 ### Instances hold HR personal data
 

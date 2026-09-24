@@ -25,7 +25,8 @@ import { withFakeGitHubServer, GITHUB_OWNER, GITHUB_REPOSITORY, GITHUB_VALID_PAT
 
 const CONTROL = ['## Document Control', '## Review & sign-off']
 const SLUG = 'platform-engineer'
-const EXAMPLE_DIR = `workspaces/examples/${SLUG}`
+// The platform-engineer worked hire as it stood on v2 (#186 moved the example itself to v3).
+const EXAMPLE_DIR = `tests/fixtures/recruitment-onboarding-v2/${SLUG}`
 
 // A scratch definitions dir holding a copy of recruitment-onboarding with the Offer Pack opted out.
 async function withOptedOutDefinitions(fn) {

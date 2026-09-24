@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cpSync, mkdtempSync, rmSync } from 'node:fs'
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { loadDefinition, definitionVersionProjection, findDefinitionProblems } from '../lib/definition.js'
@@ -13,9 +13,10 @@ import { readOnlyModuleAt, readOnlyWriteRefusal } from '../web/lib/readOnlyModul
 // #153 (spec #147): the harness every recruitment-onboarding v3 ticket extends. `definitions/
 // recruitment-onboarding/3` starts as a draft copy of v2, and tests/fixtures/recruitment-
 // onboarding-v3/platform-engineer is a copy of the platform-engineer worked hire
-// (workspaces/examples/platform-engineer, still pinned to v2) migrated to v3 and pinned to the v3
-// draft. The example itself is not repointed — migrating it is a process-owner step once v3 is
-// published.
+// migrated to v3 and pinned to v3. Once v3 was published (#186) the example itself,
+// workspaces/examples/platform-engineer, moved to v3 as the same copy (a test below keeps them
+// identical); its v2 form is kept at tests/fixtures/recruitment-onboarding-v2 for the tests that
+// exercise v2.
 //
 // The harness runs the gate check at every Gate and dry-run renders every Artefact against that
 // fixture. Two tables drive it, so a later ticket changes a row rather than adding a test:
@@ -320,9 +321,22 @@ function renderVariant(artefactId, changes) {
   })
 }
 
-test('recruitment-onboarding/3 is a draft, and v2 stays published', () => {
-  assert.equal(loadDefinition('recruitment-onboarding', { version: 3 }).status, 'draft')
+// #186: v3 is published (the process owner's step), and v2 stays published beside it, so live v2
+// instances keep loading against the version they're pinned to.
+test('recruitment-onboarding/3 is published, and v2 stays published', () => {
+  assert.equal(loadDefinition('recruitment-onboarding', { version: 3 }).status, 'published')
   assert.equal(loadDefinition('recruitment-onboarding', { version: 2 }).status, 'published')
+})
+
+// #186: the bundled example is the harness's worked hire, pinned to published v3, and passes every
+// v3 Gate as shipped.
+test('the bundled platform-engineer example is on v3, identical to the harness fixture, and passes every Gate', () => {
+  const EXAMPLES = 'workspaces/examples'
+  assert.equal(readInstance(SLUG, { instancesDir: EXAMPLES }).definitionVersion, 3)
+  for (const file of ['instance.yaml', ...readdirSync(join(FIXTURE, SLUG, 'modules')).map((m) => join('modules', m))]) {
+    assert.equal(readFileSync(join(EXAMPLES, SLUG, file), 'utf8'), readFileSync(join(FIXTURE, SLUG, file), 'utf8'), file)
+  }
+  for (const { gate } of GATES) assert.equal(checkGate(SLUG, { instancesDir: EXAMPLES, gate }).pass, true, gate)
 })
 
 test('findDefinitionProblems reports zero problems for recruitment-onboarding/3', () => {
