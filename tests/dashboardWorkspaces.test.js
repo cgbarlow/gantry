@@ -89,6 +89,18 @@ test('unrepresentedWorkspaceGroups produces an "empty" placeholder when the work
   assert.equal(groups[0].isAzureDevOps, false)
 })
 
+// #187: a workspace whose instances are all archived is shown as a plain, empty workspace — no
+// "can't read this workspace" and no credential prompt, because nothing is wrong with it.
+test('unrepresentedWorkspaceGroups produces a "blank" group when every instance in the workspace is archived', () => {
+  const workspaces = [
+    { id: 'ws-3', provider: 'github', location: { owner: 'octocat', repository: 'emptied' }, hasRegisteredInstances: false, hasArchivedInstances: true },
+  ]
+  const groups = unrepresentedWorkspaceGroups([], workspaces)
+  assert.equal(groups.length, 1)
+  assert.equal(groups[0].state, 'blank')
+  assert.equal(workspaceNewInstanceHref(groups[0]), '/new-instance?workspace=ws-3')
+})
+
 test('unrepresentedWorkspaceGroups only builds a placeholder for a workspace with zero rows — one with any row is left out entirely, even alongside an unrepresented one', () => {
   const instances = [{ slug: 'a', workspace: { id: 'ws-1', kind: 'azureDevOps' } }]
   const workspaces = [
