@@ -2,6 +2,9 @@ import { z } from 'zod'
 import { errorResult, okResult, upstreamErrorResult } from '../toolResult.js'
 
 async function listWorkspaces({ includeArchived }, { gantryClient }) {
+  // #189: discover first, so each Provider-backed workspace's `hasRegisteredInstances` reflects its
+  // real instances rather than whether a browser has listed it since gantry serve last restarted.
+  await gantryClient.discoverProviderInstances?.()
   const [providerRes, serverRes] = await Promise.all([
     gantryClient.request({ path: '/api/workspaces', query: includeArchived ? { archived: '1' } : undefined }),
     gantryClient.request({ path: '/api/server-workspaces' }),

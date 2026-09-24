@@ -373,3 +373,51 @@ test('render_artefact surfaces gantry serve\'s authentication_required 401', asy
     fetch.restore()
   }
 })
+
+// #189: after a restart gantry serve knows no Provider-backed instances until something lists that
+// workspace with a credential. The unscoped listing/slug lookup this server makes carry none — so
+// it now lists once per configured PAT (discovery) and merges/retries.
+function stubUndiscoveredGitHubWorkspace() {
+  let discovered = false
+  const githubRow = { slug: 'business-analyst', ref: 'w1i2', workspace: { kind: 'github', id: 'ws-gh' } }
+  const localRow = { slug: 'gantry', ref: 'w2i1', workspace: { kind: 'directory', id: 'examples' } }
+  return stubFetch(({ url, headers }) => {
+    if (url.pathname === '/api/instances') {
+      if (headers.authorization) discovered = true
+      return { status: 200, body: headers.authorization || discovered ? [localRow, githubRow] : [localRow] }
+    }
+    if (url.pathname === '/api/instance/workspace') {
+      return { status: 200, body: discovered ? { workspaceId: 'ws-gh', scope: 'ws-gh' } : { workspaceId: null, scope: null } }
+    }
+    if (url.pathname === '/api/workspaces') return { status: 200, body: [{ id: 'ws-gh', provider: 'github' }] }
+    if (url.pathname === '/api/server-workspaces') return { status: 200, body: [{ id: 'examples' }] }
+    if (url.pathname === '/api/instance') {
+      return headers.authorization ? { status: 200, body: { slug: 'business-analyst' } } : { status: 500, body: { error: 'No instance "business-analyst" at workspaces/business-analyst/instance.yaml.' } }
+    }
+    return undefined
+  })
+}
+
+test('list_instances includes Provider-backed instances gantry serve has not discovered yet (#189)', async () => {
+  const fetch = stubUndiscoveredGitHubWorkspace()
+  try {
+    const gantryClient = createGantryClient({ baseUrl: BASE_URL, workspacePats: { 'ws-gh': 'gh-pat' } })
+    const result = await listInstancesTool.handler({}, { gantryClient })
+    const { instances } = JSON.parse(result.content[0].text)
+    assert.deepEqual(instances.map((i) => i.ref), ['w2i1', 'w1i2'])
+  } finally {
+    fetch.restore()
+  }
+})
+
+test('get_instance by slug finds a Provider-backed instance gantry serve has not discovered yet (#189)', async () => {
+  const fetch = stubUndiscoveredGitHubWorkspace()
+  try {
+    const gantryClient = createGantryClient({ baseUrl: BASE_URL, workspacePats: { 'ws-gh': 'gh-pat' } })
+    const result = await getInstanceTool.handler({ slug: 'business-analyst' }, { gantryClient })
+    assert.equal(result.isError, undefined)
+    assert.equal(JSON.parse(result.content[0].text).slug, 'business-analyst')
+  } finally {
+    fetch.restore()
+  }
+})

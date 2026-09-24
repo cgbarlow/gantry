@@ -136,7 +136,32 @@ export function createGantryClient({ baseUrl, workspacePats = {}, fetchImpl = fe
     return rawFetch(path, { method, query, body, authorization })
   }
 
-  return { request, invalidateClassification }
+  // #189: gantry serve only learns a Provider-backed workspace's instances when something lists it
+  // with a credential that can read it — and its registry starts empty again after every restart of
+  // an ephemeral host. The browser always sends one; this server's unscoped calls
+  // (`list_instances`, slug lookup) never did, so those instances stayed invisible here until a
+  // browser happened to list them. This lists once with each configured workspace PAT, which makes
+  // gantry serve discover (and register) that workspace's instances, and returns every row seen.
+  // Throttled like the classification cache, so a burst of lookups discovers once.
+  let discoveryCache = null // { at, rows }
+  async function discoverProviderInstances({ includeArchived = false, force = false } = {}) {
+    const now = Date.now()
+    if (!force && !includeArchived && discoveryCache && now - discoveryCache.at < CLASSIFY_CACHE_TTL_MS) return discoveryCache.rows
+    const pats = [...new Set(Object.values(workspacePats).filter(Boolean))]
+    const listings = await Promise.all(
+      pats.map((pat) =>
+        rawFetch('/api/instances', {
+          query: includeArchived ? { archived: '1' } : undefined,
+          authorization: 'Basic ' + Buffer.from(':' + pat, 'utf8').toString('base64'),
+        })
+      )
+    )
+    const rows = listings.flatMap((res) => (res.ok && Array.isArray(res.body) ? res.body : []))
+    if (!includeArchived) discoveryCache = { at: now, rows }
+    return rows
+  }
+
+  return { request, invalidateClassification, discoverProviderInstances }
 }
 
 /**
@@ -156,5 +181,11 @@ export async function resolveInstanceWorkspace({ gantryClient, slug, scope, ref 
   if (slug !== undefined) query.slug = slug
   if (scope !== undefined) query.scope = scope
   if (ref !== undefined) query.ref = ref
+  const res = await gantryClient.request({ path: '/api/instance/workspace', query })
+  // #189: `null` means local *or* not yet known to gantry serve — a Provider-backed instance nothing
+  // has listed with a credential since its last restart. Discover, then ask once more.
+  const unresolved = res.ok && res.body?.workspaceId == null && scope === undefined
+  if (!unresolved || !gantryClient.discoverProviderInstances) return res
+  await gantryClient.discoverProviderInstances()
   return gantryClient.request({ path: '/api/instance/workspace', query })
 }
