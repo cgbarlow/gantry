@@ -26,7 +26,22 @@ export function createGantryClient({ baseUrl, workspacePats = {}, fetchImpl = fe
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      // #188: never follow a redirect — fetch re-sends a POST as a GET after a 301/302, which turned
+      // create_instance into a silent instance listing. A redirecting base URL is a misconfiguration
+      // the operator has to see.
+      redirect: 'manual',
     })
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get('location')
+      const target = location ? new URL(location, url).href : '(no Location header)'
+      return {
+        ok: false,
+        status: res.status,
+        body: {
+          error: `gantry serve redirected ${method} ${url.href} to ${target} — not followed, since a redirect can turn a write into a read. Set GANTRY_MCP_BASE_URL to the address gantry serve answers on directly.`,
+        },
+      }
+    }
     const text = await res.text()
     let parsedBody = null
     if (text) {

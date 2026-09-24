@@ -190,3 +190,35 @@ test('resolveInstanceWorkspace surfaces an upstream error rather than throwing',
     fetch.restore()
   }
 })
+
+// #188: fetch follows a 301/302 by re-sending a POST as a GET — so a GANTRY_MCP_BASE_URL that
+// redirects turned create_instance into GET /api/instances, and the tool "succeeded" with a listing
+// while creating nothing. A redirect is now reported, naming where it pointed, never followed.
+test('request() reports a redirecting gantry serve instead of following it and re-sending a POST as a GET', async () => {
+  const { createServer } = await import('node:http')
+  const seen = []
+  const server = createServer((req, res) => {
+    seen.push(`${req.method} ${req.url}`)
+    if (req.url.startsWith('/old/')) {
+      res.writeHead(301, { location: req.url.replace('/old/', '/new/') })
+      res.end()
+      return
+    }
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end('[]')
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const client = createGantryClient({ baseUrl: `http://127.0.0.1:${server.address().port}/old/` })
+    const res = await client.request({ path: 'api/instances', method: 'POST', body: { slug: 'x' } })
+
+    assert.equal(res.ok, false)
+    assert.equal(res.status, 301)
+    assert.match(res.body.error, /redirected/)
+    assert.match(res.body.error, /\/new\/api\/instances/)
+    assert.match(res.body.error, /GANTRY_MCP_BASE_URL/)
+    assert.deepEqual(seen, ['POST /old/api/instances'])
+  } finally {
+    server.close()
+  }
+})

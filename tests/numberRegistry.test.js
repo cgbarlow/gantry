@@ -21,6 +21,7 @@ import {
   stageNumberForStageId,
   stageIdForNumber,
   backfillNumberRegistry,
+  backfillWorkspaceNumbers,
 } from '../lib/numberRegistry.js'
 import { withScratchInstances } from './helpers/lifecycle.js'
 
@@ -241,4 +242,39 @@ test('backfillNumberRegistry is idempotent — a second call assigns nothing new
     assert.equal(second.instancesAssigned, 0)
     assert.equal(resolveInstanceNumber(LOCAL_SCOPE, 'demo', { instancesDir }), before)
   })
+})
+
+// #188: the registry file is rebuilt from nothing whenever an ephemeral host redeploys — the number an
+// instance recorded in its own instance.yaml is what keeps its ref the same afterwards.
+test('getOrAssignInstanceNumber claims a persisted number when it is free, even over a lazily-assigned one', async () => {
+  await withScratchInstances((instancesDir) => {
+    assert.equal(getOrAssignInstanceNumber('ws-a', 'ai-engineer', { instancesDir, persistedNumber: 3 }), 3)
+    assert.equal(getOrAssignInstanceNumber('ws-a', 'legacy', { instancesDir }), 4)
+
+    // Lazily numbered first, then its persisted number turns up (a free one): it moves to that.
+    assert.equal(getOrAssignInstanceNumber('ws-b', 'later', { instancesDir }), 1)
+    assert.equal(getOrAssignInstanceNumber('ws-b', 'later', { instancesDir, persistedNumber: 5 }), 5)
+    assert.equal(resolveSlugByNumber('ws-b', 1, { instancesDir }), undefined)
+  })
+})
+
+test('getOrAssignInstanceNumber never takes a persisted number another instance already holds', async () => {
+  await withScratchInstances((instancesDir) => {
+    assert.equal(getOrAssignInstanceNumber('ws-a', 'first', { instancesDir, persistedNumber: 1 }), 1)
+    assert.equal(getOrAssignInstanceNumber('ws-a', 'copy', { instancesDir, persistedNumber: 1 }), 2)
+    assert.equal(getOrAssignInstanceNumber('ws-a', 'copy', { instancesDir, persistedNumber: 1 }), 2)
+    assert.equal(resolveSlugByNumber('ws-a', 1, { instancesDir }), 'first')
+  })
+})
+
+test('backfillWorkspaceNumbers numbers every registered workspace in registry order, however requests later arrive', async () => {
+  const numbersAfterBoot = () =>
+    withScratchInstances((instancesDir) => {
+      const a = registerWorkspace({ location: { organization: 'org', project: 'proj', repository: 'a' } }, { instancesDir })
+      const b = registerWorkspace({ location: { organization: 'org', project: 'proj', repository: 'b' } }, { instancesDir })
+      backfillWorkspaceNumbers({ instancesDir })
+      // A request touching `b` first no longer decides that `b` is w1.
+      return [getOrAssignWorkspaceNumber(b.id, { instancesDir }), getOrAssignWorkspaceNumber(a.id, { instancesDir })]
+    })
+  assert.deepEqual(await numbersAfterBoot(), [2, 1])
 })

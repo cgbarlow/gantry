@@ -243,3 +243,21 @@ test('POST /api/instance/stage/reopen (GitLab workspace) re-opens a completed st
     { fakeServerOptions: { files: seedFiles() } }
   )
 })
+
+test('GET /api/instance/check (GitLab workspace) reads the stage branch the edits were saved to, not main', async () => {
+  await withScratchGitLabServer(
+    async ({ gantryBase, providerBaseUrl, instancesDir }) => {
+      registerInstance(SLUG, { kind: 'gitlab', namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, baseUrl: providerBaseUrl }, { instancesDir })
+      const gitlab = { namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, pat: GITLAB_VALID_PAT, baseUrl: providerBaseUrl }
+      const branch = await resolveGitLabStageBranch(gitlab, definition, SLUG, SHAPE.id)
+      await fillShapeStage(gitlab, branch)
+
+      const res = await fetch(`${gantryBase}/api/instance/check?slug=${SLUG}`, { headers: authHeader })
+      assert.equal(res.status, 200)
+      const body = await res.json()
+      assert.equal(body.stage.id ?? body.stage, 'shape')
+      assert.equal(body.complete, true)
+    },
+    { fakeServerOptions: { files: seedFiles() } }
+  )
+})
