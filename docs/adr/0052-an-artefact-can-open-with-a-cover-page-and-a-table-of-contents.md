@@ -167,3 +167,100 @@ change on re-render because Gantry started adding pages to it.
   same reason ADR-0049's switch is per Artefact.
 
 Status: accepted.
+
+## Amendment (#207): the classification in the page header
+
+A design v3 document showed its classification once, on the cover. A
+protective marking is normally carried in the page header of every page, as
+Word does when a document is marked, so a reviewer reading page 12 can see
+how the document must be handled. #207 adds that to design v3. The cover keeps
+its classification line, and the footer is unchanged.
+
+### Decision
+
+1. **The header holds a field, not the value.** Pandoc copies a reference
+   document's headers into the output byte for byte. That was checked on both
+   render paths: the header parts of a design v3 SAD rendered with native
+   Pandoc 3.1.3 and with pandoc-wasm's Pandoc 3.10 are identical to the
+   reference document's. Raw OpenXML in the compiled Markdown reaches only the
+   body, and it can't add a relationship to a new header part (ADR-0056). So a
+   header can't carry a different literal value per document. Instead, each
+   header holds a `STYLEREF "Cover Classification"` field. It prints the text
+   of the cover's Cover Classification paragraph, the one this ADR's cover
+   already writes. Word recalculates a STYLEREF field in a header each time it
+   lays out the pages, as it does a page number, so it needs no "update
+   fields" prompt.
+
+2. **design v3's reference documents carry it.** The field is in the first
+   paragraph of each of the three headers the documents define: default,
+   first page and even pages. That paragraph is in a new `Header
+   Classification` style, based on `Header`: centred, 8pt, grey (`595959`).
+   Its other content, the coloured bars, the logo and Word's empty
+   label-marking shapes, is unchanged. All seven documents share the same
+   header parts and the same `styles.xml`. v3's section doesn't switch on a
+   different first page or odd and even pages, so Word uses the default
+   header on every page, the cover included. The other two headers carry the
+   field so that an organisation that switches them on keeps the marking.
+   design v1 and v2 are unchanged.
+
+3. **The field's stored result is empty, and can't be made correct per
+   document.** A Word field stores its last result next to its code, and a
+   viewer that doesn't update fields shows that stored result. Here the
+   stored result is part of the header, which Pandoc copies unchanged, so it
+   is the same in every document. It can't be made to hold this document's
+   classification without post-processing the `.docx`, which this ADR rules
+   out. It is left empty, so a viewer that doesn't update fields shows an
+   empty header, never another document's marking. The cover always shows the
+   classification. Word, and any viewer that updates fields, shows it on
+   every page.
+
+4. **A blank classification still gives the field a paragraph to read.** With
+   no paragraph in the `Cover Classification` style, Word prints "Error! No
+   text of specified style in document." in place of a STYLEREF field. So,
+   for the Word conversion only, an Artefact with `cover-page: true` whose
+   `cover-classification` Field is blank opens its cover with a Cover
+   Classification paragraph holding a single non-breaking space. The field
+   finds it and prints nothing visible. The cover has an empty line where the
+   classification would be. The exported `.md` still leaves the
+   classification out, as the cover's own rule (decision 2 above) says.
+   This is an engine rule, not a design v3 one: any Definition's cover with a
+   blank classification gets the empty line in Word, whatever its headers
+   hold. design v1 and v2 and recruitment-onboarding have no cover, so their
+   documents are unchanged (`tests/frontMatterOffBaseline.test.js`).
+
+### Consequences
+
+- A Definition that uses design v3's reference documents for an Artefact
+  without a cover, or without a `cover-classification`, gets Word's error
+  text in the header, because nothing in the document has the style. It
+  should delete the field from its reference document's headers.
+- The tests read the `.docx` XML from both render paths: every page type's
+  header has the field, in the Header Classification style, with an empty
+  stored result and no other visible text; the body opens with the Cover
+  Classification paragraph. Word's own layout isn't run in the test suite, so
+  how Word prints the field, including that a non-breaking space prints as
+  nothing, rests on Word's documented STYLEREF behaviour.
+- An organisation restyles the marking by changing the `Header
+  Classification` style, and moves or removes it by editing the headers in
+  its own reference document. The same field can be added to a footer.
+
+### Alternatives considered
+
+- **Writing the value into the header after Pandoc runs.** Rejected:
+  post-processing the `.docx` in Node and in the browser, which this ADR
+  rules out.
+- **A `DOCPROPERTY` field, or a content control bound to a document
+  property, set from Pandoc metadata.** Rejected. The stored result is still
+  the reference document's, so it doesn't fix viewers that don't update
+  fields. Word doesn't recalculate a `DOCPROPERTY` field in a header on its
+  own, and the value would need a metadata block in the compiled Markdown.
+- **An `IF` field that hides Word's error text when there is no
+  classification.** Rejected. The error text is in Word's display language,
+  so a comparison against the English text fails in any other language.
+- **Microsoft Purview sensitivity labels** (`MSIP_Label_*` custom document
+  properties). Deferred. A label needs the organisation's tenant-specific
+  label IDs, and a wrongly stamped label is a compliance issue. An
+  organisation whose labels add their own header marking will see both, and
+  should remove one: delete the field, or turn off the label's marking.
+
+Status: accepted.

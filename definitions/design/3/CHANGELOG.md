@@ -354,6 +354,30 @@ and the budgets derived from it:
 | `as-built-notes.operational-notes` | 151 | — | 160 | 80 | 30 |
 | `as-built-notes.handover-confirmation` | 105 | — | 110 | 55 | 20 |
 
+### Classification in the page header (#207)
+
+A reviewer reading page 12 couldn't see how the document must be handled: the classification was
+only on the cover. Protective marking is normally carried in the page header of every page.
+
+- **Every page's header shows the classification.** The classification the cover shows (from
+  `document-handling.classification`) is printed centred, in small grey type, in the page header
+  of every page of every v3 document, the cover included. The cover keeps its classification line,
+  and the footer is unchanged.
+- **It is a Word field in the reference documents.** All seven reference documents have a
+  `STYLEREF "Cover Classification"` field in their default, first-page and even-page headers, in a
+  new `Header Classification` style (based on `Header`: centred, 8pt, grey `595959`). Word fills it
+  from the cover's classification line as it lays out the pages. They still share one set of
+  styles, and now one set of headers. An organisation restyles the marking by changing that style.
+- **Viewers that don't update fields show an empty header.** The field's stored value comes from
+  the reference document, which is the same for every document, so it is left empty rather than
+  showing another document's marking. Word shows the classification; the cover always does.
+- **No classification, nothing in the header.** With the Classification blank, the Word document's
+  cover opens with an empty line in the `Cover Classification` style, so the header field reads
+  nothing instead of Word's "Error! No text of specified style in document." The exported `.md`
+  still leaves the classification out.
+- **Not included: Microsoft Purview sensitivity labels.** Stamping a label needs your tenant's own
+  label IDs, and a wrong label is a compliance issue (ADR-0052, amendment for #207).
+
 ## v2
 
 Layout revision of v1. Every artefact's `requires` list re-sequenced to the reading
