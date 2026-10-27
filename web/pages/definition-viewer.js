@@ -190,6 +190,19 @@ function tableOfContentsCheckbox(artefact, onToggle) {
   `
 }
 
+// #195 (ADR-0053): an Artefact's `diagram-captions:` switch. Unticked by default (the key absent);
+// ticking stores `true`, which numbers the document's diagrams "Diagram N. <title>"; unticking
+// removes the key, so a Definition that never uses it saves exactly as before. `onToggle` null
+// shows it read-only, as on a published version.
+function diagramCaptionsCheckbox(artefact, onToggle) {
+  return html`
+    <label class="defn-diagram-captions">
+      <input type="checkbox" checked=${artefact.diagramCaptions === true} disabled=${!onToggle} onChange=${onToggle ? (e) => onToggle(e.currentTarget.checked) : undefined} />
+      Number and caption diagrams ("Diagram N. …") in the Word document
+    </label>
+  `
+}
+
 // #152 (docs/adr/0050): marks or unmarks one of a stage's mounted modules read-only, keeping
 // `readOnlyModules` in the stage's own module order and dropping the key once it is empty — so a stage
 // nobody marks read-only saves exactly as it did before the key existed (opt-in).
@@ -2207,6 +2220,11 @@ export function DefinitionViewerPage() {
                   if (checked) dd.artefacts[ai].tableOfContents = true
                   else delete dd.artefacts[ai].tableOfContents
                 }))}
+                <label class="field-label">Diagram captions</label>
+                ${diagramCaptionsCheckbox(a, (checked) => updateDraft((dd) => {
+                  if (checked) dd.artefacts[ai].diagramCaptions = true
+                  else delete dd.artefacts[ai].diagramCaptions
+                }))}
               </div>
             `
           : html`
@@ -2221,6 +2239,7 @@ export function DefinitionViewerPage() {
               <p><span class="field-label">Cover page</span> ${coverPageCheckbox(a, null)}</p>
               ${a.coverClassification !== undefined ? html`<p><span class="field-label">Cover classification</span> <code>${String(a.coverClassification)}</code></p>` : null}
               <p><span class="field-label">Table of contents</span> ${tableOfContentsCheckbox(a, null)}</p>
+              <p><span class="field-label">Diagram captions</span> ${diagramCaptionsCheckbox(a, null)}</p>
             `}
         <div class="defn-focus-section">
           <div class="defn-focus-section-head">

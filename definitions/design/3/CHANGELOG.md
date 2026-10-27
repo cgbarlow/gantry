@@ -24,6 +24,24 @@ v3 stays a draft when spec #192 is complete; publishing it is the process owner'
   the Examples workspace. v2's `example: examples` names a slug the Examples workspace doesn't
   have, so it is left as it is: v2 is published and stays unchanged.
 
+### Diagram captions (#195)
+
+- **Diagrams are numbered and captioned in the Word document.** Every v3 Artefact sets
+  `diagram-captions: true`, so each captioned diagram renders as `Diagram N. <title>` in italics
+  directly under the figure, kept on the same page. Mermaid blocks and images share one numbering
+  sequence per document. See ADR-0053.
+- **How to caption.** A Mermaid block takes its caption on the opening fence,
+  `` ```mermaid {caption="Security architecture"} ``. An image is captioned by its alt text,
+  `![Security architecture](asset:<id>)`, when it stands on a line of its own. Type only the title:
+  the "Diagram N." prefix is added for you. The caption doubles as the picture's alt text.
+- **What doesn't change.** The exported `.md` keeps every fence and image exactly as written. An
+  uncaptioned Mermaid block is still labelled "Diagram N", and an image with empty brackets gets
+  no caption or number. The bundled examples' images already have names, so their v3 documents
+  now show numbered captions. v1 and v2 don't set the key and render exactly as before.
+- **The switch is on the Definitions page.** Each Artefact has a "Diagram captions" checkbox, so
+  an organisation copying v3 can turn numbering off for a document without editing
+  `definition.yaml`.
+
 ## v2
 
 Layout revision of v1. Every artefact's `requires` list re-sequenced to the reading

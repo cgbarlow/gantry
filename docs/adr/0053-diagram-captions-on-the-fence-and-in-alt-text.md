@@ -61,8 +61,8 @@ the choice is recorded here.
    Artefact is converted from exactly the markdown it was before this change,
    so its Word output is byte-for-byte unchanged. This follows the spec's rule
    that engine options are opt-in per Artefact, as `document-control`
-   (ADR-0049) already does. design v3's templates set the key; design v1 and
-   v2, recruitment-onboarding and any organisation's own Definitions do not,
+   (ADR-0049) already does. design v3 sets the key on every one of its
+   Artefacts in its `definition.yaml`; design v1 and v2, recruitment-onboarding and any organisation's own Definitions do not,
    and are unaffected until their author opts in. The key takes only `true` or
    `false`. Any other value is an `invalid-diagram-captions` problem, reported
    by `gantry validate`, on save and publish and in a Local Workspace, but it
@@ -70,8 +70,11 @@ the choice is recorded here.
    a bad value leaves the document unnumbered, as it always was. The key is
    kept through every Definition lifecycle operation (save, publish, new
    draft, clone, promote, each Provider, the Local Workspace copy) and
-   projected only when set. It has no Definitions page checkbox yet; it is set
-   in `definition.yaml`.
+   projected only when set. Like `cover-page` and `table-of-contents`
+   (ADR-0052), it is shown in the Definition viewer as a "Diagram captions"
+   checkbox on each Artefact, unticked by default: read-only on a published
+   version, and on a draft (server-hosted or Local Workspace) ticking it stores
+   `true` and unticking removes the key.
 
 6. **The numbering happens in the shared compile step** (`compileArtefact` in
    `lib/render.js`, using `web/lib/diagramCaptions.js`). The step returns two
