@@ -137,7 +137,8 @@ test('local-workspace definition: create, edit and publish through /definitions/
       const artefactEl = artefactsSection.locator('.local-def-element').first()
       await artefactEl.locator('input').nth(0).fill('soap')
       await artefactEl.locator('input').nth(1).fill('SOAP')
-      await artefactEl.locator('select').selectOption('business-case')
+      // The gate select sits in the artefact's header row; the body now has its own selects too (#196's cover classification).
+      await artefactEl.locator('.local-def-element-header select').selectOption('business-case')
       await artefactEl.locator('input').nth(2).fill('Summarise')
       await artefactEl.locator('input').nth(3).fill('background.summary')
       await artefactEl.getByRole('button', { name: 'Edit template' }).click()
