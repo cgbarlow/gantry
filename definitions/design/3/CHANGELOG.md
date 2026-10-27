@@ -24,6 +24,30 @@ v3 stays a draft when spec #192 is complete; publishing it is the process owner'
   the Examples workspace. v2's `example: examples` names a slug the Examples workspace doesn't
   have, so it is left as it is: v2 is published and stays unchanged.
 
+### Design decisions as an AD | Decision | ADR table (#200)
+
+Review items GF-007 and GF-008: the v2 guidance let an author (in the review, an AI agent) treat
+every design decision as an ADR needing ARB endorsement.
+
+- **`architecture.design-decisions` asks for a table**, `| AD | Decision | ADR |`. Every decision
+  gets an AD id (AD01, AD02, …). The ADR column is filled only for a decision that needs
+  governance endorsement, as `ADRYYY` until the ADR is registered.
+- **The four ADR-candidate criteria are in the guidance**: enterprise reuse exists, a new platform
+  or product is introduced, an architecture precedent is created, or governance endorsement is
+  explicitly required. It says plainly not to assume ARB endorsement is needed: a decision is not
+  an ADR, and an ADR is not an ARB item.
+- **`as-built-notes.architecture-decisions` uses the same table**, keeping the SAD's AD ids,
+  numbering decisions made during the build next in sequence, and giving the registered ADR
+  number once there is one.
+- **The Kiwi Cover Mutual example uses the table.** Its seven SAD decisions are AD01 to AD07; two
+  carry `ADRYYY` (AD01 for enterprise reuse, AD02 for the precedent of exposing the mainframe as
+  services) and five carry none. The as-built repeats them as built, with registered ADR numbers,
+  and adds AD08 for the policy-lookup cache change made during the build. The SAD's Constraints
+  and goals now cites "AD02" rather than "decision 2".
+- **No field, template or Gate change.** Both fields stay `markdown`, so the table renders under
+  "Design decisions" in the SAD and "Architecture decisions" in the as-built through the existing
+  templates.
+
 ## v2
 
 Layout revision of v1. Every artefact's `requires` list re-sequenced to the reading
