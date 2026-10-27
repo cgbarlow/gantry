@@ -42,6 +42,14 @@ fields:
     title: Scalability and capacity
     type: markdown
     required-at: [build-ready-checklist]
+    guidance: >
+      Today's volumes, the peak the solution is designed for, and how it
+      grows beyond that.
+
+      Give every figure — volumes, peaks, throughput, user counts, growth —
+      its source in brackets, e.g. `99.5% (hosting SLA §4.2)`, or mark it
+      `(target assumption)` where nothing agreed backs it yet. Never invent a
+      figure: say what is missing rather than fill the gap.
 
   - id: performance
     title: Performance
@@ -52,6 +60,11 @@ fields:
       template asks only for the performance requirements that bear on the
       decision. Deepen to testable figures before build readiness.
 
+      Give every figure — response times, percentiles, size limits, throughput
+      — its source in brackets, e.g. `99.5% (hosting SLA §4.2)`, or mark it
+      `(target assumption)` where nothing agreed backs it yet. Never invent a
+      figure: say what is missing rather than fill the gap.
+
   - id: availability-and-continuity
     title: Availability and continuity
     type: markdown
@@ -60,6 +73,11 @@ fields:
       Keep this to a headline target at high-level design; deepen to a
       testable availability target and continuity approach before build
       readiness.
+
+      Give every figure — availability percentages, service hours, change
+      windows — its source in brackets, e.g. `99.5% (hosting SLA §4.2)`, or
+      mark it `(target assumption)` where nothing agreed backs it yet. Never
+      invent a figure: say what is missing rather than fill the gap.
 
   - id: disaster-recovery-and-backup
     title: Disaster recovery and backup
@@ -76,6 +94,11 @@ fields:
       module. Both render under the single "Failure and recovery" section, so
       state each fact in one place only. Carried through to handover so the
       as-built recovery plan can be read against the targets it was built to.
+
+      Give every figure — RTO, RPO, backup frequency, retention periods — its
+      source in brackets, e.g. `99.5% (hosting SLA §4.2)`, or mark it `(target
+      assumption)` where nothing agreed backs it yet. Never invent a figure:
+      say what is missing rather than fill the gap.
   - id: other-nfrs
     title: Other non-functional requirements
     type: markdown
@@ -87,6 +110,11 @@ fields:
       future-considerations notes. End-of-life commitments are not an NFR;
       they belong in `support-and-operations.decommission`.
 
+      Give every figure — accessibility levels, retention periods, compliance
+      timeframes — its source in brackets, e.g. `99.5% (hosting SLA §4.2)`, or
+      mark it `(target assumption)` where nothing agreed backs it yet. Never
+      invent a figure: say what is missing rather than fill the gap.
+
   - id: requirements-traceability
     title: Requirements traceability
     type: markdown
@@ -97,3 +125,8 @@ fields:
       to `solution-definition.high-level-requirements`, the agreed set captured at SOAP,
       rather than restating the requirements here. You can keep this light during
       high-level design; it should be complete before build readiness.
+
+      Give every figure — any target or measure a row is verified against —
+      its source in brackets, e.g. `99.5% (hosting SLA §4.2)`, or mark it
+      `(target assumption)` where nothing agreed backs it yet. Never invent a
+      figure: say what is missing rather than fill the gap.

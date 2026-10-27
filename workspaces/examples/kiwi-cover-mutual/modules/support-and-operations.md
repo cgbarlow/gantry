@@ -30,7 +30,7 @@ owner: m.walker
 
 ## Operational accounts and licenses
 
-- BIBIT payment gateway — merchant account and API credentials; contract owned by Treasury; gateway support portal access for Finance Systems and Technology Operations
+- BIBIT gateway (contracted name: BIBIT Merchant Payment Services, verified against the Treasury contract register) — merchant account and API credentials; contract owned by Treasury; gateway support portal access for Finance Systems and Technology Operations
 - Bank real-time payment API — access through the BIBIT gateway under KCM's banking agreement; Treasury
 - CRM vendor enterprise support — support portal accounts for the Claims Platform Team; Technology Commercial
 - Financial Application vendor support — including the payment gateway adapter; Finance Systems

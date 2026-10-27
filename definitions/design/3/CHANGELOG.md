@@ -48,6 +48,39 @@ every design decision as an ADR needing ARB endorsement.
   "Design decisions" in the SAD and "Architecture decisions" in the as-built through the existing
   templates.
 
+### Sourced figures, preferred terms, contractual names and path-led columns (#201)
+
+Review items GF-006, GF-018, GF-022 and GF-023. These are conventions that Field guidance sets
+and the example shows. Gantry does not check them.
+
+- **Every figure has a source or is marked as an assumption (GF-022).** The guidance for every
+  NFR Field, and for `architecture.architectural-risks`, `integration.hardware`,
+  `integration.bandwidth` and `integration.san`, asks for each figure's source in brackets, e.g.
+  `99.5% (hosting SLA §4.2)`, or the marker `(target assumption)`. Never invent a figure.
+  Every figure in those Fields of the `kiwi-cover-mutual` example now has a source or the marker.
+  Figures that only repeated a retention period already stated in the NFRs now point back to it.
+- **The glossary holds the preferred terms (GF-006).** `glossary.terms-and-definitions` is now a
+  Preferred term | Definition | Variants to avoid table. It names the solution itself and its
+  platforms and products, each with the variants to avoid. The guidance for the Fields that name
+  the solution's parts tells authors to use those terms in headings, tables, diagrams and prose:
+  `solution-definition.high-level-solution-overview`, `architecture.solution-description`, the
+  `integration` interface, network, licence and protocol Fields, and
+  `support-and-operations.operational-accounts-and-licenses`. The example glossary names
+  "claims handling modernisation" and eight other preferred terms, and the rest of the example
+  avoids every variant it lists.
+- **Architecture names by default, contracted names only where verified (GF-023).** The licence,
+  account and platform Fields use the architecture name. They give the contracted product name
+  only where it has been checked against the contract. The example's licences table has a
+  "Contracted name" column: it gives one verified contracted name and marks the others "Not yet
+  verified" rather than guessing. The payment gateway's account entry names its verified contract.
+- **Columns say what the rows are (GF-018).** The rows of `integration.communication-and-network-protocols`
+  are now paths: Path / Protocol / From / To / Port / Direction / Environment(s) / Comments.
+  Environment no longer comes first. `integration.san` has one row per storage use, and
+  `integration.software-and-licences` one row per product with its contracted name. The
+  example's tables use these columns.
+- **The MCP server instructions carry one authoring line.** Follow each field's guidance and the
+  example's conventions, and never invent figures or names.
+
 ## v2
 
 Layout revision of v1. Every artefact's `requires` list re-sequenced to the reading

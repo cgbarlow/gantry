@@ -60,6 +60,13 @@ fields:
       `integration`. Carries the reference SAD's "Terms & Conditions and
       Contracts" sub-section.
 
+      Use the glossary's preferred terms (`glossary.terms-and-definitions`)
+      consistently in headings, tables, diagrams and prose.
+
+      Use the architecture name by default — the glossary's preferred term —
+      and the contracted product name only where it has been verified against
+      the contract, e.g. in the licences table's "Contracted name" column.
+
   - id: monitoring-and-alerting
     title: Monitoring and alerting
     type: markdown

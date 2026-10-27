@@ -35,22 +35,22 @@ Hosting and sites: production in Wellington (hall B), recovery in Auckland; non-
 
 ## Software and licences
 
-| Software | Version | Count | Licences per environment |
-| --- | --- | --- | --- |
-| CRM System (vendor) | 12.3 with workflow extension pack | 1 production, 3 non-production | Existing enterprise licence covers the extension pack; 40 additional named handler seats |
-| Home & Away Financial Application | 9.1 with payment gateway adapter | 1 production, 2 non-production | Adapter licensed per production instance; non-production included |
-| Customer Information Service / Claims Information Service | KCM-built, Java 21 on the corporate runtime | 2 instances each in production, 1 each in non-production | No licence; open-source runtime |
-| Document management system | 7.4 | 1 production, 1 non-production | Additional 3 service-account API licences |
-| Mainframe integration layer (MQ bridge) | MQ 9.3 | Existing | Existing capacity units; +2 for the new channels |
-| Monitoring (Prometheus, Grafana, PagerDuty) | Current platform versions | Existing | 6 additional PagerDuty seats for on-call |
+| Software | Contracted name | Version | Count | Licences per environment |
+| --- | --- | --- | --- | --- |
+| CRM System | Not yet verified | 12.3 with workflow extension pack | 1 production, 3 non-production | Existing enterprise licence covers the extension pack; 40 additional named handler seats |
+| Financial Application | Home & Away Financials Enterprise (verified against the Finance Systems licence schedule) | 9.1 with payment gateway adapter | 1 production, 2 non-production | Adapter licensed per production instance; non-production included |
+| CIS / Claims InfoServ | — (KCM-built) | Java 21 on the corporate runtime | 2 instances each in production, 1 each in non-production | No licence; open-source runtime |
+| Document management system | Not yet verified | 7.4 | 1 production, 1 non-production | Additional 3 service-account API licences |
+| MQ bridge (mainframe integration layer) | Not yet verified | MQ 9.3 | Existing | Existing capacity units; +2 for the new channels |
+| Monitoring (Prometheus, Grafana, PagerDuty) | Not yet verified | Current platform versions | Existing | 6 additional PagerDuty seats for on-call |
 
 ## Hardware
 
-No new physical hardware. Production: two additional virtual guests on the UNIX server farm (VMware, RHEL 9, 64-bit), 4 vCPU and 16 GB each, for CIS and Claims InfoServ, plus the standby database host already in the farm's PostgreSQL cluster. Non-production: one guest per environment for the services, 2 vCPU and 8 GB. The document migration runs on a temporary 8 vCPU / 32 GB guest for its duration, then is released. No core-based licensing applies to the KCM-built services; the CRM and Financial Application guests are unchanged.
+No new physical hardware. Production: two additional virtual guests on the UNIX server farm (VMware, RHEL 9, 64-bit), 4 vCPU and 16 GB each, for CIS and Claims InfoServ (sized from capacity test CT-03), plus the standby database host already in the farm's PostgreSQL cluster. Non-production: one guest per environment for the services, 2 vCPU and 8 GB (UNIX server farm standard small guest). The document migration runs on a temporary 8 vCPU / 32 GB guest for its duration, then is released (target assumption). No core-based licensing applies to the KCM-built services; the CRM System and Financial Application guests are unchanged.
 
 ## Bandwidth
 
-The new flows are small: a claim registration is about 20 KB of service traffic plus documents (median 2 MB, up to 25 MB). At the design peak of 3,000 registrations a day with documents, that is under 100 GB a day on the data-centre LAN, well within the 10 Gbps fabric. The mainframe MQ channels carry about 4 KB per transaction at 4 a second peak. The BIBIT gateway path carries under 1 MB a day. Log shipping to Auckland adds about 15 GB a day on the inter-site link (1 Gbps), currently at 30 percent utilisation. The document migration transfers about 450 GB once, throttled to overnight windows.
+The new flows are small: a claim registration is about 20 KB of service traffic plus documents, median 2 MB and up to 25 MB (claims volumes report FY2025). At the design peak of 3,000 registrations a day with documents (target assumption), that is under 100 GB a day on the data-centre LAN, well within the 10 Gbps fabric (network capacity report, March 2026). The mainframe MQ channels carry about 4 KB per transaction at 4 a second peak (capacity test CT-03). The BIBIT gateway path carries under 1 MB a day (target assumption). Log shipping to Auckland adds about 15 GB a day on the 1 Gbps inter-site link, currently at 30 percent utilisation (network capacity report, March 2026). The document migration transfers about 450 GB once, throttled to overnight windows (scanning archive inventory).
 
 ## Network Devices
 
@@ -63,25 +63,25 @@ The new flows are small: a claim registration is about 20 KB of service traffic 
 
 ## Communication & Network Protocols
 
-| Environment | Protocol | From | To | Port | Direction | Comments |
-| --- | --- | --- | --- | --- | --- | --- |
-| All | HTTPS (TLS 1.3, mutual) | CRM guests | CIS, Claims InfoServ VIPs | 8443 | Bidirectional | New |
-| All | HTTPS (TLS 1.3) | API gateway (DMZ) | CIS, Claims InfoServ VIPs | 8443 | Bidirectional | New; member-scoped routes only |
-| All | MQ over TLS 1.2 | CIS, Claims InfoServ | MQ bridge | 1414 | Bidirectional | New channels; TLS 1.2 by exception |
-| All | MQ | MQ bridge | Mainframe queue manager | 1414 | Bidirectional | Existing channel, additional queues |
-| All | HTTPS (TLS 1.3, mutual) | Claims InfoServ | Financial Application | 8443 | Bidirectional | New |
-| Production, UAT | HTTPS (TLS 1.3, signed) | Financial Application | BIBIT gateway | 443 | Bidirectional | New; egress firewall rule; UAT uses the gateway sandbox |
-| All | HTTPS (TLS 1.3, mutual) | CRM, Claims InfoServ | Document management API | 8443 | Bidirectional | New |
-| All | SFTP | Claims InfoServ | Data mart landing server | 22 | Unidirectional | New nightly transfer |
-| Production | PostgreSQL streaming replication over TLS | Primary DB host | Auckland standby | 5432 | Unidirectional | New for the services' database |
+| Path | Protocol | From | To | Port | Direction | Environment(s) | Comments |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| CRM System to shared services | HTTPS (TLS 1.3, mutual) | CRM guests | CIS, Claims InfoServ VIPs | 8443 | Bidirectional | All | New |
+| Web forms to shared services | HTTPS (TLS 1.3) | API gateway (DMZ) | CIS, Claims InfoServ VIPs | 8443 | Bidirectional | All | New; member-scoped routes only |
+| Shared services to mainframe | MQ over TLS 1.2 | CIS, Claims InfoServ | MQ bridge | 1414 | Bidirectional | All | New channels; TLS 1.2 by exception |
+| MQ bridge to Policy Data Management | MQ | MQ bridge | Mainframe queue manager | 1414 | Bidirectional | All | Existing channel, additional queues |
+| Claim payment request | HTTPS (TLS 1.3, mutual) | Claims InfoServ | Financial Application | 8443 | Bidirectional | All | New |
+| Payment instruction | HTTPS (TLS 1.3, signed) | Financial Application | BIBIT gateway | 443 | Bidirectional | Production, UAT | New; egress firewall rule; UAT uses the gateway sandbox |
+| Document store and retrieve | HTTPS (TLS 1.3, mutual) | CRM System, Claims InfoServ | Document management API | 8443 | Bidirectional | All | New |
+| Nightly claims extract | SFTP | Claims InfoServ | Data mart landing server | 22 | Unidirectional | All | New nightly transfer |
+| Services database replication | PostgreSQL streaming replication over TLS | Primary DB host | Auckland standby | 5432 | Unidirectional | Production | New for the services' database |
 
 ## SAN (Database, Application Server, Backup, DR)
 
-| Environment | Use | Tier | Size | Notes |
+| Storage use | Environment(s) | Tier | Size | Notes |
 | --- | --- | --- | --- | --- |
-| Production | Services database (PostgreSQL) | Tier 1 SSD | 400 GB, 2 volumes | Transaction-log shipping to Auckland; 35-day backups on tier 3 |
-| Production | Application servers | Tier 2 | 100 GB per guest | Logs shipped to the monitoring platform |
-| Production | Document store growth | Tier 2 / tier 3 after 12 months | 450 GB migration + 90 GB a year | Nightly snapshot, 90-day retention |
-| Auckland (DR) | Standby database and restored services | Tier 1 SSD | Mirror of production | Cold application guests, warm database |
-| Non-production | Databases and application servers | Tier 3 | 100 GB per environment | Refreshed from masked production quarterly |
-| Backup | Full and log backups | Tier 3 / offsite object storage | About 2 TB rolling | Monthly retained 7 years for claims records |
+| Services database (PostgreSQL) | Production | Tier 1 SSD | 400 GB on 2 volumes (target assumption) | Transaction-log shipping to Auckland; backups on tier 3, retained as Non-Functional Requirements sets |
+| Application servers | Production | Tier 2 | 100 GB per guest (UNIX server farm standard guest) | Logs shipped to the monitoring platform |
+| Document store | Production | Tier 2, then tier 3 for closed claims (records retention schedule) | 450 GB migration (scanning archive inventory) plus 90 GB a year (records volumes report FY2025) | Nightly snapshot, retained as Non-Functional Requirements sets |
+| Standby database and restored services | Auckland (DR) | Tier 1 SSD | Mirror of production | Cold application guests, warm database |
+| Databases and application servers | Non-production | Tier 3 | 100 GB per environment (target assumption) | Refreshed from masked production quarterly |
+| Full and log backups | Production | Tier 3 / offsite object storage | About 2 TB rolling (target assumption) | Monthly backups kept for claims records as Non-Functional Requirements sets |

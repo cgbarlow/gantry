@@ -46,7 +46,7 @@ KCM's Technology Strategy names shared enterprise services as its target state a
 
 ## Architectural risks
 
-- The mainframe MQ integration layer is a single path for all policy reads and writes; if its throughput assumptions (20 transactions a second tested, 4 a second design peak) are wrong, every process step slows. Mitigated by the capacity test and by caching policy lookups in CIS for 15 minutes.
+- The mainframe MQ integration layer is a single path for all policy reads and writes; if its throughput assumption is wrong — 20 transactions a second tested against a design peak of 4 a second (capacity test CT-03) — every process step slows. Mitigated by the capacity test and by caching policy lookups in CIS for 15 minutes (target assumption).
 - Holding claim state in Claims InfoServ while the CRM runs the workflow creates two places a claim's status could be read; the design makes Claims InfoServ authoritative and the CRM a view, and the acceptance tests assert they agree.
 - The Financial Application's extension for gateway payment is vendor-delivered on the vendor's release cycle; a slip there delays increment 3 (tracked with R2).
 - The document migration is the largest data movement in the initiative and the only one that cannot be switched back; it is run in background with a claim-level reconciliation report.

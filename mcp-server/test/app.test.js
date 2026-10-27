@@ -76,6 +76,29 @@ test('a real MCP client can list and call list_workspaces end-to-end over stream
   })
 })
 
+// #201: the server instructions an MCP client receives on connect carry the one authoring rule —
+// the rest of the steering lives in each Field's guidance and the example instance it reads.
+test('a connected MCP client receives the authoring rule in the server instructions', async () => {
+  await withRunningApp({ fetchImpl: fakeGantryFetch(() => undefined) }, async (base) => {
+    const client = new Client({ name: 'test-client', version: '0.0.0' })
+    const transport = new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+      requestInit: { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } },
+    })
+    await client.connect(transport)
+    try {
+      const rule = client
+        .getInstructions()
+        .split('\n')
+        .find((line) => /each field's guidance/.test(line))
+      assert.ok(rule, 'the authoring rule is in the instructions')
+      assert.match(rule, /the example's conventions/)
+      assert.match(rule, /never invent figures or names/)
+    } finally {
+      await client.close()
+    }
+  })
+})
+
 test('a request without a valid bearer token is rejected before any tool runs', async () => {
   const fetchImpl = fakeGantryFetch(() => {
     throw new Error('gantry serve must never be called for an unauthorized request')
