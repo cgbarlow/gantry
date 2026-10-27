@@ -4,7 +4,7 @@ import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync }
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { renderArtefact } from '../lib/render.js'
+import { renderArtefact, unnumberedHeadingsForWord } from '../lib/render.js'
 import { runLocalWorkspaceCompute } from '../lib/localWorkspace.js'
 import { findDefinitionProblemsInStructure, loadDefinition } from '../lib/definition.js'
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
@@ -160,7 +160,9 @@ function convertDirectly(result) {
   try {
     const mdPath = join(scratch, 'before.md')
     const docxPath = join(scratch, 'before.docx')
-    writeFileSync(mdPath, result.markdown)
+    // Headings marked `.unnumbered` (design v3's Document Control, #197) go to Word with their
+    // numbering switched off whether or not anything is captioned.
+    writeFileSync(mdPath, unnumberedHeadingsForWord(result.markdown))
     execFileSync('pandoc', ['-f', 'markdown', '-t', 'docx', '--reference-doc', result.referenceDocPath, '-o', docxPath, mdPath])
     return unzip(docxPath, 'word/document.xml')
   } finally {

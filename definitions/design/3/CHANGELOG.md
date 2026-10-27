@@ -170,6 +170,32 @@ guidance sets and the example shows. No Field is added and Gantry checks none of
   diagram. Every logical component and interface has a Status, and Records Management's contact
   is marked `(interim)` in the support contacts and as the owner of risk R4.
 
+### Production Word styles (#197)
+
+From review items GF-003, GF-004 and GF-014 to GF-017. All of it is in the reference Word
+documents, so an organisation's own reference document can change any of it (ADR-0056). All seven
+(`reference.docx` and the six `reference-<artefact>.docx`) share one set of styles and one
+numbering definition; only their footers differ, as before.
+
+- **Numbered headings.** Heading 1, 2 and 3 are numbered `1`, `1.1` and `1.1.1` by one multilevel
+  list, and the table of contents shows the numbers. Heading 4 to 6 aren't numbered: Heading 5's
+  old link to an unrelated legal-style list (`1)`) is gone.
+- **Unnumbered front matter.** The cover's Title and Subtitle and the `TOC Heading` aren't
+  numbered. v3 ships its own `templates/_documentControl.md.tmpl`, v1's partial with
+  `## Document Control` and `## Review & sign-off` marked `{.unnumbered}`, which the render writes
+  to Word with their numbering switched off. Numbering starts at section 1.
+- **Keep with next** on Heading 1 to 6, Caption, Table Caption, Image Caption, Figure and Captioned
+  Figure, so a heading or caption is never left at the foot of a page apart from what it belongs to.
+- **One table style.** `Table`, which every table uses, has a dark grey (`404040`) header row with
+  white bold text and a light grey grid. The table style and `Compact`, the table cells' paragraph
+  style, both set 11pt, the body text's size, so every table, cell and short list matches.
+- **Rows don't split; header rows repeat.** The `Table` style turns off "Allow row to break across
+  pages", which every row of every table takes. Pandoc already marks each table's header row to
+  repeat on every page.
+- **The User Guide explains a house style.** Its new section "Word styles and your house style"
+  covers downloading and replacing a reference document, which styles Gantry uses, and
+  `{.unnumbered}`.
+
 ## v2
 
 Layout revision of v1. Every artefact's `requires` list re-sequenced to the reading
