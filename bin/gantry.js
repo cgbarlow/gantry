@@ -210,6 +210,7 @@ withInstanceOptions(
     .description('Create an instance')
     .option('--owner <owner>', "owner to record in each module file's frontmatter")
     .option('--assignee <assignee>', 'assignee to record on the instance record itself (#97)')
+    .option('--size <size>', 'target size — small, medium or large — for a definition that sets target-words (#202; default medium)')
     .option('--definition-version <version>', 'definition version to pin (default latest published)')
     .option('--version <version>', 'alias for --definition-version')
 ).action((definition, slug, options) => {
@@ -226,6 +227,7 @@ withInstanceOptions(
     definitionsDir: resolveDefinitionsDir(options.definitionsDir),
     owner: options.owner,
     assignee: options.assignee,
+    size: options.size,
     definitionVersion: version ?? undefined,
   })
   // Registered explicitly for the same reason the server does it (WI #356): the registry only

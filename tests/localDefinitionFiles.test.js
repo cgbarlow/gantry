@@ -351,6 +351,35 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
     })
   })
 
+  // #202 (spec #192, ADR-0054): a Field's `target-words` — its word budget per Target size —
+  // survives the local-workspace Definition copy too, kebab-case on disk and `targetWords` in the
+  // projection, exactly as the server-side lifecycle keeps it (tests/definitionKeyRoundTrip.test.js).
+  test('round-trips a Field\'s target-words, and matches the server-side projection for the same structure', async () => {
+    const budget = { small: 40, medium: 100, large: 200 }
+    const withBudget = {
+      ...FIXTURE_STRUCTURE,
+      modules: [{ ...FIXTURE_STRUCTURE.modules[0], fields: [{ ...FIXTURE_STRUCTURE.modules[0].fields[0], targetWords: budget }, FIXTURE_STRUCTURE.modules[0].fields[1]] }],
+    }
+
+    const handle = new MemDirHandle()
+    await writeLocalDefinitionStructure(handle, 'wi384-fixture', 1, withBudget)
+    const moduleText = await (await (await (await (await (await (await handle.getDirectoryHandle('definitions')).getDirectoryHandle('wi384-fixture')).getDirectoryHandle('1')).getDirectoryHandle('modules')).getFileHandle('background.yaml')).getFile()).text()
+    assert.match(moduleText, /target-words:\n\s+small: 40\n\s+medium: 100\n\s+large: 200/)
+    assert.doesNotMatch(moduleText, /targetWords/)
+
+    const read = await readLocalDefinitionStructure(handle, 'wi384-fixture', 1)
+    const [summary, risks] = read.modules[0].fields
+    assert.deepEqual(summary.targetWords, budget)
+    assert.equal('targetWords' in risks, false)
+
+    await withScratchInstances(async (definitionsDir) => {
+      createBlankDefinition('wi384-fixture', { definitionsDir })
+      writeDefinitionVersion('wi384-fixture', 1, withBudget, { definitionsDir })
+      const diskProjection = definitionVersionProjection(loadDefinition('wi384-fixture', { definitionsDir, version: 1 }))
+      assert.deepEqual(read, diskProjection)
+    })
+  })
+
   // #148: an explicit `true` on disk is kept in the file but left out of the projection, as
   // lib/definition.js's definitionVersionProjection does — only `false` is projected.
   test('keeps document-control / satisfies-gate: true on disk but leaves them out of the projection, matching the server', async () => {

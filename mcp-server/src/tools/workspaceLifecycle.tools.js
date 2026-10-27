@@ -107,7 +107,7 @@ async function createWorkspace(args, { gantryClient }) {
 // `workspaceId` on the actual create call, so a missing/rejected PAT is reported the same structured
 // way every other tool in this server reports it.
 async function createInstance(args, { gantryClient }) {
-  const { workspaceId, definition, slug, owner, assignee, definitionVersion } = args
+  const { workspaceId, definition, slug, owner, assignee, size, definitionVersion } = args
 
   const [providerRes, serverRes] = await Promise.all([
     gantryClient.request({ path: '/api/workspaces', query: { archived: '1' } }),
@@ -127,7 +127,15 @@ async function createInstance(args, { gantryClient }) {
     })
   }
 
-  const body = { definition, slug, ...(owner !== undefined ? { owner } : {}), ...(assignee !== undefined ? { assignee } : {}), ...(definitionVersion !== undefined ? { definitionVersion } : {}) }
+  const body = {
+    definition,
+    slug,
+    ...(owner !== undefined ? { owner } : {}),
+    ...(assignee !== undefined ? { assignee } : {}),
+    // #202 (docs/adr/0054): the instance's Target size; gantry serve refuses it for a definition with no word budgets.
+    ...(size !== undefined ? { size } : {}),
+    ...(definitionVersion !== undefined ? { definitionVersion } : {}),
+  }
 
   if (providerWorkspace) {
     const { provider, location } = providerWorkspace
@@ -203,13 +211,15 @@ export const tools = [
       '2. definition must be a known definition id; slug is the instance\'s own directory name (single path segment, no slashes). ' +
       '3. owner (optional) seeds each first-stage module\'s frontmatter owner; assignee (optional) sets the instance\'s stored assignee. definitionVersion (optional) pins a specific version — omitted defaults to latest published. ' +
       '4. A Provider-backed workspace\'s credential is resolved automatically the normal way — a missing/rejected PAT is reported as a "missing_workspace_pat"/"authentication_required" error, never guessed. ' +
-      '5. Only azure-devops and github workspaces are supported for instance creation today; gitlab/atlassian workspaces are reported as not-yet-supported rather than silently creating a local instance in the wrong place.',
+      '5. Only azure-devops and github workspaces are supported for instance creation today; gitlab/atlassian workspaces are reported as not-yet-supported rather than silently creating a local instance in the wrong place. ' +
+      '6. size (optional: small, medium or large) is the instance\'s Target size — how much authors write in each field — for a definition that sets word budgets (get_definition shows a field\'s "targetWords"); omitted, the instance works to medium. It is refused for a definition with no budgets.',
     inputSchema: {
       workspaceId: z.string().describe('An id from list_workspaces or create_workspace.'),
       definition: z.string().describe('A known definition id.'),
       slug: z.string().min(1).describe('The instance\'s directory name — a single path segment, no slashes.'),
       owner: z.string().optional(),
       assignee: z.string().optional(),
+      size: z.enum(['small', 'medium', 'large']).optional().describe('The instance\'s Target size, for a definition that sets word budgets; omitted means medium.'),
       definitionVersion: z.union([z.number(), z.string()]).optional().describe('An explicit version, or "latest" (the default when omitted).'),
     },
     handler: createInstance,

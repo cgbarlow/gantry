@@ -36,6 +36,7 @@ import { parseLocalModuleFile, parseInstanceYaml } from './localInstanceFiles.js
 import { isMultiValuedField } from './fieldShape.js'
 import { readOnlyModuleProblems } from './readOnlyModules.js'
 import { artefactFrontMatterProblems } from './artefactFrontMatter.js'
+import { targetWordsProblem } from './targetSize.js'
 
 // ---------------------------------------------------------------------------
 // definition/module lookup — the projection's `modules` is a plain array;
@@ -570,6 +571,9 @@ export function findLocalDefinitionProblems(structure) {
           message: `Module "${moduleSpec.id}" field "${field.id}" has "default: ${field.default}" which is not in its own "options:" list`,
         })
       }
+      // #202: shared with lib/definition.js rather than ported — see web/lib/targetSize.js.
+      const budgetProblem = targetWordsProblem(moduleSpec.id, field, field.targetWords)
+      if (budgetProblem) problems.push(budgetProblem)
     }
   }
 

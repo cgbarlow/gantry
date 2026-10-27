@@ -22,6 +22,7 @@ import { useEffect, useState } from 'preact/hooks'
 import { useLocation } from 'preact-iso'
 import { reorder } from '../lib/reorder.js'
 import { coverClassificationOptions } from '../lib/artefactFrontMatter.js'
+import { TARGET_SIZES, targetSizeLabel, withFieldTargetWords } from '../lib/targetSize.js'
 import {
   getWorkspaceHandle,
   ensurePermission,
@@ -185,6 +186,8 @@ function FieldRow({ field, readOnly, onChange, onRemove }) {
       delete next.multiple
       delete next.default
     }
+    // #202: only prose (markdown, list) has a word budget.
+    if (nextType !== 'markdown' && nextType !== 'list') delete next.targetWords
     onChange(next)
   }
   function updateOption(index, value) {
@@ -219,6 +222,20 @@ function FieldRow({ field, readOnly, onChange, onRemove }) {
         </label>
         ${readOnly ? null : html`<button type="button" class="btn small ghost" onClick=${onRemove}>Remove field</button>`}
       </div>
+      ${(field.type ?? 'markdown') === 'markdown' || field.type === 'list' ? html`
+        <div class="defn-target-words" role="group" aria-label="Word targets">
+          <span class="field-label">Word targets</span>
+          ${TARGET_SIZES.map((size) => html`
+            <label key=${size}>
+              ${targetSizeLabel(size)}
+              <input class="wizard-input defn-target-words-input" type="number" min="1" step="1" aria-label=${`${targetSizeLabel(size)} word target`}
+                readOnly=${readOnly}
+                value=${field.targetWords && typeof field.targetWords === 'object' ? field.targetWords[size] ?? '' : ''}
+                onInput=${(e) => onChange(withFieldTargetWords(field, size, e.currentTarget.value))} />
+            </label>
+          `)}
+        </div>
+      ` : null}
       ${field.type === 'select' ? html`
         <div class="local-def-options">
           ${(field.options ?? []).map((opt, oi) => html`
