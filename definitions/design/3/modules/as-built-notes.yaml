@@ -25,6 +25,12 @@ fields:
     guidance: >
       List the key design decisions as implemented — for each, what was decided and what it
       means in practice. Note any that changed from the approved design.
+
+      Use the same `| AD | Decision | ADR |` table as the SAD's
+      `architecture.design-decisions`, keeping its AD ids, and number any decision made during
+      the build next in sequence. Fill the ADR column only for a decision that needs governance
+      endorsement: the registered ADR number, or `ADRYYY` until the ADR is registered. Don't
+      assume ARB endorsement is needed — a decision is not an ADR, and an ADR is not an ARB item.
   - id: process-flows
     title: Data migration and process flows
     type: markdown

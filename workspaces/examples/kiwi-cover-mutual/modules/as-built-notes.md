@@ -17,14 +17,16 @@ As built, the Register step uses the document (scanning) service and the custome
 
 ## Architecture decisions
 
-- Decision 1 (shared services) — implemented as designed; CIS and Claims InfoServ are the only consumers of the PDM exposures in production.
-- Decision 2 (Policy Data Management retained, exposed as services) — implemented; PDM-01 to PDM-04 went live in the April and May 2026 windows as planned.
-- Decision 3 (CRM orchestrates, Claims InfoServ owns state) — implemented; the acceptance suite's state-agreement checks run nightly and have found no drift.
-- Decision 4 (payments via the Financial Application then the gateway) — implemented; changed in one respect: the gateway callback is received by the Financial Application's adapter rather than polled, after the vendor delivered callback support in adapter 9.1.2.
-- Decision 5 (claim-indexed documents) — implemented; the archive migration completed on 21 August 2026 with a clean reconciliation.
-- Decision 6 (switchable increments) — implemented; the manual fallback for each step is exercised in the quarterly test.
-- Decision 7 (no new platform) — held; one temporary migration guest was used and released.
-- New: the 15-minute policy-lookup cache in CIS was reduced to 5 minutes after UAT showed handlers accepting claims against a policy changed in the same quarter-hour.
+| AD | Decision | ADR |
+|----------|----------------------------------------------------------------------|------------|
+| AD01 | **Shared services** — implemented as designed; CIS and Claims InfoServ are the only consumers of the PDM exposures in production. | ADR031 |
+| AD02 | **Policy Data Management retained, exposed as services** — implemented; PDM-01 to PDM-04 went live in the April and May 2026 windows as planned. | ADR032 |
+| AD03 | **CRM orchestrates, Claims InfoServ owns state** — implemented; the acceptance suite's state-agreement checks run nightly and have found no drift. | |
+| AD04 | **Payments via the Financial Application then the gateway** — implemented; changed in one respect: the gateway callback is received by the Financial Application's adapter rather than polled, after the vendor delivered callback support in adapter 9.1.2. | |
+| AD05 | **Claim-indexed documents** — implemented; the archive migration completed on 21 August 2026 with a clean reconciliation. | |
+| AD06 | **Switchable increments** — implemented; the manual fallback for each step is exercised in the quarterly test. | |
+| AD07 | **No new platform** — held; one temporary migration guest was used and released. | |
+| AD08 | **New during the build: policy-lookup cache reduced to 5 minutes.** The 15-minute policy-lookup cache in CIS was reduced to 5 minutes after UAT showed handlers accepting claims against a policy changed in the same quarter-hour. | |
 
 ## Data migration and process flows
 
