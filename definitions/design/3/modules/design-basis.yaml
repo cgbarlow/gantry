@@ -34,6 +34,7 @@ fields:
   - id: constraints
     title: Constraints
     type: markdown
+    target-words: { small: 70, medium: 180, large: 360 }
     required: false
     guidance: >
       Fixed limits the design had to work within — deployment tooling,
@@ -45,6 +46,7 @@ fields:
   - id: assumptions
     title: Assumptions
     type: markdown
+    target-words: { small: 55, medium: 135, large: 270 }
     required: false
     guidance: >
       What was taken as given for the design to hold. Things that would
@@ -56,6 +58,7 @@ fields:
   - id: caveats
     title: Caveats
     type: markdown
+    target-words: { small: 15, medium: 40, large: 80 }
     required: false
     guidance: >
       Qualifications a reader should carry into the rest of the document —
@@ -76,6 +79,7 @@ fields:
   - id: design-principles
     title: Design principles
     type: markdown
+    target-words: { small: 50, medium: 100, large: 170 }
     required: false
     guidance: >
       The principles used as a guide when weighing options — e.g. common
@@ -85,6 +89,7 @@ fields:
   - id: outcomes-and-deliverables
     title: Outcomes and deliverables
     type: markdown
+    target-words: { small: 35, medium: 70, large: 120 }
     required: false
     guidance: >
       The concrete outputs this work produces and who owns each — by phase

@@ -22,6 +22,7 @@ fields:
   - id: controls
     title: Controls
     type: markdown
+    target-words: { small: 110, medium: 220, large: 370 }
     required-at: [build-ready-checklist, operational-handover]
     guidance: >
       The security controls in force, grouped (e.g. Encryption, Incident
@@ -39,6 +40,7 @@ fields:
   - id: inheritance-and-dependencies
     title: Inheritance and dependencies
     type: markdown
+    target-words: { small: 25, medium: 65, large: 130 }
     required: false
     guidance: >
       What the solution's security posture inherits from an underlying

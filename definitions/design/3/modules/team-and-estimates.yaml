@@ -8,6 +8,7 @@ fields:
   - id: teams-required
     title: Teams required
     type: list
+    target-words: { small: 35, medium: 90, large: 180 }
     required: true
     guidance: >
       Every team touched by this solution and a named contact for each —
@@ -16,6 +17,7 @@ fields:
   - id: estimates
     title: Estimates
     type: markdown
+    target-words: { small: 50, medium: 100, large: 170 }
     required: true
     guidance: >
       T-shirt size (or equivalent order-of-magnitude estimate) per team or
@@ -24,6 +26,7 @@ fields:
   - id: references
     title: References
     type: list
+    target-words: { small: 30, medium: 75, large: 150 }
     required: false
     guidance: >
       Links to supporting material — prior art, related initiatives, source

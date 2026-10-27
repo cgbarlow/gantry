@@ -6,10 +6,11 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { loadDefinition, loadDefinitionChangelog, definitionVersionProjection, findDefinitionProblems } from '../lib/definition.js'
-import { createInstance, readInstance, readModule } from '../lib/instance.js'
+import { createInstance, readInstance, readModule, writeModule } from '../lib/instance.js'
 import { renderArtefact, unnumberedHeadingsForWord } from '../lib/render.js'
 import { checkGate } from '../lib/check.js'
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
+import { countWords, overTargetNotes, TARGET_SIZES } from '../web/lib/targetSize.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { bodyTables, docxPart, headerRowFormat, headingNumbers, keepsWithNext, numberingLevels, rowsCantSplit, styleFontSize, styleNumbering, wordStyles } from './helpers/wordDocx.js'
 
@@ -1169,4 +1170,136 @@ describe('v3 Word styles: numbered headings, keep-with-next, one table style, ro
       assert.equal(headerRowFormat(styles, 'Table').color, 'FFFFFF', 'and shades its header row')
     })
   }
+})
+
+// #203 (spec #192): every v3 Field that renders into an Artefact has a word budget (`target-words`,
+// #202, docs/adr/0054), calibrated from the example as it stood before this ticket: Large is the
+// longer of the two bundled examples' lengths for the Field, rounded up to the next ten; Medium is
+// about half of Large and Small about a fifth, adjusted per Field where a section is a table or
+// inherently short. The v3 CHANGELOG records the measured lengths and the budgets in one table, and
+// the tests below hold the Definition to that table, so a later change to a budget changes the record
+// too. The examples are then condensed to Medium, the default. The #195 and #199–#201 tests above run
+// against the condensed example, so they are what show its captions, state labels, AD table, sourced
+// figures, preferred terms and path-led columns survived the cut.
+describe('v3 word budgets, and the examples condensed to Medium (#203)', () => {
+  const BUDGET_SECTION = /^### .*\(#203\)$/m
+
+  function budgetRecord() {
+    const changelog = loadDefinitionChangelog(DEFINITION, VERSION)
+    const start = changelog.search(BUDGET_SECTION)
+    assert.ok(start >= 0, 'the v3 CHANGELOG has a #203 section')
+    const ends = ['\n### ', '\n## '].map((heading) => changelog.indexOf(heading, start + 1)).filter((i) => i > 0)
+    const section = changelog.slice(start, ends.length ? Math.min(...ends) : undefined)
+    const tables = markdownTables(section)
+    const fields = tables.find((t) => t.header[0] === 'Field')
+    const documents = tables.find((t) => t.header[0] === 'Document')
+    assert.ok(fields && documents, 'the section records the per-Field lengths and the rendered documents\' lengths')
+    const number = (cell) => (cell === '—' ? null : Number(cell.replace(/,/g, '')))
+    return {
+      header: fields.header,
+      fields: new Map(
+        fields.rows.map(([ref, kiwi, gantry, large, medium, small]) => [
+          ref.replace(/`/g, ''),
+          { kiwi: number(kiwi), gantry: number(gantry), large: number(large), medium: number(medium), small: number(small) },
+        ])
+      ),
+      documents: new Map(documents.rows.map(([id, example, before]) => [id.replace(/`/g, ''), { example: example.replace(/`/g, ''), before: number(before) }])),
+    }
+  }
+
+  // Every markdown and list Field of v3 whose value reaches a rendered Artefact: each Field of a scratch
+  // copy of the full example is set to a marker naming it, every Artefact is rendered, and the markers
+  // that come out name the Fields. A Field no template reads would need no budget.
+  function renderedFreeTextFields() {
+    return withScratchDir((dir) => {
+      const slug = 'kiwi-cover-mutual'
+      cpSync(join(EXAMPLES_DIR, slug), join(dir, slug), { recursive: true })
+      const marker = (moduleId, fieldId) => `zzz${moduleId}0${fieldId}zzz`.replace(/-/g, '1')
+      const refs = new Map()
+      for (const [moduleId, spec] of v3().modules) {
+        const current = readModule(v3(), slug, moduleId, { instancesDir: dir })
+        const fields = { ...current.fields }
+        for (const field of spec.fields.filter((f) => f.type === 'markdown' || f.type === 'list')) {
+          fields[field.id] = field.type === 'list' ? [marker(moduleId, field.id)] : marker(moduleId, field.id)
+          refs.set(marker(moduleId, field.id), `${moduleId}.${field.id}`)
+        }
+        writeModule(v3(), slug, moduleId, { ...current, fields }, { instancesDir: dir })
+      }
+      const found = new Set()
+      for (const artefact of v3().artefacts) {
+        const { markdown } = renderArtefact(slug, artefact.id, { instancesDir: dir, dryRun: true })
+        for (const [text, ref] of refs) if (markdown.includes(text)) found.add(ref)
+      }
+      return [...found].sort()
+    })
+  }
+
+  function budgetedFields() {
+    return [...v3().modules].flatMap(([moduleId, spec]) => spec.fields.filter((f) => f.targetWords).map((f) => [`${moduleId}.${f.id}`, f.targetWords]))
+  }
+
+  test('every free-text v3 Field that renders into an Artefact has a word budget, with Small < Medium < Large', () => {
+    const rendered = renderedFreeTextFields()
+    assert.ok(rendered.length > 90, `the marker render finds the Fields (${rendered.length})`)
+    const budgets = new Map(budgetedFields())
+    assert.deepEqual(rendered.filter((ref) => !budgets.has(ref)), [], 'Fields with no target-words')
+    for (const [ref, { small, medium, large }] of budgets) {
+      assert.ok(small < medium && medium < large, `${ref}: ${small} < ${medium} < ${large}`)
+    }
+  })
+
+  test('the v3 CHANGELOG records each budgeted Field\'s pre-condense example lengths beside its budgets, and the Definition matches it', () => {
+    const record = budgetRecord()
+    assert.deepEqual(record.header, ['Field', 'Kiwi Cover Mutual', 'Gantry hosting', 'Large', 'Medium', 'Small'])
+    const budgets = budgetedFields()
+    assert.deepEqual([...record.fields.keys()].sort(), budgets.map(([ref]) => ref).sort(), 'one row per budgeted Field')
+    for (const [ref, budget] of budgets) {
+      const row = record.fields.get(ref)
+      assert.deepEqual({ small: row.small, medium: row.medium, large: row.large }, budget, ref)
+    }
+  })
+
+  test('each Large budget is the longer example\'s pre-condense length rounded up to the next ten', () => {
+    for (const [ref, { kiwi, gantry, large }] of budgetRecord().fields) {
+      const longest = Math.max(kiwi ?? 0, gantry ?? 0)
+      assert.equal(large, Math.max(10, Math.ceil(longest / 10) * 10), `${ref}: measured ${kiwi} / ${gantry}`)
+    }
+  })
+
+  test('across the Definition, Medium is about half of Large and Small about a fifth', () => {
+    const total = Object.fromEntries(TARGET_SIZES.map((size) => [size, budgetedFields().reduce((sum, [, budget]) => sum + budget[size], 0)]))
+    const medium = total.medium / total.large
+    const small = total.small / total.large
+    assert.ok(medium >= 0.45 && medium <= 0.6, `Medium is ${Math.round(medium * 100)}% of Large`)
+    assert.ok(small >= 0.15 && small <= 0.3, `Small is ${Math.round(small * 100)}% of Large`)
+  })
+
+  for (const slug of Object.keys(EXAMPLES)) {
+    test(`${slug} works to Medium, and every one of its Fields is within its Medium budget`, () => {
+      assert.ok([undefined, 'medium'].includes(readInstance(slug, { instancesDir: EXAMPLES_DIR }).size), 'no other size is stored')
+      const written = Object.fromEntries(
+        readdirSync(join(EXAMPLES_DIR, slug, 'modules')).map((file) => {
+          const moduleId = file.replace(/\.md$/, '')
+          return [moduleId, { fields: readModule(v3(), slug, moduleId, { instancesDir: EXAMPLES_DIR }).fields }]
+        })
+      )
+      assert.deepEqual(overTargetNotes(v3().modules, written, 'medium').map((note) => note.message), [])
+    })
+  }
+
+  // A rendered document's length is counted as a Field's is (countWords), over the whole dry-run
+  // Markdown: cover, Document Control and headings included.
+  test('the rendered v3 SAD is roughly half its pre-condense length, and every v3 document is shorter', () => {
+    const { documents } = budgetRecord()
+    assert.deepEqual([...documents.keys()].sort(), Object.keys(DOCUMENTS).sort())
+    const now = new Map()
+    for (const [id, { example, before }] of documents) {
+      assert.equal(example, DOCUMENTS[id].example, id)
+      const { markdown } = renderArtefact(example, id, { instancesDir: EXAMPLES_DIR, dryRun: true })
+      now.set(id, countWords(markdown))
+      assert.ok(now.get(id) < before, `${id}: ${now.get(id)} words, ${before} before`)
+    }
+    const ratio = now.get('sad') / documents.get('sad').before
+    assert.ok(ratio >= 0.4 && ratio <= 0.6, `the SAD is ${Math.round(ratio * 100)}% of its ${documents.get('sad').before} words`)
+  })
 })

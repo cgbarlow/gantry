@@ -196,6 +196,159 @@ numbering definition; only their footers differ, as before.
   covers downloading and replacing a reference document, which styles Gantry uses, and
   `{.unnumbered}`.
 
+### Word budgets on every Field, and the examples condensed to Medium (#203)
+
+The follow-up to review #191: the reviewed SAD came to about 14,000 words, more than reviewers
+needed. v3 now tells authors, people and MCP agents alike, how much to write in each Field, and its
+example shows the default amount.
+
+- **Every Field that reaches a document has a word budget.** All 102 `markdown` and `list` Fields
+  of v3 set `target-words` for Small, Medium and Large (#202, ADR-0054). Every one of them renders
+  into at least one Artefact. The only other Field, `document-handling.classification`, is a
+  `select` and has none. A new v3 instance works to Medium unless its owner picks another size.
+- **How the budgets were set.** Large is today's level of detail: the longer of the two bundled
+  examples' lengths for the Field, measured before condensing, rounded up to the next ten (and at
+  least ten). Medium is about half of Large and Small about a fifth, rounded to the nearest five,
+  with two adjustments:
+  - A Field that is mostly a table (risks, interfaces, the glossary, the AD table, the controls)
+    keeps about 60% at Medium and 30% at Small, because a table loses rows rather than words.
+  - An inherently short Field (purpose, decision requested, next steps, the list of authors) keeps
+    about 60% and 30%, and a one-line Field (the Full SOAP's dates, epic and lead) keeps a few
+    words at every size: a date doesn't get shorter.
+
+  Across v3, Medium adds up to 53% of Large and Small to 23%.
+- **The examples are condensed to Medium.** Every Field of `kiwi-cover-mutual` and `gantry` is
+  now within its Medium budget, so "Populate example text" shows the default amount. Kiwi Cover
+  Mutual was cut to about half its previous length, not just to the budgets, so its SAD is now
+  about 4,900 words, down from about 10,000. The conventions from #199, #200 and #201 survive the
+  cut: diagram captions and state labels, the Status of every component and interface, the interim
+  owner, the AD | Decision | ADR table, sourced or `(target assumption)` figures, the glossary's
+  preferred terms and the path-led integration tables. Kiwi Cover Mutual's other diagrams now
+  follow the #199 pattern too: an opening sentence, the diagram, then a paragraph interpreting it.
+- **What doesn't change.** No Field, Template, Gate or reference document changed, only budgets
+  and example text. A budget is a target, not a limit: an over-budget Field still saves, passes its
+  Gate and renders in full. v1 and v2 declare no budgets, so their instances show no size.
+
+Rendered length of each v3 document from its example, in words (the whole document, cover and
+Document Control included, counted as the editor counts a Field):
+
+| Document | Example | Before | After |
+|---|---|---:|---:|
+| `soap` | `kiwi-cover-mutual` | 1,668 | 854 |
+| `soap-full` | `gantry` | 3,408 | 1,804 |
+| `hld` | `kiwi-cover-mutual` | 3,351 | 1,696 |
+| `sad` | `kiwi-cover-mutual` | 10,033 | 4,925 |
+| `ssad` | `kiwi-cover-mutual` | 5,026 | 2,485 |
+| `as-built` | `kiwi-cover-mutual` | 4,624 | 2,232 |
+
+Each Field's pre-condense length in each example (— where the example doesn't fill the Field),
+and the budgets derived from it:
+
+| Field | Kiwi Cover Mutual | Gantry hosting | Large | Medium | Small |
+|---|---:|---:|---:|---:|---:|
+| `background.problem` | 254 | 132 | 260 | 130 | 50 |
+| `background.affected-domains` | 45 | 5 | 50 | 30 | 15 |
+| `background.opportunity` | 136 | 189 | 190 | 95 | 40 |
+| `background.success-criteria` | 124 | — | 130 | 65 | 25 |
+| `introduction.executive-summary` | 202 | — | 210 | 105 | 40 |
+| `introduction.overview` | 73 | 188 | 190 | 95 | 40 |
+| `introduction.purpose` | 79 | — | 80 | 50 | 25 |
+| `introduction.in-scope` | 142 | 149 | 150 | 75 | 30 |
+| `introduction.out-of-scope` | 93 | 110 | 110 | 55 | 20 |
+| `introduction.content-standards` | 96 | — | 100 | 50 | 20 |
+| `design-basis.constraints` | 150 | 359 | 360 | 180 | 70 |
+| `design-basis.assumptions` | 125 | 266 | 270 | 135 | 55 |
+| `design-basis.caveats` | 76 | — | 80 | 40 | 15 |
+| `design-basis.design-principles` | 161 | — | 170 | 100 | 50 |
+| `design-basis.outcomes-and-deliverables` | 113 | — | 120 | 70 | 35 |
+| `solution-definition.high-level-requirements` | 279 | 128 | 280 | 170 | 85 |
+| `solution-definition.process-flow` | 184 | 190 | 190 | 95 | 40 |
+| `solution-definition.high-level-solution-overview` | 125 | 173 | 180 | 90 | 35 |
+| `solution-definition.feature-breakdown` | 156 | 155 | 160 | 95 | 50 |
+| `solution-definition.alternatives-sketch` | 97 | 234 | 240 | 120 | 50 |
+| `team-and-estimates.teams-required` | 173 | 95 | 180 | 90 | 35 |
+| `team-and-estimates.estimates` | 165 | 144 | 170 | 100 | 50 |
+| `team-and-estimates.references` | 54 | 141 | 150 | 75 | 30 |
+| `dependencies.dependencies-overview` | 147 | 239 | 240 | 120 | 50 |
+| `dependencies.dependency-list` | 173 | — | 180 | 90 | 35 |
+| `soap-full-details.epic-project` | 4 | 0 | 10 | 5 | 3 |
+| `soap-full-details.requested-lead-by` | 12 | 7 | 20 | 10 | 5 |
+| `soap-full-details.request-date` | 3 | 3 | 10 | 5 | 3 |
+| `soap-full-details.draft-agreed-date` | 3 | 11 | 20 | 10 | 5 |
+| `soap-full-details.delivered-date` | 3 | 10 | 10 | 5 | 3 |
+| `soap-full-details.sequencing` | 163 | 147 | 170 | 100 | 50 |
+| `soap-full-details.caveats` | 127 | 251 | 260 | 130 | 50 |
+| `open-questions.questions` | 170 | 285 | 290 | 175 | 85 |
+| `hld-submission.purpose-statement` | 36 | — | 40 | 25 | 10 |
+| `hld-submission.authors-and-contributors` | 41 | — | 50 | 30 | 15 |
+| `hld-submission.decision-requested` | 63 | — | 70 | 40 | 20 |
+| `hld-submission.next-steps` | 60 | — | 60 | 35 | 20 |
+| `hld-submission.consultation` | 141 | — | 150 | 75 | 30 |
+| `hld-submission.attachments` | 34 | — | 40 | 25 | 10 |
+| `proposed-solution.guardrails` | 116 | — | 120 | 60 | 25 |
+| `proposed-solution.strategy-alignment` | 115 | — | 120 | 60 | 25 |
+| `proposed-solution.implications` | 116 | — | 120 | 60 | 25 |
+| `proposed-solution.trade-offs` | 123 | — | 130 | 65 | 25 |
+| `proposed-solution.cost-benefit` | 137 | — | 140 | 70 | 30 |
+| `proposed-solution.delivery-approach` | 140 | — | 140 | 85 | 40 |
+| `alternatives-considered.alternatives` | 351 | — | 360 | 180 | 70 |
+| `nfrs.scalability-and-capacity` | 143 | — | 150 | 75 | 30 |
+| `nfrs.performance` | 124 | — | 130 | 65 | 25 |
+| `nfrs.availability-and-continuity` | 116 | — | 120 | 60 | 25 |
+| `nfrs.disaster-recovery-and-backup` | 178 | — | 180 | 90 | 35 |
+| `nfrs.other-nfrs` | 141 | — | 150 | 75 | 30 |
+| `nfrs.requirements-traceability` | 199 | — | 200 | 120 | 60 |
+| `risks.risk-register` | 288 | — | 290 | 175 | 85 |
+| `risks.open-issues` | 93 | — | 100 | 50 | 20 |
+| `security.identity-and-access` | 194 | — | 200 | 100 | 40 |
+| `security.security-architecture` | 347 | — | 350 | 175 | 70 |
+| `security.regulations-and-standards` | 73 | — | 80 | 40 | 15 |
+| `security.privacy-and-confidentiality` | 164 | — | 170 | 85 | 35 |
+| `architecture.business-context` | 264 | — | 270 | 135 | 55 |
+| `architecture.solution-users` | 107 | — | 110 | 55 | 20 |
+| `architecture.design-decisions` | 309 | — | 310 | 185 | 95 |
+| `architecture.architectural-risks` | 150 | — | 150 | 75 | 30 |
+| `architecture.solution-description` | 391 | — | 400 | 200 | 80 |
+| `architecture.constraints` | 110 | — | 110 | 55 | 20 |
+| `architecture.standards` | 95 | — | 100 | 50 | 20 |
+| `architecture.logical-components` | 204 | — | 210 | 105 | 40 |
+| `integration.interfaces` | 229 | — | 230 | 140 | 70 |
+| `integration.network-and-infrastructure` | 226 | — | 230 | 115 | 45 |
+| `integration.software-and-licences` | 138 | — | 140 | 85 | 40 |
+| `integration.hardware` | 101 | — | 110 | 55 | 20 |
+| `integration.bandwidth` | 135 | — | 140 | 70 | 30 |
+| `integration.network-devices` | 83 | — | 90 | 45 | 20 |
+| `integration.communication-and-network-protocols` | 184 | — | 190 | 115 | 55 |
+| `integration.san` | 151 | — | 160 | 95 | 50 |
+| `data.logical-data-model` | 234 | — | 240 | 120 | 50 |
+| `data.data-classification` | 128 | — | 130 | 65 | 25 |
+| `data.data-replication` | 128 | — | 130 | 65 | 25 |
+| `data.data-retention-and-archiving` | 148 | — | 150 | 75 | 30 |
+| `data.data-migration` | 138 | — | 140 | 70 | 30 |
+| `support-and-operations.stakeholders` | 191 | — | 200 | 100 | 40 |
+| `support-and-operations.environments-and-domains` | 88 | — | 90 | 45 | 20 |
+| `support-and-operations.operational-accounts-and-licenses` | 141 | — | 150 | 75 | 30 |
+| `support-and-operations.monitoring-and-alerting` | 143 | — | 150 | 75 | 30 |
+| `support-and-operations.release-procedures` | 137 | — | 140 | 70 | 30 |
+| `support-and-operations.support-handover-readiness` | 107 | — | 110 | 55 | 20 |
+| `support-and-operations.decommission` | 134 | — | 140 | 70 | 30 |
+| `glossary.terms-and-definitions` | 451 | — | 460 | 275 | 140 |
+| `recovery-plan.recovery-approach` | 260 | — | 260 | 130 | 50 |
+| `recovery-plan.resiliency` | 101 | — | 110 | 55 | 20 |
+| `recovery-plan.test-scenarios` | 124 | — | 130 | 80 | 40 |
+| `recovery-plan.raci` | 129 | — | 130 | 80 | 40 |
+| `data-security-controls.controls` | 368 | — | 370 | 220 | 110 |
+| `data-security-controls.inheritance-and-dependencies` | 127 | — | 130 | 65 | 25 |
+| `as-built-notes.design-overview` | 177 | — | 180 | 90 | 35 |
+| `as-built-notes.architecture-decisions` | 185 | — | 190 | 115 | 55 |
+| `as-built-notes.process-flows` | 327 | — | 330 | 165 | 65 |
+| `as-built-notes.infrastructure-and-configuration` | 309 | — | 310 | 155 | 60 |
+| `as-built-notes.appendix` | 144 | — | 150 | 90 | 45 |
+| `as-built-notes.changes-from-design` | 125 | — | 130 | 65 | 25 |
+| `as-built-notes.acceptance-criteria` | 219 | — | 220 | 110 | 45 |
+| `as-built-notes.operational-notes` | 151 | — | 160 | 80 | 30 |
+| `as-built-notes.handover-confirmation` | 105 | — | 110 | 55 | 20 |
+
 ## v2
 
 Layout revision of v1. Every artefact's `requires` list re-sequenced to the reading

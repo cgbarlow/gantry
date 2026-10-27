@@ -11,6 +11,7 @@ fields:
   - id: dependencies-overview
     title: Dependencies
     type: markdown
+    target-words: { small: 50, medium: 120, large: 240 }
     required-at: [business-case, hld-arb-approved]
     guidance: >
       Describe what this solution depends on and what depends on it — other initiatives,
@@ -19,6 +20,7 @@ fields:
   - id: dependency-list
     title: Dependency list
     type: list
+    target-words: { small: 35, medium: 90, large: 180 }
     required-at: [build-ready-checklist]
     guidance: >
       Every system, service or team this solution depends on to function,

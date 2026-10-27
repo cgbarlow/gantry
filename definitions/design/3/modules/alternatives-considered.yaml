@@ -9,6 +9,7 @@ fields:
   - id: alternatives
     title: Alternatives
     type: markdown
+    target-words: { small: 70, medium: 180, large: 360 }
     required: true
     guidance: >
       For each alternative: what it was, and the specific reason it lost out

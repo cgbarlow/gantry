@@ -13,6 +13,7 @@ fields:
   - id: design-overview
     title: Design overview
     type: markdown
+    target-words: { small: 35, medium: 90, large: 180 }
     required: true
     guidance: >
       Describe the key architecture and technology as actually implemented and how it
@@ -29,6 +30,7 @@ fields:
   - id: architecture-decisions
     title: Architecture decisions
     type: markdown
+    target-words: { small: 55, medium: 115, large: 190 }
     required: false
     guidance: >
       List the key design decisions as implemented — for each, what was decided and what it
@@ -42,6 +44,7 @@ fields:
   - id: process-flows
     title: Data migration and process flows
     type: markdown
+    target-words: { small: 65, medium: 165, large: 330 }
     required: true
     guidance: >
       Describe the detailed process and data flows step by step, as the system actually
@@ -57,6 +60,7 @@ fields:
   - id: infrastructure-and-configuration
     title: Infrastructure and configuration
     type: markdown
+    target-words: { small: 60, medium: 155, large: 310 }
     required: true
     guidance: >
       Provide environment and infrastructure detail sufficient to rebuild — services, IP
@@ -65,6 +69,7 @@ fields:
   - id: appendix
     title: Appendix
     type: markdown
+    target-words: { small: 45, medium: 90, large: 150 }
     required: false
     guidance: >
       Include supporting reference material that would clutter the body, such as firewall
@@ -72,12 +77,14 @@ fields:
   - id: changes-from-design
     title: Changes from the agreed design
     type: markdown
+    target-words: { small: 25, medium: 65, large: 130 }
     required: true
     guidance: >
       Describe where the built solution diverges from the approved design and why.
   - id: acceptance-criteria
     title: Acceptance criteria
     type: markdown
+    target-words: { small: 45, medium: 110, large: 220 }
     required: true
     guidance: >
       Detailed acceptance criteria confirming the build meets
@@ -86,6 +93,7 @@ fields:
   - id: operational-notes
     title: Operational notes
     type: markdown
+    target-words: { small: 30, medium: 80, large: 160 }
     required: false
     guidance: >
       Anything a support engineer would need that isn't already captured in
@@ -96,6 +104,7 @@ fields:
   - id: handover-confirmation
     title: Handover confirmation
     type: markdown
+    target-words: { small: 20, medium: 55, large: 110 }
     required: true
     guidance: >
       Record who received the handover and when. Note that handover of the document does

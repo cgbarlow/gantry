@@ -16,6 +16,7 @@ fields:
   - id: questions
     title: Open questions
     type: markdown
+    target-words: { small: 85, medium: 175, large: 290 }
     required: false
     guidance: >
       List each open question, who needs to resolve it and when it needs resolving.

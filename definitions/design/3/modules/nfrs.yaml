@@ -41,6 +41,7 @@ fields:
   - id: scalability-and-capacity
     title: Scalability and capacity
     type: markdown
+    target-words: { small: 30, medium: 75, large: 150 }
     required-at: [build-ready-checklist]
     guidance: >
       Today's volumes, the peak the solution is designed for, and how it
@@ -54,6 +55,7 @@ fields:
   - id: performance
     title: Performance
     type: markdown
+    target-words: { small: 25, medium: 65, large: 130 }
     required-at: [hld-arb-approved, build-ready-checklist]
     guidance: >
       Keep this to a headline target at high-level design — the TAC reference
@@ -68,6 +70,7 @@ fields:
   - id: availability-and-continuity
     title: Availability and continuity
     type: markdown
+    target-words: { small: 25, medium: 60, large: 120 }
     required-at: [hld-arb-approved, build-ready-checklist]
     guidance: >
       Keep this to a headline target at high-level design; deepen to a
@@ -82,6 +85,7 @@ fields:
   - id: disaster-recovery-and-backup
     title: Disaster recovery and backup
     type: markdown
+    target-words: { small: 35, medium: 90, large: 180 }
     required-at: [build-ready-checklist, operational-handover]
     guidance: >
       The recovery *targets*, and only the targets: recovery time and point
@@ -102,6 +106,7 @@ fields:
   - id: other-nfrs
     title: Other non-functional requirements
     type: markdown
+    target-words: { small: 30, medium: 75, large: 150 }
     required: false
     guidance: >
       Anything that doesn't fit the categories above but still constrains
@@ -118,6 +123,7 @@ fields:
   - id: requirements-traceability
     title: Requirements traceability
     type: markdown
+    target-words: { small: 60, medium: 120, large: 200 }
     required-at: [build-ready-checklist]
     guidance: >
       Describe how the design maps back to the agreed functional and non-functional

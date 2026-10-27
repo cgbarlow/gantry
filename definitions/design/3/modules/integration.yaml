@@ -23,6 +23,7 @@ fields:
   - id: interfaces
     title: Interfaces
     type: markdown
+    target-words: { small: 70, medium: 140, large: 230 }
     required: true
     guidance: >
       The integration points themselves — protocol, direction, and what
@@ -39,6 +40,7 @@ fields:
   - id: network-and-infrastructure
     title: Network and infrastructure architecture
     type: markdown
+    target-words: { small: 45, medium: 115, large: 230 }
     required: false
     guidance: >
       Describe the network and infrastructure the solution is deployed on and how it is
@@ -62,6 +64,7 @@ fields:
   - id: software-and-licences
     title: Software and licences
     type: markdown
+    target-words: { small: 40, medium: 85, large: 140 }
     required: false
     guidance: >
       The software the solution deploys and what it costs to licence — one row
@@ -82,6 +85,7 @@ fields:
   - id: hardware
     title: Hardware
     type: markdown
+    target-words: { small: 20, medium: 55, large: 110 }
     required: false
     guidance: >
       Whether new hardware is needed and how it is sized — environment, OS /
@@ -101,6 +105,7 @@ fields:
   - id: bandwidth
     title: Bandwidth
     type: markdown
+    target-words: { small: 30, medium: 70, large: 140 }
     required: false
     guidance: >
       Whether the current LAN / WAN / cloud network can handle the new data
@@ -116,6 +121,7 @@ fields:
   - id: network-devices
     title: Network Devices
     type: markdown
+    target-words: { small: 20, medium: 45, large: 90 }
     required: false
     guidance: >
       Network devices the solution depends on or changes — DNS servers, reverse
@@ -124,6 +130,7 @@ fields:
   - id: communication-and-network-protocols
     title: Communication & Network Protocols
     type: markdown
+    target-words: { small: 55, medium: 115, large: 190 }
     required: false
     guidance: >
       New logical communication paths and protocols for the solution — one row
@@ -139,6 +146,7 @@ fields:
   - id: san
     title: SAN (Database, Application Server, Backup, DR)
     type: markdown
+    target-words: { small: 50, medium: 95, large: 160 }
     required: false
     guidance: >
       Storage-area-network and disk requirements — database, application server,

@@ -9,6 +9,7 @@ fields:
   - id: high-level-requirements
     title: High-level requirements
     type: markdown
+    target-words: { small: 85, medium: 170, large: 280 }
     required: true
     guidance: >
       The high-level requirements this solution must address. Use a markdown
@@ -21,6 +22,7 @@ fields:
   - id: process-flow
     title: Process flow
     type: markdown
+    target-words: { small: 40, medium: 95, large: 190 }
     required: true
     guidance: >
       How work or data moves through the solution, step by step. A narrative
@@ -39,6 +41,7 @@ fields:
   - id: high-level-solution-overview
     title: High level solution overview
     type: markdown
+    target-words: { small: 35, medium: 90, large: 180 }
     required: true
     guidance: >
       The shape of the solution in outline — the main components and how
@@ -59,6 +62,7 @@ fields:
   - id: feature-breakdown
     title: Feature breakdown and involved teams
     type: markdown
+    target-words: { small: 50, medium: 95, large: 160 }
     required: true
     guidance: >
       The solution broken into the features or workstreams that deliver it,
@@ -67,6 +71,7 @@ fields:
   - id: alternatives-sketch
     title: Alternatives sketch
     type: markdown
+    target-words: { small: 50, medium: 120, large: 240 }
     required: false
     guidance: >
       Brief alternative(s) considered at SOAP, including "do nothing" —
