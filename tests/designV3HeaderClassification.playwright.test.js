@@ -7,7 +7,7 @@ import { createInstance } from '../lib/instance.js'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { bodyParagraphs, docxPart } from './helpers/wordDocx.js'
-import { classificationField, headerVisibleText, sectionHeaders } from './helpers/wordHeaders.js'
+import { classificationField, coverClassificationStyle, headerVisibleText, sectionHeaders } from './helpers/wordHeaders.js'
 
 // #207 — the browser half of design v3's header classification. The default Render converts in the
 // browser with pandoc-wasm (Pandoc 3.10), not the native Pandoc tests/designV3HeaderClassification.test.js
@@ -80,6 +80,10 @@ test('the browser\'s pandoc-wasm render of the v3 SAD has the classification fie
   }
   const [first] = bodyParagraphs(docxPart(docx, 'word/document.xml'))
   assert.deepEqual([first.style, first.text], ['CoverClassification', 'IN-CONFIDENCE'])
+  // #209: the cover line is there for the field, printed invisibly by the reference document's style.
+  const style = coverClassificationStyle(docxPart(docx, 'word/styles.xml'))
+  assert.deepEqual([style.color, style.size, style.vanish], ['FFFFFF', 2, false])
+  for (const { type, xml } of headers) assert.match(classificationField(xml).instruction, /\\\* CHARFORMAT$/, type)
 })
 
 test('with no classification, the browser\'s render opens the cover with an empty-looking Cover Classification paragraph and shows nothing in the header (#207)', async () => {

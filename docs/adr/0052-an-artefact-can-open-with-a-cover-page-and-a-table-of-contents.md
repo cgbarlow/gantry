@@ -382,3 +382,57 @@ its classification line, and the footer is unchanged.
   should remove one: delete the field, or turn off the label's marking.
 
 Status: accepted.
+
+## Amendment (#209): the classification only in the page header
+
+With #207, a design v3 cover printed its classification twice on the first
+page: above the title and in the page header. #209 keeps it only in the
+header.
+
+### Decision
+
+1. **The cover keeps its Cover Classification paragraph, printed
+   invisibly.** The header's `STYLEREF "Cover Classification"` field
+   (amendment for #207) needs a paragraph in that style to read, so the
+   engine still writes it. design v3's seven reference documents now define
+   the `Cover Classification` paragraph style: white (`FFFFFF`), 1pt, no space
+   before or after, on an exact 1pt line. Pandoc uses a reference document's
+   style of the same name rather than adding its own, so the paragraph is
+   there for the field and shows nothing on the page. The engine and the
+   exported `.md` are unchanged. design v1 and v2 don't define the style.
+
+2. **Not hidden text.** Formatting the paragraph as hidden (`w:vanish`) would
+   be the obvious way to remove it. It doesn't work: a STYLEREF field that
+   finds text formatted as hidden shows blank, and doesn't look for the next
+   visible text.
+
+3. **The header field carries `\* CHARFORMAT`.** Its result then takes the
+   formatting of the field's first character, which is the `Header
+   Classification` style. It never takes the white 1pt of the text it copies.
+
+### Consequences
+
+- A viewer that doesn't update fields already showed an empty header (#207).
+  Now it shows no classification anywhere, because the cover line is
+  invisible. Word, and any viewer that updates fields, shows it on every
+  page.
+- The invisible text is still in the document. Copying the cover, searching
+  it, or reading it with a screen reader finds the classification. That is
+  harmless and arguably useful.
+- An organisation that wants the classification above the title as well
+  gives `Cover Classification` a visible size and colour in its reference
+  documents.
+
+### Alternatives considered
+
+- **Hidden text.** Rejected: STYLEREF shows blank (decision 2).
+- **Leaving the paragraph out of the Word conversion, with the header reading
+  a document property.** Rejected for the reasons the #207 amendment gives
+  against `DOCPROPERTY`: Word doesn't recalculate it in a header on its own,
+  and its stored result is still the reference document's.
+- **Moving the paragraph off the cover**, for example to the end of the
+  document. Rejected: it would still print somewhere, and STYLEREF in a
+  header searches from the start of the section, so the placement buys
+  nothing.
+
+Status: accepted.
