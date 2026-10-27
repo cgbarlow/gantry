@@ -39,6 +39,8 @@ import { withFakeBitbucketServer, BITBUCKET_OWNER, BITBUCKET_REPOSITORY, BITBUCK
 // is still there afterwards, read back the way a caller would see it (the version projection the
 // Definitions page and API serve).
 //
+// #205 (ADR-0052's amendment) adds an Artefact's `cover-purpose`, the statement its cover prints.
+//
 // #202 (spec #192, ADR-0054) adds a Field's `target-words` — its word budget per Target size — to the
 // fixture, so it is held to the same round trip as every key before it.
 
@@ -99,6 +101,7 @@ artefacts:
     diagram-captions: true
     cover-page: true
     cover-classification: details.kind
+    cover-purpose: This letter tells its reader what the engagement is.
     table-of-contents: true
     copied-from:
       definition: elsewhere
@@ -203,7 +206,9 @@ function assertEveryKey(projection, where) {
   assert.equal(letter.coverPage, true, `${where}: artefact cover-page`)
   assert.equal(letter.coverClassification, 'details.kind', `${where}: artefact cover-classification`)
   assert.equal(letter.tableOfContents, true, `${where}: artefact table-of-contents`)
-  for (const key of ['coverPage', 'coverClassification', 'tableOfContents']) {
+  assert.equal(letter.coverPurpose, 'This letter tells its reader what the engagement is.', `${where}: artefact cover-purpose`)
+  assert.equal(letter.purpose, 'The audience letter', `${where}: purpose is unchanged beside it`)
+  for (const key of ['coverPage', 'coverClassification', 'coverPurpose', 'tableOfContents']) {
     assert.equal(key in brief, false, `${where}: ${key} omitted unless set`)
   }
 
@@ -234,8 +239,9 @@ function assertKebabKeysOnDisk(definitionYamlText, where) {
   assert.match(definitionYamlText, /cover-page: true/, where)
   assert.match(definitionYamlText, /cover-classification: details\.kind/, where)
   assert.match(definitionYamlText, /table-of-contents: true/, where)
+  assert.match(definitionYamlText, /cover-purpose: This letter tells its reader what the engagement is\./, where)
   assert.match(definitionYamlText, /copied-from:/, where)
-  assert.doesNotMatch(definitionYamlText, /readOnlyModules|documentControl|satisfiesGate|diagramCaptions|coverPage|coverClassification|tableOfContents|copiedFrom/, where)
+  assert.doesNotMatch(definitionYamlText, /readOnlyModules|documentControl|satisfiesGate|diagramCaptions|coverPage|coverClassification|coverPurpose|tableOfContents|copiedFrom/, where)
 }
 
 function localProjection(id, version, definitionsDir) {

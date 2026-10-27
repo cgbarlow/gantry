@@ -354,6 +354,19 @@ and the budgets derived from it:
 | `as-built-notes.operational-notes` | 151 | — | 160 | 80 | 30 |
 | `as-built-notes.handover-confirmation` | 105 | — | 110 | 55 | 20 |
 
+### Cover purpose (#205)
+
+The cover printed each Artefact's `purpose`, which is written as an instruction to the author
+("Describe the complete solution architecture …") for the User Guide and the Definitions page.
+On a cover it read as an instruction rather than as a statement of what the document is.
+
+- **Every Artefact sets a `cover-purpose`.** It is the statement the cover now prints under Author,
+  written for the reader, e.g. "This document describes the complete solution architecture and its
+  requirements, security, dependencies and support handover readiness for build." Each keeps the
+  substance of the Artefact's `purpose`.
+- **`purpose` is unchanged.** It is still the author-facing text the User Guide and the
+  Definitions page show. The cover no longer prints it (ADR-0052, amended by #205).
+
 ## v2
 
 Layout revision of v1. Every artefact's `requires` list re-sequenced to the reading

@@ -1,13 +1,15 @@
-// #194 (docs/adr/0052): an Artefact's front matter — `cover-page`, `table-of-contents` and the
-// `cover-classification` pointer. All three are opt-in: absent (or `false`) means the document renders
-// exactly as before. The render honours them in lib/render.js's compileArtefact; this file holds the
+// #194 (docs/adr/0052): an Artefact's front matter — `cover-page`, `table-of-contents`, the
+// `cover-classification` pointer and (#205) `cover-purpose`, the statement the cover prints for its
+// reader. All of them are opt-in: absent (or `false`) means the document renders exactly as before.
+// The render honours them in lib/render.js's compileArtefact; this file holds the
 // rules both validators share — lib/definition.js (gantry validate, load, Save and Publish everywhere)
 // and web/lib/localStatus.js (a Local Workspace) — and the list of Fields both Definition editors
 // offer as a classification. Pure and dependency-free, so `lib/` imports it directly (as it does
 // web/lib/readOnlyModules.js) rather than keeping a port that could drift.
 //
 // Artefacts here are the camelCase in-memory shape (`coverPage`, `tableOfContents`,
-// `coverClassification`); a caller holding raw YAML maps the kebab-case keys across first.
+// `coverClassification`, `coverPurpose`); a caller holding raw YAML maps the kebab-case keys across
+// first.
 
 const FRONT_MATTER_SWITCHES = [
   { key: 'cover-page', prop: 'coverPage', type: 'invalid-cover-page' },
@@ -46,13 +48,27 @@ export function parseCoverClassification(pointer) {
 }
 
 /**
+ * The statement an Artefact's cover prints as its purpose line (#205), as the one line the cover
+ * shows (whitespace, newlines included, collapsed), or '' when `cover-purpose` is absent or not
+ * a string with something in it. The render uses this too, so a value validation would refuse prints
+ * nothing — and the cover never falls back to the author-facing `purpose`.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function coverPurposeLine(value) {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : ''
+}
+
+/**
  * Problems with an Artefact's front-matter keys. `cover-page` and `table-of-contents` take only a real
  * boolean: anything else ("yes", 1, the string "true") is refused rather than guessed at, since the
  * render only honours a real `true`. `cover-classification` must name a single-valued select or text
- * Field that is in the Artefact's own `requires`. Each message opens with `Artefact "<id>"`, which is
- * how the Definitions page anchors its marker.
+ * Field that is in the Artefact's own `requires`. `cover-purpose` (#205) must be a string with
+ * something in it: it is printed as it is, so a blank or a non-string has nothing to print. Each
+ * message opens with `Artefact "<id>"`, which is how the Definitions page anchors its marker.
  *
- * @param {{ id: string, requires?: string[], coverPage?: unknown, tableOfContents?: unknown, coverClassification?: unknown }} artefact
+ * @param {{ id: string, requires?: string[], coverPage?: unknown, tableOfContents?: unknown, coverClassification?: unknown, coverPurpose?: unknown }} artefact
  * @param {(moduleId: string, fieldId: string) => ({ type: string, multiple?: boolean } | undefined)} findField
  * @returns {{ type: string, message: string }[]}
  */
@@ -63,6 +79,10 @@ export function artefactFrontMatterProblems(artefact, findField) {
     if (value !== undefined && typeof value !== 'boolean') {
       problems.push({ type, message: `Artefact "${artefact.id}" sets "${key}" to ${JSON.stringify(value)} — it must be true or false` })
     }
+  }
+
+  if (artefact.coverPurpose !== undefined && !coverPurposeLine(artefact.coverPurpose)) {
+    problems.push({ type: 'invalid-cover-purpose', message: `Artefact "${artefact.id}" sets "cover-purpose" to ${JSON.stringify(artefact.coverPurpose)} — it must be a statement for the cover to print` })
   }
 
   const pointer = artefact.coverClassification
