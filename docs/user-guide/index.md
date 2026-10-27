@@ -200,7 +200,11 @@ flowchart LR
 
 Visual view draws the diagram in place of the source; use its **Edit diagram text** button to change the source in a pop-over. When you **Render** with the default WASM Pandoc engine, the Word document carries the diagram as a picture, and the Markdown file written beside it keeps the Mermaid source so it stays editable. If Mermaid cannot parse a block, Visual view keeps the source and shows a short error note under it; the rest of the field and the render are unaffected.
 
-Two things to know: the **Native Pandoc** engine (and the `gantry render` command) still export the block as source text, and HTML markup inside labels is not supported — use plain text.
+Three things to know:
+
+- The **Native Pandoc** engine exports the block as source text.
+- The `gantry render` command draws the diagram the same way the web render does, if the optional headless Chromium is installed (`npx playwright install chromium`; see the README). Without it, the command leaves the block as source text and prints a warning saying how to install it.
+- HTML markup inside labels is not supported. Use plain text.
 
 ### Captioning diagrams
 
@@ -220,7 +224,7 @@ Numbered captions apply to an artefact whose Definition turns them on, with the 
   Visual view shows the caption under the drawing, whether or not the artefact numbers its diagrams; in an artefact that doesn't, the Word document labels the diagram plain "Diagram N" and the caption isn't printed. **Edit diagram text** changes only the diagram, so the caption stays as you wrote it. To change the caption, edit that first line in **Markdown** view. The Markdown file written beside a render keeps the line exactly as you wrote it. Markdown viewers that follow CommonMark read the first word, `mermaid`, as the block's language and don't print the rest of the line.
 - **An image:** its caption is the text in the square brackets, `![Security architecture](asset:…)`. That text is the name you give the image when you upload it, so choose a name that reads well as a caption. An image without a name uses its filename. To get a caption, the image must be on a line of its own, with a blank line above and below. An image inside a sentence, or with empty brackets, gets no caption and no number. An image inside a block quote (a line starting `>`) keeps its plain name as its caption and takes no number.
 
-Type only the title. Gantry adds the "Diagram N." prefix itself, so it would appear twice. The caption, number included, is also the picture's alt text in the Word document, which screen readers announce. A Mermaid diagram without a caption is labelled "Diagram N" as before. Until the `gantry render` command can draw Mermaid diagrams, it leaves them as source text without a caption, but still counts them, so the images after them are numbered the same as in the browser render.
+Type only the title. Gantry adds the "Diagram N." prefix itself, so it would appear twice. The caption, number included, is also the picture's alt text in the Word document, which screen readers announce. A Mermaid diagram without a caption is labelled "Diagram N" as before. The `gantry render` command captions a Mermaid diagram the same way when it can draw it. If the optional headless Chromium isn't installed, it leaves the diagram as source text without a caption, but still counts it, so the images after it are numbered the same as in the browser render.
 
 For a Definition author: `diagram-captions` takes only `true` or `false`. Any other value is reported by `gantry validate` and when you save or publish the Definition, and the artefact renders without numbered captions until it is fixed. On the Definitions page, the **Diagram captions** checkbox on each artefact shows the setting, and on a draft you can tick or untick it there instead of editing `definition.yaml`.
 

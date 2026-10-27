@@ -99,6 +99,19 @@ and the example shows. Gantry does not check them.
   an organisation copying v3 can turn numbering off for a document without editing
   `definition.yaml`.
 
+### `gantry render` draws Mermaid diagrams (#198)
+
+An engine change, not a change to v3's files: no Stage, Field, template or reference document
+changed. It is recorded here because it completes v3's captions on the command line.
+
+- **The CLI's Word document matches the browser's.** With the optional headless Chromium
+  installed (`npx playwright install chromium`), `gantry render` draws each Mermaid block as a
+  picture with its `Diagram N. <title>` caption, using the browser export's own code: same image,
+  name, scale and caption. See ADR-0055.
+- **Without it, nothing breaks.** The render succeeds, warns once with the install command, and
+  leaves each diagram as source text, still numbered so the images after it keep their numbers.
+  The server and its container image never include Chromium.
+
 ## v2
 
 Layout revision of v1. Every artefact's `requires` list re-sequenced to the reading

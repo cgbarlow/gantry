@@ -130,7 +130,9 @@ image uploaded without a name has its filename as alt text, so it renders as
 Until #198 lands, `gantry render` and the Native Pandoc engine still show a
 Mermaid block as source text, with no caption. In an Artefact that opts in,
 the block still takes its number, so the images after it are numbered as they
-are in the browser export.
+are in the browser export. (#198 has landed for `gantry render` when the
+optional headless Chromium is installed: see docs/adr/0055. The server's
+Native Pandoc engine still shows the source.)
 
 ## Alternatives considered
 
