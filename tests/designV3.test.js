@@ -7,10 +7,11 @@ import { join, relative } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { loadDefinition, loadDefinitionChangelog, definitionVersionProjection, findDefinitionProblems } from '../lib/definition.js'
 import { createInstance, readInstance, readModule } from '../lib/instance.js'
-import { renderArtefact } from '../lib/render.js'
+import { renderArtefact, unnumberedHeadingsForWord } from '../lib/render.js'
 import { checkGate } from '../lib/check.js'
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
 import { withRunningServer } from './helpers/lifecycle.js'
+import { bodyTables, docxPart, headerRowFormat, headingNumbers, keepsWithNext, numberingLevels, rowsCantSplit, styleFontSize, styleNumbering, wordStyles } from './helpers/wordDocx.js'
 
 // #193 (spec #192): the harness every design v3 ticket extends. `definitions/design/3` starts as a
 // draft copy of v2, and the two bundled design examples in workspaces/examples move onto it — the
@@ -795,4 +796,168 @@ describe('v3 documents open with a cover page, a classification and a table of c
     assert.ok(titleAt > classificationAt, 'the title is in the Title style, under the classification')
     assert.ok(documentControlAt > titleAt, 'Document Control follows the cover')
   })
+})
+
+// #197 (GF-003, GF-004, GF-014 to GF-017, GF-024): production Word styles. v3's seven reference
+// documents share one styles.xml and one numbering.xml, and every rule below is a style in them —
+// numbering, keep-with-next, the table header and typography, and rows that don't split — so an
+// organisation's house style (its own reference document) can change any of it without changing
+// Gantry. The one thing a style can't say is "this heading isn't numbered": the front matter's
+// headings carry Pandoc's `.unnumbered` class, which the compile step turns into a heading with its
+// numbering switched off (ADR-0056). The rendered documents are judged the way Word reads them
+// (tests/helpers/wordDocx.js); tests/designV3WordStyles.playwright.test.js judges the browser's
+// pandoc-wasm render by the same rules.
+describe('v3 Word styles: numbered headings, keep-with-next, one table style, rows that don\'t split (#197)', () => {
+  const TEMPLATES = join('definitions', DEFINITION, String(VERSION), 'templates')
+  const REFERENCE_DOCS = readdirSync(TEMPLATES).filter((f) => /^reference(-[\w-]+)?\.docx$/.test(f)).sort()
+  // Styles that must keep with the next paragraph: every heading, every caption, and the figure
+  // paragraph a caption sits under.
+  const KEEP_WITH_NEXT = ['Heading1', 'Heading2', 'Heading3', 'Heading4', 'Heading5', 'Heading6', 'Caption', 'TableCaption', 'ImageCaption', 'Figure', 'CaptionedFigure']
+
+  function referenceStyles(file = 'reference.docx') {
+    return wordStyles(docxPart(join(TEMPLATES, file), 'word/styles.xml'))
+  }
+
+  function renderedWord(example, artefactId) {
+    return withScratchDir((dir) => {
+      cpSync(join(EXAMPLES_DIR, example), join(dir, example), { recursive: true })
+      rmSync(join(dir, example, 'out'), { recursive: true, force: true })
+      const { docxBytes } = renderArtefact(example, artefactId, { instancesDir: dir, deliverToClient: true })
+      return {
+        documentXml: docxPart(docxBytes, 'word/document.xml'),
+        styles: wordStyles(docxPart(docxBytes, 'word/styles.xml')),
+        numberingXml: docxPart(docxBytes, 'word/numbering.xml'),
+      }
+    })
+  }
+
+  test('all seven v3 reference documents share one styles.xml and one numbering.xml', () => {
+    assert.equal(REFERENCE_DOCS.length, 7, REFERENCE_DOCS.join(', '))
+    for (const part of ['word/styles.xml', 'word/numbering.xml']) {
+      const shared = docxPart(join(TEMPLATES, 'reference.docx'), part)
+      for (const file of REFERENCE_DOCS) assert.ok(docxPart(join(TEMPLATES, file), part) === shared, `${file}: ${part}`)
+    }
+  })
+
+  test('Heading 1–3 are numbered 1 / 1.1 / 1.1.1 by one multilevel list; Heading 4–6 are not numbered', () => {
+    const styles = referenceStyles()
+    const numberingXml = docxPart(join(TEMPLATES, 'reference.docx'), 'word/numbering.xml')
+    const numbering = ['Heading1', 'Heading2', 'Heading3'].map((id) => styleNumbering(styles, id))
+    assert.ok(numbering.every(Boolean), JSON.stringify(numbering))
+    assert.equal(new Set(numbering.map((n) => n.numId)).size, 1, 'one list numbers all three levels')
+    assert.deepEqual(numbering.map((n) => n.ilvl), [0, 1, 2])
+    const levels = numberingLevels(numberingXml, numbering[0].numId)
+    assert.deepEqual(
+      levels.slice(0, 3).map(({ numFmt, lvlText, pStyle }) => ({ numFmt, lvlText, pStyle })),
+      [
+        { numFmt: 'decimal', lvlText: '%1', pStyle: 'Heading1' },
+        { numFmt: 'decimal', lvlText: '%1.%2', pStyle: 'Heading2' },
+        { numFmt: 'decimal', lvlText: '%1.%2.%3', pStyle: 'Heading3' },
+      ]
+    )
+    for (const id of ['Heading4', 'Heading5', 'Heading6']) assert.equal(styleNumbering(styles, id), null, id)
+  })
+
+  test('the front matter\'s styles are not numbered: the cover\'s Title and Subtitle, and TOC Heading (based on Heading 1)', () => {
+    const styles = referenceStyles()
+    assert.equal(styles.get('TOCHeading').basedOn, 'Heading1')
+    for (const id of ['Title', 'Subtitle', 'TOCHeading']) assert.equal(styleNumbering(styles, id), null, id)
+  })
+
+  test('every heading, caption and table title, and the figure paragraph, keeps with the next paragraph', () => {
+    const styles = referenceStyles()
+    for (const id of KEEP_WITH_NEXT) assert.equal(keepsWithNext(styles, id), true, id)
+  })
+
+  test('one table style: a dark shaded header row with white bold text, one explicit font size for the table and its cells, and rows that don\'t split', () => {
+    const styles = referenceStyles()
+    const table = styles.get('Table')
+    assert.equal(table?.type, 'table')
+    const header = headerRowFormat(styles, 'Table')
+    assert.match(header.fill ?? '', /^[0-9A-F]{6}$/i, 'the header row is shaded')
+    const [r, g, b] = header.fill.match(/../g).map((h) => parseInt(h, 16))
+    assert.ok(r === g && g === b && r <= 0x60, `the shading is a dark neutral grey, not ${header.fill}`)
+    assert.equal(header.color, 'FFFFFF')
+    assert.equal(header.bold, true)
+    const size = styleFontSize(styles, 'Table')
+    assert.ok(size, 'the table style sets a font size')
+    assert.ok(table.xml.includes('<w:sz '), 'the font size is explicit on the table style itself')
+    assert.ok(styles.get('Compact').xml.includes('<w:sz '), 'and explicit on the cell paragraph style')
+    assert.equal(styleFontSize(styles, 'Compact'), size, 'table cells are the table style\'s size')
+    assert.equal(header.size ?? size, size, 'the header row is the same size')
+    assert.equal(rowsCantSplit(styles, 'Table'), true)
+  })
+
+  test('the v3 SAD numbers its sections 1 / 1.1 / 1.1.1 from its first section, and leaves the front matter unnumbered', () => {
+    const { documentXml, styles, numberingXml } = renderedWord('kiwi-cover-mutual', 'sad')
+    const headings = headingNumbers(documentXml, styles, numberingXml)
+    const first = headings.findIndex((h) => h.style === 'Heading1')
+    assert.ok(first > 0)
+    const frontMatter = headings.slice(0, first)
+    assert.deepEqual(
+      frontMatter.map(({ text, number }) => [text, number]),
+      [['Kiwi Cover Mutual', null], ['Document Control', null], ['Review & sign-off', null], ['Table of Contents', null]]
+    )
+    const body = headings.slice(first)
+    assert.equal(body[0].text, 'Overview')
+    assert.equal(body[0].number, '1')
+    for (const { text, style, number } of body) {
+      const level = Number(style.replace('Heading', ''))
+      if (level > 3) assert.equal(number, null, `${text} (Heading ${level}) is not numbered`)
+      else assert.match(number ?? '', level === 1 ? /^\d+$/ : level === 2 ? /^\d+\.\d+$/ : /^\d+\.\d+\.\d+$/, `${text} (Heading ${level})`)
+    }
+    const h1s = body.filter((h) => h.style === 'Heading1').map((h) => h.number)
+    assert.deepEqual(h1s, h1s.map((_, i) => String(i + 1)), 'Heading 1s count 1, 2, 3, …')
+    assert.ok(body.some((h) => h.style === 'Heading2' && h.number === '1.1'))
+    // The table of contents lists the numbered levels, so it shows the same numbers.
+    assert.match(documentXml, /TOC \\o "1-3"/)
+  })
+
+  test('the exported Markdown keeps Document Control and Review & sign-off as headings, marked .unnumbered', () => {
+    const { markdown } = renderArtefact('kiwi-cover-mutual', 'sad', { instancesDir: EXAMPLES_DIR, dryRun: true })
+    assert.match(markdown, /^## Document Control \{\.unnumbered\}$/m)
+    assert.match(markdown, /^## Review & sign-off \{\.unnumbered\}$/m)
+  })
+
+  test('for Word, any heading marked .unnumbered (or {-}) has its numbering switched off; other headings and code are left as they are', () => {
+    const markdown = [
+      '## Review & sign-off {.unnumbered}',
+      '# Notes {#notes -}',
+      '## Numbered {#numbered}',
+      '```markdown',
+      '## Inside a fence {.unnumbered}',
+      '```',
+      '### A \\*literal\\* <star> {.unnumbered .unlisted}',
+    ].join('\n')
+    const word = unnumberedHeadingsForWord(markdown)
+    const off = (level, text) =>
+      `<w:p><w:pPr><w:pStyle w:val="Heading${level}"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="0"/></w:numPr></w:pPr><w:r><w:t xml:space="preserve">${text}</w:t></w:r></w:p>`
+    assert.ok(word.includes(`\`\`\`{=openxml}\n${off(2, 'Review &amp; sign-off')}\n\`\`\``))
+    assert.ok(word.includes(off(1, 'Notes')))
+    assert.ok(word.includes(off(3, 'A *literal* &lt;star&gt;')))
+    assert.match(word, /^## Numbered \{#numbered\}$/m)
+    assert.match(word, /^## Inside a fence \{\.unnumbered\}$/m)
+    assert.equal(unnumberedHeadingsForWord('# Title\n\nText {.unnumbered}\n'), '# Title\n\nText {.unnumbered}\n', 'nothing marked, nothing changed')
+  })
+
+  for (const [id, { example }] of Object.entries(DOCUMENTS)) {
+    test(`every table in the v3 ${id} uses the one table style: a repeating, shaded header row, uniform cells, rows that don't split`, () => {
+      const { documentXml, styles } = renderedWord(example, id)
+      const tables = bodyTables(documentXml)
+      assert.ok(tables.length > 0)
+      for (const [i, table] of tables.entries()) {
+        assert.equal(table.style, 'Table', `table ${i + 1}`)
+        assert.equal(table.rows[0].header, true, `table ${i + 1}'s first row repeats as a header row`)
+        for (const row of table.rows) {
+          assert.notEqual(row.cantSplit, false, `table ${i + 1}: no row is allowed to split`)
+          for (const p of row.paragraphs) {
+            assert.equal(p.style, 'Compact', `table ${i + 1}: "${p.text}"`)
+            assert.deepEqual(p.runSizes, [], `table ${i + 1}: "${p.text}" has no font size of its own`)
+          }
+        }
+      }
+      assert.equal(rowsCantSplit(styles, 'Table'), true, 'the document\'s own table style keeps rows together')
+      assert.equal(headerRowFormat(styles, 'Table').color, 'FFFFFF', 'and shades its header row')
+    })
+  }
 })
