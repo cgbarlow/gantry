@@ -13,7 +13,7 @@ import { withRunningServer } from './helpers/lifecycle.js'
 // `table-of-contents: true`, choosing writes `cover-classification`, and all three survive save, a
 // reload and publish, after which they are shown read-only. Setup mirrors
 // tests/documentControlCheckbox.playwright.test.js, over a draft copy of recruitment-onboarding v2
-// (design has no select or text Fields to classify with).
+// (design v1 and v2 have no select or text Fields to classify with).
 
 async function withDraftRecruitment(fn) {
   const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-front-matter-'))
