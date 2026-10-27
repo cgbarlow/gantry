@@ -1,0 +1,102 @@
+# WI #331: split off the ongoing-conditions fields (constraints, assumptions,
+# caveats, design-principles, outcomes-and-deliverables) into the new
+# `design-basis` module — see modules/design-basis.yaml. This module keeps only
+# the document-opening framing cluster and is retitled "Overview" to match: the
+# two clusters rendered inconsistently relative to each other across artefacts
+# (bundled together in SAD/As-built, split apart with the conditions cluster
+# pushed to the end in Full SOAP/HLD) because they were never one coherent
+# section to begin with. See docs/adr/0028 for why the two clusters were
+# originally combined under one `introduction` id (WI #280) — that reasoning
+# (a single persistent cross-stage home, entered once and refined) still holds
+# per cluster, it just doesn't hold for the two clusters sharing one heading.
+#
+# Field order follows the approved ATLAS reference design's Introduction section:
+# Overview -> Purpose -> Scope (In/Out). `content-standards` is last; only the
+# SSAD renders it.
+#
+# CHANGED v2: `executive-summary` added — the SAD and SSAD references both open
+# with an "Executive Summary" that had no field at all. Optional; see CHANGES.md
+# for the one-line change that would mandate it.
+#
+# CHANGED v2: scope is no longer a lightweight-SOAP obligation. The reference
+# SOAP has no scope section, so `soap` does not reference `in-scope` /
+# `out-of-scope` and `business-case` is not in their `required-at`. The Full SOAP
+# does carry both sections, and `soap-full` still lists them as bare field
+# references, so producing a Full SOAP still forces them at that gate.
+
+id: introduction
+title: Overview
+purpose: >
+  Introduce the solution — what it is, why it exists, and what it covers.
+
+  Mounted from the `shape` stage onward, immediately before `design-basis`.
+  `in-scope` / `out-of-scope` are the canonical cross-stage scope statement —
+  entered once and refined, never re-entered. The ongoing conditions this
+  solution was designed under (constraints, assumptions, caveats, design
+  principles, outcomes/deliverables) live in the adjacent `design-basis`
+  module, not here — see that module's `purpose` for why they're kept
+  separate from this framing content.
+
+fields:
+  - id: executive-summary
+    title: Executive summary
+    type: markdown
+    required: false
+    guidance: >
+      A standalone summary for a reader who will not read the rest of the
+      document — what the solution is, what was decided, and what is being
+      asked of them. The SAD and SSAD references both open with this section.
+      Distinct from `overview`, which introduces the document's subject rather
+      than summarising its conclusions; the SAD carries both.
+
+  - id: overview
+    title: Overview
+    type: markdown
+    required-at: [build-ready-checklist, operational-handover]
+    guidance: >
+      A short plain-language description of the solution and the change it
+      delivers — enough for a reader with no prior knowledge to understand
+      what this document is about. Also renders as the Full SOAP's opening
+      "Introduction" section when filled at SOAP.
+
+      The HLD's `background` framing and this SAD `introduction` framing are
+      intentionally separate (ARB vs Design Authority audiences) — do not
+      expect this to pre-fill from `background.problem`. See the reconciliation
+      doc §5.
+
+  - id: purpose
+    title: Purpose
+    type: markdown
+    required-at: [build-ready-checklist, operational-handover]
+    guidance: >
+      What this document is for and who is expected to use it (e.g.
+      security teams for C&A sign-off, engineers to build or rebuild from).
+
+  - id: in-scope
+    title: In scope
+    type: markdown
+    required-at: [hld-arb-approved, build-ready-checklist, operational-handover]
+    guidance: >
+      The features, functionality, and deliverables inside the boundaries of
+      this design. This is the canonical scope statement — it re-opens and is
+      refined at every later stage.
+
+  - id: out-of-scope
+    title: Out of scope
+    type: markdown
+    required-at: [hld-arb-approved, build-ready-checklist, operational-handover]
+    guidance: >
+      What this design explicitly does not cover. Silence on out-of-scope is
+      the most common cause of a design being sent back with questions.
+
+  - id: content-standards
+    title: Content standards
+    type: markdown
+    required: false
+    guidance: >
+      Conventions a reader needs to interpret this document — e.g. that
+      diagrams are collated from several parties and so vary in style, which
+      notation is used, or how this document relates to the fuller SAD. Only
+      the SSAD renders this field (the "Content Standards" sub-section of the
+      FV Help Tool SSAD's Introduction); the SAD and as-built templates leave
+      it out, so filling it does not affect them.

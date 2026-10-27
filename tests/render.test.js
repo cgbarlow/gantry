@@ -374,8 +374,8 @@ test('a local render injects a Document Control table immediately after the titl
 
     assert.match(result.markdown, /## Document Control/)
     assert.match(result.markdown, /## Review & sign-off/)
-    // Version: design v2 · SOAP (stage title for that gate)
-    assert.match(result.markdown, /\| Version \| design v2 · SOAP \|/)
+    // Version: design v3 · SOAP (stage title for that gate) — the examples fixture is pinned to v3 (#193)
+    assert.match(result.markdown, /\| Version \| design v3 · SOAP \|/)
     assert.match(result.markdown, new RegExp(`\\| Date \\| ${escapeRegExp(expectedDate)} \\|`))
     // Local commit: plain code span, not a hyperlink
     assert.match(result.markdown, new RegExp(`\\| Commit \\| \`${escapeRegExp(expectedHash)}\` \\|`))
@@ -416,7 +416,7 @@ test('a definition other than "design" also gets a Document Control block — it
     cpSync('definitions/design', join(definitionsDir, 'design'), { recursive: true })
     cpSync(join(definitionsDir, 'design'), join(definitionsDir, 'another-definition'), { recursive: true })
     // Give the copy a distinct id, matching loadDefinition's "directory must match id" requirement — otherwise it would just be "design" again under a different path, not a genuinely distinct definition.
-    for (const version of ['1', '2']) {
+    for (const version of readdirSync(join(definitionsDir, 'another-definition'))) {
       const definitionYamlPath = join(definitionsDir, 'another-definition', version, 'definition.yaml')
       const definitionYaml = readFileSync(definitionYamlPath, 'utf8').replace(/^id: design$/m, 'id: another-definition')
       writeFileSync(definitionYamlPath, definitionYaml)
@@ -431,7 +431,7 @@ test('a definition other than "design" also gets a Document Control block — it
     assert.match(result.markdown, /## Document Control/)
     assert.match(result.markdown, /## Review & sign-off/)
     assert.match(result.markdown, /\| Commit \| `[0-9a-f]+`/)
-    assert.match(result.markdown, /\| Version \| another-definition v2/)
+    assert.match(result.markdown, /\| Version \| another-definition v3/)
     assert.doesNotMatch(result.markdown, /Rendered from commit/)
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
@@ -667,7 +667,7 @@ test('an artefact with neither an artefact-specific nor a definition-level refer
   try {
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     cpSync('definitions/design', join(definitionsDir, 'design'), { recursive: true })
-    for (const version of ['1', '2']) {
+    for (const version of readdirSync(join(definitionsDir, 'design'))) {
       rmSync(join(definitionsDir, 'design', version, 'templates', 'reference.docx'), { force: true })
       rmSync(join(definitionsDir, 'design', version, 'templates', 'reference-soap.docx'), { force: true })
     }

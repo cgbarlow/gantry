@@ -92,7 +92,7 @@ Click any stage, artefact or module to focus it in the centre pane. A module's f
 
 ### Example instances
 
-The worked example throughout this guide remains the `design` definition, illustrated by the `examples` instance (a local instance with content for every stage).
+The worked example throughout this guide remains the `design` definition, illustrated by the bundled **Examples** workspace: `kiwi-cover-mutual`, a fictitious insurer's design with content for every stage, and `gantry`, Gantry's own hosting proposal written as a complete Full SOAP. Both run on `design` version 3, a draft where the next round of design changes is being made, so their documents can differ from version 2's. New `design` instances still start on version 2, the latest published version, unless you pick version 3 in the wizard. The "Populate example text" button on a version 3 stage fills from `kiwi-cover-mutual`.
 
 ## Stages & Gates
 
