@@ -23,6 +23,7 @@ function seedFiles(slug) {
   const instanceYaml = readFileSync('workspaces/examples/kiwi-cover-mutual/instance.yaml', 'utf8').replace(/^slug: examples$/m, `slug: ${slug}`)
   return {
     [`/gantry-workspace/${slug}/instance.yaml`]: instanceYaml,
+    [`/gantry-workspace/${slug}/modules/document-handling.md`]: exampleModuleText('document-handling'),
     [`/gantry-workspace/${slug}/modules/background.md`]: exampleModuleText('background'),
     [`/gantry-workspace/${slug}/modules/introduction.md`]: exampleModuleText('introduction'),
     [`/gantry-workspace/${slug}/modules/design-basis.md`]: exampleModuleText('design-basis'),
@@ -147,7 +148,8 @@ test('render-wasm-prepare then render-wasm-finish on a server-hosted instance ne
       assert.equal(prepRes.status, 200)
       const prep = await prepRes.json()
       assert.equal(prep.artefact, 'soap')
-      assert.match(prep.markdown, /^# kiwi-cover-mutual: Solution on a Page/)
+      // design v3 (#196): the document opens with its cover page, titled with the display name.
+      assert.match(prep.markdown, /^::: \{custom-style="Cover Classification"\}\nIN-CONFIDENCE\n:::\n\n::: \{custom-style="Title"\}\nKiwi Cover Mutual\n:::/)
       assert.match(prep.markdown, /## Document Control/)
       assert.ok(prep.referenceDocBase64, 'the v2 reference doc is handed to the browser for styling')
       assert.match(prep.docxPath, /\.docx$/)
