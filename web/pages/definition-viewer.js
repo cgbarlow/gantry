@@ -9,6 +9,7 @@ import { Dropdown } from '../lib/dropdown.js'
 import { moduleFieldUsage } from '../lib/moduleFieldUsage.js'
 import { defnView, setDefnView, defnMapExpanded, setDefnMapExpanded } from '../lib/definitionView.js'
 import { planCopy, resolveCollision, applyPlan, isResolved } from '../lib/copyPlanner.js'
+import { TARGET_SIZES, targetSizeLabel, withFieldTargetWords } from '../lib/targetSize.js'
 
 // The rebuilt Definitions page (WI #381, Feature #380's grilling session). Primary source:
 // web/prototypes/definition-editor.prototype.html — variant A (Outline) and C (Map) both wanted,
@@ -112,6 +113,34 @@ function stageGates(d) {
 // #149: a Field's `required-at` as the list of gates the editor shows, or null when it has none. A bare
 // string (the invalid-required-at problem — the engine substring-matches it) reads as the one gate it
 // names, so the Required control shows what the Field really does and one tick converts it to a list.
+// #202 (docs/adr/0054): a Field's word budget per Target size, as the read-only Definition viewer shows
+// it ("Small ~40 · Medium ~100 · Large ~200"), or null when it sets none. A malformed value is shown
+// as it is — the Definitions page's problem marker says what is wrong with it.
+function targetWordsSummary(f) {
+  if (f.targetWords === undefined) return null
+  if (f.targetWords === null || typeof f.targetWords !== 'object' || Array.isArray(f.targetWords)) return JSON.stringify(f.targetWords)
+  return TARGET_SIZES.map((size) => `${targetSizeLabel(size)} ~${f.targetWords[size] ?? '?'}`).join(' · ')
+}
+
+// The editable form: one whole-number box per size, beside each other. Blank removes that size's
+// budget; blanking all three removes `target-words` from the Field (web/lib/targetSize.js's
+// `withFieldTargetWords`). Only markdown and list Fields hold prose to budget.
+function targetWordsInputs(f, disabled, onChange) {
+  return html`
+    <div class="defn-target-words" role="group" aria-label="Word targets">
+      ${TARGET_SIZES.map((size) => html`
+        <label key=${size}>
+          ${targetSizeLabel(size)}
+          <input class="wizard-input defn-target-words-input" type="number" min="1" step="1" aria-label=${`${targetSizeLabel(size)} word target`}
+            disabled=${disabled}
+            value=${f.targetWords && typeof f.targetWords === 'object' ? f.targetWords[size] ?? '' : ''}
+            onInput=${(e) => onChange(withFieldTargetWords(f, size, e.currentTarget.value).targetWords)} />
+        </label>
+      `)}
+    </div>
+  `
+}
+
 function requiredAtGates(f) {
   if (typeof f.requiredAt === 'string') return [f.requiredAt]
   return Array.isArray(f.requiredAt) ? f.requiredAt : null
@@ -1819,9 +1848,11 @@ export function DefinitionViewerPage() {
     `
   }
   function fieldRowViewBody(f) {
+    const budget = targetWordsSummary(f)
     return html`
       <div class="defn-field-row-body">
         ${f.guidance ? html`<div class="guidance" dangerouslySetInnerHTML=${{ __html: renderMarkdown(f.guidance) }} />` : html`<p class="muted">No guidance.</p>`}
+        ${budget ? html`<p class="defn-target-words-summary"><span class="field-label">Word targets</span> ${budget}</p>` : null}
       </div>
     `
   }
@@ -1861,6 +1892,8 @@ export function DefinitionViewerPage() {
                 delete field.multiple
                 delete field.default
               }
+              // #202: only prose (markdown, list) has a word budget.
+              if (nextType !== 'markdown' && nextType !== 'list') delete field.targetWords
             })
           }}>
             <option value="markdown">markdown</option>
@@ -1938,6 +1971,14 @@ export function DefinitionViewerPage() {
                 </div>
               `
             : null}
+          ${f.type === 'markdown' || f.type === 'list' ? html`
+            <label class="field-label">Word targets</label>
+            ${targetWordsInputs(f, false, (targetWords) => updateDraft((d) => {
+              const field = d.modules[mIndex].fields[fi]
+              if (targetWords === undefined) delete field.targetWords
+              else field.targetWords = targetWords
+            }))}
+          ` : null}
           <label class="field-label">Guidance</label>
           <textarea class="wizard-input" rows="3" value=${f.guidance ?? ''} onInput=${(e) => updateDraft((d) => { d.modules[mIndex].fields[fi].guidance = e.currentTarget.value })}></textarea>
         </div>

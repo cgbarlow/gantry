@@ -43,6 +43,7 @@ import { visualMode, refreshVisual, clearActiveCell, restoreActiveCell, activeCe
 import { advancedMode } from './lib/advancedMode.js'
 import { modulePayload, payloadKey, savedFields, saveStatusLine } from './lib/stageSave.js'
 import { isMultiValuedField, emptyFieldValue } from './lib/fieldShape.js'
+import { countWords, targetSizeLabel, withTargetWords } from './lib/targetSize.js'
 import { renderEngine } from './lib/renderEngine.js'
 import { warmLoadPandocWasm, renderDocxWithWasm } from './lib/pandocWasm.js'
 import { hydrateMermaidPreview, prepareMermaidForDocx } from './lib/mermaid.js'
@@ -232,7 +233,9 @@ async function loadLocalInstance(workspaceId, slug, requestedStageId) {
     modules.push(buildLocalModuleEntry(moduleSpec, stage, data, null, structure.stages))
   }
 
-  return {
+  // #202: the same Target size and per-Field targets GET /api/instance adds (web/lib/targetSize.js),
+  // so a Local-workspace instance's editor shows the same word counts.
+  return withTargetWords({
     slug,
     // #145: the same optional display-name field GET /api/instance returns (`name:` in
     // instance.yaml, or `null` when unset) — read straight off the already-parsed local
@@ -279,7 +282,7 @@ async function loadLocalInstance(workspaceId, slug, requestedStageId) {
     // no second `/api/definitions/...` fetch, and no `/api/local/status` or
     // `/api/local/check` round trip at all.
     localDefinitionStructure: structure,
-  }
+  }, structure.modules, record.size)
 }
 
 /**
@@ -1585,6 +1588,21 @@ function forwardChanges(transactions, target) {
   }
 }
 
+// #202 (docs/adr/0054): a budgeted Field's word target at the instance's Target size, beside its live
+// word count — amber once the count is over. Only a Field whose Definition sets `target-words` carries
+// `targetWords` (GET /api/instance adds it), so every other Field, and every Field of a Definition
+// without budgets, shows nothing new. Advisory only: it never blocks Save, a gate or a render.
+function FieldTargetWords({ field, words }) {
+  if (!field.targetWords) return null
+  const over = words > field.targetWords
+  return html`
+    <p class=${'field-target-words' + (over ? ' over' : '')} data-over=${over ? 'true' : 'false'}>
+      Target ~${field.targetWords} words (${targetSizeLabel(instanceData.value?.size)})
+      <span class="field-word-count">· ${words} ${words === 1 ? 'word' : 'words'}</span>
+    </p>
+  `
+}
+
 function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestSection, onRequestList }) {
   const hostRef = useRef(null)
   // Split view's Visual pane (#374) mounts its own editor here.
@@ -1654,6 +1672,8 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
   // flag, refreshed from every selection/doc update below.
   const [inTable, setInTable] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
+  // #202: kept only for a budgeted Field, recounted as the text changes.
+  const [words, setWords] = useState(() => (field.targetWords ? countWords(field.value ?? '') : 0))
   const readOnly = isEditingBlocked()
 
   useEffect(() => {
@@ -1676,6 +1696,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
         visualCompartment.of(viewMode.value === 'visual' ? visualLayer() : []),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) noteContentEdit()
+          if (update.docChanged && field.targetWords) setWords(countWords(update.state.doc.toString()))
           // Selection moves count too — Tab-walking cells must flip the strip
           // on/off as the caret crosses the table's edge.
           if (update.docChanged || update.selectionSet) {
@@ -1893,6 +1914,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
         ? html`<h3 id=${headingIdForField} class="field-heading">${field.title}${field.required ? ' *' : ''}</h3><label class="visually-hidden" style="display:none">${field.title}${field.required ? ' *' : ''}</label>`
         : html`<label>${field.title}${field.required ? ' *' : ''}</label>`}
       ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
+      <${FieldTargetWords} field=${field} words=${words} />
       ${!readOnly && showToolbar
         ? html`
             ${showTableStrip ? html`<${TableControlStrip} run=${runCommand} />` : null}
@@ -2211,6 +2233,7 @@ function ListField({ field, moduleId, onRegister, onRemove, onRequestSection, on
         ? html`<h3 id=${headingIdForField} class="field-heading">${field.title}${field.required ? ' *' : ''}</h3><label class="visually-hidden" style="display:none">${field.title}${field.required ? ' *' : ''}</label>`
         : html`<label>${field.title}${field.required ? ' *' : ''}</label>`}
       ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
+      <${FieldTargetWords} field=${field} words=${field.targetWords ? countWords(rowsRef.current) : 0} />
       <div class="list-rows">
         ${rowsRef.current.map(
           (value, i) => html`
