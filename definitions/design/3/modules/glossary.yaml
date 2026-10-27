@@ -1,0 +1,17 @@
+id: glossary
+title: Glossary
+purpose: >
+  Define the terms, acronyms and abbreviations a reader needs to follow this document.
+
+fields:
+  - id: terms-and-definitions
+    title: Terms and definitions
+    type: markdown
+    required-at: [build-ready-checklist, operational-handover]
+    guidance: >
+      A table of the acronyms, abbreviations and domain terms used in this
+      solution's design and as-built documents, each with a one-line
+      definition. The SAD, SSAD and as-built reference documents all carry
+      this section, so it is required from `build-ready-checklist` onward — a
+      reader unfamiliar with Contoso's systems must be able to follow the
+      document unaided.
