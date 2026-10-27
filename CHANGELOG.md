@@ -17,6 +17,70 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.10.0-beta — 2026-10-27
+
+### Added
+
+- **A draft design v3 that produces review-ready Word documents** (#192, #193). A new `design` v3
+  draft carries everything below. It stays a draft until a process owner publishes it, so new
+  design instances still start on v2. v1 and v2 are unchanged, and documents already written on
+  them render exactly as before. The bundled Kiwi Cover Mutual and Gantry hosting examples now run
+  on v3, and "Populate example text" fills from them.
+- **Cover page and table of contents** (#194, #196). A definition can give any Artefact a cover
+  page and a table of contents, switched on per Artefact (`cover-page`, `table-of-contents`). Both
+  are off unless a definition turns them on. Every design v3 document now opens with a cover, then
+  Document Control, then a Table of Contents, then section 1. The cover shows the classification,
+  the solution's display name, the document type, version, status, author (the Assignee) and
+  purpose. Word fills in the table of contents when you open the document, and may ask first.
+- **A Classification on every design v3 document** (#196). A new optional field offers the NZ
+  Protective Security Requirements markings: UNCLASSIFIED, IN-CONFIDENCE, SENSITIVE and RESTRICTED.
+  It prints on the cover. Organisations elsewhere can swap in their own scheme. v3 headings no
+  longer show the instance's internal slug.
+- **Production Word styles in design v3** (#197). Sections are numbered 1 / 1.1 / 1.1.1 to match
+  the table of contents, and the front matter is unnumbered. Headings, captions and diagrams stay
+  with what follows them, so nothing is stranded at the bottom of a page. Every table has the same
+  dark header row with white bold text and the same font size. Rows don't split across pages, and
+  header rows repeat. All of this lives in v3's reference Word documents, so you can swap in your
+  own house style. The User Guide explains how.
+- **Diagram captions** (#195). Give a Mermaid diagram a caption on its fence
+  (```` ```mermaid {caption="Security architecture"} ````), or give an image alt text, and an
+  Artefact that switches captions on renders it as "Diagram N. <title>" under the figure, on the
+  same page. Diagrams and images share one numbering sequence, and the caption is used as the
+  picture's alt text. design v3 switches captions on. Other definitions are unchanged unless their
+  definition switches them on.
+- **`gantry render` draws Mermaid diagrams** (#198). The CLI now produces the same diagram pictures
+  and captions as the browser export, using the browser's own drawing code in headless Chromium.
+  Chromium is optional: run `npx playwright install chromium` once to get pictures (see the
+  README's install steps). Without it, rendering still succeeds, warns once and leaves diagrams as
+  source, as before. The server and its container image don't install Chromium.
+- **Target size: Small, Medium or Large** (#202, #203). An instance now has a target size, Medium
+  by default, that tells authors and AI agents how much to write. Each budgeted field shows
+  "Target ~N words (Medium)" with a live count that turns amber when you go over. It is advice only
+  and never blocks a save, a gate or a render. Choose it in the new-instance wizard or Instance
+  Settings, through MCP `create_instance`, or with `gantry new --size`. Over MCP, `get_instance`
+  returns each field's target, and `update_instance_modules` notes fields that are over target
+  without refusing the write. Every design v3 field has a budget. At Medium, a v3 SAD is about half
+  the length of today's examples, and the bundled examples have been condensed to match.
+  Definitions without budgets show none of this.
+
+### Changed
+
+- **design v3 guidance steers authors, including AI agents, toward content reviewers trust**
+  (#199, #200, #201). The guidance and the worked example now show:
+  - a short pattern for each diagram: introduce it, caption it, then explain it
+  - architecture labelled as current, interim, target or enduring
+  - each component's status (existing, implemented, in delivery, planned, future)
+  - unconfirmed owners marked "(interim)"
+  - design decisions as an AD | Decision | ADR table, with an ADR only where governance
+    endorsement is actually needed, and an explicit note not to assume ARB endorsement
+  - every figure carrying its source or "(target assumption)"
+  - a glossary of preferred terms
+  - architecture names used by default, contracted product names only where verified
+  - table columns named for what the rows are.
+
+  The MCP server's instructions now tell AI agents to follow each field's guidance and the
+  example's conventions, and never to invent figures or names.
+
 ## 0.9.26-beta — 2026-09-24
 
 ### Fixed
