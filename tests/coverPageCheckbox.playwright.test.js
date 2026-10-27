@@ -14,6 +14,11 @@ import { withRunningServer } from './helpers/lifecycle.js'
 // reload and publish, after which they are shown read-only. Setup mirrors
 // tests/documentControlCheckbox.playwright.test.js, over a draft copy of recruitment-onboarding v2
 // (design v1 and v2 have no select or text Fields to classify with).
+//
+// #205: beside them, a "Cover purpose" text box writes `cover-purpose`, the statement the cover
+// prints; emptying it removes the key.
+
+const COVER_PURPOSE = 'This brief sets out the role the hiring manager needs filled.'
 
 async function withDraftRecruitment(fn) {
   const definitionsDir = mkdtempSync(join(tmpdir(), 'defs-front-matter-'))
@@ -52,7 +57,7 @@ async function openFirstArtefact(page, base) {
   return { coverPage, tableOfContents: page.locator('.defn-table-of-contents input[type="checkbox"]') }
 }
 
-test('Definitions page: ticking Cover page and Table of contents and choosing a classification writes all three, which survive save, reload and publish, then show read-only', async () => {
+test('Definitions page: ticking Cover page and Table of contents, choosing a classification and writing a cover purpose writes all four, which survive save, reload and publish, then show read-only', async () => {
   await withDraftRecruitment(async (base, definitionsDir) => {
     const browser = await launchBrowser()
     try {
@@ -80,6 +85,9 @@ test('Definitions page: ticking Cover page and Table of contents and choosing a 
       await coverPage.check()
       await tableOfContents.check()
       await classification.selectOption({ label: 'Engagement · Engagement type' })
+      const coverPurpose = page.locator('textarea.defn-cover-purpose')
+      assert.equal(await coverPurpose.inputValue(), '', 'empty by default — no purpose line on the cover')
+      await coverPurpose.fill(COVER_PURPOSE)
       const saved = page.waitForResponse((r) => r.request().method() === 'PUT' && r.url().includes('/api/definitions/recruitment-onboarding/versions/2'), { timeout: 10_000 })
       await page.getByRole('button', { name: 'Save', exact: true }).click()
       assert.equal((await saved).status(), 200)
@@ -87,12 +95,15 @@ test('Definitions page: ticking Cover page and Table of contents and choosing a 
       assert.equal(onDisk['cover-page'], true)
       assert.equal(onDisk['table-of-contents'], true)
       assert.equal(onDisk['cover-classification'], 'engagement.type')
+      assert.equal(onDisk['cover-purpose'], COVER_PURPOSE)
+      assert.notEqual(onDisk.purpose, COVER_PURPOSE, 'the author-facing purpose is left as it was')
 
       await page.reload()
       ;({ coverPage, tableOfContents } = await openFirstArtefact(page, base))
       assert.equal(await coverPage.isChecked(), true, 'survives a reload')
       assert.equal(await tableOfContents.isChecked(), true, 'survives a reload')
       assert.equal(await page.locator('select.defn-cover-classification').inputValue(), 'engagement.type')
+      assert.equal(await page.locator('textarea.defn-cover-purpose').inputValue(), COVER_PURPOSE, 'survives a reload')
 
       // Unticking the table of contents removes the key again rather than writing false.
       await tableOfContents.uncheck()
@@ -107,6 +118,7 @@ test('Definitions page: ticking Cover page and Table of contents and choosing a 
       onDisk = artefactOnDisk(definitionsDir, artefactId)
       assert.equal(onDisk['cover-page'], true, 'survives publish')
       assert.equal(onDisk['cover-classification'], 'engagement.type', 'survives publish')
+      assert.equal(onDisk['cover-purpose'], COVER_PURPOSE, 'survives publish')
 
       ;({ coverPage, tableOfContents } = await openFirstArtefact(page, base))
       assert.equal(await coverPage.isChecked(), true)
@@ -114,6 +126,8 @@ test('Definitions page: ticking Cover page and Table of contents and choosing a 
       assert.equal(await tableOfContents.isChecked(), false)
       assert.equal(await tableOfContents.isDisabled(), true)
       assert.match(await page.locator('.defn-focus').textContent(), /Cover classification\s*engagement\.type/)
+      assert.match(await page.locator('.defn-focus').textContent(), new RegExp(`Cover purpose\\s*${COVER_PURPOSE.replace(/\./g, '\\.')}`))
+      assert.equal(await page.locator('textarea.defn-cover-purpose').count(), 0, 'not editable on a published version')
 
       assert.deepEqual(pageErrors, [])
     } finally {
@@ -124,7 +138,7 @@ test('Definitions page: ticking Cover page and Table of contents and choosing a 
 
 // The Local Workspace twin (/definitions/local), seeded through OPFS the way
 // tests/documentControlCheckbox.playwright.test.js does.
-test('Local Workspace editor: ticking Cover page and Table of contents saves both to the workspace\'s own folder, and unticking removes them', async () => {
+test('Local Workspace editor: ticking Cover page and Table of contents and writing a cover purpose saves them to the workspace\'s own folder, and unticking or emptying removes them', async () => {
   await withRunningServer({}, async (base) => {
     const browser = await launchBrowser()
     try {
@@ -166,8 +180,11 @@ test('Local Workspace editor: ticking Cover page and Table of contents saves bot
       assert.equal(await coverPage.isChecked(), false)
       assert.equal(await tableOfContents.isChecked(), false)
       assert.equal(await artefactEl.locator('select.defn-cover-classification').count(), 1, 'the classification choice is there too')
+      const coverPurpose = artefactEl.locator('textarea.defn-cover-purpose')
+      assert.equal(await coverPurpose.inputValue(), '')
       await coverPage.check()
       await tableOfContents.check()
+      await coverPurpose.fill(COVER_PURPOSE)
 
       const save = () => editorRoot.locator('> .detail-actions').getByRole('button', { name: 'Save', exact: true }).click()
       await save()
@@ -175,17 +192,19 @@ test('Local Workspace editor: ticking Cover page and Table of contents saves bot
       const saved = parseYAML(await readDefinitionYaml()).artefacts[0]
       assert.equal(saved['cover-page'], true)
       assert.equal(saved['table-of-contents'], true)
+      assert.equal(saved['cover-purpose'], COVER_PURPOSE)
 
       // Unticking drops the keys again. "Saved." is still showing from the first save, so wait on
       // the file itself. Mid-save the file can briefly not exist, which reads as "not yet".
       await coverPage.uncheck()
       await tableOfContents.uncheck()
+      await coverPurpose.fill('')
       await save()
       await page.waitForFunction(async (workspaceId) => {
         const { getWorkspaceHandle, readTextFile } = await import('/lib/localWorkspace.js')
         try {
           const text = await readTextFile(await getWorkspaceHandle(workspaceId), 'definitions/front-matter-local-e2e/1/definition.yaml')
-          return !text.includes('cover-page') && !text.includes('table-of-contents')
+          return !text.includes('cover-page') && !text.includes('table-of-contents') && !text.includes('cover-purpose')
         } catch {
           return false
         }

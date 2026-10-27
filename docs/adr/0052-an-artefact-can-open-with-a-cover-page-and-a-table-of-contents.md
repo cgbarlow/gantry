@@ -167,3 +167,52 @@ change on re-render because Gantry started adding pages to it.
   same reason ADR-0049's switch is per Artefact.
 
 Status: accepted.
+
+## Amendment (#205): the cover prints a cover purpose, not `purpose`
+
+Decision 2's last bullet, "the Artefact's `purpose`", is replaced. The
+cover's purpose line now comes from a new optional Artefact key,
+`cover-purpose`.
+
+**Why.** An Artefact's `purpose` is written for the author (ADR-0022): the
+User Guide and the Definitions page show it as an instruction, e.g. "Describe
+the complete solution architecture …". Printed on a `design` v3 cover, it read
+as an instruction to whoever picked the document up rather than a statement of
+what the document is. One string can't serve both readers, so there are now
+two.
+
+**Decision.**
+
+- `cover-purpose` is a string: the statement the cover prints under Author,
+  written for the reader, e.g. "This document describes the complete solution
+  architecture …". Its whitespace is collapsed to one line, like every other
+  cover value.
+- The cover prints `cover-purpose` when it is set, and **never falls back to
+  `purpose`**. With `cover-page: true` and no `cover-purpose`, the cover has
+  no purpose line. A fallback was rejected because it would put the
+  instruction back on the cover of every Definition that hasn't written a
+  cover purpose yet, which is the problem this fixes.
+- `purpose` is unchanged. It stays the author-facing text the User Guide and
+  the Definitions page show, and the render no longer reads it.
+- Validation follows decision 6. `cover-purpose` must be a string with
+  something in it. A blank, whitespace-only or non-string value is an
+  `invalid-cover-purpose` problem, authoring-only like the other front-matter
+  problems: it is reported by `gantry validate`, marked on the Definitions
+  page and refused at Save and Publish, but the Definition still loads, and a
+  bad value prints no purpose line. The rule lives in
+  `web/lib/artefactFrontMatter.js` with the others, shared by
+  `lib/definition.js` and the Local Workspace validator.
+- Like the other keys (decision 7), it survives save, new draft, clone,
+  publish, promote, each Provider's loader and the Library cache. It is a
+  **Cover purpose** text box beside the Cover page checkbox on the Definitions
+  page and in the Local Workspace definition editor. Emptying the box removes
+  the key. It is shown read-only on a published version.
+- It has no effect without `cover-page: true`, as `cover-classification` has
+  none.
+
+**Consequences.** `design` v3, still a draft, sets a `cover-purpose` on all
+six Artefacts, each a "This document …" statement keeping its `purpose`'s
+substance. `design` v1 and v2 and `recruitment-onboarding` set no
+`cover-page`, so they render exactly as before. A Definition outside this repo
+that already turned on `cover-page` loses the purpose line from its cover
+until it adds a `cover-purpose`.
