@@ -36,6 +36,7 @@ import { parseLocalModuleFile, parseInstanceYaml } from './localInstanceFiles.js
 import { isMultiValuedField } from './fieldShape.js'
 import { readOnlyModuleProblems } from './readOnlyModules.js'
 import { diagramCaptionsProblem } from './diagramCaptions.js'
+import { artefactFrontMatterProblems } from './artefactFrontMatter.js'
 
 // ---------------------------------------------------------------------------
 // definition/module lookup — the projection's `modules` is a plain array;
@@ -587,6 +588,8 @@ export function findLocalDefinitionProblems(structure) {
     // #195: shared with lib/definition.js rather than ported — see web/lib/diagramCaptions.js.
     const captionsProblem = diagramCaptionsProblem(artefact.id, artefact.diagramCaptions)
     if (captionsProblem) problems.push(captionsProblem)
+    // #194: shared with lib/definition.js rather than ported — see web/lib/artefactFrontMatter.js.
+    problems.push(...artefactFrontMatterProblems(artefact, findFilenameField))
   }
 
   problems.push(...gateReferenceProblems(stages, artefacts, [...modulesById.values()]))

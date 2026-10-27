@@ -1,0 +1,16 @@
+id: alternatives-considered
+title: Alternatives considered
+purpose: >
+  Describe the other options that were on the table and why they were not chosen.
+  Include "do nothing" where it helps show the proposed approach was compared, not just
+  asserted.
+
+fields:
+  - id: alternatives
+    title: Alternatives
+    type: markdown
+    required: true
+    guidance: >
+      For each alternative: what it was, and the specific reason it lost out
+      to the proposed solution. "Do nothing" counts as an alternative and is
+      often worth including explicitly.

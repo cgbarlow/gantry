@@ -1,0 +1,122 @@
+# <%~ it.instance.slug %>: High Level Design
+<%
+  /* WI #318 (design v2): `requires` is field-level end to end so render order
+     can match the TAC HLD reference template exactly (cover block -> Problem
+     Statement -> Proposed solution -> Alternatives considered -> Open
+     questions -> Attachment/s).
+
+     WI #362: this template now renders the reference's sections and nothing
+     else. Affected domains, Design basis, Solution overview, Dependency list
+     and Open issues are gone — the TAC template has no heading for any of
+     them — and Non-functional requirements / Security and privacy are back to
+     a single `##` heading each (the v1 layout), carrying only the two mandated
+     NFR fields and privacy-and-confidentiality. The dropped fields still
+     render in the artefacts of the stages that own them; see
+     definition.yaml's `hld.requires` comment and CHANGELOG.md.
+
+     Blank-field guard `na()` is injected once as an Eta functionHeader by
+     lib/render.js (WI #273 / R2). A `module.field?` requires entry is in scope
+     but not gate-blocking (WI #276), so it renders as a suppress-when-blank
+     `<% if %>` section; a bare entry always renders its heading via na(). */
+%>
+# Submission
+
+<%~ na(it.modules['hld-submission']['purpose-statement']) %>
+<% if (it.modules['hld-submission']['authors-and-contributors'] && it.modules['hld-submission']['authors-and-contributors'].length) { %>
+## Authors and contributors
+
+<% it.modules['hld-submission']['authors-and-contributors'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+<% } %>
+## Decision requested
+
+<%~ na(it.modules['hld-submission']['decision-requested']) %>
+<% if (it.modules['hld-submission']['next-steps']) { %>
+## Next steps
+
+<%~ it.modules['hld-submission']['next-steps'] %>
+<% } %>
+## Consultation
+
+<%~ na(it.modules['hld-submission'].consultation) %>
+
+# Problem statement
+
+## Current state
+
+<%~ na(it.modules.background.problem) %>
+
+## Desired future state
+
+<%~ na(it.modules.background.opportunity) %>
+
+## In scope
+
+<%~ na(it.modules.introduction['in-scope']) %>
+
+## Out of scope
+
+<%~ na(it.modules.introduction['out-of-scope']) %>
+
+## Success criteria
+
+<%~ na(it.modules.background['success-criteria']) %>
+
+## Non-functional requirements
+
+<%~ na(it.modules.nfrs.performance) %>
+
+<%~ na(it.modules.nfrs['availability-and-continuity']) %>
+
+# Proposed solution
+
+<%~ na(it.modules['proposed-solution'].guardrails) %>
+
+## Alignment with strategy
+
+<%~ na(it.modules['proposed-solution']['strategy-alignment']) %>
+
+## Dependencies
+
+<%~ na(it.modules.dependencies['dependencies-overview']) %>
+<% if (it.modules['proposed-solution'].implications) { %>
+## Implications
+
+<%~ it.modules['proposed-solution'].implications %>
+<% } %>
+## Trade-offs
+
+<%~ na(it.modules['proposed-solution']['trade-offs']) %>
+
+## Risks and mitigations
+
+<%~ na(it.modules.risks['risk-register']) %>
+
+## Security and privacy
+
+<%~ na(it.modules.security['privacy-and-confidentiality']) %>
+
+## Cost-benefit analysis
+
+<%~ na(it.modules['proposed-solution']['cost-benefit']) %>
+
+## Delivery approach and indicative timeline
+
+<%~ na(it.modules['proposed-solution']['delivery-approach']) %>
+
+# Alternatives considered
+
+<%~ na(it.modules['alternatives-considered'].alternatives) %>
+<% if (it.modules['open-questions'].questions) { %>
+
+# Open questions
+
+<%~ it.modules['open-questions'].questions %>
+<% } %>
+<% if (it.modules['hld-submission'].attachments && it.modules['hld-submission'].attachments.length) { %>
+
+# Attachment/s
+
+<% it.modules['hld-submission'].attachments.forEach(function(item) { %>- <%~ item %>
+<% }) %>
+<% } %>

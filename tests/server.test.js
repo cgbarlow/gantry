@@ -27,7 +27,7 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
       {
         id: 'soap',
         title: 'Solution on a Page',
-        // design v2 `soap.requires` (the fixture is pinned to v2, WI #348)
+        // design v3 `soap.requires`, still v2's (the fixture is pinned to v3, #193)
         requires: [
           'background.problem',
           'background.affected-domains',
@@ -108,7 +108,7 @@ test('GET /api/instance?stage=<id> browses a different stage\'s modules without 
     const body = await res.json()
     assert.deepEqual(body.stage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-arb-approved', number: 2 })
     assert.equal(body.currentStageId, 'shape')
-    // design v2 `hld.requires` — field-level end to end (WI #318), fixture pinned to v2 (WI #348),
+    // design v2 `hld.requires`, carried into v3 — field-level end to end (WI #318), fixture pinned to v3 (#193),
     // trimmed to one entry per TAC reference section (WI #362, docs/adr/0032). This list is what
     // the editor filters visible fields by (`artefactFieldIds`, web/lib/artefactSelection.js), so
     // it is also the exact field set the HLD stage screen shows.

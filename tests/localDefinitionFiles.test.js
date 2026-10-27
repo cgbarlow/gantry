@@ -304,12 +304,16 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
       artefacts: [
         FIXTURE_STRUCTURE.artefacts[0],
         {
-          id: 'letter', title: 'Letter', purpose: 'For the reader', template: 'templates/letter.md.tmpl', gate: 'sign-off', requires: ['background.summary'],
+          id: 'letter', title: 'Letter', purpose: 'For the reader', template: 'templates/letter.md.tmpl', gate: 'sign-off', requires: ['background.summary', 'background.marking?'],
           filename: '{instance.name} - Letter', documentControl: false, satisfiesGate: false, diagramCaptions: true, copiedFrom: provenance,
+          // #194 (ADR-0052): the front-matter keys.
+          coverPage: true, coverClassification: 'background.marking', tableOfContents: true,
         },
         // #151: what passes sign-off, so the Letter opting out doesn't make the gate unsatisfiable.
         { id: 'record', title: 'Record', purpose: 'The record', template: 'templates/main.md.tmpl', gate: 'sign-off', requires: ['background.summary'] },
       ],
+      // #194: a text Field for the Letter's cover-classification to name.
+      modules: [{ ...FIXTURE_STRUCTURE.modules[0], fields: [...FIXTURE_STRUCTURE.modules[0].fields, { id: 'marking', title: 'Marking', type: 'text' }] }],
     }
 
     const handle = new MemDirHandle()
@@ -319,6 +323,9 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
     assert.match(yamlText, /document-control: false/)
     assert.match(yamlText, /satisfies-gate: false/)
     assert.match(yamlText, /diagram-captions: true/)
+    assert.match(yamlText, /cover-page: true/)
+    assert.match(yamlText, /cover-classification: background\.marking/)
+    assert.match(yamlText, /table-of-contents: true/)
 
     const read = await readLocalDefinitionStructure(handle, 'wi384-fixture', 1)
     const review = read.stages.find((s) => s.id === 'review')
@@ -330,6 +337,11 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
     assert.equal(letter.satisfiesGate, false)
     assert.equal(letter.diagramCaptions, true)
     assert.deepEqual(letter.copiedFrom, provenance)
+    assert.equal(letter.coverPage, true)
+    assert.equal(letter.coverClassification, 'background.marking')
+    assert.equal(letter.tableOfContents, true)
+    assert.equal('coverPage' in read.artefacts[0], false)
+    assert.equal('tableOfContents' in read.artefacts[0], false)
     assert.equal('documentControl' in read.artefacts[0], false)
     assert.equal('satisfiesGate' in read.artefacts[0], false)
     assert.equal('diagramCaptions' in read.artefacts[0], false)
@@ -393,6 +405,54 @@ describe('a non-boolean document-control read from a Local Workspace folder', ()
 
     await writeLocalDefinitionStructure(handle, 'wi384-fixture', 1, read)
     assert.match(await (await fileHandle.getFile()).text(), /document-control: no/)
+  })
+})
+
+// #194 (ADR-0052): the front-matter switches default to false, so an explicit false stays in the file
+// but out of the projection, as on the server; a non-boolean is kept as it is so it is reported.
+describe('front-matter keys read from a Local Workspace folder', () => {
+  test('keeps cover-page / table-of-contents: false on disk but leaves them out of the projection, matching the server', async () => {
+    const withFalse = {
+      ...FIXTURE_STRUCTURE,
+      artefacts: [{ ...FIXTURE_STRUCTURE.artefacts[0], coverPage: false, tableOfContents: false }],
+    }
+    const handle = new MemDirHandle()
+    await writeLocalDefinitionStructure(handle, 'wi384-fixture', 1, withFalse)
+    const yamlText = await (await (await (await (await (await handle.getDirectoryHandle('definitions')).getDirectoryHandle('wi384-fixture')).getDirectoryHandle('1')).getFileHandle('definition.yaml')).getFile()).text()
+    assert.match(yamlText, /cover-page: false/)
+    assert.match(yamlText, /table-of-contents: false/)
+
+    const read = await readLocalDefinitionStructure(handle, 'wi384-fixture', 1)
+    assert.equal('coverPage' in read.artefacts[0], false)
+    assert.equal('tableOfContents' in read.artefacts[0], false)
+
+    await withScratchInstances(async (definitionsDir) => {
+      createBlankDefinition('wi384-fixture', { definitionsDir })
+      writeDefinitionVersion('wi384-fixture', 1, withFalse, { definitionsDir })
+      const diskProjection = definitionVersionProjection(loadDefinition('wi384-fixture', { definitionsDir, version: 1 }))
+      assert.deepEqual(read, diskProjection)
+    })
+  })
+
+  test('a hand-edited non-boolean table-of-contents is kept, reported by findLocalDefinitionProblems, and survives a write', async () => {
+    const handle = new MemDirHandle()
+    await writeLocalDefinitionStructure(handle, 'wi384-fixture', 1, FIXTURE_STRUCTURE)
+    const fileHandle = await (await (await (await handle.getDirectoryHandle('definitions')).getDirectoryHandle('wi384-fixture')).getDirectoryHandle('1')).getFileHandle('definition.yaml')
+    const yamlText = await (await fileHandle.getFile()).text()
+    const edited = yamlText.replace('    requires:\n', '    table-of-contents: yes\n    requires:\n')
+    assert.notEqual(edited, yamlText, 'the fixture edit must land')
+    const writable = await fileHandle.createWritable()
+    await writable.write(edited)
+    await writable.close()
+
+    const read = await readLocalDefinitionStructure(handle, 'wi384-fixture', 1)
+    assert.equal(read.artefacts[0].tableOfContents, 'yes')
+    const problems = findLocalDefinitionProblems(read)
+    assert.deepEqual(problems.map((p) => p.type), ['invalid-table-of-contents'])
+    assert.match(problems[0].message, /^Artefact "soap" sets "table-of-contents" to "yes"/)
+
+    await writeLocalDefinitionStructure(handle, 'wi384-fixture', 1, read)
+    assert.match(await (await fileHandle.getFile()).text(), /table-of-contents: yes/)
   })
 })
 

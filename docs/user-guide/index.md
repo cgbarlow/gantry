@@ -92,7 +92,7 @@ Click any stage, artefact or module to focus it in the centre pane. A module's f
 
 ### Example instances
 
-The worked example throughout this guide remains the `design` definition, illustrated by the `examples` instance (a local instance with content for every stage).
+The worked example throughout this guide remains the `design` definition, illustrated by the bundled **Examples** workspace: `kiwi-cover-mutual`, a fictitious insurer's design with content for every stage, and `gantry`, Gantry's own hosting proposal written as a complete Full SOAP. Both run on `design` version 3, a draft where the next round of design changes is being made, so their documents can differ from version 2's. New `design` instances still start on version 2, the latest published version, unless you pick version 3 in the wizard. The "Populate example text" button on a version 3 stage fills from `kiwi-cover-mutual`.
 
 ## Stages & Gates
 
@@ -235,6 +235,22 @@ Straight under its title, a rendered document normally has two tables, both supp
 Some documents are written for people outside the organisation, such as the offer sent to a candidate. For those, both tables are internal detail you would otherwise delete by hand. A Definition author can switch them off for one artefact: untick **Document Control** on that artefact on the Definitions page, or set `document-control: false` on it in `definition.yaml`. That artefact then renders with its title and content only, and neither table. Every other artefact keeps both tables. This applies wherever the document is rendered: locally, on any Provider, in the browser, from the command line, or automatically when you request sign-off. The commit the render was saved as is still in the repository's history, even though the document doesn't print it.
 
 The key accepts only `true` or `false`. Anything else, such as `"no"` (which is also what an unquoted `no` becomes), is a problem. `gantry validate` and a Local Workspace report it, the Definitions page marks it on a draft, and it blocks Save and Publish. A Definition that carries it won't load until it's fixed, and neither will its instances, on any Provider. Until then the other Definitions in the same folder stop listing too. The error names the artefact and the value. A Definition can still leave the tables out of every document at once by shipping an empty `templates/_documentControl.md.tmpl`.
+
+### Cover page and table of contents
+
+A Definition author can give an artefact a cover page, a table of contents, or both. They are off by default, so a document only gets them if its Definition asks for them.
+
+**Cover page.** Tick **Cover page** on the artefact on the Definitions page, or set `cover-page: true` on it in `definition.yaml`. The document then opens with a cover showing the instance's name as the title, the artefact's title as the document type, the version and status from the Document Control table, the instance's assignee as author, and the artefact's purpose, followed by a page break. Document Control comes next. Anything without a value is left off the cover. The cover never shows diagrams or section content.
+
+The cover can also show a classification, such as `IN-CONFIDENCE`. Choose the field it comes from under **Cover classification**, or set `cover-classification: <module>.<field>` in `definition.yaml`. It must be a single-choice select or a text field that the artefact itself requires; the choice on the Definitions page lists exactly those. When the field is blank, the cover leaves the classification out.
+
+With a cover page, Document Control, the table of contents and then the template's own content follow the cover in that order. A template that still starts with its own `#` title line prints it there, after the front matter, so a template written for a cover usually leaves it out.
+
+**Table of contents.** Tick **Table of contents**, or set `table-of-contents: true`. The document gets a "Table of Contents" heading and a contents list of its headings, three levels deep, after Document Control and before the first section, then a page break. If the artefact also leaves out Document Control, the table of contents comes straight after the cover, or first under the title when there is no cover. Word fills the list in when you open the document, and may ask first whether to update the fields in it. A viewer that doesn't update fields shows a one-line note in its place.
+
+Both work wherever the document is rendered: locally, on any Provider, in the browser, from the command line, or automatically when you request sign-off. The cover's paragraphs use the Word styles `Title`, `Subtitle`, `Cover Classification`, `Cover Details` and `Cover Purpose`, and the contents heading uses `TOC Heading`, so an organisation can restyle them in its reference `.docx`.
+
+`cover-page` and `table-of-contents` accept only `true` or `false`, and `cover-classification` must name a field the cover can print. Anything else is a problem. `gantry validate` and a Local Workspace report it, the Definitions page marks it on a draft, and it blocks Save and Publish. A Definition that already has one keeps loading, and the document renders without that cover, contents or classification until it's fixed.
 
 ### Artefacts that don't count toward the gate
 
