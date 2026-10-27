@@ -1,5 +1,6 @@
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
+import { mermaidFenceCaption } from './diagramCaptions.js'
 
 const md = new MarkdownIt()
 
@@ -34,6 +35,20 @@ md.renderer.rules.image = (tokens, index, options, env, self) => {
   const src = tokens[index].attrGet('src') ?? ''
   if (src.startsWith('/api/instance/assets/')) tokens[index].attrJoin('class', 'asset-thumb')
   return defaultImageRenderer(tokens, index, options, env, self)
+}
+
+// #195 (ADR-0053): a Mermaid fence's caption (```mermaid {caption="…"}) is not part of what
+// markdown-it prints — only the word `mermaid` becomes the code's language class — so it rides on
+// the `<code>` as `data-caption` for web/lib/mermaid.js's preview hook to put under the drawing.
+const defaultFenceRenderer =
+  md.renderer.rules.fence ?? ((tokens, index, options, env, self) => self.renderToken(tokens, index, options))
+md.renderer.rules.fence = (tokens, index, options, env, self) => {
+  const token = tokens[index]
+  if (/^mermaid\b/.test(token.info.trim())) {
+    const caption = mermaidFenceCaption(token.info)
+    if (caption) token.attrSet('data-caption', caption)
+  }
+  return defaultFenceRenderer(tokens, index, options, env, self)
 }
 
 // Every link in rendered markdown opens in a new tab, except pure in-page anchors

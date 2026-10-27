@@ -327,7 +327,9 @@ test('an asset:<id> reference (#80) inserted into a module field compiles into a
     assert.match(relationshipsXml, /Target="https:\/\/draw\.io\/diagrams\/eligibility-flow"/)
     // v2 renders the field as "Problem statement" (the same `background.problem` field the reference was appended to).
     const driverIndex = roundTrip.indexOf('Problem statement')
-    const imageIndex = roundTrip.indexOf('![Eligibility flow]')
+    // #195 (ADR-0053): the alt text is the image's caption, numbered — the first figure in the SOAP.
+    // pandoc's markdown writer hard-wraps the round-tripped alt text, so match across the break.
+    const imageIndex = roundTrip.search(/!\[Diagram 1\.\s+Eligibility\s+flow\]/)
     const affectedDomainsIndex = roundTrip.indexOf('Affected domains')
     assert.ok(driverIndex >= 0 && imageIndex >= 0 && affectedDomainsIndex >= 0)
     assert.ok(driverIndex < imageIndex, 'expected the image after the Problem statement section')

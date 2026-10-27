@@ -612,6 +612,15 @@ main[data-view-mode='split'] .field-markdown .split:focus-within .editor-host:no
 .field-markdown .md-rendered figure.mermaid-diagram svg { max-width: 100%; height: auto; }
 .field-markdown .md-rendered pre.mermaid-error { border-left: 3px solid var(--danger, #b00020); }
 .field-markdown .md-rendered .mermaid-error-note { color: var(--text-muted, #666); font-size: 12px; margin: -6px 0 12px; }
+/* #195: a fence's caption under its drawing, italic and centred as in the Word
+ * document. The figure is always white, so the text colour is fixed too. */
+.field-markdown .md-rendered figure.mermaid-diagram figcaption.diagram-caption {
+  margin: 6px 0 0;
+  font-style: italic;
+  font-size: 13px;
+  text-align: center;
+  color: #444;
+}
 
 /*
  * Formatting toolbar (#133) — one slim strip per focused markdown field.

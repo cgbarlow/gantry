@@ -458,8 +458,9 @@ async function renderLocalArtefactViaEngine(instance, artefact, slug, format = '
     try {
       const compiled = await runLocalCompute('compile', instance, { artefact: artefact.id })
       const referenceDocBytes = compiled.referenceDocBase64 ? base64ToBytes(compiled.referenceDocBase64) : null
-      // WI #353: Mermaid blocks become PNGs for the docx.
-      const docxInput = await prepareMermaidForDocx(compiled.markdown)
+      // WI #353: Mermaid blocks become PNGs for the docx. #195: from the compile's numbered,
+      // captioned markdown — `compiled.markdown` is the authored form an `.md` render writes.
+      const docxInput = await prepareMermaidForDocx(compiled.docxMarkdown)
       const docxBytes = await renderDocxWithWasm({ markdown: docxInput.markdown, referenceDocBytes, files: docxInput.files })
       const docxPath = `gantry-workspace/${slug}/out/${compiled.basename}.docx`
       await writeLocalBinaryFile(handle, docxPath, docxBytes)
