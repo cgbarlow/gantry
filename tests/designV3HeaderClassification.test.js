@@ -138,8 +138,8 @@ describe('design v3 prints the classification in the page header of every page (
 
     // A scratch copy of design v3 whose SOAP drops one of the two keys at a time.
     for (const [label, edit] of [
-      ['a cover without a classification Field', (yaml) => yaml.replace(SOAP_KEYS, '    cover-page: true\n    table-of-contents: true\n')],
-      ['a classification Field without a cover', (yaml) => yaml.replace(SOAP_KEYS, '    cover-classification: document-handling.classification\n    table-of-contents: true\n')],
+      ['a cover without a classification Field', (yaml) => yaml.replace(SOAP_KEYS, '    cover-page: true\n')],
+      ['a classification Field without a cover', (yaml) => yaml.replace(SOAP_KEYS, '    cover-classification: document-handling.classification\n')],
     ]) {
       withScratchDir((root) => {
         const definitionsDir = join(root, 'definitions')
@@ -164,4 +164,4 @@ test('the v3 CHANGELOG records the header classification under v3, and v3 stays 
   assert.match(v3Section, /\*\*Status: draft\b/)
 })
 
-const SOAP_KEYS = '    cover-page: true\n    cover-classification: document-handling.classification\n    table-of-contents: true\n'
+const SOAP_KEYS = '    cover-page: true\n    cover-classification: document-handling.classification\n'
