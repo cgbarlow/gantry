@@ -9,18 +9,16 @@ owner: p.natarajan
 
 ### Alternative A — Do nothing
 
-Keep the four systems and the manual hand-offs, and meet the cycle-time commitment by adding claims handlers. Rejected: the Claims Service Review shows the re-key error rate is structural, not a staffing problem, so extra handlers hold the cycle time only while volumes are flat. The recurring cost exceeds the modernisation cost within three years and none of the audit findings on manual payment requests are addressed.
+Keep the four systems and add claims handlers. Rejected: the Claims Service Review shows re-keying errors are structural, and the recurring cost exceeds the modernisation cost within three years.
 
 ### Alternative B — Migrate Policy Data Management off the mainframe first
 
-Replace the inherited ArchiSurance policy platform with a modern policy administration product, then integrate claims handling against it. Rejected for this initiative: the migration is the largest and least certain piece of work in the technology roadmap (data cleansing alone is estimated at a year), and sequencing the claims benefit behind it defers the board commitment by at least eighteen months. The shared services this design builds are exactly what a later migration needs, so nothing is lost by doing them first.
+Replace the inherited ArchiSurance platform, then integrate claims handling. Rejected for now: it is the roadmap's largest and least certain piece of work, and would defer the board commitment by at least eighteen months. The shared services built here are what a later migration needs.
 
 ### Alternative C — Adopt a dedicated claims-management product
 
-License a claims-management platform to own the whole Handle Claim process, integrating it to Policy Data Management, the CRM and the Financial Application. Deferred: it would still need the same three integrations plus a fourth to the CRM for customer contact, add an annual licence comparable to the ArchiSurance renewal, and extend the timeline by an estimated two quarters for product selection and configuration. Worth revisiting if the CRM vendor's workflow extension proves limiting in increment 2.
+Rejected for now: it needs the same integrations plus one more, adds a licence, and adds about two quarters. Worth revisiting if the CRM System's workflow extension proves limiting.
 
 ### Alternative D — Point-to-point integration without shared services
 
-Wire the CRM directly to Policy Data Management and the Financial Application without introducing the Customer Information and Claims Information services. Rejected: it removes the re-keying but leaves each application with its own copy of customer and claim data, so the disagreement problem persists, and the web and telephone intake flow would need its own integrations rather than reusing the services.
-
-The proposed solution (shared services around the existing systems, CRM orchestrating the process, payment gateway for settlement) is the one that delivers the member commitment earliest while leaving every larger decision — mainframe retirement, CRM replacement — open.
+Rejected: it removes re-keying but leaves each application with its own copy of the data, so the disagreements persist.

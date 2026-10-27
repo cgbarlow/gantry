@@ -7,105 +7,90 @@ owner: p.natarajan
 
 ## Business context
 
-Kiwi Cover Mutual sells and services general insurance to about 310,000 members through its own web and telephone channels. Two business processes are affected: taking out insurance (request received, processed, premium collected) and handling a claim (register, accept, valuate, pay). The problem and opportunity were approved at SOAP and HLD; for builders the setting is this: the CRM System is where staff work, Policy Data Management on the mainframe holds the policies and the claims ledger, the Home & Away Financial Application holds the money, and the document management system holds the paperwork. The regulatory setting — the Privacy Act, the Fair Insurance Code's timeframes, and the prudential record-keeping rules — is listed in Security; what it means for the build is that every claim state change is audited and that member data does not leave the KCM network except as a payment instruction.
+KCM sells and services general insurance to its members through its own web and telephone channels. Two business processes change: taking out insurance and handling a claim. For builders, the setting is this: staff work in the CRM System, Policy Data Management holds policies and the claims ledger, the Financial Application holds the money, and the document management system holds the paperwork. Every claim state change is audited, and member data leaves KCM's network only as a payment instruction.
 
-### Business concept view
+The following diagram presents the business concept view.
 
 ![Business concept view](asset:kcm-business-concept-view)
 
-The concept view shows the boundary the design works within. Inside the boundary, a business user (a claims handler or an insurance seller) works with the solution and its data store; outside it, the client (the member) interacts through the web and telephone channels, and the solution interacts with an external party — the payment gateway and bank. Everything the design adds sits inside that boundary except the payment instruction.
-
-### Wider context
-
-KCM's Technology Strategy names shared enterprise services as its target state and "modernise in place, retire on evidence" as the route to it. This design delivers the first two shared services (customer information, claims information) and the service exposures on the mainframe that a later policy-platform migration would reuse.
+The diagram shows how business users and the solution sit inside the boundary, with the member and the BIBIT gateway outside it. Everything the design adds is inside that boundary except the payment instruction.
 
 ## Solution users
 
-- Member — registers claims and requests policies on the web; receives payments and correspondence
-- Contact Centre Agent — registers claims and policy requests on the member's behalf by telephone
-- Claims Handler — accepts, valuates and progresses claims within an authority limit
-- Senior Claims Handler — handles complex and high-value claims; approves valuations above the limit
-- Claims Payment Approver — releases approved claim payments (separated from valuation)
-- Insurance Seller — processes telephone policy requests through to binding
-- Finance Operator — reconciles claims payments and premium receipts in the Financial Application
-- Claims Support Administrator — maintains routing rules, reference data and templates
-- Actuarial / Finance Analyst — consumes the claims data mart
+- Member — registers claims and requests policies on the web
+- Contact Centre Agent — registers claims and requests by telephone
+- Claims Handler and Senior Claims Handler — accept and valuate claims
+- Claims Payment Approver — releases payments
+- Finance Operator — reconciles payments and receipts
+- Claims Support Administrator — maintains routing rules
 - Internal Auditor — reads claims and audit records
 
 ## Design decisions
 
 | AD | Decision | ADR |
 |----------|----------------------------------------------------------------------|------------|
-| AD01 | **Shared services rather than point-to-point integration.** Customer and claim data are served by CIS and Claims InfoServ; applications consume them rather than holding copies. Alternative D (point-to-point) was rejected at HLD because it leaves the data disagreement in place. An ADR because the two services are built for enterprise reuse. | ADRYYY |
-| AD02 | **Policy Data Management stays the policy system of record, exposed as services.** Four CICS transactions (policy lookup, insured-item lookup, policy create, claim ledger update) are exposed over MQ through the integration layer. Migration (alternative B) is deferred; the exposures are what migration would need anyway. An ADR because it sets the precedent for exposing the mainframe as services. | ADRYYY |
-| AD03 | **The CRM orchestrates Handle Claim; Claims InfoServ owns the claim state.** The workflow runs in the CRM's extension framework, but the claim's state, valuation and audit trail are held in Claims InfoServ so the process can move to another orchestrator without losing data. Routing rules also live in Claims InfoServ (risk R3). | |
-| AD04 | **Payments go through the Financial Application, then the gateway.** A claim payment is recorded in the Home & Away Financial Application first (so Finance's ledger is authoritative) and the Financial Application instructs the BIBIT gateway; the CRM never talks to the gateway directly. Premium collection follows the same path in reverse. | |
-| AD05 | **Documents are claim-indexed in the document management system.** Every document is stored once, keyed by claim number, and linked from the CRM; the scanning archive is migrated and retired. | |
-| AD06 | **Each increment is switchable.** A configuration flag per process step falls back to the previous manual step (design principle P5), so go-live is reversible per step. | |
-| AD07 | **No new platform.** New components run in the existing UNIX server farm under existing deployment and monitoring tooling; the only new external party is the payment gateway, which is contracted through Treasury. | |
+| AD01 | **Shared services, not point-to-point.** CIS and Claims InfoServ serve customer and claim data; applications don't hold copies. An ADR because the services are built for enterprise reuse. | ADRYYY |
+| AD02 | **Policy Data Management stays the system of record, exposed as services.** Four CICS transactions over MQ. An ADR because it sets the precedent for exposing the mainframe as services. | ADRYYY |
+| AD03 | **The CRM System orchestrates Handle Claim; Claims InfoServ owns claim state**, valuation, routing rules and the audit trail. | |
+| AD04 | **Payments go through the Financial Application, then the BIBIT gateway.** The CRM System never calls the gateway. | |
+| AD05 | **Documents are claim-indexed in the document management system**, and the scanning archive is retired. | |
+| AD06 | **Each increment is switchable** back to the manual step (principle P5). | |
+| AD07 | **No new platform** beyond the BIBIT gateway. | |
 
 ## Architectural risks
 
-- The mainframe MQ integration layer is a single path for all policy reads and writes; if its throughput assumption is wrong — 20 transactions a second tested against a design peak of 4 a second (capacity test CT-03) — every process step slows. Mitigated by the capacity test and by caching policy lookups in CIS for 15 minutes (target assumption).
-- Holding claim state in Claims InfoServ while the CRM runs the workflow creates two places a claim's status could be read; the design makes Claims InfoServ authoritative and the CRM a view, and the acceptance tests assert they agree.
-- The Financial Application's extension for gateway payment is vendor-delivered on the vendor's release cycle; a slip there delays increment 3 (tracked with R2).
-- The document migration is the largest data movement in the initiative and the only one that cannot be switched back; it is run in background with a claim-level reconciliation report.
+- The MQ integration layer is the single path to policies, tested at 20 transactions a second against a design peak of 4 a second (capacity test CT-03); CIS caches policy lookups for 15 minutes (target assumption).
+- Claim status shows in Claims InfoServ and the CRM System; Claims InfoServ is authoritative.
+- The Financial Application's gateway extension depends on the vendor's release cycle (R2).
+- The document migration is the only step that can't be switched back.
 
 ## Solution description
 
-The solution is best read as four layers — business, application, technology and the services between them — which the layered viewpoint shows in one picture.
-
-### Layered viewpoint
+The following diagram presents the layered viewpoint.
 
 ![Layered viewpoint](asset:kcm-layered-viewpoint)
 
-At the top, the external roles and actors: the insurant (the member) and the client relationship. The external business services they use — claim registration, customer information and claim payment — are realised by the Handle Claim business process (Register, Accept, Valuate, Pay), performed by the insurer role within KCM (labelled with the inherited ArchiSurance name in the diagram). Those process steps use the external application services — insurance application, customer data modification and premium payment — which are realised by the application components: the CRM System, Policy Data Management and the Financial Application, with the Customer Information Service (CIS) and Claims Information Service (Claims InfoServ) between them. The application components use two infrastructure services, claim files and customer files, realised by the mainframe (CICS, DBMS, message queuing), the UNIX server farm and the NAS file server.
+The diagram shows how the member's business services are realised by Handle Claim, which uses application services realised by the CRM System, Policy Data Management and the Financial Application, with CIS and Claims InfoServ between them, running on the mainframe and the UNIX server farm.
 
-### Product viewpoint
+The following diagram presents the product viewpoint.
 
 ![Product viewpoint](asset:kcm-product-viewpoint)
 
-The product viewpoint shows what the member buys and the services attached to it. The Insurance product aggregates the services this design exposes — insurance application, premium payment, customer information, customer data modification, claim registration and claim payment — under a single insurance policy contract. Car (motor) insurance specialises it and adds a damage assessment service, which is why the Valuate step has product-specific routing rules for motor claims.
+The diagram shows how the insurance product aggregates the services this design exposes. Motor insurance adds damage assessment, which is why motor claims have their own routing rules.
 
-### Application usage viewpoint
+The following diagram presents the application usage viewpoint.
 
 ![Application usage viewpoint](asset:kcm-application-usage-viewpoint)
 
-This viewpoint shows which application service supports each step of Handle Claim. Register uses the scanning (document) service and the customer administration service; Accept uses customer administration; Valuate uses the claims administration service; Pay uses the printing (correspondence) service and the payment service. Those services are realised by the document management system, the CRM System, the Home & Away Financial Application and the Home & Away Policy Administration (Policy Data Management) respectively. Every arrow in this diagram corresponds to an interface in the Integration module.
+The diagram shows how each Handle Claim step uses an application service. Every arrow is an interface in the Integration module.
 
-### Service realisation viewpoint
+The following diagram presents the service realisation viewpoint.
 
 ![Service realisation viewpoint](asset:kcm-service-realisation-viewpoint)
 
-The service realisation viewpoint closes the loop between what the customer sees and what KCM does: the insurance application service is realised by the Close Contract process (take out insurance), the claim registration and claims payment services by Handle Claim, the customer information service by Inform Customer, and the premium payment service by Collect Premium. This is the view the Contact Centre and Claims Operations signed off, because it names the processes they own.
+The diagram shows how each member-facing service is realised by a process Claims Operations or the Contact Centre owns.
 
 ## Constraints and goals
 
-Architecture-specific constraints: the mainframe MQ channels support TLS 1.2 only (the integration layer re-encrypts); the CRM extension framework runs with the CRM's privileges, so anything that must be authoritative or auditable lives in Claims InfoServ, not in the CRM; the UNIX server farm's load balancer supports only HTTP/1.1 health checks, which shaped the service health endpoints. Architecture goals: one authoritative home for each kind of data (principle P3), services that a future policy platform can sit behind unchanged (AD02), and a latency budget of 500 ms per shared-service call so the 3-second registration target holds with two calls and a document write. Solution-wide assumptions are in the Design Basis module.
+Constraints: the mainframe MQ channels support TLS 1.2 only, and the CRM System's extensions run with its own privileges, so anything authoritative lives in Claims InfoServ. Goals: one home for each kind of data (P3), services a future policy platform can sit behind (AD02), and per-call latency that keeps registration within its NFR.
 
 ## Applicable standards
 
-- ArchiMate 3.2 for architecture views; C4 for the deployment detail in the Integration module
-- KCM Integration Standard IS-04 (REST/JSON over mutual TLS for services; MQ for mainframe transactions)
-- KCM Data Standard DS-02 (customer and claim canonical models)
-- OpenAPI 3.1 for service contracts; contract tests generated from the specification
-- NZISM control baseline; PCI DSS v4.0 for the payment gateway scope
-- KCM UI Standard for the CRM workflow screens; WCAG 2.1 AA for member-facing web forms
-- Departure: the mainframe integration uses TLS 1.2 rather than the standard's TLS 1.3, by documented exception until the mainframe MQ upgrade
+- ArchiMate 3.2 for architecture views
+- KCM Integration Standard IS-04 (REST over mutual TLS; MQ for the mainframe)
+- KCM Data Standard DS-02 (canonical models)
+- OpenAPI 3.1 service contracts
+- NZISM; PCI DSS v4.0 for the BIBIT gateway scope
+- Departure: TLS 1.2 to the mainframe until the MQ upgrade
 
 ## Logical components
 
-- Customer Information Service (CIS) — Status: in delivery — canonical customer, policy summary and contact data for all channels
-- Claims Information Service (Claims InfoServ) — Status: in delivery — claim state, valuation, routing rules and audit trail
-- Handle Claim workflow (CRM extension) — Status: in delivery — orchestrates Register, Accept, Valuate, Pay
-- Take out insurance workflow (CRM extension and web form) — Status: planned — policy intake for telephone and web
-- Policy Data Management service exposures (PDM-01 policy lookup, PDM-02 insured-item lookup, PDM-03 policy create, PDM-04 claim ledger update) — Status: in delivery — CICS transactions over MQ
-- Mainframe integration layer (MQ bridge with TLS termination) — Status: existing — extended with the new channels
-- CRM System — Status: existing — extended with the workflow extensions
-- Home & Away Policy Administration / Policy Data Management — Status: existing — unchanged internally
-- Home & Away Financial Application — Status: existing — extended for gateway payments and daily posting
-- Document management system — Status: existing — extended with claim indexing; scanning archive migrated in and retired
-- BIBIT payment gateway integration — Status: planned — claims payment and premium collection to the bank system
+- Customer Information Service (CIS) — Status: in delivery — customer and policy summary data
+- Claims Information Service (Claims InfoServ) — Status: in delivery — claim state, routing rules and audit trail
+- Handle Claim workflow — Status: in delivery — CRM System extension orchestrating the four steps
+- Take out insurance workflow — Status: planned — web and telephone intake
+- Policy Data Management exposures PDM-01 to PDM-04 — Status: in delivery — CICS transactions over MQ
+- MQ bridge — Status: existing — extended with new channels
+- CRM System, Financial Application and document management system — Status: existing — extended
+- BIBIT gateway integration — Status: planned — claims payment and premium collection
 - Claims data mart extract — Status: existing — extended with claim events
-- Member web forms (claim, policy request) — Status: planned — on the existing member web platform
-- Monitoring and alerting configuration — Status: existing — new dashboards and alerts on the existing platform
