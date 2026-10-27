@@ -37,7 +37,7 @@ test('dry-run compiles the template without writing anything, with no HTML-entit
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     const result = renderArtefact('examples', 'soap', { dryRun: true, instancesDir })
     assert.equal(result.dryRun, true)
-    assert.match(result.markdown, /# kiwi-cover-mutual: Solution on a Page/)
+    assert.match(result.markdown, /::: \{custom-style="Title"\}\nKiwi Cover Mutual\n:::/)
     assert.match(result.markdown, /- Claims handling \(register, accept, valuate, pay\)/)
     assert.doesNotMatch(result.markdown, /&#39;|&quot;|&amp;/)
   } finally {
@@ -112,7 +112,7 @@ test('deliverToClient (md): out/ is never created, and the markdown is available
     assert.equal(result.docxPath, null)
     assert.equal(result.mdPath, null)
     assert.equal(existsSync(join(instancesDir, 'examples', 'out')), false)
-    assert.match(result.markdown, /# kiwi-cover-mutual: Solution on a Page/)
+    assert.match(result.markdown, /::: \{custom-style="Title"\}\nKiwi Cover Mutual\n:::/)
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
   }
@@ -201,11 +201,11 @@ test('renders a real docx styled from the HLD reference doc', () => {
       encoding: 'utf8',
     })
     const headingStyles = [...documentXml.matchAll(/w:pStyle w:val="(Heading\d)"/g)].map((m) => m[1])
-    // New document heading scale (ADR-0016): the artefact title and each module title sit at Heading1, every field heading at Heading2 — the templates emit nothing deeper. Author content starts at Heading3: the examples fixture's process-flow field carries `###` sub-headings for its two processes (WI #348), so Heading3 appears too, and nothing below it.
+    // New document heading scale (ADR-0016): each module title sits at Heading1, every field heading at Heading2 — the templates emit nothing deeper. Author content starts at Heading3: the examples fixture's process-flow field carries `###` sub-headings for its two processes (WI #348), so Heading3 appears too, and nothing below it. Since design v3 (#196) the artefact title is on the cover, in the Title style, so the first heading is Document Control's Heading2.
     assert.ok(headingStyles.includes('Heading1'))
     assert.ok(headingStyles.includes('Heading2'))
     assert.deepEqual(
-      [...new Set(headingStyles)],
+      [...new Set(headingStyles)].sort(),
       ['Heading1', 'Heading2', 'Heading3']
     )
     assert.ok((documentXml.match(/<w:numPr>/g) ?? []).length > 0, 'expected real list numbering, not flattened text')
@@ -327,7 +327,8 @@ test('an asset:<id> reference (#80) inserted into a module field compiles into a
     assert.match(relationshipsXml, /Target="https:\/\/draw\.io\/diagrams\/eligibility-flow"/)
     // v2 renders the field as "Problem statement" (the same `background.problem` field the reference was appended to).
     const driverIndex = roundTrip.indexOf('Problem statement')
-    const imageIndex = roundTrip.indexOf('![Eligibility flow]')
+    // #195 (ADR-0053): the example is on design v3, which numbers its captioned images, and this is the SOAP's first.
+    const imageIndex = roundTrip.search(/!\[Diagram 1\.\s+Eligibility\s+flow\]/)
     const affectedDomainsIndex = roundTrip.indexOf('Affected domains')
     assert.ok(driverIndex >= 0 && imageIndex >= 0 && affectedDomainsIndex >= 0)
     assert.ok(driverIndex < imageIndex, 'expected the image after the Problem statement section')
@@ -363,8 +364,9 @@ test('a local render injects a Document Control table immediately after the titl
   try {
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     const result = renderArtefact('examples', 'soap', { dryRun: true, instancesDir })
-    // Block headings appear in order: title -> Document Control -> Review & sign-off -> first content section
-    const titleIdx = result.markdown.indexOf('# kiwi-cover-mutual: Solution on a Page')
+    // Block headings appear in order: title -> Document Control -> Review & sign-off -> first content section.
+    // The examples fixture is on design v3, whose title is on the cover page (#196).
+    const titleIdx = result.markdown.indexOf('::: {custom-style="Title"}\nKiwi Cover Mutual\n:::')
     const docIdx = result.markdown.indexOf('## Document Control')
     const reviewIdx = result.markdown.indexOf('## Review & sign-off')
     const contextIdx = result.markdown.indexOf('# Background and context')
@@ -374,8 +376,8 @@ test('a local render injects a Document Control table immediately after the titl
 
     assert.match(result.markdown, /## Document Control/)
     assert.match(result.markdown, /## Review & sign-off/)
-    // Version: design v2 · SOAP (stage title for that gate)
-    assert.match(result.markdown, /\| Version \| design v2 · SOAP \|/)
+    // Version: design v3 · SOAP (stage title for that gate) — the examples fixture is pinned to v3 (#193)
+    assert.match(result.markdown, /\| Version \| design v3 · SOAP \|/)
     assert.match(result.markdown, new RegExp(`\\| Date \\| ${escapeRegExp(expectedDate)} \\|`))
     // Local commit: plain code span, not a hyperlink
     assert.match(result.markdown, new RegExp(`\\| Commit \\| \`${escapeRegExp(expectedHash)}\` \\|`))
@@ -416,7 +418,7 @@ test('a definition other than "design" also gets a Document Control block — it
     cpSync('definitions/design', join(definitionsDir, 'design'), { recursive: true })
     cpSync(join(definitionsDir, 'design'), join(definitionsDir, 'another-definition'), { recursive: true })
     // Give the copy a distinct id, matching loadDefinition's "directory must match id" requirement — otherwise it would just be "design" again under a different path, not a genuinely distinct definition.
-    for (const version of ['1', '2']) {
+    for (const version of readdirSync(join(definitionsDir, 'another-definition'))) {
       const definitionYamlPath = join(definitionsDir, 'another-definition', version, 'definition.yaml')
       const definitionYaml = readFileSync(definitionYamlPath, 'utf8').replace(/^id: design$/m, 'id: another-definition')
       writeFileSync(definitionYamlPath, definitionYaml)
@@ -431,7 +433,7 @@ test('a definition other than "design" also gets a Document Control block — it
     assert.match(result.markdown, /## Document Control/)
     assert.match(result.markdown, /## Review & sign-off/)
     assert.match(result.markdown, /\| Commit \| `[0-9a-f]+`/)
-    assert.match(result.markdown, /\| Version \| another-definition v2/)
+    assert.match(result.markdown, /\| Version \| another-definition v3/)
     assert.doesNotMatch(result.markdown, /Rendered from commit/)
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
@@ -490,6 +492,7 @@ function escapeRegExp(value) {
 function seedExamplesAzureDevOpsFiles() {
   return {
     '/gantry-workspace/examples/instance.yaml': readFileSync('workspaces/examples/kiwi-cover-mutual/instance.yaml', 'utf8'),
+    '/gantry-workspace/examples/modules/document-handling.md': exampleModuleText('document-handling'),
     '/gantry-workspace/examples/modules/background.md': exampleModuleText('background'),
     '/gantry-workspace/examples/modules/introduction.md': exampleModuleText('introduction'),
     '/gantry-workspace/examples/modules/design-basis.md': exampleModuleText('design-basis'),
@@ -590,7 +593,7 @@ test('format: "md" against Azure DevOps pushes the compiled markdown itself (nev
       const pushedMarkdown = Buffer.from(pushedContent, 'base64').toString('utf8')
       assert.match(pushedMarkdown, /## Document Control/)
       assert.match(pushedMarkdown, new RegExp(`\\| Commit \\| \\[\`${escapeRegExp(result.commit.hash)}\`\\]`))
-      assert.match(pushedMarkdown, /# kiwi-cover-mutual: Solution on a Page/)
+      assert.match(pushedMarkdown, /::: \{custom-style="Title"\}\nKiwi Cover Mutual\n:::/)
       // Not a docx: pandoc's own zip-file magic bytes ("PK") never appear.
       assert.doesNotMatch(pushedContent, /^UEs/) // "PK" as the first two bytes, base64-encoded
     }
@@ -667,7 +670,7 @@ test('an artefact with neither an artefact-specific nor a definition-level refer
   try {
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     cpSync('definitions/design', join(definitionsDir, 'design'), { recursive: true })
-    for (const version of ['1', '2']) {
+    for (const version of readdirSync(join(definitionsDir, 'design'))) {
       rmSync(join(definitionsDir, 'design', version, 'templates', 'reference.docx'), { force: true })
       rmSync(join(definitionsDir, 'design', version, 'templates', 'reference-soap.docx'), { force: true })
     }

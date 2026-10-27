@@ -1,0 +1,282 @@
+{
+  "design/1/soap": {
+    "markdown": "4848146b6986cec0edb2431eef0ffb4202c7fb2332172dfe2b1a5519de5eb895",
+    "docxMarkdown": "4848146b6986cec0edb2431eef0ffb4202c7fb2332172dfe2b1a5519de5eb895"
+  },
+  "design/1/soap-full": {
+    "markdown": "5c547773bc7c303dcc6bc7077e7cf2334f7947427ff95e525aafccc8a5539f10",
+    "docxMarkdown": "5c547773bc7c303dcc6bc7077e7cf2334f7947427ff95e525aafccc8a5539f10"
+  },
+  "design/1/hld": {
+    "markdown": "8789a21dc861c37d7b5cc968f5479327d1808379f48faf8624f1126c981c25a1",
+    "docxMarkdown": "8789a21dc861c37d7b5cc968f5479327d1808379f48faf8624f1126c981c25a1"
+  },
+  "design/1/sad": {
+    "markdown": "87ad9294aa87a6eceeaa2950a92fe0e3152f861f38f3210a3588280288160923",
+    "docxMarkdown": "87ad9294aa87a6eceeaa2950a92fe0e3152f861f38f3210a3588280288160923"
+  },
+  "design/1/ssad": {
+    "markdown": "6eb0f6c786ae8aefe071bd22cb1ee3b0d4de33b01377813122947f0d40103bcf",
+    "docxMarkdown": "6eb0f6c786ae8aefe071bd22cb1ee3b0d4de33b01377813122947f0d40103bcf"
+  },
+  "design/1/as-built": {
+    "markdown": "991d22583215bb5eed46a295d6c2a99f052b34e7c2327bf3e7597a257bec83b6",
+    "docxMarkdown": "991d22583215bb5eed46a295d6c2a99f052b34e7c2327bf3e7597a257bec83b6"
+  },
+  "design/1/soap (authored)": {
+    "markdown": "fc2751e9a049e88f638cd0290bd8bf527bea9ef4b2a063c58318da025742c9e7",
+    "docxMarkdown": "fc2751e9a049e88f638cd0290bd8bf527bea9ef4b2a063c58318da025742c9e7"
+  },
+  "design/1/soap-full (authored)": {
+    "markdown": "b104bbf6b7f914746dd645dffb119d458347561188d0d6f3cb8768320dda2fa3",
+    "docxMarkdown": "b104bbf6b7f914746dd645dffb119d458347561188d0d6f3cb8768320dda2fa3"
+  },
+  "design/1/hld (authored)": {
+    "markdown": "66327abbc7cae186c24c3834940c12e855c0f02b68a288d7f16f3c0dc9e74677",
+    "docxMarkdown": "66327abbc7cae186c24c3834940c12e855c0f02b68a288d7f16f3c0dc9e74677"
+  },
+  "design/1/sad (authored)": {
+    "markdown": "a436e6f7eb92968deb0813502a0907806fcd9d6d8ffaaf5e530d54720461136d",
+    "docxMarkdown": "a436e6f7eb92968deb0813502a0907806fcd9d6d8ffaaf5e530d54720461136d"
+  },
+  "design/1/ssad (authored)": {
+    "markdown": "359172db16fb8380d6120114aa79ad563aa05eda936eac5247ba5eb0ae0606a5",
+    "docxMarkdown": "359172db16fb8380d6120114aa79ad563aa05eda936eac5247ba5eb0ae0606a5"
+  },
+  "design/1/as-built (authored)": {
+    "markdown": "651bb97ce95df0ec4b112656ee41a42e6cf92fadbc5195398f42dd0f2ecf06c2",
+    "docxMarkdown": "651bb97ce95df0ec4b112656ee41a42e6cf92fadbc5195398f42dd0f2ecf06c2"
+  },
+  "design/2/soap": {
+    "markdown": "d0e852a919c2e4483b4ca1252303987d8225757ab464b17b49ef24d5cc6641a9",
+    "docxMarkdown": "d0e852a919c2e4483b4ca1252303987d8225757ab464b17b49ef24d5cc6641a9"
+  },
+  "design/2/soap-full": {
+    "markdown": "8ad6e157769aaa525a1634e59116c32b7e186f89dd9d25929937ef46bf8e0009",
+    "docxMarkdown": "8ad6e157769aaa525a1634e59116c32b7e186f89dd9d25929937ef46bf8e0009"
+  },
+  "design/2/hld": {
+    "markdown": "bc8854cf06b6955340233c7ae96db95de443909d1f0c3f9b9a958fe9ca1fe73f",
+    "docxMarkdown": "bc8854cf06b6955340233c7ae96db95de443909d1f0c3f9b9a958fe9ca1fe73f"
+  },
+  "design/2/sad": {
+    "markdown": "152cf57c9de85c0c5da1378226721beb0b255d003c3b2ec39bb753e8bb04c156",
+    "docxMarkdown": "152cf57c9de85c0c5da1378226721beb0b255d003c3b2ec39bb753e8bb04c156"
+  },
+  "design/2/ssad": {
+    "markdown": "72432064bd84dea96ee67f4a244caa2cd4649b110073cd33fde659af751eb488",
+    "docxMarkdown": "72432064bd84dea96ee67f4a244caa2cd4649b110073cd33fde659af751eb488"
+  },
+  "design/2/as-built": {
+    "markdown": "ce0f34d60e3b6e3d1c7a248a3648dfda08d4e310a0aabfb580d48cc7643bb3c5",
+    "docxMarkdown": "ce0f34d60e3b6e3d1c7a248a3648dfda08d4e310a0aabfb580d48cc7643bb3c5"
+  },
+  "design/2/soap (authored)": {
+    "markdown": "fac8bbbdbffaa358506f5d0d3c9b9a6ad3cda8c2ae2e01e9452d0ac91e341d3f",
+    "docxMarkdown": "fac8bbbdbffaa358506f5d0d3c9b9a6ad3cda8c2ae2e01e9452d0ac91e341d3f"
+  },
+  "design/2/soap-full (authored)": {
+    "markdown": "71ba08e0be377479e1a1e6107a3e31fd4ac0437a5056682670ad2c333aaef703",
+    "docxMarkdown": "71ba08e0be377479e1a1e6107a3e31fd4ac0437a5056682670ad2c333aaef703"
+  },
+  "design/2/hld (authored)": {
+    "markdown": "c0741b1a4368d2f49bb804c9a8f49b35ed43dfd3eb53110c6517dd59cce75cca",
+    "docxMarkdown": "c0741b1a4368d2f49bb804c9a8f49b35ed43dfd3eb53110c6517dd59cce75cca"
+  },
+  "design/2/sad (authored)": {
+    "markdown": "00b0ada03defd403a30ed7d974c6acb23719b2dbc50c296e90061268924267ef",
+    "docxMarkdown": "00b0ada03defd403a30ed7d974c6acb23719b2dbc50c296e90061268924267ef"
+  },
+  "design/2/ssad (authored)": {
+    "markdown": "c5520e73e7687846501a932f640ff28b8e58e643331d8f1e54f69b0b26b3a35a",
+    "docxMarkdown": "c5520e73e7687846501a932f640ff28b8e58e643331d8f1e54f69b0b26b3a35a"
+  },
+  "design/2/as-built (authored)": {
+    "markdown": "94ee64da4d48e30682e262adbc34231a8c5289f2f75f919e27c55cd3ab163833",
+    "docxMarkdown": "94ee64da4d48e30682e262adbc34231a8c5289f2f75f919e27c55cd3ab163833"
+  },
+  "recruitment-onboarding/1/requisition-brief": {
+    "markdown": "18976843dc492aaa74bc7a0276bac616f4c78bc5e9e0edd6485d2c86bddc312d",
+    "docxMarkdown": "18976843dc492aaa74bc7a0276bac616f4c78bc5e9e0edd6485d2c86bddc312d"
+  },
+  "recruitment-onboarding/1/selection-report": {
+    "markdown": "8ea10162e323243f5d89e447b610dee3794da0d1421ce6047ddb85fa228e1622",
+    "docxMarkdown": "8ea10162e323243f5d89e447b610dee3794da0d1421ce6047ddb85fa228e1622"
+  },
+  "recruitment-onboarding/1/appointment-case": {
+    "markdown": "8bb0b794f77e836eec43462f4176f288a8592ac0306384a917e90187b23530cd",
+    "docxMarkdown": "8bb0b794f77e836eec43462f4176f288a8592ac0306384a917e90187b23530cd"
+  },
+  "recruitment-onboarding/1/offer-pack": {
+    "markdown": "475148d6b6e31f1168ae04a0be132160bd89acc728261162f1f4cf60e737ddf8",
+    "docxMarkdown": "475148d6b6e31f1168ae04a0be132160bd89acc728261162f1f4cf60e737ddf8"
+  },
+  "recruitment-onboarding/1/starter-readiness": {
+    "markdown": "683aed6cde2c6f99de0fd4958aaf205cc3bafef2e181f8012ae8226e062663af",
+    "docxMarkdown": "683aed6cde2c6f99de0fd4958aaf205cc3bafef2e181f8012ae8226e062663af"
+  },
+  "recruitment-onboarding/1/manager-handover": {
+    "markdown": "0dfc6a12d379be3e7d362d21aaec3ac5da607a9d370658da02abcef0b2ca9424",
+    "docxMarkdown": "0dfc6a12d379be3e7d362d21aaec3ac5da607a9d370658da02abcef0b2ca9424"
+  },
+  "recruitment-onboarding/1/hire-record": {
+    "markdown": "77e68b9ca0b47ef23d6b9cc860d10961fdef2ed785ee9e616382d16bc25ffffa",
+    "docxMarkdown": "77e68b9ca0b47ef23d6b9cc860d10961fdef2ed785ee9e616382d16bc25ffffa"
+  },
+  "recruitment-onboarding/1/requisition-brief (authored)": {
+    "markdown": "4db06cedb9a2483e47cb76783ed9f929a87b85798b0e856b5360668a93f60b46",
+    "docxMarkdown": "4db06cedb9a2483e47cb76783ed9f929a87b85798b0e856b5360668a93f60b46"
+  },
+  "recruitment-onboarding/1/selection-report (authored)": {
+    "markdown": "f5f12ce14b1652fd659294e717bdd66a056d4f0e3dcdff2b83c39de075521241",
+    "docxMarkdown": "f5f12ce14b1652fd659294e717bdd66a056d4f0e3dcdff2b83c39de075521241"
+  },
+  "recruitment-onboarding/1/appointment-case (authored)": {
+    "markdown": "509169104a20f4dad30f3ecd3bb39af0d365ada75a8a8eb3e6775068abe06521",
+    "docxMarkdown": "509169104a20f4dad30f3ecd3bb39af0d365ada75a8a8eb3e6775068abe06521"
+  },
+  "recruitment-onboarding/1/offer-pack (authored)": {
+    "markdown": "d323e7a442e9579baef5c0e8518e8b36aa94add2fad941b0e473f06c9df54d78",
+    "docxMarkdown": "d323e7a442e9579baef5c0e8518e8b36aa94add2fad941b0e473f06c9df54d78"
+  },
+  "recruitment-onboarding/1/starter-readiness (authored)": {
+    "markdown": "d900081ffe788168d825d99480f1c3291f5b0932e0e1e487da6bc353d97ba768",
+    "docxMarkdown": "d900081ffe788168d825d99480f1c3291f5b0932e0e1e487da6bc353d97ba768"
+  },
+  "recruitment-onboarding/1/manager-handover (authored)": {
+    "markdown": "f4440e81228080b25a271b7d21f194e2fb5485ec4d9bbc41b16d1b17511c6c49",
+    "docxMarkdown": "f4440e81228080b25a271b7d21f194e2fb5485ec4d9bbc41b16d1b17511c6c49"
+  },
+  "recruitment-onboarding/1/hire-record (authored)": {
+    "markdown": "be0d03fdbc9edbf508d82dfe38bcfd8eda0743a8756db16756b2f8e55367b407",
+    "docxMarkdown": "be0d03fdbc9edbf508d82dfe38bcfd8eda0743a8756db16756b2f8e55367b407"
+  },
+  "recruitment-onboarding/2/requisition-brief": {
+    "markdown": "a5b3ddc4fc1e0edc272108f7c9808c34e2ea97a726d9d82bfd3e507ba6088982",
+    "docxMarkdown": "a5b3ddc4fc1e0edc272108f7c9808c34e2ea97a726d9d82bfd3e507ba6088982"
+  },
+  "recruitment-onboarding/2/selection-report": {
+    "markdown": "b6436cbd8e1a70c90055b12e21176904e3241b7942ed1c7dbb63cde3d61f6e8f",
+    "docxMarkdown": "b6436cbd8e1a70c90055b12e21176904e3241b7942ed1c7dbb63cde3d61f6e8f"
+  },
+  "recruitment-onboarding/2/appointment-case": {
+    "markdown": "c44fbd32879fef00a7a56251dd63d0696e21b515ae5bc2e97930636dfa11b1fa",
+    "docxMarkdown": "c44fbd32879fef00a7a56251dd63d0696e21b515ae5bc2e97930636dfa11b1fa"
+  },
+  "recruitment-onboarding/2/offer-pack": {
+    "markdown": "019d7781d0bf85d33a2839467ca4f75e1cfe18a4126944e991596d420ffb88d3",
+    "docxMarkdown": "019d7781d0bf85d33a2839467ca4f75e1cfe18a4126944e991596d420ffb88d3"
+  },
+  "recruitment-onboarding/2/starter-readiness": {
+    "markdown": "2d659c8466435d1bdd064669a1d2f201e8dd5dfe2dbfbdb83623413520987a9e",
+    "docxMarkdown": "2d659c8466435d1bdd064669a1d2f201e8dd5dfe2dbfbdb83623413520987a9e"
+  },
+  "recruitment-onboarding/2/manager-handover": {
+    "markdown": "88e11a675966b837c44906b5277ceb2c739607ab00ca5dff2034779a1f5c3c7e",
+    "docxMarkdown": "88e11a675966b837c44906b5277ceb2c739607ab00ca5dff2034779a1f5c3c7e"
+  },
+  "recruitment-onboarding/2/hire-record": {
+    "markdown": "c245c461884cd731be84812510760f9c4fdeff1290244cf77395b4d242abb332",
+    "docxMarkdown": "c245c461884cd731be84812510760f9c4fdeff1290244cf77395b4d242abb332"
+  },
+  "recruitment-onboarding/2/requisition-brief (authored)": {
+    "markdown": "6296a59a59eee6329be59e881662af688269933b7fa70469397c6861bd9c6f78",
+    "docxMarkdown": "6296a59a59eee6329be59e881662af688269933b7fa70469397c6861bd9c6f78"
+  },
+  "recruitment-onboarding/2/selection-report (authored)": {
+    "markdown": "1c17d1e8b986497a8c318e97d4c569fe583782a94fde01a6a78941c65f960442",
+    "docxMarkdown": "1c17d1e8b986497a8c318e97d4c569fe583782a94fde01a6a78941c65f960442"
+  },
+  "recruitment-onboarding/2/appointment-case (authored)": {
+    "markdown": "b7e5b0ba2eebf8f97f9fb2111136cea2e9b875e9e4314f17b501f38caee5830d",
+    "docxMarkdown": "b7e5b0ba2eebf8f97f9fb2111136cea2e9b875e9e4314f17b501f38caee5830d"
+  },
+  "recruitment-onboarding/2/offer-pack (authored)": {
+    "markdown": "f18aa0c717a9e59e360a8c42350d4a59b93f15661a43aa7e1e9382e8191b3c61",
+    "docxMarkdown": "f18aa0c717a9e59e360a8c42350d4a59b93f15661a43aa7e1e9382e8191b3c61"
+  },
+  "recruitment-onboarding/2/starter-readiness (authored)": {
+    "markdown": "9d07b0e0d6c1d26773394e279ced778c4f59d0eb8e6421ec6fc6d90f2ba05720",
+    "docxMarkdown": "9d07b0e0d6c1d26773394e279ced778c4f59d0eb8e6421ec6fc6d90f2ba05720"
+  },
+  "recruitment-onboarding/2/manager-handover (authored)": {
+    "markdown": "e8bd6d7f02cfa8a2f17b3fdcdf819d96b2f04d015ea3d02ff0300b017ebe29e3",
+    "docxMarkdown": "e8bd6d7f02cfa8a2f17b3fdcdf819d96b2f04d015ea3d02ff0300b017ebe29e3"
+  },
+  "recruitment-onboarding/2/hire-record (authored)": {
+    "markdown": "8227ec77e2918c5a635c4679a07c499a08bf003cf7061ff55cd723ba1cdff3d2",
+    "docxMarkdown": "8227ec77e2918c5a635c4679a07c499a08bf003cf7061ff55cd723ba1cdff3d2"
+  },
+  "recruitment-onboarding/3/requisition-brief": {
+    "markdown": "1e6f8203cdc299fe17570643817944e0b4c913a8318ce00f79fe754a5f8c255d",
+    "docxMarkdown": "1e6f8203cdc299fe17570643817944e0b4c913a8318ce00f79fe754a5f8c255d"
+  },
+  "recruitment-onboarding/3/selection-report": {
+    "markdown": "9f894a282f9ac8e7d2ab809c43bb8cdc329040f18fa6271f7c30593bfe2fc45c",
+    "docxMarkdown": "9f894a282f9ac8e7d2ab809c43bb8cdc329040f18fa6271f7c30593bfe2fc45c"
+  },
+  "recruitment-onboarding/3/appointment-case": {
+    "markdown": "d643887b34aa241e88a2ff2612a09408361381ab40382eaa6d9197332533a6d6",
+    "docxMarkdown": "d643887b34aa241e88a2ff2612a09408361381ab40382eaa6d9197332533a6d6"
+  },
+  "recruitment-onboarding/3/onboarding-case": {
+    "markdown": "746d19d99a12b635b2322062e7a78a4d4c84ecd404f1ff4aecc7885640c3108e",
+    "docxMarkdown": "746d19d99a12b635b2322062e7a78a4d4c84ecd404f1ff4aecc7885640c3108e"
+  },
+  "recruitment-onboarding/3/offer-pack": {
+    "markdown": "31319266d2ea17f1afc5d1b6b8a9c58037f959ce9b68372a9a7056cfc3e47eeb",
+    "docxMarkdown": "31319266d2ea17f1afc5d1b6b8a9c58037f959ce9b68372a9a7056cfc3e47eeb"
+  },
+  "recruitment-onboarding/3/appointment-confirmation": {
+    "markdown": "f411907f359b8be573f402ef0e816c384350433dcc1348da0af8e2f42ea19717",
+    "docxMarkdown": "f411907f359b8be573f402ef0e816c384350433dcc1348da0af8e2f42ea19717"
+  },
+  "recruitment-onboarding/3/starter-readiness": {
+    "markdown": "c65e6352044d5288e9f524e3fdee1d92b9d74727dccc794171688f484f92f3cd",
+    "docxMarkdown": "c65e6352044d5288e9f524e3fdee1d92b9d74727dccc794171688f484f92f3cd"
+  },
+  "recruitment-onboarding/3/manager-handover": {
+    "markdown": "edffc697b82d016b015c28add69ae2df7ba0cfdf46a07a066ef04dfa2a293965",
+    "docxMarkdown": "edffc697b82d016b015c28add69ae2df7ba0cfdf46a07a066ef04dfa2a293965"
+  },
+  "recruitment-onboarding/3/hire-record": {
+    "markdown": "9ca56ad58f580dbd3e4849d5527152a869d62f58d6d06595c1f7660c007e0e7a",
+    "docxMarkdown": "9ca56ad58f580dbd3e4849d5527152a869d62f58d6d06595c1f7660c007e0e7a"
+  },
+  "recruitment-onboarding/3/requisition-brief (authored)": {
+    "markdown": "67a763251ce0af0850a60ae39fd653e4ca69b5d039f35391ee5d7293f31154a1",
+    "docxMarkdown": "67a763251ce0af0850a60ae39fd653e4ca69b5d039f35391ee5d7293f31154a1"
+  },
+  "recruitment-onboarding/3/selection-report (authored)": {
+    "markdown": "3612f5cef044f5e258d177233a02b6639c70f0cf62cdf4888198c5622466cc0a",
+    "docxMarkdown": "3612f5cef044f5e258d177233a02b6639c70f0cf62cdf4888198c5622466cc0a"
+  },
+  "recruitment-onboarding/3/appointment-case (authored)": {
+    "markdown": "09d35fdf0b7f8787629eae2b627b4e9c9d7a169a362c3fa65066ce6f8cde98ec",
+    "docxMarkdown": "09d35fdf0b7f8787629eae2b627b4e9c9d7a169a362c3fa65066ce6f8cde98ec"
+  },
+  "recruitment-onboarding/3/onboarding-case (authored)": {
+    "markdown": "4d497f783e0b1f1b31121dd9d3da2daa07117187dce7b4c3fa850279c22b8726",
+    "docxMarkdown": "4d497f783e0b1f1b31121dd9d3da2daa07117187dce7b4c3fa850279c22b8726"
+  },
+  "recruitment-onboarding/3/offer-pack (authored)": {
+    "markdown": "b6964024e9692d21683bad157b0ed31846d8e20be4110208e2929fca0523611f",
+    "docxMarkdown": "b6964024e9692d21683bad157b0ed31846d8e20be4110208e2929fca0523611f"
+  },
+  "recruitment-onboarding/3/appointment-confirmation (authored)": {
+    "markdown": "ef8fbef4f86b852f52eb6a7064f6836aa6415d9ccb3ab635503981c988f0a751",
+    "docxMarkdown": "ef8fbef4f86b852f52eb6a7064f6836aa6415d9ccb3ab635503981c988f0a751"
+  },
+  "recruitment-onboarding/3/starter-readiness (authored)": {
+    "markdown": "dcc652337a9559eff07a9f41e0df88f268a740a23e8c9fbcb3acc6941ef6e1aa",
+    "docxMarkdown": "dcc652337a9559eff07a9f41e0df88f268a740a23e8c9fbcb3acc6941ef6e1aa"
+  },
+  "recruitment-onboarding/3/manager-handover (authored)": {
+    "markdown": "e0ba8507365abfe14e75b091eabcec79c9ba55e173a41f0c1d2aa0a32b321409",
+    "docxMarkdown": "e0ba8507365abfe14e75b091eabcec79c9ba55e173a41f0c1d2aa0a32b321409"
+  },
+  "recruitment-onboarding/3/hire-record (authored)": {
+    "markdown": "6634964274b8a11bdd2bbd70710609f054185a6f04032eea921c44435be916d2",
+    "docxMarkdown": "6634964274b8a11bdd2bbd70710609f054185a6f04032eea921c44435be916d2"
+  }
+}

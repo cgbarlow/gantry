@@ -17,22 +17,22 @@ Chris Barlow, Architecture Practice (requester and lead)
 
 ## Draft agreed date
 
-Pending: to be set when the Architecture Practice agrees the draft.
+Pending: set when the Architecture Practice agrees the draft.
 
 ## SOAP/estimate delivered date
 
-Pending: to be set when Business Case Approved is passed.
+Pending Business Case Approved.
 
 ## Sequencing
 
 | Requirement | Team | Estimate | Notes |
 | --- | --- | --- | --- |
-| UAT environment (subnet, Container Apps environment, share, Log Analytics, DNS, certificate) | Cloud Platform team, Network / security team | S | Step 1. Nothing else can start until this exists. |
-| Gantry container app in UAT | Cloud Platform team, Architecture Practice | S | Step 1, same engagement. Proves the image, the share mount, registry pull and the egress path. |
-| UAT workspace repository and pilot | Architecture Practice | S | Step 2. The practice authors real initiatives in UAT; sizing and the open questions are settled here. |
-| Production environment (same shape, two replicas) | Cloud Platform team, Network / security team | S | Step 3, after UAT sign-off. Same infrastructure-as-code as UAT with different parameters. |
-| Deployment pipeline stage and alerts | Architecture Practice, Cloud Platform team | S | Step 3, built against UAT first and reused for Production. |
-| Production workspace and cutover | Architecture Practice | S | Step 4. Production repository created, practice moves to the Production URL. |
+| UAT environment | Cloud Platform team, Network / security team | S | Step 1; everything else waits on it |
+| Gantry container app in UAT | Cloud Platform team, Architecture Practice | S | Step 1; proves the image, share, registry pull and egress |
+| UAT workspace and pilot | Architecture Practice | S | Step 2; settles sizing and the open questions |
+| Production environment | Cloud Platform team, Network / security team | S | Step 3, after UAT sign-off |
+| Deployment pipeline stage and alerts | Architecture Practice, Cloud Platform team | S | Step 3, built against UAT first |
+| Production workspace and cutover | Architecture Practice | S | Step 4 |
 
 ```mermaid
 gantt
@@ -51,10 +51,9 @@ gantt
 
 ## Caveats
 
-- Gantry is beta software (0.3.x). Breaking changes are likely between releases and an upgrade may need a data migration step; the release changelog is the record of what changed.
-- Production resilience covers the compute layer only. The Azure Files share and Azure DevOps are each a single dependency; the service is unavailable while either is.
-- Sizing is unvalidated. The replica size and count are chosen without load data and are revisited after the UAT pilot.
-- Azure DevOps access is a requirement, and anyone with access to the workspace repository can edit its instances. The audit trail is the repository's commit history.
-- Container Apps is a managed platform: the host is not accessible, replicas may be moved by the platform during maintenance, and the ingress request timeout is fixed at 240 seconds. None of these affect Gantry as it works today, but a future feature that needs a long server-side request would.
-- The internal-only setting on a Container Apps environment cannot be changed after creation. If a public endpoint is ever wanted, that is a new environment.
-- No security scanning of the Gantry codebase or its container image is included in these estimates. The build pipeline verifies that Gantry works, not that it is free of vulnerabilities: there is no static analysis, no dependency vulnerability scan and no image scan today. Adding them is a small piece of work on the pipeline itself, but it is not sized here and the Network / security team's requirements for it are not yet known (Q7).
+- Gantry is beta software. Breaking changes are likely between releases, and an upgrade may need a data migration.
+- Production resilience covers compute only: the Azure Files share and Azure DevOps are each single dependencies.
+- Sizing is unvalidated until the UAT pilot.
+- Anyone with access to the workspace repository can edit its instances; the audit trail is its commit history.
+- Container Apps fixes the request timeout at 240 seconds, and an internal-only environment can't later be made public.
+- No security scanning of the codebase or image is included in these estimates (Q7).

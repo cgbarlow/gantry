@@ -1,0 +1,159 @@
+# Field order follows the SAD reference template's "Technology Architecture View"
+# (§12) and "Deployment View" (§13): network/infrastructure first, then Hardware,
+# Bandwidth, Network Devices, Communication & Network Protocols, SAN.
+#
+# CHANGED v2: the `environments` field is removed. The SAD reference's
+# "Environments" sub-section and the SSAD reference's "Solution Domains" /
+# "URL's, Domains and redirections" / "…Environments" sections are the same
+# information, and `support-and-operations.environments-and-domains` already
+# carried it for the SSAD. The `sad` artefact now references that field instead,
+# so an environment list is entered once and rendered by both documents.
+
+id: integration
+title: Integration
+purpose: >
+  Describe how this solution connects to surrounding systems and the infrastructure
+  those connections run on. Cover interfaces, networks and hosting.
+
+  Environments are not held here — see
+  `support-and-operations.environments-and-domains`, the single environment /
+  URL / domain list shared by the SAD and the SSAD.
+
+fields:
+  - id: interfaces
+    title: Interfaces
+    type: markdown
+    target-words: { small: 70, medium: 140, large: 230 }
+    required: true
+    guidance: >
+      The integration points themselves — protocol, direction, and what
+      crosses the boundary.
+
+      Use the glossary's preferred terms (`glossary.terms-and-definitions`)
+      consistently in headings, tables, diagrams and prose.
+
+      Add a Status column giving each interface's status: `existing`,
+      `implemented`, `in delivery`, `planned` or `future`. Don't assume an
+      interface exists: one still to be built is `in delivery`, `planned` or
+      `future`.
+
+  - id: network-and-infrastructure
+    title: Network and infrastructure architecture
+    type: markdown
+    target-words: { small: 45, medium: 115, large: 230 }
+    required: false
+    guidance: >
+      Describe the network and infrastructure the solution is deployed on and how it is
+      reached, including hosting and sites. Keep hardware, bandwidth, network devices,
+      protocols and storage details in the dedicated fields below.
+
+      Use the glossary's preferred terms (`glossary.terms-and-definitions`)
+      consistently in headings, tables, diagrams and prose.
+
+      Use the architecture name by default — the glossary's preferred term —
+      and the contracted product name only where it has been verified against
+      the contract, e.g. in the licences table's "Contracted name" column.
+
+      Lay out each diagram in this order: one introductory sentence ("The
+      following diagram presents…"), the diagram, its caption (an image's alt
+      text, or `{caption="…"}` on a Mermaid fence), a paragraph interpreting it
+      ("The diagram shows how…"), then the detail, e.g. goals and then layered
+      controls as bullets. A diagram or section that isn't the enduring design
+      names its state — `current`, `interim`, `target` or `enduring` — in its
+      caption and its opening sentence, e.g. `Diagram 3. Publishing flow (interim)`.
+  - id: software-and-licences
+    title: Software and licences
+    type: markdown
+    target-words: { small: 40, medium: 85, large: 140 }
+    required: false
+    guidance: >
+      The software the solution deploys and what it costs to licence — one row
+      per product: Software / Contracted name / Version / Count / Licences per
+      environment. This is the build-time deployment inventory (the reference
+      SAD's "Application Software View").
+      The accounts and subscriptions a support team must hold to run the
+      solution once it is live belong in
+      `support-and-operations.operational-accounts-and-licenses`.
+
+      Use the glossary's preferred terms (`glossary.terms-and-definitions`)
+      consistently in headings, tables, diagrams and prose.
+
+      Use the architecture name by default — the glossary's preferred term —
+      and the contracted product name only where it has been verified against
+      the contract, e.g. in the licences table's "Contracted name" column.
+
+  - id: hardware
+    title: Hardware
+    type: markdown
+    target-words: { small: 20, medium: 55, large: 110 }
+    required: false
+    guidance: >
+      Whether new hardware is needed and how it is sized — environment, OS /
+      version / 32-64-bit, hypervisor, memory and CPU per guest, virtualization
+      approach, and any licensing tied to cores or memory. Include batch-processing
+      RAM needs where relevant.
+
+      Give every figure — vCPU, memory, disk, guest counts — its source in
+      brackets, e.g. `99.5% (hosting SLA §4.2)`, or mark it `(target
+      assumption)` where nothing agreed backs it yet. Never invent a figure:
+      say what is missing rather than fill the gap.
+
+      Use the architecture name by default — the glossary's preferred term —
+      and the contracted product name only where it has been verified against
+      the contract, e.g. in the licences table's "Contracted name" column.
+
+  - id: bandwidth
+    title: Bandwidth
+    type: markdown
+    target-words: { small: 30, medium: 70, large: 140 }
+    required: false
+    guidance: >
+      Whether the current LAN / WAN / cloud network can handle the new data
+      flows — link capacities, anticipated data volumes, and utilisation over
+      time (e.g. MAN link, ExpressRoute circuit, AzCopy parallelism and wave
+      sizing).
+
+      Give every figure — link capacities, data volumes, utilisation — its
+      source in brackets, e.g. `99.5% (hosting SLA §4.2)`, or mark it `(target
+      assumption)` where nothing agreed backs it yet. Never invent a figure:
+      say what is missing rather than fill the gap.
+
+  - id: network-devices
+    title: Network Devices
+    type: markdown
+    target-words: { small: 20, medium: 45, large: 90 }
+    required: false
+    guidance: >
+      Network devices the solution depends on or changes — DNS servers, reverse
+      proxies, switches / routers — including IPv6 support where relevant.
+
+  - id: communication-and-network-protocols
+    title: Communication & Network Protocols
+    type: markdown
+    target-words: { small: 55, medium: 115, large: 190 }
+    required: false
+    guidance: >
+      New logical communication paths and protocols for the solution — one row
+      per path: Path / Protocol / From / To / Port / Direction / Environment(s)
+      / Comments. Name each path for what travels along it (e.g. "Payment
+      instruction"), give from and to as a system or device, the direction as
+      unidirectional or bidirectional, and the environments the path exists in.
+      Only new or changed protocols, not every existing enabled one.
+
+      Use the glossary's preferred terms (`glossary.terms-and-definitions`)
+      consistently in headings, tables, diagrams and prose.
+
+  - id: san
+    title: SAN (Database, Application Server, Backup, DR)
+    type: markdown
+    target-words: { small: 50, medium: 95, large: 160 }
+    required: false
+    guidance: >
+      Storage-area-network and disk requirements — database, application server,
+      backup and DR — one row per storage use: Storage use / Environment(s) /
+      Tier / Size / Notes. Refer to service catalogues where relevant.
+
+      Give every figure — sizes, growth, retention — its source in brackets,
+      e.g. `99.5% (hosting SLA §4.2)`, or mark it `(target assumption)` where
+      nothing agreed backs it yet. Never invent a figure: say what is missing
+      rather than fill the gap.

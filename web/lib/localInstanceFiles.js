@@ -55,7 +55,7 @@ function canonicalizeForSerialization(value) {
  * (`definition`, `slug`, `stage` = first stage id, `assignee`,
  * `definitionVersion`), serialized canonically.
  */
-export function renderInstanceYaml({ definition, slug, stage, assignee, definitionVersion }) {
+export function renderInstanceYaml({ definition, slug, stage, assignee, definitionVersion, size }) {
   return stringifyYAML(
     canonicalizeForSerialization({
       definition,
@@ -63,6 +63,8 @@ export function renderInstanceYaml({ definition, slug, stage, assignee, definiti
       stage,
       assignee: assignee ?? '',
       definitionVersion,
+      // #202 (docs/adr/0054): the Target size, written only when one was chosen — as lib/instance.js's createInstance does.
+      ...(size ? { size } : {}),
     })
   )
 }
@@ -105,6 +107,16 @@ export function withInstanceStage(record, stage) {
  */
 export function withInstanceAssignee(record, assignee) {
   return stringifyYAML(canonicalizeForSerialization({ ...record, assignee }))
+}
+
+/**
+ * The bytes to write back to `instance.yaml` after changing the instance's
+ * Target size from a local-workspace Instance Settings screen (#202,
+ * docs/adr/0054) — the Local-Workspace twin of `PUT /api/instance/size`.
+ * Same read-modify-write shape as `withInstanceAssignee` above.
+ */
+export function withInstanceSize(record, size) {
+  return stringifyYAML(canonicalizeForSerialization({ ...record, size }))
 }
 
 // ---------------------------------------------------------------------------

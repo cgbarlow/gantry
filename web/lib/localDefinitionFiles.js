@@ -99,7 +99,7 @@ export function blankLocalDefinitionStructure(id, title) {
 // loadDefinition/findDefinitionProblems both start from.
 // ---------------------------------------------------------------------------
 
-/** Port of `lib/definition.js`'s `buildDefinitionYamlObject`, minus the disk-only `onDiskRaw` fallback (a local-workspace caller always has the full structure already in memory — see this file's header comment) and minus its `keyOf` kebab-case input form (#148): this takes only the camelCase structure, so a raw parsed `definition.yaml` loses `read-only-modules`, `copied-from`, `document-control` and `satisfies-gate` here. */
+/** Port of `lib/definition.js`'s `buildDefinitionYamlObject`, minus the disk-only `onDiskRaw` fallback (a local-workspace caller always has the full structure already in memory — see this file's header comment) and minus its `keyOf` kebab-case input form (#148): this takes only the camelCase structure, so a raw parsed `definition.yaml` loses `read-only-modules`, `copied-from`, `document-control`, `satisfies-gate`, `cover-page`, `cover-classification`, `table-of-contents` and `diagram-captions` here. */
 export function renderDefinitionYaml(structure) {
   const obj = {}
   obj.id = structure.id
@@ -119,6 +119,10 @@ export function renderDefinitionYaml(structure) {
     if (a.filename !== undefined) entry.filename = a.filename
     if (a.documentControl !== undefined) entry['document-control'] = a.documentControl
     if (a.satisfiesGate !== undefined) entry['satisfies-gate'] = a.satisfiesGate
+    if (a.diagramCaptions !== undefined) entry['diagram-captions'] = a.diagramCaptions
+    if (a.coverPage !== undefined) entry['cover-page'] = a.coverPage
+    if (a.coverClassification !== undefined) entry['cover-classification'] = a.coverClassification
+    if (a.tableOfContents !== undefined) entry['table-of-contents'] = a.tableOfContents
     if (a.copiedFrom !== undefined) entry['copied-from'] = a.copiedFrom
     return entry
   })
@@ -143,6 +147,7 @@ export function renderModuleYaml(mod) {
       if (f.multiple === true) field.multiple = true
       if (f.default !== undefined) field.default = f.default
     }
+    if (f.targetWords !== undefined) field['target-words'] = f.targetWords
     if (f.copiedFrom !== undefined) field['copied-from'] = f.copiedFrom
     return field
   })
@@ -194,6 +199,8 @@ function moduleFromRaw(raw) {
         options: field.type === 'select' ? field.options : undefined,
         multiple: field.type === 'select' && field.multiple === true ? true : undefined,
         default: field.type === 'select' ? field.default : undefined,
+        // #202 (ADR-0054): kept as it is, so findLocalDefinitionProblems sees a malformed one.
+        targetWords: field['target-words'],
       }
     )
   })
@@ -294,10 +301,16 @@ export async function readLocalDefinitionStructure(handle, definitionId, version
         // #148: projected only when false, as lib/definition.js's definitionVersionProjection does.
         // #150: a non-boolean `document-control` ("no") is kept as it is, as there, so
         // findLocalDefinitionProblems reports it and a Save doesn't quietly drop it.
+        // #195: `diagram-captions` is projected unless false (its default), as there.
+        // #194: the front-matter switches are projected unless false (their default), as there.
         {
           filename: a.filename,
           documentControl: a['document-control'] === true ? undefined : a['document-control'],
           satisfiesGate: a['satisfies-gate'] === false ? false : undefined,
+          diagramCaptions: a['diagram-captions'] === false ? undefined : a['diagram-captions'],
+          coverPage: a['cover-page'] === false ? undefined : a['cover-page'],
+          coverClassification: a['cover-classification'],
+          tableOfContents: a['table-of-contents'] === false ? undefined : a['table-of-contents'],
           copiedFrom: a['copied-from'],
         }
       )

@@ -35,6 +35,9 @@ import { readTextFile } from './localWorkspace.js'
 import { parseLocalModuleFile, parseInstanceYaml } from './localInstanceFiles.js'
 import { isMultiValuedField } from './fieldShape.js'
 import { readOnlyModuleProblems } from './readOnlyModules.js'
+import { diagramCaptionsProblem } from './diagramCaptions.js'
+import { artefactFrontMatterProblems } from './artefactFrontMatter.js'
+import { targetWordsProblem } from './targetSize.js'
 
 // ---------------------------------------------------------------------------
 // definition/module lookup — the projection's `modules` is a plain array;
@@ -569,6 +572,9 @@ export function findLocalDefinitionProblems(structure) {
           message: `Module "${moduleSpec.id}" field "${field.id}" has "default: ${field.default}" which is not in its own "options:" list`,
         })
       }
+      // #202: shared with lib/definition.js rather than ported — see web/lib/targetSize.js.
+      const budgetProblem = targetWordsProblem(moduleSpec.id, field, field.targetWords)
+      if (budgetProblem) problems.push(budgetProblem)
     }
   }
 
@@ -583,6 +589,11 @@ export function findLocalDefinitionProblems(structure) {
         message: `Artefact "${artefact.id}" sets "document-control" to ${JSON.stringify(documentControl)} — it must be true or false`,
       })
     }
+    // #195: shared with lib/definition.js rather than ported — see web/lib/diagramCaptions.js.
+    const captionsProblem = diagramCaptionsProblem(artefact.id, artefact.diagramCaptions)
+    if (captionsProblem) problems.push(captionsProblem)
+    // #194: shared with lib/definition.js rather than ported — see web/lib/artefactFrontMatter.js.
+    problems.push(...artefactFrontMatterProblems(artefact, findFilenameField))
   }
 
   problems.push(...gateReferenceProblems(stages, artefacts, [...modulesById.values()]))

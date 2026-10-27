@@ -9,6 +9,8 @@ import { Dropdown } from '../lib/dropdown.js'
 import { moduleFieldUsage } from '../lib/moduleFieldUsage.js'
 import { defnView, setDefnView, defnMapExpanded, setDefnMapExpanded } from '../lib/definitionView.js'
 import { planCopy, resolveCollision, applyPlan, isResolved } from '../lib/copyPlanner.js'
+import { coverClassificationOptions } from '../lib/artefactFrontMatter.js'
+import { TARGET_SIZES, targetSizeLabel, withFieldTargetWords } from '../lib/targetSize.js'
 
 // The rebuilt Definitions page (WI #381, Feature #380's grilling session). Primary source:
 // web/prototypes/definition-editor.prototype.html — variant A (Outline) and C (Map) both wanted,
@@ -112,6 +114,34 @@ function stageGates(d) {
 // #149: a Field's `required-at` as the list of gates the editor shows, or null when it has none. A bare
 // string (the invalid-required-at problem — the engine substring-matches it) reads as the one gate it
 // names, so the Required control shows what the Field really does and one tick converts it to a list.
+// #202 (docs/adr/0054): a Field's word budget per Target size, as the read-only Definition viewer shows
+// it ("Small ~40 · Medium ~100 · Large ~200"), or null when it sets none. A malformed value is shown
+// as it is — the Definitions page's problem marker says what is wrong with it.
+function targetWordsSummary(f) {
+  if (f.targetWords === undefined) return null
+  if (f.targetWords === null || typeof f.targetWords !== 'object' || Array.isArray(f.targetWords)) return JSON.stringify(f.targetWords)
+  return TARGET_SIZES.map((size) => `${targetSizeLabel(size)} ~${f.targetWords[size] ?? '?'}`).join(' · ')
+}
+
+// The editable form: one whole-number box per size, beside each other. Blank removes that size's
+// budget; blanking all three removes `target-words` from the Field (web/lib/targetSize.js's
+// `withFieldTargetWords`). Only markdown and list Fields hold prose to budget.
+function targetWordsInputs(f, disabled, onChange) {
+  return html`
+    <div class="defn-target-words" role="group" aria-label="Word targets">
+      ${TARGET_SIZES.map((size) => html`
+        <label key=${size}>
+          ${targetSizeLabel(size)}
+          <input class="wizard-input defn-target-words-input" type="number" min="1" step="1" aria-label=${`${targetSizeLabel(size)} word target`}
+            disabled=${disabled}
+            value=${f.targetWords && typeof f.targetWords === 'object' ? f.targetWords[size] ?? '' : ''}
+            onInput=${(e) => onChange(withFieldTargetWords(f, size, e.currentTarget.value).targetWords)} />
+        </label>
+      `)}
+    </div>
+  `
+}
+
 function requiredAtGates(f) {
   if (typeof f.requiredAt === 'string') return [f.requiredAt]
   return Array.isArray(f.requiredAt) ? f.requiredAt : null
@@ -163,6 +193,41 @@ function documentControlCheckbox(artefact, onToggle) {
     <label class="defn-document-control">
       <input type="checkbox" checked=${artefact.documentControl !== false} disabled=${!onToggle} onChange=${onToggle ? (e) => onToggle(e.currentTarget.checked) : undefined} />
       Print the Document Control and Review & sign-off tables
+    </label>
+  `
+}
+
+// #194 (ADR-0052): an Artefact's front-matter switches, `cover-page:` and `table-of-contents:`. Both
+// are unticked by default (the key absent); ticking stores `true`, unticking removes the key, so a
+// Definition that never uses them saves exactly as before. `onToggle` null shows them read-only, as
+// on a published version.
+function coverPageCheckbox(artefact, onToggle) {
+  return html`
+    <label class="defn-cover-page">
+      <input type="checkbox" checked=${artefact.coverPage === true} disabled=${!onToggle} onChange=${onToggle ? (e) => onToggle(e.currentTarget.checked) : undefined} />
+      Open the document with a cover page
+    </label>
+  `
+}
+
+function tableOfContentsCheckbox(artefact, onToggle) {
+  return html`
+    <label class="defn-table-of-contents">
+      <input type="checkbox" checked=${artefact.tableOfContents === true} disabled=${!onToggle} onChange=${onToggle ? (e) => onToggle(e.currentTarget.checked) : undefined} />
+      Add a table of contents after Document Control
+    </label>
+  `
+}
+
+// #195 (ADR-0053): an Artefact's `diagram-captions:` switch. Unticked by default (the key absent);
+// ticking stores `true`, which numbers the document's diagrams "Diagram N. <title>"; unticking
+// removes the key, so a Definition that never uses it saves exactly as before. `onToggle` null
+// shows it read-only, as on a published version.
+function diagramCaptionsCheckbox(artefact, onToggle) {
+  return html`
+    <label class="defn-diagram-captions">
+      <input type="checkbox" checked=${artefact.diagramCaptions === true} disabled=${!onToggle} onChange=${onToggle ? (e) => onToggle(e.currentTarget.checked) : undefined} />
+      Number and caption diagrams ("Diagram N. …") in the Word document
     </label>
   `
 }
@@ -1819,9 +1884,11 @@ export function DefinitionViewerPage() {
     `
   }
   function fieldRowViewBody(f) {
+    const budget = targetWordsSummary(f)
     return html`
       <div class="defn-field-row-body">
         ${f.guidance ? html`<div class="guidance" dangerouslySetInnerHTML=${{ __html: renderMarkdown(f.guidance) }} />` : html`<p class="muted">No guidance.</p>`}
+        ${budget ? html`<p class="defn-target-words-summary"><span class="field-label">Word targets</span> ${budget}</p>` : null}
       </div>
     `
   }
@@ -1861,6 +1928,8 @@ export function DefinitionViewerPage() {
                 delete field.multiple
                 delete field.default
               }
+              // #202: only prose (markdown, list) has a word budget.
+              if (nextType !== 'markdown' && nextType !== 'list') delete field.targetWords
             })
           }}>
             <option value="markdown">markdown</option>
@@ -1938,6 +2007,14 @@ export function DefinitionViewerPage() {
                 </div>
               `
             : null}
+          ${f.type === 'markdown' || f.type === 'list' ? html`
+            <label class="field-label">Word targets</label>
+            ${targetWordsInputs(f, false, (targetWords) => updateDraft((d) => {
+              const field = d.modules[mIndex].fields[fi]
+              if (targetWords === undefined) delete field.targetWords
+              else field.targetWords = targetWords
+            }))}
+          ` : null}
           <label class="field-label">Guidance</label>
           <textarea class="wizard-input" rows="3" value=${f.guidance ?? ''} onInput=${(e) => updateDraft((d) => { d.modules[mIndex].fields[fi].guidance = e.currentTarget.value })}></textarea>
         </div>
@@ -2116,6 +2193,10 @@ export function DefinitionViewerPage() {
     // token is explained where it's authored, not just flagged elsewhere.
     const filenameProblems = validationProblems.filter((p) => typeof p.type === 'string' && p.type.startsWith('filename-') && problemTarget(p)?.type === 'artefact' && problemTarget(p)?.id === a.id)
     const filenameTokens = [...FILENAME_BUILTIN_TOKENS, ...eligibleFilenameFields(d, a)]
+    // #194 (ADR-0052): the Fields the cover may print as a classification, and any problem with the
+    // one this artefact names, shown where it is chosen as the filename problems are above.
+    const classificationOptions = coverClassificationOptions(d.modules, a)
+    const classificationProblems = validationProblems.filter((p) => p.type === 'invalid-cover-classification' && problemTarget(p)?.type === 'artefact' && problemTarget(p)?.id === a.id)
     const gates = stageGates(d)
     return html`
       <div class="defn-focus">
@@ -2158,6 +2239,33 @@ export function DefinitionViewerPage() {
                   if (checked) delete dd.artefacts[ai].satisfiesGate
                   else dd.artefacts[ai].satisfiesGate = false
                 }))}
+                <label class="field-label">Cover page</label>
+                ${coverPageCheckbox(a, (checked) => updateDraft((dd) => {
+                  if (checked) dd.artefacts[ai].coverPage = true
+                  else delete dd.artefacts[ai].coverPage
+                }))}
+                <label class="field-label">Cover classification</label>
+                <div>
+                  <select class="wizard-input mono defn-cover-classification" aria-label="Cover classification" value=${a.coverClassification ?? ''} onChange=${(e) => updateDraft((dd) => {
+                    if (e.currentTarget.value) dd.artefacts[ai].coverClassification = e.currentTarget.value
+                    else delete dd.artefacts[ai].coverClassification
+                  })}>
+                    <option value="">None</option>
+                    ${a.coverClassification !== undefined && !classificationOptions.some((o) => o.value === a.coverClassification) ? html`<option value=${String(a.coverClassification)}>${String(a.coverClassification)} (not a field this artefact can print)</option>` : null}
+                    ${classificationOptions.map((o) => html`<option key=${o.value} value=${o.value}>${o.label}</option>`)}
+                  </select>
+                  ${classificationProblems.length ? html`<ul class="defn-filename-problems">${classificationProblems.map((p) => html`<li class="inline-error">${p.message}</li>`)}</ul>` : null}
+                </div>
+                <label class="field-label">Table of contents</label>
+                ${tableOfContentsCheckbox(a, (checked) => updateDraft((dd) => {
+                  if (checked) dd.artefacts[ai].tableOfContents = true
+                  else delete dd.artefacts[ai].tableOfContents
+                }))}
+                <label class="field-label">Diagram captions</label>
+                ${diagramCaptionsCheckbox(a, (checked) => updateDraft((dd) => {
+                  if (checked) dd.artefacts[ai].diagramCaptions = true
+                  else delete dd.artefacts[ai].diagramCaptions
+                }))}
               </div>
             `
           : html`
@@ -2169,6 +2277,10 @@ export function DefinitionViewerPage() {
               ${a.filename ? html`<p><span class="field-label">Filename pattern</span> <code>${a.filename}</code></p>` : null}
               <p><span class="field-label">Document Control</span> ${documentControlCheckbox(a, null)}</p>
               <p><span class="field-label">Counts toward gate</span> ${satisfiesGateCheckbox(a, null)}</p>
+              <p><span class="field-label">Cover page</span> ${coverPageCheckbox(a, null)}</p>
+              ${a.coverClassification !== undefined ? html`<p><span class="field-label">Cover classification</span> <code>${String(a.coverClassification)}</code></p>` : null}
+              <p><span class="field-label">Table of contents</span> ${tableOfContentsCheckbox(a, null)}</p>
+              <p><span class="field-label">Diagram captions</span> ${diagramCaptionsCheckbox(a, null)}</p>
             `}
         <div class="defn-focus-section">
           <div class="defn-focus-section-head">

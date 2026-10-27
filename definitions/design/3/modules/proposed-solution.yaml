@@ -1,0 +1,72 @@
+# Field order follows the TAC HLD reference template's "Proposed solution"
+# section: the guardrails note sits in the section's opening text, then
+# Alignment with strategy -> (Dependencies) -> Implications -> Trade-offs ->
+# (Risks) -> (Security and privacy) -> Cost-benefit analysis -> Delivery
+# approach. Dependencies, risks and security are shared modules and are
+# interleaved by the `hld` artefact's requires order, not held here.
+
+id: proposed-solution
+title: Proposed Solution
+purpose: >
+  Describe the proposed solution and why it is the right choice. Cover how it aligns
+  with strategy, its costs and benefits, implications and what you are trading off.
+
+  The solution's shape itself is not re-entered here — the `hld` artefact
+  renders `solution-definition.high-level-solution-overview` from SOAP as the
+  section's opening. Deepen or correct that sketch there rather than restating
+  it.
+
+fields:
+  - id: guardrails
+    title: Guardrails
+    type: markdown
+    target-words: { small: 25, medium: 60, large: 120 }
+    required: true
+    guidance: >
+      List which guardrails this solution follows. If it seeks an exemption or introduces a
+      new guardrail, say so explicitly.
+  - id: strategy-alignment
+    title: Alignment with strategy
+    type: markdown
+    target-words: { small: 25, medium: 60, large: 120 }
+    required: true
+    guidance: >
+      Builds on the SOAP sketch — see `solution-definition`
+      (`high-level-solution-overview`, `feature-breakdown`). Do not re-derive;
+      show how that shape aligns with strategy for the ARB.
+
+  - id: implications
+    title: Implications
+    type: markdown
+    target-words: { small: 25, medium: 60, large: 120 }
+    required: false
+
+  - id: trade-offs
+    title: Trade-offs
+    type: markdown
+    target-words: { small: 25, medium: 65, large: 130 }
+    required: true
+    guidance: >
+      What you're giving up by choosing this solution over the alternatives
+      recorded in `alternatives-considered` (seeded by
+      `solution-definition.alternatives-sketch` at SOAP).
+
+  - id: cost-benefit
+    title: Cost-benefit analysis
+    type: markdown
+    target-words: { small: 30, medium: 70, large: 140 }
+    required: true
+    guidance: >
+      Cost versus benefit, including recurring costs and non-monetary
+      comparisons (e.g. person-hours saved) where a dollar figure isn't
+      meaningful. Start from `team-and-estimates.estimates` — refine, don't
+      restate.
+
+  - id: delivery-approach
+    title: Delivery approach and indicative timeline
+    type: markdown
+    target-words: { small: 40, medium: 85, large: 140 }
+    required: true
+    guidance: >
+      Traceable to `team-and-estimates.estimates` — refine the SOAP T-shirt
+      sizes into an indicative timeline rather than re-deriving them.

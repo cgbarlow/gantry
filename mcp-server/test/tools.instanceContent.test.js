@@ -203,6 +203,34 @@ test('get_instance surfaces gantry serve\'s own authentication_required 401 (a r
   }
 })
 
+// #202 (spec #192, ADR-0054): an instance whose Definition declares word budgets carries its Target
+// size, and each budgeted field its target at that size, so an AI author can write to the size.
+test('get_instance returns the instance\'s size and each budgeted field\'s word target, and says so in its description', async () => {
+  const instance = {
+    slug: 'sized-instance',
+    size: 'medium',
+    modules: [{ id: 'nfrs', fields: [{ id: 'performance', type: 'markdown', value: '', targetWords: 150 }, { id: 'owner', type: 'text', value: '' }] }],
+  }
+  const fetch = stubFetch(({ url }) => {
+    if (url.pathname === '/api/instance/workspace') return { status: 200, body: { workspaceId: null, scope: null } }
+    if (url.pathname === '/api/instance') return { status: 200, body: instance }
+    return undefined
+  })
+  try {
+    const gantryClient = createGantryClient({ baseUrl: BASE_URL, workspacePats: {} })
+    const result = await getInstanceTool.handler({ slug: 'sized-instance' }, { gantryClient })
+    assert.equal(result.isError, undefined)
+    const payload = JSON.parse(result.content[0].text)
+    assert.equal(payload.size, 'medium')
+    assert.equal(payload.modules[0].fields[0].targetWords, 150)
+    assert.equal('targetWords' in payload.modules[0].fields[1], false)
+  } finally {
+    fetch.restore()
+  }
+  assert.match(getInstanceTool.description, /"size"/)
+  assert.match(getInstanceTool.description, /"targetWords"/)
+})
+
 // ---------------------------------------------------------------------------
 // update_instance_modules
 // ---------------------------------------------------------------------------
@@ -248,6 +276,33 @@ test('update_instance_modules writes module content and returns the save status'
   } finally {
     fetch.restore()
   }
+})
+
+// #202: an over-budget field is saved like any other; the notes ride beside the save so the agent can
+// tighten the field and save again. They never turn the write into an error.
+test('update_instance_modules returns over-budget notes beside a successful save, not as an error', async () => {
+  const note = { module: 'nfrs', field: 'performance', words: 420, target: 150, size: 'medium', message: 'nfrs.performance: 420 words, Medium target ~150' }
+  const fetch = stubFetch(({ url, method }) => {
+    if (url.pathname === '/api/instance/workspace') return { status: 200, body: { workspaceId: null, scope: null } }
+    if (url.pathname === '/api/instance/modules' && method === 'PUT') {
+      return { status: 200, body: { saved: ['nfrs'], commit: null, targetWordNotes: [note] } }
+    }
+    return undefined
+  })
+  try {
+    const gantryClient = createGantryClient({ baseUrl: BASE_URL, workspacePats: {} })
+    const result = await updateInstanceModulesTool.handler(
+      { slug: 'sized-instance', modules: { nfrs: { fields: { performance: 'word '.repeat(420) } } } },
+      { gantryClient }
+    )
+    assert.equal(result.isError, undefined)
+    const payload = JSON.parse(result.content[0].text)
+    assert.deepEqual(payload.saved, ['nfrs'])
+    assert.deepEqual(payload.targetWordNotes, [note])
+  } finally {
+    fetch.restore()
+  }
+  assert.match(updateInstanceModulesTool.description, /"targetWordNotes"/)
 })
 
 test('update_instance_modules reports missing_workspace_pat and never calls PUT /api/instance/modules', async () => {

@@ -1,4 +1,5 @@
 import DOMPurify from 'dompurify'
+import { figureCaption } from './diagramCaptions.js'
 
 // WI #353 — Mermaid diagrams in the editor preview and in browser-driven `.docx` exports.
 // Resolves the deferral recorded in docs/adr/0020-full-soap-artefact.md; see
@@ -102,15 +103,18 @@ function sanitiseSvg(svg) {
  * Fences inside a longer fence of a different language (```md containing ```mermaid) are not
  * special-cased: markdown-it would treat that the same way, and no artefact template does it.
  *
+ * Each block also carries its `info` string (`mermaid {caption="…"}`, from the word `mermaid`
+ * on) so a caller can read the fence's attributes (web/lib/diagramCaptions.js).
+ *
  * @param {string} markdown
- * @param {(block: { code: string, index: number }) => string} replace
- * @returns {{ markdown: string, blocks: Array<{ code: string, index: number }> }}
+ * @param {(block: { code: string, index: number, info: string }) => string} replace
+ * @returns {{ markdown: string, blocks: Array<{ code: string, index: number, info: string }> }}
  */
 export function replaceMermaidBlocks(markdown, replace) {
   const blocks = []
-  const re = /^( {0,3})(`{3,}|~{3,})[ \t]*mermaid\b[^\n]*\n([\s\S]*?)\n\1\2[ \t]*$/gm
-  const out = (markdown ?? '').replace(re, (match, _indent, _fence, code) => {
-    const block = { code: code.replace(/^\n+|\n+$/g, ''), index: blocks.length }
+  const re = /^( {0,3})(`{3,}|~{3,})[ \t]*(mermaid\b[^\n]*)\n([\s\S]*?)\n\1\2[ \t]*$/gm
+  const out = (markdown ?? '').replace(re, (match, _indent, _fence, info, code) => {
+    const block = { code: code.replace(/^\n+|\n+$/g, ''), index: blocks.length, info: info.trimEnd() }
     blocks.push(block)
     return replace(block)
   })
@@ -189,9 +193,21 @@ export async function prepareMermaidForDocx(markdown, testOverrides) {
   const { markdown: out } = replaceMermaidBlocks(markdown, (block) => {
     const name = rendered.get(block.index)
     if (!name) return '```mermaid\n' + block.code + '\n```'
-    return `![Diagram ${block.index + 1}](${name})`
+    // #195 (ADR-0053): the caption the compile step resolved onto the fence — "Diagram N. <title>",
+    // or "Diagram N" for an uncaptioned block — numbered in the one sequence it shares with the
+    // document's images. Pandoc makes an image alone in its paragraph a figure, with this text as
+    // both the caption under it and its alt text. Markdown that never went through the compile
+    // step keeps the old per-block "Diagram N".
+    const label = figureCaption(block.info) ?? `Diagram ${block.index + 1}`
+    return `![${escapeMarkdownText(label)}](${name})`
   })
   return { markdown: out, files }
+}
+
+// A caption is plain text, not markdown: every ASCII punctuation mark is backslash-escaped so
+// Pandoc prints it as typed (`*`, `_`, `[`, `$` …) and the image reference can't be broken by it.
+function escapeMarkdownText(text) {
+  return text.replace(/[!-/:-@[-`{-~]/g, '\\$&')
 }
 
 /**
@@ -210,12 +226,21 @@ export async function hydrateMermaidPreview(node, testOverrides) {
   for (const code of codes) {
     const pre = code.parentElement
     const source = code.textContent ?? ''
+    // #195: the fence's caption (web/lib/markdown.js puts it on the `<code>`), shown under the
+    // drawing. The preview shows a field, not a document, so it has no "Diagram N" to give it.
+    const caption = code.getAttribute('data-caption')
     try {
       const svg = await renderMermaidSvg(source, testOverrides)
       if (!pre.isConnected) continue
       const figure = document.createElement('figure')
       figure.className = 'mermaid-diagram'
       figure.innerHTML = svg
+      if (caption) {
+        const figcaption = document.createElement('figcaption')
+        figcaption.className = 'diagram-caption'
+        figcaption.textContent = caption
+        figure.appendChild(figcaption)
+      }
       pre.replaceWith(figure)
     } catch (err) {
       if (!pre.isConnected) continue

@@ -18,9 +18,9 @@ owner: c.barlow
 
 ## Process flow
 
-Two flows matter: how a change reaches Production, and how a person uses the hosted service.
+Two flows matter: how a change reaches Production, and how a person uses the service.
 
-**Release and deployment.** A merge to `main` builds the container image and pushes it to the registry tagged with the version, the commit and `latest`. A pipeline stage updates the UAT container app to that image, which Container Apps rolls out as a new revision: the old revision keeps serving until the new one passes its probes, then traffic moves. The Architecture Practice exercises UAT. Once accepted, the same image tag is deployed to Production behind an approval in the same way. If a revision misbehaves, the previous revision is reactivated.
+The following diagram presents the release and deployment flow.
 
 ```mermaid
 flowchart LR
@@ -35,7 +35,9 @@ flowchart LR
   H -- no --> RB[Traffic stays on previous revision]
 ```
 
-**Using Gantry.** A user opens the environment's DNS name from the Contoso network, enters their Azure DevOps PAT once in the browser, and picks or creates an instance in the workspace. They author module fields in the editor, the tool checks the current gate against the fields each artefact requires, and a Render produces the artefact as Markdown and Word documents committed back to the workspace repository. Reviewers sign off through the linked work item, and the instance moves to the next stage.
+The diagram shows how a merge to `main` publishes an image that rolls out to UAT as a new revision, then to Production behind an approval; a failing revision leaves traffic on the previous one.
+
+The following diagram presents how a person uses Gantry.
 
 ```mermaid
 flowchart TD
@@ -51,11 +53,13 @@ flowchart TD
   I --> D
 ```
 
+The diagram shows how a user enters their Azure DevOps PAT once, authors module fields, passes the gate check and renders artefacts back to the workspace repository.
+
 ## High level solution overview
 
-Gantry runs as its published container image in Azure Container Apps. The container listens on port 3000; the environment's ingress terminates TLS for the environment's DNS name, probes each replica's health, and spreads requests across the healthy replicas. An Azure Files share is mounted into every replica as the instances directory and holds the workspace registry and configuration; instance data itself lives in the Azure DevOps workspace repository the registry points to.
+Gantry runs as its published container image in Azure Container Apps. Ingress terminates TLS, probes each replica and spreads requests across healthy ones; every replica mounts the Azure Files share for the workspace registry and configuration.
 
-**UAT** is one container app at one replica in an internal-only environment in the Contoso UAT tenancy.
+The following diagram presents UAT: one replica.
 
 ```mermaid
 flowchart LR
@@ -73,7 +77,7 @@ flowchart LR
   REG[("Container registry")] -. image pull, managed identity .-> R1
 ```
 
-**Production** is the same design with a minimum of two replicas. Ingress owns the common DNS name, probes each replica, and stops routing to one that fails; both replicas mount the same share.
+The following diagram presents Production: the same design with two replicas sharing one share.
 
 ```mermaid
 flowchart LR
@@ -96,25 +100,25 @@ flowchart LR
   REG -. image pull .-> R2
 ```
 
-Because every user's request carries their own PAT and the replicas hold no session state, any replica can answer any request and ingress needs no session affinity. The ingress request timeout of 240 seconds is not a concern: document rendering runs in the browser, and the server's own calls are short.
+The diagrams show how requests carry each user's own PAT and replicas hold no session state, so any replica can answer any request.
 
 ## Feature breakdown and involved teams
 
 | Feature | What it delivers | Teams |
 | --- | --- | --- |
-| UAT environment | Virtual network subnet, internal-only Container Apps environment, storage account and file share, Log Analytics workspace, internal DNS name and certificate | Cloud Platform team, Network / security team |
+| UAT environment | Subnet, internal-only Container Apps environment, file share, Log Analytics, DNS name and certificate | Cloud Platform team, Network / security team |
 | Production environment | The same, in the Production tenancy | Cloud Platform team, Network / security team |
-| Gantry container app | The published image, `GANTRY_INSTANCES_DIR=/data` on the share mount, min replicas (1 UAT, 2 Prod), HTTP probe on `/`, managed identity for registry pull, corporate CA secret volume if needed | Cloud Platform team, Architecture Practice |
-| Deployment path | A pipeline stage that updates the container app's image tag as a new revision, UAT automatic and Production behind an approval; rollback by reactivating the previous revision | Architecture Practice, Cloud Platform team |
-| Monitoring | Console, system and HTTP logs in Log Analytics; Azure Monitor alerts on replica restarts and failed revisions | Cloud Platform team |
-| Workspace set-up | One Azure DevOps workspace repository per environment, registered in Gantry, pilot instances migrated | Architecture Practice |
+| Gantry container app | The image on the share mount, minimum replicas, health probe | Cloud Platform team, Architecture Practice |
+| Deployment path | A pipeline stage deploying each image as a revision | Architecture Practice |
+| Monitoring | Logs in Log Analytics; alerts on restarts and failed revisions | Cloud Platform team |
+| Workspace set-up | One workspace repository per environment | Architecture Practice |
 
 ## Alternatives sketch
 
-**Linux virtual machines with a separate load balancer** was this SOAP's first proposal: one VM in UAT, two in Production behind an internal Azure Load Balancer or Application Gateway, each running the container with Docker and mounting the same Azure Files share. Rejected on engineering review. Everything the VM design assembled by hand (load balancing, health probing, restart, deployment, log collection, patching of the host) is provided by Container Apps, and the VM design left three choices open at SOAP level that Container Apps answers directly. The trade-off accepted is that Container Apps is a managed platform with less control over the host and a hard request timeout of 240 seconds, neither of which affects Gantry.
+**Linux virtual machines with a separate load balancer** was this SOAP's first proposal. Rejected on engineering review: Container Apps provides the load balancing, health probing, restarts, deployment and log collection the VM design assembled by hand. The trade-off is a managed host and a fixed 240-second request timeout, neither of which affects Gantry.
 
-**Azure App Service for containers** would also work and is closer to a traditional web host. Not chosen because Container Apps' internal-only environment, revision model and per-replica probing map more directly onto the requirements, and the Cloud Platform team already provisions Container Apps environments.
+**Azure App Service for containers** would also work, but Container Apps' internal-only environments, revisions and per-replica probes fit the requirements more directly.
 
-**Azure Kubernetes Service** was set aside as far more platform than a single small web app needs.
+**Azure Kubernetes Service** is far more platform than one small web app needs.
 
-Two smaller choices are left to the HLD and listed under Open questions: whether the Azure Files share is mounted over SMB with a storage-account key held as a Container Apps secret, or over NFS from a storage account locked to the virtual network; and whether Production runs on the Consumption workload profile or a Dedicated one.
+The Azure Files mount protocol and the Production workload profile are left to the HLD (Q1, Q2).

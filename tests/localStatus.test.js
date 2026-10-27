@@ -159,9 +159,9 @@ describe('getLocalStatus matches getStatus', () => {
 
   test('the examples fixture is complete', async () => {
     const serverStatus = getStatus('kiwi-cover-mutual', { instancesDir: 'workspaces/examples' })
-    // workspaces/examples/kiwi-cover-mutual is pinned to `definitionVersion: 2` (WI #348) — the
+    // workspaces/examples/kiwi-cover-mutual is pinned to `definitionVersion: 3` (#193) — the
     // projection must match, or the local and server views would diverge.
-    const structure = projectionFor('design', { version: 2 })
+    const structure = projectionFor('design', { version: 3 })
     const handle = await memHandleFromInstance('workspaces/examples', 'kiwi-cover-mutual')
     const localStatus = await getLocalStatus(handle, 'kiwi-cover-mutual', structure, serverStatus.stage.id)
 
@@ -299,8 +299,8 @@ describe('checkLocalGate matches checkGate', () => {
   test('the identical SAD and SSAD requirements still pass both artefacts together', async () => {
     const serverResult = checkGate('kiwi-cover-mutual', { instancesDir: 'workspaces/examples', gate: 'build-ready-checklist' })
 
-    // workspaces/examples/kiwi-cover-mutual is pinned to `definitionVersion: 2` (WI #348).
-    const structure = projectionFor('design', { version: 2 })
+    // workspaces/examples/kiwi-cover-mutual is pinned to `definitionVersion: 3` (#193).
+    const structure = projectionFor('design', { version: 3 })
     const handle = await memHandleFromInstance('workspaces/examples', 'kiwi-cover-mutual')
     const localResult = await checkLocalGate(handle, 'kiwi-cover-mutual', structure, 'shape', { gate: 'build-ready-checklist' })
 
@@ -316,8 +316,8 @@ describe('checkLocalGate matches checkGate', () => {
       unlinkSync(join(instancesDir, 'examples', 'modules', 'architecture.md'))
       const serverResult = checkGate('examples', { instancesDir, gate: 'build-ready-checklist' })
 
-      // Copied from workspaces/examples/kiwi-cover-mutual, so pinned to v2 like the fixture (WI #348).
-      const structure = projectionFor('design', { version: 2 })
+      // Copied from workspaces/examples/kiwi-cover-mutual, so pinned to v3 like the fixture (#193).
+      const structure = projectionFor('design', { version: 3 })
       const handle = await memHandleFromInstance(instancesDir, 'examples')
       const localResult = await checkLocalGate(handle, 'examples', structure, 'shape', { gate: 'build-ready-checklist' })
 
@@ -354,9 +354,9 @@ describe('checkLocalGate matches checkGate', () => {
 
   test('passes the examples fixture against its current stage', async () => {
     const serverResult = checkGate('kiwi-cover-mutual', { instancesDir: 'workspaces/examples' })
-    // workspaces/examples/kiwi-cover-mutual has no `definitionVersion`, so it resolves to v1 —
-    // pinned here to match (WI #318).
-    const structure = projectionFor('design', { version: 2 })
+    // workspaces/examples/kiwi-cover-mutual is pinned to `definitionVersion: 3` (#193) — pinned
+    // here to match.
+    const structure = projectionFor('design', { version: 3 })
     const handle = await memHandleFromInstance('workspaces/examples', 'kiwi-cover-mutual')
     const localResult = await checkLocalGate(handle, 'kiwi-cover-mutual', structure, 'shape')
 
@@ -367,9 +367,9 @@ describe('checkLocalGate matches checkGate', () => {
 
   test('--gate resolves the stage owning that gate, even when it is not the instance\'s current stage', async () => {
     const serverResult = checkGate('kiwi-cover-mutual', { instancesDir: 'workspaces/examples', gate: 'hld-arb-approved' })
-    // workspaces/examples/kiwi-cover-mutual has no `definitionVersion`, so it resolves to v1 —
-    // pinned here to match (WI #318).
-    const structure = projectionFor('design', { version: 2 })
+    // workspaces/examples/kiwi-cover-mutual is pinned to `definitionVersion: 3` (#193) — pinned
+    // here to match.
+    const structure = projectionFor('design', { version: 3 })
     const handle = await memHandleFromInstance('workspaces/examples', 'kiwi-cover-mutual')
     const localResult = await checkLocalGate(handle, 'kiwi-cover-mutual', structure, 'shape', { gate: 'hld-arb-approved' })
 

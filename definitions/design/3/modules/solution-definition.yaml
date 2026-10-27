@@ -1,0 +1,79 @@
+id: solution-definition
+title: Solution Definition
+purpose: >
+  Outline what the solution is and how it will work end to end, at a level that shows
+  the shape without committing to the full architecture. Include the key requirements,
+  process flow and who delivers each part.
+
+fields:
+  - id: high-level-requirements
+    title: High-level requirements
+    type: markdown
+    target-words: { small: 85, medium: 170, large: 280 }
+    required: true
+    guidance: >
+      The high-level requirements this solution must address. Use a markdown
+      table with `Section` and `Requirement` columns when the work has several
+      requirement groups; keep each requirement brief but specific enough to
+      define the expected functionality and its scope. This is the agreed set
+      that `nfrs.requirements-traceability` maps back to at detailed design —
+      capture it here so nothing agreed can be quietly dropped.
+
+  - id: process-flow
+    title: Process flow
+    type: markdown
+    target-words: { small: 40, medium: 95, large: 190 }
+    required: true
+    guidance: >
+      How work or data moves through the solution, step by step. A narrative
+      walk-through is fine; a diagram reference is fine too, but describe
+      what the diagram shows in words as well. Reused and deepened at
+      `architecture.solution-description` — write the SOAP-level flow once.
+
+      Lay out each diagram in this order: one introductory sentence ("The
+      following diagram presents…"), the diagram, its caption (an image's alt
+      text, or `{caption="…"}` on a Mermaid fence), a paragraph interpreting it
+      ("The diagram shows how…"), then the detail, e.g. goals and then layered
+      controls as bullets. A diagram or section that isn't the enduring design
+      names its state — `current`, `interim`, `target` or `enduring` — in its
+      caption and its opening sentence, e.g. `Diagram 3. Publishing flow (interim)`.
+
+  - id: high-level-solution-overview
+    title: High level solution overview
+    type: markdown
+    target-words: { small: 35, medium: 90, large: 180 }
+    required: true
+    guidance: >
+      The shape of the solution in outline — the main components and how
+      they relate. This is a sketch, not the Detailed Design stage's
+      `architecture` module; go only as deep as a SOAP-stage reader needs.
+
+      Use the glossary's preferred terms (`glossary.terms-and-definitions`)
+      consistently in headings, tables, diagrams and prose.
+
+      Lay out each diagram in this order: one introductory sentence ("The
+      following diagram presents…"), the diagram, its caption (an image's alt
+      text, or `{caption="…"}` on a Mermaid fence), a paragraph interpreting it
+      ("The diagram shows how…"), then the detail, e.g. goals and then layered
+      controls as bullets. A diagram or section that isn't the enduring design
+      names its state — `current`, `interim`, `target` or `enduring` — in its
+      caption and its opening sentence, e.g. `Diagram 3. Publishing flow (interim)`.
+
+  - id: feature-breakdown
+    title: Feature breakdown and involved teams
+    type: markdown
+    target-words: { small: 50, medium: 95, large: 160 }
+    required: true
+    guidance: >
+      The solution broken into the features or workstreams that deliver it,
+      and which teams are involved in each.
+
+  - id: alternatives-sketch
+    title: Alternatives sketch
+    type: markdown
+    target-words: { small: 50, medium: 120, large: 240 }
+    required: false
+    guidance: >
+      Brief alternative(s) considered at SOAP, including "do nothing" —
+      expanded at `modules/alternatives-considered.md` for the ARB; do not
+      re-derive there.

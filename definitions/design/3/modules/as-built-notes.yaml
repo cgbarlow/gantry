@@ -1,0 +1,111 @@
+# Field set confirmed 2026-08-20 (ticket #53); reconciled against the approved ATLAS reference design 2026-08-29 (WI #227). Evidence: the Post-SOAP Artefact Coverage Assessment spreadsheet's "Detailed Design / As-built" column and its threaded comments ("good enough for the technical person who is not familiar with the system to successfully rebuild it from scratch"; "handover of the document does not include the handover of responsibility"), plus a direct statement on ownership and required depth: as-builts are the responsibility of senior developers/tech leads or contingent Architecture support, and must cover detailed business process flows, field-level logic, detailed API specifications, UI wireframes, validation rules, code-level sequence diagrams, and detailed acceptance criteria.
+#
+# WI #227: the sections this module previously re-implemented as ad-hoc sub-headings inside free-text fields — Terms & Definitions, Introduction/Overview/Purpose/Scope/Constraints/Assumptions/Caveats/Design Principles/Outcomes, Recovery Plan, Data Security Controls — now live in the shared `glossary`, `introduction`, `recovery-plan` and `data-security-controls` modules, referenced from the `as-built` artefact alongside this one. This module is reduced to the genuinely as-built-specific content. See docs/research/design-definition-reference-reconciliation.md Sections 1 and 4.
+
+id: as-built-notes
+title: As-Built Notes
+purpose: >
+  Describe what was actually built in enough detail that a skilled engineer could
+  rebuild it. Include how it differs from the approved design and how it was shown to
+  meet its requirements.
+
+fields:
+  - id: design-overview
+    title: Design overview
+    type: markdown
+    target-words: { small: 35, medium: 90, large: 180 }
+    required: true
+    guidance: >
+      Describe the key architecture and technology as actually implemented and how it
+      aligns to the approved design. Reference a diagram if you have one, but describe the
+      structure in words too.
+
+      Lay out each diagram in this order: one introductory sentence ("The
+      following diagram presents…"), the diagram, its caption (an image's alt
+      text, or `{caption="…"}` on a Mermaid fence), a paragraph interpreting it
+      ("The diagram shows how…"), then the detail, e.g. goals and then layered
+      controls as bullets. A diagram or section that isn't the enduring design
+      names its state — `current`, `interim`, `target` or `enduring` — in its
+      caption and its opening sentence, e.g. `Diagram 3. Publishing flow (interim)`.
+  - id: architecture-decisions
+    title: Architecture decisions
+    type: markdown
+    target-words: { small: 55, medium: 115, large: 190 }
+    required: false
+    guidance: >
+      List the key design decisions as implemented — for each, what was decided and what it
+      means in practice. Note any that changed from the approved design.
+
+      Use the same `| AD | Decision | ADR |` table as the SAD's
+      `architecture.design-decisions`, keeping its AD ids, and number any decision made during
+      the build next in sequence. Fill the ADR column only for a decision that needs governance
+      endorsement: the registered ADR number, or `ADRYYY` until the ADR is registered. Don't
+      assume ARB endorsement is needed — a decision is not an ADR, and an ADR is not an ARB item.
+  - id: process-flows
+    title: Data migration and process flows
+    type: markdown
+    target-words: { small: 65, medium: 165, large: 330 }
+    required: true
+    guidance: >
+      Describe the detailed process and data flows step by step, as the system actually
+      behaves — not the intended flows from design.
+
+      Lay out each diagram in this order: one introductory sentence ("The
+      following diagram presents…"), the diagram, its caption (an image's alt
+      text, or `{caption="…"}` on a Mermaid fence), a paragraph interpreting it
+      ("The diagram shows how…"), then the detail, e.g. goals and then layered
+      controls as bullets. A diagram or section that isn't the enduring design
+      names its state — `current`, `interim`, `target` or `enduring` — in its
+      caption and its opening sentence, e.g. `Diagram 3. Publishing flow (interim)`.
+  - id: infrastructure-and-configuration
+    title: Infrastructure and configuration
+    type: markdown
+    target-words: { small: 60, medium: 155, large: 310 }
+    required: true
+    guidance: >
+      Provide environment and infrastructure detail sufficient to rebuild — services, IP
+      addresses, ports, network configuration, resource names, roles and permissions, and
+      equivalent build-time values.
+  - id: appendix
+    title: Appendix
+    type: markdown
+    target-words: { small: 45, medium: 90, large: 150 }
+    required: false
+    guidance: >
+      Include supporting reference material that would clutter the body, such as firewall
+      rules, test cases and the security control register.
+  - id: changes-from-design
+    title: Changes from the agreed design
+    type: markdown
+    target-words: { small: 25, medium: 65, large: 130 }
+    required: true
+    guidance: >
+      Describe where the built solution diverges from the approved design and why.
+  - id: acceptance-criteria
+    title: Acceptance criteria
+    type: markdown
+    target-words: { small: 45, medium: 110, large: 220 }
+    required: true
+    guidance: >
+      Detailed acceptance criteria confirming the build meets
+      requirements — the bar a rebuild should be tested against.
+
+  - id: operational-notes
+    title: Operational notes
+    type: markdown
+    target-words: { small: 30, medium: 80, large: 160 }
+    required: false
+    guidance: >
+      Anything a support engineer would need that isn't already captured in
+      `support-and-operations`, the shared `recovery-plan`, or the shared
+      `data-security-controls` module — quirks, workarounds, known
+      limitations.
+
+  - id: handover-confirmation
+    title: Handover confirmation
+    type: markdown
+    target-words: { small: 20, medium: 55, large: 110 }
+    required: true
+    guidance: >
+      Record who received the handover and when. Note that handover of the document does
+      not transfer responsibility for keeping it updated.

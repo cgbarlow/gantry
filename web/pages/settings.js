@@ -83,7 +83,9 @@ import {
   writeTextFile as writeLocalTextFile,
   parseWorkspaceJson,
 } from '../lib/localWorkspace.js'
-import { parseInstanceYaml, withInstanceAssignee } from '../lib/localInstanceFiles.js'
+import { parseInstanceYaml, withInstanceAssignee, withInstanceSize } from '../lib/localInstanceFiles.js'
+import { resolveDefinitionStructure } from '../lib/localDefinitionFiles.js'
+import { TARGET_SIZES, targetSizeLabel, effectiveTargetSize, definitionHasTargetWords } from '../lib/targetSize.js'
 
 // ---------- Shared header ----------
 // One header shape for all three Settings screens: a title (distinct per
@@ -1360,6 +1362,58 @@ function RequiredReviewerSection({ slug, requiredReviewer, disabled = false }) {
   `
 }
 
+async function saveSize(slug, size) {
+  const res = await apiFetchForInstance(slug, `/api/instance/size?slug=${encodeURIComponent(slug)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ size }),
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(body.message ?? body.error ?? `Failed to save size (${res.status})`)
+  }
+  return body
+}
+
+// #202 (docs/adr/0054): the instance's Target size — how much its authors write in each Field. Shown
+// only for an instance whose Definition sets word budgets (`instance.size` is present only then), so
+// every other instance's Settings look exactly as before. `onSave` writes it — the server route for a
+// server-hosted instance, the folder's own instance.yaml for a Local-workspace one.
+function SizeSection({ size, disabled = false, onSave }) {
+  const [draft, setDraft] = useState(effectiveTargetSize(size))
+  const [status, setStatus] = useState('')
+
+  useEffect(() => setDraft(effectiveTargetSize(size)), [size])
+
+  async function handleSave() {
+    setStatus('Saving\u2026')
+    try {
+      await onSave(draft)
+      setStatus('Saved.')
+    } catch (err) {
+      setStatus(err.message)
+    }
+  }
+
+  return html`
+    <section class="settings-section">
+      <h2>Size</h2>
+      <p class="guidance">
+        How much to write in each field. Each field with a word target shows it in the editor for this size,
+        with a live word count. Medium, the default, is about half of Large; Small is about a fifth. It's a
+        target, not a limit: nothing is blocked, and documents render exactly what was written.
+      </p>
+      <div class="workspace-field-row">
+        <select class="wizard-input" aria-label="Size" disabled=${disabled} value=${draft} onChange=${(e) => setDraft(e.currentTarget.value)}>
+          ${TARGET_SIZES.map((s) => html`<option key=${s} value=${s}>${targetSizeLabel(s)}</option>`)}
+        </select>
+        <button type="button" class="btn small" disabled=${disabled} onClick=${handleSave}>Save</button>
+      </div>
+      <div class="workspace-field-status">${status}</div>
+    </section>
+  `
+}
+
 // Read-only — slug, definition, and the instance's own current stage. Not
 // a form: nothing here is editable from this screen.
 function InstanceInfoSection({ instance }) {
@@ -1493,6 +1547,8 @@ function LocalInstanceSettingsPage({ query, workspaceId, slug }) {
   const [assigneeDraft, setAssigneeDraft] = useState('')
   const [assigneeStatus, setAssigneeStatus] = useState('')
   const [busy, setBusy] = useState(false)
+  // #202: whether this instance's Definition sets word budgets — only then does it have a Size.
+  const [hasBudgets, setHasBudgets] = useState(false)
 
   async function load() {
     setState('loading')
@@ -1512,6 +1568,12 @@ function LocalInstanceSettingsPage({ query, workspaceId, slug }) {
       const rec = parseInstanceYaml(text)
       setRecord(rec)
       setAssigneeDraft(rec.assignee ?? '')
+      try {
+        const structure = await resolveDefinitionStructure(h, rec.definition, rec.definitionVersion ?? 1)
+        setHasBudgets(definitionHasTargetWords(structure.modules))
+      } catch {
+        setHasBudgets(false)
+      }
       setState('ready')
     } catch (err) {
       setError(err.message)
@@ -1556,6 +1618,11 @@ function LocalInstanceSettingsPage({ query, workspaceId, slug }) {
     }
   }
 
+  async function handleSaveSize(size) {
+    await writeLocalTextFile(handle, `gantry-workspace/${slug}/instance.yaml`, withInstanceSize(record, size))
+    setRecord({ ...record, size })
+  }
+
   return html`
     <${SettingsHeader} title="Instance Settings" backHref=${backHrefFrom(query)} />
     <main class="settings-page">
@@ -1597,6 +1664,7 @@ function LocalInstanceSettingsPage({ query, workspaceId, slug }) {
               </div>
               <div class="workspace-field-status">${assigneeStatus}</div>
             </section>
+            ${hasBudgets ? html`<${SizeSection} size=${record.size} onSave=${handleSaveSize} />` : null}
             <section class="settings-section">
               <h2>Instance info</h2>
               <div class="result-card">
@@ -1673,6 +1741,7 @@ function RemoteInstanceSettingsPage({ query }) {
             <${WriteAccessBanner} instance=${instance} workspaceId=${workspaceId} />
             <${AssigneeSection} slug=${slug} assignee=${instance.assignee} disabled=${blocked} />
             <${RequiredReviewerSection} slug=${slug} requiredReviewer=${instance.requiredReviewer} disabled=${blocked} />
+            ${instance.size ? html`<${SizeSection} size=${instance.size} disabled=${blocked} onSave=${(size) => saveSize(slug, size)} />` : null}
             <${InstanceInfoSection} instance=${instance} />
             <${WorkItemLinkSection} instance=${instance} />
             <${InstanceArchiveSection} slug=${slug} archived=${instance.archived} />

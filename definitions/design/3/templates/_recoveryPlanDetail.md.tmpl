@@ -1,0 +1,20 @@
+<%
+  /* Shared partial (WI #273 / R2, finding F10): the recovery-plan detail block —
+     verbatim-duplicated between sad.md.tmpl and as-built.md.tmpl before this. Each
+     field is optional, so it stays a suppress-when-blank `<% if %>` section.
+     Caller passes { recovery }. */
+%><% if (it.recovery.resiliency) { %>
+## Resiliency
+
+<%~ it.recovery.resiliency %>
+<% } %>
+<% if (it.recovery['test-scenarios']) { %>
+## Test scenarios
+
+<%~ it.recovery['test-scenarios'] %>
+<% } %>
+<% if (it.recovery.raci) { %>
+## RACI
+
+<%~ it.recovery.raci %>
+<% } %>

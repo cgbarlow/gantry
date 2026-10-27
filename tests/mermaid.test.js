@@ -33,6 +33,15 @@ test('replaceMermaidBlocks tolerates an info-string suffix, indentation up to th
   assert.equal(blocks[0].code, '   pie\n   "a": 1')
 })
 
+test('replaceMermaidBlocks hands the caller each fence\'s info string, so a caption on the fence can be read (#195)', () => {
+  const md = '```mermaid {caption="Security architecture"}\ngraph TD\n```\n\n```mermaid\ngraph LR\n```\n'
+  const { blocks } = replaceMermaidBlocks(md, () => 'X')
+  assert.deepEqual(
+    blocks.map((b) => b.info),
+    ['mermaid {caption="Security architecture"}', 'mermaid']
+  )
+})
+
 test('replaceMermaidBlocks ignores an unterminated fence and handles empty/null input', () => {
   assert.deepEqual(replaceMermaidBlocks('```mermaid\ngraph TD\n', () => 'X'), { markdown: '```mermaid\ngraph TD\n', blocks: [] })
   assert.deepEqual(replaceMermaidBlocks('', () => 'X'), { markdown: '', blocks: [] })
@@ -140,12 +149,16 @@ function installDomShims({ toBlobFails = false, imageFails = false } = {}) {
           },
         }
       }
-      // figure / div for hydrateMermaidPreview
+      // figure / div / figcaption for hydrateMermaidPreview
       return {
         tagName: tag,
         className: '',
         innerHTML: '',
         textContent: '',
+        children: [],
+        appendChild(child) {
+          this.children.push(child)
+        },
       }
     },
   }
@@ -221,6 +234,23 @@ test('prepareMermaidForDocx rewrites each block to an image reference and return
   }
 })
 
+test('prepareMermaidForDocx labels each picture with the caption the compile step resolved onto its fence, as plain text (#195)', async () => {
+  const shims = installDomShims()
+  try {
+    resetForTests()
+    const { prepareMermaidForDocx } = await import('../web/lib/mermaid.js')
+    const importBundle = fakeBundle(async () => ({ svg: '<svg viewBox="0 0 10 10"/>' }))
+    const md = '```mermaid {figure-caption="Diagram 2. Login *and* [SSO]"}\ngraph TD\n```\n\n```mermaid {figure-caption="Diagram 3"}\npie\n```\n'
+    const out = await prepareMermaidForDocx(md, { importBundle })
+    assert.equal(
+      out.markdown,
+      '![Diagram 2\\. Login \\*and\\* \\[SSO\\]](mermaid-diagram-1.png)\n\n![Diagram 3](mermaid-diagram-2.png)\n'
+    )
+  } finally {
+    shims.restore()
+  }
+})
+
 test('prepareMermaidForDocx keeps a block that fails to render as its fenced source, and still converts the others', async () => {
   const shims = installDomShims()
   try {
@@ -239,8 +269,11 @@ test('prepareMermaidForDocx keeps a block that fails to render as its fenced sou
   }
 })
 
+// A source is the diagram text, or `{ source, caption }` for a fence web/lib/markdown.js gave a
+// `data-caption` (#195).
 function fakePreviewNode(sources) {
-  const pres = sources.map((source) => {
+  const pres = sources.map((entry) => {
+    const { source, caption } = typeof entry === 'string' ? { source: entry } : entry
     const pre = { isConnected: true, classes: new Set(), after: null, replacedWith: null }
     pre.classList = { add: (c) => pre.classes.add(c) }
     pre.replaceWith = (el) => {
@@ -250,7 +283,7 @@ function fakePreviewNode(sources) {
     pre.after = (el) => {
       pre.afterEl = el
     }
-    pre.code = { textContent: source, parentElement: pre }
+    pre.code = { textContent: source, parentElement: pre, getAttribute: (n) => (n === 'data-caption' ? (caption ?? null) : null) }
     return pre
   })
   return {
@@ -278,6 +311,25 @@ test('hydrateMermaidPreview swaps a rendered block for a figure and annotates a 
     assert.ok(bad.classes.has('mermaid-error'))
     assert.equal(bad.afterEl.className, 'mermaid-error-note')
     assert.equal(bad.afterEl.textContent, 'Mermaid: unexpected token')
+  } finally {
+    shims.restore()
+  }
+})
+
+test('hydrateMermaidPreview puts a fence\'s caption under its drawing, and adds nothing to an uncaptioned one (#195)', async () => {
+  const shims = installDomShims()
+  try {
+    resetForTests()
+    const { hydrateMermaidPreview } = await import('../web/lib/mermaid.js')
+    const importBundle = fakeBundle(async (_id, code) => ({ svg: `<svg>${code}</svg>` }))
+    const node = fakePreviewNode([{ source: 'graph TD', caption: 'Security architecture' }, 'graph LR'])
+    await hydrateMermaidPreview(node, { importBundle })
+    const [captioned, plain] = node.pres.map((p) => p.replacedWith)
+    assert.deepEqual(
+      captioned.children.map((c) => [c.tagName, c.className, c.textContent]),
+      [['figcaption', 'diagram-caption', 'Security architecture']]
+    )
+    assert.deepEqual(plain.children, [])
   } finally {
     shims.restore()
   }

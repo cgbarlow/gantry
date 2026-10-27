@@ -23,6 +23,7 @@ function seedFiles(slug) {
   const instanceYaml = readFileSync('workspaces/examples/kiwi-cover-mutual/instance.yaml', 'utf8').replace(/^slug: examples$/m, `slug: ${slug}`)
   return {
     [`/gantry-workspace/${slug}/instance.yaml`]: instanceYaml,
+    [`/gantry-workspace/${slug}/modules/document-handling.md`]: exampleModuleText('document-handling'),
     [`/gantry-workspace/${slug}/modules/background.md`]: exampleModuleText('background'),
     [`/gantry-workspace/${slug}/modules/introduction.md`]: exampleModuleText('introduction'),
     [`/gantry-workspace/${slug}/modules/design-basis.md`]: exampleModuleText('design-basis'),
@@ -75,7 +76,9 @@ test('render-wasm-prepare then render-wasm-finish: a real, well-formed docx ends
           const prep = await prepRes.json()
           assert.equal(prep.artefact, 'soap')
           assert.match(prep.markdown, /Solution on a Page/)
-          assert.match(prep.markdown, /## Document Control/)
+          // The Markdown the browser converts. The example is on design v3, whose Document Control
+          // heading is `.unnumbered`, so it reaches Word as a heading with its numbering off (#197).
+          assert.match(prep.markdown, /^## Document Control|>Document Control</m)
           assert.match(prep.commit.hash, /^[0-9a-f]{7}$/)
           assert.equal(typeof prep.referenceDocBase64, 'string')
           assert.equal(Buffer.from(prep.referenceDocBase64, 'base64').subarray(0, 2).toString(), 'PK')
@@ -147,8 +150,9 @@ test('render-wasm-prepare then render-wasm-finish on a server-hosted instance ne
       assert.equal(prepRes.status, 200)
       const prep = await prepRes.json()
       assert.equal(prep.artefact, 'soap')
-      assert.match(prep.markdown, /^# kiwi-cover-mutual: Solution on a Page/)
-      assert.match(prep.markdown, /## Document Control/)
+      // design v3 (#196): the document opens with its cover page, titled with the display name.
+      assert.match(prep.markdown, /^::: \{custom-style="Cover Classification"\}\nIN-CONFIDENCE\n:::\n\n::: \{custom-style="Title"\}\nKiwi Cover Mutual\n:::/)
+      assert.match(prep.markdown, /^## Document Control|>Document Control</m)
       assert.ok(prep.referenceDocBase64, 'the v2 reference doc is handed to the browser for styling')
       assert.match(prep.docxPath, /\.docx$/)
       // WI #356: the server's own startup migration moved this scratch instance into the

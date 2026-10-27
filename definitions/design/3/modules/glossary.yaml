@@ -1,0 +1,26 @@
+id: glossary
+title: Glossary
+purpose: >
+  Define the terms, acronyms and abbreviations a reader needs to follow this document.
+
+fields:
+  - id: terms-and-definitions
+    title: Terms and definitions
+    type: markdown
+    target-words: { small: 140, medium: 275, large: 460 }
+    required-at: [build-ready-checklist, operational-handover]
+    guidance: >
+      A table of the preferred terms, acronyms, abbreviations and domain terms
+      used in this solution's design and as-built documents, one row per term:
+      Preferred term | Definition | Variants to avoid. Give the preferred term
+      for the solution itself, its platforms and its products, each with a
+      one-line definition and the variants to avoid (former names, informal
+      names, other spellings; "—" where there are none), so every other field
+      uses one name in headings, tables, diagrams and prose. Prefer the
+      architecture name; a contracted product name goes in the licences
+      table's "Contracted name" column once it has been verified.
+
+      The SAD, SSAD and as-built reference documents all carry this section,
+      so it is required from `build-ready-checklist` onward — a
+      reader unfamiliar with Contoso's systems must be able to follow the
+      document unaided.

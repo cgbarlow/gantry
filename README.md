@@ -132,7 +132,15 @@ npm link             # makes `gantry` available on your PATH
 
 > **TODO:** publish to an npm feed (`npx gantry`) too, for people who only ever consume definitions and don't want a clone-and-install step at all.
 
-**5. Run it.** `gantry serve` (from step 4's `npm link`), then open the URL it prints in your browser. Same on all platforms.
+**5. Optional: let `gantry render` draw Mermaid diagrams.** The web UI's Render draws Mermaid diagrams in your own browser and needs nothing extra. The `gantry render` command needs a headless Chromium to draw them, which is optional and only used by the CLI (docs/adr/0055):
+
+```bash
+npx playwright install chromium   # the headless browser `gantry render` draws Mermaid diagrams in
+```
+
+Step 4's `npm install` already installed Playwright, the package that runs it. If you installed with `--omit=optional`, run `npm install --include=optional` first. On Linux, `npx playwright install --with-deps chromium` also installs the system libraries Chromium needs. Skip this step and `gantry render` still works: it leaves each diagram as Mermaid source text and prints a warning with these commands.
+
+**6. Run it.** `gantry serve` (from step 4's `npm link`), then open the URL it prints in your browser. Same on all platforms.
 
 ## Software dependencies
 
@@ -140,6 +148,7 @@ npm link             # makes `gantry` available on your PATH
 |---|---|---|
 | Node.js | 24+ | Engine runtime and CLI (`package.json` `engines.node` is `>=24`) |
 | `pandoc` | 3.x confirmed (3.1.3) | **Required for the `gantry render` CLI command** (shells out to it unconditionally). Optional for the web UI — `gantry serve` renders via an in-browser WASM Pandoc by default; native Pandoc is only needed there if you use Settings' native-engine toggle, or as the automatic fallback if WASM fails to load |
+| Playwright's headless Chromium | the `playwright` version in `package.json` (`optionalDependencies`) | **Optional, `gantry render` only.** Draws Mermaid diagrams into the CLI's `.docx` with the browser export's own code, so both match (docs/adr/0055). Install with `npx playwright install chromium`. Without it, `gantry render` leaves diagrams as source text and warns. Never needed by `gantry serve`; the container images leave it out (`npm ci --omit=dev --omit=optional`) |
 | Git | 2.x+ | Needed to clone the source below and for any Workspace-backed instance (Azure DevOps or GitHub). Not needed for local-folder-only instances |
 | A text editor | any | Modules are markdown; no tooling required to author them |
 
@@ -219,6 +228,7 @@ gantry/
 │   ├── workItemLink.js           # link an instance to a work item; confirmed gate-pass state sync
 │   ├── repoCheck.js              # "does this repo (Azure DevOps or GitHub) already hold instance
 │   │                             # data", incl. the legacy-root-to-gantry-workspace/<slug>/ migration
+│   ├── mermaidChromium.js        # `gantry render`: draws Mermaid with web/lib/mermaid.js in optional headless Chromium (docs/adr/0055)
 │   └── credential.js             # extracts a forwarded PAT from a request
 ├── bin/gantry.js                 # CLI entrypoint
 └── web/
@@ -235,7 +245,8 @@ gantry/
     ├── lib/apiFetch.js           # fetch wrapper: attaches the right PAT, retries once on 401
     ├── lib/validateRepo.js       # parses/checks the legacy Azure DevOps repo-URL adopt flow
     ├── lib/markdown.js           # markdown-it + DOMPurify rendering
-    ├── lib/mermaid.js            # ```mermaid fences → SVG in the preview, PNG in WASM docx exports (docs/adr/0030)
+    ├── lib/mermaid.js            # ```mermaid fences → SVG in the preview, PNG in docx exports: WASM in the browser, and the CLI via lib/mermaidChromium.js (docs/adr/0030, 0055)
+    ├── lib/diagramCaptions.js    # Diagram captions: the fence/alt-text syntax and "Diagram N." numbering, shared with lib/render.js (docs/adr/0053)
     ├── lib/dropdown.js           # reusable dropdown (trigger + menu)
     ├── lib/reorder.js            # pure array reorder helper
     ├── user-guide-images/        # User Guide screenshots, served statically
@@ -283,7 +294,7 @@ Each screen's own back control returns to wherever it was actually opened from (
 
 - **Global Settings** (`/settings`) — the **Advanced mode** toggle, off by default (see "Backing an instance with a local folder" below), and a **default ticketing system** selector that only ever affects a *new* Azure DevOps workspace's own ticketing-system override (Jira is listed but disabled). There is no global PAT control here any more, for any Provider — see the credentials paragraph above.
 - **Workspace Settings** (`/settings/workspace`, from an instance's own Settings dropdown) — the workspace *behind that one instance* (never a picker across every registered workspace): its Provider and repo location, a free-text **owner** label, and that workspace's own **PAT** — set, replace or clear it, with no effect on any other workspace. For an Azure DevOps workspace only, a **ticketing-system** override is also shown (Jira is listed but disabled — a GitHub or GitLab workspace has no such choice, since its tracker is fixed by its Provider, GitHub Issues or GitLab Issues respectively). It also offers **Archive** — a reversible "set aside" that drops the workspace out of the default dashboard and API listings without deleting anything on disk or on the Provider (blocked while it still has an active instance; `?archived=1` reveals archived rows for a per-row Restore). A local instance has no workspace, so this screen reports that instead.
-- **Instance Settings** (`/settings/instance`, from an instance's own Settings dropdown) — that instance's own stored **Assignee** (editable), read-only instance info (slug, definition, current stage), and a read-only view of its linked work item (organization/project or owner/repository, parent work item/issue, type where the Provider has one, and each stage's own child work item id). Re-linking isn't supported here or anywhere else after creation — linking happens only at instance creation (see "Linking an instance to a tracked work item" below). This screen also offers **Archive** for the instance itself — the same reversible set-aside as for a workspace; an archived instance still resolves read-only at its direct URL.
+- **Instance Settings** (`/settings/instance`, from an instance's own Settings dropdown) — that instance's own stored **Assignee** (editable), its **Size** (editable, shown only when its definition sets `target-words`), read-only instance info (slug, definition, current stage), and a read-only view of its linked work item (organization/project or owner/repository, parent work item/issue, type where the Provider has one, and each stage's own child work item id). Re-linking isn't supported here or anywhere else after creation — linking happens only at instance creation (see "Linking an instance to a tracked work item" below). This screen also offers **Archive** for the instance itself — the same reversible set-aside as for a workspace; an archived instance still resolves read-only at its direct URL.
 
 Once registered, a server-workspace-backed and a remote-workspace-backed instance are indistinguishable from the dashboard's point of view — same listing, same module editor, same render command, regardless of which Provider a remote workspace uses. Where each one's data actually lives is tracked server-side across three registry files at the workspaces root (`workspaces/instance-registry.json`: slug -> workspace; `workspaces/workspace-registry.json`: workspace -> provider/location/owner/ticketing-system/`archived`, for a remote workspace, or -> its own `workspace.json`, for a server workspace directory; `workspaces/number-registry.json`: the scoped numeric ordinals of ADR-0024 — all gitignored, application state, not source), not in any client-visible config. A flat, pre-Provider record is read forward into the nested `{provider, location}` shape automatically the first time it's touched, and rewritten in that shape on next write — there is no separate migration step to run.
 
@@ -371,12 +382,21 @@ Instances live inside a **workspace** under the workspaces root, so a listing na
 | `gantry new <definition> <slug> [--owner <name>] [--assignee <name>]` | Create an instance, in the reserved `default` workspace — `--owner` seeds each first-stage module file's own frontmatter `owner`; `--assignee` sets the instance record's own stored assignee | Implemented |
 | `gantry status <slug> [--json]` | Current stage, module completeness, what's outstanding | Implemented |
 | `gantry check <slug> [--gate <id>] [--json]` | Validate an instance against a gate's requirements — any gate, not just the instance's current stage | Implemented |
-| `gantry render <slug> <artefact> [--dry-run]` | Render an artefact to `out/` | Implemented |
+| `gantry render <slug> <artefact> [--dry-run]` | Render an artefact to `out/`. Draws Mermaid diagrams when the optional headless Chromium is installed (see below) | Implemented |
 | `gantry serve [slug] [--port <port>]` | Serve the web app (default port 3000): a dashboard of every registered instance at `/`, local or remote-workspace-backed (Azure DevOps or GitHub), and the stage-by-stage form at `/instance/<slug>`. `[slug]` only sets a fallback default for API requests made with no `?slug=<slug>` of their own — it doesn't change what the dashboard shows or require picking one instance up front. `/new-workspace` is the "+ New Workspace" wizard, `/settings` the Settings screens, `/user-guide` the in-product User Guide, `/definitions` the Definitions page (see "Backing an instance with a remote workspace" above) | Implemented |
 | `gantry validate <definition> [--json]` | Report every structural problem with a definition in one pass | Implemented |
 | `gantry backfill-numeric-refs` | One-time (idempotent) backfill of scoped numeric workspace/instance references (ADR-0024) for workspaces/instances that predate the feature | Implemented |
 
 `definitions`, `instances`, `status`, `check` and `validate` all emit structured output with `--json` for scripting and agent use.
+
+**Mermaid diagrams in `gantry render`.** The CLI draws each Mermaid diagram into the `.docx` as a picture, with the same image, name, scale and `Diagram N. <title>` caption as the web UI's Render. It does this by running the web UI's own Mermaid code in a headless Chromium, which is an **optional, CLI-only** install:
+
+```bash
+npx playwright install chromium        # the browser itself
+npm install --include=optional         # only if Gantry was installed with --omit=optional
+```
+
+Without it, `gantry render` still succeeds. It leaves each diagram as Mermaid source text, as earlier versions did, and prints one warning naming the command to run. Diagrams keep their numbers either way, so captioned images after them are numbered as in the web UI. A `--dry-run`, or a document with no Mermaid diagram, never starts Chromium. `gantry serve` and the container images don't use or include it (docs/adr/0055).
 
 Every command that reads instance data takes `--workspaces-dir <path>` (or `GANTRY_WORKSPACES_DIR`) to point at a workspaces root other than `./workspaces`. A failure prints a single line explaining it; set `GANTRY_DEBUG=1` to get the full stack as well.
 
@@ -498,6 +518,17 @@ Where a field's *content* genuinely changes shape across the gates its module sp
 
 `required` and `required-at` are mutually exclusive on a field — use `required` for a field whose requiredness doesn't vary by gate (including fields in single-gate modules), and `required-at` only where it does. Don't reach for `required-at` by default; most fields don't need it.
 
+A markdown or list field can also state how much to write, per **Target size** (#202, `docs/adr/0054-target-size-is-an-authoring-target-not-render-time-condensing.md`):
+
+```yaml
+  - id: performance
+    title: Performance
+    type: markdown
+    target-words: { small: 30, medium: 75, large: 150 }
+```
+
+Each instance of a definition that sets any `target-words` has a size — `small`, `medium` (the default) or `large`, stored as `size:` in its `instance.yaml` — chosen in the wizard or with `gantry new --size`, changed in Instance Settings, or set by MCP `create_instance`. The editor shows each field's target for that size with a live word count, MCP `get_instance` returns it, and a save over target returns a non-blocking note. It's advisory only: the gate check and the renderer never read it, so a document renders exactly what was written. All three sizes must be positive whole numbers; `gantry validate` reports anything else as `invalid-target-words`. A definition without `target-words` shows no size anywhere.
+
 ## Instance module files
 
 **`workspaces/<workspace>/my-initiative/modules/context.md`** — what someone actually writes:
@@ -574,7 +605,7 @@ npm test               # node --test with no filter — runs every *.test.js, Pl
 
 ## Validating definitions and instances
 
-`gantry validate <definition> [--json]` reports every structural problem with a definition in one pass — a missing module reference, an invalid field type, a `required`/`required-at` conflict, an artefact `gate` or a `required-at` entry that names no stage's gate, a stage whose artefacts all set `satisfies-gate: false` — instead of fixing one, rerunning, and hitting the next.
+`gantry validate <definition> [--json]` reports every structural problem with a definition in one pass — a missing module reference, an invalid field type, a `required`/`required-at` conflict, an artefact `gate` or a `required-at` entry that names no stage's gate, a stage whose artefacts all set `satisfies-gate: false`, a `cover-page` or `table-of-contents` that isn't `true` or `false`, a `cover-classification` that names no single-valued select or text field the artefact requires — instead of fixing one, rerunning, and hitting the next.
 
 `gantry check <slug> [--gate <id>] [--json]` validates an instance against a gate's requirements, PASS/FAIL with a matching exit code. Defaults to the instance's current stage; `--gate` resolves any stage's gate, so you can check readiness for a later gate before the instance actually gets there. It lists each of the gate's artefacts with its completeness and whether it counts toward the gate (an artefact with `satisfies-gate: false` is reported but never passes the gate on its own; ADR-0051), and on FAIL names the closest artefact that can pass it.
 
@@ -658,6 +689,8 @@ docker run gantry render kiwi-cover-mutual soap --workspaces-dir workspaces/exam
 # Extract the rendered .docx to your host
 docker run -v "$(pwd)/output:/app/workspaces/examples/kiwi-cover-mutual/out" gantry render kiwi-cover-mutual soap --workspaces-dir workspaces/examples
 ```
+
+The image is a server image and carries no headless Chromium (docs/adr/0055), so a `docker run gantry render` leaves Mermaid diagrams as source text and prints a warning. Render from a local install with Chromium to get the pictures.
 
 After the volume-mounted run, the rendered document is at `./output/Kiwi Cover Mutual - Solution on a Page.docx` —
 rendered artefacts are named `<Instance name> - <Full artefact title>.docx` (the instance's `name:`, or a

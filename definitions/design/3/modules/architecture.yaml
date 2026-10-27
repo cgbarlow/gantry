@@ -1,0 +1,159 @@
+# Field order follows the SAD reference template's "High Level Architectural View"
+# (SAD Template.docx §7): Design Decisions -> Architectural Risks -> Solution
+# Description -> Architectural Goals -> Architectural Constraints -> Solution
+# Standards. `logical-components` is last because the reference renders it as its
+# own top-level section ("Logical Components View", §9) after "Open Issues", not
+# inside the architectural view.
+
+id: architecture
+title: Architecture
+purpose: >
+  Describe the solution's structure in enough detail to build from — components,
+  layers, and the design decisions behind them. Explain what was chosen and why, and
+  how the parts fit together.
+
+fields:
+  - id: business-context
+    title: Business context
+    type: markdown
+    target-words: { small: 55, medium: 135, large: 270 }
+    required: false
+    guidance: >
+      Describe the business processes, users and regulatory context this
+      architecture sits within — the background the rest of this section
+      assumes. Already approved at earlier stages — see `background` and the
+      HLD's `proposed-solution`; do not re-derive, summarise for builders.
+      Carries the reference SAD's "Background" / "Context" / "Business Concept
+      View" / "Wider Government Context" sub-sections.
+
+      Kept deliberately separate from `background.problem`: the HLD frames the
+      problem for the ARB, this frames the setting for builders. Confirmed as a
+      decision, not an oversight — see CHANGES.md.
+
+      Lay out each diagram in this order: one introductory sentence ("The
+      following diagram presents…"), the diagram, its caption (an image's alt
+      text, or `{caption="…"}` on a Mermaid fence), a paragraph interpreting it
+      ("The diagram shows how…"), then the detail, e.g. goals and then layered
+      controls as bullets. A diagram or section that isn't the enduring design
+      names its state — `current`, `interim`, `target` or `enduring` — in its
+      caption and its opening sentence, e.g. `Diagram 3. Publishing flow (interim)`.
+
+  - id: solution-users
+    title: Solution users
+    type: list
+    target-words: { small: 20, medium: 55, large: 110 }
+    required: false
+    guidance: >
+      The roles that use this system, internal and external, each with a short
+      description of what they do with it. The reference SAD asks for a
+      User / Description table here and points at the requirements document's
+      use-case model. This is the business user catalogue — the security roles
+      and how they authenticate belong in `security.identity-and-access`, and
+      the people to contact about the running system belong in
+      `support-and-operations.stakeholders`.
+
+  - id: design-decisions
+    title: Design decisions
+    type: markdown
+    target-words: { small: 95, medium: 185, large: 310 }
+    required: true
+    guidance: >
+      The decisions that shaped this architecture and why — not just what
+      was decided, but what else was on the table. Deepen the
+      `solution-definition.high-level-solution-overview` sketch to build-ready
+      depth rather than starting over.
+
+      Write them as a table with three columns, `| AD | Decision | ADR |`,
+      one row per decision: `| AD01 | <the decision and why> | ADRYYY |`, or
+      the same row with the ADR cell left blank. Every decision gets an
+      Architecture Decision id (AD01, AD02, …). Fill the ADR column only for
+      a decision that needs governance endorsement, using the placeholder
+      `ADRYYY` until the ADR is registered and has its number.
+
+      A decision is an ADR candidate only where at least one of these holds:
+      enterprise reuse exists; a new platform or product is introduced; an
+      architecture precedent is created; or governance endorsement is
+      explicitly required. Most decisions meet none of them and stay ADs.
+
+      Don't assume ARB endorsement is needed. A decision is not an ADR, and
+      an ADR is not an ARB item.
+
+  - id: architectural-risks
+    title: Architectural risks
+    type: markdown
+    target-words: { small: 30, medium: 75, large: 150 }
+    required: false
+    guidance: >
+      Risks specific to this architecture's shape. Broader project risk
+      belongs in the `risks` module — this is for risk that's a direct
+      consequence of a structural choice made here.
+
+      Give every figure — a tested throughput, a design peak, a cache lifetime
+      — its source in brackets, e.g. `99.5% (hosting SLA §4.2)`, or mark it
+      `(target assumption)` where nothing agreed backs it yet. Never invent a
+      figure: say what is missing rather than fill the gap.
+
+  - id: solution-description
+    title: Solution description
+    type: markdown
+    target-words: { small: 80, medium: 200, large: 400 }
+    required: true
+    guidance: >
+      The components and how they fit together. Reference a diagram if you
+      have one, but describe the structure in words too. Expands the
+      `solution-definition` `high-level-solution-overview` / `process-flow`
+      sketch — the original stays at `modules/solution-definition.md`.
+
+      Use the glossary's preferred terms (`glossary.terms-and-definitions`)
+      consistently in headings, tables, diagrams and prose.
+
+      Lay out each diagram in this order: one introductory sentence ("The
+      following diagram presents…"), the diagram, its caption (an image's alt
+      text, or `{caption="…"}` on a Mermaid fence), a paragraph interpreting it
+      ("The diagram shows how…"), then the detail, e.g. goals and then layered
+      controls as bullets. A diagram or section that isn't the enduring design
+      names its state — `current`, `interim`, `target` or `enduring` — in its
+      caption and its opening sentence, e.g. `Diagram 3. Publishing flow (interim)`.
+
+  - id: constraints
+    title: Constraints and goals
+    type: markdown
+    target-words: { small: 20, medium: 55, large: 110 }
+    required: false
+    guidance: >
+      Architecture-specific constraints and goals only — the boundaries and
+      objectives that shaped this structure (e.g. a fixed platform, a latency
+      budget, a "reuse existing services" goal). Solution-wide assumptions
+      belong in `design-basis.assumptions` (WI #331: was `introduction.assumptions`);
+      list here only what is particular to the architecture and cross-reference
+      that field.
+
+  - id: standards
+    title: Applicable standards
+    type: list
+    target-words: { small: 20, medium: 50, large: 100 }
+    required: false
+    guidance: >
+      Architectural or solution standards this design follows (e.g.
+      messaging, security, UI, development framework) — and any it
+      deliberately departs from. Carries both the reference SAD's "Solution
+      Standards" and "Architectural Standards" sub-sections.
+
+  - id: logical-components
+    title: Logical components
+    type: list
+    target-words: { small: 40, medium: 105, large: 210 }
+    required: true
+    guidance: >
+      The solution's logical components, and for each, its status (below).
+      Renders as its own section, after `risks.open-issues` — it
+      carries the reference SAD's whole "Logical Components View", including
+      its layered / product / application-usage / service-realisation
+      viewpoints.
+
+      Give every component a Status straight after its name, so the list reads
+      as Component / Status / Description: `- Notification service — Status:
+      planned — sends members their claim updates`. The Status is one of
+      `existing`, `implemented`, `in delivery`, `planned` or `future`. Don't
+      assume a capability exists: a component this work is still to build is
+      `in delivery`, `planned` or `future`, not described as if it runs today.

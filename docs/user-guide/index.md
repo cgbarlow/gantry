@@ -88,11 +88,11 @@ The **Definitions** page — linked from the Workspaces page header — is a fir
 
 ![The Definitions page's Outline view, showing a stage's fields, modules and gate artefacts](/user-guide-images/definition-editor.png)
 
-Click any stage, artefact or module to focus it in the centre pane. A module's fields are compact rows — click one to expand it, edit it, and collapse it again; only one field is expanded at a time. On a published version everything is read-only, with a **View template source** button to inspect each artefact's `.md.tmpl`; on a `draft` version every field is directly editable, and every element (Stage/Artefact/Module/Field — see CONTEXT.md's **Element**) can be reordered, or moved between a stage, an artefact and a module, either by dragging its handle or with an equivalent button (Move ↑/↓, "+ Add module…", "+ Add requirement…", "Move to module…"). On a draft, each module a stage lists has a **read-only** checkbox: tick it when the stage mounts that module only so its documents and gate can use it, and the module is edited at an earlier stage. The instance editor then shows it read-only at this stage, naming the earlier stage it is edited at (see *Modules & Fields* below). The toolbar shows a live problems count — sharing the same validation rules the server runs on Save — that jumps straight to the affected element when clicked. An artefact's **Gate** is picked from the stages' own gates (a new artefact starts on the first one, and a new stage starts with a placeholder gate id such as `new-stage-3-gate` to rename), and an artefact gate or a field's "required at gate(s)" that names no stage's gate is flagged as a problem and refused at Save and Publish; a definition an existing instance already uses keeps loading even if it has one. Template editing opens as its own focus-pane view on a full markdown editor. Other actions: creating a **New draft version**, starting a **New definition** (Blank or cloned from the current one), **archiving / restoring** definitions, and **publishing** a draft (which validates it and flips its status to `published`). Save is a single action for everything changed since the last save, with a Save/Discard/Cancel prompt if you try to navigate away with unsaved changes.
+Click any stage, artefact or module to focus it in the centre pane. A module's fields are compact rows — click one to expand it, edit it, and collapse it again; only one field is expanded at a time. On a published version everything is read-only, with a **View template source** button to inspect each artefact's `.md.tmpl`; on a `draft` version every field is directly editable, and every element (Stage/Artefact/Module/Field — see CONTEXT.md's **Element**) can be reordered, or moved between a stage, an artefact and a module, either by dragging its handle or with an equivalent button (Move ↑/↓, "+ Add module…", "+ Add requirement…", "Move to module…"). A markdown or list field on a draft has three **Word targets** boxes, one per size, for how many words authors should aim for (see **Target size and word targets** below); leave all three blank for no target. On a draft, each module a stage lists has a **read-only** checkbox: tick it when the stage mounts that module only so its documents and gate can use it, and the module is edited at an earlier stage. The instance editor then shows it read-only at this stage, naming the earlier stage it is edited at (see *Modules & Fields* below). The toolbar shows a live problems count — sharing the same validation rules the server runs on Save — that jumps straight to the affected element when clicked. An artefact's **Gate** is picked from the stages' own gates (a new artefact starts on the first one, and a new stage starts with a placeholder gate id such as `new-stage-3-gate` to rename), and an artefact gate or a field's "required at gate(s)" that names no stage's gate is flagged as a problem and refused at Save and Publish; a definition an existing instance already uses keeps loading even if it has one. Template editing opens as its own focus-pane view on a full markdown editor. Other actions: creating a **New draft version**, starting a **New definition** (Blank or cloned from the current one), **archiving / restoring** definitions, and **publishing** a draft (which validates it and flips its status to `published`). Save is a single action for everything changed since the last save, with a Save/Discard/Cancel prompt if you try to navigate away with unsaved changes.
 
 ### Example instances
 
-The worked example throughout this guide remains the `design` definition, illustrated by the `examples` instance (a local instance with content for every stage).
+The worked example throughout this guide remains the `design` definition, illustrated by the bundled **Examples** workspace: `kiwi-cover-mutual`, a fictitious insurer's design with content for every stage, and `gantry`, Gantry's own hosting proposal written as a complete Full SOAP. Both run on `design` version 3, a draft where the next round of design changes is being made, so their documents can differ from version 2's. New `design` instances still start on version 2, the latest published version, unless you pick version 3 in the wizard. The "Populate example text" button on a version 3 stage fills from `kiwi-cover-mutual`.
 
 ## Stages & Gates
 
@@ -126,6 +126,20 @@ Most fields are free text (Markdown) or a bulleted list — you type the answer.
 - A **date** field is a calendar date, entered with your browser's own date picker rather than typed, so there's no ambiguity about the format. It's stored as `YYYY-MM-DD`; a rendered document that needs to read naturally ("3 November 2026") formats it for display without changing what's stored.
 
 Which fields are which type is set by the Definition, not by you — an author can't turn a select into free text or the reverse from the editor. If a field's permitted answers look wrong or too narrow, that's a Definition change, made by whoever maintains it.
+
+### Target size and word targets
+
+Some Definitions tell you roughly how much to write in each field. If yours does, every instance has a **Size**: **Small**, **Medium** or **Large**. Medium is the default, about half of Large; Small is about a fifth. Pick the size when you create the instance in the "+ New Workspace" wizard, and change it later in **Instance Settings**. Choose it for the solution's risk and audience: a document reviewers need to read closely in one sitting wants a smaller size than a full reference.
+
+Under each field with a word target, the editor shows the target for the instance's size and a live word count, for example `Target ~100 words (Medium) · 87 words`. Once the count goes over the target it turns amber. Diagrams in Mermaid code blocks, images and Markdown symbols aren't counted as words.
+
+The target is advice, not a limit. You can always save a field that's over its target, it never stops a gate passing, and a document renders exactly what you wrote, at any size. Gantry never shortens your content for you. Changing the size changes the targets you see, not anything already written.
+
+An AI agent writing through the MCP server sees the same targets: `get_instance` gives each field's target for the instance's size, and when `update_instance_modules` saves a field that's over its target, the save still succeeds and its response carries a note such as `nfrs.performance: 420 words, Medium target ~150` so the agent can tighten it.
+
+The `design` definition's v3 draft sets word targets on every field that appears in a document. Its Large targets match the bundled examples' original level of detail, and the examples are now written to Medium, so **Populate example text** shows the default amount. A Medium Solution Architecture Document comes to roughly half the length of a Large one.
+
+A Definition without word targets shows none of this: no Size in the wizard or Instance Settings and no targets in the editor. A Definition author sets a field's targets on the Definitions page (see *Definition versions and the Definitions page* above) or in the module's YAML as `target-words: { small: 40, medium: 100, large: 200 }`. Each must be a whole number above zero, all three sizes are needed, and only Markdown and list fields can have them. Anything else is a problem that `gantry validate` and a Local Workspace report, the Definitions page marks and Save and Publish refuse; a Definition an instance already uses keeps loading even if it has one.
 
 ### The editor toolbar
 
@@ -168,7 +182,7 @@ Use **Insert ▾** below each field to add a new **Section** (a custom Markdown 
 
 To put a picture or diagram into a field, place the cursor where it should go and use the **Image** button on that field's formatting toolbar (see **The editor toolbar** above). This opens a dialog with two tabs:
 
-- **Upload new** — choose an image file (PNG or JPEG), optionally give it a name, and provide its **Source location**: a link to where the original file lives, such as a Draw.io diagram or an export from a design tool. The source location is required — it's what lets anyone reading the finished document trace a picture back to where it came from — and Gantry shows that link as a small citation beneath the image wherever it's used.
+- **Upload new** — choose an image file (PNG or JPEG), optionally give it a name (the name becomes the image's caption in the rendered document; see **Captioning diagrams** below), and provide its **Source location**: a link to where the original file lives, such as a Draw.io diagram or an export from a design tool. The source location is required — it's what lets anyone reading the finished document trace a picture back to where it came from — and Gantry shows that link as a small citation beneath the image wherever it's used.
 - **Choose existing** — reuse a picture already uploaded elsewhere in the same instance instead of uploading it again.
 
 Either way, Gantry inserts the reference into the field for you at the cursor.
@@ -188,7 +202,51 @@ flowchart LR
 
 Visual view draws the diagram in place of the source; use its **Edit diagram text** button to change the source in a pop-over. When you **Render** with the default WASM Pandoc engine, the Word document carries the diagram as a picture, and the Markdown file written beside it keeps the Mermaid source so it stays editable. If Mermaid cannot parse a block, Visual view keeps the source and shows a short error note under it; the rest of the field and the render are unaffected.
 
-Two things to know: the **Native Pandoc** engine (and the `gantry render` command) still export the block as source text, and HTML markup inside labels is not supported — use plain text.
+Three things to know:
+
+- The **Native Pandoc** engine exports the block as source text.
+- The `gantry render` command draws the diagram the same way the web render does, if the optional headless Chromium is installed (`npx playwright install chromium`; see the README). Without it, the command leaves the block as source text and prints a warning saying how to install it.
+- HTML markup inside labels is not supported. Use plain text.
+
+### Captioning diagrams
+
+Give a diagram a caption and the Word document shows it under the figure as **Diagram N. <caption>**, in italics, on the same page as the figure. Diagrams are numbered in one sequence through the document, Mermaid diagrams and images together.
+
+Numbered captions apply to an artefact whose Definition turns them on, with the artefact's **Diagram captions** checkbox on the Definitions page (`diagram-captions: true` in `definition.yaml`). Every design v3 document does. design v1 and v2, and any Definition that doesn't set the key, render their diagrams exactly as they always have: a Mermaid diagram labelled "Diagram N" and an image captioned with its plain name.
+
+- **A Mermaid diagram:** add the caption to the opening line of its block:
+
+  ````markdown
+  ```mermaid {caption="Security architecture"}
+  flowchart LR
+    Member --> Portal --> CRM
+  ```
+  ````
+
+  Visual view shows the caption under the drawing, whether or not the artefact numbers its diagrams; in an artefact that doesn't, the Word document labels the diagram plain "Diagram N" and the caption isn't printed. **Edit diagram text** changes only the diagram, so the caption stays as you wrote it. To change the caption, edit that first line in **Markdown** view. The Markdown file written beside a render keeps the line exactly as you wrote it. Markdown viewers that follow CommonMark read the first word, `mermaid`, as the block's language and don't print the rest of the line.
+- **An image:** its caption is the text in the square brackets, `![Security architecture](asset:…)`. That text is the name you give the image when you upload it, so choose a name that reads well as a caption. An image without a name uses its filename. To get a caption, the image must be on a line of its own, with a blank line above and below. An image inside a sentence, or with empty brackets, gets no caption and no number. An image inside a block quote (a line starting `>`) keeps its plain name as its caption and takes no number.
+
+Type only the title. Gantry adds the "Diagram N." prefix itself, so it would appear twice. The caption, number included, is also the picture's alt text in the Word document, which screen readers announce. A Mermaid diagram without a caption is labelled "Diagram N" as before. The `gantry render` command captions a Mermaid diagram the same way when it can draw it. If the optional headless Chromium isn't installed, it leaves the diagram as source text without a caption, but still counts it, so the images after it are numbered the same as in the browser render.
+
+For a Definition author: `diagram-captions` takes only `true` or `false`. Any other value is reported by `gantry validate` and when you save or publish the Definition, and the artefact renders without numbered captions until it is fixed. On the Definitions page, the **Diagram captions** checkbox on each artefact shows the setting, and on a draft you can tick or untick it there instead of editing `definition.yaml`.
+
+### Laying out a diagram and labelling its state
+
+design v3's field guidance asks for each diagram in a set order, so a reader is never left to work out what a picture means:
+
+1. one introductory sentence ("The following diagram presents…")
+2. the diagram
+3. its caption
+4. a paragraph interpreting it ("The diagram shows how…")
+5. the detail, such as goals and then layered controls as bullets.
+
+It also sets three labels for saying what state something is in. They are conventions you type, not fields, and Gantry doesn't check them:
+
+- **Architecture state.** A diagram or section that isn't the enduring design says so in its caption and opening sentence: `current`, `interim`, `target` or `enduring`. For example, the caption `Publishing flow (interim)` renders as "Diagram 3. Publishing flow (interim)".
+- **Capability status.** The logical components list and the interfaces table give each entry a Status: `existing`, `implemented`, `in delivery`, `planned` or `future`. Don't present something still to be built as if it runs today.
+- **Interim ownership.** Where an owner isn't confirmed yet, put `(interim)` after their name: in the support contacts, the risk register, open issues, and outcomes and deliverables.
+
+The bundled `kiwi-cover-mutual` example shows all three. Its security architecture is a captioned Mermaid diagram labelled `(interim)` and laid out in this order.
 
 ## Artefacts & Rendering
 
@@ -213,6 +271,55 @@ Straight under its title, a rendered document normally has two tables, both supp
 Some documents are written for people outside the organisation, such as the offer sent to a candidate. For those, both tables are internal detail you would otherwise delete by hand. A Definition author can switch them off for one artefact: untick **Document Control** on that artefact on the Definitions page, or set `document-control: false` on it in `definition.yaml`. That artefact then renders with its title and content only, and neither table. Every other artefact keeps both tables. This applies wherever the document is rendered: locally, on any Provider, in the browser, from the command line, or automatically when you request sign-off. The commit the render was saved as is still in the repository's history, even though the document doesn't print it.
 
 The key accepts only `true` or `false`. Anything else, such as `"no"` (which is also what an unquoted `no` becomes), is a problem. `gantry validate` and a Local Workspace report it, the Definitions page marks it on a draft, and it blocks Save and Publish. A Definition that carries it won't load until it's fixed, and neither will its instances, on any Provider. Until then the other Definitions in the same folder stop listing too. The error names the artefact and the value. A Definition can still leave the tables out of every document at once by shipping an empty `templates/_documentControl.md.tmpl`.
+
+### Cover page and table of contents
+
+A Definition author can give an artefact a cover page, a table of contents, or both. They are off by default, so a document only gets them if its Definition asks for them.
+
+**Cover page.** Tick **Cover page** on the artefact on the Definitions page, or set `cover-page: true` on it in `definition.yaml`. The document then opens with a cover showing the instance's name as the title, the artefact's title as the document type, the version and status from the Document Control table, the instance's assignee as author, and the artefact's purpose, followed by a page break. Document Control comes next. Anything without a value is left off the cover. The cover never shows diagrams or section content.
+
+The cover can also show a classification, such as `IN-CONFIDENCE`. Choose the field it comes from under **Cover classification**, or set `cover-classification: <module>.<field>` in `definition.yaml`. It must be a single-choice select or a text field that the artefact itself requires; the choice on the Definitions page lists exactly those. When the field is blank, the cover leaves the classification out.
+
+With a cover page, Document Control, the table of contents and then the template's own content follow the cover in that order. A template that still starts with its own `#` title line prints it there, after the front matter, so a template written for a cover usually leaves it out.
+
+**Table of contents.** Tick **Table of contents**, or set `table-of-contents: true`. The document gets a "Table of Contents" heading and a contents list of its headings, three levels deep, after Document Control and before the first section, then a page break. If the artefact also leaves out Document Control, the table of contents comes straight after the cover, or first under the title when there is no cover. Word fills the list in when you open the document, and may ask first whether to update the fields in it. A viewer that doesn't update fields shows a one-line note in its place.
+
+Both work wherever the document is rendered: locally, on any Provider, in the browser, from the command line, or automatically when you request sign-off. The cover's paragraphs use the Word styles `Title`, `Subtitle`, `Cover Classification`, `Cover Details` and `Cover Purpose`, and the contents heading uses `TOC Heading`, so an organisation can restyle them in its reference `.docx`.
+
+`cover-page` and `table-of-contents` accept only `true` or `false`, and `cover-classification` must name a field the cover can print. Anything else is a problem. `gantry validate` and a Local Workspace report it, the Definitions page marks it on a draft, and it blocks Save and Publish. A Definition that already has one keeps loading, and the document renders without that cover, contents or classification until it's fixed.
+
+### Word styles and your house style
+
+A rendered Word document takes its look from the definition's **reference Word document**: a `.docx` whose styles (fonts, colours, spacing, heading numbering, the table style) Gantry's text is poured into. Gantry doesn't format anything itself. Each artefact uses its own `templates/reference-<artefact>.docx` when the definition has one, and `templates/reference.docx` otherwise. Headers, footers and page size come from the same file.
+
+To give the documents your organisation's house style, change the styles, not the documents:
+
+1. On the **Definitions** page, open the artefact in your organisation's draft of the definition and press **Download** next to **Reference docx**. If the definition is published, make a new draft first.
+2. Open the file in Word and change the styles listed below (Home › Styles › Modify, or Table Design › Modify Table Style). Change the headers and footers too if you like. Keep the style names: Gantry finds the styles by name. The file's own body text is never printed, so you can leave it as it is.
+3. Save it as a `.docx` and choose it under **Reference docx** on the same artefact. Repeat for each artefact, or upload the same file to each. You can also copy the file into the definition's `templates/` folder yourself.
+
+The next render uses the new styles. Documents already rendered keep their old look until you render them again.
+
+| Style | What uses it |
+|---|---|
+| `Heading 1` to `Heading 6` | Section headings, one level per `#` |
+| `Title`, `Subtitle`, `Cover Classification`, `Cover Details`, `Cover Purpose` | The cover page |
+| `TOC Heading`, `TOC 1` to `TOC 3` | The table of contents |
+| `First Paragraph`, `Body Text` | Ordinary paragraphs |
+| `Compact` | Text in table cells, and the items of short lists |
+| `Table` | Every table (a table style; its header row is the "Header Row" part) |
+| `Captioned Figure`, `Image Caption` | A captioned diagram or image, and its "Diagram N." caption |
+| `Table Caption` | A table's caption |
+
+**Design version 3's reference documents** are ready to start from. All seven share one set of styles, so a change made in one can be uploaded for every artefact:
+
+- **Numbered headings.** Heading 1, 2 and 3 are numbered 1, 1.1 and 1.1.1 by a multilevel list attached to the styles, and the table of contents shows the numbers. Headings 4 to 6 aren't numbered. The cover, Document Control, Review & sign-off and the table of contents aren't numbered either.
+- **Nothing stranded at a page break.** Every heading, caption and table caption, and the paragraph holding a captioned figure, is set to "Keep with next".
+- **One table style.** Every table has a dark grey header row with white bold text, a light grid, and the same font size as the body text in every cell. A table's header row repeats at the top of each page it runs onto, and no row is split across a page break ("Allow row to break across pages" is off in the table style).
+
+To change these, change the style: for example, the header row's colour in the `Table` style, or the numbering by editing the list attached to Heading 1 (Home › Multilevel List › Define New Multilevel List). A reference document made from another Word template works too. Any of the styles above that it doesn't define gets a plain default, so a heading or table can look different from the rest of your template until you add the style.
+
+**A heading you don't want numbered.** Add `{.unnumbered}` after its text, as in `## Revision history {.unnumbered}`. Word then shows it without a number, whatever the reference document numbers. This is how design version 3 leaves Document Control and Review & sign-off unnumbered. The heading keeps its formatting and links, and a link to it still works. This works in documents that use design version 3's cover page, table of contents or diagram captions. Other documents show the heading as they always have.
 
 ### Artefacts that don't count toward the gate
 
@@ -285,7 +392,7 @@ Gantry's Settings are split by scope:
 
 - **Global Settings** holds the **Advanced mode** toggle, off by default — with it off, a browser only ever sees the Local workspace flow (see **Local workspaces** above), with no Provider, work-item or sign-off UI anywhere in the app. It also holds a **default ticketing system** choice, which only ever affects a *new* Azure DevOps Workspace's own ticketing-system override (Jira is listed but disabled). There is no global Personal Access Token here, or anywhere else: every Server-hosted Workspace holds its own **Workspace PAT** (see **Choosing a Provider** above), so this screen has nothing credential-related to set.
 - **Workspace Settings** controls the Owner and the Workspace's own PAT — set it, replace it, or clear it, entirely independently of every other workspace's own token — plus, for an Azure DevOps workspace only, a ticketing-system override (Jira is listed but disabled; a GitHub or GitLab workspace has no such choice, since its tracker is fixed by its Provider — GitHub Issues or GitLab Issues respectively). This screen also shows the Workspace's Provider and, at a glance, whether its PAT is set, missing or was rejected on the last request that used it. These settings apply to the Workspace and can be opened from an Instance that belongs to it. The same screen also holds **Archive workspace** / **Restore workspace**.
-- **Instance Settings** controls the Instance's Assignee and shows read-only information about the Instance and its linked work item. The same screen also holds **Archive instance** / **Restore instance**. An archived instance is hidden from the dashboard but still opens at its direct URL.
+- **Instance Settings** controls the Instance's Assignee and, when its Definition sets word targets, its **Size** (see **Target size and word targets** above), and shows read-only information about the Instance and its linked work item. The same screen also holds **Archive instance** / **Restore instance**. An archived instance is hidden from the dashboard but still opens at its direct URL.
 
 An override narrows the scope of a setting: a workspace's own PAT and ticketing-system choice apply only to that Workspace, while Instance settings affect only that one run of the Definition — nothing here falls back to a shared default any more.
 
@@ -315,6 +422,8 @@ The rendered documents are deliberately **not** a one-to-one copy of every refer
 - **Shared modules, not per-document sections.** Scope, assumptions, NFRs, risks, security, dependencies, the glossary, the recovery plan and the security-control register are each one module reused by several documents. A reference heading that appears in two documents maps to one field.
 - **Consolidation over sprawl.** Where a reference document has a chapter of viewpoints or a deep product-specific hierarchy (the SAD's Logical Components View, the SSAD's thirty product sub-sections, the ATLAS's fifty-five infrastructure headings), Gantry gives it one field. Put the finer structure inside the field as sub-headings when an instance needs it; a module per heading would mostly sit empty.
 - **Document control is the tool's job.** Version, date, commit, gate status and the review / sign-off table are rendered at the top of every document by Gantry from the instance's history and pull request — not authored as fields. Where a reference has a Document Control, Approved By, Consulted or Sign-Off section, that is what it maps to.
+
+**Version 3 (draft).** Every version 3 document opens with a [cover page and a table of contents](#cover-page-and-table-of-contents). The cover's title is the instance's name, not its slug, so the documents no longer start with a `<slug>: <document>` heading; their first heading is section 1. The cover's classification comes from **Document handling › Classification** (`document-handling.classification`), a choice of the New Zealand Protective Security Requirements markings `UNCLASSIFIED`, `IN-CONFIDENCE`, `SENSITIVE` and `RESTRICTED`. It is available at every stage and applies to every document from the instance. An organisation with a different scheme replaces the options in its own copy of the definition. Leave it blank and the cover has no classification; pick a value that isn't one of the options (by editing the module file) and `check` warns without blocking the gate. The cover's author is the instance's assignee. Version 3's headings are numbered 1, 1.1 and 1.1.1, and its tables share one style with a repeating header row and rows that don't split across pages; see [Word styles and your house style](#word-styles-and-your-house-style).
 
 #### How to read the tables
 
@@ -425,7 +534,7 @@ Reference: *SAD Template* (98 headings). All fields are authored at the Detailed
 | `H1` Solution Overview | `# Solution overview`, opened by Architecture › Solution description | Same chapter. It also carries the High Level Architectural View content (rows below) so the architecture reads in one place. |
 | `H2` Dependencies | Dependencies › Dependencies `dependencies.dependencies-overview` *(carried from SOAP/HLD)* → `## Dependencies overview`; › Dependency list `dependencies.dependency-list` → `## Dependency list` | The overview is pre-filled; the structured list is new at this gate. Version 2 moved both to the reference's early position. |
 | `H1` High Level Architectural View | Continues `# Solution overview` (Design decisions → Applicable standards) | Merged into Solution overview; the sub-sections keep the reference's order. |
-| `H2` Design Decisions | Architecture › Design decisions `architecture.design-decisions` → `## Design decisions` | Match. Deepen the SOAP sketch to build-ready depth. |
+| `H2` Design Decisions | Architecture › Design decisions `architecture.design-decisions` → `## Design decisions` | Match. Deepen the SOAP sketch to build-ready depth. In version 3, write it as an `AD \| Decision \| ADR` table: every decision gets an AD id, and only a decision that needs governance endorsement names an ADR (`ADRYYY` until registered). Don't assume ARB endorsement — a decision is not an ADR, and an ADR is not an ARB item. |
 | `H2` Architectural Risks | Architecture › Architectural risks `architecture.architectural-risks` → `## Architectural risks` | Match. Structural risks only; delivery and operating risks are in the Risks module. |
 | `H2` Solution Description | Architecture › Solution description `architecture.solution-description` → `## Solution description` | Match. Expands the SOAP overview and process flow. |
 | `H2` Architectural Goals | Architecture › Constraints and goals `architecture.constraints` → `## Constraints and goals` | Goals and constraints are one short passage in practice; three headed sections would mostly be empty. |
@@ -434,7 +543,7 @@ Reference: *SAD Template* (98 headings). All fields are authored at the Detailed
 | `H2` Solution Standards | Architecture › Applicable standards `architecture.standards` *(list)* → `## Applicable standards` | One list covers solution and architectural standards. |
 | `H2` Architectural Standards | Architecture › Applicable standards | As above. |
 | `H1` Open Issues | Risks › Open issues `risks.open-issues` *(carried from HLD)* → `# Open issues` | Version 2 gave it the reference's own top-level position. It is followed by a gantry-only `# Risks` / `## Risk register` (`risks.risk-register`) — the register carried from the HLD, which the reference has no chapter for. |
-| `H1` Logical Components View | Architecture › Logical components `architecture.logical-components` *(list)* → `# Logical components view` | One list of components, each marked new or existing. The four viewpoints below are a Word navigation device, not separate content. |
+| `H1` Logical Components View | Architecture › Logical components `architecture.logical-components` *(list)* → `# Logical components view` | One list of components, each marked new or existing. In version 3, each gives its Status straight after its name: `existing`, `implemented`, `in delivery`, `planned` or `future`. The four viewpoints below are a Word navigation device, not separate content. |
 | `H2` Layered Viewpoint | Architecture › Logical components — add a sub-heading inside the field if the viewpoint is needed | Collapsed into the component list. |
 | `H2` Product Viewpoint | Architecture › Logical components | As above. |
 | `H2` Application Usage Viewpoint | Architecture › Logical components | As above. |

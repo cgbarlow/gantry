@@ -117,7 +117,8 @@ export const tools = [
       '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref". ' +
       '3. Pass "stage" (a stage id) or "stageNumber" to browse a stage other than the instance\'s current one; omitted, this reads the instance\'s persisted current stage. ' +
       '4. A Provider-backed instance whose workspace has no PAT configured fails with "missing_workspace_pat" — report this to the operator, do not retry. ' +
-      '5. Use the response\'s "artefacts" list to find valid artefactId values for render_artefact.',
+      '5. Use the response\'s "artefacts" list to find valid artefactId values for render_artefact. ' +
+      '6. When the instance\'s definition sets word budgets, the response carries the instance\'s Target size as "size" (small, medium or large; medium when none was chosen) and each budgeted field carries "targetWords" — about how many words to write in that field for this instance. Write to that length: it is a target, not a limit, and the size is the instance owner\'s choice of how much detail reviewers want.',
     inputSchema: {
       ...slugRefShape,
       stage: z.string().optional().describe('A stage id to browse instead of the instance\'s current stage.'),
@@ -134,7 +135,8 @@ export const tools = [
       '4. Pass "stage" (a stage id) to target a stage other than the instance\'s current one; the definition must actually declare each moduleId on that stage, or gantry serve rejects the whole call with a 400. ' +
       '4a. A module the stage mounts read-only (its "read-only-modules" in the definition; get_instance marks it "readOnly" with its "homeStage") is carried forward from an earlier stage: gantry serve rejects the whole call with a 400 naming that home stage — write it there instead. ' +
       '5. This never renders an artefact — call render_artefact separately once content is saved. ' +
-      '6. The written content is reflected on the very next get_instance call for the same instance/stage.',
+      '6. The written content is reflected on the very next get_instance call for the same instance/stage. ' +
+      '7. When a field you wrote is over its word target (get_instance\'s "targetWords"), the save still succeeds and the response carries "targetWordNotes", one per such field (e.g. "nfrs.performance: 420 words, Medium target ~150") — tighten that field and save again.',
     inputSchema: {
       ...slugRefShape,
       stage: z.string().optional().describe('The stage id these modules belong to; omitted defaults to the instance\'s current stage.'),

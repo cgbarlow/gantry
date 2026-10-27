@@ -217,6 +217,28 @@ test('create_instance creates a first instance against a server-directory worksp
   }
 })
 
+// #202 (spec #192, ADR-0054): the instance's Target size can be chosen at creation, as in the wizard.
+test('create_instance passes a chosen size through to POST /api/instances', async () => {
+  const fetch = stubFetch((call) => {
+    const base = stubClassification({ serverWorkspaces: [{ id: 'default', name: 'default' }] })(call)
+    if (base) return base
+    const { url, method, body } = call
+    if (url.pathname === '/api/instances' && method === 'POST') {
+      assert.deepEqual(JSON.parse(body), { definition: 'design', slug: 'my-instance', size: 'small' })
+      return { status: 201, body: { slug: 'my-instance', definition: 'design' } }
+    }
+    return undefined
+  })
+  try {
+    const result = await createInstanceTool.handler({ workspaceId: 'default', definition: 'design', slug: 'my-instance', size: 'small' }, { gantryClient: client() })
+    assert.equal(result.isError, undefined)
+  } finally {
+    fetch.restore()
+  }
+  assert.equal(createInstanceTool.inputSchema.size.safeParse('large').success, true)
+  assert.equal(createInstanceTool.inputSchema.size.safeParse('huge').success, false)
+})
+
 test('create_instance reports missing_workspace_pat rather than calling POST /api/instances', async () => {
   const ws = { id: 'ws-1', provider: 'azure-devops', location: { organization: 'acme', project: 'widgets', repository: 'repo1' } }
   const fetch = stubFetch((call) => {

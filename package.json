@@ -1,6 +1,6 @@
 {
   "name": "gantry",
-  "version": "0.9.26-beta",
+  "version": "0.10.0-beta",
   "license": "MIT",
   "private": true,
   "description": "A repo-driven pipeline for staged, gated processes.",
@@ -34,9 +34,11 @@
     "preact-iso": "^2.12.2",
     "yaml": "^2.9.0"
   },
+  "optionalDependencies": {
+    "playwright": "^1.62.1"
+  },
   "devDependencies": {
     "fake-indexeddb": "^6.2.5",
-    "node-test-junit-reporter": "^1.0.0",
-    "playwright": "^1.62.1"
+    "node-test-junit-reporter": "^1.0.0"
   }
 }

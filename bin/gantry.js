@@ -3,7 +3,7 @@ import { join, dirname } from 'node:path'
 import { realpathSync, readFileSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { Command } from 'commander'
-import { renderArtefact } from '../lib/render.js'
+import { renderArtefactWithDiagrams } from '../lib/render.js'
 import { getStatus } from '../lib/status.js'
 import { checkGate, formatGateOutstanding } from '../lib/check.js'
 import { validateDefinition } from '../lib/validate.js'
@@ -210,6 +210,7 @@ withInstanceOptions(
     .description('Create an instance')
     .option('--owner <owner>', "owner to record in each module file's frontmatter")
     .option('--assignee <assignee>', 'assignee to record on the instance record itself (#97)')
+    .option('--size <size>', 'target size — small, medium or large — for a definition that sets target-words (#202; default medium)')
     .option('--definition-version <version>', 'definition version to pin (default latest published)')
     .option('--version <version>', 'alias for --definition-version')
 ).action((definition, slug, options) => {
@@ -226,6 +227,7 @@ withInstanceOptions(
     definitionsDir: resolveDefinitionsDir(options.definitionsDir),
     owner: options.owner,
     assignee: options.assignee,
+    size: options.size,
     definitionVersion: version ?? undefined,
   })
   // Registered explicitly for the same reason the server does it (WI #356): the registry only
@@ -312,9 +314,16 @@ withInstanceOptions(
     .command('render <slug> <artefact>')
     .description('Render an artefact to out/')
     .option('--dry-run', 'resolve the template without writing')
-).action((address, artefact, options) => {
+).action(async (address, artefact, options) => {
   const { slug, instancesDir } = resolveInstanceArgument(address, resolveEffectiveWorkspacesDir(options))
-  const result = renderArtefact(slug, artefact, { dryRun: options.dryRun, instancesDir, definitionsDir: resolveDefinitionsDir(options.definitionsDir) })
+  // #198 (ADR-0055): Mermaid diagrams are drawn in the optional headless Chromium when it is
+  // installed. Without it the render still succeeds, with the diagrams as source and one warning.
+  const result = await renderArtefactWithDiagrams(slug, artefact, {
+    dryRun: options.dryRun,
+    instancesDir,
+    definitionsDir: resolveDefinitionsDir(options.definitionsDir),
+  })
+  if (result.warning) console.warn(result.warning)
   if (result.dryRun) {
     console.log(result.markdown)
   } else {

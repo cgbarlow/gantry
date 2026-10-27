@@ -503,6 +503,13 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .field label { font-family: var(--font-display); font-weight: 600; font-size: 13px; display: block; margin-bottom: 6px; }
 .field h3.field-heading { font-family: var(--font-display); font-weight: 600; font-size: 13px; display: block; margin: 0 0 6px; }
 .guidance { color: var(--text-muted); font-size: 12px; margin: 0 0 8px; }
+/* #202: a Field's word budget per Target size on the Definitions page and the local definition editor. */
+.defn-target-words { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.defn-target-words label { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.defn-target-words-input { width: 6em; }
+/* #202: a budgeted field's word target and live count — amber once over, never an error. */
+.field-target-words { color: var(--text-muted); font-size: 12px; margin: -4px 0 8px; }
+.field-target-words.over, .field-target-words.over .field-word-count { color: var(--warning, #b06a00); font-weight: 600; }
 
 /* Stage navigation dropdown (WI232) — inline in ViewModeToolbar to the right of the artefact selector */
 .stage-navigation { margin: 0; display: inline-flex; align-items: center; }
@@ -612,6 +619,15 @@ main[data-view-mode='split'] .field-markdown .split:focus-within .editor-host:no
 .field-markdown .md-rendered figure.mermaid-diagram svg { max-width: 100%; height: auto; }
 .field-markdown .md-rendered pre.mermaid-error { border-left: 3px solid var(--danger, #b00020); }
 .field-markdown .md-rendered .mermaid-error-note { color: var(--text-muted, #666); font-size: 12px; margin: -6px 0 12px; }
+/* #195: a fence's caption under its drawing, italic and centred as in the Word
+ * document. The figure is always white, so the text colour is fixed too. */
+.field-markdown .md-rendered figure.mermaid-diagram figcaption.diagram-caption {
+  margin: 6px 0 0;
+  font-style: italic;
+  font-size: 13px;
+  text-align: center;
+  color: #444;
+}
 
 /*
  * Formatting toolbar (#133) — one slim strip per focused markdown field.
@@ -1729,7 +1745,7 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-filename-tokens { display: flex; flex-wrap: wrap; gap: 6px; }
 .defn-filename-token { font-family: var(--font-mono); }
 .defn-filename-problems { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
-.defn-document-control, .defn-satisfies-gate { display: inline-flex; align-items: center; gap: 6px; }
+.defn-document-control, .defn-satisfies-gate, .defn-cover-page, .defn-table-of-contents, .defn-diagram-captions { display: inline-flex; align-items: center; gap: 6px; }
 
 /* Drag and drop */
 .defn-drag-handle { cursor: grab; user-select: none; padding: 2px 6px; font-size: 14px; color: var(--text-muted); border: var(--hairline) solid transparent; border-radius: var(--radius); }
