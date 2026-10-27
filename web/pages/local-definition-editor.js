@@ -21,6 +21,7 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { useLocation } from 'preact-iso'
 import { reorder } from '../lib/reorder.js'
+import { coverClassificationOptions } from '../lib/artefactFrontMatter.js'
 import {
   getWorkspaceHandle,
   ensurePermission,
@@ -408,6 +409,7 @@ function ArtefactTemplateEditor({ handle, definitionId, version, artefact, readO
 function ArtefactEditor({ handle, definitionId, version, artefact, modules, gates, readOnly, onChange, onRemove }) {
   const [expanded, setExpanded] = useState(false)
   const filenameTokens = [...FILENAME_BUILTIN_TOKENS, ...eligibleFilenameFields(modules, artefact)]
+  const classificationOptions = coverClassificationOptions(modules, artefact)
   return html`
     <div class="local-def-element">
       <div class="local-def-element-header">
@@ -462,6 +464,36 @@ function ArtefactEditor({ handle, definitionId, version, artefact, modules, gate
           onChange(next)
         }} />
         Completing this artefact passes its gate
+      </label>
+      <label class="field-label defn-cover-page">
+        <input type="checkbox" checked=${artefact.coverPage === true} disabled=${readOnly} onChange=${(e) => {
+          // #194 (ADR-0052): the same switch as the server-hosted editor's — absent means no cover.
+          const next = { ...artefact }
+          if (e.currentTarget.checked) next.coverPage = true
+          else delete next.coverPage
+          onChange(next)
+        }} />
+        Open the document with a cover page
+      </label>
+      <label class="field-label">Cover classification</label>
+      <select class="wizard-input mono defn-cover-classification" aria-label="Cover classification" value=${artefact.coverClassification ?? ''} disabled=${readOnly} onChange=${(e) => {
+        const next = { ...artefact }
+        if (e.currentTarget.value) next.coverClassification = e.currentTarget.value
+        else delete next.coverClassification
+        onChange(next)
+      }}>
+        <option value="">None</option>
+        ${artefact.coverClassification !== undefined && !classificationOptions.some((o) => o.value === artefact.coverClassification) ? html`<option value=${String(artefact.coverClassification)}>${String(artefact.coverClassification)} (not a field this artefact can print)</option>` : null}
+        ${classificationOptions.map((o) => html`<option key=${o.value} value=${o.value}>${o.label}</option>`)}
+      </select>
+      <label class="field-label defn-table-of-contents">
+        <input type="checkbox" checked=${artefact.tableOfContents === true} disabled=${readOnly} onChange=${(e) => {
+          const next = { ...artefact }
+          if (e.currentTarget.checked) next.tableOfContents = true
+          else delete next.tableOfContents
+          onChange(next)
+        }} />
+        Add a table of contents after Document Control
       </label>
       <button type="button" class="btn small ghost" onClick=${() => setExpanded(!expanded)}>${expanded ? 'Hide template' : 'Edit template'}</button>
       ${expanded ? html`<${ArtefactTemplateEditor} handle=${handle} definitionId=${definitionId} version=${version} artefact=${artefact} readOnly=${readOnly} />` : null}

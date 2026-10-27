@@ -31,9 +31,10 @@ import { withFakeBitbucketServer, BITBUCKET_OWNER, BITBUCKET_REPOSITORY, BITBUCK
 
 // #148 (spec #147, "Round trip first") — a Definition means the same thing after every lifecycle
 // operation. One fixture sets every Definition key this codebase knows, including Stage/Artefact
-// `copied-from`, an Artefact `filename`, select `options`/`multiple`/`default`, and the three keys the
+// `copied-from`, an Artefact `filename`, select `options`/`multiple`/`default`, the three keys the
 // #147 engine tickets give behaviour to (`document-control`, `satisfies-gate`, `read-only-modules`),
-// which are pass-through here. Each test drives one lifecycle operation — save, new draft, clone,
+// which are pass-through here, and #194's front matter (`cover-page`, `table-of-contents`,
+// `cover-classification`). Each test drives one lifecycle operation — save, new draft, clone,
 // publish, promote, each Provider's loader and write path, the Library cache — and asserts every key
 // is still there afterwards, read back the way a caller would see it (the version projection the
 // Definitions page and API serve).
@@ -92,6 +93,9 @@ artefacts:
     filename: "{details.kind} - Letter - {today}"
     document-control: false
     satisfies-gate: false
+    cover-page: true
+    cover-classification: details.kind
+    table-of-contents: true
     copied-from:
       definition: elsewhere
       version: 2
@@ -185,6 +189,12 @@ function assertEveryKey(projection, where) {
   assert.equal(letter.documentControl, false, `${where}: artefact document-control`)
   assert.equal(letter.satisfiesGate, false, `${where}: artefact satisfies-gate`)
   assert.deepEqual(letter.copiedFrom, ARTEFACT_PROVENANCE, `${where}: artefact copied-from`)
+  assert.equal(letter.coverPage, true, `${where}: artefact cover-page`)
+  assert.equal(letter.coverClassification, 'details.kind', `${where}: artefact cover-classification`)
+  assert.equal(letter.tableOfContents, true, `${where}: artefact table-of-contents`)
+  for (const key of ['coverPage', 'coverClassification', 'tableOfContents']) {
+    assert.equal(key in brief, false, `${where}: ${key} omitted unless set`)
+  }
 
   const details = byId(projection.modules, 'details')
   const kind = byId(details.fields, 'kind')
@@ -202,8 +212,11 @@ function assertKebabKeysOnDisk(definitionYamlText, where) {
   assert.match(definitionYamlText, /read-only-modules:/, where)
   assert.match(definitionYamlText, /document-control: false/, where)
   assert.match(definitionYamlText, /satisfies-gate: false/, where)
+  assert.match(definitionYamlText, /cover-page: true/, where)
+  assert.match(definitionYamlText, /cover-classification: details\.kind/, where)
+  assert.match(definitionYamlText, /table-of-contents: true/, where)
   assert.match(definitionYamlText, /copied-from:/, where)
-  assert.doesNotMatch(definitionYamlText, /readOnlyModules|documentControl|satisfiesGate|copiedFrom/, where)
+  assert.doesNotMatch(definitionYamlText, /readOnlyModules|documentControl|satisfiesGate|coverPage|coverClassification|tableOfContents|copiedFrom/, where)
 }
 
 function localProjection(id, version, definitionsDir) {
@@ -234,6 +247,18 @@ test('every key survives load, web-editor save, publish, new draft version and c
 
     cloneDefinition('roundtrip', 'roundtrip-copy', { definitionsDir })
     assertEveryKey(localProjection('roundtrip-copy', 1, definitionsDir), 'clone')
+  }))
+
+// #194: the front-matter switches default to false, so an explicit false is left out the same way.
+test('an Artefact that sets cover-page and table-of-contents to false keeps loading with both keys omitted from the projection', () =>
+  withScratch(({ definitionsDir }) => {
+    writeLocalFixture(definitionsDir, 'roundtrip')
+    const path = join(definitionsDir, 'roundtrip/1/definition.yaml')
+    writeFileSync(path, readFileSync(path, 'utf8').replace('cover-page: true', 'cover-page: false').replace('table-of-contents: true', 'table-of-contents: false'))
+    const letter = localProjection('roundtrip', 1, definitionsDir).artefacts.find((a) => a.id === 'letter')
+    assert.equal('coverPage' in letter, false)
+    assert.equal('tableOfContents' in letter, false)
+    assert.equal(letter.coverClassification, 'details.kind')
   }))
 
 test('an Artefact that sets document-control and satisfies-gate to true keeps loading with both keys omitted from the projection', () =>

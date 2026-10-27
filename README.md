@@ -574,7 +574,7 @@ npm test               # node --test with no filter — runs every *.test.js, Pl
 
 ## Validating definitions and instances
 
-`gantry validate <definition> [--json]` reports every structural problem with a definition in one pass — a missing module reference, an invalid field type, a `required`/`required-at` conflict, an artefact `gate` or a `required-at` entry that names no stage's gate, a stage whose artefacts all set `satisfies-gate: false` — instead of fixing one, rerunning, and hitting the next.
+`gantry validate <definition> [--json]` reports every structural problem with a definition in one pass — a missing module reference, an invalid field type, a `required`/`required-at` conflict, an artefact `gate` or a `required-at` entry that names no stage's gate, a stage whose artefacts all set `satisfies-gate: false`, a `cover-page` or `table-of-contents` that isn't `true` or `false`, a `cover-classification` that names no single-valued select or text field the artefact requires — instead of fixing one, rerunning, and hitting the next.
 
 `gantry check <slug> [--gate <id>] [--json]` validates an instance against a gate's requirements, PASS/FAIL with a matching exit code. Defaults to the instance's current stage; `--gate` resolves any stage's gate, so you can check readiness for a later gate before the instance actually gets there. It lists each of the gate's artefacts with its completeness and whether it counts toward the gate (an artefact with `satisfies-gate: false` is reported but never passes the gate on its own; ADR-0051), and on FAIL names the closest artefact that can pass it.
 

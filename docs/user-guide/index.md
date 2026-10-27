@@ -214,6 +214,22 @@ Some documents are written for people outside the organisation, such as the offe
 
 The key accepts only `true` or `false`. Anything else, such as `"no"` (which is also what an unquoted `no` becomes), is a problem. `gantry validate` and a Local Workspace report it, the Definitions page marks it on a draft, and it blocks Save and Publish. A Definition that carries it won't load until it's fixed, and neither will its instances, on any Provider. Until then the other Definitions in the same folder stop listing too. The error names the artefact and the value. A Definition can still leave the tables out of every document at once by shipping an empty `templates/_documentControl.md.tmpl`.
 
+### Cover page and table of contents
+
+A Definition author can give an artefact a cover page, a table of contents, or both. They are off by default, so a document only gets them if its Definition asks for them.
+
+**Cover page.** Tick **Cover page** on the artefact on the Definitions page, or set `cover-page: true` on it in `definition.yaml`. The document then opens with a cover showing the instance's name as the title, the artefact's title as the document type, the version and status from the Document Control table, the instance's assignee as author, and the artefact's purpose, followed by a page break. Document Control comes next. Anything without a value is left off the cover. The cover never shows diagrams or section content.
+
+The cover can also show a classification, such as `IN-CONFIDENCE`. Choose the field it comes from under **Cover classification**, or set `cover-classification: <module>.<field>` in `definition.yaml`. It must be a single-choice select or a text field that the artefact itself requires; the choice on the Definitions page lists exactly those. When the field is blank, the cover leaves the classification out.
+
+With a cover page, Document Control, the table of contents and then the template's own content follow the cover in that order. A template that still starts with its own `#` title line prints it there, after the front matter, so a template written for a cover usually leaves it out.
+
+**Table of contents.** Tick **Table of contents**, or set `table-of-contents: true`. The document gets a "Table of Contents" heading and a contents list of its headings, three levels deep, after Document Control and before the first section, then a page break. If the artefact also leaves out Document Control, the table of contents comes straight after the cover, or first under the title when there is no cover. Word fills the list in when you open the document, and may ask first whether to update the fields in it. A viewer that doesn't update fields shows a one-line note in its place.
+
+Both work wherever the document is rendered: locally, on any Provider, in the browser, from the command line, or automatically when you request sign-off. The cover's paragraphs use the Word styles `Title`, `Subtitle`, `Cover Classification`, `Cover Details` and `Cover Purpose`, and the contents heading uses `TOC Heading`, so an organisation can restyle them in its reference `.docx`.
+
+`cover-page` and `table-of-contents` accept only `true` or `false`, and `cover-classification` must name a field the cover can print. Anything else is a problem. `gantry validate` and a Local Workspace report it, the Definitions page marks it on a draft, and it blocks Save and Publish. A Definition that already has one keeps loading, and the document renders without that cover, contents or classification until it's fixed.
+
 ### Artefacts that don't count toward the gate
 
 A stage's gate passes when any one of its artefacts is complete. That works when each artefact is a full record of the stage, but not for a document written for someone else, such as the confirmation sent to a candidate. That document should carry only what its reader needs, and if it carries less than the internal record, completing it would be the easy way through the gate.
