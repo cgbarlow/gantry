@@ -264,6 +264,39 @@ Both work wherever the document is rendered: locally, on any Provider, in the br
 
 `cover-page` and `table-of-contents` accept only `true` or `false`, and `cover-classification` must name a field the cover can print. Anything else is a problem. `gantry validate` and a Local Workspace report it, the Definitions page marks it on a draft, and it blocks Save and Publish. A Definition that already has one keeps loading, and the document renders without that cover, contents or classification until it's fixed.
 
+### Word styles and your house style
+
+A rendered Word document takes its look from the definition's **reference Word document**: a `.docx` whose styles (fonts, colours, spacing, heading numbering, the table style) Gantry's text is poured into. Gantry doesn't format anything itself. Each artefact uses its own `templates/reference-<artefact>.docx` when the definition has one, and `templates/reference.docx` otherwise. Headers, footers and page size come from the same file.
+
+To give the documents your organisation's house style, change the styles, not the documents:
+
+1. On the **Definitions** page, open the artefact in your organisation's draft of the definition and press **Download** next to **Reference docx**. If the definition is published, make a new draft first.
+2. Open the file in Word and change the styles listed below (Home › Styles › Modify, or Table Design › Modify Table Style). Change the headers and footers too if you like. Keep the style names: Gantry finds the styles by name. The file's own body text is never printed, so you can leave it as it is.
+3. Save it as a `.docx` and choose it under **Reference docx** on the same artefact. Repeat for each artefact, or upload the same file to each. You can also copy the file into the definition's `templates/` folder yourself.
+
+The next render uses the new styles. Documents already rendered keep their old look until you render them again.
+
+| Style | What uses it |
+|---|---|
+| `Heading 1` to `Heading 6` | Section headings, one level per `#` |
+| `Title`, `Subtitle`, `Cover Classification`, `Cover Details`, `Cover Purpose` | The cover page |
+| `TOC Heading`, `TOC 1` to `TOC 3` | The table of contents |
+| `First Paragraph`, `Body Text` | Ordinary paragraphs |
+| `Compact` | Text in table cells, and the items of short lists |
+| `Table` | Every table (a table style; its header row is the "Header Row" part) |
+| `Captioned Figure`, `Image Caption` | A captioned diagram or image, and its "Diagram N." caption |
+| `Table Caption` | A table's caption |
+
+**Design version 3's reference documents** are ready to start from. All seven share one set of styles, so a change made in one can be uploaded for every artefact:
+
+- **Numbered headings.** Heading 1, 2 and 3 are numbered 1, 1.1 and 1.1.1 by a multilevel list attached to the styles, and the table of contents shows the numbers. Headings 4 to 6 aren't numbered. The cover, Document Control, Review & sign-off and the table of contents aren't numbered either.
+- **Nothing stranded at a page break.** Every heading, caption and table caption, and the paragraph holding a captioned figure, is set to "Keep with next".
+- **One table style.** Every table has a dark grey header row with white bold text, a light grid, and the same font size as the body text in every cell. A table's header row repeats at the top of each page it runs onto, and no row is split across a page break ("Allow row to break across pages" is off in the table style).
+
+To change these, change the style: for example, the header row's colour in the `Table` style, or the numbering by editing the list attached to Heading 1 (Home › Multilevel List › Define New Multilevel List). A reference document made from another Word template works too. Any of the styles above that it doesn't define gets a plain default, so a heading or table can look different from the rest of your template until you add the style.
+
+**A heading you don't want numbered.** Add `{.unnumbered}` after its text, as in `## Revision history {.unnumbered}`. Word then shows it without a number, whatever the reference document numbers. This is how design version 3 leaves Document Control and Review & sign-off unnumbered. Such a heading is written as plain text in Word, so leave formatting such as bold out of it.
+
 ### Artefacts that don't count toward the gate
 
 A stage's gate passes when any one of its artefacts is complete. That works when each artefact is a full record of the stage, but not for a document written for someone else, such as the confirmation sent to a candidate. That document should carry only what its reader needs, and if it carries less than the internal record, completing it would be the easy way through the gate.
@@ -366,7 +399,7 @@ The rendered documents are deliberately **not** a one-to-one copy of every refer
 - **Consolidation over sprawl.** Where a reference document has a chapter of viewpoints or a deep product-specific hierarchy (the SAD's Logical Components View, the SSAD's thirty product sub-sections, the ATLAS's fifty-five infrastructure headings), Gantry gives it one field. Put the finer structure inside the field as sub-headings when an instance needs it; a module per heading would mostly sit empty.
 - **Document control is the tool's job.** Version, date, commit, gate status and the review / sign-off table are rendered at the top of every document by Gantry from the instance's history and pull request — not authored as fields. Where a reference has a Document Control, Approved By, Consulted or Sign-Off section, that is what it maps to.
 
-**Version 3 (draft).** Every version 3 document opens with a [cover page and a table of contents](#cover-page-and-table-of-contents). The cover's title is the instance's name, not its slug, so the documents no longer start with a `<slug>: <document>` heading; their first heading is section 1. The cover's classification comes from **Document handling › Classification** (`document-handling.classification`), a choice of the New Zealand Protective Security Requirements markings `UNCLASSIFIED`, `IN-CONFIDENCE`, `SENSITIVE` and `RESTRICTED`. It is available at every stage and applies to every document from the instance. An organisation with a different scheme replaces the options in its own copy of the definition. Leave it blank and the cover has no classification; pick a value that isn't one of the options (by editing the module file) and `check` warns without blocking the gate. The cover's author is the instance's assignee.
+**Version 3 (draft).** Every version 3 document opens with a [cover page and a table of contents](#cover-page-and-table-of-contents). The cover's title is the instance's name, not its slug, so the documents no longer start with a `<slug>: <document>` heading; their first heading is section 1. The cover's classification comes from **Document handling › Classification** (`document-handling.classification`), a choice of the New Zealand Protective Security Requirements markings `UNCLASSIFIED`, `IN-CONFIDENCE`, `SENSITIVE` and `RESTRICTED`. It is available at every stage and applies to every document from the instance. An organisation with a different scheme replaces the options in its own copy of the definition. Leave it blank and the cover has no classification; pick a value that isn't one of the options (by editing the module file) and `check` warns without blocking the gate. The cover's author is the instance's assignee. Version 3's headings are numbered 1, 1.1 and 1.1.1, and its tables share one style with a repeating header row and rows that don't split across pages; see [Word styles and your house style](#word-styles-and-your-house-style).
 
 #### How to read the tables
 
