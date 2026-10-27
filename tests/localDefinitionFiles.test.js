@@ -308,6 +308,8 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
           filename: '{instance.name} - Letter', documentControl: false, satisfiesGate: false, diagramCaptions: true, copiedFrom: provenance,
           // #194 (ADR-0052): the front-matter keys.
           coverPage: true, coverClassification: 'background.marking', tableOfContents: true,
+          // #205: the statement the cover prints.
+          coverPurpose: 'This letter tells its reader what the work is for.',
         },
         // #151: what passes sign-off, so the Letter opting out doesn't make the gate unsatisfiable.
         { id: 'record', title: 'Record', purpose: 'The record', template: 'templates/main.md.tmpl', gate: 'sign-off', requires: ['background.summary'] },
@@ -326,6 +328,7 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
     assert.match(yamlText, /cover-page: true/)
     assert.match(yamlText, /cover-classification: background\.marking/)
     assert.match(yamlText, /table-of-contents: true/)
+    assert.match(yamlText, /cover-purpose: This letter tells its reader what the work is for\./)
 
     const read = await readLocalDefinitionStructure(handle, 'wi384-fixture', 1)
     const review = read.stages.find((s) => s.id === 'review')
@@ -340,6 +343,8 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
     assert.equal(letter.coverPage, true)
     assert.equal(letter.coverClassification, 'background.marking')
     assert.equal(letter.tableOfContents, true)
+    assert.equal(letter.coverPurpose, 'This letter tells its reader what the work is for.')
+    assert.equal('coverPurpose' in read.artefacts[0], false)
     assert.equal('coverPage' in read.artefacts[0], false)
     assert.equal('tableOfContents' in read.artefacts[0], false)
     assert.equal('documentControl' in read.artefacts[0], false)

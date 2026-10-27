@@ -99,7 +99,7 @@ export function blankLocalDefinitionStructure(id, title) {
 // loadDefinition/findDefinitionProblems both start from.
 // ---------------------------------------------------------------------------
 
-/** Port of `lib/definition.js`'s `buildDefinitionYamlObject`, minus the disk-only `onDiskRaw` fallback (a local-workspace caller always has the full structure already in memory — see this file's header comment) and minus its `keyOf` kebab-case input form (#148): this takes only the camelCase structure, so a raw parsed `definition.yaml` loses `read-only-modules`, `copied-from`, `document-control`, `satisfies-gate`, `cover-page`, `cover-classification`, `table-of-contents` and `diagram-captions` here. */
+/** Port of `lib/definition.js`'s `buildDefinitionYamlObject`, minus the disk-only `onDiskRaw` fallback (a local-workspace caller always has the full structure already in memory — see this file's header comment) and minus its `keyOf` kebab-case input form (#148): this takes only the camelCase structure, so a raw parsed `definition.yaml` loses `read-only-modules`, `copied-from`, `document-control`, `satisfies-gate`, `cover-page`, `cover-classification`, `cover-purpose`, `table-of-contents` and `diagram-captions` here. */
 export function renderDefinitionYaml(structure) {
   const obj = {}
   obj.id = structure.id
@@ -122,6 +122,7 @@ export function renderDefinitionYaml(structure) {
     if (a.diagramCaptions !== undefined) entry['diagram-captions'] = a.diagramCaptions
     if (a.coverPage !== undefined) entry['cover-page'] = a.coverPage
     if (a.coverClassification !== undefined) entry['cover-classification'] = a.coverClassification
+    if (a.coverPurpose !== undefined) entry['cover-purpose'] = a.coverPurpose
     if (a.tableOfContents !== undefined) entry['table-of-contents'] = a.tableOfContents
     if (a.copiedFrom !== undefined) entry['copied-from'] = a.copiedFrom
     return entry
@@ -310,6 +311,8 @@ export async function readLocalDefinitionStructure(handle, definitionId, version
           diagramCaptions: a['diagram-captions'] === false ? undefined : a['diagram-captions'],
           coverPage: a['cover-page'] === false ? undefined : a['cover-page'],
           coverClassification: a['cover-classification'],
+          // #205: no default, so projected whenever set, as there.
+          coverPurpose: a['cover-purpose'],
           tableOfContents: a['table-of-contents'] === false ? undefined : a['table-of-contents'],
           copiedFrom: a['copied-from'],
         }

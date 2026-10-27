@@ -17,6 +17,37 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.10.1-beta — 2026-10-27
+
+Three follow-ups to the design v3 Word output, from rendering a real Solution Architecture
+Document on 0.10.0-beta. v3 is still a draft; v1 and v2 documents render exactly as before.
+
+### Added
+
+- **The classification in the page header of every page** (#207). Every design v3 document now
+  prints its classification centred in the page header, on every page including the cover, the way
+  a protectively marked Word document normally carries it. It comes from the same Classification
+  field as the cover. Leave it blank and the header stays empty. Word fills the header in as it
+  lays the document out; a previewer that doesn't refresh Word fields shows an empty header, never
+  a wrong marking, and the cover always shows the classification. The marking is a style
+  (`Header Classification`) an organisation can restyle in its reference documents. Word's own
+  Sensitivity (Microsoft Purview) label is not set; apply it in Word if your organisation uses one.
+
+### Changed
+
+- **The cover's purpose line is written for the reader** (#205). The cover used to print the
+  Artefact's purpose, which is an instruction to the author ("Describe the complete solution
+  architecture…"). It now prints a separate `cover-purpose`, a statement for whoever reads the
+  document ("This document describes the complete solution architecture…"). All six design v3
+  documents have one. Edit it on the Definitions page, next to the Cover page checkbox. A
+  definition of your own that already uses `cover-page` shows no purpose line on its cover until
+  you give its Artefacts a cover purpose.
+- **The table of contents is filled in when the document is rendered** (#206). It used to hold
+  only "Open this document in Word, or update this field…" until Word rebuilt it. It now lists
+  every level 1–3 heading with its number, linked to the heading, so it reads in any viewer or
+  previewer. Page numbers still come from Word, which refreshes the list when it opens the
+  document.
+
 ## 0.10.0-beta — 2026-10-27
 
 ### Added

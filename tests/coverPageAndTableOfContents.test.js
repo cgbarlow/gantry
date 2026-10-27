@@ -12,12 +12,14 @@ import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { loadAzureDevOpsDefinition, writeAzureDevOpsDefinitionVersion } from '../lib/definitionAzureDevOps.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { docxPart, expectedTableOfContents, headingBookmarks, tableOfContents, wordStyles } from './helpers/wordDocx.js'
 
 // #194 (spec #192, ADR-0052): two opt-in Artefact keys put front matter on a rendered document.
 // `cover-page: true` opens it with a cover (classification, title, version, status, author and the
-// Artefact's purpose) and a page break; `table-of-contents: true` adds a "Table of Contents" heading
+// Artefact's `cover-purpose`) and a page break; `table-of-contents: true` adds a "Table of Contents" heading
 // and a Word TOC field after Document Control. `cover-classification: <module>.<field>` names the
-// Field whose value the cover prints as its classification. Like `document-control: false`
+// Field whose value the cover prints as its classification. `cover-purpose` (#205) is the statement
+// the cover prints for the reader; the author-facing `purpose` never reaches the cover. Like `document-control: false`
 // (ADR-0049) they are honoured in the one compile step every render path goes through, so these
 // tests drive a spread of paths against a scratch copy of recruitment-onboarding v2 whose
 // Appointment Case sets them. The bundled Definition is never touched.
@@ -28,6 +30,7 @@ const FILENAME_LINE = '    filename: "{selection.candidate-name} - Appointment C
 const H1 = '# Platform Engineer: Appointment Case'
 const FIRST_SECTION = '# The appointment'
 const PURPOSE = 'Present the case for appointing this candidate, and the contract and payroll position that releases onboarding.'
+const COVER_PURPOSE = 'This document makes the case for appointing the candidate, and sets out the contract and payroll position.'
 const PAGE_BREAK = '<w:br w:type="page"/>'
 const TOC_FIELD = /<w:fldChar w:fldCharType="begin" w:dirty="true"\/>.*<w:instrText xml:space="preserve"> TOC \\o "1-3" \\h \\z \\u <\/w:instrText>/
 
@@ -81,11 +84,11 @@ function coverOf(markdown) {
   return markdown.slice(0, end)
 }
 
-const FULL_FRONT_MATTER = ['cover-page: true', 'cover-classification: engagement.type', 'table-of-contents: true']
+const FULL_FRONT_MATTER = ['cover-page: true', 'cover-classification: engagement.type', `cover-purpose: "${COVER_PURPOSE}"`, 'table-of-contents: true']
 
 // ── What the compile step produces ──────────────────────────────────────────────────────────────
 
-test('cover-page: true opens the document with a cover — title, version, status, author and purpose — then a page break, then Document Control', async () => {
+test('cover-page: true opens the document with a cover — title, version, status and author — then a page break, then Document Control', async () => {
   await withDefinitions(['cover-page: true'], (definitionsDir) =>
     withInstancesDir((instancesDir) => {
       const markdown = compile(definitionsDir, instancesDir)
@@ -95,7 +98,9 @@ test('cover-page: true opens the document with a cover — title, version, statu
       assert.match(cover, /\*\*Version:\*\* recruitment-onboarding v2 · Appointment/)
       assert.match(cover, /\*\*Status:\*\* Draft/)
       assert.match(cover, /\*\*Author:\*\* c\.barlow/, 'the author is the instance\'s Assignee')
-      assert.ok(cover.includes(PURPOSE), 'the Artefact\'s purpose')
+      // #205: without a cover-purpose the cover has no purpose line, and never falls back to `purpose`.
+      assert.doesNotMatch(cover, /Cover Purpose/, 'no purpose line without cover-purpose')
+      assert.ok(!cover.includes(PURPOSE), 'the author-facing purpose is not on the cover')
       assert.doesNotMatch(cover, /^#/m, 'no heading or section content on the cover')
       assert.doesNotMatch(cover, /!\[|```mermaid/, 'no diagrams on the cover')
       assert.doesNotMatch(cover, /Cover Classification/, 'no classification without cover-classification')
@@ -125,6 +130,28 @@ test('the cover prints the classification from the Field cover-classification na
         writeFileSync(path, blanked)
       }
     )
+  })
+})
+
+// #205: the cover prints the reader-facing `cover-purpose`, one line, after the details. The
+// author-facing `purpose` stays where it is (the User Guide, the Definitions page) and never reaches it.
+test('the cover prints the Artefact\'s cover-purpose as its purpose line, and never its purpose', async () => {
+  await withDefinitions(['cover-page: true', 'cover-purpose: >', '  This document makes the case for appointing the candidate,', '  and sets out the contract and payroll position.'], (definitionsDir) =>
+    withInstancesDir((instancesDir) => {
+      const cover = coverOf(compile(definitionsDir, instancesDir))
+      assert.ok(cover.includes(`::: {custom-style="Cover Purpose"}\n${COVER_PURPOSE}\n:::`), `a one-line Cover Purpose paragraph, got:\n${cover}`)
+      assert.ok(!cover.includes(PURPOSE), 'the author-facing purpose is not on the cover')
+      assertInOrder(cover, ['custom-style="Title"', 'custom-style="Cover Details"', 'custom-style="Cover Purpose"'])
+    })
+  )
+})
+
+test('a cover-purpose without cover-page: true puts nothing on the document', async () => {
+  await withInstancesDir(async (instancesDir) => {
+    const without = compile('definitions', instancesDir)
+    await withDefinitions([`cover-purpose: "${COVER_PURPOSE}"`], (definitionsDir) => {
+      assert.equal(compile(definitionsDir, instancesDir), without)
+    })
   })
 })
 
@@ -210,7 +237,8 @@ test('only the Artefact that sets the keys gets front matter', async () => {
 // ── Every render path compiles through the same step ────────────────────────────────────────────
 
 function assertFrontMatter(markdown) {
-  assertInOrder(markdown, ['::: {custom-style="Cover Classification"}\nPermanent', 'custom-style="Title"', PAGE_BREAK, '## Document Control', 'Table of Contents', 'TOC \\o', H1])
+  assertInOrder(markdown, ['::: {custom-style="Cover Classification"}\nPermanent', 'custom-style="Title"', `::: {custom-style="Cover Purpose"}\n${COVER_PURPOSE}\n:::`, PAGE_BREAK, '## Document Control', 'Table of Contents', 'TOC \\o', H1])
+  assert.ok(!markdown.includes(PURPOSE), 'the author-facing purpose is not printed')
 }
 
 test('`gantry render --dry-run` prints the cover and table of contents', async () => {
@@ -251,7 +279,7 @@ function localWorkspacePayload(structure) {
 
 function structureWithFrontMatter() {
   const structure = definitionVersionProjection(loadDefinition('recruitment-onboarding', { version: 2 }))
-  Object.assign(structure.artefacts.find((a) => a.id === 'appointment-case'), { coverPage: true, coverClassification: 'engagement.type', tableOfContents: true })
+  Object.assign(structure.artefacts.find((a) => a.id === 'appointment-case'), { coverPage: true, coverClassification: 'engagement.type', coverPurpose: COVER_PURPOSE, tableOfContents: true })
   return structure
 }
 
@@ -301,6 +329,7 @@ function assertWordFrontMatter(documentXml) {
   const order = [
     at(/<w:pStyle w:val="CoverClassification" \/><\/w:pPr><w:r><w:t xml:space="preserve">Permanent</, 'the cover classification'),
     at(/<w:pStyle w:val="Title" \/><\/w:pPr><w:r><w:t xml:space="preserve">Platform Engineer</, 'the cover title'),
+    at(/<w:pStyle w:val="CoverPurpose" \/><\/w:pPr><w:r><w:t xml:space="preserve">This document makes the case/, 'the cover purpose'),
     at(/<w:br w:type="page" ?\/>/, 'the page break after the cover'),
     at(/>Document Control</, 'Document Control'),
     at(/<w:pStyle w:val="TOCHeading" \/><\/w:pPr><w:r><w:t xml:space="preserve">Table of Contents</, 'the Table of Contents heading'),
@@ -311,11 +340,28 @@ function assertWordFrontMatter(documentXml) {
   assert.match(documentXml, /<w:instrText xml:space="preserve"> TOC \\o "1-3" \\h \\z \\u <\/w:instrText>/)
 }
 
+// #206: the field's result lists the document's headings, as Word would before page numbers. This
+// Definition's reference document numbers no headings, so neither do the entries.
+function assertTableOfContentsFilledIn(docx) {
+  const documentXml = docxPart(docx, 'word/document.xml')
+  const toc = tableOfContents(documentXml)
+  assert.equal(toc.dirty, true, 'Word still rebuilds it on open')
+  const expected = expectedTableOfContents(documentXml, wordStyles(docxPart(docx, 'word/styles.xml')), docxPart(docx, 'word/numbering.xml'))
+  assert.deepEqual(toc.entries.map(({ style, text }) => ({ style, text })), expected.map(({ style, text }) => ({ style, text })))
+  assert.deepEqual(
+    toc.entries.slice(0, 4).map(({ style, text }) => [style, text]),
+    [['TOC2', 'Document Control'], ['TOC2', 'Review & sign-off'], ['TOC1', 'Platform Engineer: Appointment Case'], ['TOC1', 'The appointment']]
+  )
+  const bookmarks = headingBookmarks(documentXml)
+  for (const [i, entry] of toc.entries.entries()) assert.equal(bookmarks.get(entry.anchor)?.heading, expected[i].heading, entry.text)
+}
+
 test('the native Pandoc render (CLI and server) writes the cover and a self-refreshing TOC field into the .docx', async () => {
   await withDefinitions(FULL_FRONT_MATTER, (definitionsDir) =>
     withInstancesDir((instancesDir) => {
       const result = renderArtefact(SLUG, 'appointment-case', { instancesDir, definitionsDir, commit: COMMIT })
       assertWordFrontMatter(execFileSync('unzip', ['-p', result.docxPath, 'word/document.xml'], { encoding: 'utf8' }))
+      assertTableOfContentsFilledIn(result.docxPath)
     })
   )
 })
@@ -326,15 +372,29 @@ test('the browser\'s pandoc-wasm writes the same cover and self-refreshing TOC f
   const { convert } = await import(new URL('../node_modules/pandoc-wasm/src/index.node.js', import.meta.url))
   // The inline Definition ships templates only, so give it the reference document v2 itself uses.
   const files = { 'reference.docx': new Blob([readFileSync('definitions/recruitment-onboarding/2/templates/reference.docx')]) }
-  const result = await convert({ from: 'markdown', to: 'docx', 'output-file': 'output.docx', 'reference-doc': 'reference.docx' }, compiled.markdown, files)
+  // What the browser converts is the compile's `docxMarkdown`, the Word conversion's Markdown.
+  const result = await convert({ from: 'markdown', to: 'docx', 'output-file': 'output.docx', 'reference-doc': 'reference.docx' }, compiled.docxMarkdown, files)
   const scratch = mkdtempSync(join(tmpdir(), 'gantry-front-matter-wasm-'))
   try {
     const docxPath = join(scratch, 'output.docx')
     writeFileSync(docxPath, new Uint8Array(await result.files['output.docx'].arrayBuffer()))
     assertWordFrontMatter(execFileSync('unzip', ['-p', docxPath, 'word/document.xml'], { encoding: 'utf8' }))
+    assertTableOfContentsFilledIn(docxPath)
   } finally {
     rmSync(scratch, { recursive: true, force: true })
   }
+})
+
+test('with no heading to list, the table of contents keeps its one-line placeholder (#206)', async () => {
+  await withDefinitions(['document-control: false', 'table-of-contents: true'], (definitionsDir) =>
+    withInstancesDir((instancesDir) => {
+      writeFileSync(join(definitionsDir, 'recruitment-onboarding', '2', 'templates', 'appointment-case.md.tmpl'), 'A document with no headings at all.\n\n```markdown\n# Not a heading: it is code\n```\n')
+      const { docxMarkdown } = renderArtefact(SLUG, 'appointment-case', { dryRun: true, instancesDir, definitionsDir, commit: COMMIT })
+      assert.match(docxMarkdown, TOC_FIELD)
+      assert.ok(docxMarkdown.includes('<w:r><w:t>Open this document in Word, or update this field, to build the table of contents.</w:t></w:r>'))
+      assert.doesNotMatch(docxMarkdown, /w:val="TOC1"/)
+    })
+  )
 })
 
 // ── Validation ──────────────────────────────────────────────────────────────────────────────────
@@ -429,6 +489,40 @@ for (const { name, artefact, value, message } of CLASSIFICATION_CASES) {
   })
 }
 
+// #205: `cover-purpose` is the statement the cover prints, so it must be text with something in it.
+const COVER_PURPOSE_CASES = [
+  { name: 'an empty string', value: '', message: 'Artefact "appointment-case" sets "cover-purpose" to "" — it must be a statement for the cover to print' },
+  { name: 'only whitespace', value: '   ', message: 'Artefact "appointment-case" sets "cover-purpose" to "   " — it must be a statement for the cover to print' },
+  { name: 'a number', value: 42, message: 'Artefact "appointment-case" sets "cover-purpose" to 42 — it must be a statement for the cover to print' },
+  { name: 'a boolean', value: true, message: 'Artefact "appointment-case" sets "cover-purpose" to true — it must be a statement for the cover to print' },
+]
+
+for (const { name, value, message } of COVER_PURPOSE_CASES) {
+  test(`a cover-purpose that is ${name} is an invalid-cover-purpose problem everywhere, but the Definition still loads`, async () => {
+    const structure = definitionVersionProjection(loadDefinition('recruitment-onboarding', { version: 2 }))
+    structure.artefacts.find((a) => a.id === 'appointment-case').coverPurpose = value
+    for (const problems of [findDefinitionProblemsInStructure(structure), findLocalDefinitionProblems(structure)]) {
+      assert.deepEqual(problems.map((p) => [p.type, p.message]), [['invalid-cover-purpose', message]])
+    }
+    await withDefinitions(['cover-page: true', `cover-purpose: ${JSON.stringify(value)}`], (definitionsDir) =>
+      withInstancesDir((instancesDir) => {
+        const problems = findDefinitionProblems('recruitment-onboarding', { definitionsDir, version: 2 })
+        assert.deepEqual(problems.map((p) => [p.type, p.message]), [['invalid-cover-purpose', message]])
+        const loaded = loadDefinition('recruitment-onboarding', { definitionsDir, version: 2 })
+        assert.deepEqual(loaded.artefacts.find((a) => a.id === 'appointment-case').coverPurpose, value, 'authoring-only: carried through as it is')
+        assert.doesNotMatch(coverOf(compile(definitionsDir, instancesDir)), /Cover Purpose/, 'a bad value prints no purpose line')
+      })
+    )
+  })
+}
+
+test('a cover-purpose that is a statement is not a problem', () => {
+  const structure = definitionVersionProjection(loadDefinition('recruitment-onboarding', { version: 2 }))
+  structure.artefacts.find((a) => a.id === 'appointment-case').coverPurpose = COVER_PURPOSE
+  assert.deepEqual(findDefinitionProblemsInStructure(structure), [])
+  assert.deepEqual(findLocalDefinitionProblems(structure), [])
+})
+
 test('a cover-classification on an optional (?) requirement or a whole required module is accepted', () => {
   const structure = definitionVersionProjection(loadDefinition('recruitment-onboarding', { version: 2 }))
   const brief = structure.artefacts.find((a) => a.id === 'requisition-brief')
@@ -440,16 +534,16 @@ test('a cover-classification on an optional (?) requirement or a whole required 
   assert.deepEqual(findLocalDefinitionProblems(structure), [])
 })
 
-test('saving a draft refuses a non-boolean cover-page or a bad cover-classification, and keeps valid front matter', async () => {
+test('saving a draft refuses a non-boolean cover-page, a bad cover-classification or an empty cover-purpose, and keeps valid front matter', async () => {
   await withDefinitions([], (definitionsDir) => {
     const structure = definitionVersionProjection(loadDefinition('recruitment-onboarding', { definitionsDir, version: 2 }))
     const appointmentCase = structure.artefacts.find((a) => a.id === 'appointment-case')
 
-    Object.assign(appointmentCase, { coverPage: 'yes', tableOfContents: true, coverClassification: 'role.summary' })
+    Object.assign(appointmentCase, { coverPage: 'yes', tableOfContents: true, coverClassification: 'role.summary', coverPurpose: ' ' })
     const refused = writeDefinitionVersion('recruitment-onboarding', 2, structure, { definitionsDir })
-    assert.deepEqual(refused.problems.map((p) => p.type).sort(), ['invalid-cover-classification', 'invalid-cover-page'])
+    assert.deepEqual(refused.problems.map((p) => p.type).sort(), ['invalid-cover-classification', 'invalid-cover-page', 'invalid-cover-purpose'])
 
-    Object.assign(appointmentCase, { coverPage: true, coverClassification: 'engagement.type' })
+    Object.assign(appointmentCase, { coverPage: true, coverClassification: 'engagement.type', coverPurpose: COVER_PURPOSE })
     const saved = writeDefinitionVersion('recruitment-onboarding', 2, structure, { definitionsDir })
     assert.equal(saved.problems, undefined, JSON.stringify(saved.problems))
     const reloaded = loadDefinition('recruitment-onboarding', { definitionsDir, version: 2 })
@@ -457,7 +551,9 @@ test('saving a draft refuses a non-boolean cover-page or a bad cover-classificat
     assert.equal(reloadedCase.coverPage, true)
     assert.equal(reloadedCase.tableOfContents, true)
     assert.equal(reloadedCase.coverClassification, 'engagement.type')
+    assert.equal(reloadedCase.coverPurpose, COVER_PURPOSE)
     assert.equal(reloaded.artefacts.find((a) => a.id === 'offer-pack').coverPage, undefined)
+    assert.equal(reloaded.artefacts.find((a) => a.id === 'offer-pack').coverPurpose, undefined)
   }, (yaml) => yaml.replace(/^status: published$/m, 'status: draft'))
 })
 

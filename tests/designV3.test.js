@@ -356,7 +356,9 @@ describe('design decisions are an AD | Decision | ADR table, without assuming AR
     assert.match(section, /\| AD01 \|/)
 
     const { documentXml } = renderWord('kiwi-cover-mutual', 'sad')
-    const after = documentXml.slice(documentXml.indexOf('>Design decisions<'))
+    // The heading, not its entry in the table of contents (#206).
+    const heading = /<w:pStyle w:val="Heading2" ?\/><\/w:pPr><w:r><w:t xml:space="preserve">Design decisions</.exec(documentXml)
+    const after = documentXml.slice(heading.index + heading[0].length)
     const nextHeading = after.indexOf('w:pStyle w:val="Heading2"')
     const table = after.indexOf('<w:tbl>')
     assert.ok(table > 0 && table < nextHeading, 'a Word table follows the Design decisions heading')
@@ -712,6 +714,24 @@ describe('v3 documents open with a cover page, a classification and a table of c
     }
   })
 
+  // #205: the cover's purpose line is a statement for the reader ("This document describes …"),
+  // not the author-facing instruction in `purpose` ("Describe …"), which stays as it was.
+  test('every v3 Artefact with a cover has a cover-purpose phrased as a statement, distinct from its purpose', () => {
+    for (const artefact of v3().artefacts.filter((a) => a.coverPage === true)) {
+      assert.equal(typeof artefact.coverPurpose, 'string', artefact.id)
+      const statement = artefact.coverPurpose.replace(/\s+/g, ' ').trim()
+      assert.match(statement, /^This document [a-z]+s\b[^.]*\.$/, `${artefact.id}: one sentence opening "This document <verb>s"`)
+      assert.notEqual(statement, artefact.purpose.replace(/\s+/g, ' ').trim(), artefact.id)
+      assert.doesNotMatch(artefact.purpose, /^This document/, `${artefact.id}: purpose is still the author-facing instruction`)
+    }
+  })
+
+  test('the v3 CHANGELOG records the cover purpose under its own #205 heading', () => {
+    const changelog = loadDefinitionChangelog(DEFINITION, VERSION)
+    const v3Section = changelog.slice(0, changelog.indexOf('\n## v2'))
+    assert.match(v3Section, /^### Cover purpose \(#205\)$/m)
+  })
+
   test('no v3 template emits the instance slug in a heading', () => {
     const templates = join('definitions', DEFINITION, String(VERSION), 'templates')
     for (const file of readdirSync(templates).filter((f) => f.endsWith('.md.tmpl'))) {
@@ -757,7 +777,9 @@ describe('v3 documents open with a cover page, a classification and a table of c
       assert.match(details, /\*\*Version:\*\* design v3 · /)
       assert.match(details, /\*\*Status:\*\* Draft/)
       assert.match(details, /\*\*Author:\*\* c\.barlow/)
-      assert.equal(coverParagraph(cover, 'Cover Purpose'), artefact.purpose.replace(/\s+/g, ' ').trim())
+      // #205: the cover prints the reader-facing cover-purpose, never the author-facing purpose.
+      assert.equal(coverParagraph(cover, 'Cover Purpose'), artefact.coverPurpose.replace(/\s+/g, ' ').trim())
+      assert.ok(!cover.includes(artefact.purpose.replace(/\s+/g, ' ').trim()), 'the author-facing purpose is not on the cover')
 
       // Nothing from the body: no heading, no diagram, no image.
       assert.deepEqual(headings(cover), [])
@@ -1227,7 +1249,7 @@ describe('v3 Word styles: numbered headings, keep-with-next, one table style, ro
     assert.ok(heading, 'the heading reaches Word as its text, without Markdown syntax')
     assert.equal(heading.style, 'Heading3')
     assert.equal(heading.number, null)
-    const paragraph = bodyParagraphs(documentXml).find((p) => p.text === 'Data flows and CIS')
+    const paragraph = bodyParagraphs(documentXml).find((p) => p.text === 'Data flows and CIS' && p.style === 'Heading3')
     assert.match(paragraph.xml, /<w:b\/>[\s\S]*?flows/, 'bold stays bold')
     assert.match(paragraph.xml, /<w:bookmarkStart w:id="\d+" w:name="authored-flows"\/>/)
     assert.match(documentXml, /<w:hyperlink w:anchor="authored-flows">/, 'and the link to it lands on it')

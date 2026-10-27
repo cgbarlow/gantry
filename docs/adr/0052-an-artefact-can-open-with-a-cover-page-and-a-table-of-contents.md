@@ -167,3 +167,218 @@ change on re-render because Gantry started adding pages to it.
   same reason ADR-0049's switch is per Artefact.
 
 Status: accepted.
+
+## Amendment (#205): the cover prints a cover purpose, not `purpose`
+
+Decision 2's last bullet, "the Artefact's `purpose`", is replaced. The
+cover's purpose line now comes from a new optional Artefact key,
+`cover-purpose`.
+
+**Why.** An Artefact's `purpose` is written for the author (ADR-0022): the
+User Guide and the Definitions page show it as an instruction, e.g. "Describe
+the complete solution architecture …". Printed on a `design` v3 cover, it read
+as an instruction to whoever picked the document up rather than a statement of
+what the document is. One string can't serve both readers, so there are now
+two.
+
+**Decision.**
+
+- `cover-purpose` is a string: the statement the cover prints under Author,
+  written for the reader, e.g. "This document describes the complete solution
+  architecture …". Its whitespace is collapsed to one line, like every other
+  cover value.
+- The cover prints `cover-purpose` when it is set, and **never falls back to
+  `purpose`**. With `cover-page: true` and no `cover-purpose`, the cover has
+  no purpose line. A fallback was rejected because it would put the
+  instruction back on the cover of every Definition that hasn't written a
+  cover purpose yet, which is the problem this fixes.
+- `purpose` is unchanged. It stays the author-facing text the User Guide and
+  the Definitions page show, and the render no longer reads it.
+- Validation follows decision 6. `cover-purpose` must be a string with
+  something in it. A blank, whitespace-only or non-string value is an
+  `invalid-cover-purpose` problem, authoring-only like the other front-matter
+  problems: it is reported by `gantry validate`, marked on the Definitions
+  page and refused at Save and Publish, but the Definition still loads, and a
+  bad value prints no purpose line. The rule lives in
+  `web/lib/artefactFrontMatter.js` with the others, shared by
+  `lib/definition.js` and the Local Workspace validator.
+- Like the other keys (decision 7), it survives save, new draft, clone,
+  publish, promote, each Provider's loader and the Library cache. It is a
+  **Cover purpose** text box beside the Cover page checkbox on the Definitions
+  page and in the Local Workspace definition editor. Emptying the box removes
+  the key. It is shown read-only on a published version.
+- It has no effect without `cover-page: true`, as `cover-classification` has
+  none.
+
+**Consequences.** `design` v3, still a draft, sets a `cover-purpose` on all
+six Artefacts, each a "This document …" statement keeping its `purpose`'s
+substance. `design` v1 and v2 and `recruitment-onboarding` set no
+`cover-page`, so they render exactly as before. A Definition outside this repo
+that already turned on `cover-page` loses the purpose line from its cover
+until it adds a `cover-purpose`.
+
+## Amendment (#206): the table of contents is filled in when the document is rendered
+
+Decision 5 left the TOC field's result as a one-line placeholder, for Word to
+replace when it opens the document. Any viewer that doesn't refresh fields
+(previews, web viewers, other editors) showed only that sentence, so the
+document read as if it had no table of contents.
+
+1. **The field's result is filled in.** The compile step writes the entries
+   Word itself builds when it updates the field, less the page numbers: one
+   paragraph per heading at levels 1 to 3, in document order, in Word's
+   `TOC 1` to `TOC 3` styles. Each entry is an internal link
+   (`w:hyperlink w:anchor`) to its heading's bookmark. The field opens in the
+   first entry's paragraph and closes in the last one's, as in a table of
+   contents Word has built. It is still marked dirty, so desktop Word still
+   rebuilds it, with page numbers, on open. The placeholder is used only when
+   there is no heading to list.
+
+2. **It lists what Pandoc will write, under the names Pandoc will give.**
+   The entries are built from the Word conversion's Markdown (`docxMarkdown`),
+   after the `.unnumbered` rewrite (ADR-0056). A Pandoc heading's bookmark is
+   its `{#id}`, or else Pandoc's automatic identifier (with Pandoc's `smart`
+   punctuation applied first), made unique the way Pandoc makes it (`-1`,
+   `-2`, …). An identifier longer than 40 characters, or one that doesn't
+   start with a letter, becomes Pandoc's `X` plus SHA-1 name. An
+   `.unnumbered` heading is listed with the text and bookmark its raw
+   OpenXML paragraph carries. Heading-like lines in fenced code or HTML
+   comments, or that only continue a paragraph, aren't headings to Pandoc
+   and aren't listed. Setext headings are listed. Headings inside list items
+   or block quotes aren't listed, though Word would list them. Templates and
+   Fields don't put headings there, and Word adds them when it updates the
+   field.
+
+3. **The numbers come from the reference document.** The compile step reads
+   the reference document's `word/styles.xml` and `word/numbering.xml`: the
+   same file the native render passes as `--reference-doc` and every prepare
+   route hands the browser. Pandoc copies both parts into the `.docx`
+   unchanged, so they decide the numbers beside the headings. Heading styles
+   are found by their built-in names (`heading 1`, …) through `basedOn`, and
+   the attached list's level gives the number format, start (including a
+   `startOverride`), level text, legal numbering and the separator after the
+   number. Headings are counted in document order, as Word counts them. An
+   `.unnumbered` heading (numId 0) is listed without a number and doesn't
+   advance the count. With no reference document, or one that numbers no
+   heading style, entries have no numbers. So design v3 shows `1`, `1.1`,
+   `1.1.1` (#197), and an organisation's house style shows its own.
+
+4. **Page numbers stay with the word processor.** A page number depends on
+   page layout (fonts, page size, margins, keep-with-next, images and how
+   every paragraph wraps), and only a layout engine knows it. Gantry has
+   none, and guessing would print wrong numbers in a document that is meant
+   to be reviewed and signed off. Word supplies them when it updates the
+   field.
+
+5. **ADR-0052's decisions stand.** The entries are raw OpenXML in the
+   compiled Markdown, built in `compileArtefact`, so the native Pandoc
+   render, the browser's pandoc-wasm, `gantry render` and every Provider get
+   them with no change to Pandoc's arguments and no post-processing of the
+   `.docx`. Only the Word conversion's Markdown is filled in. The exported
+   `.md` keeps the placeholder field, because its anchors for `.unnumbered`
+   headings exist only in the Word conversion. An Artefact without
+   `table-of-contents: true` compiles exactly as before
+   (`tests/frontMatterOffBaseline.test.js`).
+
+Tests read the field's result from `.docx` files produced by native Pandoc
+and pandoc-wasm (in Node, and in a real browser). They check it against the
+headings and numbers the document itself shows, and check that each link
+resolves to a bookmark on its own heading. LibreOffice isn't available in the
+test environment and isn't added, so no test renders the document's pages.
+
+## Amendment (#207): the classification in the page header
+
+A design v3 document showed its classification once, on the cover. A
+protective marking is normally carried in the page header of every page, as
+Word does when a document is marked, so a reviewer reading page 12 can see
+how the document must be handled. #207 adds that to design v3. The cover keeps
+its classification line, and the footer is unchanged.
+
+### Decision
+
+1. **The header holds a field, not the value.** Pandoc copies a reference
+   document's headers into the output byte for byte. That was checked on both
+   render paths: the header parts of a design v3 SAD rendered with native
+   Pandoc 3.1.3 and with pandoc-wasm's Pandoc 3.10 are identical to the
+   reference document's. Raw OpenXML in the compiled Markdown reaches only the
+   body, and it can't add a relationship to a new header part (ADR-0056). So a
+   header can't carry a different literal value per document. Instead, each
+   header holds a `STYLEREF "Cover Classification"` field. It prints the text
+   of the cover's Cover Classification paragraph, the one this ADR's cover
+   already writes. Word recalculates a STYLEREF field in a header each time it
+   lays out the pages, as it does a page number, so it needs no "update
+   fields" prompt.
+
+2. **design v3's reference documents carry it.** The field is in the first
+   paragraph of each of the three headers the documents define: default,
+   first page and even pages. That paragraph is in a new `Header
+   Classification` style, based on `Header`: centred, 8pt, grey (`595959`).
+   Its other content, the coloured bars, the logo and Word's empty
+   label-marking shapes, is unchanged. All seven documents share the same
+   header parts and the same `styles.xml`. v3's section doesn't switch on a
+   different first page or odd and even pages, so Word uses the default
+   header on every page, the cover included. The other two headers carry the
+   field so that an organisation that switches them on keeps the marking.
+   design v1 and v2 are unchanged.
+
+3. **The field's stored result is empty, and can't be made correct per
+   document.** A Word field stores its last result next to its code, and a
+   viewer that doesn't update fields shows that stored result. Here the
+   stored result is part of the header, which Pandoc copies unchanged, so it
+   is the same in every document. It can't be made to hold this document's
+   classification without post-processing the `.docx`, which this ADR rules
+   out. It is left empty, so a viewer that doesn't update fields shows an
+   empty header, never another document's marking. The cover always shows the
+   classification. Word, and any viewer that updates fields, shows it on
+   every page.
+
+4. **A blank classification still gives the field a paragraph to read.** With
+   no paragraph in the `Cover Classification` style, Word prints "Error! No
+   text of specified style in document." in place of a STYLEREF field. So,
+   for the Word conversion only, an Artefact with `cover-page: true` whose
+   `cover-classification` Field is blank opens its cover with a Cover
+   Classification paragraph holding a single non-breaking space. The field
+   finds it and prints nothing visible. The cover has an empty line where the
+   classification would be. The exported `.md` still leaves the
+   classification out, as the cover's own rule (decision 2 above) says.
+   This is an engine rule, not a design v3 one: any Definition's cover with a
+   blank classification gets the empty line in Word, whatever its headers
+   hold. design v1 and v2 and recruitment-onboarding have no cover, so their
+   documents are unchanged (`tests/frontMatterOffBaseline.test.js`).
+
+### Consequences
+
+- A Definition that uses design v3's reference documents for an Artefact
+  without a cover, or without a `cover-classification`, gets Word's error
+  text in the header, because nothing in the document has the style. It
+  should delete the field from its reference document's headers.
+- The tests read the `.docx` XML from both render paths: every page type's
+  header has the field, in the Header Classification style, with an empty
+  stored result and no other visible text; the body opens with the Cover
+  Classification paragraph. Word's own layout isn't run in the test suite, so
+  how Word prints the field, including that a non-breaking space prints as
+  nothing, rests on Word's documented STYLEREF behaviour.
+- An organisation restyles the marking by changing the `Header
+  Classification` style, and moves or removes it by editing the headers in
+  its own reference document. The same field can be added to a footer.
+
+### Alternatives considered
+
+- **Writing the value into the header after Pandoc runs.** Rejected:
+  post-processing the `.docx` in Node and in the browser, which this ADR
+  rules out.
+- **A `DOCPROPERTY` field, or a content control bound to a document
+  property, set from Pandoc metadata.** Rejected. The stored result is still
+  the reference document's, so it doesn't fix viewers that don't update
+  fields. Word doesn't recalculate a `DOCPROPERTY` field in a header on its
+  own, and the value would need a metadata block in the compiled Markdown.
+- **An `IF` field that hides Word's error text when there is no
+  classification.** Rejected. The error text is in Word's display language,
+  so a comparison against the English text fails in any other language.
+- **Microsoft Purview sensitivity labels** (`MSIP_Label_*` custom document
+  properties). Deferred. A label needs the organisation's tenant-specific
+  label IDs, and a wrongly stamped label is a compliance issue. An
+  organisation whose labels add their own header marking will see both, and
+  should remove one: delete the field, or turn off the label's marking.
+
+Status: accepted.

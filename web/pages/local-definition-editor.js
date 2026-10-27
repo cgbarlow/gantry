@@ -503,6 +503,14 @@ function ArtefactEditor({ handle, definitionId, version, artefact, modules, gate
         ${artefact.coverClassification !== undefined && !classificationOptions.some((o) => o.value === artefact.coverClassification) ? html`<option value=${String(artefact.coverClassification)}>${String(artefact.coverClassification)} (not a field this artefact can print)</option>` : null}
         ${classificationOptions.map((o) => html`<option key=${o.value} value=${o.value}>${o.label}</option>`)}
       </select>
+      <label class="field-label">Cover purpose</label>
+      <textarea class="wizard-input defn-cover-purpose" rows="2" aria-label="Cover purpose" placeholder="e.g. This document describes …" value=${artefact.coverPurpose === undefined ? '' : String(artefact.coverPurpose)} readOnly=${readOnly} onInput=${(e) => {
+        // #205 (ADR-0052): the statement the cover prints — empty removes the key, so no purpose line.
+        const next = { ...artefact }
+        if (e.currentTarget.value) next.coverPurpose = e.currentTarget.value
+        else delete next.coverPurpose
+        onChange(next)
+      }}></textarea>
       <label class="field-label defn-table-of-contents">
         <input type="checkbox" checked=${artefact.tableOfContents === true} disabled=${readOnly} onChange=${(e) => {
           const next = { ...artefact }

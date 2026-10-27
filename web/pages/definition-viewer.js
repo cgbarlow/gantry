@@ -2197,6 +2197,8 @@ export function DefinitionViewerPage() {
     // one this artefact names, shown where it is chosen as the filename problems are above.
     const classificationOptions = coverClassificationOptions(d.modules, a)
     const classificationProblems = validationProblems.filter((p) => p.type === 'invalid-cover-classification' && problemTarget(p)?.type === 'artefact' && problemTarget(p)?.id === a.id)
+    // #205: the statement the cover prints, and any problem with it, beside the classification.
+    const coverPurposeProblems = validationProblems.filter((p) => p.type === 'invalid-cover-purpose' && problemTarget(p)?.type === 'artefact' && problemTarget(p)?.id === a.id)
     const gates = stageGates(d)
     return html`
       <div class="defn-focus">
@@ -2256,6 +2258,14 @@ export function DefinitionViewerPage() {
                   </select>
                   ${classificationProblems.length ? html`<ul class="defn-filename-problems">${classificationProblems.map((p) => html`<li class="inline-error">${p.message}</li>`)}</ul>` : null}
                 </div>
+                <label class="field-label">Cover purpose</label>
+                <div>
+                  <textarea class="wizard-input defn-cover-purpose" rows="2" aria-label="Cover purpose" placeholder="e.g. This document describes …" value=${a.coverPurpose === undefined ? '' : String(a.coverPurpose)} onInput=${(e) => updateDraft((dd) => {
+                    if (e.currentTarget.value) dd.artefacts[ai].coverPurpose = e.currentTarget.value
+                    else delete dd.artefacts[ai].coverPurpose
+                  })}></textarea>
+                  ${coverPurposeProblems.length ? html`<ul class="defn-filename-problems">${coverPurposeProblems.map((p) => html`<li class="inline-error">${p.message}</li>`)}</ul>` : null}
+                </div>
                 <label class="field-label">Table of contents</label>
                 ${tableOfContentsCheckbox(a, (checked) => updateDraft((dd) => {
                   if (checked) dd.artefacts[ai].tableOfContents = true
@@ -2279,6 +2289,7 @@ export function DefinitionViewerPage() {
               <p><span class="field-label">Counts toward gate</span> ${satisfiesGateCheckbox(a, null)}</p>
               <p><span class="field-label">Cover page</span> ${coverPageCheckbox(a, null)}</p>
               ${a.coverClassification !== undefined ? html`<p><span class="field-label">Cover classification</span> <code>${String(a.coverClassification)}</code></p>` : null}
+              ${a.coverPurpose !== undefined ? html`<p><span class="field-label">Cover purpose</span> ${String(a.coverPurpose)}</p>` : null}
               <p><span class="field-label">Table of contents</span> ${tableOfContentsCheckbox(a, null)}</p>
               <p><span class="field-label">Diagram captions</span> ${diagramCaptionsCheckbox(a, null)}</p>
             `}

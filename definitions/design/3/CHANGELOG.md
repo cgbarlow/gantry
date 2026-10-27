@@ -354,6 +354,59 @@ and the budgets derived from it:
 | `as-built-notes.operational-notes` | 151 | — | 160 | 80 | 30 |
 | `as-built-notes.handover-confirmation` | 105 | — | 110 | 55 | 20 |
 
+### Cover purpose (#205)
+
+The cover printed each Artefact's `purpose`, which is written as an instruction to the author
+("Describe the complete solution architecture …") for the User Guide and the Definitions page.
+On a cover it read as an instruction rather than as a statement of what the document is.
+
+- **Every Artefact sets a `cover-purpose`.** It is the statement the cover now prints under Author,
+  written for the reader, e.g. "This document describes the complete solution architecture and its
+  requirements, security, dependencies and support handover readiness for build." Each keeps the
+  substance of the Artefact's `purpose`.
+- **`purpose` is unchanged.** It is still the author-facing text the User Guide and the
+  Definitions page show. The cover no longer prints it (ADR-0052, amended by #205).
+
+### Table of contents pre-filled (#206)
+
+- **The table of contents reads in any viewer.** It used to hold one sentence, "Open this document
+  in Word, or update this field, to build the table of contents.", until Word rebuilt it, so a
+  preview, a web viewer or another editor showed no contents at all. Every v3 document now has
+  its contents filled in when it is rendered: Document Control and Review & sign-off, then every
+  section at levels 1 to 3 with the number the document shows beside it (1, 1.1, 1.1.1), each a
+  link to its heading. See the ADR-0052 amendment.
+- **No page numbers until Word updates it.** Page numbers depend on where the pages break, which
+  only a word processor knows. Word still rebuilds the list, with page numbers, when it opens
+  the document.
+- **Your numbering, if you change it.** The numbers are read from the Artefact's reference Word
+  document, so a house style that numbers headings differently, or not at all, gets matching
+  entries. No v3 file changes: this is done in the render, for every Definition that sets
+  `table-of-contents: true`. v1 and v2 don't set it and render exactly as before.
+
+### Classification in the page header (#207)
+
+A reviewer reading page 12 couldn't see how the document must be handled: the classification was
+only on the cover. Protective marking is normally carried in the page header of every page.
+
+- **Every page's header shows the classification.** The classification the cover shows (from
+  `document-handling.classification`) is printed centred, in small grey type, in the page header
+  of every page of every v3 document, the cover included. The cover keeps its classification line,
+  and the footer is unchanged.
+- **It is a Word field in the reference documents.** All seven reference documents have a
+  `STYLEREF "Cover Classification"` field in their default, first-page and even-page headers, in a
+  new `Header Classification` style (based on `Header`: centred, 8pt, grey `595959`). Word fills it
+  from the cover's classification line as it lays out the pages. They still share one set of
+  styles, and now one set of headers. An organisation restyles the marking by changing that style.
+- **Viewers that don't update fields show an empty header.** The field's stored value comes from
+  the reference document, which is the same for every document, so it is left empty rather than
+  showing another document's marking. Word shows the classification; the cover always does.
+- **No classification, nothing in the header.** With the Classification blank, the Word document's
+  cover opens with an empty line in the `Cover Classification` style, so the header field reads
+  nothing instead of Word's "Error! No text of specified style in document." The exported `.md`
+  still leaves the classification out.
+- **Not included: Microsoft Purview sensitivity labels.** Stamping a label needs your tenant's own
+  label IDs, and a wrong label is a compliance issue (ADR-0052, amendment for #207).
+
 ## v2
 
 Layout revision of v1. Every artefact's `requires` list re-sequenced to the reading

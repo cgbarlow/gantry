@@ -119,6 +119,9 @@ artefacts:
   # so no gate waits on it), and the instance's display name as the title, so
   # no template opens with its own `# <slug>: <title>` line any more: section 1
   # follows the table of contents directly.
+  # #205: the cover prints each Artefact's `cover-purpose`, a statement for
+  # the reader ("This document describes ..."). `purpose` stays the
+  # instruction to the author that the User Guide and Definitions page show.
   - id: soap
     title: Solution on a Page
     purpose: >
@@ -130,6 +133,9 @@ artefacts:
     diagram-captions: true
     cover-page: true
     cover-classification: document-handling.classification
+    cover-purpose: >
+      This document summarises the initiative's context, solution, team and
+      estimates for the business case decision.
     table-of-contents: true
     # Order follows the reference SOAP (SAMPLE SOAP - Mobile Phone Assistance):
     # Background and context -> Solution definition (Process flow, High level
@@ -182,6 +188,9 @@ artefacts:
     diagram-captions: true
     cover-page: true
     cover-classification: document-handling.classification
+    cover-purpose: >
+      This document gives a fuller summary of the initiative, with its detailed
+      scope, dependencies, sequencing, dates and open questions.
     table-of-contents: true
     # Order follows the JEDI Full SOAP reference document exactly: the
     # front-matter metadata block, then Introduction, Problem statement,
@@ -249,6 +258,9 @@ artefacts:
     diagram-captions: true
     cover-page: true
     cover-classification: document-handling.classification
+    cover-purpose: >
+      This document presents the proposed solution, its alternatives, risks and
+      open questions for approval before detailed design.
     table-of-contents: true
     # Order follows the TAC HLD reference template: cover block -> Problem
     # Statement (Current state, Desired future state, In scope / out of scope,
@@ -340,6 +352,10 @@ artefacts:
     diagram-captions: true
     cover-page: true
     cover-classification: document-handling.classification
+    cover-purpose: >
+      This document describes the complete solution architecture and its
+      requirements, security, dependencies and support handover readiness for
+      build.
     table-of-contents: true
     # Order follows SAD Template.docx: Introduction / Overview -> Business
     # Architecture View -> Solution Overview (+ Dependencies) -> High Level
@@ -470,6 +486,9 @@ artefacts:
     diagram-captions: true
     cover-page: true
     cover-classification: document-handling.classification
+    cover-purpose: >
+      This document describes the solution's design and operational readiness
+      for the teams that will support it after build.
     table-of-contents: true
     # Order follows the FV Help Tool SSAD reference: Solution Products ->
     # Architectural Risks -> Introduction (Purpose, Scope, Content Standards) ->
@@ -554,6 +573,9 @@ artefacts:
     diagram-captions: true
     cover-page: true
     cover-classification: document-handling.classification
+    cover-purpose: >
+      This document records what was built and the final handover information
+      needed for operational use.
     table-of-contents: true
     # Order mirrors the approved ATLAS reference design: Terms & Definitions ->
     # Introduction -> As-built design (Overview, Architecture Decisions, flows,
