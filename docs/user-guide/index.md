@@ -224,6 +224,24 @@ Type only the title. Gantry adds the "Diagram N." prefix itself, so it would app
 
 For a Definition author: `diagram-captions` takes only `true` or `false`. Any other value is reported by `gantry validate` and when you save or publish the Definition, and the artefact renders without numbered captions until it is fixed. On the Definitions page, the **Diagram captions** checkbox on each artefact shows the setting, and on a draft you can tick or untick it there instead of editing `definition.yaml`.
 
+### Laying out a diagram and labelling its state
+
+design v3's field guidance asks for each diagram in a set order, so a reader is never left to work out what a picture means:
+
+1. one introductory sentence ("The following diagram presents…")
+2. the diagram
+3. its caption
+4. a paragraph interpreting it ("The diagram shows how…")
+5. the detail, such as goals and then layered controls as bullets.
+
+It also sets three labels for saying what state something is in. They are conventions you type, not fields, and Gantry doesn't check them:
+
+- **Architecture state.** A diagram or section that isn't the enduring design says so in its caption and opening sentence: `current`, `interim`, `target` or `enduring`. For example, the caption `Publishing flow (interim)` renders as "Diagram 3. Publishing flow (interim)".
+- **Capability status.** The logical components list and the interfaces table give each entry a Status: `existing`, `implemented`, `in delivery`, `planned` or `future`. Don't present something still to be built as if it runs today.
+- **Interim ownership.** Where an owner isn't confirmed yet, put `(interim)` after their name: in the support contacts, the risk register, open issues, and outcomes and deliverables.
+
+The bundled `kiwi-cover-mutual` example shows all three. Its security architecture is a captioned Mermaid diagram labelled `(interim)` and laid out in this order.
+
 ## Artefacts & Rendering
 
 An **Artefact** is a rendered output such as a summary, design document or handover document. Artefacts are generated from module data on demand and are never the authored source of truth.
@@ -484,7 +502,7 @@ Reference: *SAD Template* (98 headings). All fields are authored at the Detailed
 | `H2` Solution Standards | Architecture › Applicable standards `architecture.standards` *(list)* → `## Applicable standards` | One list covers solution and architectural standards. |
 | `H2` Architectural Standards | Architecture › Applicable standards | As above. |
 | `H1` Open Issues | Risks › Open issues `risks.open-issues` *(carried from HLD)* → `# Open issues` | Version 2 gave it the reference's own top-level position. It is followed by a gantry-only `# Risks` / `## Risk register` (`risks.risk-register`) — the register carried from the HLD, which the reference has no chapter for. |
-| `H1` Logical Components View | Architecture › Logical components `architecture.logical-components` *(list)* → `# Logical components view` | One list of components, each marked new or existing. The four viewpoints below are a Word navigation device, not separate content. |
+| `H1` Logical Components View | Architecture › Logical components `architecture.logical-components` *(list)* → `# Logical components view` | One list of components, each marked new or existing. In version 3, each gives its Status straight after its name: `existing`, `implemented`, `in delivery`, `planned` or `future`. The four viewpoints below are a Word navigation device, not separate content. |
 | `H2` Layered Viewpoint | Architecture › Logical components — add a sub-heading inside the field if the viewpoint is needed | Collapsed into the component list. |
 | `H2` Product Viewpoint | Architecture › Logical components | As above. |
 | `H2` Application Usage Viewpoint | Architecture › Logical components | As above. |

@@ -99,6 +99,38 @@ and the example shows. Gantry does not check them.
   an organisation copying v3 can turn numbering off for a document without editing
   `definition.yaml`.
 
+### Diagram pattern and current / interim / target state labels (#199)
+
+Review items GF-009 to GF-012, GF-020 and GF-021. Like #201, these are conventions that Field
+guidance sets and the example shows. No Field is added and Gantry checks none of them.
+
+- **A short diagram pattern.** The guidance of every Field that carries a diagram gives the order
+  in two sentences: one introductory sentence ("The following diagram presents…"), the diagram,
+  its caption, a paragraph interpreting it ("The diagram shows how…"), then the detail. The
+  Fields are `introduction.overview`, `solution-definition.process-flow` and
+  `high-level-solution-overview`, `soap-full-details.sequencing`, `architecture.business-context`
+  and `solution-description`, `integration.network-and-infrastructure`, `data.logical-data-model`,
+  `security.security-architecture`, `support-and-operations.monitoring-and-alerting`, and
+  `as-built-notes.design-overview` and `process-flows`.
+- **Architecture state (GF-012).** The same guidance says a diagram or section that isn't the
+  enduring design names its state in its caption and its opening sentence: `current`, `interim`,
+  `target` or `enduring`, e.g. `Diagram 3. Publishing flow (interim)`.
+- **Capability status (GF-021).** `architecture.logical-components` gives every component a
+  Status straight after its name (`- <component> — Status: <status> — <description>`), and
+  `integration.interfaces` has a Status column. The Status is `existing`, `implemented`,
+  `in delivery`, `planned` or `future`, and the guidance says not to assume a capability exists.
+  `logical-components` stays a `list` Field, so v1 and v2 still read the same file; its items
+  carry the Status rather than a table column.
+- **Interim ownership (GF-020).** `support-and-operations.stakeholders`, `risks.risk-register`,
+  `risks.open-issues` and `design-basis.outcomes-and-deliverables` mark an owner who is not yet
+  confirmed `(interim)`.
+- **The Kiwi Cover Mutual example shows each one.** Its security architecture is now a Mermaid
+  diagram captioned on the fence, `Security architecture (interim)`, laid out in the pattern: an
+  opening sentence that names the interim state, the diagram, an interpretation that says which
+  part is interim, then the goals and the layered controls as bullets. It is the SAD's last
+  diagram. Every logical component and interface has a Status, and Records Management's contact
+  is marked `(interim)` in the support contacts and as the owner of risk R4.
+
 ## v2
 
 Layout revision of v1. Every artefact's `requires` list re-sequenced to the reading
