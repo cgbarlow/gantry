@@ -28,6 +28,9 @@ fields:
       The integration points themselves — protocol, direction, and what
       crosses the boundary.
 
+      Use the glossary's preferred terms (`glossary.terms-and-definitions`)
+      consistently in headings, tables, diagrams and prose.
+
   - id: network-and-infrastructure
     title: Network and infrastructure architecture
     type: markdown
@@ -36,17 +39,32 @@ fields:
       Describe the network and infrastructure the solution is deployed on and how it is
       reached, including hosting and sites. Keep hardware, bandwidth, network devices,
       protocols and storage details in the dedicated fields below.
+
+      Use the glossary's preferred terms (`glossary.terms-and-definitions`)
+      consistently in headings, tables, diagrams and prose.
+
+      Use the architecture name by default — the glossary's preferred term —
+      and the contracted product name only where it has been verified against
+      the contract, e.g. in the licences table's "Contracted name" column.
   - id: software-and-licences
     title: Software and licences
     type: markdown
     required: false
     guidance: >
-      The software the solution deploys and what it costs to licence — software,
-      version, total count, and licences per environment. This is the build-time
-      deployment inventory (the reference SAD's "Application Software View").
+      The software the solution deploys and what it costs to licence — one row
+      per product: Software / Contracted name / Version / Count / Licences per
+      environment. This is the build-time deployment inventory (the reference
+      SAD's "Application Software View").
       The accounts and subscriptions a support team must hold to run the
       solution once it is live belong in
       `support-and-operations.operational-accounts-and-licenses`.
+
+      Use the glossary's preferred terms (`glossary.terms-and-definitions`)
+      consistently in headings, tables, diagrams and prose.
+
+      Use the architecture name by default — the glossary's preferred term —
+      and the contracted product name only where it has been verified against
+      the contract, e.g. in the licences table's "Contracted name" column.
 
   - id: hardware
     title: Hardware
@@ -58,6 +76,15 @@ fields:
       approach, and any licensing tied to cores or memory. Include batch-processing
       RAM needs where relevant.
 
+      Give every figure — vCPU, memory, disk, guest counts — its source in
+      brackets, e.g. `99.5% (hosting SLA §4.2)`, or mark it `(target
+      assumption)` where nothing agreed backs it yet. Never invent a figure:
+      say what is missing rather than fill the gap.
+
+      Use the architecture name by default — the glossary's preferred term —
+      and the contracted product name only where it has been verified against
+      the contract, e.g. in the licences table's "Contracted name" column.
+
   - id: bandwidth
     title: Bandwidth
     type: markdown
@@ -67,6 +94,11 @@ fields:
       flows — link capacities, anticipated data volumes, and utilisation over
       time (e.g. MAN link, ExpressRoute circuit, AzCopy parallelism and wave
       sizing).
+
+      Give every figure — link capacities, data volumes, utilisation — its
+      source in brackets, e.g. `99.5% (hosting SLA §4.2)`, or mark it `(target
+      assumption)` where nothing agreed backs it yet. Never invent a figure:
+      say what is missing rather than fill the gap.
 
   - id: network-devices
     title: Network Devices
@@ -82,9 +114,14 @@ fields:
     required: false
     guidance: >
       New logical communication paths and protocols for the solution — one row
-      per path with environment, protocol, from / to (system or device), port,
-      path direction (unidirectional / bidirectional), and any other comments.
+      per path: Path / Protocol / From / To / Port / Direction / Environment(s)
+      / Comments. Name each path for what travels along it (e.g. "Payment
+      instruction"), give from and to as a system or device, the direction as
+      unidirectional or bidirectional, and the environments the path exists in.
       Only new or changed protocols, not every existing enabled one.
+
+      Use the glossary's preferred terms (`glossary.terms-and-definitions`)
+      consistently in headings, tables, diagrams and prose.
 
   - id: san
     title: SAN (Database, Application Server, Backup, DR)
@@ -92,5 +129,10 @@ fields:
     required: false
     guidance: >
       Storage-area-network and disk requirements — database, application server,
-      backup and DR — per environment and disk-tier type. Refer to service
-      catalogues where relevant.
+      backup and DR — one row per storage use: Storage use / Environment(s) /
+      Tier / Size / Notes. Refer to service catalogues where relevant.
+
+      Give every figure — sizes, growth, retention — its source in brackets,
+      e.g. `99.5% (hosting SLA §4.2)`, or mark it `(target assumption)` where
+      nothing agreed backs it yet. Never invent a figure: say what is missing
+      rather than fill the gap.

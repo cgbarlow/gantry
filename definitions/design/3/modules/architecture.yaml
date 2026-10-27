@@ -61,6 +61,11 @@ fields:
       belongs in the `risks` module — this is for risk that's a direct
       consequence of a structural choice made here.
 
+      Give every figure — a tested throughput, a design peak, a cache lifetime
+      — its source in brackets, e.g. `99.5% (hosting SLA §4.2)`, or mark it
+      `(target assumption)` where nothing agreed backs it yet. Never invent a
+      figure: say what is missing rather than fill the gap.
+
   - id: solution-description
     title: Solution description
     type: markdown
@@ -70,6 +75,9 @@ fields:
       have one, but describe the structure in words too. Expands the
       `solution-definition` `high-level-solution-overview` / `process-flow`
       sketch — the original stays at `modules/solution-definition.md`.
+
+      Use the glossary's preferred terms (`glossary.terms-and-definitions`)
+      consistently in headings, tables, diagrams and prose.
 
   - id: constraints
     title: Constraints and goals
