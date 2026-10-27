@@ -65,3 +65,8 @@ it as a code block. The first consumer is the Gantry hosting Full SOAP
   text and Mermaid's own line-break syntax.
 - Native-Pandoc exports still show Mermaid as source. When phase 2 lands it
   should reuse `replaceMermaidBlocks` and produce the same image names.
+  **Amended by docs/adr/0055 (#198):** phase 2 has landed for the
+  `gantry render` CLI. It runs this module's `prepareMermaidForDocx` in an
+  optional, CLI-only headless Chromium, so it produces the same images, names
+  and captions. The server's Native Pandoc engine still shows Mermaid as
+  source, and the server and its container image still carry no Chromium.

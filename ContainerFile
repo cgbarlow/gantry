@@ -115,9 +115,13 @@ COPY --from=test     /results/test-results/ /ci-results/test-results/
 COPY --from=test     /results/coverage/     /ci-results/coverage/
 COPY --from=test-e2e /results/e2e-results/  /ci-results/e2e-results/
 
-# Production dependencies only (no devDependencies)
+# Production dependencies only: no devDependencies, and no optional ones.
+# `playwright` is optional and CLI-only (docs/adr/0055): `gantry render` uses
+# its headless Chromium to draw Mermaid diagrams when it is installed. The
+# server never needs it, so the image carries neither the package nor a
+# browser, and a `docker run gantry render` leaves diagrams as source text.
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --omit=optional
 
 # Application code (from the source stage that all tests ran against)
 COPY --from=source /app/gantry.yaml        ./

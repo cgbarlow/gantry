@@ -132,7 +132,15 @@ npm link             # makes `gantry` available on your PATH
 
 > **TODO:** publish to an npm feed (`npx gantry`) too, for people who only ever consume definitions and don't want a clone-and-install step at all.
 
-**5. Run it.** `gantry serve` (from step 4's `npm link`), then open the URL it prints in your browser. Same on all platforms.
+**5. Optional: let `gantry render` draw Mermaid diagrams.** The web UI's Render draws Mermaid diagrams in your own browser and needs nothing extra. The `gantry render` command needs a headless Chromium to draw them, which is optional and only used by the CLI (docs/adr/0055):
+
+```bash
+npx playwright install chromium   # the headless browser `gantry render` draws Mermaid diagrams in
+```
+
+Step 4's `npm install` already installed Playwright, the package that runs it. If you installed with `--omit=optional`, run `npm install --include=optional` first. On Linux, `npx playwright install --with-deps chromium` also installs the system libraries Chromium needs. Skip this step and `gantry render` still works: it leaves each diagram as Mermaid source text and prints a warning with these commands.
+
+**6. Run it.** `gantry serve` (from step 4's `npm link`), then open the URL it prints in your browser. Same on all platforms.
 
 ## Software dependencies
 
@@ -140,6 +148,7 @@ npm link             # makes `gantry` available on your PATH
 |---|---|---|
 | Node.js | 24+ | Engine runtime and CLI (`package.json` `engines.node` is `>=24`) |
 | `pandoc` | 3.x confirmed (3.1.3) | **Required for the `gantry render` CLI command** (shells out to it unconditionally). Optional for the web UI — `gantry serve` renders via an in-browser WASM Pandoc by default; native Pandoc is only needed there if you use Settings' native-engine toggle, or as the automatic fallback if WASM fails to load |
+| Playwright's headless Chromium | the `playwright` version in `package.json` (`optionalDependencies`) | **Optional, `gantry render` only.** Draws Mermaid diagrams into the CLI's `.docx` with the browser export's own code, so both match (docs/adr/0055). Install with `npx playwright install chromium`. Without it, `gantry render` leaves diagrams as source text and warns. Never needed by `gantry serve`; the container images leave it out (`npm ci --omit=dev --omit=optional`) |
 | Git | 2.x+ | Needed to clone the source below and for any Workspace-backed instance (Azure DevOps or GitHub). Not needed for local-folder-only instances |
 | A text editor | any | Modules are markdown; no tooling required to author them |
 
@@ -219,6 +228,7 @@ gantry/
 │   ├── workItemLink.js           # link an instance to a work item; confirmed gate-pass state sync
 │   ├── repoCheck.js              # "does this repo (Azure DevOps or GitHub) already hold instance
 │   │                             # data", incl. the legacy-root-to-gantry-workspace/<slug>/ migration
+│   ├── mermaidChromium.js        # `gantry render`: draws Mermaid with web/lib/mermaid.js in optional headless Chromium (docs/adr/0055)
 │   └── credential.js             # extracts a forwarded PAT from a request
 ├── bin/gantry.js                 # CLI entrypoint
 └── web/
@@ -235,7 +245,7 @@ gantry/
     ├── lib/apiFetch.js           # fetch wrapper: attaches the right PAT, retries once on 401
     ├── lib/validateRepo.js       # parses/checks the legacy Azure DevOps repo-URL adopt flow
     ├── lib/markdown.js           # markdown-it + DOMPurify rendering
-    ├── lib/mermaid.js            # ```mermaid fences → SVG in the preview, PNG in WASM docx exports (docs/adr/0030)
+    ├── lib/mermaid.js            # ```mermaid fences → SVG in the preview, PNG in docx exports: WASM in the browser, and the CLI via lib/mermaidChromium.js (docs/adr/0030, 0055)
     ├── lib/diagramCaptions.js    # Diagram captions: the fence/alt-text syntax and "Diagram N." numbering, shared with lib/render.js (docs/adr/0053)
     ├── lib/dropdown.js           # reusable dropdown (trigger + menu)
     ├── lib/reorder.js            # pure array reorder helper
@@ -372,12 +382,21 @@ Instances live inside a **workspace** under the workspaces root, so a listing na
 | `gantry new <definition> <slug> [--owner <name>] [--assignee <name>]` | Create an instance, in the reserved `default` workspace — `--owner` seeds each first-stage module file's own frontmatter `owner`; `--assignee` sets the instance record's own stored assignee | Implemented |
 | `gantry status <slug> [--json]` | Current stage, module completeness, what's outstanding | Implemented |
 | `gantry check <slug> [--gate <id>] [--json]` | Validate an instance against a gate's requirements — any gate, not just the instance's current stage | Implemented |
-| `gantry render <slug> <artefact> [--dry-run]` | Render an artefact to `out/` | Implemented |
+| `gantry render <slug> <artefact> [--dry-run]` | Render an artefact to `out/`. Draws Mermaid diagrams when the optional headless Chromium is installed (see below) | Implemented |
 | `gantry serve [slug] [--port <port>]` | Serve the web app (default port 3000): a dashboard of every registered instance at `/`, local or remote-workspace-backed (Azure DevOps or GitHub), and the stage-by-stage form at `/instance/<slug>`. `[slug]` only sets a fallback default for API requests made with no `?slug=<slug>` of their own — it doesn't change what the dashboard shows or require picking one instance up front. `/new-workspace` is the "+ New Workspace" wizard, `/settings` the Settings screens, `/user-guide` the in-product User Guide, `/definitions` the Definitions page (see "Backing an instance with a remote workspace" above) | Implemented |
 | `gantry validate <definition> [--json]` | Report every structural problem with a definition in one pass | Implemented |
 | `gantry backfill-numeric-refs` | One-time (idempotent) backfill of scoped numeric workspace/instance references (ADR-0024) for workspaces/instances that predate the feature | Implemented |
 
 `definitions`, `instances`, `status`, `check` and `validate` all emit structured output with `--json` for scripting and agent use.
+
+**Mermaid diagrams in `gantry render`.** The CLI draws each Mermaid diagram into the `.docx` as a picture, with the same image, name, scale and `Diagram N. <title>` caption as the web UI's Render. It does this by running the web UI's own Mermaid code in a headless Chromium, which is an **optional, CLI-only** install:
+
+```bash
+npx playwright install chromium        # the browser itself
+npm install --include=optional         # only if Gantry was installed with --omit=optional
+```
+
+Without it, `gantry render` still succeeds. It leaves each diagram as Mermaid source text, as earlier versions did, and prints one warning naming the command to run. Diagrams keep their numbers either way, so captioned images after them are numbered as in the web UI. A `--dry-run`, or a document with no Mermaid diagram, never starts Chromium. `gantry serve` and the container images don't use or include it (docs/adr/0055).
 
 Every command that reads instance data takes `--workspaces-dir <path>` (or `GANTRY_WORKSPACES_DIR`) to point at a workspaces root other than `./workspaces`. A failure prints a single line explaining it; set `GANTRY_DEBUG=1` to get the full stack as well.
 
@@ -670,6 +689,8 @@ docker run gantry render kiwi-cover-mutual soap --workspaces-dir workspaces/exam
 # Extract the rendered .docx to your host
 docker run -v "$(pwd)/output:/app/workspaces/examples/kiwi-cover-mutual/out" gantry render kiwi-cover-mutual soap --workspaces-dir workspaces/examples
 ```
+
+The image is a server image and carries no headless Chromium (docs/adr/0055), so a `docker run gantry render` leaves Mermaid diagrams as source text and prints a warning. Render from a local install with Chromium to get the pictures.
 
 After the volume-mounted run, the rendered document is at `./output/Kiwi Cover Mutual - Solution on a Page.docx` —
 rendered artefacts are named `<Instance name> - <Full artefact title>.docx` (the instance's `name:`, or a
