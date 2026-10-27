@@ -256,3 +256,103 @@ describe('every v3 Artefact renders from the example data (#193)', () => {
     })
   }
 })
+
+// #200 (GF-007, GF-008): design decisions are an AD | Decision | ADR table. Every decision gets an
+// AD id; only a decision that needs governance endorsement carries an ADR, as `ADRYYY` until the ADR
+// is registered. The SAD's `architecture.design-decisions` and the as-built's
+// `as-built-notes.architecture-decisions` share the table.
+describe('design decisions are an AD | Decision | ADR table, without assuming ARB endorsement (#200)', () => {
+  const DECISION_FIELDS = [
+    ['architecture', 'design-decisions'],
+    ['as-built-notes', 'architecture-decisions'],
+  ]
+  const ADR_CRITERIA = [
+    /enterprise reuse/i,
+    /new platform or product/i,
+    /architecture precedent/i,
+    /governance endorsement is explicitly required/i,
+  ]
+
+  function guidanceOf(moduleId, fieldId) {
+    return v3().modules.get(moduleId).fields.find((f) => f.id === fieldId).guidance
+  }
+
+  // The rows of the one pipe table in a Field value, as arrays of trimmed cells; the header row first.
+  function tableRows(markdown) {
+    return markdown
+      .split('\n')
+      .filter((line) => line.trim().startsWith('|') && !/^\|[\s|:-]+\|$/.test(line.trim()))
+      .map((line) => line.trim().replace(/^\||\|$/g, '').split('|').map((cell) => cell.trim()))
+  }
+
+  function exampleDecisions(moduleId, fieldId) {
+    const value = readModule(v3(), 'kiwi-cover-mutual', moduleId, { instancesDir: EXAMPLES_DIR }).fields[fieldId]
+    const [header, ...rows] = tableRows(value)
+    return { value, header, rows }
+  }
+
+  test('the design-decisions guidance asks for the table, the four ADR-candidate criteria, the ADRYYY placeholder and no assumed ARB endorsement', () => {
+    const guidance = guidanceOf('architecture', 'design-decisions')
+    assert.ok(guidance.includes('`| AD | Decision | ADR |`'), 'names the table and its columns')
+    assert.match(guidance, /AD01/)
+    for (const criterion of ADR_CRITERIA) assert.match(guidance, criterion)
+    assert.match(guidance, /`ADRYYY`/)
+    assert.match(guidance, /don't assume ARB endorsement/i)
+    assert.match(guidance, /A decision is not an ADR, and an ADR is not an ARB item/)
+  })
+
+  test('the as-built architecture-decisions guidance asks for the same table, keeping the SAD\'s AD ids', () => {
+    const guidance = guidanceOf('as-built-notes', 'architecture-decisions')
+    assert.ok(guidance.includes('`| AD | Decision | ADR |`'))
+    assert.match(guidance, /architecture\.design-decisions/)
+    assert.match(guidance, /`ADRYYY`/)
+  })
+
+  for (const [moduleId, fieldId] of DECISION_FIELDS) {
+    test(`the example's ${moduleId}.${fieldId} is the table, and only a minority of decisions carry an ADR`, () => {
+      const { value, header, rows } = exampleDecisions(moduleId, fieldId)
+      assert.deepEqual(header, ['AD', 'Decision', 'ADR'])
+      assert.ok(rows.length >= 3, value)
+      rows.forEach(([ad, decision, adr], i) => {
+        assert.equal(ad, `AD${String(i + 1).padStart(2, '0')}`, 'AD ids run AD01, AD02, … in order')
+        assert.ok(decision, `${ad} states its decision`)
+        assert.match(adr, /^(ADR(YYY|\d{3}))?$/, `${ad}'s ADR is blank, ADRYYY or a registered ADR number`)
+      })
+      const withAdr = rows.filter(([, , adr]) => adr)
+      assert.ok(withAdr.length > 0, 'some decisions need an ADR')
+      assert.ok(withAdr.length < rows.length / 2, 'only a minority of decisions need an ADR')
+    })
+  }
+
+  test('the SAD\'s ADRs not yet registered use the ADRYYY placeholder; the as-built keeps the SAD\'s AD ids and ADR decisions', () => {
+    const sad = exampleDecisions('architecture', 'design-decisions').rows
+    const asBuilt = exampleDecisions('as-built-notes', 'architecture-decisions').rows
+    assert.ok(sad.some(([, , adr]) => adr === 'ADRYYY'))
+    for (const [ad, , adr] of sad) {
+      const built = asBuilt.find(([id]) => id === ad)
+      assert.ok(built, `${ad} carries into the as-built`)
+      assert.equal(Boolean(built[2]), Boolean(adr), `${ad} needs an ADR in both or neither`)
+    }
+  })
+
+  test('the rendered v3 SAD shows the table under Design decisions, in Markdown and in Word', () => {
+    const { markdown } = renderArtefact('kiwi-cover-mutual', 'sad', { instancesDir: EXAMPLES_DIR, dryRun: true })
+    const section = markdown.slice(markdown.indexOf('## Design decisions'), markdown.indexOf('## Architectural risks'))
+    assert.deepEqual(tableRows(section)[0], ['AD', 'Decision', 'ADR'])
+    assert.match(section, /\| AD01 \|/)
+
+    const { documentXml } = renderWord('kiwi-cover-mutual', 'sad')
+    const after = documentXml.slice(documentXml.indexOf('>Design decisions<'))
+    const nextHeading = after.indexOf('w:pStyle w:val="Heading2"')
+    const table = after.indexOf('<w:tbl>')
+    assert.ok(table > 0 && table < nextHeading, 'a Word table follows the Design decisions heading')
+    assert.match(after.slice(table, after.indexOf('</w:tbl>')), /AD01[\s\S]*ADRYYY/)
+  })
+
+  test('the rendered v3 as-built shows the table under Architecture decisions', () => {
+    const { markdown } = renderArtefact('kiwi-cover-mutual', 'as-built', { instancesDir: EXAMPLES_DIR, dryRun: true })
+    const start = markdown.indexOf('## Architecture decisions')
+    const section = markdown.slice(start, markdown.indexOf('\n#', start + 1))
+    assert.deepEqual(tableRows(section)[0], ['AD', 'Decision', 'ADR'])
+  })
+})

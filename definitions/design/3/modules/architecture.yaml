@@ -52,6 +52,21 @@ fields:
       `solution-definition.high-level-solution-overview` sketch to build-ready
       depth rather than starting over.
 
+      Write them as a table with three columns, `| AD | Decision | ADR |`,
+      one row per decision: `| AD01 | <the decision and why> | ADRYYY |`, or
+      the same row with the ADR cell left blank. Every decision gets an
+      Architecture Decision id (AD01, AD02, …). Fill the ADR column only for
+      a decision that needs governance endorsement, using the placeholder
+      `ADRYYY` until the ADR is registered and has its number.
+
+      A decision is an ADR candidate only where at least one of these holds:
+      enterprise reuse exists; a new platform or product is introduced; an
+      architecture precedent is created; or governance endorsement is
+      explicitly required. Most decisions meet none of them and stay ADs.
+
+      Don't assume ARB endorsement is needed. A decision is not an ADR, and
+      an ADR is not an ARB item.
+
   - id: architectural-risks
     title: Architectural risks
     type: markdown

@@ -34,13 +34,15 @@ KCM's Technology Strategy names shared enterprise services as its target state a
 
 ## Design decisions
 
-1. **Shared services rather than point-to-point integration.** Customer and claim data are served by CIS and Claims InfoServ; applications consume them rather than holding copies. Alternative D (point-to-point) was rejected at HLD because it leaves the data disagreement in place.
-2. **Policy Data Management stays the policy system of record, exposed as services.** Four CICS transactions (policy lookup, insured-item lookup, policy create, claim ledger update) are exposed over MQ through the integration layer. Migration (alternative B) is deferred; the exposures are what migration would need anyway.
-3. **The CRM orchestrates Handle Claim; Claims InfoServ owns the claim state.** The workflow runs in the CRM's extension framework, but the claim's state, valuation and audit trail are held in Claims InfoServ so the process can move to another orchestrator without losing data. Routing rules also live in Claims InfoServ (risk R3).
-4. **Payments go through the Financial Application, then the gateway.** A claim payment is recorded in the Home & Away Financial Application first (so Finance's ledger is authoritative) and the Financial Application instructs the BIBIT gateway; the CRM never talks to the gateway directly. Premium collection follows the same path in reverse.
-5. **Documents are claim-indexed in the document management system.** Every document is stored once, keyed by claim number, and linked from the CRM; the scanning archive is migrated and retired.
-6. **Each increment is switchable.** A configuration flag per process step falls back to the previous manual step (design principle P5), so go-live is reversible per step.
-7. **No new platform.** New components run in the existing UNIX server farm under existing deployment and monitoring tooling; the only new external party is the payment gateway, which is contracted through Treasury.
+| AD | Decision | ADR |
+|----------|----------------------------------------------------------------------|------------|
+| AD01 | **Shared services rather than point-to-point integration.** Customer and claim data are served by CIS and Claims InfoServ; applications consume them rather than holding copies. Alternative D (point-to-point) was rejected at HLD because it leaves the data disagreement in place. An ADR because the two services are built for enterprise reuse. | ADRYYY |
+| AD02 | **Policy Data Management stays the policy system of record, exposed as services.** Four CICS transactions (policy lookup, insured-item lookup, policy create, claim ledger update) are exposed over MQ through the integration layer. Migration (alternative B) is deferred; the exposures are what migration would need anyway. An ADR because it sets the precedent for exposing the mainframe as services. | ADRYYY |
+| AD03 | **The CRM orchestrates Handle Claim; Claims InfoServ owns the claim state.** The workflow runs in the CRM's extension framework, but the claim's state, valuation and audit trail are held in Claims InfoServ so the process can move to another orchestrator without losing data. Routing rules also live in Claims InfoServ (risk R3). | |
+| AD04 | **Payments go through the Financial Application, then the gateway.** A claim payment is recorded in the Home & Away Financial Application first (so Finance's ledger is authoritative) and the Financial Application instructs the BIBIT gateway; the CRM never talks to the gateway directly. Premium collection follows the same path in reverse. | |
+| AD05 | **Documents are claim-indexed in the document management system.** Every document is stored once, keyed by claim number, and linked from the CRM; the scanning archive is migrated and retired. | |
+| AD06 | **Each increment is switchable.** A configuration flag per process step falls back to the previous manual step (design principle P5), so go-live is reversible per step. | |
+| AD07 | **No new platform.** New components run in the existing UNIX server farm under existing deployment and monitoring tooling; the only new external party is the payment gateway, which is contracted through Treasury. | |
 
 ## Architectural risks
 
@@ -79,7 +81,7 @@ The service realisation viewpoint closes the loop between what the customer sees
 
 ## Constraints and goals
 
-Architecture-specific constraints: the mainframe MQ channels support TLS 1.2 only (the integration layer re-encrypts); the CRM extension framework runs with the CRM's privileges, so anything that must be authoritative or auditable lives in Claims InfoServ, not in the CRM; the UNIX server farm's load balancer supports only HTTP/1.1 health checks, which shaped the service health endpoints. Architecture goals: one authoritative home for each kind of data (principle P3), services that a future policy platform can sit behind unchanged (decision 2), and a latency budget of 500 ms per shared-service call so the 3-second registration target holds with two calls and a document write. Solution-wide assumptions are in the Design Basis module.
+Architecture-specific constraints: the mainframe MQ channels support TLS 1.2 only (the integration layer re-encrypts); the CRM extension framework runs with the CRM's privileges, so anything that must be authoritative or auditable lives in Claims InfoServ, not in the CRM; the UNIX server farm's load balancer supports only HTTP/1.1 health checks, which shaped the service health endpoints. Architecture goals: one authoritative home for each kind of data (principle P3), services that a future policy platform can sit behind unchanged (AD02), and a latency budget of 500 ms per shared-service call so the 3-second registration target holds with two calls and a document write. Solution-wide assumptions are in the Design Basis module.
 
 ## Applicable standards
 
