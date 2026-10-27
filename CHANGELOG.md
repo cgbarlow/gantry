@@ -17,6 +17,19 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.10.2-beta — 2026-10-27
+
+### Changed
+
+- **The classification shows only in the page header** (#209). A design v3 document printed its
+  classification twice on the first page: above the cover's title and in the page header. It
+  now shows only in the header of every page, the cover included. The cover's classification
+  line is still in the document, because the header copies its text from it, but it prints
+  invisibly. A previewer that doesn't refresh Word fields, which already showed an empty header,
+  now shows the classification nowhere; open the document in Word to see it. To bring the line
+  back above the title, give the `Cover Classification` style a visible size and colour in your
+  reference documents. v1 and v2 documents are unchanged.
+
 ## 0.10.1-beta — 2026-10-27
 
 Three follow-ups to the design v3 Word output, from rendering a real Solution Architecture
