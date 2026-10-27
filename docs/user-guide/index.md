@@ -319,7 +319,7 @@ The next render uses the new styles. Documents already rendered keep their old l
 
 To change these, change the style: for example, the header row's colour in the `Table` style, or the numbering by editing the list attached to Heading 1 (Home › Multilevel List › Define New Multilevel List). A reference document made from another Word template works too. Any of the styles above that it doesn't define gets a plain default, so a heading or table can look different from the rest of your template until you add the style.
 
-**A heading you don't want numbered.** Add `{.unnumbered}` after its text, as in `## Revision history {.unnumbered}`. Word then shows it without a number, whatever the reference document numbers. This is how design version 3 leaves Document Control and Review & sign-off unnumbered. Such a heading is written as plain text in Word, so leave formatting such as bold out of it.
+**A heading you don't want numbered.** Add `{.unnumbered}` after its text, as in `## Revision history {.unnumbered}`. Word then shows it without a number, whatever the reference document numbers. This is how design version 3 leaves Document Control and Review & sign-off unnumbered. The heading keeps its formatting and links, and a link to it still works. This works in documents that use design version 3's cover page, table of contents or diagram captions. Other documents show the heading as they always have.
 
 ### Artefacts that don't count toward the gate
 

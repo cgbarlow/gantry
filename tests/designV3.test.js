@@ -12,7 +12,7 @@ import { checkGate } from '../lib/check.js'
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
 import { countWords, overTargetNotes, TARGET_SIZES } from '../web/lib/targetSize.js'
 import { withRunningServer } from './helpers/lifecycle.js'
-import { bodyTables, docxPart, headerRowFormat, headingNumbers, keepsWithNext, numberingLevels, rowsCantSplit, styleFontSize, styleNumbering, wordStyles } from './helpers/wordDocx.js'
+import { bodyParagraphs, bodyTables, docxPart, headerRowFormat, headingNumbers, keepsWithNext, numberingLevels, rowsCantSplit, styleFontSize, styleNumbering, wordStyles } from './helpers/wordDocx.js'
 
 // #193 (spec #192): the harness every design v3 ticket extends. `definitions/design/3` starts as a
 // draft copy of v2, and the two bundled design examples in workspaces/examples move onto it — the
@@ -1129,6 +1129,20 @@ describe('v3 Word styles: numbered headings, keep-with-next, one table style, ro
     assert.match(markdown, /^## Review & sign-off \{\.unnumbered\}$/m)
   })
 
+  // The raw OpenXML paragraph a heading marked `.unnumbered` becomes, parsed back: its style, its
+  // own numbering, the bookmarks on it and its runs.
+  function wordHeadings(word) {
+    return [...word.matchAll(/```\{=openxml\}\n(<w:p>[\s\S]*?<\/w:p>)\n```/g)].map(([, xml]) => ({
+      xml,
+      style: /<w:pStyle w:val="([^"]+)"\/>/.exec(xml)?.[1],
+      numId: /<w:numId w:val="([^"]+)"\/>/.exec(xml)?.[1],
+      bookmarks: [...xml.matchAll(/<w:bookmarkStart w:id="(\d+)" w:name="([^"]*)"\/>/g)].map(([, id, name]) => ({ id, name })),
+      bookmarkEnds: [...xml.matchAll(/<w:bookmarkEnd w:id="(\d+)"\/>/g)].map(([, id]) => id),
+      text: [...xml.matchAll(/<w:t xml:space="preserve">([^<]*)<\/w:t>/g)].map(([, t]) => t).join(''),
+      runs: [...xml.matchAll(/<w:r>(?:<w:rPr>([\s\S]*?)<\/w:rPr>)?<w:t xml:space="preserve">([^<]*)<\/w:t><\/w:r>/g)].map(([, rPr = '', t]) => ({ rPr, t })),
+    }))
+  }
+
   test('for Word, any heading marked .unnumbered (or {-}) has its numbering switched off; other headings and code are left as they are', () => {
     const markdown = [
       '## Review & sign-off {.unnumbered}',
@@ -1140,14 +1154,110 @@ describe('v3 Word styles: numbered headings, keep-with-next, one table style, ro
       '### A \\*literal\\* <star> {.unnumbered .unlisted}',
     ].join('\n')
     const word = unnumberedHeadingsForWord(markdown)
-    const off = (level, text) =>
-      `<w:p><w:pPr><w:pStyle w:val="Heading${level}"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="0"/></w:numPr></w:pPr><w:r><w:t xml:space="preserve">${text}</w:t></w:r></w:p>`
-    assert.ok(word.includes(`\`\`\`{=openxml}\n${off(2, 'Review &amp; sign-off')}\n\`\`\``))
-    assert.ok(word.includes(off(1, 'Notes')))
-    assert.ok(word.includes(off(3, 'A *literal* &lt;star&gt;')))
+    const headings = wordHeadings(word)
+    assert.deepEqual(
+      headings.map(({ style, numId, text }) => [style, numId, text]),
+      [['Heading2', '0', 'Review &amp; sign-off'], ['Heading1', '0', 'Notes'], ['Heading3', '0', 'A *literal* &lt;star&gt;']]
+    )
+    for (const h of headings) assert.match(h.xml, /^<w:p><w:pPr><w:pStyle w:val="Heading\d"\/><w:numPr><w:ilvl w:val="0"\/><w:numId w:val="0"\/><\/w:numPr><\/w:pPr>/)
     assert.match(word, /^## Numbered \{#numbered\}$/m)
     assert.match(word, /^## Inside a fence \{\.unnumbered\}$/m)
     assert.equal(unnumberedHeadingsForWord('# Title\n\nText {.unnumbered}\n'), '# Title\n\nText {.unnumbered}\n', 'nothing marked, nothing changed')
+  })
+
+  test('for Word, an .unnumbered heading keeps its inline formatting and links instead of printing the Markdown', () => {
+    const [heading] = wordHeadings(
+      unnumberedHeadingsForWord('## Data **flows**, *in* `code`, ~~gone~~ and [CIS](https://x.example/a?b=1&c="d") or [back](#top) {#flows .unnumbered}')
+    )
+    assert.equal(heading.text, 'Data flows, in code, gone and CIS or back')
+    assert.doesNotMatch(heading.xml, /\*\*|\]\(|~~|`/, 'no Markdown syntax reaches Word')
+    const run = (t) => heading.runs.find((r) => r.t === t)
+    assert.match(run('flows').rPr, /<w:b\/><w:bCs\/>/)
+    assert.match(run('in').rPr, /<w:i\/><w:iCs\/>/)
+    assert.match(run('code').rPr, /<w:rStyle w:val="VerbatimChar"\/>/)
+    assert.match(run('gone').rPr, /<w:strike\/>/)
+    assert.equal(run('Data ').rPr, '', 'plain text is a plain run')
+    // An external link is a HYPERLINK field (raw OpenXML can't add the relationship Pandoc's own links
+    // use); an internal one points at its bookmark. Both look like Pandoc's links.
+    assert.match(heading.xml, /<w:instrText xml:space="preserve"> HYPERLINK "https:\/\/x\.example\/a\?b=1&amp;c=%22d%22" <\/w:instrText>/)
+    assert.match(run('CIS').rPr, /<w:rStyle w:val="Hyperlink"\/>/)
+    assert.match(heading.xml, /<w:hyperlink w:anchor="top"><w:r><w:rPr><w:rStyle w:val="Hyperlink"\/><\/w:rPr><w:t xml:space="preserve">back<\/w:t><\/w:r><\/w:hyperlink>/)
+  })
+
+  test('for Word, an .unnumbered heading keeps its anchor: its {#id}, or else the identifier Pandoc would give it', () => {
+    const word = unnumberedHeadingsForWord(
+      [
+        '## Data flows {#flows .unnumbered}',
+        '## Review & sign-off {.unnumbered}',
+        '## 2.1 Über_alles *now* {-}',
+        '## Notes {.unnumbered}',
+        '# Notes',
+      ].join('\n\n')
+    )
+    const headings = wordHeadings(word)
+    assert.deepEqual(
+      headings.map((h) => h.bookmarks.map((b) => b.name)),
+      [['flows'], ['review-sign-off'], ['über_alles-now'], []],
+      'an identifier another heading would take too is left to that heading'
+    )
+    const ids = headings.flatMap((h) => h.bookmarks.map((b) => b.id))
+    assert.equal(new Set(ids).size, ids.length, 'every bookmark id is unique')
+    for (const h of headings) assert.deepEqual(h.bookmarkEnds, h.bookmarks.map((b) => b.id), 'each bookmark is closed in its own paragraph')
+  })
+
+  test('in the rendered v3 SAD, an authored .unnumbered heading is unnumbered, formatted, and the target of a link to it', () => {
+    const { documentXml, styles, numberingXml, markdown } = withScratchDir((dir) => {
+      cpSync(join(EXAMPLES_DIR, 'kiwi-cover-mutual'), join(dir, 'kiwi-cover-mutual'), { recursive: true })
+      rmSync(join(dir, 'kiwi-cover-mutual', 'out'), { recursive: true, force: true })
+      const definition = loadDefinition(DEFINITION, { version: VERSION })
+      const { fields } = readModule(definition, 'kiwi-cover-mutual', 'introduction', { instancesDir: dir })
+      const [fieldId] = Object.entries(fields).find(([, value]) => typeof value === 'string' && value.startsWith('The build-ready Solution Architecture Document'))
+      fields[fieldId] += '\n\n### Data **flows** and [CIS](https://example.com/cis) {#authored-flows .unnumbered}\n\nSee [the flows](#authored-flows).'
+      writeModule(definition, 'kiwi-cover-mutual', 'introduction', { fields }, { instancesDir: dir })
+      const result = renderArtefact('kiwi-cover-mutual', 'sad', { instancesDir: dir, deliverToClient: true })
+      return {
+        markdown: result.markdown,
+        documentXml: docxPart(result.docxBytes, 'word/document.xml'),
+        styles: wordStyles(docxPart(result.docxBytes, 'word/styles.xml')),
+        numberingXml: docxPart(result.docxBytes, 'word/numbering.xml'),
+      }
+    })
+    assert.match(markdown, /^### Data \*\*flows\*\* and \[CIS\]\(https:\/\/example\.com\/cis\) \{#authored-flows \.unnumbered\}$/m, 'the .md keeps it as authored')
+    const heading = headingNumbers(documentXml, styles, numberingXml).find((h) => h.text === 'Data flows and CIS')
+    assert.ok(heading, 'the heading reaches Word as its text, without Markdown syntax')
+    assert.equal(heading.style, 'Heading3')
+    assert.equal(heading.number, null)
+    const paragraph = bodyParagraphs(documentXml).find((p) => p.text === 'Data flows and CIS')
+    assert.match(paragraph.xml, /<w:b\/>[\s\S]*?flows/, 'bold stays bold')
+    assert.match(paragraph.xml, /<w:bookmarkStart w:id="\d+" w:name="authored-flows"\/>/)
+    assert.match(documentXml, /<w:hyperlink w:anchor="authored-flows">/, 'and the link to it lands on it')
+  })
+
+  test('an Artefact that opts into none of cover-page, table-of-contents and diagram-captions hands Word its authored headings unchanged; only its Document Control partial\'s .unnumbered headings are rewritten', () => {
+    withScratchDir((dir) => {
+      // design v3 with the SAD's opt-ins switched off: its partial still marks Document Control
+      // `{.unnumbered}`, and its reference documents still number headings.
+      const definitionsDir = join(dir, 'definitions')
+      cpSync(join('definitions', DEFINITION), join(definitionsDir, DEFINITION), { recursive: true })
+      const yamlPath = join(definitionsDir, DEFINITION, String(VERSION), 'definition.yaml')
+      writeFileSync(yamlPath, readFileSync(yamlPath, 'utf8').replace(/^ {4}(cover-page|table-of-contents|diagram-captions): true\n/gm, ''))
+      const instancesDir = join(dir, 'instances')
+      cpSync(join(EXAMPLES_DIR, 'kiwi-cover-mutual'), join(instancesDir, 'kiwi-cover-mutual'), { recursive: true })
+      const definition = loadDefinition(DEFINITION, { version: VERSION, definitionsDir })
+      const sad = definition.artefacts.find((a) => a.id === 'sad')
+      assert.ok(!sad.coverPage && !sad.tableOfContents && !sad.diagramCaptions)
+      const { fields } = readModule(definition, 'kiwi-cover-mutual', 'introduction', { instancesDir })
+      const [fieldId] = Object.entries(fields).find(([, value]) => typeof value === 'string' && value.startsWith('The build-ready Solution Architecture Document'))
+      fields[fieldId] += '\n\n### Data **flows** {#authored-flows .unnumbered}'
+      writeModule(definition, 'kiwi-cover-mutual', 'introduction', { fields }, { instancesDir })
+      const { markdown, docxMarkdown } = renderArtefact('kiwi-cover-mutual', 'sad', { instancesDir, definitionsDir, dryRun: true })
+      assert.match(docxMarkdown, /^### Data \*\*flows\*\* \{#authored-flows \.unnumbered\}$/m, 'the authored heading is left for Pandoc')
+      assert.deepEqual(
+        wordHeadings(docxMarkdown).map(({ style, numId, text }) => [style, numId, text]),
+        [['Heading2', '0', 'Document Control'], ['Heading2', '0', 'Review &amp; sign-off']]
+      )
+      assert.match(markdown, /^## Document Control \{\.unnumbered\}$/m, 'the .md keeps the partial as written')
+    })
   })
 
   for (const [id, { example }] of Object.entries(DOCUMENTS)) {

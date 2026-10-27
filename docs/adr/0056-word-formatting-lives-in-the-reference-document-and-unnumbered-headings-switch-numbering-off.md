@@ -70,20 +70,42 @@ This records what was needed, and the one thing a style can't do.
    styles, and `TOC Heading` is switched off in its style, so neither needs
    the class.
 
-   The step applies to every Artefact, because the class means the same
-   thing everywhere. Where the reference document numbers nothing, the
-   heading looks exactly as before. No bundled template or example except
-   design v3's partial uses the class, so v1, v2 and recruitment-onboarding
-   convert exactly as they did.
+   The paragraph is the one Pandoc would have written, as far as raw OpenXML
+   allows. Its inline Markdown (bold, italics, code, strikeout, links,
+   backslash escapes) becomes the same runs and character styles. It carries
+   a bookmark named for its `{#id}`, or for the identifier Pandoc would have
+   given it, so a link to it still lands on it. Raw OpenXML can't add a
+   relationship, so an external link in such a heading is a `HYPERLINK`
+   field rather than Pandoc's relationship link. It looks and works the same.
+
+4. **Only a Definition that asks for it gets the rewrite.** An Artefact that
+   opts into any of design v3's Word front matter (`cover-page`,
+   `table-of-contents` or `diagram-captions`, ADR-0052 and ADR-0053) has
+   every `.unnumbered` heading rewritten. Any other Artefact has only its
+   Document Control partial's headings rewritten, since a Definition's own
+   partial is where it decides how its front matter reads. v1's partial,
+   which design v1 and v2 and recruitment-onboarding use, marks nothing. An
+   author's own `{.unnumbered}` heading in such an Artefact reaches Pandoc as
+   it always did. So every existing Definition hands Word exactly the text it
+   did before spec #192. `tests/frontMatterOffBaseline.test.js` holds both
+   the `.md` and the Word text of every design v1, v2 and
+   recruitment-onboarding Artefact to their 0.9.26-beta hashes, including an
+   instance whose content has `{.unnumbered}` and `{-}` headings and a
+   captioned Mermaid block.
 
 ## Consequences
 
 - The exported `.md` keeps the headings as authored, `{.unnumbered}`
   included. Only the Word conversion's Markdown changes.
-- An `.unnumbered` heading reaches Word as plain text with no anchor of its
-  own. Inline formatting in it (bold, code, a link) shows as typed, and an
-  internal link to it has nowhere to land. That is fine for front-matter
-  headings. The User Guide tells authors to keep such headings plain.
+- An `.unnumbered` heading keeps its formatting, its links and its anchor in
+  Word. Inline Markdown the rewrite doesn't know (raw HTML, footnotes, inline
+  images) shows as typed. Where another heading in the document would take
+  the same automatic identifier, the unnumbered one gets no bookmark, so a
+  link to that identifier lands on the other heading, as Pandoc would have
+  it. An explicit `{#id}` always gets its bookmark.
+- An author who marks a heading `{.unnumbered}` in a Definition without the
+  v3 opt-ins gets Pandoc's own heading, numbered if the reference document
+  numbers headings, exactly as before this ADR.
 - Fenced code blocks are skipped, so a heading-like line inside one is left
   alone.
 - The tests check what Word reads in the `.docx` (styles, numbering, row

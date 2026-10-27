@@ -184,6 +184,11 @@ numbering definition; only their footers differ, as before.
   numbered. v3 ships its own `templates/_documentControl.md.tmpl`, v1's partial with
   `## Document Control` and `## Review & sign-off` marked `{.unnumbered}`, which the render writes
   to Word with their numbering switched off. Numbering starts at section 1.
+- **Your own unnumbered headings.** A heading you mark `{.unnumbered}` (or `{-}`) in a v3 document
+  is unnumbered in Word too, and keeps its bold, italics, code and links. A link to it, by its
+  `{#id}` or by its automatic identifier, still lands on it. Documents from design v1
+  and v2 and recruitment-onboarding, which have no cover page, table of contents or diagram
+  captions, show such a heading exactly as they always did.
 - **Keep with next** on Heading 1 to 6, Caption, Table Caption, Image Caption, Figure and Captioned
   Figure, so a heading or caption is never left at the foot of a page apart from what it belongs to.
 - **One table style.** `Table`, which every table uses, has a dark grey (`404040`) header row with
