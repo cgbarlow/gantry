@@ -143,6 +143,7 @@ export function renderModuleYaml(mod) {
       if (f.multiple === true) field.multiple = true
       if (f.default !== undefined) field.default = f.default
     }
+    if (f.targetWords !== undefined) field['target-words'] = f.targetWords
     if (f.copiedFrom !== undefined) field['copied-from'] = f.copiedFrom
     return field
   })
@@ -194,6 +195,8 @@ function moduleFromRaw(raw) {
         options: field.type === 'select' ? field.options : undefined,
         multiple: field.type === 'select' && field.multiple === true ? true : undefined,
         default: field.type === 'select' ? field.default : undefined,
+        // #202 (ADR-0054): kept as it is, so findLocalDefinitionProblems sees a malformed one.
+        targetWords: field['target-words'],
       }
     )
   })

@@ -37,6 +37,9 @@ import { withFakeBitbucketServer, BITBUCKET_OWNER, BITBUCKET_REPOSITORY, BITBUCK
 // publish, promote, each Provider's loader and write path, the Library cache — and asserts every key
 // is still there afterwards, read back the way a caller would see it (the version projection the
 // Definitions page and API serve).
+//
+// #202 (spec #192, ADR-0054) adds a Field's `target-words` — its word budget per Target size — to the
+// fixture, so it is held to the same round trip as every key before it.
 
 const ORGANIZATION = 'fake-org'
 const PROJECT = 'fake-project'
@@ -137,6 +140,10 @@ fields:
     type: markdown
     required-at:
       - second-gate
+    target-words:
+      small: 40
+      medium: 100
+      large: 200
 `
 
 function repoFiles(id, options) {
@@ -196,6 +203,13 @@ function assertEveryKey(projection, where) {
   assert.equal(tags.multiple, true, `${where}: select multiple`)
   const body = byId(byId(projection.modules, 'notes').fields, 'body')
   assert.deepEqual(body.requiredAt, ['second-gate'], `${where}: required-at`)
+  assert.deepEqual(body.targetWords, { small: 40, medium: 100, large: 200 }, `${where}: field target-words`)
+  assert.equal('targetWords' in kind, false, `${where}: a field without target-words has no such key`)
+}
+
+function assertTargetWordsOnDisk(moduleYamlText, where) {
+  assert.match(moduleYamlText, /target-words:\n\s+small: 40\n\s+medium: 100\n\s+large: 200/, where)
+  assert.doesNotMatch(moduleYamlText, /targetWords/, where)
 }
 
 function assertKebabKeysOnDisk(definitionYamlText, where) {
@@ -228,6 +242,7 @@ test('every key survives load, web-editor save, publish, new draft version and c
     assert.equal(published.status, 'published')
     assertEveryKey(published, 'publish')
     assertKebabKeysOnDisk(readFileSync(join(definitionsDir, 'roundtrip/1/definition.yaml'), 'utf8'), 'publish')
+    assertTargetWordsOnDisk(readFileSync(join(definitionsDir, 'roundtrip/1/modules/notes.yaml'), 'utf8'), 'publish')
 
     const { version } = createDraftVersion('roundtrip', { definitionsDir })
     assertEveryKey(localProjection('roundtrip', version, definitionsDir), 'new draft version')
@@ -258,6 +273,12 @@ test('the packaged definitions project exactly as before: no new keys appear on 
         [],
         `${id} v${version} artefact ${artefact.id}`
       )
+    }
+    // #202: no packaged field declares a word budget, so none projects `targetWords`.
+    for (const mod of projection.modules) {
+      for (const field of mod.fields) {
+        assert.equal('targetWords' in field, false, `${id} v${version} field ${mod.id}.${field.id}`)
+      }
     }
   }
 })
