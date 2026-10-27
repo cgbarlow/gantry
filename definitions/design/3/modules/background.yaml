@@ -13,6 +13,7 @@ fields:
   - id: problem
     title: Problem statement
     type: markdown
+    target-words: { small: 50, medium: 130, large: 260 }
     required-at: [business-case, hld-arb-approved]
     guidance: >
       The current state — what is wrong, missing, or binding right now: the
@@ -34,11 +35,13 @@ fields:
   - id: affected-domains
     title: Affected domains
     type: list
+    target-words: { small: 15, medium: 30, large: 50 }
     required: true
 
   - id: opportunity
     title: Opportunity
     type: markdown
+    target-words: { small: 40, medium: 95, large: 190 }
     required-at: [hld-arb-approved]
     guidance: >
       The desired future state — the better outcome, service, or capability this
@@ -48,6 +51,7 @@ fields:
   - id: success-criteria
     title: Success criteria
     type: markdown
+    target-words: { small: 25, medium: 65, large: 130 }
     required-at: [hld-arb-approved]
     guidance: >
       How you'll know the desired future state has actually been reached —

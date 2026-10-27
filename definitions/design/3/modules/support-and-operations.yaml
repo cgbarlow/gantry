@@ -31,6 +31,7 @@ fields:
   - id: stakeholders
     title: Stakeholders and support contacts
     type: list
+    target-words: { small: 40, medium: 100, large: 200 }
     required: true
     guidance: >
       Who owns this solution operationally once it's live, who to contact
@@ -45,6 +46,7 @@ fields:
   - id: environments-and-domains
     title: Environments, URLs and domains
     type: list
+    target-words: { small: 20, medium: 45, large: 90 }
     required: true
     guidance: >
       Every environment this solution runs in, and the URLs/domains
@@ -56,6 +58,7 @@ fields:
   - id: operational-accounts-and-licenses
     title: Operational accounts and licenses
     type: list
+    target-words: { small: 30, medium: 75, large: 150 }
     required: false
     guidance: >
       Third-party accounts, subscriptions or licenses the support team must
@@ -74,6 +77,7 @@ fields:
   - id: monitoring-and-alerting
     title: Monitoring and alerting
     type: markdown
+    target-words: { small: 30, medium: 75, large: 150 }
     required: false
     guidance: >
       What's monitored once this solution is live — dashboards, alert
@@ -92,11 +96,13 @@ fields:
   - id: release-procedures
     title: Release procedures
     type: markdown
+    target-words: { small: 30, medium: 70, large: 140 }
     required: false
 
   - id: support-handover-readiness
     title: Support handover readiness
     type: markdown
+    target-words: { small: 20, medium: 55, large: 110 }
     required: true
     guidance: >
       What "ready to hand over to support" means for this solution
@@ -105,6 +111,7 @@ fields:
   - id: decommission
     title: Decommission
     type: markdown
+    target-words: { small: 30, medium: 70, large: 140 }
     required: false
     guidance: >
       What happens at end of life — who turns the solution off, what becomes of

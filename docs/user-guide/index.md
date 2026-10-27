@@ -137,6 +137,8 @@ The target is advice, not a limit. You can always save a field that's over its t
 
 An AI agent writing through the MCP server sees the same targets: `get_instance` gives each field's target for the instance's size, and when `update_instance_modules` saves a field that's over its target, the save still succeeds and its response carries a note such as `nfrs.performance: 420 words, Medium target ~150` so the agent can tighten it.
 
+The `design` definition's v3 draft sets word targets on every field that appears in a document. Its Large targets match the bundled examples' original level of detail, and the examples are now written to Medium, so **Populate example text** shows the default amount. A Medium Solution Architecture Document comes to roughly half the length of a Large one.
+
 A Definition without word targets shows none of this: no Size in the wizard or Instance Settings and no targets in the editor. A Definition author sets a field's targets on the Definitions page (see *Definition versions and the Definitions page* above) or in the module's YAML as `target-words: { small: 40, medium: 100, large: 200 }`. Each must be a whole number above zero, all three sizes are needed, and only Markdown and list fields can have them. Anything else is a problem that `gantry validate` and a Local Workspace report, the Definitions page marks and Save and Publish refuse; a Definition an instance already uses keeps loading even if it has one.
 
 ### The editor toolbar

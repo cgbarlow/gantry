@@ -14,6 +14,7 @@ fields:
   - id: purpose-statement
     title: Purpose statement
     type: markdown
+    target-words: { small: 10, medium: 25, large: 40 }
     required: true
     guidance: >
       Summarise in one sentence what this document proposes and what decision is being
@@ -21,6 +22,7 @@ fields:
   - id: authors-and-contributors
     title: Authors and contributors
     type: list
+    target-words: { small: 15, medium: 30, large: 50 }
     required: false
     guidance: >
       List who wrote or contributed to this paper — name and role (for example, "J. Smith —
@@ -29,6 +31,7 @@ fields:
   - id: decision-requested
     title: Decision requested
     type: markdown
+    target-words: { small: 20, medium: 40, large: 70 }
     required: true
     guidance: >
       State the decision being asked for — Approve, Endorse, Discuss or Note — and a short
@@ -36,6 +39,7 @@ fields:
   - id: next-steps
     title: Next steps
     type: markdown
+    target-words: { small: 20, medium: 35, large: 60 }
     required: false
     guidance: >
       Describe where this paper goes next, if anywhere — for example, which governance step
@@ -43,6 +47,7 @@ fields:
   - id: consultation
     title: Consultation
     type: markdown
+    target-words: { small: 30, medium: 75, large: 150 }
     required: true
     guidance: >
       List who was consulted before this submission and whether they endorsed it or raised
@@ -50,6 +55,7 @@ fields:
   - id: attachments
     title: Attachments
     type: list
+    target-words: { small: 10, medium: 25, large: 40 }
     required: false
     guidance: >
       List any supplementary documents attached to this submission, with a name and

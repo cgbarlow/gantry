@@ -15,6 +15,7 @@ fields:
   - id: logical-data-model
     title: Logical data model
     type: markdown
+    target-words: { small: 50, medium: 120, large: 240 }
     required: true
     guidance: >
       The solution's key data entities and how they relate — enough for a
@@ -31,6 +32,7 @@ fields:
   - id: data-classification
     title: Data classification
     type: markdown
+    target-words: { small: 25, medium: 65, large: 130 }
     required: true
     guidance: >
       The sensitivity classification of the data this solution holds (e.g.
@@ -40,6 +42,7 @@ fields:
   - id: data-replication
     title: Data replication
     type: markdown
+    target-words: { small: 25, medium: 65, large: 130 }
     required: false
     guidance: >
       Where this data is copied or synchronised to (e.g. across
@@ -48,6 +51,7 @@ fields:
   - id: data-retention-and-archiving
     title: Data retention, archiving and records management
     type: markdown
+    target-words: { small: 30, medium: 75, large: 150 }
     required: true
     guidance: >
       How long data is kept, when/how it's archived, and any records-
@@ -56,6 +60,7 @@ fields:
   - id: data-migration
     title: Data migration
     type: markdown
+    target-words: { small: 30, medium: 70, large: 140 }
     required: false
     guidance: >
       Data that needs to move from an existing system into this one, and

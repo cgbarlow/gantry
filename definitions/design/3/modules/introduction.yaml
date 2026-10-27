@@ -41,6 +41,7 @@ fields:
   - id: executive-summary
     title: Executive summary
     type: markdown
+    target-words: { small: 40, medium: 105, large: 210 }
     required: false
     guidance: >
       A standalone summary for a reader who will not read the rest of the
@@ -52,6 +53,7 @@ fields:
   - id: overview
     title: Overview
     type: markdown
+    target-words: { small: 40, medium: 95, large: 190 }
     required-at: [build-ready-checklist, operational-handover]
     guidance: >
       A short plain-language description of the solution and the change it
@@ -75,6 +77,7 @@ fields:
   - id: purpose
     title: Purpose
     type: markdown
+    target-words: { small: 25, medium: 50, large: 80 }
     required-at: [build-ready-checklist, operational-handover]
     guidance: >
       What this document is for and who is expected to use it (e.g.
@@ -83,6 +86,7 @@ fields:
   - id: in-scope
     title: In scope
     type: markdown
+    target-words: { small: 30, medium: 75, large: 150 }
     required-at: [hld-arb-approved, build-ready-checklist, operational-handover]
     guidance: >
       The features, functionality, and deliverables inside the boundaries of
@@ -92,6 +96,7 @@ fields:
   - id: out-of-scope
     title: Out of scope
     type: markdown
+    target-words: { small: 20, medium: 55, large: 110 }
     required-at: [hld-arb-approved, build-ready-checklist, operational-handover]
     guidance: >
       What this design explicitly does not cover. Silence on out-of-scope is
@@ -100,6 +105,7 @@ fields:
   - id: content-standards
     title: Content standards
     type: markdown
+    target-words: { small: 20, medium: 50, large: 100 }
     required: false
     guidance: >
       Conventions a reader needs to interpret this document — e.g. that

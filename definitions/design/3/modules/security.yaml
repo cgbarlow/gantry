@@ -29,6 +29,7 @@ fields:
   - id: identity-and-access
     title: Identity and access management
     type: markdown
+    target-words: { small: 40, medium: 100, large: 200 }
     required-at: [build-ready-checklist]
     guidance: >
       Authentication, authorisation, and the security roles involved. Carries the
@@ -38,6 +39,7 @@ fields:
   - id: security-architecture
     title: Security architecture
     type: markdown
+    target-words: { small: 70, medium: 175, large: 350 }
     required-at: [build-ready-checklist]
     guidance: >
       Goals, constraints and assumptions specific to security — not a
@@ -54,6 +56,7 @@ fields:
   - id: regulations-and-standards
     title: Regulations and standards
     type: list
+    target-words: { small: 15, medium: 40, large: 80 }
     required-at: [build-ready-checklist]
     guidance: >
       The regulations and standards this solution is held to, including the acts
@@ -62,6 +65,7 @@ fields:
   - id: privacy-and-confidentiality
     title: Privacy and confidentiality concerns
     type: markdown
+    target-words: { small: 35, medium: 85, large: 170 }
     required-at: [hld-arb-approved, build-ready-checklist]
     guidance: >
       Whether the solution affects anyone's personal information, and any privacy

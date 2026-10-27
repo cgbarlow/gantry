@@ -16,6 +16,7 @@ fields:
   - id: business-context
     title: Business context
     type: markdown
+    target-words: { small: 55, medium: 135, large: 270 }
     required: false
     guidance: >
       Describe the business processes, users and regulatory context this
@@ -40,6 +41,7 @@ fields:
   - id: solution-users
     title: Solution users
     type: list
+    target-words: { small: 20, medium: 55, large: 110 }
     required: false
     guidance: >
       The roles that use this system, internal and external, each with a short
@@ -53,6 +55,7 @@ fields:
   - id: design-decisions
     title: Design decisions
     type: markdown
+    target-words: { small: 95, medium: 185, large: 310 }
     required: true
     guidance: >
       The decisions that shaped this architecture and why — not just what
@@ -78,6 +81,7 @@ fields:
   - id: architectural-risks
     title: Architectural risks
     type: markdown
+    target-words: { small: 30, medium: 75, large: 150 }
     required: false
     guidance: >
       Risks specific to this architecture's shape. Broader project risk
@@ -92,6 +96,7 @@ fields:
   - id: solution-description
     title: Solution description
     type: markdown
+    target-words: { small: 80, medium: 200, large: 400 }
     required: true
     guidance: >
       The components and how they fit together. Reference a diagram if you
@@ -113,6 +118,7 @@ fields:
   - id: constraints
     title: Constraints and goals
     type: markdown
+    target-words: { small: 20, medium: 55, large: 110 }
     required: false
     guidance: >
       Architecture-specific constraints and goals only — the boundaries and
@@ -125,6 +131,7 @@ fields:
   - id: standards
     title: Applicable standards
     type: list
+    target-words: { small: 20, medium: 50, large: 100 }
     required: false
     guidance: >
       Architectural or solution standards this design follows (e.g.
@@ -135,6 +142,7 @@ fields:
   - id: logical-components
     title: Logical components
     type: list
+    target-words: { small: 40, medium: 105, large: 210 }
     required: true
     guidance: >
       The solution's logical components, and for each, its status (below).

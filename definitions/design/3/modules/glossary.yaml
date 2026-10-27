@@ -7,6 +7,7 @@ fields:
   - id: terms-and-definitions
     title: Terms and definitions
     type: markdown
+    target-words: { small: 140, medium: 275, large: 460 }
     required-at: [build-ready-checklist, operational-handover]
     guidance: >
       A table of the preferred terms, acronyms, abbreviations and domain terms
