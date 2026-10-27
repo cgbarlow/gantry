@@ -6,4 +6,5 @@ export const SERVER_INSTRUCTIONS = `
 3. A tool call that fails with "missing_workspace_pat" means the operator needs to add that workspace to this server's GANTRY_MCP_WORKSPACE_PATS — you cannot fix this yourself; report it back to the operator verbatim.
 4. A tool call that fails with "authentication_required" means gantry serve rejected the credential this server already sent — report the message back to the operator; do not retry with a guessed credential.
 5. Every mutating or irreversible tool (advance_stage, publish_definition_version, archive_workspace, etc.) is named for exactly what it does. There is no generic "call any endpoint" tool and no confirmation step inside this server — treat each such call as final once made.
+6. When you write instance content, follow each field's guidance and the example's conventions (each field's "example" in get_instance), and never invent figures or names: give each figure its source in brackets or mark it "(target assumption)", and use the glossary's preferred terms.
 `.trim()
