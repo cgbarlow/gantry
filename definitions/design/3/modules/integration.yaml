@@ -31,6 +31,11 @@ fields:
       Use the glossary's preferred terms (`glossary.terms-and-definitions`)
       consistently in headings, tables, diagrams and prose.
 
+      Add a Status column giving each interface's status: `existing`,
+      `implemented`, `in delivery`, `planned` or `future`. Don't assume an
+      interface exists: one still to be built is `in delivery`, `planned` or
+      `future`.
+
   - id: network-and-infrastructure
     title: Network and infrastructure architecture
     type: markdown
@@ -46,6 +51,14 @@ fields:
       Use the architecture name by default — the glossary's preferred term —
       and the contracted product name only where it has been verified against
       the contract, e.g. in the licences table's "Contracted name" column.
+
+      Lay out each diagram in this order: one introductory sentence ("The
+      following diagram presents…"), the diagram, its caption (an image's alt
+      text, or `{caption="…"}` on a Mermaid fence), a paragraph interpreting it
+      ("The diagram shows how…"), then the detail, e.g. goals and then layered
+      controls as bullets. A diagram or section that isn't the enduring design
+      names its state — `current`, `interim`, `target` or `enduring` — in its
+      caption and its opening sentence, e.g. `Diagram 3. Publishing flow (interim)`.
   - id: software-and-licences
     title: Software and licences
     type: markdown

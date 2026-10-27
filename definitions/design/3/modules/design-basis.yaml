@@ -89,3 +89,7 @@ fields:
     guidance: >
       The concrete outputs this work produces and who owns each — by phase
       where that helps (Design / Triage / Build / Handover).
+
+      Mark an owner who is not yet confirmed `(interim)` after their name, e.g.
+      `Service owner — A. Ngata (interim)`, so temporary ownership isn't read
+      as final.

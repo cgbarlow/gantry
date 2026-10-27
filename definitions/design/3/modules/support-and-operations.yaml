@@ -38,6 +38,10 @@ fields:
       them — not just a flat contact list. Also carries the reference SAD's
       "Stakeholder Mapping" sub-section.
 
+      Mark an owner who is not yet confirmed `(interim)` after their name, e.g.
+      `Service owner — A. Ngata (interim)`, so temporary ownership isn't read
+      as final.
+
   - id: environments-and-domains
     title: Environments, URLs and domains
     type: list
@@ -76,6 +80,14 @@ fields:
       thresholds (e.g. request volume, 4xx/5xx rates) — and who gets
       notified when they trip. Carries the reference SAD's "Systems
       Management & Monitoring" sub-section.
+
+      Lay out each diagram in this order: one introductory sentence ("The
+      following diagram presents…"), the diagram, its caption (an image's alt
+      text, or `{caption="…"}` on a Mermaid fence), a paragraph interpreting it
+      ("The diagram shows how…"), then the detail, e.g. goals and then layered
+      controls as bullets. A diagram or section that isn't the enduring design
+      names its state — `current`, `interim`, `target` or `enduring` — in its
+      caption and its opening sentence, e.g. `Diagram 3. Publishing flow (interim)`.
 
   - id: release-procedures
     title: Release procedures

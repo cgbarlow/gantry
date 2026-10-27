@@ -18,6 +18,10 @@ fields:
       versus the projected rating once the mitigation lands. Not just a list
       of concerns with no response attached.
 
+      Mark an owner who is not yet confirmed `(interim)` after their name, e.g.
+      `Service owner — A. Ngata (interim)`, so temporary ownership isn't read
+      as final.
+
   - id: open-issues
     title: Open issues
     type: markdown
@@ -25,3 +29,7 @@ fields:
     guidance: >
       List unresolved issues that are not yet risks with a clear mitigation but need
       tracking before the design is approved for build.
+
+      Mark an owner who is not yet confirmed `(interim)` after their name, e.g.
+      `Service owner — A. Ngata (interim)`, so temporary ownership isn't read
+      as final.

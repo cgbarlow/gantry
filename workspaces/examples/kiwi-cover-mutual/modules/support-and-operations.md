@@ -16,7 +16,7 @@ owner: m.walker
 - Finance Systems — Liam O'Connor; Financial Application, payment reconciliation
 - Treasury — Anaru Pihema; BIBIT gateway contract, bank settlement issues; gateway vendor support via Treasury
 - CRM vendor support — via Claims Platform Team under the enterprise support agreement (P1 response one hour)
-- Records Management — Karen Doyle; document retention and disposal
+- Records Management — Karen Doyle (interim); document retention and disposal
 - Information Security — Sam Okafor; security incidents (any suspected data exposure is escalated here immediately, in parallel with Tier 2)
 - Escalation path: Service Desk → Technology Operations on-call → Claims Platform Team → vendor; business impact escalated to the Product Owner, then the Head of Claims
 
