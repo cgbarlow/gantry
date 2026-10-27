@@ -116,6 +116,8 @@ artefacts:
       business case decision.
     template: templates/soap.md.tmpl
     gate: business-case
+    # #195 (ADR-0053): number every diagram "Diagram N. <title>" in the Word document.
+    diagram-captions: true
     # Order follows the reference SOAP (SAMPLE SOAP - Mobile Phone Assistance):
     # Background and context -> Solution definition (Process flow, High level
     # solution design, Assumptions and considerations, Feature breakdown) ->
@@ -163,6 +165,7 @@ artefacts:
       dates and open questions.
     template: templates/soap-full.md.tmpl
     gate: business-case
+    diagram-captions: true
     # Order follows the JEDI Full SOAP reference document exactly: the
     # front-matter metadata block, then Introduction, Problem statement,
     # Opportunity, In Scope, Out of Scope, High Level Requirements, High level
@@ -225,6 +228,7 @@ artefacts:
       approval before detailed design.
     template: templates/hld.md.tmpl
     gate: hld-arb-approved
+    diagram-captions: true
     # Order follows the TAC HLD reference template: cover block -> Problem
     # Statement (Current state, Desired future state, In scope / out of scope,
     # Success criteria, Non-functional requirements) -> Proposed solution
@@ -311,6 +315,7 @@ artefacts:
       security, dependencies and support handover readiness for build.
     template: templates/sad.md.tmpl
     gate: build-ready-checklist
+    diagram-captions: true
     # Order follows SAD Template.docx: Introduction / Overview -> Business
     # Architecture View -> Solution Overview (+ Dependencies) -> High Level
     # Architectural View -> Open Issues -> Logical Components View ->
@@ -436,6 +441,7 @@ artefacts:
       that will support it after build.
     template: templates/ssad.md.tmpl
     gate: build-ready-checklist
+    diagram-captions: true
     # Order follows the FV Help Tool SSAD reference: Solution Products ->
     # Architectural Risks -> Introduction (Purpose, Scope, Content Standards) ->
     # Solution Overview (Stakeholders, Solution Domains, third-party platforms,
@@ -515,6 +521,7 @@ artefacts:
       operational use.
     template: templates/as-built.md.tmpl
     gate: operational-handover
+    diagram-captions: true
     # Order mirrors the approved ATLAS reference design: Terms & Definitions ->
     # Introduction -> As-built design (Overview, Architecture Decisions, flows,
     # infrastructure) -> Recovery plan -> Data security controls -> Appendix,

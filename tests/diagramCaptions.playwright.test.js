@@ -19,28 +19,30 @@ import { loadDefinition } from '../lib/definition.js'
 const EXAMPLE = 'workspaces/examples/kiwi-cover-mutual'
 const SECURITY_FENCE = '```mermaid {caption="Security architecture"}\nflowchart LR\n  Member --> Portal --> CRM\n```'
 
-// A scratch copy of the bundled Definitions with `diagram-captions: true` on design v2's SOAP:
-// numbering is opt-in per Artefact, and no bundled v1/v2 Artefact opts in.
-function optedInDefinitions(root) {
-  const definitionsDir = join(root, 'definitions')
-  cpSync('definitions', definitionsDir, { recursive: true })
-  const path = join(definitionsDir, 'design', '2', 'definition.yaml')
-  const before = readFileSync(path, 'utf8')
-  const after = before.replace('\n  - id: soap\n', '\n  - id: soap\n    diagram-captions: true\n')
-  assert.notEqual(after, before, 'the soap Artefact opts in')
-  writeFileSync(path, after)
-  return definitionsDir
-}
+// Numbering is opt-in per Artefact: design v3 opts every Artefact in, and v2 (published before
+// captions existed) opts none in. Each test pins its scratch copy of the example to the version it
+// is about, rather than relying on the version the bundled example happens to be pinned to.
+const OPTED_IN = 3
+const NOT_OPTED_IN = 2
 
-async function withExampleServer(fn, { edit, optIn = false } = {}) {
+async function withExampleServer(fn, { edit, version = OPTED_IN } = {}) {
+  const expectOptIn = version === OPTED_IN
+  assert.equal(
+    loadDefinition('design', { version }).artefacts.every((a) => a.diagramCaptions === (expectOptIn ? true : undefined)),
+    true,
+    `design v${version} ${expectOptIn ? 'opts every Artefact in' : 'opts no Artefact in'}`
+  )
   const root = mkdtempSync(join(tmpdir(), 'gantry-captions-e2e-'))
   const instancesDir = join(root, 'instances')
   try {
-    const definitionsDir = optIn ? optedInDefinitions(root) : undefined
     cpSync(EXAMPLE, join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+    const instanceYaml = join(instancesDir, 'examples', 'instance.yaml')
+    const pinned = readFileSync(instanceYaml, 'utf8').replace(/^definitionVersion: \d+$/m, `definitionVersion: ${version}`)
+    assert.match(pinned, new RegExp(`^definitionVersion: ${version}$`, 'm'))
+    writeFileSync(instanceYaml, pinned)
     if (edit) edit(join(instancesDir, 'examples'))
-    await withRunningServer({ slug: 'examples', instancesDir, ...(definitionsDir ? { definitionsDir } : {}) }, async (base) => {
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
       const browser = await launchBrowser()
       try {
         const context = await browser.newContext({ acceptDownloads: true, viewport: { width: 1400, height: 1000 } })
@@ -147,7 +149,6 @@ test('the default WASM render of an Artefact that opts in draws a captioned Merm
       }
     },
     {
-      optIn: true,
       edit: (instanceDir) => {
         const path = join(instanceDir, 'modules', 'background.md')
         writeFileSync(path, readFileSync(path, 'utf8').replace(/\n## Affected domains/, `\n${SECURITY_FENCE}\n\n## Affected domains`))
@@ -173,6 +174,7 @@ test('the default WASM render of an Artefact that does not opt in captions exact
       )
     },
     {
+      version: NOT_OPTED_IN,
       edit: (instanceDir) => {
         // An uncaptioned Mermaid block after both images: still the document's "Diagram 1".
         const path = join(instanceDir, 'modules', 'solution-definition.md')

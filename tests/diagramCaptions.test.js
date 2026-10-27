@@ -22,32 +22,39 @@ import { numberDiagrams } from '../web/lib/diagramCaptions.js'
 // Numbering is opt-in per Artefact (`diagram-captions: true`, the "engine options are opt-in per
 // Artefact" pattern of ADR-0049): an Artefact that doesn't set it — every Artefact of design v1
 // and v2 and every other bundled Definition — converts exactly as it did before captions existed.
-// The opted-in tests below render against a scratch copy of the bundled Definitions with the
-// switch set on design v2's SOAP.
+// design v3 switches it on for every Artefact. Each test pins the version its scratch copy of the
+// example renders on, rather than relying on the version the bundled example happens to be pinned
+// to: the opted-in tests render on v3, and the "exactly as before" regressions on v2.
 
 const SLUG = 'examples'
 const EXAMPLE = 'workspaces/examples/kiwi-cover-mutual'
 const SECURITY_FENCE = '```mermaid {caption="Security architecture"}\nflowchart LR\n  Member --> Portal --> CRM\n```'
 
-// A scratch copy of the bundled Definitions, with `diagram-captions: true` on design v2's SOAP.
-function optedInDefinitions(root) {
-  const definitionsDir = join(root, 'definitions')
-  cpSync('definitions', definitionsDir, { recursive: true })
-  const path = join(definitionsDir, 'design', '2', 'definition.yaml')
-  const before = readFileSync(path, 'utf8')
-  const after = before.replace('\n  - id: soap\n', '\n  - id: soap\n    diagram-captions: true\n')
-  assert.notEqual(after, before, 'the soap Artefact opts in')
-  writeFileSync(path, after)
-  return definitionsDir
+// design v3 opts every Artefact in; v2, published before captions existed, opts none in.
+const OPTED_IN = 3
+const NOT_OPTED_IN = 2
+
+// The example's instance.yaml, pinned to `version` of the design Definition.
+function instanceYamlOn(version) {
+  const before = readFileSync(join(EXAMPLE, 'instance.yaml'), 'utf8')
+  const after = before.replace(/^definitionVersion: \d+$/m, `definitionVersion: ${version}`)
+  assert.match(after, new RegExp(`^definitionVersion: ${version}$`, 'm'), 'the example is pinned to the version under test')
+  return after
 }
 
-async function withExample(edit, fn, { optIn = true } = {}) {
+async function withExample(edit, fn, { version = OPTED_IN } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'gantry-captions-'))
   const instancesDir = join(root, 'instances')
   try {
-    const definitionsDir = optIn ? optedInDefinitions(root) : 'definitions'
+    const definitionsDir = 'definitions'
+    assert.equal(
+      loadDefinition('design', { definitionsDir, version }).artefacts.every((a) => a.diagramCaptions === (version === OPTED_IN ? true : undefined)),
+      true,
+      `design v${version} ${version === OPTED_IN ? 'opts every Artefact in' : 'opts no Artefact in'}`
+    )
     cpSync(EXAMPLE, join(instancesDir, SLUG), { recursive: true })
     rmSync(join(instancesDir, SLUG, 'out'), { recursive: true, force: true })
+    writeFileSync(join(instancesDir, SLUG, 'instance.yaml'), instanceYamlOn(version))
     for (const [moduleId, change] of Object.entries(edit)) {
       const path = join(instancesDir, SLUG, 'modules', `${moduleId}.md`)
       const before = readFileSync(path, 'utf8')
@@ -170,7 +177,6 @@ test('an Artefact that does not opt in converts exactly as before: alt-texted im
   await withExample(
     { 'solution-definition': withUncaptionedDiagramAfterImages },
     ({ instancesDir, definitionsDir }) => {
-      assert.equal(loadDefinition('design', { definitionsDir, version: 2 }).artefacts.find((a) => a.id === 'soap').diagramCaptions, undefined)
       const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir })
       assert.equal(result.docxMarkdown, result.markdown, 'the Word document is converted from the markdown as compiled')
       const documentXml = unzip(result.docxPath, 'word/document.xml')
@@ -181,7 +187,7 @@ test('an Artefact that does not opt in converts exactly as before: alt-texted im
         'the images keep their bare alt text as their caption'
       )
     },
-    { optIn: false }
+    { version: NOT_OPTED_IN }
   )
 })
 
@@ -195,7 +201,7 @@ test('the unmodified example SAD, with eight alt-texted images, converts exactly
       assert.equal(documentXml, convertDirectly(result))
       assert.doesNotMatch(documentXml, /Diagram \d/)
     },
-    { optIn: false }
+    { version: NOT_OPTED_IN }
   )
 })
 
@@ -226,36 +232,31 @@ function exampleModuleFiles() {
   return moduleFiles
 }
 
-const compileLocally = (definitionsDir) =>
+const compileLocally = (version) =>
   runLocalWorkspaceCompute(
     'compile',
     {
       definitionId: 'design',
-      definitionVersion: 2,
-      instanceYaml: readFileSync(join(EXAMPLE, 'instance.yaml'), 'utf8'),
+      definitionVersion: version,
+      instanceYaml: instanceYamlOn(version),
       moduleFiles: exampleModuleFiles(),
       artefact: 'soap',
     },
-    { definitionsDir }
+    { definitionsDir: 'definitions' }
   )
 
 test('a local workspace compile hands the browser the numbered markdown for the Word document, and the authored markdown for the .md', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'gantry-captions-local-'))
-  try {
-    const compiled = await compileLocally(optedInDefinitions(root))
-    assert.ok(compiled.markdown.includes(SECURITY_FENCE), 'the .md keeps the fence as written')
-    assert.doesNotMatch(compiled.markdown, /Diagram \d/)
-    // The browser draws the Mermaid picture and labels it with the caption the compile resolved.
-    assert.match(compiled.docxMarkdown, /```mermaid \{figure-caption="Diagram 1\. Security architecture"\}\nflowchart LR/)
-    assert.match(compiled.docxMarkdown, /!\[Diagram 2\. Take out insurance process\]\(diagram\.png\)/)
-    assert.match(compiled.docxMarkdown, /!\[Diagram 3\. Claims handling introductory view\]\(diagram\.png\)/)
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
+  const compiled = await compileLocally(OPTED_IN)
+  assert.ok(compiled.markdown.includes(SECURITY_FENCE), 'the .md keeps the fence as written')
+  assert.doesNotMatch(compiled.markdown, /Diagram \d/)
+  // The browser draws the Mermaid picture and labels it with the caption the compile resolved.
+  assert.match(compiled.docxMarkdown, /```mermaid \{figure-caption="Diagram 1\. Security architecture"\}\nflowchart LR/)
+  assert.match(compiled.docxMarkdown, /!\[Diagram 2\. Take out insurance process\]\(diagram\.png\)/)
+  assert.match(compiled.docxMarkdown, /!\[Diagram 3\. Claims handling introductory view\]\(diagram\.png\)/)
 })
 
 test('a local workspace compile of an Artefact that does not opt in hands the browser the markdown as compiled', async () => {
-  const compiled = await compileLocally('definitions')
+  const compiled = await compileLocally(NOT_OPTED_IN)
   assert.equal(compiled.docxMarkdown, compiled.markdown)
 })
 

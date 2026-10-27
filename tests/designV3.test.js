@@ -256,3 +256,31 @@ describe('every v3 Artefact renders from the example data (#193)', () => {
     })
   }
 })
+
+describe('design v3 numbers and captions its diagrams (#195)', () => {
+  // ADR-0053: `diagram-captions` is an opt-in engine option, and v3 switches it on for every
+  // Artefact. v1 and v2 never set it, so their documents convert exactly as they always did.
+  test('every v3 Artefact sets diagram-captions: true, and no v1 or v2 Artefact sets it', () => {
+    assert.deepEqual(v3().artefacts.filter((a) => a.diagramCaptions !== true).map((a) => a.id), [])
+    for (const version of [1, 2]) {
+      const def = loadDefinition(DEFINITION, { version })
+      assert.deepEqual(def.artefacts.filter((a) => a.diagramCaptions !== undefined).map((a) => a.id), [], `v${version}`)
+    }
+  })
+
+  test('the v3 SAD numbers the example\'s captioned images in one sequence, "Diagram N. <title>", the caption doubling as alt text', () => {
+    const { result, documentXml } = renderWord('kiwi-cover-mutual', 'sad')
+    assert.doesNotMatch(result.markdown, /Diagram \d/, 'the exported .md keeps the images as authored')
+    const paragraphs = [...documentXml.matchAll(/<w:p>([\s\S]*?)<\/w:p>/g)].map(([, body]) => body)
+    const captions = paragraphs.flatMap((body, i) =>
+      body.includes('w:val="ImageCaption"')
+        ? [{ text: [...body.matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/g)].map((m) => m[1]).join(''), alt: paragraphs[i - 1].match(/<wp:docPr [^>]*descr="([^"]*)"/)?.[1] }]
+        : []
+    )
+    assert.ok(captions.length > 1, 'the SAD has captioned images')
+    captions.forEach(({ text, alt }, i) => {
+      assert.match(text, new RegExp(`^Diagram ${i + 1}\\. \\S`), text)
+      assert.equal(alt, text, 'the caption is the image\'s alt text')
+    })
+  })
+})
