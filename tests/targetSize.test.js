@@ -15,11 +15,18 @@ import { validateDefinition } from '../lib/validate.js'
 import { checkGate } from '../lib/check.js'
 import { renderArtefact } from '../lib/render.js'
 import { createGitHubClient } from '../lib/githubClient.js'
+import { program } from '../bin/gantry.js'
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
+import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
+import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import {
   withRunningServer,
   withRunningServerForProvider,
   basicAuthHeader,
+  ORGANIZATION,
+  PROJECT,
+  REPOSITORY,
+  VALID_PAT,
   GITHUB_OWNER,
   GITHUB_REPOSITORY,
   GITHUB_VALID_PAT,
@@ -249,6 +256,24 @@ test('a Definition with no budgets shows no size: GET /api/instance is unchanged
     assert.match((await res.json()).error, /declares no target-words/)
   }))
 
+test('`gantry new --size` stores the size, and refuses one for a Definition with no budgets', () =>
+  withLibrary(async ({ definitionsDir, instancesDir }) => {
+    program.exitOverride()
+    const origLog = console.log
+    console.log = () => {}
+    try {
+      await program.parseAsync(['node', 'gantry.js', 'new', 'sized', 'cli-sized', '--size', 'large', '--workspaces-dir', instancesDir, '--definitions-dir', definitionsDir])
+      await assert.rejects(
+        program.parseAsync(['node', 'gantry.js', 'new', 'plain', 'cli-plain', '--size', 'large', '--workspaces-dir', instancesDir, '--definitions-dir', definitionsDir]),
+        /declares no target-words/
+      )
+    } finally {
+      console.log = origLog
+    }
+    assert.match(localInstanceYaml(instancesDir, 'cli-sized'), /^size: large$/m)
+    assert.equal(existsSync(join(instancesDir, 'default', 'cli-plain')), false)
+  }))
+
 // ---------- Over-budget notes on save ----------
 
 test('PUT /api/instance/modules saves an over-budget field and returns a note naming its count and target, without failing the write', () =>
@@ -367,4 +392,28 @@ test('a GitHub-backed instance stores its size in its own repo and changes it on
       assert.equal(body.size, 'small')
       assert.equal(fieldsById(body).get('overview').targetWords, 5)
     })
+  ))
+
+// The wizard's "import a Local-workspace instance" path (WI #305) carries the source instance's size
+// across to its new Azure DevOps home, rather than silently resetting it to Medium.
+test('POST /api/instances/import keeps the imported instance\'s size', () =>
+  withLibrary(({ definitionsDir, instancesDir }) =>
+    withFakeAzureDevOpsServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT }, (adoBaseUrl) =>
+      withRunningServer({ definitionsDir, instancesDir, allowAzureDevOpsBaseUrlOverride: true }, async (base) => {
+        const res = await fetch(`${base}/api/instances/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(VALID_PAT) },
+          body: JSON.stringify({
+            definition: 'sized',
+            slug: 'imported-sized',
+            size: 'small',
+            modules: [],
+            azureDevOps: { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl },
+          }),
+        })
+        assert.equal(res.status, 201)
+        const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
+        assert.match(await client.getFileContent('gantry-workspace/imported-sized/instance.yaml'), /^size: small$/m)
+      })
+    )
   ))
