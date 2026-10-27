@@ -640,3 +640,212 @@ describe('design v3 numbers and captions its diagrams (#195)', () => {
     })
   })
 })
+
+// #199 (GF-009 to GF-012, GF-020, GF-021): v3 guidance sets a short diagram pattern and three
+// inline state labels, and the example shows each. Guidance only, as for #201: no new Field, and
+// Gantry checks none of it in the product, so the tests guard the guidance text and the bundled
+// example.
+//
+// Tables drive it:
+//   - DIAGRAM_FIELDS: every Field that carries a diagram. Its guidance gives the intro → diagram →
+//     caption → interpretation → detail order, and the architecture-state labels.
+//   - CAPABILITY_STATUS_FIELDS: the inventories, which give each entry a Status.
+//   - INTERIM_OWNER_FIELDS: the Fields that name owners, which mark an unconfirmed one `(interim)`.
+
+const DIAGRAM_FIELDS = [
+  'introduction.overview',
+  'solution-definition.process-flow',
+  'solution-definition.high-level-solution-overview',
+  'soap-full-details.sequencing',
+  'architecture.business-context',
+  'architecture.solution-description',
+  'integration.network-and-infrastructure',
+  'data.logical-data-model',
+  'security.security-architecture',
+  'support-and-operations.monitoring-and-alerting',
+  'as-built-notes.design-overview',
+  'as-built-notes.process-flows',
+]
+
+const CAPABILITY_STATUS_FIELDS = ['architecture.logical-components', 'integration.interfaces']
+
+const INTERIM_OWNER_FIELDS = [
+  'support-and-operations.stakeholders',
+  'risks.risk-register',
+  'risks.open-issues',
+  'design-basis.outcomes-and-deliverables',
+]
+
+const ARCHITECTURE_STATES = ['current', 'interim', 'target', 'enduring']
+const CAPABILITY_STATUSES = ['existing', 'implemented', 'in delivery', 'planned', 'future']
+
+// A diagram is an image alone on its line, or a Mermaid fence.
+const DIAGRAM_LINE = /^(?:!\[[^\]]*\]\([^)]*\)\s*$|```mermaid\b)/m
+
+// The sentences of a guidance paragraph. Inline code, quoted phrases and "e.g." hold full stops
+// that don't end a sentence.
+function sentencesOf(paragraph) {
+  const plain = paragraph
+    .replace(/`[^`]*`/g, 'code')
+    .replace(/"[^"]*"/g, 'quote')
+    .replace(/\b(?:e\.g|i\.e)\./g, 'eg')
+  return plain.split(/(?<=[.!?])\s+/).filter((s) => /\S/.test(s))
+}
+
+// The guidance paragraph that sets the diagram pattern.
+function diagramPatternOf(guidance) {
+  return (guidance ?? '').split('\n').find((paragraph) => /introductory sentence/.test(paragraph))
+}
+
+// Each diagram in a Field value with the blocks around it: the one before (its opening sentence),
+// its caption, the one after (its interpretation) and the rest. Blocks are separated by blank
+// lines; a fence is one block.
+function diagramLayouts(markdown) {
+  const blocks = []
+  let fence = null
+  for (const line of markdown.split('\n')) {
+    if (fence !== null) {
+      fence.push(line)
+      if (/^```\s*$/.test(line)) {
+        blocks.push(fence.join('\n'))
+        fence = null
+      }
+    } else if (line.startsWith('```')) {
+      fence = [line]
+    } else if (/\S/.test(line)) {
+      if (blocks.length && blocks.at(-1) !== null && !blocks.at(-1).startsWith('```')) blocks[blocks.length - 1] += `\n${line}`
+      else blocks.push(line)
+    } else if (blocks.at(-1) !== null) {
+      blocks.push(null)
+    }
+  }
+  const paragraphs = blocks.filter((b) => b !== null)
+  return paragraphs.flatMap((block, i) => {
+    if (!DIAGRAM_LINE.test(block)) return []
+    const caption = block.match(/^```mermaid\s*\{caption="([^"]*)"\}/)?.[1] ?? block.match(/^!\[([^\]]*)\]/)?.[1] ?? null
+    return [{ caption, before: paragraphs[i - 1] ?? '', after: paragraphs[i + 1] ?? '', rest: paragraphs.slice(i + 2) }]
+  })
+}
+
+describe('v3 guidance and example: the diagram pattern and current / interim / target state labels (#199)', () => {
+  describe('the diagram pattern (GF-009, GF-010, GF-011)', () => {
+    test('every Field that carries a diagram in a bundled example is in the diagram table', () => {
+      for (const slug of Object.keys(EXAMPLES)) {
+        for (const file of readdirSync(join(EXAMPLES_DIR, slug, 'modules'))) {
+          const moduleId = file.replace(/\.md$/, '')
+          for (const [fieldId, value] of Object.entries(readModule(v3(), slug, moduleId, { instancesDir: EXAMPLES_DIR }).fields)) {
+            if (DIAGRAM_LINE.test(valueText(value))) assert.ok(DIAGRAM_FIELDS.includes(`${moduleId}.${fieldId}`), `${slug}: ${moduleId}.${fieldId}`)
+          }
+        }
+      }
+    })
+
+    test('the sentence counter ignores the full stops in code, quotes and "e.g."', () => {
+      assert.equal(sentencesOf('One ("The following diagram presents…"), e.g. `Diagram 3. Flow`. Two.').length, 2)
+    })
+
+    for (const ref of DIAGRAM_FIELDS) {
+      test(`${ref}'s guidance gives the intro → diagram → caption → interpretation → detail order in no more than two sentences`, () => {
+        const pattern = diagramPatternOf(v3Field(ref).guidance)
+        assert.ok(pattern, `${ref} has the diagram pattern`)
+        assert.match(pattern, /introductory sentence[\s\S]*\bthe diagram\b[\s\S]*\bcaption\b[\s\S]*\binterpret[\s\S]*\bdetail\b/)
+        assert.match(pattern, /"The following diagram presents…"/)
+        assert.match(pattern, /"The diagram shows how…"/)
+        assert.ok(sentencesOf(pattern).length <= 2, pattern)
+      })
+
+      test(`${ref}'s guidance labels a diagram that isn't the enduring design current, interim, target or enduring, in its caption and opening sentence`, () => {
+        const { guidance } = v3Field(ref)
+        assert.match(guidance, /`current`, `interim`, `target` or `enduring`/)
+        assert.match(guidance, /in its caption and its opening sentence/)
+        assert.ok(guidance.includes('`Diagram 3. Publishing flow (interim)`'), 'shows a labelled caption')
+      })
+    }
+
+    test('the example shows the pattern: a captioned Mermaid diagram introduced in one sentence, interpreted, then the detail', () => {
+      const [layout] = diagramLayouts(exampleValue('security.security-architecture'))
+      assert.ok(layout, 'the example security architecture has a diagram')
+      assert.match(exampleValue('security.security-architecture'), /^```mermaid \{caption="[^"]+"\}$/m, 'captioned on the fence (#195)')
+      assert.match(layout.before, /^The following diagram presents /)
+      assert.equal(sentencesOf(layout.before).length, 1, 'one introductory sentence')
+      assert.match(layout.after, /^The diagram shows how /)
+      assert.ok(layout.rest.some((block) => /^- /m.test(block)), 'the detail follows, with the layered controls as bullets')
+    })
+
+    test('the rendered v3 SAD captions the example\'s Mermaid diagram in the same sequence as its images', () => {
+      const { markdown, docxMarkdown } = renderArtefact(CONVENTIONS_EXAMPLE, 'sad', { instancesDir: EXAMPLES_DIR, dryRun: true })
+      assert.ok(markdown.includes('```mermaid {caption="Security architecture (interim)"}'), 'the exported .md keeps the fence as written')
+      const numbers = [...docxMarkdown.matchAll(/Diagram (\d+)\. /g)].map((m) => Number(m[1]))
+      assert.deepEqual(numbers, numbers.map((_, i) => i + 1), 'one sequence')
+      assert.match(docxMarkdown, new RegExp(`Diagram ${numbers.length}\\. Security architecture \\(interim\\)`))
+    })
+  })
+
+  describe('architecture state (GF-012)', () => {
+    test('a labelled diagram in the example names its state in its caption and its opening sentence', () => {
+      const labelled = DIAGRAM_FIELDS.flatMap((ref) => (hasContent(exampleValue(ref)) ? diagramLayouts(exampleValue(ref)) : [])).filter(({ caption }) =>
+        /\((\w+)\)$/.test(caption ?? '')
+      )
+      assert.ok(labelled.some(({ caption }) => caption.endsWith('(interim)')), 'an interim diagram')
+      for (const { caption, before } of labelled) {
+        const state = caption.match(/\((\w+)\)$/)[1]
+        assert.ok(ARCHITECTURE_STATES.includes(state), `"${caption}" uses a state label`)
+        assert.match(before, new RegExp(`\\b${state}\\b`), `"${caption}": the opening sentence names the state too`)
+      }
+    })
+  })
+
+  describe('capability status (GF-021)', () => {
+    for (const ref of CAPABILITY_STATUS_FIELDS) {
+      test(`${ref}'s guidance asks for a Status of existing, implemented, in delivery, planned or future, and not to assume a capability exists`, () => {
+        const { guidance } = v3Field(ref)
+        assert.match(guidance, /\bStatus\b/)
+        assert.match(guidance, /`existing`, `implemented`, `in delivery`, `planned` or `future`/)
+        assert.match(guidance, /Don't assume an? (capability|component|interface) exists/)
+      })
+    }
+
+    test('every logical component in the example states its Status, and not every one exists yet', () => {
+      const items = exampleValue('architecture.logical-components')
+      assert.ok(items.length > 0)
+      const statuses = items.map((item) => item.match(/^.+? — Status: ([a-z ]+) — \S/)?.[1])
+      items.forEach((item, i) => assert.ok(CAPABILITY_STATUSES.includes(statuses[i]), item))
+      assert.ok(statuses.includes('existing'))
+      assert.ok(statuses.some((s) => s !== 'existing' && s !== 'implemented'), 'some components are still to come')
+    })
+
+    test('the example interfaces table has a Status column', () => {
+      const [table] = markdownTables(exampleValue('integration.interfaces'))
+      const column = table.header.indexOf('Status')
+      assert.ok(column > 0, table.header.join(' | '))
+      for (const row of table.rows) assert.ok(CAPABILITY_STATUSES.includes(row[column]), row.join(' | '))
+    })
+
+    test('the rendered v3 SAD lists each logical component with its Status', () => {
+      const { markdown } = renderArtefact(CONVENTIONS_EXAMPLE, 'sad', { instancesDir: EXAMPLES_DIR, dryRun: true })
+      const start = markdown.indexOf('# Logical components view')
+      const section = markdown.slice(start, markdown.indexOf('\n# ', start + 1))
+      assert.match(section, /^- Customer Information Service \(CIS\) — Status: \w/m)
+    })
+  })
+
+  describe('interim ownership (GF-020)', () => {
+    for (const ref of INTERIM_OWNER_FIELDS) {
+      test(`${ref}'s guidance marks an owner who is not yet confirmed (interim)`, () => {
+        const { guidance } = v3Field(ref)
+        assert.match(guidance, /owner who is not yet confirmed/)
+        assert.match(guidance, /`\(interim\)`/)
+      })
+    }
+
+    test('the example marks an unconfirmed owner (interim) in the support contacts and the risk register', () => {
+      const contact = exampleValue('support-and-operations.stakeholders').find((item) => /\(interim\)/.test(item))
+      assert.ok(contact, 'a support contact is interim')
+      const owner = contact.match(/— ([^;(]+?) \(interim\)/)?.[1]
+      assert.ok(owner, contact)
+      const [register] = markdownTables(exampleValue('risks.risk-register'))
+      const column = register.header.indexOf('Owner')
+      assert.ok(register.rows.some((row) => row[column] === `${owner} (interim)`), `${owner} is the interim owner of a risk too`)
+    })
+  })
+})

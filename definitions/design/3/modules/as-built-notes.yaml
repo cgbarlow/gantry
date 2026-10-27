@@ -18,6 +18,14 @@ fields:
       Describe the key architecture and technology as actually implemented and how it
       aligns to the approved design. Reference a diagram if you have one, but describe the
       structure in words too.
+
+      Lay out each diagram in this order: one introductory sentence ("The
+      following diagram presents…"), the diagram, its caption (an image's alt
+      text, or `{caption="…"}` on a Mermaid fence), a paragraph interpreting it
+      ("The diagram shows how…"), then the detail, e.g. goals and then layered
+      controls as bullets. A diagram or section that isn't the enduring design
+      names its state — `current`, `interim`, `target` or `enduring` — in its
+      caption and its opening sentence, e.g. `Diagram 3. Publishing flow (interim)`.
   - id: architecture-decisions
     title: Architecture decisions
     type: markdown
@@ -38,6 +46,14 @@ fields:
     guidance: >
       Describe the detailed process and data flows step by step, as the system actually
       behaves — not the intended flows from design.
+
+      Lay out each diagram in this order: one introductory sentence ("The
+      following diagram presents…"), the diagram, its caption (an image's alt
+      text, or `{caption="…"}` on a Mermaid fence), a paragraph interpreting it
+      ("The diagram shows how…"), then the detail, e.g. goals and then layered
+      controls as bullets. A diagram or section that isn't the enduring design
+      names its state — `current`, `interim`, `target` or `enduring` — in its
+      caption and its opening sentence, e.g. `Diagram 3. Publishing flow (interim)`.
   - id: infrastructure-and-configuration
     title: Infrastructure and configuration
     type: markdown

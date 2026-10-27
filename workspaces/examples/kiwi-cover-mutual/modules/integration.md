@@ -7,19 +7,19 @@ owner: p.natarajan
 
 ## Interfaces
 
-| Interface | From → To | Protocol | Direction | What crosses |
-| --- | --- | --- | --- | --- |
-| CRM → CIS | CRM workflow → Customer Information Service | REST/JSON over mutual TLS | Bidirectional | Customer lookup and update, policy summary |
-| CRM → Claims InfoServ | CRM workflow → Claims Information Service | REST/JSON over mutual TLS | Bidirectional | Claim create, state change, valuation, routing decision, audit event |
-| Web forms → CIS / Claims InfoServ | Member web platform → services | REST/JSON over TLS through the API gateway | Bidirectional | Claim registration, policy request; member-scoped |
-| CIS → PDM-01 / PDM-02 / PDM-03 | CIS → mainframe integration layer → CICS | MQ request/reply (JSON payload) | Bidirectional | Policy lookup, insured-item lookup, policy create |
-| Claims InfoServ → PDM-04 | Claims InfoServ → mainframe integration layer → CICS | MQ request/reply | Unidirectional | Claim ledger update on accept, valuate and pay |
-| Claims InfoServ → Financial Application | Claim payment request | REST/JSON over mutual TLS | Bidirectional | Payment request, payment reference and status |
-| Financial Application → BIBIT gateway | Payment instruction | HTTPS (gateway API v4) with signed requests | Bidirectional | Member name, account, amount, reference; status callbacks |
-| BIBIT gateway → Bank system | Settlement | Gateway-managed | Unidirectional | Payment to member account; premium collection from member account |
-| CRM / Claims InfoServ → Document management | Document store and retrieve | REST over mutual TLS | Bidirectional | Claim-indexed documents and metadata |
-| Claims InfoServ → Claims data mart | Nightly extract | SFTP file transfer | Unidirectional | Claim events since last extract |
-| CRM → Correspondence (printing) service | Member letters and email | Existing internal API | Unidirectional | Templated correspondence |
+| Interface | From → To | Protocol | Direction | What crosses | Status |
+| --- | --- | --- | --- | --- | --- |
+| CRM → CIS | CRM workflow → Customer Information Service | REST/JSON over mutual TLS | Bidirectional | Customer lookup and update, policy summary | in delivery |
+| CRM → Claims InfoServ | CRM workflow → Claims Information Service | REST/JSON over mutual TLS | Bidirectional | Claim create, state change, valuation, routing decision, audit event | in delivery |
+| Web forms → CIS / Claims InfoServ | Member web platform → services | REST/JSON over TLS through the API gateway | Bidirectional | Claim registration, policy request; member-scoped | planned |
+| CIS → PDM-01 / PDM-02 / PDM-03 | CIS → mainframe integration layer → CICS | MQ request/reply (JSON payload) | Bidirectional | Policy lookup, insured-item lookup, policy create | in delivery |
+| Claims InfoServ → PDM-04 | Claims InfoServ → mainframe integration layer → CICS | MQ request/reply | Unidirectional | Claim ledger update on accept, valuate and pay | in delivery |
+| Claims InfoServ → Financial Application | Claim payment request | REST/JSON over mutual TLS | Bidirectional | Payment request, payment reference and status | planned |
+| Financial Application → BIBIT gateway | Payment instruction | HTTPS (gateway API v4) with signed requests | Bidirectional | Member name, account, amount, reference; status callbacks | planned |
+| BIBIT gateway → Bank system | Settlement | Gateway-managed | Unidirectional | Payment to member account; premium collection from member account | planned |
+| CRM / Claims InfoServ → Document management | Document store and retrieve | REST over mutual TLS | Bidirectional | Claim-indexed documents and metadata | in delivery |
+| Claims InfoServ → Claims data mart | Nightly extract | SFTP file transfer | Unidirectional | Claim events since last extract | planned |
+| CRM → Correspondence (printing) service | Member letters and email | Existing internal API | Unidirectional | Templated correspondence | existing |
 
 ## Network and infrastructure architecture
 

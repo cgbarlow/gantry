@@ -29,6 +29,14 @@ fields:
       problem for the ARB, this frames the setting for builders. Confirmed as a
       decision, not an oversight — see CHANGES.md.
 
+      Lay out each diagram in this order: one introductory sentence ("The
+      following diagram presents…"), the diagram, its caption (an image's alt
+      text, or `{caption="…"}` on a Mermaid fence), a paragraph interpreting it
+      ("The diagram shows how…"), then the detail, e.g. goals and then layered
+      controls as bullets. A diagram or section that isn't the enduring design
+      names its state — `current`, `interim`, `target` or `enduring` — in its
+      caption and its opening sentence, e.g. `Diagram 3. Publishing flow (interim)`.
+
   - id: solution-users
     title: Solution users
     type: list
@@ -94,6 +102,14 @@ fields:
       Use the glossary's preferred terms (`glossary.terms-and-definitions`)
       consistently in headings, tables, diagrams and prose.
 
+      Lay out each diagram in this order: one introductory sentence ("The
+      following diagram presents…"), the diagram, its caption (an image's alt
+      text, or `{caption="…"}` on a Mermaid fence), a paragraph interpreting it
+      ("The diagram shows how…"), then the detail, e.g. goals and then layered
+      controls as bullets. A diagram or section that isn't the enduring design
+      names its state — `current`, `interim`, `target` or `enduring` — in its
+      caption and its opening sentence, e.g. `Diagram 3. Publishing flow (interim)`.
+
   - id: constraints
     title: Constraints and goals
     type: markdown
@@ -121,8 +137,15 @@ fields:
     type: list
     required: true
     guidance: >
-      The solution's logical components, and for each, whether it's new or
-      existing. Renders as its own section, after `risks.open-issues` — it
+      The solution's logical components, and for each, its status (below).
+      Renders as its own section, after `risks.open-issues` — it
       carries the reference SAD's whole "Logical Components View", including
       its layered / product / application-usage / service-realisation
       viewpoints.
+
+      Give every component a Status straight after its name, so the list reads
+      as Component / Status / Description: `- Notification service — Status:
+      planned — sends members their claim updates`. The Status is one of
+      `existing`, `implemented`, `in delivery`, `planned` or `future`. Don't
+      assume a capability exists: a component this work is still to build is
+      `in delivery`, `planned` or `future`, not described as if it runs today.

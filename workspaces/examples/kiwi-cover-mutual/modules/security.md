@@ -15,7 +15,31 @@ User roles in the business sense (who uses the system for what) are catalogued i
 
 ## Security architecture
 
+The following diagram presents the interim security architecture, which holds until the mainframe MQ upgrade.
+
+```mermaid {caption="Security architecture (interim)"}
+flowchart LR
+  member["Member"] -->|"member identity service"| web["Member web forms (DMZ)"]
+  staff["Staff"] -->|"single sign-on with MFA"| crm["CRM System"]
+  web -->|"TLS through the API gateway"| services["CIS and Claims InfoServ"]
+  crm -->|"mutual TLS"| services
+  services -->|"mutual TLS 1.3"| bridge["MQ bridge"]
+  bridge -->|"TLS 1.2, re-encrypted (interim)"| pdm["Policy Data Management (mainframe zone)"]
+  services -->|"mutual TLS"| fin["Financial Application"]
+  fin -->|"signed HTTPS through the egress firewall"| gateway["BIBIT gateway"]
+```
+
+The diagram shows how every hop between components is authenticated and encrypted, and that the only path out of KCM's network is the Financial Application's payment instruction to the BIBIT gateway. Only the mainframe leg is interim: the MQ bridge re-encrypts to TLS 1.2 because the mainframe's MQ channels support nothing newer. After the upgrade the bridge carries TLS 1.3 to the mainframe, and the enduring architecture is otherwise as drawn.
+
 Goals: no member data leaves KCM's network except payment instructions to the gateway; every hop between components is authenticated and encrypted; a handler cannot both valuate and pay the same claim; the audit record is complete and tamper-evident. Constraints: the mainframe's MQ channels support TLS 1.2 only, so the integration layer terminates TLS 1.3 from the services and re-encrypts to the mainframe; the CRM vendor's extension framework runs with the application's own privileges, so routing rules are held in Claims InfoServ rather than in the CRM. Assumptions: the enterprise identity provider and the network segmentation between the DMZ, the application zone and the mainframe zone are already assessed and remain in place; the BIBIT gateway holds PCI DSS certification for the payment data it processes. The threat model (STRIDE, held in the security repository) is reviewed at each increment gate.
+
+Layered controls:
+
+- Identity: staff through the enterprise identity provider with multi-factor authentication, members through the member identity service, and services by mutual TLS with a service account per consuming application (see Identity and access management).
+- Network: firewalls separate the DMZ, the application zone and the mainframe zone; the egress firewall allows only the Financial Application's connection to the BIBIT gateway.
+- Transport: every hop is encrypted, with mutual TLS between components and TLS 1.2 on the interim mainframe leg.
+- Application: valuation and payment release are separate roles by rule, and routing rules sit in Claims InfoServ, outside the CRM's privileges.
+- Audit: every claim state change is recorded in Claims InfoServ's tamper-evident audit trail, and every read of a member record is logged.
 
 ## Regulations and standards
 

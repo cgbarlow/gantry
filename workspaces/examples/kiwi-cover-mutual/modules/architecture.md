@@ -95,17 +95,17 @@ Architecture-specific constraints: the mainframe MQ channels support TLS 1.2 onl
 
 ## Logical components
 
-- Customer Information Service (CIS) — new; canonical customer, policy summary and contact data for all channels
-- Claims Information Service (Claims InfoServ) — new; claim state, valuation, routing rules and audit trail
-- Handle Claim workflow (CRM extension) — new; orchestrates Register, Accept, Valuate, Pay
-- Take out insurance workflow (CRM extension and web form) — new; policy intake for telephone and web
-- Policy Data Management service exposures (PDM-01 policy lookup, PDM-02 insured-item lookup, PDM-03 policy create, PDM-04 claim ledger update) — new; CICS transactions over MQ
-- Mainframe integration layer (MQ bridge with TLS termination) — existing, extended
-- CRM System — existing, extended
-- Home & Away Policy Administration / Policy Data Management — existing, unchanged internally
-- Home & Away Financial Application — existing, extended for gateway payments and daily posting
-- Document management system — existing, extended with claim indexing; scanning archive migrated in and retired
-- BIBIT payment gateway integration — new; claims payment and premium collection to the bank system
-- Claims data mart extract — existing, extended with claim events
-- Member web forms (claim, policy request) — new; on the existing member web platform
-- Monitoring and alerting configuration — existing platform, new dashboards and alerts
+- Customer Information Service (CIS) — Status: in delivery — canonical customer, policy summary and contact data for all channels
+- Claims Information Service (Claims InfoServ) — Status: in delivery — claim state, valuation, routing rules and audit trail
+- Handle Claim workflow (CRM extension) — Status: in delivery — orchestrates Register, Accept, Valuate, Pay
+- Take out insurance workflow (CRM extension and web form) — Status: planned — policy intake for telephone and web
+- Policy Data Management service exposures (PDM-01 policy lookup, PDM-02 insured-item lookup, PDM-03 policy create, PDM-04 claim ledger update) — Status: in delivery — CICS transactions over MQ
+- Mainframe integration layer (MQ bridge with TLS termination) — Status: existing — extended with the new channels
+- CRM System — Status: existing — extended with the workflow extensions
+- Home & Away Policy Administration / Policy Data Management — Status: existing — unchanged internally
+- Home & Away Financial Application — Status: existing — extended for gateway payments and daily posting
+- Document management system — Status: existing — extended with claim indexing; scanning archive migrated in and retired
+- BIBIT payment gateway integration — Status: planned — claims payment and premium collection to the bank system
+- Claims data mart extract — Status: existing — extended with claim events
+- Member web forms (claim, policy request) — Status: planned — on the existing member web platform
+- Monitoring and alerting configuration — Status: existing — new dashboards and alerts on the existing platform
