@@ -367,6 +367,22 @@ On a cover it read as an instruction rather than as a statement of what the docu
 - **`purpose` is unchanged.** It is still the author-facing text the User Guide and the
   Definitions page show. The cover no longer prints it (ADR-0052, amended by #205).
 
+### Table of contents pre-filled (#206)
+
+- **The table of contents reads in any viewer.** It used to hold one sentence, "Open this document
+  in Word, or update this field, to build the table of contents.", until Word rebuilt it, so a
+  preview, a web viewer or another editor showed no contents at all. Every v3 document now has
+  its contents filled in when it is rendered: Document Control and Review & sign-off, then every
+  section at levels 1 to 3 with the number the document shows beside it (1, 1.1, 1.1.1), each a
+  link to its heading. See the ADR-0052 amendment.
+- **No page numbers until Word updates it.** Page numbers depend on where the pages break, which
+  only a word processor knows. Word still rebuilds the list, with page numbers, when it opens
+  the document.
+- **Your numbering, if you change it.** The numbers are read from the Artefact's reference Word
+  document, so a house style that numbers headings differently, or not at all, gets matching
+  entries. No v3 file changes: this is done in the render, for every Definition that sets
+  `table-of-contents: true`. v1 and v2 don't set it and render exactly as before.
+
 ## v2
 
 Layout revision of v1. Every artefact's `requires` list re-sequenced to the reading

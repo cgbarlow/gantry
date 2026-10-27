@@ -356,7 +356,9 @@ describe('design decisions are an AD | Decision | ADR table, without assuming AR
     assert.match(section, /\| AD01 \|/)
 
     const { documentXml } = renderWord('kiwi-cover-mutual', 'sad')
-    const after = documentXml.slice(documentXml.indexOf('>Design decisions<'))
+    // The heading, not its entry in the table of contents (#206).
+    const heading = /<w:pStyle w:val="Heading2" ?\/><\/w:pPr><w:r><w:t xml:space="preserve">Design decisions</.exec(documentXml)
+    const after = documentXml.slice(heading.index + heading[0].length)
     const nextHeading = after.indexOf('w:pStyle w:val="Heading2"')
     const table = after.indexOf('<w:tbl>')
     assert.ok(table > 0 && table < nextHeading, 'a Word table follows the Design decisions heading')
@@ -1247,7 +1249,7 @@ describe('v3 Word styles: numbered headings, keep-with-next, one table style, ro
     assert.ok(heading, 'the heading reaches Word as its text, without Markdown syntax')
     assert.equal(heading.style, 'Heading3')
     assert.equal(heading.number, null)
-    const paragraph = bodyParagraphs(documentXml).find((p) => p.text === 'Data flows and CIS')
+    const paragraph = bodyParagraphs(documentXml).find((p) => p.text === 'Data flows and CIS' && p.style === 'Heading3')
     assert.match(paragraph.xml, /<w:b\/>[\s\S]*?flows/, 'bold stays bold')
     assert.match(paragraph.xml, /<w:bookmarkStart w:id="\d+" w:name="authored-flows"\/>/)
     assert.match(documentXml, /<w:hyperlink w:anchor="authored-flows">/, 'and the link to it lands on it')
