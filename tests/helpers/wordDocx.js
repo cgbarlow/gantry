@@ -199,3 +199,88 @@ export function headingNumbers(documentXml, styles, numberingXml) {
   }
   return out
 }
+
+// A paragraph's text as Word lays it out: its `<w:t>` runs and its tabs (`\t`), in order.
+function paragraphText(xml) {
+  return decode([...xml.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>|<w:tab\/>/g)].map((m) => m[1] ?? '\t').join(''))
+}
+
+/**
+ * #206: the document's TOC field, as Word and any other viewer read it before the field is updated:
+ * `{ instruction, dirty, entries: [{ style, text, anchor }] }`, or null when there is none.
+ * `entries` are the paragraphs of the field's result, between its `separate` and `end`: each one's
+ * paragraph style, its text (tabs as `\t`), and the bookmark its internal link points at (null
+ * when it isn't a link). A field result that isn't a list of entries (a placeholder sentence) is
+ * one entry with no style.
+ */
+export function tableOfContents(documentXml) {
+  const paragraphs = [...documentXml.matchAll(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g)].map(([xml]) => xml)
+  const first = paragraphs.findIndex((p) => /<w:instrText[^>]*>\s*TOC\s/.test(p))
+  if (first < 0) return null
+  let depth = 0
+  const field = []
+  for (const p of paragraphs.slice(first)) {
+    field.push(p)
+    depth += (p.match(/w:fldCharType="begin"/g) ?? []).length - (p.match(/w:fldCharType="end"/g) ?? []).length
+    if (depth <= 0) break
+  }
+  const begin = /<w:fldChar w:fldCharType="begin"([^>]*)\/>/.exec(field[0])
+  // The result: everything after the field's `separate` and before its `end`, paragraph by paragraph.
+  const result = field.map((p, i) => {
+    let xml = p
+    if (i === 0) xml = xml.slice(xml.indexOf('w:fldCharType="separate"'))
+    if (i === field.length - 1) xml = xml.slice(0, xml.lastIndexOf('w:fldCharType="end"'))
+    return { xml, style: attribute(childElement(childElement(p, 'pPr') ?? '', 'pStyle'), 'val') ?? null }
+  })
+  return {
+    instruction: decode(/<w:instrText[^>]*>([^<]*)<\/w:instrText>/.exec(field[0])[1]),
+    dirty: /w:dirty="(true|1|on)"/.test(begin?.[1] ?? ''),
+    entries: result
+      .map(({ xml, style }) => ({ style, text: paragraphText(xml), anchor: decode(/<w:hyperlink [^>]*w:anchor="([^"]*)"/.exec(xml)?.[1] ?? '') || null }))
+      .filter((entry) => entry.text !== ''),
+  }
+}
+
+/**
+ * Every bookmark that marks a heading: bookmark name → `{ heading, text, style }` of the heading
+ * paragraph it starts in, or starts just before (Pandoc 3.1 opens a heading's bookmark ahead of its
+ * paragraph; later Pandocs and Gantry's own unnumbered headings open it inside). `heading` counts the
+ * document's heading paragraphs from 0, in order, so two headings with the same text can be told apart.
+ */
+export function headingBookmarks(documentXml) {
+  const bookmarks = new Map()
+  let pending = []
+  let heading = 0
+  for (const [token] of documentXml.matchAll(/<w:bookmarkStart [^>]*\/>|<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>|<w:tbl>/g)) {
+    if (token.startsWith('<w:bookmarkStart')) {
+      pending.push(decode(attribute(token, 'name')))
+      continue
+    }
+    if (token === '<w:tbl>') {
+      pending = []
+      continue
+    }
+    const p = paragraph(token)
+    const inside = [...token.matchAll(/<w:bookmarkStart [^>]*\/>/g)].map(([b]) => decode(attribute(b, 'name')))
+    if (/^Heading\d$/.test(p.style ?? '')) {
+      for (const name of [...pending, ...inside]) if (!bookmarks.has(name)) bookmarks.set(name, { heading, text: p.text, style: p.style })
+      heading++
+    }
+    pending = []
+  }
+  return bookmarks
+}
+
+/**
+ * #206: the entries Word lists when it updates a `TOC \o "1-3"` field, less page numbers: one per
+ * Heading 1–3 paragraph, in order, `{ style: 'TOC<level>', text, heading }`, where `text` is the
+ * heading's number (as headingNumbers works it out), a tab, and its text, or just its text when it
+ * isn't numbered, and `heading` the heading's place among all heading paragraphs (headingBookmarks).
+ */
+export function expectedTableOfContents(documentXml, styles, numberingXml) {
+  return headingNumbers(documentXml, styles, numberingXml)
+    .filter((h) => /^Heading\d$/.test(h.style))
+    .map((h, heading) => ({ ...h, heading, level: Number(h.style.slice('Heading'.length)) }))
+    .filter((h) => h.level <= 3)
+    .map(({ text, number, heading, level }) => ({ style: `TOC${level}`, text: number ? `${number}\t${text}` : text, heading }))
+}

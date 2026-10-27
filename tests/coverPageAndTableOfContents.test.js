@@ -12,6 +12,7 @@ import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { loadAzureDevOpsDefinition, writeAzureDevOpsDefinitionVersion } from '../lib/definitionAzureDevOps.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { docxPart, expectedTableOfContents, headingBookmarks, tableOfContents, wordStyles } from './helpers/wordDocx.js'
 
 // #194 (spec #192, ADR-0052): two opt-in Artefact keys put front matter on a rendered document.
 // `cover-page: true` opens it with a cover (classification, title, version, status, author and the
@@ -311,11 +312,28 @@ function assertWordFrontMatter(documentXml) {
   assert.match(documentXml, /<w:instrText xml:space="preserve"> TOC \\o "1-3" \\h \\z \\u <\/w:instrText>/)
 }
 
+// #206: the field's result lists the document's headings, as Word would before page numbers. This
+// Definition's reference document numbers no headings, so neither do the entries.
+function assertTableOfContentsFilledIn(docx) {
+  const documentXml = docxPart(docx, 'word/document.xml')
+  const toc = tableOfContents(documentXml)
+  assert.equal(toc.dirty, true, 'Word still rebuilds it on open')
+  const expected = expectedTableOfContents(documentXml, wordStyles(docxPart(docx, 'word/styles.xml')), docxPart(docx, 'word/numbering.xml'))
+  assert.deepEqual(toc.entries.map(({ style, text }) => ({ style, text })), expected.map(({ style, text }) => ({ style, text })))
+  assert.deepEqual(
+    toc.entries.slice(0, 4).map(({ style, text }) => [style, text]),
+    [['TOC2', 'Document Control'], ['TOC2', 'Review & sign-off'], ['TOC1', 'Platform Engineer: Appointment Case'], ['TOC1', 'The appointment']]
+  )
+  const bookmarks = headingBookmarks(documentXml)
+  for (const [i, entry] of toc.entries.entries()) assert.equal(bookmarks.get(entry.anchor)?.heading, expected[i].heading, entry.text)
+}
+
 test('the native Pandoc render (CLI and server) writes the cover and a self-refreshing TOC field into the .docx', async () => {
   await withDefinitions(FULL_FRONT_MATTER, (definitionsDir) =>
     withInstancesDir((instancesDir) => {
       const result = renderArtefact(SLUG, 'appointment-case', { instancesDir, definitionsDir, commit: COMMIT })
       assertWordFrontMatter(execFileSync('unzip', ['-p', result.docxPath, 'word/document.xml'], { encoding: 'utf8' }))
+      assertTableOfContentsFilledIn(result.docxPath)
     })
   )
 })
@@ -326,15 +344,29 @@ test('the browser\'s pandoc-wasm writes the same cover and self-refreshing TOC f
   const { convert } = await import(new URL('../node_modules/pandoc-wasm/src/index.node.js', import.meta.url))
   // The inline Definition ships templates only, so give it the reference document v2 itself uses.
   const files = { 'reference.docx': new Blob([readFileSync('definitions/recruitment-onboarding/2/templates/reference.docx')]) }
-  const result = await convert({ from: 'markdown', to: 'docx', 'output-file': 'output.docx', 'reference-doc': 'reference.docx' }, compiled.markdown, files)
+  // What the browser converts is the compile's `docxMarkdown`, the Word conversion's Markdown.
+  const result = await convert({ from: 'markdown', to: 'docx', 'output-file': 'output.docx', 'reference-doc': 'reference.docx' }, compiled.docxMarkdown, files)
   const scratch = mkdtempSync(join(tmpdir(), 'gantry-front-matter-wasm-'))
   try {
     const docxPath = join(scratch, 'output.docx')
     writeFileSync(docxPath, new Uint8Array(await result.files['output.docx'].arrayBuffer()))
     assertWordFrontMatter(execFileSync('unzip', ['-p', docxPath, 'word/document.xml'], { encoding: 'utf8' }))
+    assertTableOfContentsFilledIn(docxPath)
   } finally {
     rmSync(scratch, { recursive: true, force: true })
   }
+})
+
+test('with no heading to list, the table of contents keeps its one-line placeholder (#206)', async () => {
+  await withDefinitions(['document-control: false', 'table-of-contents: true'], (definitionsDir) =>
+    withInstancesDir((instancesDir) => {
+      writeFileSync(join(definitionsDir, 'recruitment-onboarding', '2', 'templates', 'appointment-case.md.tmpl'), 'A document with no headings at all.\n\n```markdown\n# Not a heading: it is code\n```\n')
+      const { docxMarkdown } = renderArtefact(SLUG, 'appointment-case', { dryRun: true, instancesDir, definitionsDir, commit: COMMIT })
+      assert.match(docxMarkdown, TOC_FIELD)
+      assert.ok(docxMarkdown.includes('<w:r><w:t>Open this document in Word, or update this field, to build the table of contents.</w:t></w:r>'))
+      assert.doesNotMatch(docxMarkdown, /w:val="TOC1"/)
+    })
+  )
 })
 
 // ── Validation ──────────────────────────────────────────────────────────────────────────────────

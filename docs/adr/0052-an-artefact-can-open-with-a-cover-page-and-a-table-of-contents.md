@@ -167,3 +167,72 @@ change on re-render because Gantry started adding pages to it.
   same reason ADR-0049's switch is per Artefact.
 
 Status: accepted.
+
+## Amendment (#206): the table of contents is filled in when the document is rendered
+
+Decision 5 left the TOC field's result as a one-line placeholder, for Word to
+replace when it opens the document. Any viewer that doesn't refresh fields
+(previews, web viewers, other editors) showed only that sentence, so the
+document read as if it had no table of contents.
+
+1. **The field's result is filled in.** The compile step writes the entries
+   Word itself builds when it updates the field, less the page numbers: one
+   paragraph per heading at levels 1 to 3, in document order, in Word's
+   `TOC 1` to `TOC 3` styles. Each entry is an internal link
+   (`w:hyperlink w:anchor`) to its heading's bookmark. The field opens in the
+   first entry's paragraph and closes in the last one's, as in a table of
+   contents Word has built. It is still marked dirty, so desktop Word still
+   rebuilds it, with page numbers, on open. The placeholder is used only when
+   there is no heading to list.
+
+2. **It lists what Pandoc will write, under the names Pandoc will give.**
+   The entries are built from the Word conversion's Markdown (`docxMarkdown`),
+   after the `.unnumbered` rewrite (ADR-0056). A Pandoc heading's bookmark is
+   its `{#id}`, or else Pandoc's automatic identifier (with Pandoc's `smart`
+   punctuation applied first), made unique the way Pandoc makes it (`-1`,
+   `-2`, …). An identifier longer than 40 characters, or one that doesn't
+   start with a letter, becomes Pandoc's `X` plus SHA-1 name. An
+   `.unnumbered` heading is listed with the text and bookmark its raw
+   OpenXML paragraph carries. Heading-like lines in fenced code or HTML
+   comments, or that only continue a paragraph, aren't headings to Pandoc
+   and aren't listed. Setext headings are listed. Headings inside list items
+   or block quotes aren't listed, though Word would list them. Templates and
+   Fields don't put headings there, and Word adds them when it updates the
+   field.
+
+3. **The numbers come from the reference document.** The compile step reads
+   the reference document's `word/styles.xml` and `word/numbering.xml`: the
+   same file the native render passes as `--reference-doc` and every prepare
+   route hands the browser. Pandoc copies both parts into the `.docx`
+   unchanged, so they decide the numbers beside the headings. Heading styles
+   are found by their built-in names (`heading 1`, …) through `basedOn`, and
+   the attached list's level gives the number format, start (including a
+   `startOverride`), level text, legal numbering and the separator after the
+   number. Headings are counted in document order, as Word counts them. An
+   `.unnumbered` heading (numId 0) is listed without a number and doesn't
+   advance the count. With no reference document, or one that numbers no
+   heading style, entries have no numbers. So design v3 shows `1`, `1.1`,
+   `1.1.1` (#197), and an organisation's house style shows its own.
+
+4. **Page numbers stay with the word processor.** A page number depends on
+   page layout (fonts, page size, margins, keep-with-next, images and how
+   every paragraph wraps), and only a layout engine knows it. Gantry has
+   none, and guessing would print wrong numbers in a document that is meant
+   to be reviewed and signed off. Word supplies them when it updates the
+   field.
+
+5. **ADR-0052's decisions stand.** The entries are raw OpenXML in the
+   compiled Markdown, built in `compileArtefact`, so the native Pandoc
+   render, the browser's pandoc-wasm, `gantry render` and every Provider get
+   them with no change to Pandoc's arguments and no post-processing of the
+   `.docx`. Only the Word conversion's Markdown is filled in. The exported
+   `.md` keeps the placeholder field, because its anchors for `.unnumbered`
+   headings exist only in the Word conversion. An Artefact without
+   `table-of-contents: true` compiles exactly as before
+   (`tests/frontMatterOffBaseline.test.js`).
+
+Tests read the field's result from `.docx` files produced by native Pandoc
+and pandoc-wasm (in Node, and in a real browser). They check it against the
+headings and numbers the document itself shows, and check that each link
+resolves to a bookmark on its own heading. LibreOffice isn't available in the
+test environment and isn't added, so no test renders the document's pages.
