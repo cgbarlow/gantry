@@ -7,7 +7,7 @@ import { loadDefinitionChangelog } from '../lib/definition.js'
 import { createInstance } from '../lib/instance.js'
 import { renderArtefact } from '../lib/render.js'
 import { bodyParagraphs, docxPart } from './helpers/wordDocx.js'
-import { classificationField, headerVisibleText, paragraphStyleFormat, sectionHeaders } from './helpers/wordHeaders.js'
+import { classificationField, coverClassificationStyle, headerVisibleText, paragraphStyleFormat, sectionHeaders } from './helpers/wordHeaders.js'
 
 // #207 (spec #192 follow-up): a design v3 document carries its classification in the page header
 // of every page, centred, as Word does for a marked document. The cover keeps its classification
@@ -157,6 +157,54 @@ describe('design v3 prints the classification in the page header of every page (
   })
 })
 
+// #209: the classification shows only in the page header. The cover keeps its Cover Classification
+// paragraph, because the header's STYLEREF field reads it, but v3's reference documents print it
+// invisibly: white, 1pt, on a 1pt line with no spacing. It can't be formatted as hidden, because a
+// STYLEREF field that finds hidden text shows blank. The header's field carries `\* CHARFORMAT`, so
+// its result is formatted as the field is (Header Classification), never as the invisible source.
+// (ADR-0052, amendment for #209.)
+describe('design v3 shows the classification only in the page header, not above the cover title (#209)', () => {
+  test('every v3 reference document prints the Cover Classification paragraph invisibly, without hiding it', () => {
+    for (const file of REFERENCE_DOCS(3)) {
+      const style = coverClassificationStyle(docxPart(join(TEMPLATES(3), file), 'word/styles.xml'))
+      assert.equal(style.exists, true, `${file} defines Cover Classification`)
+      assert.equal(style.name, 'Cover Classification', file)
+      assert.equal(style.color, 'FFFFFF', `${file}: white`)
+      assert.equal(style.size, 2, `${file}: 1pt`)
+      assert.deepEqual([style.before, style.after, style.line, style.lineRule], ['0', '0', '20', 'exact'], `${file}: a 1pt line with no spacing`)
+      assert.equal(style.vanish, false, `${file}: not hidden, or the header's STYLEREF field would show blank`)
+    }
+  })
+
+  test('the header field formats its result as the field, not as the invisible cover line', () => {
+    for (const file of REFERENCE_DOCS(3)) {
+      for (const { type, xml } of sectionHeaders(join(TEMPLATES(3), file))) {
+        assert.match(classificationField(xml).instruction, /\\\* CHARFORMAT$/, `${file}: ${type} header`)
+      }
+    }
+  })
+
+  test('v1 and v2 reference documents don\'t define the style, so nothing changes for them', () => {
+    for (const version of [1, 2]) {
+      for (const file of REFERENCE_DOCS(version)) {
+        assert.equal(coverClassificationStyle(docxPart(join(TEMPLATES(version), file), 'word/styles.xml')).exists, false, `design v${version} ${file}`)
+      }
+    }
+  })
+
+  test('the rendered v3 SAD keeps IN-CONFIDENCE in its Cover Classification paragraph, in the reference document\'s invisible style', () => {
+    withScratchDir((dir) => {
+      cpSync('workspaces/examples/kiwi-cover-mutual', join(dir, 'kiwi-cover-mutual'), { recursive: true })
+      rmSync(join(dir, 'kiwi-cover-mutual', 'out'), { recursive: true, force: true })
+      const { docxBytes } = renderArtefact('kiwi-cover-mutual', 'sad', { instancesDir: dir, deliverToClient: true })
+      const [first] = bodyParagraphs(docxPart(docxBytes, 'word/document.xml'))
+      assert.deepEqual([first.style, first.text], ['CoverClassification', 'IN-CONFIDENCE'], 'still there for the header field to read')
+      const style = coverClassificationStyle(docxPart(docxBytes, 'word/styles.xml'))
+      assert.deepEqual([style.color, style.size, style.vanish], ['FFFFFF', 2, false], 'Pandoc used the reference document\'s style, not one of its own')
+    })
+  })
+})
+
 test('the v3 CHANGELOG records the header classification under v3, and v3 stays a draft (#207)', () => {
   const changelog = loadDefinitionChangelog('design', 3)
   const v3Section = changelog.slice(0, changelog.indexOf('\n## v2'))
@@ -165,3 +213,9 @@ test('the v3 CHANGELOG records the header classification under v3, and v3 stays 
 })
 
 const SOAP_KEYS = '    cover-page: true\n    cover-classification: document-handling.classification\n'
+
+test('the v3 CHANGELOG records the header-only classification under v3 (#209)', () => {
+  const changelog = loadDefinitionChangelog('design', 3)
+  const v3Section = changelog.slice(0, changelog.indexOf('\n## v2'))
+  assert.match(v3Section, /^### Classification only in the page header \(#209\)$/m)
+})

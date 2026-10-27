@@ -95,3 +95,23 @@ export function paragraphStyleFormat(stylesXml, id) {
   }
   return { exists: chain.length > 0, name: chain[0]?.name, jc: first('pPr', 'jc'), size: Number(first('rPr', 'sz')) || undefined, color: first('rPr', 'color') }
 }
+
+/**
+ * #209: the cover's Cover Classification paragraph style as Word resolves it — the paragraph the
+ * header's field reads, which design v3 keeps on the cover but prints invisibly. Its own spacing
+ * (`before`, `after`, `line`, `lineRule`) and whether it is formatted as hidden (`vanish`), on top
+ * of paragraphStyleFormat's size and colour.
+ */
+export function coverClassificationStyle(stylesXml) {
+  const style = wordStyles(stylesXml).get('CoverClassification')
+  const spacing = /<w:pPr>[\s\S]*?<w:spacing\s([^>]*)\/>/.exec(style?.xml ?? '')?.[1] ?? ''
+  const attr = (name) => new RegExp(`w:${name}="([^"]*)"`).exec(spacing)?.[1]
+  return {
+    ...paragraphStyleFormat(stylesXml, 'CoverClassification'),
+    before: attr('before'),
+    after: attr('after'),
+    line: attr('line'),
+    lineRule: attr('lineRule'),
+    vanish: /<w:vanish\s*\/>/.test(style?.xml ?? ''),
+  }
+}

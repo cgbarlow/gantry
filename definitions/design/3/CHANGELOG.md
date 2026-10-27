@@ -407,6 +407,24 @@ only on the cover. Protective marking is normally carried in the page header of 
 - **Not included: Microsoft Purview sensitivity labels.** Stamping a label needs your tenant's own
   label IDs, and a wrong label is a compliance issue (ADR-0052, amendment for #207).
 
+### Classification only in the page header (#209)
+
+The classification printed twice on the first page: above the cover's title and in the page header.
+It now shows only in the header.
+
+- **The cover's classification line is invisible.** All seven reference documents define the
+  `Cover Classification` style: white, 1pt, with no spacing on a 1pt line. The line stays in the
+  document because the header's `STYLEREF "Cover Classification"` field reads it. It isn't
+  formatted as hidden, because a STYLEREF field that finds hidden text shows blank. An organisation
+  that wants the line back gives the style a visible size and colour.
+- **The header field formats its result itself.** The field is now
+  `STYLEREF "Cover Classification" \* CHARFORMAT`, so the marking takes the field's
+  `Header Classification` formatting and never the invisible source line's.
+- **Viewers that don't update fields show no classification.** Their header was already empty
+  (#207). Now the cover line is invisible too. Word shows the classification on every page.
+- No engine change: the exported `.md` keeps the classification line on its cover, and v1 and v2
+  are unchanged.
+
 ## v2
 
 Layout revision of v1. Every artefact's `requires` list re-sequenced to the reading
