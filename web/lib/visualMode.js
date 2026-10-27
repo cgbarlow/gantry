@@ -858,7 +858,9 @@ function buildVisual(state, generation) {
         case 'FencedCode': {
           const raw = text.slice(from, to)
           const firstBreak = raw.indexOf('\n')
-          if (/^(```|~~~)\s*mermaid\s*$/.test(firstBreak === -1 ? raw : raw.slice(0, firstBreak)) && firstBreak !== -1) {
+          // #195: a caption on the fence (```mermaid {caption="…"}) still draws; the pop-over edits
+          // only the diagram text, so the fence line and its caption are kept byte for byte.
+          if (/^(```|~~~)\s*mermaid(\s*\{[^\n]*\})?\s*$/.test(firstBreak === -1 ? raw : raw.slice(0, firstBreak)) && firstBreak !== -1) {
             const closing = /\n(```|~~~)\s*$/.exec(raw)
             const bodyFrom = firstBreak + 1
             const bodyTo = closing ? Math.max(closing.index, bodyFrom) : raw.length

@@ -305,7 +305,7 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
         FIXTURE_STRUCTURE.artefacts[0],
         {
           id: 'letter', title: 'Letter', purpose: 'For the reader', template: 'templates/letter.md.tmpl', gate: 'sign-off', requires: ['background.summary', 'background.marking?'],
-          filename: '{instance.name} - Letter', documentControl: false, satisfiesGate: false, copiedFrom: provenance,
+          filename: '{instance.name} - Letter', documentControl: false, satisfiesGate: false, diagramCaptions: true, copiedFrom: provenance,
           // #194 (ADR-0052): the front-matter keys.
           coverPage: true, coverClassification: 'background.marking', tableOfContents: true,
         },
@@ -322,6 +322,7 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
     assert.match(yamlText, /read-only-modules:/)
     assert.match(yamlText, /document-control: false/)
     assert.match(yamlText, /satisfies-gate: false/)
+    assert.match(yamlText, /diagram-captions: true/)
     assert.match(yamlText, /cover-page: true/)
     assert.match(yamlText, /cover-classification: background\.marking/)
     assert.match(yamlText, /table-of-contents: true/)
@@ -334,6 +335,7 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
     assert.equal(letter.filename, '{instance.name} - Letter')
     assert.equal(letter.documentControl, false)
     assert.equal(letter.satisfiesGate, false)
+    assert.equal(letter.diagramCaptions, true)
     assert.deepEqual(letter.copiedFrom, provenance)
     assert.equal(letter.coverPage, true)
     assert.equal(letter.coverClassification, 'background.marking')
@@ -342,6 +344,7 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
     assert.equal('tableOfContents' in read.artefacts[0], false)
     assert.equal('documentControl' in read.artefacts[0], false)
     assert.equal('satisfiesGate' in read.artefacts[0], false)
+    assert.equal('diagramCaptions' in read.artefacts[0], false)
 
     await withScratchInstances(async (definitionsDir) => {
       createBlankDefinition('wi384-fixture', { definitionsDir })

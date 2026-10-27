@@ -236,6 +236,7 @@ gantry/
     ├── lib/validateRepo.js       # parses/checks the legacy Azure DevOps repo-URL adopt flow
     ├── lib/markdown.js           # markdown-it + DOMPurify rendering
     ├── lib/mermaid.js            # ```mermaid fences → SVG in the preview, PNG in WASM docx exports (docs/adr/0030)
+    ├── lib/diagramCaptions.js    # Diagram captions: the fence/alt-text syntax and "Diagram N." numbering, shared with lib/render.js (docs/adr/0053)
     ├── lib/dropdown.js           # reusable dropdown (trigger + menu)
     ├── lib/reorder.js            # pure array reorder helper
     ├── user-guide-images/        # User Guide screenshots, served statically

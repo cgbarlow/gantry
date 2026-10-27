@@ -512,6 +512,16 @@ function ArtefactEditor({ handle, definitionId, version, artefact, modules, gate
         }} />
         Add a table of contents after Document Control
       </label>
+      <label class="field-label defn-diagram-captions">
+        <input type="checkbox" checked=${artefact.diagramCaptions === true} disabled=${readOnly} onChange=${(e) => {
+          // #195 (ADR-0053): the same switch as the server-hosted editor's — absent means unnumbered.
+          const next = { ...artefact }
+          if (e.currentTarget.checked) next.diagramCaptions = true
+          else delete next.diagramCaptions
+          onChange(next)
+        }} />
+        Number and caption diagrams ("Diagram N. …") in the Word document
+      </label>
       <button type="button" class="btn small ghost" onClick=${() => setExpanded(!expanded)}>${expanded ? 'Hide template' : 'Edit template'}</button>
       ${expanded ? html`<${ArtefactTemplateEditor} handle=${handle} definitionId=${definitionId} version=${version} artefact=${artefact} readOnly=${readOnly} />` : null}
     </div>

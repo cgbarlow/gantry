@@ -35,6 +35,7 @@ import { readTextFile } from './localWorkspace.js'
 import { parseLocalModuleFile, parseInstanceYaml } from './localInstanceFiles.js'
 import { isMultiValuedField } from './fieldShape.js'
 import { readOnlyModuleProblems } from './readOnlyModules.js'
+import { diagramCaptionsProblem } from './diagramCaptions.js'
 import { artefactFrontMatterProblems } from './artefactFrontMatter.js'
 import { targetWordsProblem } from './targetSize.js'
 
@@ -588,6 +589,9 @@ export function findLocalDefinitionProblems(structure) {
         message: `Artefact "${artefact.id}" sets "document-control" to ${JSON.stringify(documentControl)} — it must be true or false`,
       })
     }
+    // #195: shared with lib/definition.js rather than ported — see web/lib/diagramCaptions.js.
+    const captionsProblem = diagramCaptionsProblem(artefact.id, artefact.diagramCaptions)
+    if (captionsProblem) problems.push(captionsProblem)
     // #194: shared with lib/definition.js rather than ported — see web/lib/artefactFrontMatter.js.
     problems.push(...artefactFrontMatterProblems(artefact, findFilenameField))
   }

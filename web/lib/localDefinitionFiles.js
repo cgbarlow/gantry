@@ -99,7 +99,7 @@ export function blankLocalDefinitionStructure(id, title) {
 // loadDefinition/findDefinitionProblems both start from.
 // ---------------------------------------------------------------------------
 
-/** Port of `lib/definition.js`'s `buildDefinitionYamlObject`, minus the disk-only `onDiskRaw` fallback (a local-workspace caller always has the full structure already in memory — see this file's header comment) and minus its `keyOf` kebab-case input form (#148): this takes only the camelCase structure, so a raw parsed `definition.yaml` loses `read-only-modules`, `copied-from`, `document-control`, `satisfies-gate`, `cover-page`, `cover-classification` and `table-of-contents` here. */
+/** Port of `lib/definition.js`'s `buildDefinitionYamlObject`, minus the disk-only `onDiskRaw` fallback (a local-workspace caller always has the full structure already in memory — see this file's header comment) and minus its `keyOf` kebab-case input form (#148): this takes only the camelCase structure, so a raw parsed `definition.yaml` loses `read-only-modules`, `copied-from`, `document-control`, `satisfies-gate`, `cover-page`, `cover-classification`, `table-of-contents` and `diagram-captions` here. */
 export function renderDefinitionYaml(structure) {
   const obj = {}
   obj.id = structure.id
@@ -119,6 +119,7 @@ export function renderDefinitionYaml(structure) {
     if (a.filename !== undefined) entry.filename = a.filename
     if (a.documentControl !== undefined) entry['document-control'] = a.documentControl
     if (a.satisfiesGate !== undefined) entry['satisfies-gate'] = a.satisfiesGate
+    if (a.diagramCaptions !== undefined) entry['diagram-captions'] = a.diagramCaptions
     if (a.coverPage !== undefined) entry['cover-page'] = a.coverPage
     if (a.coverClassification !== undefined) entry['cover-classification'] = a.coverClassification
     if (a.tableOfContents !== undefined) entry['table-of-contents'] = a.tableOfContents
@@ -300,11 +301,13 @@ export async function readLocalDefinitionStructure(handle, definitionId, version
         // #148: projected only when false, as lib/definition.js's definitionVersionProjection does.
         // #150: a non-boolean `document-control` ("no") is kept as it is, as there, so
         // findLocalDefinitionProblems reports it and a Save doesn't quietly drop it.
+        // #195: `diagram-captions` is projected unless false (its default), as there.
         // #194: the front-matter switches are projected unless false (their default), as there.
         {
           filename: a.filename,
           documentControl: a['document-control'] === true ? undefined : a['document-control'],
           satisfiesGate: a['satisfies-gate'] === false ? false : undefined,
+          diagramCaptions: a['diagram-captions'] === false ? undefined : a['diagram-captions'],
           coverPage: a['cover-page'] === false ? undefined : a['cover-page'],
           coverClassification: a['cover-classification'],
           tableOfContents: a['table-of-contents'] === false ? undefined : a['table-of-contents'],

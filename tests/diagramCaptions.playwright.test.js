@@ -1,0 +1,188 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
+import { withRunningServer } from './helpers/lifecycle.js'
+import { readModule } from '../lib/instance.js'
+import { loadDefinition } from '../lib/definition.js'
+
+// #195 (spec #192, ADR-0053) — the browser half of Diagram captions: what only a real browser
+// does. The editor draws a captioned Mermaid fence with its caption under it and keeps the
+// caption through a Visual-view edit, and the default WASM render draws the diagram into the
+// .docx as a picture captioned "Diagram N. <title>", numbered in one sequence with the
+// document's captioned images. The native path's numbering is covered by
+// tests/diagramCaptions.test.js.
+
+const EXAMPLE = 'workspaces/examples/kiwi-cover-mutual'
+const SECURITY_FENCE = '```mermaid {caption="Security architecture"}\nflowchart LR\n  Member --> Portal --> CRM\n```'
+
+// Numbering is opt-in per Artefact: design v3 opts every Artefact in, and v2 (published before
+// captions existed) opts none in. Each test pins its scratch copy of the example to the version it
+// is about, rather than relying on the version the bundled example happens to be pinned to.
+const OPTED_IN = 3
+const NOT_OPTED_IN = 2
+
+async function withExampleServer(fn, { edit, version = OPTED_IN } = {}) {
+  const expectOptIn = version === OPTED_IN
+  assert.equal(
+    loadDefinition('design', { version }).artefacts.every((a) => a.diagramCaptions === (expectOptIn ? true : undefined)),
+    true,
+    `design v${version} ${expectOptIn ? 'opts every Artefact in' : 'opts no Artefact in'}`
+  )
+  const root = mkdtempSync(join(tmpdir(), 'gantry-captions-e2e-'))
+  const instancesDir = join(root, 'instances')
+  try {
+    cpSync(EXAMPLE, join(instancesDir, 'examples'), { recursive: true })
+    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+    const instanceYaml = join(instancesDir, 'examples', 'instance.yaml')
+    const pinned = readFileSync(instanceYaml, 'utf8').replace(/^definitionVersion: \d+$/m, `definitionVersion: ${version}`)
+    assert.match(pinned, new RegExp(`^definitionVersion: ${version}$`, 'm'))
+    writeFileSync(instanceYaml, pinned)
+    if (edit) edit(join(instancesDir, 'examples'))
+    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+      const browser = await launchBrowser()
+      try {
+        const context = await browser.newContext({ acceptDownloads: true, viewport: { width: 1400, height: 1000 } })
+        const page = await context.newPage()
+        page.setDefaultTimeout(DEFAULT_TIMEOUT)
+        const pageErrors = []
+        page.on('pageerror', (err) => pageErrors.push(err.message))
+        await page.goto(`${base}/instance/examples`)
+        await page.waitForSelector('.module', { timeout: 10_000 })
+        await fn({ page, pageErrors, instancesDir })
+      } finally {
+        await browser.close()
+      }
+    })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+}
+
+async function chooseMode(page, label) {
+  await page.locator('.view-mode-dropdown').getByRole('button', { name: /^Mode/ }).click()
+  await page.getByRole('menuitemradio', { name: label, exact: true }).click()
+}
+
+const decode = (s) => s.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+
+// Every caption in a .docx, with the paragraph holding its figure.
+function captionedFigures(docxPath) {
+  const xml = execFileSync('unzip', ['-p', docxPath, 'word/document.xml'], { encoding: 'utf8' })
+  const ps = [...xml.matchAll(/<w:p>([\s\S]*?)<\/w:p>/g)].map(([, body]) => ({
+    style: body.match(/<w:pStyle w:val="([^"]+)"/)?.[1] ?? null,
+    text: decode([...body.matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/g)].map((m) => m[1]).join('')),
+    alt: body.includes('<w:drawing>') ? decode(body.match(/<wp:docPr [^>]*descr="([^"]*)"/)?.[1] ?? '') : null,
+  }))
+  return ps.flatMap((p, i) => (p.style === 'ImageCaption' ? [{ caption: p.text, figure: ps[i - 1] }] : []))
+}
+
+test('Visual view draws a captioned Mermaid fence with its caption under it, and an edit to the diagram keeps the caption (#195)', async () => {
+  await withExampleServer(async ({ page, pageErrors, instancesDir }) => {
+    const field = page.locator('.module').first().locator('.field-markdown').first()
+    const text = `Intro.\n\n${SECURITY_FENCE}\n\nOutro.`
+    await chooseMode(page, 'Markdown')
+    await field.locator('.cm-content').click()
+    await page.keyboard.press('ControlOrMeta+a')
+    await page.keyboard.insertText(text)
+    await chooseMode(page, 'Visual')
+
+    const diagram = field.locator('.cm-visual-mermaid')
+    await diagram.locator('figure.mermaid-diagram svg').waitFor({ timeout: 30_000 })
+    assert.equal(await diagram.locator('figure.mermaid-diagram figcaption').textContent(), 'Security architecture')
+
+    await diagram.getByRole('button', { name: 'Edit diagram text' }).click()
+    const pop = page.locator('.vgrid-popover')
+    assert.equal(await pop.locator('textarea').inputValue(), 'flowchart LR\n  Member --> Portal --> CRM')
+    await pop.locator('textarea').fill('flowchart LR\n  Member --> Portal --> CRM --> Ledger')
+    await pop.getByRole('button', { name: 'Apply' }).click()
+    await diagram.locator('figure.mermaid-diagram svg').waitFor({ timeout: 30_000 })
+    assert.match(await diagram.innerHTML(), /Ledger/)
+    assert.equal(await diagram.locator('figure.mermaid-diagram figcaption').textContent(), 'Security architecture')
+
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+    await page.waitForSelector('text=Saved', { timeout: 5_000 })
+    const saved = readModule(loadDefinition('design'), 'examples', 'background', { instancesDir: join(instancesDir, 'default') }).fields.problem
+    assert.equal(saved, text.replace('CRM\n', 'CRM --> Ledger\n'), 'the fence line, caption and all, is saved as written')
+    assert.deepEqual(pageErrors, [])
+  })
+})
+
+test('Visual view draws a fence captioned with no space before the brace as a captioned diagram too (#195)', async () => {
+  await withExampleServer(async ({ page, pageErrors }) => {
+    const field = page.locator('.module').first().locator('.field-markdown').first()
+    await chooseMode(page, 'Markdown')
+    await field.locator('.cm-content').click()
+    await page.keyboard.press('ControlOrMeta+a')
+    await page.keyboard.insertText('Intro.\n\n```mermaid{caption="Security architecture"}\nflowchart LR\n  Member --> Portal\n```\n\nOutro.')
+    await chooseMode(page, 'Visual')
+
+    const diagram = field.locator('.cm-visual-mermaid')
+    await diagram.locator('figure.mermaid-diagram svg').waitFor({ timeout: 30_000 })
+    assert.equal(await diagram.locator('figure.mermaid-diagram figcaption').textContent(), 'Security architecture')
+    assert.deepEqual(pageErrors, [])
+  })
+})
+
+test('the default WASM render of an Artefact that opts in draws a captioned Mermaid block into the .docx as "Diagram 1. <title>", numbered before the captioned images (#195)', async () => {
+  await withExampleServer(
+    async ({ page }) => {
+      await page.getByRole('button', { name: 'Render', exact: true }).click()
+      const renderDialog = page.locator('.modal[aria-label="Render an artefact"]')
+      await renderDialog.waitFor({ state: 'visible', timeout: 5_000 })
+      await renderDialog.getByRole('button', { name: 'Solution on a Page', exact: true }).click()
+      const [download] = await Promise.all([
+        page.waitForEvent('download', { timeout: 60_000 }),
+        renderDialog.locator('.modal-actions').getByRole('button', { name: 'Render' }).click(),
+      ])
+      const figures = captionedFigures(await download.path())
+      assert.deepEqual(
+        figures.map((f) => f.caption),
+        ['Diagram 1. Security architecture', 'Diagram 2. Take out insurance process', 'Diagram 3. Claims handling introductory view']
+      )
+      for (const { caption, figure } of figures) {
+        assert.equal(figure.style, 'CaptionedFigure', `"${caption}" sits directly under its figure, kept with it`)
+        assert.equal(figure.alt, caption, 'the caption doubles as the picture\'s alt text')
+      }
+    },
+    {
+      edit: (instanceDir) => {
+        const path = join(instanceDir, 'modules', 'background.md')
+        writeFileSync(path, readFileSync(path, 'utf8').replace(/\n## Affected domains/, `\n${SECURITY_FENCE}\n\n## Affected domains`))
+      },
+    }
+  )
+})
+
+test('the default WASM render of an Artefact that does not opt in captions exactly as before: bare alt text on images, plain "Diagram N" per Mermaid block (#195)', async () => {
+  await withExampleServer(
+    async ({ page }) => {
+      await page.getByRole('button', { name: 'Render', exact: true }).click()
+      const renderDialog = page.locator('.modal[aria-label="Render an artefact"]')
+      await renderDialog.waitFor({ state: 'visible', timeout: 5_000 })
+      await renderDialog.getByRole('button', { name: 'Solution on a Page', exact: true }).click()
+      const [download] = await Promise.all([
+        page.waitForEvent('download', { timeout: 60_000 }),
+        renderDialog.locator('.modal-actions').getByRole('button', { name: 'Render' }).click(),
+      ])
+      assert.deepEqual(
+        captionedFigures(await download.path()).map((f) => f.caption),
+        ['Take out insurance process', 'Claims handling introductory view', 'Diagram 1']
+      )
+    },
+    {
+      version: NOT_OPTED_IN,
+      edit: (instanceDir) => {
+        // An uncaptioned Mermaid block after both images: still the document's "Diagram 1".
+        const path = join(instanceDir, 'modules', 'solution-definition.md')
+        const before = readFileSync(path, 'utf8')
+        const after = before.replace(/\n## Feature breakdown and involved teams/, '\n```mermaid\nflowchart LR\n  A --> B\n```\n\n## Feature breakdown and involved teams')
+        assert.notEqual(after, before)
+        writeFileSync(path, after)
+      },
+    }
+  )
+})
