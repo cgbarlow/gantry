@@ -7,11 +7,34 @@
 // Word document shows each as the figure followed by "Diagram N. <title>", numbered in one
 // sequence per document across both kinds.
 //
-// Pure (no DOM, no Node built-ins), so the server's compile step (lib/render.js) and the browser
-// (web/lib/markdown.js for the preview, web/lib/mermaid.js for the docx pictures) share one copy
-// of the syntax and the label format — the same split web/lib/readOnlyModules.js already uses.
+// Numbering is opt-in per Artefact: only one that sets `diagram-captions: true` in its
+// Definition is numbered (`compileArtefact` in lib/render.js). Every other Artefact — design v1
+// and v2 among them — converts exactly as it did before captions existed.
+//
+// Pure (no DOM, no Node built-ins), so the server's compile step (lib/render.js), the Definition
+// checks (lib/definition.js, web/lib/localStatus.js) and the browser (web/lib/markdown.js for the
+// preview, web/lib/mermaid.js for the docx pictures) share one copy of the syntax and the label
+// format — the same split web/lib/readOnlyModules.js already uses.
 
 const DIAGRAM_LABEL = 'Diagram'
+
+/**
+ * The problem with an Artefact's `diagram-captions:` switch, or `null`. It is a plain boolean, like
+ * `document-control` (ADR-0049); anything else ("yes", 1) is reported rather than guessed at. The
+ * render honours only a real `true`, so a near-miss leaves the document unnumbered, as it was.
+ * `value` is the key read under either spelling (camelCase in memory, kebab-case on disk).
+ *
+ * @param {string} artefactId
+ * @param {unknown} value
+ * @returns {{ type: string, message: string }|null}
+ */
+export function diagramCaptionsProblem(artefactId, value) {
+  if (value === undefined || typeof value === 'boolean') return null
+  return {
+    type: 'invalid-diagram-captions',
+    message: `Artefact "${artefactId}" sets "diagram-captions" to ${JSON.stringify(value)} — it must be true or false`,
+  }
+}
 
 // The attribute the compile step writes onto each Mermaid fence of the markdown bound for the
 // Word document: the resolved caption, number included. Only that markdown ever carries it — the
@@ -70,17 +93,36 @@ export function diagramLabel(number, caption) {
 // for a figure) or a line holding nothing but an image. The fence half has the same shape as
 // web/lib/mermaid.js's MERMAID scanner — closing fence identical to the opening one — so both
 // see the same Mermaid blocks in the same order.
+//
+// Alt text may hold balanced brackets one level deep (`![A [b] c](x.png)`), as Pandoc allows.
 const FENCE_OR_IMAGE_RE =
-  /^( {0,3})(`{3,}|~{3,})([^\n]*)\n([\s\S]*?)\n\1\2[ \t]*$|^ {0,3}!\[([^\]\n]*)\]\(([^)\n]+)\)(\{[^}\n]*\})?[ \t]*$/gm
+  /^( {0,3})(`{3,}|~{3,})([^\n]*)\n([\s\S]*?)\n\1\2[ \t]*$|^ {0,3}!\[((?:[^[\]\n]|\[[^[\]\n]*\])*)\]\(([^)\n]+)\)(\{[^}\n]*\})?[ \t]*$/gm
 
 const MERMAID_INFO_RE = /^[ \t]*mermaid\b/
 
-// A paragraph of its own: a blank line (or the start / end of the text) on both sides. Exactly
-// when Pandoc's `implicit_figures` makes an image a figure with a caption.
+// A paragraph of its own: a blank line (or the start / end of the text) on both sides, or ATX
+// heading lines directly above that themselves follow a blank line or the start of the text (a
+// heading there is a block of its own, so the image still starts a new paragraph; after a line of
+// body text Pandoc reads `## …` as more of that paragraph). Exactly when Pandoc's
+// `implicit_figures` makes an image a figure with a caption. A heading directly *below* doesn't
+// end the paragraph: Pandoc wants a blank line before one.
+const ATX_HEADING_LINE_RE = /^ {0,3}#{1,6}(?:[ \t].*)?$/
+
+function startsParagraph(before) {
+  let end = before.length - 1 // the newline that ends the line above
+  while (end >= 0) {
+    const start = before.lastIndexOf('\n', end - 1) + 1
+    const line = before.slice(start, end)
+    if (/^[ \t]*$/.test(line)) return true
+    if (!ATX_HEADING_LINE_RE.test(line)) return false
+    end = start - 1
+  }
+  return true
+}
+
 function standsAlone(text, offset, length) {
-  const before = text.slice(0, offset)
   const after = text.slice(offset + length)
-  return (before === '' || /(^|\n)[ \t]*\n$/.test(before)) && (after === '' || /^\n[ \t]*(\n|$)/.test(after))
+  return startsParagraph(text.slice(0, offset)) && (after === '' || /^\n[ \t]*(\n|$)/.test(after))
 }
 
 /**
@@ -95,14 +137,17 @@ function standsAlone(text, offset, length) {
  *   "Diagram N. ".
  *
  * Everything else — an image beside other text, an image with no alt text, anything inside a
- * code block — is left exactly as it was.
+ * code block — is left exactly as it was. CRLF line endings are read as LF, as Pandoc reads them
+ * (the result, only ever handed to Pandoc, has LF endings).
+ *
+ * Only for an Artefact that opts in (`diagram-captions: true`); see the header comment.
  *
  * @param {string} markdown
  * @returns {string}
  */
 export function numberDiagrams(markdown) {
   let count = 0
-  return (markdown ?? '').replace(FENCE_OR_IMAGE_RE, (match, indent, fence, info, code, alt, target, attributes, offset, text) => {
+  return (markdown ?? '').replace(/\r\n?/g, '\n').replace(FENCE_OR_IMAGE_RE, (match, indent, fence, info, code, alt, target, attributes, offset, text) => {
     if (fence !== undefined) {
       if (!MERMAID_INFO_RE.test(info)) return match
       count += 1

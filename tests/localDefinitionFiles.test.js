@@ -305,7 +305,7 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
         FIXTURE_STRUCTURE.artefacts[0],
         {
           id: 'letter', title: 'Letter', purpose: 'For the reader', template: 'templates/letter.md.tmpl', gate: 'sign-off', requires: ['background.summary'],
-          filename: '{instance.name} - Letter', documentControl: false, satisfiesGate: false, copiedFrom: provenance,
+          filename: '{instance.name} - Letter', documentControl: false, satisfiesGate: false, diagramCaptions: true, copiedFrom: provenance,
         },
         // #151: what passes sign-off, so the Letter opting out doesn't make the gate unsatisfiable.
         { id: 'record', title: 'Record', purpose: 'The record', template: 'templates/main.md.tmpl', gate: 'sign-off', requires: ['background.summary'] },
@@ -318,6 +318,7 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
     assert.match(yamlText, /read-only-modules:/)
     assert.match(yamlText, /document-control: false/)
     assert.match(yamlText, /satisfies-gate: false/)
+    assert.match(yamlText, /diagram-captions: true/)
 
     const read = await readLocalDefinitionStructure(handle, 'wi384-fixture', 1)
     const review = read.stages.find((s) => s.id === 'review')
@@ -327,9 +328,11 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
     assert.equal(letter.filename, '{instance.name} - Letter')
     assert.equal(letter.documentControl, false)
     assert.equal(letter.satisfiesGate, false)
+    assert.equal(letter.diagramCaptions, true)
     assert.deepEqual(letter.copiedFrom, provenance)
     assert.equal('documentControl' in read.artefacts[0], false)
     assert.equal('satisfiesGate' in read.artefacts[0], false)
+    assert.equal('diagramCaptions' in read.artefacts[0], false)
 
     await withScratchInstances(async (definitionsDir) => {
       createBlankDefinition('wi384-fixture', { definitionsDir })

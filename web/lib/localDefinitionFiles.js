@@ -99,7 +99,7 @@ export function blankLocalDefinitionStructure(id, title) {
 // loadDefinition/findDefinitionProblems both start from.
 // ---------------------------------------------------------------------------
 
-/** Port of `lib/definition.js`'s `buildDefinitionYamlObject`, minus the disk-only `onDiskRaw` fallback (a local-workspace caller always has the full structure already in memory — see this file's header comment) and minus its `keyOf` kebab-case input form (#148): this takes only the camelCase structure, so a raw parsed `definition.yaml` loses `read-only-modules`, `copied-from`, `document-control` and `satisfies-gate` here. */
+/** Port of `lib/definition.js`'s `buildDefinitionYamlObject`, minus the disk-only `onDiskRaw` fallback (a local-workspace caller always has the full structure already in memory — see this file's header comment) and minus its `keyOf` kebab-case input form (#148): this takes only the camelCase structure, so a raw parsed `definition.yaml` loses `read-only-modules`, `copied-from`, `document-control`, `satisfies-gate` and `diagram-captions` here. */
 export function renderDefinitionYaml(structure) {
   const obj = {}
   obj.id = structure.id
@@ -119,6 +119,7 @@ export function renderDefinitionYaml(structure) {
     if (a.filename !== undefined) entry.filename = a.filename
     if (a.documentControl !== undefined) entry['document-control'] = a.documentControl
     if (a.satisfiesGate !== undefined) entry['satisfies-gate'] = a.satisfiesGate
+    if (a.diagramCaptions !== undefined) entry['diagram-captions'] = a.diagramCaptions
     if (a.copiedFrom !== undefined) entry['copied-from'] = a.copiedFrom
     return entry
   })
@@ -294,10 +295,12 @@ export async function readLocalDefinitionStructure(handle, definitionId, version
         // #148: projected only when false, as lib/definition.js's definitionVersionProjection does.
         // #150: a non-boolean `document-control` ("no") is kept as it is, as there, so
         // findLocalDefinitionProblems reports it and a Save doesn't quietly drop it.
+        // #195: `diagram-captions` is projected unless false (its default), as there.
         {
           filename: a.filename,
           documentControl: a['document-control'] === true ? undefined : a['document-control'],
           satisfiesGate: a['satisfies-gate'] === false ? false : undefined,
+          diagramCaptions: a['diagram-captions'] === false ? undefined : a['diagram-captions'],
           copiedFrom: a['copied-from'],
         }
       )

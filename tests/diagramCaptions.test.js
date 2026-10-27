@@ -6,6 +6,9 @@ import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { renderArtefact } from '../lib/render.js'
 import { runLocalWorkspaceCompute } from '../lib/localWorkspace.js'
+import { findDefinitionProblemsInStructure, loadDefinition } from '../lib/definition.js'
+import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
+import { numberDiagrams } from '../web/lib/diagramCaptions.js'
 
 // #195 (spec #192, ADR-0053): a Diagram caption. An author captions a Mermaid block on its fence
 // (```mermaid {caption="…"}) or an image with its alt text (![…](asset:id)), and the Word document
@@ -15,14 +18,34 @@ import { runLocalWorkspaceCompute } from '../lib/localWorkspace.js'
 // as the browser path does. These tests drive the native path end to end and read the .docx XML;
 // the browser export (which draws the Mermaid picture) is covered by
 // tests/diagramCaptions.playwright.test.js.
+//
+// Numbering is opt-in per Artefact (`diagram-captions: true`, the "engine options are opt-in per
+// Artefact" pattern of ADR-0049): an Artefact that doesn't set it — every Artefact of design v1
+// and v2 and every other bundled Definition — converts exactly as it did before captions existed.
+// The opted-in tests below render against a scratch copy of the bundled Definitions with the
+// switch set on design v2's SOAP.
 
 const SLUG = 'examples'
 const EXAMPLE = 'workspaces/examples/kiwi-cover-mutual'
 const SECURITY_FENCE = '```mermaid {caption="Security architecture"}\nflowchart LR\n  Member --> Portal --> CRM\n```'
 
-async function withExample(edit, fn) {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-captions-'))
+// A scratch copy of the bundled Definitions, with `diagram-captions: true` on design v2's SOAP.
+function optedInDefinitions(root) {
+  const definitionsDir = join(root, 'definitions')
+  cpSync('definitions', definitionsDir, { recursive: true })
+  const path = join(definitionsDir, 'design', '2', 'definition.yaml')
+  const before = readFileSync(path, 'utf8')
+  const after = before.replace('\n  - id: soap\n', '\n  - id: soap\n    diagram-captions: true\n')
+  assert.notEqual(after, before, 'the soap Artefact opts in')
+  writeFileSync(path, after)
+  return definitionsDir
+}
+
+async function withExample(edit, fn, { optIn = true } = {}) {
+  const root = mkdtempSync(join(tmpdir(), 'gantry-captions-'))
+  const instancesDir = join(root, 'instances')
   try {
+    const definitionsDir = optIn ? optedInDefinitions(root) : 'definitions'
     cpSync(EXAMPLE, join(instancesDir, SLUG), { recursive: true })
     rmSync(join(instancesDir, SLUG, 'out'), { recursive: true, force: true })
     for (const [moduleId, change] of Object.entries(edit)) {
@@ -32,9 +55,9 @@ async function withExample(edit, fn) {
       assert.notEqual(after, before, `the ${moduleId} fixture edit must land`)
       writeFileSync(path, after)
     }
-    return await fn(instancesDir)
+    return await fn({ instancesDir, definitionsDir })
   } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
+    rmSync(root, { recursive: true, force: true })
   }
 }
 
@@ -62,8 +85,8 @@ function captionedFigures(documentXml) {
 }
 
 test('a captioned image renders as the figure then "Diagram N. <title>", numbered in one sequence with the Mermaid blocks before it', async () => {
-  await withExample({ background: withSecurityDiagram }, (instancesDir) => {
-    const result = renderArtefact(SLUG, 'soap', { instancesDir })
+  await withExample({ background: withSecurityDiagram }, ({ instancesDir, definitionsDir }) => {
+    const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir })
     const figures = captionedFigures(unzip(result.docxPath, 'word/document.xml'))
 
     // The Mermaid block is Diagram 1 on every path. The CLI / native path still leaves its
@@ -104,8 +127,8 @@ test('only a figure takes a number: an inline image, an image with no alt text a
           ].join('\n')
         ),
     },
-    (instancesDir) => {
-      const result = renderArtefact(SLUG, 'soap', { instancesDir })
+    ({ instancesDir, definitionsDir }) => {
+      const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir })
       assert.deepEqual(
         captionedFigures(unzip(result.docxPath, 'word/document.xml')).map((f) => f.caption),
         ['Diagram 1. Take out insurance process', 'Diagram 2. Claims handling introductory view']
@@ -115,8 +138,8 @@ test('only a figure takes a number: an inline image, an image with no alt text a
 })
 
 test('the exported .md keeps the caption syntax intact and the images as authored', async () => {
-  await withExample({ background: withSecurityDiagram }, (instancesDir) => {
-    const result = renderArtefact(SLUG, 'soap', { instancesDir, format: 'md' })
+  await withExample({ background: withSecurityDiagram }, ({ instancesDir, definitionsDir }) => {
+    const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir, format: 'md' })
     const md = readFileSync(result.mdPath, 'utf8')
     assert.ok(md.includes(SECURITY_FENCE), 'the captioned fence is exported exactly as written')
     assert.match(md, /!\[Take out insurance process\]\(/)
@@ -124,32 +147,75 @@ test('the exported .md keeps the caption syntax intact and the images as authore
   })
 })
 
-test('a document with no captioned diagram renders exactly as before: an uncaptioned Mermaid block and an image without alt text', async () => {
+// What Pandoc made of the compiled markdown before captions existed: the render handed it straight over.
+function convertDirectly(result) {
+  const scratch = mkdtempSync(join(tmpdir(), 'gantry-captions-before-'))
+  try {
+    const mdPath = join(scratch, 'before.md')
+    const docxPath = join(scratch, 'before.docx')
+    writeFileSync(mdPath, result.markdown)
+    execFileSync('pandoc', ['-f', 'markdown', '-t', 'docx', '--reference-doc', result.referenceDocPath, '-o', docxPath, mdPath])
+    return unzip(docxPath, 'word/document.xml')
+  } finally {
+    rmSync(scratch, { recursive: true, force: true })
+  }
+}
+
+// An uncaptioned Mermaid block after both of the SOAP's images, so a numbering pass would have
+// called it "Diagram 3".
+const withUncaptionedDiagramAfterImages = (text) =>
+  text.replace(/\n## Feature breakdown and involved teams/, '\n```mermaid\nflowchart LR\n  A --> B\n```\n\n## Feature breakdown and involved teams')
+
+test('an Artefact that does not opt in converts exactly as before: alt-texted images and an uncaptioned Mermaid block take no number', async () => {
+  await withExample(
+    { 'solution-definition': withUncaptionedDiagramAfterImages },
+    ({ instancesDir, definitionsDir }) => {
+      assert.equal(loadDefinition('design', { definitionsDir, version: 2 }).artefacts.find((a) => a.id === 'soap').diagramCaptions, undefined)
+      const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir })
+      assert.equal(result.docxMarkdown, result.markdown, 'the Word document is converted from the markdown as compiled')
+      const documentXml = unzip(result.docxPath, 'word/document.xml')
+      assert.equal(documentXml, convertDirectly(result))
+      assert.deepEqual(
+        captionedFigures(documentXml).map((f) => f.caption),
+        ['Take out insurance process', 'Claims handling introductory view'],
+        'the images keep their bare alt text as their caption'
+      )
+    },
+    { optIn: false }
+  )
+})
+
+test('the unmodified example SAD, with eight alt-texted images, converts exactly as before', async () => {
+  await withExample(
+    {},
+    ({ instancesDir, definitionsDir }) => {
+      const result = renderArtefact(SLUG, 'sad', { instancesDir, definitionsDir })
+      assert.equal(result.docxMarkdown, result.markdown)
+      const documentXml = unzip(result.docxPath, 'word/document.xml')
+      assert.equal(documentXml, convertDirectly(result))
+      assert.doesNotMatch(documentXml, /Diagram \d/)
+    },
+    { optIn: false }
+  )
+})
+
+test('an opted-in document with no captioned diagram renders exactly as before: an uncaptioned Mermaid block and an image without alt text', async () => {
   await withExample(
     {
       background: (text) => text.replace(/\n## Affected domains/, '\n```mermaid\nflowchart LR\n  A --> B\n```\n\n## Affected domains'),
       'solution-definition': (text) =>
         text.replace('![Take out insurance process](', '![](').replace('![Claims handling introductory view](', '!['),
     },
-    (instancesDir) => {
-      const result = renderArtefact(SLUG, 'soap', { instancesDir })
-      // Before captions, the render handed the compiled markdown straight to Pandoc.
-      const scratch = mkdtempSync(join(tmpdir(), 'gantry-captions-before-'))
-      try {
-        const mdPath = join(scratch, 'before.md')
-        const docxPath = join(scratch, 'before.docx')
-        writeFileSync(mdPath, result.markdown)
-        execFileSync('pandoc', ['-f', 'markdown', '-t', 'docx', '--reference-doc', result.referenceDocPath, '-o', docxPath, mdPath])
-        assert.equal(unzip(result.docxPath, 'word/document.xml'), unzip(docxPath, 'word/document.xml'))
-      } finally {
-        rmSync(scratch, { recursive: true, force: true })
-      }
-      assert.deepEqual(captionedFigures(unzip(result.docxPath, 'word/document.xml')), [])
+    ({ instancesDir, definitionsDir }) => {
+      const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir })
+      const documentXml = unzip(result.docxPath, 'word/document.xml')
+      assert.equal(documentXml, convertDirectly(result))
+      assert.deepEqual(captionedFigures(documentXml), [])
     }
   )
 })
 
-test('a local workspace compile hands the browser the numbered markdown for the Word document, and the authored markdown for the .md', async () => {
+function exampleModuleFiles() {
   const moduleFiles = {}
   for (const name of readdirSync(join(EXAMPLE, 'modules'))) {
     moduleFiles[name.replace(/\.md$/, '')] = readFileSync(join(EXAMPLE, 'modules', name), 'utf8')
@@ -157,17 +223,79 @@ test('a local workspace compile hands the browser the numbered markdown for the 
   moduleFiles.background = withSecurityDiagram(moduleFiles.background)
   // A local workspace ships its own image bytes; this compile only needs the references.
   moduleFiles['solution-definition'] = moduleFiles['solution-definition'].replace(/\(asset:[^)]+\)/g, '(diagram.png)')
-  const compiled = await runLocalWorkspaceCompute('compile', {
-    definitionId: 'design',
-    definitionVersion: 2,
-    instanceYaml: readFileSync(join(EXAMPLE, 'instance.yaml'), 'utf8'),
-    moduleFiles,
-    artefact: 'soap',
-  })
-  assert.ok(compiled.markdown.includes(SECURITY_FENCE), 'the .md keeps the fence as written')
-  assert.doesNotMatch(compiled.markdown, /Diagram \d/)
-  // The browser draws the Mermaid picture and labels it with the caption the compile resolved.
-  assert.match(compiled.docxMarkdown, /```mermaid \{figure-caption="Diagram 1\. Security architecture"\}\nflowchart LR/)
-  assert.match(compiled.docxMarkdown, /!\[Diagram 2\. Take out insurance process\]\(diagram\.png\)/)
-  assert.match(compiled.docxMarkdown, /!\[Diagram 3\. Claims handling introductory view\]\(diagram\.png\)/)
+  return moduleFiles
+}
+
+const compileLocally = (definitionsDir) =>
+  runLocalWorkspaceCompute(
+    'compile',
+    {
+      definitionId: 'design',
+      definitionVersion: 2,
+      instanceYaml: readFileSync(join(EXAMPLE, 'instance.yaml'), 'utf8'),
+      moduleFiles: exampleModuleFiles(),
+      artefact: 'soap',
+    },
+    { definitionsDir }
+  )
+
+test('a local workspace compile hands the browser the numbered markdown for the Word document, and the authored markdown for the .md', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'gantry-captions-local-'))
+  try {
+    const compiled = await compileLocally(optedInDefinitions(root))
+    assert.ok(compiled.markdown.includes(SECURITY_FENCE), 'the .md keeps the fence as written')
+    assert.doesNotMatch(compiled.markdown, /Diagram \d/)
+    // The browser draws the Mermaid picture and labels it with the caption the compile resolved.
+    assert.match(compiled.docxMarkdown, /```mermaid \{figure-caption="Diagram 1\. Security architecture"\}\nflowchart LR/)
+    assert.match(compiled.docxMarkdown, /!\[Diagram 2\. Take out insurance process\]\(diagram\.png\)/)
+    assert.match(compiled.docxMarkdown, /!\[Diagram 3\. Claims handling introductory view\]\(diagram\.png\)/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a local workspace compile of an Artefact that does not opt in hands the browser the markdown as compiled', async () => {
+  const compiled = await compileLocally('definitions')
+  assert.equal(compiled.docxMarkdown, compiled.markdown)
+})
+
+test('a diagram-captions value that is not true or false is reported, by the server and in a Local Workspace', () => {
+  const structure = {
+    stages: [{ id: 'one', gate: 'one-gate', modules: ['m'] }],
+    artefacts: [
+      { id: 'doc', template: 'templates/doc.md.tmpl', gate: 'one-gate', requires: ['m'], diagramCaptions: 'yes' },
+      { id: 'other', template: 'templates/doc.md.tmpl', gate: 'one-gate', requires: ['m'], diagramCaptions: true },
+    ],
+    modules: [{ id: 'm', fields: [{ id: 'f', type: 'markdown' }] }],
+  }
+  const expected = {
+    type: 'invalid-diagram-captions',
+    message: 'Artefact "doc" sets "diagram-captions" to "yes" — it must be true or false',
+  }
+  assert.deepEqual(findDefinitionProblemsInStructure(structure).filter((p) => p.type === 'invalid-diagram-captions'), [expected])
+  assert.deepEqual(findLocalDefinitionProblems(structure).filter((p) => p.type === 'invalid-diagram-captions'), [expected])
+  // The kebab-case spelling a raw definition.yaml uses is read too.
+  const raw = { ...structure, artefacts: [{ ...structure.artefacts[0], diagramCaptions: undefined, 'diagram-captions': 'yes' }] }
+  assert.deepEqual(findDefinitionProblemsInStructure(raw).filter((p) => p.type === 'invalid-diagram-captions'), [expected])
+})
+
+// Every image Pandoc turns into a captioned figure takes a number, so none is left with a bare
+// caption between numbered ones.
+test('numberDiagrams numbers an image Pandoc makes a figure directly under a heading', () => {
+  assert.equal(numberDiagrams('## H\n![Alpha](x.png)\n'), '## H\n![Diagram 1. Alpha](x.png)\n')
+  assert.equal(numberDiagrams('# Top\n## H\n![Alpha](x.png)\n'), '# Top\n## H\n![Diagram 1. Alpha](x.png)\n')
+  assert.equal(numberDiagrams('Text\n![Alpha](x.png)\n'), 'Text\n![Alpha](x.png)\n', 'a line of a paragraph is not a figure')
+  // After body text, Pandoc reads "## H" as more of the paragraph, so the image is inline.
+  assert.equal(numberDiagrams('Text\n## H\n![Alpha](x.png)\n'), 'Text\n## H\n![Alpha](x.png)\n')
+  assert.equal(numberDiagrams('#tag\n![Alpha](x.png)\n'), '#tag\n![Alpha](x.png)\n', '"#tag" is not a heading')
+})
+
+test('numberDiagrams numbers an image whose alt text holds brackets', () => {
+  assert.equal(numberDiagrams('![A [b] c](x.png)\n'), '![Diagram 1. A [b] c](x.png)\n')
+})
+
+test('numberDiagrams treats CRLF text as it does LF text', () => {
+  const lf = '![Alpha](x.png)\n\n```mermaid {caption="Beta"}\ngraph TD\n```\n'
+  assert.equal(numberDiagrams(lf.replace(/\n/g, '\r\n')), numberDiagrams(lf))
+  assert.match(numberDiagrams(lf), /!\[Diagram 1\. Alpha\]/)
 })

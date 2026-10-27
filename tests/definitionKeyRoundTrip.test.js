@@ -92,6 +92,7 @@ artefacts:
     filename: "{details.kind} - Letter - {today}"
     document-control: false
     satisfies-gate: false
+    diagram-captions: true
     copied-from:
       definition: elsewhere
       version: 2
@@ -184,6 +185,9 @@ function assertEveryKey(projection, where) {
   assert.equal(letter.filename, '{details.kind} - Letter - {today}', `${where}: artefact filename`)
   assert.equal(letter.documentControl, false, `${where}: artefact document-control`)
   assert.equal(letter.satisfiesGate, false, `${where}: artefact satisfies-gate`)
+  // #195: `diagram-captions` defaults to false, so only an opt-in is projected.
+  assert.equal(letter.diagramCaptions, true, `${where}: artefact diagram-captions`)
+  assert.equal('diagramCaptions' in brief, false, `${where}: diagram-captions omitted unless set`)
   assert.deepEqual(letter.copiedFrom, ARTEFACT_PROVENANCE, `${where}: artefact copied-from`)
 
   const details = byId(projection.modules, 'details')
@@ -202,8 +206,9 @@ function assertKebabKeysOnDisk(definitionYamlText, where) {
   assert.match(definitionYamlText, /read-only-modules:/, where)
   assert.match(definitionYamlText, /document-control: false/, where)
   assert.match(definitionYamlText, /satisfies-gate: false/, where)
+  assert.match(definitionYamlText, /diagram-captions: true/, where)
   assert.match(definitionYamlText, /copied-from:/, where)
-  assert.doesNotMatch(definitionYamlText, /readOnlyModules|documentControl|satisfiesGate|copiedFrom/, where)
+  assert.doesNotMatch(definitionYamlText, /readOnlyModules|documentControl|satisfiesGate|diagramCaptions|copiedFrom/, where)
 }
 
 function localProjection(id, version, definitionsDir) {

@@ -19,13 +19,28 @@ import { loadDefinition } from '../lib/definition.js'
 const EXAMPLE = 'workspaces/examples/kiwi-cover-mutual'
 const SECURITY_FENCE = '```mermaid {caption="Security architecture"}\nflowchart LR\n  Member --> Portal --> CRM\n```'
 
-async function withExampleServer(fn, { edit } = {}) {
-  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-captions-e2e-'))
+// A scratch copy of the bundled Definitions with `diagram-captions: true` on design v2's SOAP:
+// numbering is opt-in per Artefact, and no bundled v1/v2 Artefact opts in.
+function optedInDefinitions(root) {
+  const definitionsDir = join(root, 'definitions')
+  cpSync('definitions', definitionsDir, { recursive: true })
+  const path = join(definitionsDir, 'design', '2', 'definition.yaml')
+  const before = readFileSync(path, 'utf8')
+  const after = before.replace('\n  - id: soap\n', '\n  - id: soap\n    diagram-captions: true\n')
+  assert.notEqual(after, before, 'the soap Artefact opts in')
+  writeFileSync(path, after)
+  return definitionsDir
+}
+
+async function withExampleServer(fn, { edit, optIn = false } = {}) {
+  const root = mkdtempSync(join(tmpdir(), 'gantry-captions-e2e-'))
+  const instancesDir = join(root, 'instances')
   try {
+    const definitionsDir = optIn ? optedInDefinitions(root) : undefined
     cpSync(EXAMPLE, join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
     if (edit) edit(join(instancesDir, 'examples'))
-    await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
+    await withRunningServer({ slug: 'examples', instancesDir, ...(definitionsDir ? { definitionsDir } : {}) }, async (base) => {
       const browser = await launchBrowser()
       try {
         const context = await browser.newContext({ acceptDownloads: true, viewport: { width: 1400, height: 1000 } })
@@ -41,7 +56,7 @@ async function withExampleServer(fn, { edit } = {}) {
       }
     })
   } finally {
-    rmSync(instancesDir, { recursive: true, force: true })
+    rmSync(root, { recursive: true, force: true })
   }
 }
 
@@ -94,7 +109,23 @@ test('Visual view draws a captioned Mermaid fence with its caption under it, and
   })
 })
 
-test('the default WASM render draws a captioned Mermaid block into the .docx as "Diagram 1. <title>", numbered before the captioned images (#195)', async () => {
+test('Visual view draws a fence captioned with no space before the brace as a captioned diagram too (#195)', async () => {
+  await withExampleServer(async ({ page, pageErrors }) => {
+    const field = page.locator('.module').first().locator('.field-markdown').first()
+    await chooseMode(page, 'Markdown')
+    await field.locator('.cm-content').click()
+    await page.keyboard.press('ControlOrMeta+a')
+    await page.keyboard.insertText('Intro.\n\n```mermaid{caption="Security architecture"}\nflowchart LR\n  Member --> Portal\n```\n\nOutro.')
+    await chooseMode(page, 'Visual')
+
+    const diagram = field.locator('.cm-visual-mermaid')
+    await diagram.locator('figure.mermaid-diagram svg').waitFor({ timeout: 30_000 })
+    assert.equal(await diagram.locator('figure.mermaid-diagram figcaption').textContent(), 'Security architecture')
+    assert.deepEqual(pageErrors, [])
+  })
+})
+
+test('the default WASM render of an Artefact that opts in draws a captioned Mermaid block into the .docx as "Diagram 1. <title>", numbered before the captioned images (#195)', async () => {
   await withExampleServer(
     async ({ page }) => {
       await page.getByRole('button', { name: 'Render', exact: true }).click()
@@ -116,9 +147,39 @@ test('the default WASM render draws a captioned Mermaid block into the .docx as 
       }
     },
     {
+      optIn: true,
       edit: (instanceDir) => {
         const path = join(instanceDir, 'modules', 'background.md')
         writeFileSync(path, readFileSync(path, 'utf8').replace(/\n## Affected domains/, `\n${SECURITY_FENCE}\n\n## Affected domains`))
+      },
+    }
+  )
+})
+
+test('the default WASM render of an Artefact that does not opt in captions exactly as before: bare alt text on images, plain "Diagram N" per Mermaid block (#195)', async () => {
+  await withExampleServer(
+    async ({ page }) => {
+      await page.getByRole('button', { name: 'Render', exact: true }).click()
+      const renderDialog = page.locator('.modal[aria-label="Render an artefact"]')
+      await renderDialog.waitFor({ state: 'visible', timeout: 5_000 })
+      await renderDialog.getByRole('button', { name: 'Solution on a Page', exact: true }).click()
+      const [download] = await Promise.all([
+        page.waitForEvent('download', { timeout: 60_000 }),
+        renderDialog.locator('.modal-actions').getByRole('button', { name: 'Render' }).click(),
+      ])
+      assert.deepEqual(
+        captionedFigures(await download.path()).map((f) => f.caption),
+        ['Take out insurance process', 'Claims handling introductory view', 'Diagram 1']
+      )
+    },
+    {
+      edit: (instanceDir) => {
+        // An uncaptioned Mermaid block after both images: still the document's "Diagram 1".
+        const path = join(instanceDir, 'modules', 'solution-definition.md')
+        const before = readFileSync(path, 'utf8')
+        const after = before.replace(/\n## Feature breakdown and involved teams/, '\n```mermaid\nflowchart LR\n  A --> B\n```\n\n## Feature breakdown and involved teams')
+        assert.notEqual(after, before)
+        writeFileSync(path, after)
       },
     }
   )

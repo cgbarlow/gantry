@@ -194,6 +194,8 @@ Two things to know: the **Native Pandoc** engine (and the `gantry render` comman
 
 Give a diagram a caption and the Word document shows it under the figure as **Diagram N. <caption>**, in italics, on the same page as the figure. Diagrams are numbered in one sequence through the document, Mermaid diagrams and images together.
 
+Numbered captions apply to an artefact whose Definition turns them on, with `diagram-captions: true` on that artefact in `definition.yaml`. design v3's documents do. design v1 and v2, and any Definition that doesn't set the key, render their diagrams exactly as they always have: a Mermaid diagram labelled "Diagram N" and an image captioned with its plain name.
+
 - **A Mermaid diagram:** add the caption to the opening line of its block:
 
   ````markdown
@@ -203,10 +205,12 @@ Give a diagram a caption and the Word document shows it under the figure as **Di
   ```
   ````
 
-  Visual view shows the caption under the drawing. **Edit diagram text** changes only the diagram, so the caption stays as you wrote it. To change the caption, edit that first line in **Markdown** view. The Markdown file written beside a render keeps the line exactly as you wrote it. GitHub and other Markdown viewers hide the caption and still draw the diagram.
+  Visual view shows the caption under the drawing. **Edit diagram text** changes only the diagram, so the caption stays as you wrote it. To change the caption, edit that first line in **Markdown** view. The Markdown file written beside a render keeps the line exactly as you wrote it. Markdown viewers that follow CommonMark read the first word, `mermaid`, as the block's language and don't print the rest of the line.
 - **An image:** its caption is the text in the square brackets, `![Security architecture](asset:…)`. That text is the name you give the image when you upload it, so choose a name that reads well as a caption. An image without a name uses its filename. To get a caption, the image must be on a line of its own, with a blank line above and below. An image inside a sentence, or with empty brackets, gets no caption and no number.
 
-Type only the title. Gantry adds the "Diagram N." prefix itself, so it would appear twice. The caption is also the picture's alt text in the Word document, which screen readers announce. A Mermaid diagram without a caption is labelled "Diagram N" as before. Until the `gantry render` command can draw Mermaid diagrams, it leaves them as source text without a caption, but still counts them, so the images after them are numbered the same as in the browser render.
+Type only the title. Gantry adds the "Diagram N." prefix itself, so it would appear twice. The caption, number included, is also the picture's alt text in the Word document, which screen readers announce. A Mermaid diagram without a caption is labelled "Diagram N" as before. Until the `gantry render` command can draw Mermaid diagrams, it leaves them as source text without a caption, but still counts them, so the images after them are numbered the same as in the browser render.
+
+For a Definition author: `diagram-captions` takes only `true` or `false`. Any other value is reported by `gantry validate` and when you save or publish the Definition, and the artefact renders without numbered captions until it is fixed. There is no checkbox for it on the Definitions page yet.
 
 ## Artefacts & Rendering
 

@@ -44,7 +44,12 @@ const defaultFenceRenderer =
   md.renderer.rules.fence ?? ((tokens, index, options, env, self) => self.renderToken(tokens, index, options))
 md.renderer.rules.fence = (tokens, index, options, env, self) => {
   const token = tokens[index]
-  if (/^mermaid\b/.test(token.info.trim())) {
+  const info = token.info.trim()
+  if (/^mermaid\b/.test(info)) {
+    // ```mermaid{caption="…"}, with no space: the compile step, web/lib/mermaid.js and Pandoc all
+    // read it as a Mermaid block with a caption, but markdown-it would take the whole
+    // `mermaid{…}` as the language and the preview would show source. Split the word off.
+    if (/^mermaid\{/.test(info)) token.info = info.replace(/^mermaid/, 'mermaid ')
     const caption = mermaidFenceCaption(token.info)
     if (caption) token.attrSet('data-caption', caption)
   }
