@@ -45,7 +45,11 @@ stages:
     # WI #331: `introduction` (retitled "Overview") and the new `design-basis`
     # module moved from 6th/7 to 2nd/3rd of 8, immediately after `background` —
     # the position they'd always logically belonged at, not buried near the end.
-    modules: [background, introduction, design-basis, solution-definition, team-and-estimates, dependencies, soap-full-details, open-questions]
+    # v3 (#196): `document-handling` (the documents' Classification) is mounted
+    # at every Stage, from this one onward, after the content modules, so it is
+    # set before the first document is rendered and can change at any later
+    # Stage; every Artefact prints it on its cover.
+    modules: [background, introduction, design-basis, solution-definition, team-and-estimates, dependencies, soap-full-details, open-questions, document-handling]
     # The instance the web form's "Populate example text" button reads from for this stage's fields — one shared instance covering every stage, so `gantry serve examples` shows every gate screen populated.
     example: kiwi-cover-mutual
 
@@ -66,7 +70,7 @@ stages:
     # artefact, so mounting them would put editor cards here that no HLD section
     # renders. Both still mount at `shape` and `detailed-design` — the
     # `design-basis` backbone accumulates there, not here.
-    modules: [hld-submission, background, introduction, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies]
+    modules: [hld-submission, background, introduction, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies, document-handling]
     example: kiwi-cover-mutual
 
   - id: detailed-design
@@ -86,7 +90,7 @@ stages:
     # module of its own to sit behind (unlike `background` at the other three
     # stages), so the pair mounts at the very front, matching the SAD's own
     # document layout.
-    modules: [introduction, design-basis, architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations, glossary, recovery-plan, data-security-controls, solution-definition, team-and-estimates]
+    modules: [introduction, design-basis, architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations, glossary, recovery-plan, data-security-controls, solution-definition, team-and-estimates, document-handling]
     example: kiwi-cover-mutual
 
   - id: handover
@@ -105,10 +109,16 @@ stages:
     # WI #331: the new `design-basis` module mounts adjacent to `introduction`
     # (retitled "Overview"), which already sat 2nd/6 at this stage — the pair
     # is now 2nd/3rd of 7.
-    modules: [glossary, introduction, design-basis, as-built-notes, recovery-plan, data-security-controls, nfrs]
+    modules: [glossary, introduction, design-basis, as-built-notes, recovery-plan, data-security-controls, nfrs, document-handling]
     example: kiwi-cover-mutual
 
 artefacts:
+  # v3 (#196, spec #192): every Artefact opens with a cover page and a table of
+  # contents (ADR-0052). The cover prints the Classification from
+  # `document-handling.classification`, listed first in each `requires` (`?`,
+  # so no gate waits on it), and the instance's display name as the title, so
+  # no template opens with its own `# <slug>: <title>` line any more: section 1
+  # follows the table of contents directly.
   - id: soap
     title: Solution on a Page
     purpose: >
@@ -118,6 +128,9 @@ artefacts:
     gate: business-case
     # #195 (ADR-0053): number every diagram "Diagram N. <title>" in the Word document.
     diagram-captions: true
+    cover-page: true
+    cover-classification: document-handling.classification
+    table-of-contents: true
     # Order follows the reference SOAP (SAMPLE SOAP - Mobile Phone Assistance):
     # Background and context -> Solution definition (Process flow, High level
     # solution design, Assumptions and considerations, Feature breakdown) ->
@@ -146,6 +159,7 @@ artefacts:
     #    still forces them at this gate.
     requires:
       [
+        document-handling.classification?,
         background.problem,
         background.affected-domains,
         solution-definition.high-level-requirements,
@@ -166,6 +180,9 @@ artefacts:
     template: templates/soap-full.md.tmpl
     gate: business-case
     diagram-captions: true
+    cover-page: true
+    cover-classification: document-handling.classification
+    table-of-contents: true
     # Order follows the JEDI Full SOAP reference document exactly: the
     # front-matter metadata block, then Introduction, Problem statement,
     # Opportunity, In Scope, Out of Scope, High Level Requirements, High level
@@ -197,6 +214,7 @@ artefacts:
     # reference-mandated and stays put, unrenamed.
     requires:
       [
+        document-handling.classification?,
         soap-full-details.epic-project,
         soap-full-details.requested-lead-by,
         soap-full-details.request-date,
@@ -229,6 +247,9 @@ artefacts:
     template: templates/hld.md.tmpl
     gate: hld-arb-approved
     diagram-captions: true
+    cover-page: true
+    cover-classification: document-handling.classification
+    table-of-contents: true
     # Order follows the TAC HLD reference template: cover block -> Problem
     # Statement (Current state, Desired future state, In scope / out of scope,
     # Success criteria, Non-functional requirements) -> Proposed solution
@@ -282,6 +303,7 @@ artefacts:
     # v2 onwards — so this restores v1 behaviour for it.
     requires:
       [
+        document-handling.classification?,
         hld-submission.purpose-statement,
         hld-submission.authors-and-contributors?,
         hld-submission.decision-requested,
@@ -316,6 +338,9 @@ artefacts:
     template: templates/sad.md.tmpl
     gate: build-ready-checklist
     diagram-captions: true
+    cover-page: true
+    cover-classification: document-handling.classification
+    table-of-contents: true
     # Order follows SAD Template.docx: Introduction / Overview -> Business
     # Architecture View -> Solution Overview (+ Dependencies) -> High Level
     # Architectural View -> Open Issues -> Logical Components View ->
@@ -374,6 +399,7 @@ artefacts:
     # "# Overview" and "# Design basis", still adjacent, still first.
     requires:
       [
+        document-handling.classification?,
         introduction.executive-summary?,
         introduction.overview,
         introduction.purpose,
@@ -442,6 +468,9 @@ artefacts:
     template: templates/ssad.md.tmpl
     gate: build-ready-checklist
     diagram-captions: true
+    cover-page: true
+    cover-classification: document-handling.classification
+    table-of-contents: true
     # Order follows the FV Help Tool SSAD reference: Solution Products ->
     # Architectural Risks -> Introduction (Purpose, Scope, Content Standards) ->
     # Solution Overview (Stakeholders, Solution Domains, third-party platforms,
@@ -484,6 +513,7 @@ artefacts:
     # `design-basis` fields render in this artefact, so no other change.
     requires:
       [
+        document-handling.classification?,
         architecture.logical-components,
         architecture.architectural-risks,
         risks.risk-register,
@@ -522,6 +552,9 @@ artefacts:
     template: templates/as-built.md.tmpl
     gate: operational-handover
     diagram-captions: true
+    cover-page: true
+    cover-classification: document-handling.classification
+    table-of-contents: true
     # Order mirrors the approved ATLAS reference design: Terms & Definitions ->
     # Introduction -> As-built design (Overview, Architecture Decisions, flows,
     # infrastructure) -> Recovery plan -> Data security controls -> Appendix,
@@ -554,6 +587,7 @@ artefacts:
     # splits into "# Overview" and "# Design basis", both still 2nd/3rd.
     requires:
       [
+        document-handling.classification?,
         glossary.terms-and-definitions,
         introduction.overview,
         introduction.purpose,

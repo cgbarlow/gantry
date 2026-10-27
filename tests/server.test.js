@@ -27,8 +27,10 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
       {
         id: 'soap',
         title: 'Solution on a Page',
-        // design v3 `soap.requires`, still v2's (the fixture is pinned to v3, #193)
+        // design v3 `soap.requires`: v2's (the fixture is pinned to v3, #193), opened by the
+        // Classification the cover prints (#196)
         requires: [
+          'document-handling.classification?',
           'background.problem',
           'background.affected-domains',
           'solution-definition.high-level-requirements',
@@ -45,6 +47,7 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
         id: 'soap-full',
         title: 'Full Solution on a Page',
         requires: [
+          'document-handling.classification?',
           'soap-full-details.epic-project',
           'soap-full-details.requested-lead-by',
           'soap-full-details.request-date',
@@ -111,8 +114,10 @@ test('GET /api/instance?stage=<id> browses a different stage\'s modules without 
     // design v2 `hld.requires`, carried into v3 — field-level end to end (WI #318), fixture pinned to v3 (#193),
     // trimmed to one entry per TAC reference section (WI #362, docs/adr/0032). This list is what
     // the editor filters visible fields by (`artefactFieldIds`, web/lib/artefactSelection.js), so
-    // it is also the exact field set the HLD stage screen shows.
+    // it is also the exact field set the HLD stage screen shows. v3 opens it with the Classification
+    // the cover prints (#196).
     assert.deepEqual(body.artefacts, [{ id: 'hld', title: 'High Level Design', requires: [
+      'document-handling.classification?',
       'hld-submission.purpose-statement', 'hld-submission.authors-and-contributors?', 'hld-submission.decision-requested', 'hld-submission.next-steps?', 'hld-submission.consultation',
       'background.problem', 'background.opportunity', 'introduction.in-scope', 'introduction.out-of-scope', 'background.success-criteria',
       'nfrs.performance', 'nfrs.availability-and-continuity',
@@ -383,7 +388,7 @@ test('POST /api/instance/render/:artefact?format=md returns the compiled markdow
       assert.equal(body.artefact, 'soap')
       assert.equal(body.format, 'md')
       assert.equal(body.docxBase64, null)
-      assert.match(body.markdown, /# kiwi-cover-mutual: Solution on a Page/)
+      assert.match(body.markdown, /::: \{custom-style="Title"\}\nKiwi Cover Mutual\n:::/)
       assert.equal(existsSync(join(instancesDir, 'default', 'examples', 'out')), false)
     })
   } finally {

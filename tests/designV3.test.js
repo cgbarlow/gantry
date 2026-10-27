@@ -28,35 +28,43 @@ import { withRunningServer } from './helpers/lifecycle.js'
 // Sections, in order: the draft itself; the examples on v3; rendering every Artefact. Later tickets
 // add their own `describe` block after these (front matter, Word styles, captions, guidance and
 // example conventions, target size), keyed by ticket number.
+//
+// A ticket that adds a Module to v3 lists it in V3_ADDED_MODULES, so the copy-of-v2 checks below
+// keep comparing everything else with v2.
 
 const DEFINITION = 'design'
 const VERSION = 3
 const EXAMPLES_DIR = 'workspaces/examples'
 
-// The Gates each bundled example passes on v3. Kiwi Cover Mutual is the full worked design, filled
-// in at every Stage; the gantry instance is Gantry's own hosting proposal, a complete Full SOAP at
-// the Shape stage only.
+// The Gates each bundled example passes on v3, and the classification its documents carry (#196).
+// Kiwi Cover Mutual is the full worked design, filled in at every Stage; the gantry instance is
+// Gantry's own hosting proposal, a complete Full SOAP at the Shape stage only.
 const EXAMPLES = {
-  'kiwi-cover-mutual': { gates: ['business-case', 'hld-arb-approved', 'build-ready-checklist', 'operational-handover'] },
-  gantry: { gates: ['business-case'] },
+  'kiwi-cover-mutual': {
+    name: 'Kiwi Cover Mutual',
+    classification: 'IN-CONFIDENCE',
+    gates: ['business-case', 'hld-arb-approved', 'build-ready-checklist', 'operational-handover'],
+  },
+  gantry: { name: 'Gantry hosting', classification: 'IN-CONFIDENCE', gates: ['business-case'] },
+}
+
+// Modules v3 has that v2 doesn't, each added by the ticket named.
+const V3_ADDED_MODULES = {
+  'document-handling': 196,
 }
 
 // Each Stage's "Populate example text" source: the one example that covers every Stage.
 const STAGE_EXAMPLE = 'kiwi-cover-mutual'
 
-// Every v3 Artefact, rendered from the example named here. `heading` is the document's opening
-// heading, which still carries the slug until #196 replaces it with the display name.
+// Every v3 Artefact, rendered from the example named here. `heading` is the document's first heading,
+// section 1: since #196 the title is on the cover, and no template opens with a title line of its own.
 const DOCUMENTS = {
-  soap: { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - Solution on a Page', heading: '# kiwi-cover-mutual: Solution on a Page' },
-  'soap-full': { example: 'gantry', basename: 'Gantry hosting - Full Solution on a Page', heading: '# gantry: Full Solution on a Page' },
-  hld: { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - High Level Design', heading: '# kiwi-cover-mutual: High Level Design' },
-  sad: { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - Solution Architecture Document', heading: '# kiwi-cover-mutual: Solution Architecture Document' },
-  ssad: {
-    example: 'kiwi-cover-mutual',
-    basename: 'Kiwi Cover Mutual - Solution Support Architecture Document',
-    heading: '# kiwi-cover-mutual: Solution Support Architecture Document',
-  },
-  'as-built': { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - As-built', heading: '# kiwi-cover-mutual: As-built' },
+  soap: { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - Solution on a Page', heading: '# Background and context' },
+  'soap-full': { example: 'gantry', basename: 'Gantry hosting - Full Solution on a Page', heading: '# Metadata' },
+  hld: { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - High Level Design', heading: '# Submission' },
+  sad: { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - Solution Architecture Document', heading: '# Overview' },
+  ssad: { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - Solution Support Architecture Document', heading: '# Logical components' },
+  'as-built': { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - As-built', heading: '# Terms & Definitions' },
 }
 
 // v1 and v2 must stay byte-for-byte as published: a SHA-256 over each version folder's files
@@ -153,14 +161,16 @@ describe('design v3 is a draft copy of v2 (#193)', () => {
     }
   })
 
-  test('v3 has the same Stages, Gates, Artefacts and Modules as v2', () => {
+  test('v3 has the same Stages, Gates, Artefacts and Modules as v2, plus the Modules later tickets add', () => {
     const v2 = loadDefinition(DEFINITION, { version: 2 })
+    const v2Modules = (ids) => ids.filter((id) => !(id in V3_ADDED_MODULES))
     const outline = (def) => ({
-      stages: def.stages.map((s) => [s.id, s.gate, s.modules]),
+      stages: def.stages.map((s) => [s.id, s.gate, v2Modules(s.modules)]),
       artefacts: def.artefacts.map((a) => [a.id, a.title]),
-      modules: [...def.modules.keys()].sort(),
+      modules: v2Modules([...def.modules.keys()]).sort(),
     })
     assert.deepEqual(outline(v3()), outline(v2))
+    for (const id of Object.keys(V3_ADDED_MODULES)) assert.ok(v3().modules.has(id), `v3 has ${id}`)
   })
 
   test('the v3 CHANGELOG opens with a draft v3 section citing the parent spec, with the v2 and v1 history below it', () => {
@@ -220,12 +230,14 @@ describe('the design examples are on v3 (#193)', () => {
   })
 
   // v2 keeps reading the same files: every Field id carries over, so the example content parses
-  // the same under v2 as under v3, and v2's "Populate example text" keeps filling.
+  // the same under v2 as under v3, and v2's "Populate example text" keeps filling. A Module only v3
+  // has is a file v2 never reads.
   test('the migrated example content still reads field-for-field under v2', () => {
     const v2 = loadDefinition(DEFINITION, { version: 2 })
     for (const slug of Object.keys(EXAMPLES)) {
       for (const file of readdirSync(join(EXAMPLES_DIR, slug, 'modules'))) {
         const moduleId = file.replace(/\.md$/, '')
+        if (moduleId in V3_ADDED_MODULES) continue
         const underV2 = readModule(v2, slug, moduleId, { instancesDir: EXAMPLES_DIR }).fields
         const underV3 = readModule(v3(), slug, moduleId, { instancesDir: EXAMPLES_DIR }).fields
         assert.deepEqual(underV2, underV3, `${slug}/${moduleId}`)
@@ -638,5 +650,149 @@ describe('design v3 numbers and captions its diagrams (#195)', () => {
       assert.match(text, new RegExp(`^Diagram ${i + 1}\\. \\S`), text)
       assert.equal(alt, text, 'the caption is the image\'s alt text')
     })
+  })
+})
+
+describe('v3 documents open with a cover page, a classification and a table of contents (#196)', () => {
+  const CLASSIFICATION = 'document-handling.classification'
+  const MARKINGS = ['UNCLASSIFIED', 'IN-CONFIDENCE', 'SENSITIVE', 'RESTRICTED']
+  const PAGE_BREAK = '<w:br w:type="page"/>'
+
+  function classificationField() {
+    return v3().modules.get('document-handling').fields.find((f) => f.id === 'classification')
+  }
+
+  // The cover is everything before the first page break; the rest of the document follows it.
+  function splitCover(markdown) {
+    const end = markdown.indexOf(PAGE_BREAK)
+    assert.ok(end > 0, 'the document opens with a cover that ends with a page break')
+    return { cover: markdown.slice(0, end), rest: markdown.slice(end) }
+  }
+
+  // The text of the paragraph a cover gives the custom style `style`, or undefined.
+  function coverParagraph(cover, style) {
+    return new RegExp(`::: \\{custom-style="${style}"\\}\\n([\\s\\S]*?)\\n:::`).exec(cover)?.[1]
+  }
+
+  function headings(markdown) {
+    return markdown.split('\n').filter((line) => /^#{1,6} /.test(line))
+  }
+
+  test('v3 has a Classification select offering exactly the four NZ Protective Security Requirements markings', () => {
+    const field = classificationField()
+    assert.equal(field.type, 'select')
+    assert.notEqual(field.multiple, true)
+    assert.deepEqual(field.options, MARKINGS)
+    assert.match(field.guidance, /Protective Security Requirements/)
+    assert.match(field.guidance, /replace (these|the) options with (its|their) own/i)
+  })
+
+  test('the Classification is mounted from the first Stage onward, so every Stage can set it', () => {
+    for (const stage of v3().stages) assert.ok(stage.modules.includes('document-handling'), stage.id)
+  })
+
+  test('a new v3 Instance has the Classification from creation, so its first render already opens with a cover', () => {
+    withScratchDir((instancesDir) => {
+      createInstance(DEFINITION, 'claims-portal', { instancesDir, version: VERSION })
+      assert.ok(existsSync(join(instancesDir, 'claims-portal', 'modules', 'document-handling.md')))
+      const { markdown } = renderArtefact('claims-portal', 'soap', { instancesDir, dryRun: true })
+      const { cover } = splitCover(markdown)
+      assert.equal(coverParagraph(cover, 'Cover Classification'), undefined, 'a blank classification is left off the cover')
+      assert.equal(coverParagraph(cover, 'Title'), 'Claims Portal', 'the title is the display name, the slug title-cased')
+    })
+  })
+
+  test('every v3 Artefact switches on a cover page and a table of contents, its cover classification the Classification field', () => {
+    for (const artefact of v3().artefacts) {
+      assert.equal(artefact.coverPage, true, artefact.id)
+      assert.equal(artefact.tableOfContents, true, artefact.id)
+      assert.equal(artefact.coverClassification, CLASSIFICATION, artefact.id)
+    }
+  })
+
+  test('no v3 template emits the instance slug in a heading', () => {
+    const templates = join('definitions', DEFINITION, String(VERSION), 'templates')
+    for (const file of readdirSync(templates).filter((f) => f.endsWith('.md.tmpl'))) {
+      const offending = headings(readFileSync(join(templates, file), 'utf8')).filter((line) => line.includes('instance.slug'))
+      assert.deepEqual(offending, [], file)
+    }
+  })
+
+  for (const [slug, { classification }] of Object.entries(EXAMPLES)) {
+    test(`${slug} has a classification from the option list`, () => {
+      const { fields } = readModule(v3(), slug, 'document-handling', { instancesDir: EXAMPLES_DIR })
+      assert.equal(fields.classification, classification)
+      assert.ok(MARKINGS.includes(fields.classification))
+    })
+  }
+
+  test('a classification that is not one of the markings warns, as any off-list select value does, without blocking the Gate', () => {
+    withScratchDir((dir) => {
+      cpSync(join(EXAMPLES_DIR, 'kiwi-cover-mutual'), join(dir, 'kiwi-cover-mutual'), { recursive: true })
+      const file = join(dir, 'kiwi-cover-mutual', 'modules', 'document-handling.md')
+      writeFileSync(file, readFileSync(file, 'utf8').replace(/\nIN-CONFIDENCE\n/, '\nTOP SECRET\n'))
+      const result = checkGate('kiwi-cover-mutual', { instancesDir: dir, gate: 'business-case' })
+      assert.equal(result.pass, true)
+      assert.ok(
+        result.warnings.some((w) => /field "Classification" has a value \("TOP SECRET"\) that is not in its option list/.test(w)),
+        JSON.stringify(result.warnings)
+      )
+    })
+  })
+
+  for (const [id, { example, heading }] of Object.entries(DOCUMENTS)) {
+    const { name, classification } = EXAMPLES[example]
+
+    test(`the v3 ${id} opens with a cover, then Document Control, then the Table of Contents, then section 1`, () => {
+      const artefact = v3().artefacts.find((a) => a.id === id)
+      const { markdown } = renderArtefact(example, id, { instancesDir: EXAMPLES_DIR, dryRun: true })
+      const { cover, rest } = splitCover(markdown)
+
+      assert.equal(coverParagraph(cover, 'Cover Classification'), classification)
+      assert.equal(coverParagraph(cover, 'Title'), name)
+      assert.equal(coverParagraph(cover, 'Subtitle'), artefact.title)
+      const details = coverParagraph(cover, 'Cover Details')
+      assert.match(details, /\*\*Version:\*\* design v3 · /)
+      assert.match(details, /\*\*Status:\*\* Draft/)
+      assert.match(details, /\*\*Author:\*\* c\.barlow/)
+      assert.equal(coverParagraph(cover, 'Cover Purpose'), artefact.purpose.replace(/\s+/g, ' ').trim())
+
+      // Nothing from the body: no heading, no diagram, no image.
+      assert.deepEqual(headings(cover), [])
+      assert.doesNotMatch(cover, /```mermaid|!\[/)
+
+      const documentControl = rest.indexOf('## Document Control')
+      const contents = rest.indexOf('::: {custom-style="TOC Heading"}\nTable of Contents\n:::')
+      assert.ok(documentControl > 0, 'Document Control follows the cover')
+      assert.ok(contents > documentControl, 'the Table of Contents follows Document Control')
+      // The Table of Contents ends with a page break; the first thing after it is section 1.
+      const afterContents = rest.slice(rest.indexOf(PAGE_BREAK, contents))
+      const firstLine = afterContents.split('\n').slice(2).find((line) => line.trim() !== '')
+      assert.equal(firstLine, heading)
+    })
+
+    test(`no heading in the rendered v3 ${id} names the instance slug`, () => {
+      const { markdown } = renderArtefact(example, id, { instancesDir: EXAMPLES_DIR, dryRun: true })
+      assert.deepEqual(headings(markdown).filter((line) => line.includes(`${example}:`) || line.includes(example)), [])
+    })
+  }
+
+  test('the SAD and SSAD carry no "<slug>:" heading', () => {
+    for (const id of ['sad', 'ssad']) {
+      const { markdown } = renderArtefact('kiwi-cover-mutual', id, { instancesDir: EXAMPLES_DIR, dryRun: true })
+      assert.doesNotMatch(markdown, /^#+ kiwi-cover-mutual:/m, id)
+    }
+  })
+
+  test('in Word, the SAD\'s cover carries the classification and the display name in the Title style, before Document Control', () => {
+    const { documentXml } = renderWord('kiwi-cover-mutual', 'sad')
+    const paragraphs = documentXml.split('</w:p>')
+    const styled = (style, text) => paragraphs.findIndex((p) => new RegExp(`<w:pStyle w:val="${style}" ?/>`).test(p) && p.includes(`>${text}<`))
+    const classificationAt = styled('CoverClassification', 'IN-CONFIDENCE')
+    const titleAt = styled('Title', 'Kiwi Cover Mutual')
+    const documentControlAt = paragraphs.findIndex((p) => p.includes('>Document Control<'))
+    assert.ok(classificationAt >= 0, 'the classification is in the Cover Classification style')
+    assert.ok(titleAt > classificationAt, 'the title is in the Title style, under the classification')
+    assert.ok(documentControlAt > titleAt, 'Document Control follows the cover')
   })
 })

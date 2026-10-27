@@ -99,6 +99,32 @@ and the example shows. Gantry does not check them.
   an organisation copying v3 can turn numbering off for a document without editing
   `definition.yaml`.
 
+### Cover page, classification and titles without the slug (#196)
+
+From review items GF-001, GF-002 and GF-005.
+
+- **Every document opens with a cover page and a table of contents.** All six Artefacts set
+  `cover-page: true` and `table-of-contents: true` (ADR-0052). Each document now reads: the cover
+  (classification, title, document type, version, status, author, purpose), Document Control, the
+  Table of Contents, then section 1. The author is the instance's Assignee. The cover never shows a
+  diagram or section content.
+- **A Classification field.** New Module `document-handling` (Document handling) holds one
+  optional `select` Field, `classification`, with the New Zealand Protective Security Requirements
+  markings `UNCLASSIFIED`, `IN-CONFIDENCE`, `SENSITIVE` and `RESTRICTED` (ADR-0044). Every
+  Artefact names it as its `cover-classification` and lists it first in its `requires`, with `?`,
+  so it gates nothing. The Module is mounted at every Stage, from Shape onward, after the content
+  Modules, so a new instance has it from creation and it can change at any later Stage. A value
+  not in the list is kept and warned about by `check`, as for any `select`. The guidance tells an
+  organisation with a different scheme to replace the options with its own.
+- **No slug in the title.** The templates no longer open with `# <instance-slug>: <Document
+  title>`. The cover carries the title instead: the instance's display name (its name, or its slug
+  title-cased) in the Title style, with the document type under it. No heading names the slug,
+  and the first heading in every document is its first section.
+- **The bundled examples have a classification.** `kiwi-cover-mutual` and `gantry` are both
+  `IN-CONFIDENCE`, and every Artefact still renders from them and every Gate they passed still
+  passes. v2 never reads the new `document-handling.md` files, so it still reads the examples as
+  before.
+
 ## v2
 
 Layout revision of v1. Every artefact's `requires` list re-sequenced to the reading
