@@ -50,7 +50,8 @@ import {
 } from '../lib/localWorkspace.js'
 import { renderInstanceYaml, renderModuleFile as renderLocalModuleFile, parseInstanceYaml } from '../lib/localInstanceFiles.js'
 import { listLocalDefinitionRows, resolveDefinitionStructure } from '../lib/localDefinitionFiles.js'
-import { TARGET_SIZES, DEFAULT_TARGET_SIZE, targetSizeLabel, definitionHasTargetWords } from '../lib/targetSize.js'
+import { definitionInstanceSettings, effectiveInstanceSetting, chosenInstanceSettings } from '../lib/instanceSettings.js'
+import { InstanceSettingSelect } from '../lib/instanceSettingsView.js'
 
 // The work item type used when nothing more specific is looked up or
 // chosen — mirrors lib/workItemLink.js's own `DEFAULT_WORK_ITEM_TYPE`
@@ -271,11 +272,19 @@ const directoryField = signal('')
 // Directory instead.
 const directoryTouched = signal(false)
 const assigneeField = signal('')
-// #202 (docs/adr/0054): the new instance's Target size. Offered only when the chosen definition
-// version sets word budgets (`selectedHasTargetWords`, worked out per selection below); otherwise
-// nothing is shown and nothing is sent, so creating an instance of any other definition is unchanged.
-const sizeField = signal(DEFAULT_TARGET_SIZE)
-const selectedHasTargetWords = signal(false)
+// #219 (docs/adr/0058): the new instance's Instance settings — Target size (#202, docs/adr/0054)
+// today. `selectedInstanceSettings` is what the chosen definition version offers (worked out per
+// selection below, from web/lib/instanceSettings.js); `instanceSettingValues` holds what the author
+// picked, `{ [id]: value }`, each setting otherwise showing its Definition's default. A definition
+// that offers none shows nothing and sends nothing, so creating its instance is unchanged.
+const selectedInstanceSettings = signal([])
+const instanceSettingValues = signal({})
+
+// `{ [id]: value }` for every setting `settings` offers: the author's pick when it is one of the
+// choices, else the default — what a create request sends, under each setting's own id.
+function chosenSettingValues(settings) {
+  return Object.fromEntries(settings.map((setting) => [setting.id, effectiveInstanceSetting(setting, instanceSettingValues.value[setting.id])]))
+}
 
 // ---------- Step 3: parent-work-item link (#126) ----------
 const workItemTypes = signal([])
@@ -522,7 +531,7 @@ function resetWizard() {
   directoryField.value = ''
   directoryTouched.value = false
   assigneeField.value = ''
-  sizeField.value = DEFAULT_TARGET_SIZE
+  instanceSettingValues.value = {}
   workItemTypes.value = []
   workItemTypesLoadError.value = ''
   parentIdField.value = ''
@@ -852,7 +861,7 @@ async function createLocalInstance() {
         stage: firstStage.id,
         assignee: assigneeField.value.trim(),
         definitionVersion: version,
-        size: definitionHasTargetWords(structure.modules) ? sizeField.value : undefined,
+        ...chosenSettingValues(definitionInstanceSettings(structure)),
       })
     )
     for (const moduleId of firstStage.modules ?? []) {
@@ -1130,7 +1139,8 @@ function applyImportPrefill() {
   directoryTouched.value = false
   nameField.value = payload.slug
   assigneeField.value = y.assignee ?? ''
-  sizeField.value = TARGET_SIZES.includes(y.size) ? y.size : DEFAULT_TARGET_SIZE
+  // #202/#219: the source instance's own Instance settings (its Target size) carry over.
+  instanceSettingValues.value = chosenInstanceSettings(y)
 }
 
 // Wrap the existing registerWorkspace()/pickWorkspace() destination actions
@@ -1217,24 +1227,24 @@ effect(() => {
     })
 })
 
-// #202: whether the selected definition version sets word budgets — read from this local workspace's
-// own folder first when one is open, else the library's version projection (the same order
-// `resolveDefinitionStructure` uses at create time). A failed lookup offers no size, which is also
-// what every definition without budgets gets.
-let targetWordsLookup = 0
+// #202/#219: the Instance settings the selected definition version offers — read from this local
+// workspace's own folder first when one is open, else the library's version projection (the same
+// order `resolveDefinitionStructure` uses at create time). A failed lookup offers none, which is also
+// what every definition without Instance settings gets.
+let instanceSettingsLookup = 0
 effect(() => {
   const def = selectedDefinition()
   const v = resolvedVersion()
   const handle = isLocalWorkspace.value ? localRegHandle.value : null
-  const lookup = ++targetWordsLookup
-  selectedHasTargetWords.value = false
+  const lookup = ++instanceSettingsLookup
+  selectedInstanceSettings.value = []
   if (!def || v == null) return
   const structure = handle
     ? resolveDefinitionStructure(handle, def.id, v)
     : fetch(`/api/definitions/${encodeURIComponent(def.id)}/versions/${encodeURIComponent(String(v))}`).then((res) => (res.ok ? res.json() : null))
   Promise.resolve(structure)
     .then((body) => {
-      if (lookup === targetWordsLookup) selectedHasTargetWords.value = definitionHasTargetWords(body?.modules)
+      if (lookup === instanceSettingsLookup) selectedInstanceSettings.value = body ? definitionInstanceSettings(body) : []
     })
     .catch(() => {})
 })
@@ -1372,7 +1382,7 @@ async function createInstanceAndMaybeLink() {
           slug,
           assignee: assigneeField.value.trim(),
           definitionVersion: versionToSend,
-          ...(selectedHasTargetWords.value ? { size: sizeField.value } : {}),
+          ...chosenSettingValues(selectedInstanceSettings.value),
           azureDevOps: { organization: ws.location.organization, project: ws.location.project, repository: ws.location.repository, ...(ws.location.baseUrl ? { baseUrl: ws.location.baseUrl } : {}) },
           stage: importPayload.value.stage,
           modules: importPayload.value.modules,
@@ -1445,7 +1455,7 @@ async function createInstanceAndMaybeLink() {
             slug,
             assignee: assigneeField.value.trim(),
             definitionVersion: versionToSend,
-            ...(selectedHasTargetWords.value ? { size: sizeField.value } : {}),
+            ...chosenSettingValues(selectedInstanceSettings.value),
             ...(ws.provider === 'github'
               ? { github: { owner: ws.location.owner, repository: ws.location.repository, ...(ws.location.baseUrl ? { baseUrl: ws.location.baseUrl } : {}) } }
               : { azureDevOps: { organization: ws.location.organization, project: ws.location.project, repository: ws.location.repository, ...(ws.location.baseUrl ? { baseUrl: ws.location.baseUrl } : {}) } }),
@@ -2796,18 +2806,28 @@ function InstanceStep() {
           `}
     </div>
 
-    ${selectedHasTargetWords.value
+    ${selectedInstanceSettings.value.length
       ? html`
-          <div class="wizard-field">
-            <label for="instance-size">Size</label>
-            <select id="instance-size" class="wizard-input" value=${sizeField.value} onChange=${(e) => (sizeField.value = e.currentTarget.value)}>
-              ${TARGET_SIZES.map((size) => html`<option key=${size} value=${size}>${targetSizeLabel(size)}</option>`)}
-            </select>
+          <section class="wizard-instance-settings" aria-labelledby="instance-settings-heading">
+            <h3 id="instance-settings-heading">Instance settings</h3>
             <p class="wizard-field-hint">
-              How much to write in each field: every field with a word target shows it in the editor. Medium is
-              about half of Large, Small about a fifth. You can change it later in Instance Settings.
+              Choices this Definition asks every instance to make. You can change them later in Instance Settings.
             </p>
-          </div>
+            ${selectedInstanceSettings.value.map(
+              (setting) => html`
+                <div class="wizard-field" key=${setting.id}>
+                  <label for=${`instance-${setting.id}`}>${setting.label}</label>
+                  <${InstanceSettingSelect}
+                    id=${`instance-${setting.id}`}
+                    setting=${setting}
+                    value=${effectiveInstanceSetting(setting, instanceSettingValues.value[setting.id])}
+                    onChange=${(value) => (instanceSettingValues.value = { ...instanceSettingValues.value, [setting.id]: value })}
+                  />
+                  <p class="wizard-field-hint">${setting.guidance}</p>
+                </div>
+              `
+            )}
+          </section>
         `
       : null}
 

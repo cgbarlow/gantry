@@ -83,6 +83,11 @@ export function definitionHasTargetWords(modules) {
   return moduleList(modules).some((mod) => (mod?.fields ?? []).some(hasBudget))
 }
 
+/** How many Fields of a Definition declare a well-formed word budget — what the Definitions page cites for why Size is offered. */
+export function targetWordsFieldCount(modules) {
+  return moduleList(modules).reduce((count, mod) => count + (mod?.fields ?? []).filter(hasBudget).length, 0)
+}
+
 /**
  * Words in a Field's value as a reader would count them: Markdown punctuation (`-`, `|`, `#`, `**`)
  * is not a word, a link counts its text, and fenced code blocks (a Mermaid diagram's source) and

@@ -510,6 +510,16 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 /* #202: a budgeted field's word target and live count — amber once over, never an error. */
 .field-target-words { color: var(--text-muted); font-size: 12px; margin: -4px 0 8px; }
 .field-target-words.over, .field-target-words.over .field-word-count { color: var(--warning, #b06a00); font-weight: 600; }
+/* #219 (docs/adr/0058): Instance settings — one heading in the wizard and Instance Settings, one
+ * read-only summary on the Definitions page and in the local definition editor. */
+.wizard-instance-settings { margin-bottom: 24px; }
+.wizard-instance-settings > h3 { font-family: var(--font-display); font-weight: 600; font-size: 15px; margin: 0 0 4px; }
+.wizard-instance-settings > .wizard-field-hint { margin: 0 0 12px; }
+.instance-setting { margin-bottom: 14px; }
+.instance-setting h3, .instance-setting-summary h3 { font-family: var(--font-display); font-weight: 600; font-size: 13px; margin: 0 0 4px; }
+.instance-setting-summary { margin-top: 14px; }
+.instance-setting-summary p { margin: 0 0 6px; }
+.defn-map-col-instance-settings { border-style: dashed; }
 
 /* Stage navigation dropdown (WI232) — inline in ViewModeToolbar to the right of the artefact selector */
 .stage-navigation { margin: 0; display: inline-flex; align-items: center; }

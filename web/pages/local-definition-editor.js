@@ -23,6 +23,8 @@ import { useLocation } from 'preact-iso'
 import { reorder } from '../lib/reorder.js'
 import { coverClassificationOptions } from '../lib/artefactFrontMatter.js'
 import { TARGET_SIZES, targetSizeLabel, withFieldTargetWords } from '../lib/targetSize.js'
+import { definitionInstanceSettings } from '../lib/instanceSettings.js'
+import { InstanceSettingsSummary } from '../lib/instanceSettingsView.js'
 import {
   getWorkspaceHandle,
   ensurePermission,
@@ -547,6 +549,9 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
   const [publishError, setPublishError] = useState(null)
 
   const readOnly = structure.status === 'published'
+  // #219 (docs/adr/0058): the Instance settings this Definition offers, the same description the
+  // server's Definitions page shows — read-only for now; editing them is #221.
+  const instanceSettings = definitionInstanceSettings(structure)
 
   useEffect(() => {
     let cancelled = false
@@ -715,6 +720,18 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
         )}
         ${readOnly ? null : html`<button type="button" class="btn small ghost" onClick=${addArtefact}>+ Add artefact</button>`}
       </section>
+
+      ${instanceSettings.length
+        ? html`
+            <section class="local-def-instance-settings">
+              <h2>Instance settings</h2>
+              <p class="guidance">
+                What every Instance of this Definition chooses for itself, when it is created and later in Instance Settings.
+              </p>
+              <${InstanceSettingsSummary} settings=${instanceSettings} />
+            </section>
+          `
+        : null}
 
       <section class="local-def-validation">
         <h2>Validation</h2>

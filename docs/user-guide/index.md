@@ -80,6 +80,18 @@ On the Workspaces page, a Workspace-backed instance that has an open sign-off Pu
 
 Workspaces and instances can be archived — hidden from the dashboard's default listing — and restored later, with no data deleted. Archiving is done from **Workspace Settings** or **Instance Settings** respectively. An archived instance still opens read-only at its direct `/instance/<slug>` link, with a banner explaining it is archived and linking to Instance Settings to restore it. On the dashboard, archived items appear in the collapsible **Archived instances** and **Archived workspaces** panels at the bottom of the page. A workspace that still has active instances cannot be archived until those are archived first. A definition can also be archived and restored from the Definitions page's switcher menu, filtered by a "Show archived" checkbox.
 
+### Instance settings
+
+Some choices apply to a whole Instance rather than to one Stage's content. Gantry calls them **Instance settings**, and the Instance's Definition decides which ones there are, what you can choose from and what is chosen if you don't. Today there is one, **Size** (see **Target size and word targets** below).
+
+You meet them in three places, always under an **Instance settings** heading:
+
+- **Creating an Instance.** The "+ New Workspace" wizard shows them on the Instance step with the Definition's defaults already selected, so you only change what differs for your initiative. An AI agent can set them in MCP `create_instance`.
+- **Instance Settings.** Change any of them later and click **Save**. For a Workspace-backed Instance the change is saved on the current Stage branch and reviewed with the rest of that stage, on every Provider; a Local-workspace Instance saves it straight into its folder. MCP `get_instance` returns each one.
+- **The Definitions page.** A Definition that has Instance settings shows an **Instance settings** group at the end of the Outline (and a column at the end of the Map). Select it to see, for each setting, why the Definition offers it, its choices and its default. It is read-only for now.
+
+A Definition with no Instance settings shows none of this anywhere: no heading in the wizard, nothing extra in Instance Settings and no section on the Definitions page. Assignee and Required reviewer aren't Instance settings. They are about people rather than the documents, and they keep their own places in Instance Settings.
+
 ### Definition versions and the Definitions page
 
 Definitions are versioned. The first version of a definition is published and is the default for new instances; newer versions start as `draft`. Each version has its own `definition.yaml`, module specs, templates and `CHANGELOG.md`. Only the latest published version is used when no explicit version is requested; draft versions are opt-in via the wizard's version picker.
@@ -129,7 +141,7 @@ Which fields are which type is set by the Definition, not by you — an author c
 
 ### Target size and word targets
 
-Some Definitions tell you roughly how much to write in each field. If yours does, every instance has a **Size**: **Small**, **Medium** or **Large**. Medium is the default, about half of Large; Small is about a fifth. Pick the size when you create the instance in the "+ New Workspace" wizard, and change it later in **Instance Settings**. Choose it for the solution's risk and audience: a document reviewers need to read closely in one sitting wants a smaller size than a full reference.
+Some Definitions tell you roughly how much to write in each field. If yours does, every instance has a **Size**: **Small**, **Medium** or **Large**. Size is one of the instance's **Instance settings** (see **Instance settings** above). Medium is the default, about half of Large; Small is about a fifth. Pick the size under **Instance settings** when you create the instance in the "+ New Workspace" wizard, and change it later under the same heading in **Instance Settings**. Choose it for the solution's risk and audience: a document reviewers need to read closely in one sitting wants a smaller size than a full reference.
 
 Under each field with a word target, the editor shows the target for the instance's size and a live word count, for example `Target ~100 words (Medium) · 87 words`. Once the count goes over the target it turns amber. Diagrams in Mermaid code blocks, images and Markdown symbols aren't counted as words.
 
@@ -139,7 +151,7 @@ An AI agent writing through the MCP server sees the same targets: `get_instance`
 
 The `design` definition's v3 draft sets word targets on every field that appears in a document. Its Large targets match the bundled examples' original level of detail, and the examples are now written to Medium, so **Populate example text** shows the default amount. A Medium Solution Architecture Document comes to roughly half the length of a Large one.
 
-A Definition without word targets shows none of this: no Size in the wizard or Instance Settings and no targets in the editor. A Definition author sets a field's targets on the Definitions page (see *Definition versions and the Definitions page* above) or in the module's YAML as `target-words: { small: 40, medium: 100, large: 200 }`. Each must be a whole number above zero, all three sizes are needed, and only Markdown and list fields can have them. Anything else is a problem that `gantry validate` and a Local Workspace report, the Definitions page marks and Save and Publish refuse; a Definition an instance already uses keeps loading even if it has one.
+A Definition without word targets shows none of this: no Size in the wizard or Instance Settings, no Instance settings section on the Definitions page and no targets in the editor. For a Definition with word targets, the Definitions page's Instance settings section shows Size as offered because a number of fields declare word targets, with its three choices and its default, Medium. A Definition author sets a field's targets on the Definitions page (see *Definition versions and the Definitions page* above) or in the module's YAML as `target-words: { small: 40, medium: 100, large: 200 }`. Each must be a whole number above zero, all three sizes are needed, and only Markdown and list fields can have them. Anything else is a problem that `gantry validate` and a Local Workspace report, the Definitions page marks and Save and Publish refuse; a Definition an instance already uses keeps loading even if it has one.
 
 ### The editor toolbar
 
@@ -400,9 +412,9 @@ Gantry's Settings are split by scope:
 
 - **Global Settings** holds the **Advanced mode** toggle, off by default — with it off, a browser only ever sees the Local workspace flow (see **Local workspaces** above), with no Provider, work-item or sign-off UI anywhere in the app. It also holds a **default ticketing system** choice, which only ever affects a *new* Azure DevOps Workspace's own ticketing-system override (Jira is listed but disabled). There is no global Personal Access Token here, or anywhere else: every Server-hosted Workspace holds its own **Workspace PAT** (see **Choosing a Provider** above), so this screen has nothing credential-related to set.
 - **Workspace Settings** controls the Owner and the Workspace's own PAT — set it, replace it, or clear it, entirely independently of every other workspace's own token — plus, for an Azure DevOps workspace only, a ticketing-system override (Jira is listed but disabled; a GitHub or GitLab workspace has no such choice, since its tracker is fixed by its Provider — GitHub Issues or GitLab Issues respectively). This screen also shows the Workspace's Provider and, at a glance, whether its PAT is set, missing or was rejected on the last request that used it. These settings apply to the Workspace and can be opened from an Instance that belongs to it. The same screen also holds **Archive workspace** / **Restore workspace**.
-- **Instance Settings** controls the Instance's Assignee and, when its Definition sets word targets, its **Size** (see **Target size and word targets** above), and shows read-only information about the Instance and its linked work item. The same screen also holds **Archive instance** / **Restore instance**. An archived instance is hidden from the dashboard but still opens at its direct URL.
+- **Instance Settings** controls the Instance's Assignee (and, for a Workspace-backed Instance, its Required reviewer) and, under an **Instance settings** heading, whatever Instance settings its Definition offers, such as **Size** when it sets word targets (see **Instance settings** and **Target size and word targets** above), and shows read-only information about the Instance and its linked work item. The same screen also holds **Archive instance** / **Restore instance**. An archived instance is hidden from the dashboard but still opens at its direct URL.
 
-An override narrows the scope of a setting: a workspace's own PAT and ticketing-system choice apply only to that Workspace, while Instance settings affect only that one run of the Definition — nothing here falls back to a shared default any more.
+An override narrows the scope of a setting: a workspace's own PAT and ticketing-system choice apply only to that Workspace, while an Instance's own settings affect only that one run of the Definition — nothing here falls back to a shared default any more.
 
 For example, an architect can give a GitHub `design` Workspace its own PAT while a separate Azure DevOps `design` Workspace keeps its own, entirely unrelated token, and assign one `design` Instance without changing its Workspace or sibling Instances.
 

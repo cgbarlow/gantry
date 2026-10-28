@@ -90,3 +90,18 @@ Authors, people and agents alike, wrote to the example.
   author can then tighten (or expand) Fields to the new size.
 
 Status: accepted.
+
+## Amendment (ADR-0058): Target size is an Instance setting
+
+ADR-0058 groups the per-Instance choices a Definition declares as
+**Instance settings**, and Target size is the first member. With #219 the
+wizard and Instance Settings show Size under an "Instance settings" heading,
+the Definitions page shows it as offered "because N Fields declare word
+targets", and Instance Settings saves it through the one settings write that
+every Instance setting uses. Where it is offered, how it is stored (`size:`
+in `instance.yaml`, written only when chosen) and what it does are
+unchanged.
+
+Decision 1's "Medium is the default" becomes "the Definition's default, else
+Medium". A Definition that sets no default, which is every Definition until
+#221 lets an author set one, behaves exactly as before.

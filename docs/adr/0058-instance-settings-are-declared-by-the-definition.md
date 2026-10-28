@@ -129,4 +129,18 @@ draft.
 - ADR-0054's "Medium is the default" now means "the Definition's default,
   else Medium".
 
-Status: proposed. To be marked accepted when #219 lands.
+## Delivery
+
+- **#219** groups the settings. The shared module is
+  `web/lib/instanceSettings.js`, and Target size is its first member. The
+  wizard and Instance Settings show Size under an "Instance settings"
+  heading, and the Definitions page shows a read-only "Instance settings"
+  section. Instance Settings saves through `PUT /api/instance/settings`;
+  `PUT /api/instance/size` stays as the same write for Size alone. Size's
+  default is still Medium for every Definition.
+- **#220** adds Classification and switches design v3 over (§2, §6, Design
+  v3).
+- **#221** lets a draft's author edit choices and defaults on the
+  Definitions page, including Size's default (§4, §7).
+
+Status: accepted.

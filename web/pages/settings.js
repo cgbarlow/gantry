@@ -83,9 +83,10 @@ import {
   writeTextFile as writeLocalTextFile,
   parseWorkspaceJson,
 } from '../lib/localWorkspace.js'
-import { parseInstanceYaml, withInstanceAssignee, withInstanceSize } from '../lib/localInstanceFiles.js'
+import { parseInstanceYaml, withInstanceAssignee, withStoredInstanceSettings } from '../lib/localInstanceFiles.js'
 import { resolveDefinitionStructure } from '../lib/localDefinitionFiles.js'
-import { TARGET_SIZES, targetSizeLabel, effectiveTargetSize, definitionHasTargetWords } from '../lib/targetSize.js'
+import { instanceSettingsWithValues } from '../lib/instanceSettings.js'
+import { InstanceSettingSelect } from '../lib/instanceSettingsView.js'
 
 // ---------- Shared header ----------
 // One header shape for all three Settings screens: a title (distinct per
@@ -1362,28 +1363,33 @@ function RequiredReviewerSection({ slug, requiredReviewer, disabled = false }) {
   `
 }
 
-async function saveSize(slug, size) {
-  const res = await apiFetchForInstance(slug, `/api/instance/size?slug=${encodeURIComponent(slug)}`, {
+async function saveInstanceSettings(slug, settings) {
+  const res = await apiFetchForInstance(slug, `/api/instance/settings?slug=${encodeURIComponent(slug)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ size }),
+    body: JSON.stringify({ settings }),
   })
   const body = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new Error(body.message ?? body.error ?? `Failed to save size (${res.status})`)
+    throw new Error(body.message ?? body.error ?? `Failed to save Instance settings (${res.status})`)
   }
   return body
 }
 
-// #202 (docs/adr/0054): the instance's Target size — how much its authors write in each Field. Shown
-// only for an instance whose Definition sets word budgets (`instance.size` is present only then), so
-// every other instance's Settings look exactly as before. `onSave` writes it — the server route for a
-// server-hosted instance, the folder's own instance.yaml for a Local-workspace one.
-function SizeSection({ size, disabled = false, onSave }) {
-  const [draft, setDraft] = useState(effectiveTargetSize(size))
+// #219 (docs/adr/0058): the Instance settings the instance's Definition offers — Target size (#202,
+// docs/adr/0054) today — under one heading, with one Save for all of them. `settings` is
+// web/lib/instanceSettings.js's description with each setting's current `value` (`instanceSettings`
+// on GET /api/instance, or worked out from the folder for a Local-workspace instance); an instance
+// whose Definition offers none gets no section, so its Settings look exactly as before. `onSave`
+// writes the changed values — the server route for a server-hosted instance, the folder's own
+// instance.yaml for a Local-workspace one.
+function InstanceSettingsSection({ settings, disabled = false, onSave }) {
+  const current = () => Object.fromEntries(settings.map((setting) => [setting.id, setting.value]))
+  const [draft, setDraft] = useState(current)
   const [status, setStatus] = useState('')
+  const valuesKey = settings.map((setting) => `${setting.id}=${setting.value}`).join('&')
 
-  useEffect(() => setDraft(effectiveTargetSize(size)), [size])
+  useEffect(() => setDraft(current()), [valuesKey])
 
   async function handleSave() {
     setStatus('Saving\u2026')
@@ -1396,17 +1402,28 @@ function SizeSection({ size, disabled = false, onSave }) {
   }
 
   return html`
-    <section class="settings-section">
-      <h2>Size</h2>
+    <section class="settings-section instance-settings">
+      <h2>Instance settings</h2>
       <p class="guidance">
-        How much to write in each field. Each field with a word target shows it in the editor for this size,
-        with a live word count. Medium, the default, is about half of Large; Small is about a fifth. It's a
-        target, not a limit: nothing is blocked, and documents render exactly what was written.
+        Choices this instance's Definition asks it to make. Each one applies to the whole instance, not to one stage.
       </p>
+      ${settings.map(
+        (setting) => html`
+          <div key=${setting.id} class="instance-setting" data-setting=${setting.id}>
+            <h3>${setting.label}</h3>
+            <p class="guidance">${setting.guidance}</p>
+            <div class="workspace-field-row">
+              <${InstanceSettingSelect}
+                setting=${setting}
+                value=${draft[setting.id] ?? setting.value}
+                disabled=${disabled}
+                onChange=${(value) => setDraft((prev) => ({ ...prev, [setting.id]: value }))}
+              />
+            </div>
+          </div>
+        `
+      )}
       <div class="workspace-field-row">
-        <select class="wizard-input" aria-label="Size" disabled=${disabled} value=${draft} onChange=${(e) => setDraft(e.currentTarget.value)}>
-          ${TARGET_SIZES.map((s) => html`<option key=${s} value=${s}>${targetSizeLabel(s)}</option>`)}
-        </select>
         <button type="button" class="btn small" disabled=${disabled} onClick=${handleSave}>Save</button>
       </div>
       <div class="workspace-field-status">${status}</div>
@@ -1547,8 +1564,9 @@ function LocalInstanceSettingsPage({ query, workspaceId, slug }) {
   const [assigneeDraft, setAssigneeDraft] = useState('')
   const [assigneeStatus, setAssigneeStatus] = useState('')
   const [busy, setBusy] = useState(false)
-  // #202: whether this instance's Definition sets word budgets — only then does it have a Size.
-  const [hasBudgets, setHasBudgets] = useState(false)
+  // #219: this instance's Definition, as far as its Instance settings need it — `null` until read, or
+  // when it can't be, which offers none.
+  const [structure, setStructure] = useState(null)
 
   async function load() {
     setState('loading')
@@ -1569,10 +1587,9 @@ function LocalInstanceSettingsPage({ query, workspaceId, slug }) {
       setRecord(rec)
       setAssigneeDraft(rec.assignee ?? '')
       try {
-        const structure = await resolveDefinitionStructure(h, rec.definition, rec.definitionVersion ?? 1)
-        setHasBudgets(definitionHasTargetWords(structure.modules))
+        setStructure(await resolveDefinitionStructure(h, rec.definition, rec.definitionVersion ?? 1))
       } catch {
-        setHasBudgets(false)
+        setStructure(null)
       }
       setState('ready')
     } catch (err) {
@@ -1618,10 +1635,13 @@ function LocalInstanceSettingsPage({ query, workspaceId, slug }) {
     }
   }
 
-  async function handleSaveSize(size) {
-    await writeLocalTextFile(handle, `gantry-workspace/${slug}/instance.yaml`, withInstanceSize(record, size))
-    setRecord({ ...record, size })
+  async function handleSaveInstanceSettings(settings) {
+    const text = withStoredInstanceSettings(record, settings)
+    await writeLocalTextFile(handle, `gantry-workspace/${slug}/instance.yaml`, text)
+    setRecord(parseInstanceYaml(text))
   }
+
+  const instanceSettings = structure && record ? instanceSettingsWithValues(structure, record) : []
 
   return html`
     <${SettingsHeader} title="Instance Settings" backHref=${backHrefFrom(query)} />
@@ -1664,7 +1684,7 @@ function LocalInstanceSettingsPage({ query, workspaceId, slug }) {
               </div>
               <div class="workspace-field-status">${assigneeStatus}</div>
             </section>
-            ${hasBudgets ? html`<${SizeSection} size=${record.size} onSave=${handleSaveSize} />` : null}
+            ${instanceSettings.length ? html`<${InstanceSettingsSection} settings=${instanceSettings} onSave=${handleSaveInstanceSettings} />` : null}
             <section class="settings-section">
               <h2>Instance info</h2>
               <div class="result-card">
@@ -1741,7 +1761,13 @@ function RemoteInstanceSettingsPage({ query }) {
             <${WriteAccessBanner} instance=${instance} workspaceId=${workspaceId} />
             <${AssigneeSection} slug=${slug} assignee=${instance.assignee} disabled=${blocked} />
             <${RequiredReviewerSection} slug=${slug} requiredReviewer=${instance.requiredReviewer} disabled=${blocked} />
-            ${instance.size ? html`<${SizeSection} size=${instance.size} disabled=${blocked} onSave=${(size) => saveSize(slug, size)} />` : null}
+            ${instance.instanceSettings?.length
+              ? html`<${InstanceSettingsSection}
+                  settings=${instance.instanceSettings}
+                  disabled=${blocked}
+                  onSave=${(settings) => saveInstanceSettings(slug, settings)}
+                />`
+              : null}
             <${InstanceInfoSection} instance=${instance} />
             <${WorkItemLinkSection} instance=${instance} />
             <${InstanceArchiveSection} slug=${slug} archived=${instance.archived} />
