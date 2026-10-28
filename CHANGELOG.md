@@ -17,6 +17,67 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.12.0 — 2026-10-28
+
+Instance settings: the choices a Definition asks every Instance to make once, for the whole
+Instance rather than at a gate (#223). Target size, Classification and the header logo now sit
+together under one **Instance settings** heading, wherever you meet them. Definitions without any
+of them (design v1/v2, recruitment-onboarding) behave and render exactly as before.
+
+**If you have design v3 Instances other than the bundled examples:** choose their classification
+again in Instance Settings. A marking chosen in the old "Document handling" Field is no longer
+read, and no migration was built because v3 is still a draft.
+
+### Added
+
+- **One Instance settings heading** (#219). In the "+ New Workspace" wizard and in Instance
+  Settings, Target size, Classification and Logo appear together under **Instance settings**, with
+  one Save. This works in a Local Workspace and on Azure DevOps, GitHub and GitLab, where a change
+  is saved on the stage branch as before. The Definitions page (server and Local Workspace) has a
+  matching **Instance settings** section, and MCP `get_instance` returns an `instanceSettings`
+  list. Size itself works as before.
+- **Edit Instance settings on a draft's Definitions page** (#221). A Definition author can add,
+  rename, reorder and remove classification markings, pick an optional default (or None), or stop
+  declaring Classification altogether. This is how an organisation swaps the NZ PSR markings for
+  its own scheme. Size's Small / Medium / Large are fixed, but its default can be changed. A
+  published version shows the section read-only. A default that isn't one of the choices, a blank
+  or repeated marking, or an empty marking list is a Definition problem: the server's Save and
+  every Publish refuse it, and `gantry validate` and a Local Workspace report it too. A Local
+  Workspace's Save still keeps a draft that has problems, as it does for every other problem.
+- **Replace a Definition's header logo with one upload** (#222). A new **Logo** control on the
+  Definitions page shows the picture in the page header of the Definition's reference documents,
+  with **Download**, and on a draft **Replace**. Replace takes a PNG or JPEG and writes it into
+  every reference document of that draft at once, so you no longer edit seven Word files by hand.
+  The logo keeps its proportions within the space the old one took up, and its alt text is
+  "Organisation logo". A Local Workspace's Definition editor has the same control. Design v3 still
+  ships the Contoso logo by default. A reference document uploaded later under **Reference docx**
+  keeps whatever logo it carries.
+- **An Instance can have its own header logo** (#224). One Gantry can now produce documents for
+  different organisations or clients from one Definition. Upload a logo under Instance settings in
+  the "+ New Workspace" wizard, or later in Instance Settings, which shows whether the Instance uses
+  its own logo or the Definition's and offers **Replace**, **Download** and **Remove**. The header
+  shows the Instance's logo if it has one, else the Definition's, on every render path, and the
+  Definition's files are never changed. It is offered only when the Definition's reference
+  documents have a header picture, and only PNG and JPEG are accepted. MCP `get_instance` reports
+  whether the Instance has its own logo; uploading one over MCP isn't supported.
+
+### Changed
+
+- **Classification is an Instance setting, and leaves the gates in design v3** (#220). A
+  Definition lists its markings, and optionally a default, under `instance-settings:` in
+  `definition.yaml`. You pick the marking once, in the wizard or Instance Settings, or with
+  `gantry new --classification` or MCP `create_instance`. It is optional: **None** prints no
+  marking. Covers and page headers print the Instance's marking. Design v3 declares the four NZ PSR
+  markings with no default and drops its `document-handling` Module, so no gate shows a "Document
+  handling" section any more. The bundled examples still render IN-CONFIDENCE. A marking that
+  isn't in the Definition's list is refused. A Definition that declares no markings keeps printing
+  the Field its `cover-classification` names, so your own Definitions keep working; the Definitions
+  page no longer offers that pointer for new ones.
+- **Size's default is the Definition's** (#221). An Instance with no stored size now works to the
+  Definition's default size (`instance-settings: { size: { default: small } }`), in the editor's
+  word targets, MCP `get_instance`, over-budget notes and the wizard's pre-selection. A Definition
+  that sets no default still uses Medium, so existing Definitions are unchanged.
+
 ## 0.11.0 — 2026-10-28
 
 The same Gantry as 0.11.0-beta, released without the `-beta` suffix at the maintainer's request.
