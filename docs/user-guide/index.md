@@ -623,7 +623,7 @@ Reference: *SAD Template* (98 headings). All fields are authored at the Detailed
 
 Reference: *FV Help Tool SSAD* — a filled instance for one product family, not a blank template, so most of its headings are product names. All fields are authored at the Detailed Design stage; the SSAD is a second rendering of the same design data as the SAD, focused on what a support team needs.
 
-**Version 3 (draft)** puts the SSAD in the SAD's order, under the SAD's headings, so a reviewer reading both finds each thing in the same place: `# Overview` › `# Business architecture` (Stakeholders and support contacts) › `# Solution overview` (Solution description, Dependency list, Architectural risks) › `# Open issues` › `# Risks` (Risk register) › `# Logical components view` › `# Technology architecture` (Interfaces) › `# Support and operations` › `# Glossary` › `# References`. All the support material, from Environments, URLs and domains to Support handover readiness, stays together in the one `# Support and operations` chapter. A field the SAD also renders takes the SAD's heading, so Disaster recovery and backup is `## Backup and archiving policy`; Stakeholders and support contacts keeps its name. The fields and the gate are the same as version 2's. The table below gives version 2's headings; for version 3, read each field's heading from this outline. See ADR-0057.
+**Version 3 (draft)** puts the SSAD in the SAD's order, under the SAD's headings, so a reviewer reading both finds each thing in the same place: `# Overview` › `# Design basis` *(only when filled)* › `# Business architecture` (Stakeholders and support contacts) › `# Solution overview` (Solution description, Dependency list, Architectural risks) › `# Open issues` › `# Risks` (Risk register) › `# Logical components view` › `# Technology architecture` (Interfaces) › `# Support and operations` › `# Glossary` › `# References`. All the support material, from Environments, URLs and domains to Support handover readiness, stays together in the one `# Support and operations` chapter. A field the SAD also renders takes the SAD's heading, so Disaster recovery and backup is `## Backup and archiving policy`; Stakeholders and support contacts keeps its name. Like the SAD, the SSAD opens with the Overview paragraph (Overview › Overview `introduction.overview`) and the Design basis Assumptions and Constraints, which the SAD already asks for at the same gate; otherwise the fields are version 2's. The table below gives version 2's headings; for version 3, read each field's heading from this outline. See ADR-0057.
 
 | Reference heading | Where to find it in Gantry | Description / rationale |
 | --- | --- | --- |
@@ -791,13 +791,13 @@ The table below is the field-level view of "content is introduced once and carri
 | Background and context › Opportunity `background.opportunity` | ● Full SOAP | ● HLD | — | — | SOAP → HLD |
 | Background and context › Success criteria `background.success-criteria` | ○ editor only | ● HLD | — | — | SOAP → HLD |
 | Overview › Executive summary `introduction.executive-summary` | ○ editor only | ○ editor only | ○ SAD, SSAD | ○ editor only | SOAP → Handover |
-| Overview › Overview `introduction.overview` | ○ Full SOAP | ○ editor only | ● SAD | ● As-built | SOAP → Handover |
+| Overview › Overview `introduction.overview` | ○ Full SOAP | ○ editor only | ● SAD; SSAD in version 3 | ● As-built | SOAP → Handover |
 | Overview › Purpose `introduction.purpose` | ○ editor only | ○ editor only | ● SAD, SSAD | ● As-built | SOAP → Handover |
 | Overview › In scope `introduction.in-scope` | ● Full SOAP | ● HLD | ● SAD, SSAD | ● As-built | SOAP → Handover |
 | Overview › Out of scope `introduction.out-of-scope` | ● Full SOAP | ● HLD | ● SAD, SSAD | ● As-built | SOAP → Handover |
 | Overview › Content standards `introduction.content-standards` | ○ editor only | ○ editor only | ○ SSAD | ○ editor only | SOAP → Handover |
-| Design Basis › Constraints `design-basis.constraints` | ○ Full SOAP | — | ○ SAD | ○ As-built | SOAP → Handover |
-| Design Basis › Assumptions `design-basis.assumptions` | ○ SOAP, Full SOAP | — | ○ SAD | ○ As-built | SOAP → Handover |
+| Design Basis › Constraints `design-basis.constraints` | ○ Full SOAP | — | ○ SAD; SSAD in version 3 | ○ As-built | SOAP → Handover |
+| Design Basis › Assumptions `design-basis.assumptions` | ○ SOAP, Full SOAP | — | ○ SAD; SSAD in version 3 | ○ As-built | SOAP → Handover |
 | Design Basis › Caveats `design-basis.caveats` | ○ editor only | — | ○ editor only | ○ As-built | SOAP → Handover |
 | Design Basis › Design principles `design-basis.design-principles` | ○ editor only | ○ editor only | ○ editor only | ○ As-built | SOAP → Handover |
 | Design Basis › Outcomes and deliverables `design-basis.outcomes-and-deliverables` | ○ editor only | ○ editor only | ○ editor only | ○ As-built | SOAP → Handover |

@@ -451,6 +451,21 @@ names. The SSAD now reads like the SAD (ADR-0057).
   mandatory and optional, so `build-ready-checklist` asks exactly what it asked before. The
   Kiwi Cover Mutual SSAD still renders and passes. v1 and v2 are unchanged.
 
+### The SSAD opens with the Overview and Design basis (#214)
+
+The SAD opens with an Overview paragraph and then a Design basis chapter. The SSAD had neither, so
+the two documents rendered at the same Gate started differently.
+
+- **The Overview paragraph.** The SSAD's Overview chapter now has an Overview section,
+  `introduction.overview`, between the Executive summary and Purpose, as in the SAD.
+- **A Design basis chapter.** Directly after the Overview chapter, the SSAD shows Assumptions and
+  Constraints (`design-basis.assumptions`, `design-basis.constraints`) as the SAD does. It
+  appears only when one of them is filled, and each section only when its own Field is.
+- **Nothing new to write.** The SAD already requires the Overview paragraph at
+  `build-ready-checklist`, so every instance that passes that Gate already has it. Both Design basis
+  Fields are optional and already mounted at Detailed Design. The Kiwi Cover Mutual SSAD now shows
+  all three sections with no change to its content, and still passes. v1 and v2 are unchanged.
+
 ## v2
 
 Layout revision of v1. Every artefact's `requires` list re-sequenced to the reading

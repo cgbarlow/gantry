@@ -498,7 +498,7 @@ artefacts:
     # same data at the same Gate. See docs/adr/0057 — the counterpart to
     # ADR-0032, which kept reference fidelity for the HLD.
     #
-    # Order: Overview -> Business architecture (Stakeholders and support
+    # Order: Overview -> Design basis -> Business architecture (Stakeholders and support
     # contacts) -> Solution overview (Solution description, Dependency list,
     # Architectural risks) -> Open issues -> Risks -> Logical components view
     # -> Technology architecture (Interfaces) -> Support and operations ->
@@ -512,6 +512,12 @@ artefacts:
     # entry keeps its bare / `?` form. `stakeholders`, `monitoring-and-alerting`
     # and `operational-accounts-and-licenses` stay bare here though the SAD
     # lists them with `?` — the SSAD is the document a support team needs them in.
+    #
+    # #214: the SSAD opens the way the SAD does. `introduction.overview` joins the
+    # Overview chapter (bare, as in the SAD) and `design-basis.assumptions?` /
+    # `.constraints?` render as a "Design basis" chapter right after it, only
+    # when filled. Authors are asked for nothing new: the SAD already requires
+    # `overview` at this Gate, and `design-basis` is mounted at Detailed Design.
     #
     # History, v2: `architecture.architectural-risks` / `.logical-components`
     # opened the document and `release-procedures` sat late, both to match the
@@ -527,10 +533,13 @@ artefacts:
       [
         document-handling.classification?,
         introduction.executive-summary?,
+        introduction.overview,
         introduction.purpose,
         introduction.in-scope,
         introduction.out-of-scope,
         introduction.content-standards?,
+        design-basis.assumptions?,
+        design-basis.constraints?,
         support-and-operations.stakeholders,
         architecture.solution-description,
         dependencies.dependency-list,
