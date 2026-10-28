@@ -11,7 +11,7 @@ import { defnView, setDefnView, defnMapExpanded, setDefnMapExpanded } from '../l
 import { planCopy, resolveCollision, applyPlan, isResolved } from '../lib/copyPlanner.js'
 import { TARGET_SIZES, targetSizeLabel, withFieldTargetWords } from '../lib/targetSize.js'
 import { definitionInstanceSettings, instanceSettingName } from '../lib/instanceSettings.js'
-import { InstanceSettingsSummary } from '../lib/instanceSettingsView.js'
+import { InstanceSettingsSummary, InstanceSettingsEditor } from '../lib/instanceSettingsView.js'
 import { DefinitionLogoControl } from '../lib/definitionLogoControl.js'
 
 // The rebuilt Definitions page (WI #381, Feature #380's grilling session). Primary source:
@@ -81,11 +81,14 @@ function templateBasename(tmpl) {
 
 // What Save compares against, and what a fresh draft starts from — title/description/stages/
 // artefacts/modules only, the fields Save actually writes (id/version/status never change here).
+// #221: and the Instance settings declaration, an empty one the same as none (Save writes neither).
 function editableStructure(def) {
   if (!def) return null
+  const instanceSettings = def.instanceSettings && typeof def.instanceSettings === 'object' && Object.keys(def.instanceSettings).length === 0 ? undefined : def.instanceSettings
   return {
     title: def.title,
     description: def.description,
+    instanceSettings,
     stages: def.stages,
     artefacts: def.artefacts,
     modules: def.modules,
@@ -1855,11 +1858,14 @@ export function DefinitionViewerPage() {
   // #219 (docs/adr/0058): the Instance settings this Definition offers — worked out from the working
   // copy by web/lib/instanceSettings.js, so a draft's word-target edits show at once — as the
   // Outline's last group, and a column at the end of the Map. A Definition that offers none shows
-  // neither. Each setting selects the one read-only "Instance settings" focus view.
+  // neither. Each setting selects the one "Instance settings" focus view.
   // #220: a setting whose declaration is malformed isn't offered, but is listed all the same, with its
   // problem marker, so the problem has somewhere to be shown and fixed.
+  // #221: on a draft, Classification is listed even where the Definition declares no markings, so its
+  // author can declare some — and so it stays put while a marking being typed is blank.
   function instanceSettingsNav(d) {
     const nav = definitionInstanceSettings(d).map((setting) => ({ id: setting.id, name: setting.name }))
+    if (isEditable && !nav.some((entry) => entry.id === 'classification')) nav.push({ id: 'classification', name: instanceSettingName('classification') })
     for (const target of problemTargets.filter((t) => t.type === 'instance-setting')) {
       if (!nav.some((entry) => entry.id === target.id)) nav.push({ id: target.id, name: instanceSettingName(target.id) })
     }
@@ -2161,10 +2167,11 @@ export function DefinitionViewerPage() {
     return html`<p class="loading">Select an element.</p>`
   }
 
-  // #219 (docs/adr/0058): read-only for now, on a draft as on a published version — editing each
-  // setting's choices and default is #221.
+  // #219 (docs/adr/0058): one view for every setting the Definition offers.
   // #220: any problem with the declaration is listed above the settings, as the filename problems
   // are beside an Artefact's filename.
+  // #221 (ADR-0058 §7): on a draft, each setting's choices and default are edited here, and Save and
+  // Publish carry the declaration as `instanceSettings`; a published version shows it read-only.
   function renderInstanceSettingsFocus(d) {
     const settings = definitionInstanceSettings(d)
     if (!instanceSettingsNav(d).some((setting) => setting.id === selection.id)) return html`<p class="loading">Select an element.</p>`
@@ -2178,7 +2185,9 @@ export function DefinitionViewerPage() {
           Settings. Each applies to the whole Instance, not to one stage.
         </p>
         ${declarationProblems.length ? html`<ul class="defn-filename-problems defn-instance-settings-problems">${declarationProblems.map((p) => html`<li class="inline-error">${p.message}</li>`)}</ul>` : null}
-        <${InstanceSettingsSummary} settings=${settings} />
+        ${isEditable
+          ? html`<${InstanceSettingsEditor} definition=${d} onChange=${(next) => updateDraft((dd) => { dd.instanceSettings = next })} />`
+          : html`<${InstanceSettingsSummary} settings=${settings} />`}
       </div>
     `
   }

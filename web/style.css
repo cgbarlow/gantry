@@ -519,6 +519,12 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .instance-setting h3, .instance-setting-summary h3 { font-family: var(--font-display); font-weight: 600; font-size: 13px; margin: 0 0 4px; }
 .instance-setting-summary { margin-top: 14px; }
 .instance-setting-summary p { margin: 0 0 6px; }
+/* #221: a draft's Instance settings editor on the Definitions page (server and Local Workspace). */
+.instance-setting-markings { list-style: decimal; margin: 4px 0 8px; padding-left: 22px; }
+.instance-setting-marking, .instance-setting-add-marking { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.instance-setting-marking .wizard-input, .instance-setting-add-marking .wizard-input { flex: 1; min-width: 0; max-width: 22em; margin: 0; }
+.instance-setting-add-marking { margin-bottom: 10px; }
+.instance-setting-default-select { max-width: 22em; }
 .defn-map-col-instance-settings { border-style: dashed; }
 /* #224: an Instance's own Logo, in the wizard and Instance Settings. */
 .instance-logo-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 4px 0 8px; }

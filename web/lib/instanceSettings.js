@@ -13,6 +13,8 @@
 // (`instanceSettings` once loaded), keyed by setting id:
 //
 //   instance-settings:
+//     size:
+//       default: small           # optional; Size's choices are Gantry's own (#221)
 //     classification:
 //       choices: [UNCLASSIFIED, IN-CONFIDENCE, SENSITIVE, RESTRICTED]
 //       default: IN-CONFIDENCE   # optional
@@ -26,7 +28,7 @@
 // a `Map`) or a version projection (`modules` an array) — so the server and the browser describe it
 // identically.
 
-import { TARGET_SIZES, DEFAULT_TARGET_SIZE, targetSizeLabel, targetWordsFieldCount } from './targetSize.js'
+import { TARGET_SIZES, DEFAULT_TARGET_SIZE, isTargetSize, targetSizeLabel, targetWordsFieldCount } from './targetSize.js'
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`
 const quotedList = (values) => values.map((value) => JSON.stringify(value)).join(', ')
@@ -35,6 +37,35 @@ const isPlainObject = (value) => value !== null && typeof value === 'object' && 
 /** A Definition's `instance-settings` declaration as it holds it — loaded (`instanceSettings`) or raw YAML (`instance-settings`) — or `undefined`. */
 export function instanceSettingsDeclaration(definition) {
   return definition?.instanceSettings !== undefined ? definition.instanceSettings : definition?.['instance-settings']
+}
+
+// #221 (ADR-0058 §2): why `declaration` (the `size:` entry) isn't a well-formed Size declaration —
+// one message each — or none. Small, Medium and Large are Gantry's, because every Field's
+// `target-words` is keyed by them, so a Definition declares only which one is its default.
+function sizeDeclarationProblems(declaration) {
+  const where = 'Instance setting "size"'
+  if (!isPlainObject(declaration)) {
+    return [`${where} must declare its "default", the size an instance works to until one is chosen — e.g. "size: { default: small }"`]
+  }
+  const problems = []
+  for (const key of Object.keys(declaration).filter((key) => key !== 'default')) {
+    problems.push(
+      key === 'choices'
+        ? `${where} declares "choices", but Small, Medium and Large are fixed by Gantry, because every Field's word targets are written against them — declare only its "default"`
+        : `${where} has an unknown key "${key}" — a Size declaration has only "default"`
+    )
+  }
+  if (declaration.default !== undefined && declaration.default !== null && !isTargetSize(declaration.default)) {
+    problems.push(`${where} has "default: ${declaration.default}", which is not one of its choices (${quotedList(TARGET_SIZES)})`)
+  }
+  return problems
+}
+
+// The `size:` entry when it is well-formed, else `null`, read as Classification's is below.
+function sizeDeclaration(definition) {
+  const declared = instanceSettingsDeclaration(definition)
+  if (!isPlainObject(declared) || declared.size === undefined) return null
+  return sizeDeclarationProblems(declared.size).length === 0 ? declared.size : null
 }
 
 // Why `declaration` (the `classification:` entry) isn't a well-formed list of markings — one message
@@ -99,8 +130,10 @@ const MEMBERS = [
       const count = targetWordsFieldCount(definition?.modules)
       return count > 0 ? `${plural(count, 'Field declares', 'Fields declare')} word targets` : null
     },
-    // ADR-0058 §4: the Definition's default once it can declare one (#221); Medium until then.
-    defaultValue: () => DEFAULT_TARGET_SIZE,
+    // ADR-0058 §4 (#221): the Definition's declared default, else Medium, so a Definition that
+    // declares none works exactly as before.
+    defaultValue: (definition) => sizeDeclaration(definition)?.default ?? DEFAULT_TARGET_SIZE,
+    declarationProblems: sizeDeclarationProblems,
     unknownValueMessage: (value) =>
       `Unknown size ${JSON.stringify(value)} — choose ${TARGET_SIZES.slice(0, -1).join(', ')} or ${TARGET_SIZES.at(-1)}`,
     notOfferedMessage: (definition) =>
@@ -224,6 +257,16 @@ export function withInstanceSettings(response, definition, record) {
 }
 
 /**
+ * The Target size an Instance works to (#221, ADR-0058 §4): its stored `size` when it is one, else
+ * the Definition's default, else Medium. What the editor's word targets, `GET /api/instance` (and so
+ * MCP `get_instance`) and a save's over-budget notes are worked out at. `record` is the instance
+ * record.
+ */
+export function instanceTargetSize(definition, record) {
+  return isTargetSize(record?.size) ? record.size : memberById('size').defaultValue(definition)
+}
+
+/**
  * The Classification an Instance's documents print (#220, ADR-0058 §6): its effective value — stored,
  * else the Definition's default, else blank — when `definition` declares markings; `null` when it
  * declares none, which is when the render falls back to an Artefact's `cover-classification` Field
@@ -282,4 +325,94 @@ export function withChangedInstanceSettings(record, settings) {
     else next[id] = value
   }
   return next
+}
+
+// ------------------------------------------------------------ Editing a declaration (#221)
+// ADR-0058 §7: what the Definitions page (server and Local Workspace) does to a draft's
+// `instance-settings` as its author edits each setting's choices and default. Each takes the
+// declaration as the draft holds it (`instanceSettingsDeclaration`) and returns a new one, leaving
+// the old untouched. Nothing here refuses an edit: a blank or repeated marking, or an emptied list,
+// is kept as typed and reported by `instanceSettingsDeclarationProblems`, so the author sees the
+// problem where they made it and Save and Publish refuse it. An empty map (`{}`) declares nothing;
+// the Definition writers leave it out of definition.yaml.
+
+const declarationMap = (declaration) => (isPlainObject(declaration) ? declaration : {})
+
+function withEntry(declaration, id, entry) {
+  const next = { ...declarationMap(declaration) }
+  if (entry === null) delete next[id]
+  else next[id] = entry
+  return next
+}
+
+/**
+ * `declaration` with Instance setting `id`'s default set to `value`, or removed when `value` is blank
+ * (no default: Size works to Medium, Classification to no marking). A Size declaration left with no
+ * default declares nothing, so it goes rather than linger as `size: {}`.
+ */
+export function withInstanceSettingDefault(declaration, id, value) {
+  const current = declarationMap(declaration)[id]
+  const entry = isPlainObject(current) ? { ...current } : {}
+  if (isBlank(value)) delete entry.default
+  else entry.default = value
+  return withEntry(declaration, id, id === 'size' && Object.keys(entry).length === 0 ? null : entry)
+}
+
+/** `declaration` without Instance setting `id`, so the Definition stops offering it (Size stays offered while any Field has word targets, at Medium). */
+export function withoutInstanceSetting(declaration, id) {
+  return withEntry(declaration, id, null)
+}
+
+/** The markings `declaration` lists for Classification, as typed — blanks and repeats included — or `null` when it doesn't declare Classification. */
+export function classificationMarkings(declaration) {
+  const entry = declarationMap(declaration).classification
+  if (entry === undefined) return null
+  return Array.isArray(entry?.choices) ? entry.choices : []
+}
+
+// `declaration` with Classification's markings replaced by `next(choices, entry)` — which returns the
+// new list and, optionally, the new default — declaring Classification if it wasn't.
+function withMarkings(declaration, next) {
+  const current = declarationMap(declaration).classification
+  const entry = isPlainObject(current) ? { ...current } : {}
+  const result = next(Array.isArray(entry.choices) ? [...entry.choices] : [], entry)
+  entry.choices = result.choices
+  if ('default' in result) {
+    if (isBlank(result.default)) delete entry.default
+    else entry.default = result.default
+  }
+  return withEntry(declaration, 'classification', entry)
+}
+
+/** `declaration` with `marking` added at the end of Classification's markings, declaring Classification if it wasn't. */
+export function withClassificationMarkingAdded(declaration, marking) {
+  return withMarkings(declaration, (choices) => ({ choices: [...choices, marking] }))
+}
+
+/** `declaration` with the marking at `index` renamed to `marking`; a default that named the old marking follows it. */
+export function withClassificationMarkingRenamed(declaration, index, marking) {
+  return withMarkings(declaration, (choices, entry) => {
+    const old = choices[index]
+    choices[index] = marking
+    return entry.default !== undefined && entry.default === old ? { choices, default: marking } : { choices }
+  })
+}
+
+/** `declaration` without the marking at `index`; a default that named it goes too, leaving no default. */
+export function withClassificationMarkingRemoved(declaration, index) {
+  return withMarkings(declaration, (choices, entry) => {
+    const [removed] = choices.splice(index, 1)
+    return entry.default !== undefined && entry.default === removed && !choices.includes(removed) ? { choices, default: null } : { choices }
+  })
+}
+
+/** `declaration` with the marking at `index` moved `offset` places (−1 up, +1 down), the order every surface offers them in; unchanged at either end. */
+export function withClassificationMarkingMoved(declaration, index, offset) {
+  return withMarkings(declaration, (choices) => {
+    const to = index + offset
+    if (to < 0 || to >= choices.length) return { choices }
+    const [moved] = choices.splice(index, 1)
+    choices.splice(to, 0, moved)
+    return { choices }
+  })
 }

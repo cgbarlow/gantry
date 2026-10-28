@@ -148,7 +148,23 @@ draft.
   leaves `instanceSettings` out (MCP `update_definition` sends only stages,
   artefacts and modules) keeps the declaration on disk.
 - **#221** lets a draft's author edit choices and defaults on the
-  Definitions page, including Size's default (§4, §7).
+  Definitions page, including Size's default (§4, §7). Size is declared as
+  `instance-settings: { size: { default: small } }`: a `default` and nothing
+  else, so `choices`, an unknown key or a default other than small, medium
+  or large is an `invalid-instance-settings` problem. An Instance with no
+  stored `size:` works to that default in the editor's targets,
+  `get_instance` and a save's over-budget notes, and the wizard pre-selects
+  it. The server's Definitions page and a Local Workspace's Definition
+  editor share one editor: Classification's markings are added, renamed,
+  reordered and removed in place (a default follows its marking's rename
+  and goes with its removal), and each default is picked from the choices.
+  The editor keeps what the author types, blanks and repeats included, and
+  the page's validator reports it, so Save and Publish refuse it rather than
+  the editor. A draft always lists Classification, so a Definition without
+  markings can declare some. Removing the last setting leaves an empty
+  declaration, which the Definition writers leave out of `definition.yaml`,
+  so a draft can stop declaring one; a save that omits the key altogether
+  (MCP `update_definition`) still keeps what is on disk.
 
 ## Amendment (#224): an Instance's own Logo
 

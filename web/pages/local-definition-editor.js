@@ -23,7 +23,7 @@ import { useLocation } from 'preact-iso'
 import { reorder } from '../lib/reorder.js'
 import { TARGET_SIZES, targetSizeLabel, withFieldTargetWords } from '../lib/targetSize.js'
 import { definitionInstanceSettings } from '../lib/instanceSettings.js'
-import { InstanceSettingsSummary } from '../lib/instanceSettingsView.js'
+import { InstanceSettingsSummary, InstanceSettingsEditor } from '../lib/instanceSettingsView.js'
 import {
   getWorkspaceHandle,
   ensurePermission,
@@ -563,7 +563,8 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
 
   const readOnly = structure.status === 'published'
   // #219 (docs/adr/0058): the Instance settings this Definition offers, the same description the
-  // server's Definitions page shows — read-only for now; editing them is #221.
+  // server's Definitions page shows. #221: edited on a draft with the same editor, read-only once
+  // published.
   const instanceSettings = definitionInstanceSettings(structure)
   // #222: bumped when a reference docx is saved, so the Logo control re-reads the header logo.
   const [logoReload, setLogoReload] = useState(0)
@@ -748,14 +749,21 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
         ${readOnly ? null : html`<button type="button" class="btn small ghost" onClick=${addArtefact}>+ Add artefact</button>`}
       </section>
 
-      ${instanceSettings.length
+      ${instanceSettings.length || !readOnly
         ? html`
             <section class="local-def-instance-settings">
               <h2>Instance settings</h2>
               <p class="guidance">
                 What every Instance of this Definition chooses for itself, when it is created and later in Instance Settings.
               </p>
-              <${InstanceSettingsSummary} settings=${instanceSettings} />
+              ${problems.some((p) => p.type === 'invalid-instance-settings')
+                ? html`<ul class="local-def-problems local-def-instance-settings-problems">
+                    ${problems.filter((p) => p.type === 'invalid-instance-settings').map((p) => html`<li key=${p.message} class="inline-error">${p.message}</li>`)}
+                  </ul>`
+                : null}
+              ${readOnly
+                ? html`<${InstanceSettingsSummary} settings=${instanceSettings} />`
+                : html`<${InstanceSettingsEditor} definition=${structure} onChange=${(next) => update({ instanceSettings: next })} />`}
             </section>
           `
         : null}

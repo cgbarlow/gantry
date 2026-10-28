@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parse as parseYAML } from 'yaml'
 import { createInstance, readInstance } from '../lib/instance.js'
-import { loadDefinition, definitionVersionProjection } from '../lib/definition.js'
+import { loadDefinition, definitionVersionProjection, findDefinitionProblems, findDefinitionProblemsInStructure } from '../lib/definition.js'
+import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { createGitHubClient } from '../lib/githubClient.js'
 import { createGitLabClient } from '../lib/gitlabClient.js'
@@ -21,6 +22,15 @@ import {
   instanceSettingsProblem,
   chosenInstanceSettings,
   withChangedInstanceSettings,
+  instanceTargetSize,
+  instanceSettingsDeclarationProblems,
+  classificationMarkings,
+  withInstanceSettingDefault,
+  withoutInstanceSetting,
+  withClassificationMarkingAdded,
+  withClassificationMarkingRenamed,
+  withClassificationMarkingRemoved,
+  withClassificationMarkingMoved,
 } from '../web/lib/instanceSettings.js'
 import { withStoredInstanceSettings, renderInstanceYaml } from '../web/lib/localInstanceFiles.js'
 import { withRunningServer, withRunningServerForProvider, withScratchInstances, basicAuthHeader } from './helpers/lifecycle.js'
@@ -59,13 +69,16 @@ fields:
 
 const PLAIN_MODULE = BUDGETED_MODULE.replace(/ {4}target-words:\n( {6}\w+: \d+\n){3}/g, '')
 
-function writeFixtureDefinition(definitionsDir, id, moduleYaml) {
+const SMALL_DEFAULT = 'instance-settings:\n  size:\n    default: small\n'
+
+// #221: `declaration` is an `instance-settings:` block, and `status` lets a fixture be a draft.
+function writeFixtureDefinition(definitionsDir, id, moduleYaml, { declaration = '', status = 'published' } = {}) {
   const dir = join(definitionsDir, id, '1')
   mkdirSync(join(dir, 'modules'), { recursive: true })
   mkdirSync(join(dir, 'templates'), { recursive: true })
   writeFileSync(
     join(dir, 'definition.yaml'),
-    `id: ${id}\nversion: 1\nstatus: published\ntitle: ${id}\ndescription: A one-stage fixture\nstages:\n  - id: draft\n    title: Draft\n    purpose: Write it\n    gate: drafted\n    modules:\n      - summary\nartefacts:\n  - id: brief\n    title: Brief\n    purpose: The brief\n    template: templates/brief.md.tmpl\n    gate: drafted\n    requires:\n      - summary\n`
+    `id: ${id}\nversion: 1\nstatus: ${status}\ntitle: ${id}\ndescription: A one-stage fixture\n${declaration}stages:\n  - id: draft\n    title: Draft\n    purpose: Write it\n    gate: drafted\n    modules:\n      - summary\nartefacts:\n  - id: brief\n    title: Brief\n    purpose: The brief\n    template: templates/brief.md.tmpl\n    gate: drafted\n    requires:\n      - summary\n`
   )
   writeFileSync(join(dir, 'modules', 'summary.yaml'), moduleYaml)
   writeFileSync(join(dir, 'templates', 'brief.md.tmpl'), '# Brief\n\n<%~ it.modules.summary.overview %>\n')
@@ -79,6 +92,8 @@ async function withLibrary(fn) {
   try {
     writeFixtureDefinition(definitionsDir, 'sized', BUDGETED_MODULE)
     writeFixtureDefinition(definitionsDir, 'plain', PLAIN_MODULE)
+    // #221: `small-first` is `sized` with Small as its declared default size.
+    writeFixtureDefinition(definitionsDir, 'small-first', BUDGETED_MODULE, { declaration: SMALL_DEFAULT })
     return await fn({ definitionsDir, instancesDir })
   } finally {
     rmSync(root, { recursive: true, force: true })
@@ -311,4 +326,164 @@ test('`createInstance` refuses a setting the Definition doesn\'t offer before wr
     assert.throws(() => createInstance('plain', 'plain-sized', { definitionsDir, instancesDir, size: 'small' }), /declares no target-words/)
     createInstance('sized', 'sized-blank', { definitionsDir, instancesDir, size: '' })
     assert.equal('size' in readInstance('sized-blank', { instancesDir }), false)
+  }))
+
+// ---------- #221: a Definition's default size, and editing the declaration ----------
+
+test('a Definition can declare its default size: the description, the wizard\'s pre-selection and the effective value all follow it', () =>
+  withLibrary(({ definitionsDir }) => {
+    const smallFirst = loadDefinition('small-first', { definitionsDir, version: 1 })
+    const [size] = definitionInstanceSettings(smallFirst)
+    assert.equal(size.default, 'small')
+    assert.deepEqual(size.choices.map((c) => c.value), ['small', 'medium', 'large'], 'the choices are still Gantry\'s')
+    assert.equal(effectiveInstanceSetting(size, undefined), 'small', 'what the wizard pre-selects')
+    assert.equal(effectiveInstanceSetting(size, 'large'), 'large', 'a stored size still wins')
+    assert.deepEqual(definitionInstanceSettings(definitionVersionProjection(smallFirst)), definitionInstanceSettings(smallFirst))
+
+    assert.equal(instanceTargetSize(smallFirst, {}), 'small')
+    assert.equal(instanceTargetSize(smallFirst, { size: 'large' }), 'large')
+    assert.equal(instanceTargetSize(smallFirst, { size: 'huge' }), 'small')
+    assert.equal(instanceTargetSize(loadDefinition('sized', { definitionsDir, version: 1 }), {}), 'medium', 'no default declared: Medium, as before')
+    assert.equal(instanceSettingProblem(smallFirst, 'size', 'medium'), null)
+  }))
+
+const MALFORMED_SIZE = [
+  ['a default that isn\'t a size', { size: { default: 'huge' } }, /^Instance setting "size" has "default: huge", which is not one of its choices \("small", "medium", "large"\)$/],
+  ['a default spelt as its label', { size: { default: 'Small' } }, /^Instance setting "size" has "default: Small", which is not one of its choices/],
+  ['its own choices', { size: { choices: ['tiny', 'huge'], default: 'tiny' } }, /^Instance setting "size" declares "choices", but Small, Medium and Large are fixed by Gantry/],
+  ['an unknown key', { size: { defualt: 'small' } }, /^Instance setting "size" has an unknown key "defualt"/],
+  ['a bare value', { size: 'small' }, /^Instance setting "size" must declare its "default"/],
+]
+
+for (const [label, declaration, message] of MALFORMED_SIZE) {
+  test(`a Size declaration with ${label} is an invalid-instance-settings problem everywhere, and the Definition still works to Medium`, () =>
+    withLibrary(({ definitionsDir }) => {
+      const problems = instanceSettingsDeclarationProblems(declaration)
+      assert.ok(problems.length > 0 && problems.every((p) => p.type === 'invalid-instance-settings'), JSON.stringify(problems))
+      assert.match(problems[0].message, message)
+
+      const projection = { ...definitionVersionProjection(loadDefinition('sized', { definitionsDir, version: 1 })), instanceSettings: declaration }
+      assert.deepEqual(findDefinitionProblemsInStructure(projection), problems, 'the Definitions page sees the same problem')
+      assert.deepEqual(findLocalDefinitionProblems(projection), problems, 'a Local Workspace sees the same problem')
+      const [size] = definitionInstanceSettings(projection)
+      assert.equal(size.default, 'medium', 'readers ignore a malformed setting')
+      assert.equal(instanceTargetSize(projection, {}), 'medium')
+    }))
+}
+
+test('gantry validate reports a malformed Size declaration on disk', () =>
+  withLibrary(({ definitionsDir }) => {
+    writeFixtureDefinition(definitionsDir, 'bad-size', BUDGETED_MODULE, { declaration: 'instance-settings:\n  size:\n    default: huge\n', status: 'draft' })
+    assert.deepEqual(findDefinitionProblems('bad-size', { definitionsDir, version: 1 }).map((p) => p.type), ['invalid-instance-settings'])
+    assert.deepEqual(definitionInstanceSettings(loadDefinition('bad-size', { definitionsDir, version: 1 }))[0].default, 'medium')
+  }))
+
+test('an instance with no stored size works to its Definition\'s default: GET /api/instance, its word targets and a save\'s over-budget notes', () =>
+  withServer(async ({ base, instancesDir }) => {
+    assert.equal((await fetch(`${base}/api/instances`, json({ definition: 'small-first', slug: 'unsized' }))).status, 201)
+    assert.equal('size' in localInstanceYaml(instancesDir, 'unsized'), false, 'the default applies without being stored')
+
+    const body = await (await fetch(`${base}/api/instance?slug=unsized`)).json()
+    assert.equal(body.size, 'small')
+    assert.equal(body.modules[0].fields.find((f) => f.id === 'overview').targetWords, 5)
+    assert.deepEqual(body.instanceSettings.map(({ id, value, default: byDefault }) => ({ id, value, default: byDefault })), [{ id: 'size', value: 'small', default: 'small' }])
+
+    const saved = await (await fetch(`${base}/api/instance/modules?slug=unsized`, put({
+      modules: { summary: { fields: { risks: ['Late delivery', 'Over budget'] } } },
+    }))).json()
+    assert.deepEqual(saved.targetWordNotes.map((n) => n.message), ['summary.risks: 4 words, Small target ~2'])
+
+    // Choosing a size overrides the default; clearing it goes back to the default, not to Medium.
+    await fetch(`${base}/api/instance/settings?slug=unsized`, put({ settings: { size: 'large' } }))
+    assert.equal((await (await fetch(`${base}/api/instance?slug=unsized`)).json()).size, 'large')
+    await fetch(`${base}/api/instance/settings?slug=unsized`, put({ settings: { size: '' } }))
+    assert.equal((await (await fetch(`${base}/api/instance?slug=unsized`)).json()).size, 'small')
+  }))
+
+test('editing a declaration: a default is set and cleared, and Classification\'s markings are added, renamed, reordered and removed', () => {
+  // Size: a default, and clearing it removes the whole entry, since a Size declaration is only its default.
+  assert.deepEqual(withInstanceSettingDefault(undefined, 'size', 'large'), { size: { default: 'large' } })
+  assert.deepEqual(withInstanceSettingDefault({ size: { default: 'large' } }, 'size', ''), {})
+
+  // Classification: the first marking declares it; later ones join the end, in order.
+  assert.equal(classificationMarkings(undefined), null)
+  let declaration = withClassificationMarkingAdded({ size: { default: 'small' } }, 'OFFICIAL')
+  declaration = withClassificationMarkingAdded(declaration, 'SENSITIVE')
+  declaration = withClassificationMarkingAdded(declaration, 'PROTECTED')
+  assert.deepEqual(declaration, { size: { default: 'small' }, classification: { choices: ['OFFICIAL', 'SENSITIVE', 'PROTECTED'] } })
+  assert.deepEqual(classificationMarkings(declaration), ['OFFICIAL', 'SENSITIVE', 'PROTECTED'])
+
+  // A default follows its marking when the marking is renamed, and goes when it is removed.
+  declaration = withInstanceSettingDefault(declaration, 'classification', 'SENSITIVE')
+  declaration = withClassificationMarkingRenamed(declaration, 1, 'OFFICIAL: Sensitive')
+  assert.deepEqual(declaration.classification, { choices: ['OFFICIAL', 'OFFICIAL: Sensitive', 'PROTECTED'], default: 'OFFICIAL: Sensitive' })
+  declaration = withClassificationMarkingRenamed(declaration, 0, 'UNOFFICIAL')
+  assert.equal(declaration.classification.default, 'OFFICIAL: Sensitive', 'renaming another marking leaves the default alone')
+
+  declaration = withClassificationMarkingMoved(declaration, 2, -1)
+  assert.deepEqual(declaration.classification.choices, ['UNOFFICIAL', 'PROTECTED', 'OFFICIAL: Sensitive'])
+  assert.deepEqual(withClassificationMarkingMoved(declaration, 0, -1), declaration, 'unchanged at the top')
+  assert.deepEqual(withClassificationMarkingMoved(declaration, 2, 1), declaration, 'and at the bottom')
+
+  const removed = withClassificationMarkingRemoved(declaration, 2)
+  assert.deepEqual(removed.classification, { choices: ['UNOFFICIAL', 'PROTECTED'] })
+  assert.deepEqual(withClassificationMarkingRemoved(declaration, 0).classification.default, 'OFFICIAL: Sensitive')
+  assert.equal(withInstanceSettingDefault(declaration, 'classification', '').classification.default, undefined)
+  assert.deepEqual(withoutInstanceSetting(declaration, 'classification'), { size: { default: 'small' } })
+
+  // Nothing here refuses an edit: what an author types is kept, and the validator reports it.
+  const typed = withClassificationMarkingAdded(withClassificationMarkingRenamed(removed, 1, ''), 'UNOFFICIAL')
+  assert.deepEqual(typed.classification.choices, ['UNOFFICIAL', '', 'UNOFFICIAL'])
+  assert.deepEqual(instanceSettingsDeclarationProblems(typed).map((p) => p.message), [
+    'Instance setting "classification" has a blank or non-text marking ("") — every choice must be the marking\'s text',
+    'Instance setting "classification" lists the marking "UNOFFICIAL" more than once',
+  ])
+  const emptied = withClassificationMarkingRemoved(withClassificationMarkingRemoved(removed, 0), 0)
+  assert.deepEqual(emptied.classification, { choices: [] })
+  assert.match(instanceSettingsDeclarationProblems(emptied)[0].message, /declares no "choices"/)
+
+  // The edits never change the declaration they are given.
+  const before = JSON.stringify(declaration)
+  withClassificationMarkingRemoved(declaration, 0)
+  withInstanceSettingDefault(declaration, 'size', 'large')
+  assert.equal(JSON.stringify(declaration), before)
+})
+
+test('the Definitions page\'s Save and Publish carry an edited declaration onto disk, refuse a malformed one, and a published version can\'t change', () =>
+  withServer(async ({ base, definitionsDir }) => {
+    writeFixtureDefinition(definitionsDir, 'drafty', BUDGETED_MODULE, { status: 'draft', declaration: 'instance-settings:\n  classification:\n    choices: [PUBLIC, SECRET]\n' })
+    const url = `${base}/api/definitions/drafty/versions/1`
+    const onDisk = () => parseYAML(readFileSync(join(definitionsDir, 'drafty', '1', 'definition.yaml'), 'utf8'))['instance-settings']
+    const draft = await (await fetch(url)).json()
+    assert.deepEqual(draft.instanceSettings, { classification: { choices: ['PUBLIC', 'SECRET'] } })
+
+    let edited = withClassificationMarkingRenamed(draft.instanceSettings, 1, 'IN-CONFIDENCE')
+    edited = withClassificationMarkingAdded(edited, 'RESTRICTED')
+    edited = withClassificationMarkingMoved(edited, 2, -2)
+    edited = withInstanceSettingDefault(edited, 'classification', 'PUBLIC')
+    edited = withInstanceSettingDefault(edited, 'size', 'large')
+
+    // The live validator and Save both refuse a malformed edit, and a refused Save writes nothing.
+    const malformed = withClassificationMarkingAdded(edited, 'PUBLIC')
+    const validated = await (await fetch(`${url}/validate`, json({ ...draft, instanceSettings: malformed }))).json()
+    assert.deepEqual(validated.problems.map((p) => p.message), ['Instance setting "classification" lists the marking "PUBLIC" more than once'])
+    const refused = await fetch(url, put({ ...draft, instanceSettings: malformed }))
+    assert.equal(refused.status, 422)
+    assert.deepEqual((await refused.json()).problems.map((p) => p.type), ['invalid-instance-settings'])
+    assert.deepEqual(onDisk(), { classification: { choices: ['PUBLIC', 'SECRET'] } })
+
+    const saved = await fetch(url, put({ ...draft, instanceSettings: edited }))
+    assert.equal(saved.status, 200, await saved.clone().text())
+    const expected = { classification: { choices: ['RESTRICTED', 'PUBLIC', 'IN-CONFIDENCE'], default: 'PUBLIC' }, size: { default: 'large' } }
+    assert.deepEqual(onDisk(), expected)
+    const reloaded = await (await fetch(url)).json()
+    assert.deepEqual(reloaded.instanceSettings, expected)
+    assert.deepEqual(definitionInstanceSettings(reloaded).map((s) => [s.id, s.default]), [['size', 'large'], ['classification', 'PUBLIC']])
+
+    const published = await fetch(`${url}/publish`, { method: 'POST' })
+    assert.equal(published.status, 200, await published.clone().text())
+    assert.deepEqual(onDisk(), expected)
+    const afterPublish = await fetch(url, put({ ...reloaded, instanceSettings: withoutInstanceSetting(expected, 'classification') }))
+    assert.equal(afterPublish.status, 409)
+    assert.deepEqual(onDisk(), expected, 'a published version stays as it was')
   }))

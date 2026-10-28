@@ -103,5 +103,6 @@ in `instance.yaml`, written only when chosen) and what it does are
 unchanged.
 
 Decision 1's "Medium is the default" becomes "the Definition's default, else
-Medium". A Definition that sets no default, which is every Definition until
-#221 lets an author set one, behaves exactly as before.
+Medium". A Definition that sets no default behaves exactly as before. #221
+lets an author set one, as `instance-settings: { size: { default: ... } }`,
+on a draft's Definitions page; the three sizes stay Gantry's.
