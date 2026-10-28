@@ -1444,10 +1444,13 @@ describe('the v3 SSAD follows the SAD\'s order and headings (#213)', () => {
   const SSAD_REQUIRES = [
     'document-handling.classification?',
     'introduction.executive-summary?',
+    'introduction.overview',
     'introduction.purpose',
     'introduction.in-scope',
     'introduction.out-of-scope',
     'introduction.content-standards?',
+    'design-basis.assumptions?',
+    'design-basis.constraints?',
     'support-and-operations.stakeholders',
     'architecture.solution-description',
     'dependencies.dependency-list',
@@ -1477,10 +1480,14 @@ describe('the v3 SSAD follows the SAD\'s order and headings (#213)', () => {
   const SSAD_OUTLINE = [
     '# Overview',
     '## Executive summary',
+    '## Overview',
     '## Purpose',
     '## In scope',
     '## Out of scope',
     '## Content standards',
+    '# Design basis',
+    '## Assumptions',
+    '## Constraints',
     '# Business architecture',
     '## Stakeholders and support contacts',
     '# Solution overview',
@@ -1521,9 +1528,11 @@ describe('the v3 SSAD follows the SAD\'s order and headings (#213)', () => {
     assert.deepEqual(requiresOf(v3(), 'ssad'), SSAD_REQUIRES)
   })
 
-  test('no Field entered or left the SSAD, and none changed between mandatory and optional', () => {
+  // #213 moved no Field in or out; #214 added the SAD's Overview paragraph and Design basis.
+  test('beyond #214\'s three Fields, no Field entered or left the SSAD, and none changed between mandatory and optional', () => {
     const v2 = loadDefinition(DEFINITION, { version: 2 })
-    assert.deepEqual([...requiresOf(v3(), 'ssad')].sort(), [...requiresOf(v2, 'ssad'), 'document-handling.classification?'].sort())
+    const added = ['document-handling.classification?', 'introduction.overview', 'design-basis.assumptions?', 'design-basis.constraints?']
+    assert.deepEqual([...requiresOf(v3(), 'ssad')].sort(), [...requiresOf(v2, 'ssad'), ...added].sort())
   })
 
   test('the rendered SSAD has the SAD-led outline, with the support material in one chapter', () => {
@@ -1552,5 +1561,68 @@ describe('the v3 SSAD follows the SAD\'s order and headings (#213)', () => {
     assert.match(changelog.slice(0, changelog.indexOf('\n## v2')), /^### The SSAD follows the SAD's order and headings \(#213\)$/m)
     assert.ok(existsSync('docs/adr/0057-the-ssad-follows-the-sad-not-its-reference-instance.md'))
     assert.match(readFileSync('docs/user-guide/index.md', 'utf8'), /\*\*Version 3 \(draft\)\*\* puts the SSAD in the SAD's order/)
+  })
+})
+
+// #214: the SSAD opens the way the SAD does, with the Overview paragraph and a Design basis chapter
+// (assumptions and constraints). Authors are asked for nothing new: the SAD already requires the
+// Overview paragraph at build-ready-checklist, and Design basis is optional and shows only when filled.
+describe('the v3 SSAD opens with the SAD\'s Overview paragraph and Design basis (#214)', () => {
+  const sectionOf = (markdown, heading) => {
+    const start = markdown.indexOf(`\n${heading}\n`)
+    assert.ok(start >= 0, `${heading} is in the document`)
+    const next = markdown.slice(start + 1).search(/\n#{1,2} /)
+    return markdown.slice(start + 1, next < 0 ? undefined : start + 1 + next)
+  }
+
+  test('the SSAD renders the same Overview paragraph and Design basis as the SAD', () => {
+    const render = (id) => renderArtefact('kiwi-cover-mutual', id, { instancesDir: EXAMPLES_DIR, dryRun: true }).markdown
+    const [sad, ssad] = [render('sad'), render('ssad')]
+    for (const heading of ['## Overview', '# Design basis']) assert.equal(sectionOf(ssad, heading), sectionOf(sad, heading), heading)
+    for (const heading of ['## Assumptions', '## Constraints']) assert.equal(sectionOf(ssad, heading), sectionOf(sad, heading), heading)
+  })
+
+  test('with assumptions and constraints both blank, the SSAD has no Design basis heading; with one filled, only its section shows', () => {
+    withScratchDir((dir) => {
+      const slug = 'kiwi-cover-mutual'
+      cpSync(join(EXAMPLES_DIR, slug), join(dir, slug), { recursive: true })
+      const setDesignBasis = (fields) => {
+        const current = readModule(v3(), slug, 'design-basis', { instancesDir: dir })
+        writeModule(v3(), slug, 'design-basis', { ...current, fields: { ...current.fields, ...fields } }, { instancesDir: dir })
+      }
+      const headings = () =>
+        renderArtefact(slug, 'ssad', { instancesDir: dir, dryRun: true })
+          .markdown.split('\n')
+          .filter((line) => /^#{1,2} (Design basis|Assumptions|Constraints)$/.test(line))
+
+      setDesignBasis({ assumptions: '', constraints: '' })
+      assert.deepEqual(headings(), [])
+      setDesignBasis({ constraints: 'Must run in the existing data centre.' })
+      assert.deepEqual(headings(), ['# Design basis', '## Constraints'])
+    })
+  })
+
+  // The example still passing build-ready-checklist is covered by the #193 harness above.
+  test('a blank Overview paragraph holds up the SSAD at build-ready-checklist, as it already holds up the SAD', () => {
+    withScratchDir((dir) => {
+      const slug = 'kiwi-cover-mutual'
+      cpSync(join(EXAMPLES_DIR, slug), join(dir, slug), { recursive: true })
+      const current = readModule(v3(), slug, 'introduction', { instancesDir: dir })
+      writeModule(v3(), slug, 'introduction', { ...current, fields: { ...current.fields, overview: '' } }, { instancesDir: dir })
+      const result = checkGate(slug, { instancesDir: dir, gate: 'build-ready-checklist' })
+      for (const id of ['sad', 'ssad']) {
+        const artefact = result.artefacts.find((a) => a.id === id)
+        assert.ok(JSON.stringify(artefact.outstanding).includes('introduction.overview'), `${id}: ${JSON.stringify(artefact.outstanding)}`)
+      }
+    })
+  })
+
+  test('the change is recorded: the v3 CHANGELOG and the User Guide', () => {
+    const changelog = loadDefinitionChangelog(DEFINITION, VERSION)
+    assert.match(changelog.slice(0, changelog.indexOf('\n## v2')), /^### The SSAD opens with the Overview and Design basis \(#214\)$/m)
+    const guide = readFileSync('docs/user-guide/index.md', 'utf8')
+    assert.match(guide, /\| Overview › Overview `introduction\.overview` \|[^\n]*SSAD/)
+    assert.match(guide, /\| Design Basis › Constraints `design-basis\.constraints` \|[^\n]*SSAD/)
+    assert.match(guide, /\| Design Basis › Assumptions `design-basis\.assumptions` \|[^\n]*SSAD/)
   })
 })

@@ -17,7 +17,11 @@
      lib/render.js (WI #273 / R2). A `module.field?` requires entry is in scope
      but not gate-blocking (WI #276), so it renders as a suppress-when-blank
      `<% if %>` section; every other field here is bare (gate-blocking) and
-     rendered via na(). No `design-basis` fields render in this artefact. */
+     rendered via na(). #214: the Overview chapter carries
+     `introduction.overview`, and a "# Design basis" chapter follows it when
+     `assumptions` or `constraints` is filled, inlined as in the SAD rather than
+     via `_designBasisOptional.md.tmpl` (the SSAD's scope is those two fields,
+     not the partial's five). */
   const dsc = it.modules['data-security-controls'] || {}
 %>
 # Overview
@@ -26,6 +30,10 @@
 
 <%~ it.modules.introduction['executive-summary'] %>
 <% } %>
+## Overview
+
+<%~ na(it.modules.introduction.overview) %>
+
 ## Purpose
 
 <%~ na(it.modules.introduction.purpose) %>
@@ -41,6 +49,20 @@
 ## Content standards
 
 <%~ it.modules.introduction['content-standards'] %>
+<% } %>
+<% if (it.modules['design-basis'].assumptions || it.modules['design-basis'].constraints) { %>
+
+# Design basis
+<% if (it.modules['design-basis'].assumptions) { %>
+## Assumptions
+
+<%~ it.modules['design-basis'].assumptions %>
+<% } %>
+<% if (it.modules['design-basis'].constraints) { %>
+## Constraints
+
+<%~ it.modules['design-basis'].constraints %>
+<% } %>
 <% } %>
 
 # Business architecture
