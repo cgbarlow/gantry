@@ -17,6 +17,29 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.11.0-beta — 2026-10-28
+
+The design v3 Solution Support Architecture Document (SSAD) now reads like the Solution
+Architecture Document (SAD) rendered beside it. v3 is still a draft; v1 and v2 documents render
+exactly as before.
+
+### Changed
+
+- **The SSAD follows the SAD's order and headings** (#213). The SSAD used to follow its old
+  reference document, opening with the logical components and risks, with everything else packed
+  into one long "Solution overview". It now has the SAD's chapters in the SAD's order: Overview,
+  Business architecture, Solution overview, Open issues, Risks, Logical components view and
+  Technology architecture. All the support-team material then stays together in one "Support and
+  operations" chapter, from environments and backup to release procedures and handover
+  readiness. Shared sections take the SAD's names, so "Disaster recovery and backup" is now
+  "Backup and archiving policy" and "Logical components" is "Logical components view".
+  "Stakeholders and support contacts" keeps its name. The fields and the gate are unchanged. See
+  ADR-0057 for why consistency with the SAD won over the reference here.
+- **The SSAD opens with the Overview paragraph and Design basis** (#214). Like the SAD, the SSAD's
+  Overview chapter now includes the Overview paragraph, followed by a Design basis chapter
+  (Assumptions, Constraints) when either is filled. There's nothing new to write: the SAD already
+  requires the Overview paragraph at the same gate, and the Design basis fields are optional.
+
 ## 0.10.2-beta — 2026-10-27
 
 ### Changed
