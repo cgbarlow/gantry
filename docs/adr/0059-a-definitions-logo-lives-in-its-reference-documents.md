@@ -62,6 +62,10 @@ document missed still showed Contoso.
   Download only, like its reference documents.
 - The logo travels with the reference documents through new draft, clone,
   promote and the Library cache, because they copy those files.
+- A render of a Local Workspace's own Definition now sends an Artefact
+  without its own reference document the shared `reference.docx`, as a
+  render on disk already uses it. Before, it got Pandoc's default, so a logo
+  replaced in the shared document would never have shown.
 - A reference document with a picture in its header for some other reason
   (a watermark, say) has that picture replaced too. A picture inside a group
   or shape is not the logo and is left alone.

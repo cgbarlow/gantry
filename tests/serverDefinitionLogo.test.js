@@ -1,10 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readHeaderLogo } from '../web/lib/definitionLogo.js'
+import { serverWorkspaceDefinitionsDir } from '../lib/definitionHome.js'
+import { writeWorkspaceJson } from '../lib/workspaceDirectory.js'
+import { addLibraryRepo } from '../lib/librarySettings.js'
+import { libraryRepoDefinitionsDir } from '../lib/libraryCache.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { pngImage } from './helpers/logoImages.js'
 
@@ -129,4 +133,46 @@ test('an unknown definition or a bad version is refused', async () => {
     assert.equal((await fetch(`${base}/api/definitions/design/versions/zero/logo`)).status, 400)
     assert.equal((await fetch(`${base}/api/definitions/design/versions/9/logo`)).status, 404)
   })
+})
+
+// The route resolves a Definition wherever it lives, as Reference docx does: a server workspace's
+// own Definition is read and replaced in that workspace's folder, and a library repo's cached copy
+// is read-only (403), its files untouched.
+test('a workspace-homed draft is replaced in its own folder; a library repo\'s Definition is read-only', async () => {
+  const definitionsDir = mkdtempSync(join(tmpdir(), 'gantry-logo-api-defs-'))
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-logo-api-instances-'))
+  try {
+    mkdirSync(join(instancesDir, 'acme'), { recursive: true })
+    writeWorkspaceJson(instancesDir, 'acme', { name: 'Acme', kind: 'local', createdAt: new Date().toISOString() })
+    const workspaceTemplates = join(serverWorkspaceDefinitionsDir(instancesDir, 'acme'), 'acme-design', '1', 'templates')
+    cpSync('definitions/design/3', join(serverWorkspaceDefinitionsDir(instancesDir, 'acme'), 'acme-design', '1'), { recursive: true })
+    const workspaceYaml = join(serverWorkspaceDefinitionsDir(instancesDir, 'acme'), 'acme-design', '1', 'definition.yaml')
+    writeFileSync(workspaceYaml, readFileSync(workspaceYaml, 'utf8').replace(/^id: .*$/m, 'id: acme-design').replace(/^version: .*$/m, 'version: 1'))
+
+    const repo = addLibraryRepo({ provider: 'github', location: { owner: 'octocat', repository: 'widgets' } }, { instancesDir })
+    const repoTemplates = join(libraryRepoDefinitionsDir(instancesDir, repo.id), 'repo-design', '1', 'templates')
+    cpSync('definitions/design/3', join(libraryRepoDefinitionsDir(instancesDir, repo.id), 'repo-design', '1'), { recursive: true })
+    const repoYaml = join(libraryRepoDefinitionsDir(instancesDir, repo.id), 'repo-design', '1', 'definition.yaml')
+    writeFileSync(repoYaml, readFileSync(repoYaml, 'utf8').replace(/^id: .*$/m, 'id: repo-design').replace(/^version: .*$/m, 'version: 1'))
+
+    await withRunningServer({ definitionsDir, instancesDir }, async (base) => {
+      const logo = pngImage(30, 30)
+      const put = (id) => fetch(`${base}/api/definitions/${id}/versions/1/logo`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageBase64: Buffer.from(logo).toString('base64') }) })
+
+      assert.equal((await put('acme-design')).status, 200)
+      for (const file of referenceDocs(workspaceTemplates)) {
+        assert.deepEqual(Buffer.from((await readHeaderLogo(readFileSync(join(workspaceTemplates, file)))).bytes), logo, `${file} in the workspace has the new logo`)
+      }
+
+      const summary = await (await fetch(`${base}/api/definitions/repo-design/versions/1/logo`)).json()
+      assert.equal(summary.documents.length, 7, 'a library repo\'s logo can be viewed')
+      assert.equal((await put('repo-design')).status, 403)
+      for (const file of referenceDocs(repoTemplates)) {
+        assert.deepEqual(readFileSync(join(repoTemplates, file)), readFileSync(join('definitions/design/3/templates', file)), `${file} in the library repo is untouched`)
+      }
+    })
+  } finally {
+    rmSync(definitionsDir, { recursive: true, force: true })
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
 })

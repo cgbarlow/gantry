@@ -128,7 +128,7 @@ test('Definitions page: a draft shows the Contoso logo, Replace writes a new one
   }
 })
 
-test('Local Workspace editor: the Logo control shows a reference document\'s header logo and Replace writes a new one into it', async () => {
+test('Local Workspace editor: the Logo control shows a reference document\'s header logo, follows a reference docx upload, and Replace writes a new one into each', async () => {
   await withRunningServer({}, (base) => withPage(async (page) => {
     await page.goto(`${base}/`)
     const workspaceId = await page.evaluate(async () => {
@@ -148,6 +148,15 @@ test('Local Workspace editor: the Logo control shows a reference document\'s hea
     await logo.locator('.defn-logo-none').waitFor({ state: 'visible', timeout: 10_000 })
     assert.match(await logo.textContent(), /no reference documents/)
 
+    // A reference docx uploaded for an Artefact shows its logo in the control straight away.
+    const artefactsSection = page.locator('.local-definition-editor section').filter({ has: page.getByRole('heading', { name: 'Artefacts' }) })
+    await artefactsSection.getByRole('button', { name: '+ Add artefact' }).click()
+    await artefactsSection.locator('input[placeholder="artefact-id"]').fill('sad')
+    await artefactsSection.getByRole('button', { name: 'Edit template' }).click()
+    await artefactsSection.locator('.local-def-template input[type="file"]').setInputFiles('definitions/design/3/templates/reference-sad.docx')
+    await artefactsSection.getByText('Reference document saved.').waitFor({ state: 'visible', timeout: 10_000 })
+    assert.equal(await previewWidth(logo), 192, 'the uploaded reference document\'s Contoso logo is shown')
+
     // Give the definition design v3's shared reference document, as copying it into templates/ would.
     await page.evaluate(async ({ workspaceId, bytes }) => {
       const { getWorkspaceHandle, writeBinaryFile } = await import('/lib/localWorkspace.js')
@@ -160,13 +169,15 @@ test('Local Workspace editor: the Logo control shows a reference document\'s hea
 
     await logo.locator('input[aria-label="Replace logo"]').setInputFiles({ name: 'our-logo.png', mimeType: 'image/png', buffer: NEW_LOGO })
     await logo.locator('.defn-logo-status.save-status').waitFor({ state: 'visible', timeout: 10_000 })
-    assert.equal(await logo.locator('.defn-logo-status.save-status').textContent(), 'Logo replaced in 1 reference document.')
+    assert.equal(await logo.locator('.defn-logo-status.save-status').textContent(), 'Logo replaced in 2 reference documents.')
     await page.waitForFunction(() => document.querySelector('img.defn-logo-preview')?.naturalWidth === 120, null, { timeout: 10_000 })
 
-    const saved = await page.evaluate(async (workspaceId) => {
-      const { getWorkspaceHandle, readBinaryFile } = await import('/lib/localWorkspace.js')
-      return [...(await readBinaryFile(await getWorkspaceHandle(workspaceId), 'definitions/logo-local-e2e/1/templates/reference.docx'))]
-    }, workspaceId)
-    assert.deepEqual(Buffer.from((await readHeaderLogo(Buffer.from(saved))).bytes), NEW_LOGO, 'the workspace\'s own reference document has the new logo')
+    for (const name of ['reference.docx', 'reference-sad.docx']) {
+      const saved = await page.evaluate(async ({ workspaceId, name }) => {
+        const { getWorkspaceHandle, readBinaryFile } = await import('/lib/localWorkspace.js')
+        return [...(await readBinaryFile(await getWorkspaceHandle(workspaceId), `definitions/logo-local-e2e/1/templates/${name}`))]
+      }, { workspaceId, name })
+      assert.deepEqual(Buffer.from((await readHeaderLogo(Buffer.from(saved))).bytes), NEW_LOGO, `the workspace's own ${name} has the new logo`)
+    }
   }))
 })

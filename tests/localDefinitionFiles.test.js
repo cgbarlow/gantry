@@ -25,12 +25,14 @@ import {
   writeLocalDefinitionReferenceDocx,
   readLocalDefinitionLogo,
   writeLocalDefinitionLogo,
+  readLocalArtefactRenderReferenceDocx,
   listLocalDefinitions,
   localDefinitionExists,
   resolveDefinitionStructure,
   listLocalDefinitionRows,
 } from '../web/lib/localDefinitionFiles.js'
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
+import { writeBinaryFile } from '../web/lib/localWorkspace.js'
 
 // ---------------------------------------------------------------------------
 // In-memory File System Access API stub — same minimal shape
@@ -543,6 +545,20 @@ describe('templates and reference docx', () => {
     assert.deepEqual(new Uint8Array((await readLocalDefinitionLogo(handle, 'wi384-fixture', 1)).logo.bytes), logo)
     assert.deepEqual(new Uint8Array(await readLocalDefinitionReferenceDocx(handle, 'wi384-fixture', 1, 'hld')), plain, 'the one without a logo is untouched')
     await assert.rejects(writeLocalDefinitionLogo(handle, 'wi384-fixture', 1, new TextEncoder().encode('not an image')), /PNG or JPEG/)
+  })
+
+  // #222: a render uses an artefact's own reference document, else the definition's shared one, as
+  // lib/render.js does on disk, so a logo replaced in the shared one reaches a Local Workspace render.
+  test('the reference docx a render uses is the artefact\'s own, else the shared reference.docx, else none', async () => {
+    const handle = new MemDirHandle()
+    assert.equal(await readLocalArtefactRenderReferenceDocx(handle, 'wi384-fixture', 1, 'soap'), null, 'none at all')
+    const shared = new TextEncoder().encode('PK\x03\x04 shared')
+    await writeBinaryFile(handle, 'definitions/wi384-fixture/1/templates/reference.docx', shared)
+    assert.deepEqual(new Uint8Array(await readLocalArtefactRenderReferenceDocx(handle, 'wi384-fixture', 1, 'soap')), shared)
+    const own = new TextEncoder().encode('PK\x03\x04 soap')
+    await writeLocalDefinitionReferenceDocx(handle, 'wi384-fixture', 1, 'soap', own)
+    assert.deepEqual(new Uint8Array(await readLocalArtefactRenderReferenceDocx(handle, 'wi384-fixture', 1, 'soap')), own)
+    assert.deepEqual(new Uint8Array(await readLocalArtefactRenderReferenceDocx(handle, 'wi384-fixture', 1, 'hld')), shared)
   })
 })
 

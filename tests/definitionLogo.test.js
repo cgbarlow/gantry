@@ -176,6 +176,17 @@ describe('replacing the header logo in one reference document (#222)', () => {
     assert.match(docxPart(Buffer.from(docx), '\\[Content_Types\\].xml'), /<Default Extension="jpeg" ContentType="image\/jpeg"\/>/)
   })
 
+  test('the old logo\'s image part is dropped, and so is any content type the package declared for it alone', async () => {
+    const declared = repackDocx(SHARED, (dir) => {
+      editFile(join(dir, '[Content_Types].xml'), (xml) => xml.replace('</Types>', '<Override PartName="/word/media/image1.png" ContentType="image/png"/></Types>'))
+    })
+    const out = Buffer.from((await replaceHeaderLogo(declared, pngImage(100, 100))).docx)
+    assert.ok(!zipEntryNames(out).includes('word/media/image1.png'), 'the Contoso image is gone')
+    const contentTypes = docxPart(out, '\\[Content_Types\\].xml')
+    assert.doesNotMatch(contentTypes, /\/word\/media\/image1\.png/)
+    assert.match(contentTypes, /<Override PartName="\/word\/header2\.xml"/, 'every other declaration is kept')
+  })
+
   test('every other part of the reference document is unchanged', async () => {
     const { docx } = await replaceHeaderLogo(SHARED, pngImage(100, 100))
     const out = Buffer.from(docx)

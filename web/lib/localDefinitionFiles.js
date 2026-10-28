@@ -394,6 +394,22 @@ export async function readLocalDefinitionReferenceDocx(handle, definitionId, ver
   }
 }
 
+/**
+ * The reference `.docx` a render of `artefactId` uses: the artefact's own, else the definition's
+ * shared `templates/reference.docx`, else `null` — the order lib/render.js resolves them in on
+ * disk. web/app.js ships this as the artefact's reference doc, so a shared one (and the Logo
+ * control's replacement in it, #222) reaches a Local Workspace render too.
+ */
+export async function readLocalArtefactRenderReferenceDocx(handle, definitionId, version, artefactId) {
+  const own = await readLocalDefinitionReferenceDocx(handle, definitionId, version, artefactId)
+  if (own) return own
+  try {
+    return await readBinaryFile(handle, `${definitionDirPath(definitionId, version)}/templates/reference.docx`)
+  } catch {
+    return null
+  }
+}
+
 /** Write an artefact's reference `.docx` bytes — caller validates with `isValidDocxBuffer` first. */
 export async function writeLocalDefinitionReferenceDocx(handle, definitionId, version, artefactId, bytes) {
   await writeBinaryFile(handle, `${definitionDirPath(definitionId, version)}/templates/${referenceDocxName(artefactId)}`, bytes)

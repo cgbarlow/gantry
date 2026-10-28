@@ -443,11 +443,15 @@ export async function replaceHeaderLogo(docx, image) {
     const rIds = new Set(logo.pictures.map((p) => p.rId))
     replacements.set(logo.relsPath, logo.relsXml.replace(/<Relationship\s[^>]*?\/?>/g, (tag) => (rIds.has(attr(tag, 'Id')) ? setAttr(tag, 'Target', resolveRelative(logo.part, mediaPart)) : tag)))
   }
+  // The package declares the new image's type, and no longer declares a dropped image part: an
+  // Override naming a part the package doesn't hold is one a strict reader may refuse.
   const contentTypes = kept.find((e) => e.name === '[Content_Types].xml')
   if (contentTypes) {
-    const xml = await entryText(contentTypes)
+    const original = await entryText(contentTypes)
+    let xml = original.replace(/<Override\s[^>]*>/g, (tag) => (oldMedia.has(attr(tag, 'PartName')?.replace(/^\//, '')) ? '' : tag))
     const hasDefault = [...xml.matchAll(/<Default\s[^>]*>/g)].some(([tag]) => attr(tag, 'Extension')?.toLowerCase() === info.extension)
-    if (!hasDefault) replacements.set(contentTypes.name, xml.replace(/(<Types\b[^>]*>)/, `$1<Default Extension="${info.extension}" ContentType="${info.contentType}"/>`))
+    if (!hasDefault) xml = xml.replace(/(<Types\b[^>]*>)/, `$1<Default Extension="${info.extension}" ContentType="${info.contentType}"/>`)
+    if (xml !== original) replacements.set(contentTypes.name, xml)
   }
 
   const out = []
