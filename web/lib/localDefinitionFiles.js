@@ -26,6 +26,7 @@
 
 import { parse as parseYAML, stringify as stringifyYAML } from 'yaml'
 import { readTextFile, writeTextFile, readBinaryFile, writeBinaryFile, listDir } from './localWorkspace.js'
+import { sortReferenceDocxNames, summariseDefinitionLogo, applyDefinitionLogo } from './definitionLogo.js'
 
 // Verbatim copy of lib/slug.js's isValidSlug — a single path segment, never
 // a traversal token. lib/slug.js has no node-only imports of its own, but
@@ -396,6 +397,34 @@ export async function readLocalDefinitionReferenceDocx(handle, definitionId, ver
 /** Write an artefact's reference `.docx` bytes — caller validates with `isValidDocxBuffer` first. */
 export async function writeLocalDefinitionReferenceDocx(handle, definitionId, version, artefactId, bytes) {
   await writeBinaryFile(handle, `${definitionDirPath(definitionId, version)}/templates/${referenceDocxName(artefactId)}`, bytes)
+}
+
+// #222 (docs/adr/0059): the Local Workspace twin of lib/definition.js's readDefinitionLogo/
+// writeDefinitionLogo — the header logo of every reference document in `templates/`, read and
+// replaced through the shared web/lib/definitionLogo.js. Like the reference docx writes above, it
+// has no draft guard of its own: the editor offers Replace only on a draft.
+async function localReferenceDocuments(handle, definitionId, version) {
+  const dir = `${definitionDirPath(definitionId, version)}/templates`
+  let entries
+  try {
+    entries = await listDir(handle, dir)
+  } catch {
+    return []
+  }
+  const names = sortReferenceDocxNames(entries.filter((e) => e.kind === 'file').map((e) => e.name))
+  return Promise.all(names.map(async (name) => ({ name, bytes: await readBinaryFile(handle, `${dir}/${name}`) })))
+}
+
+/** `{ logo: { bytes, contentType, extension, document } | null, documents: [{ name, hasLogo }] }`. */
+export async function readLocalDefinitionLogo(handle, definitionId, version) {
+  return summariseDefinitionLogo(await localReferenceDocuments(handle, definitionId, version))
+}
+
+/** Writes `image` (a PNG or JPEG) into every reference document whose header has a logo: `{ updated, withoutLogo }`, names only. */
+export async function writeLocalDefinitionLogo(handle, definitionId, version, image) {
+  const { updated, withoutLogo } = await applyDefinitionLogo(await localReferenceDocuments(handle, definitionId, version), image)
+  for (const doc of updated) await writeBinaryFile(handle, `${definitionDirPath(definitionId, version)}/templates/${doc.name}`, doc.bytes)
+  return { updated: updated.map((d) => d.name), withoutLogo }
 }
 
 /**

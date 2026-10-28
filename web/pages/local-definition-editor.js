@@ -36,8 +36,11 @@ import {
   readLocalDefinitionTemplate,
   writeLocalDefinitionTemplate,
   writeLocalDefinitionReferenceDocx,
+  readLocalDefinitionLogo,
+  writeLocalDefinitionLogo,
   listLocalDefinitions,
 } from '../lib/localDefinitionFiles.js'
+import { DefinitionLogoControl } from '../lib/definitionLogoControl.js'
 
 const GATES = ['business-case', 'design-review', 'implementation-ready']
 // #149: an Artefact's gate must name one of this definition's own Stage gates (validation reports
@@ -638,6 +641,16 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
       <input id="local-def-title-input" class="wizard-input" type="text" value=${structure.title} readOnly=${readOnly} onInput=${(e) => update({ title: e.currentTarget.value })} />
       <label class="field-label" for="local-def-description-input">Description</label>
       <textarea id="local-def-description-input" class="wizard-input" rows="2" readOnly=${readOnly} value=${structure.description} onInput=${(e) => update({ description: e.currentTarget.value })}></textarea>
+
+      <${DefinitionLogoControl}
+        editable=${!readOnly}
+        load=${async () => {
+          const { logo, documents } = await readLocalDefinitionLogo(handle, definitionId, version)
+          return { image: logo ? new Blob([logo.bytes], { type: logo.contentType }) : null, extension: logo?.extension, documents }
+        }}
+        replace=${(bytes) => writeLocalDefinitionLogo(handle, definitionId, version, bytes)}
+        reloadKey=${`${definitionId}@${version}`}
+      />
 
       <section>
         <h2>Stages</h2>
