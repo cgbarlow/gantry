@@ -65,7 +65,7 @@ const DOCUMENTS = {
   'soap-full': { example: 'gantry', basename: 'Gantry hosting - Full Solution on a Page', heading: '# Metadata' },
   hld: { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - High Level Design', heading: '# Submission' },
   sad: { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - Solution Architecture Document', heading: '# Overview' },
-  ssad: { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - Solution Support Architecture Document', heading: '# Logical components' },
+  ssad: { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - Solution Support Architecture Document', heading: '# Overview' },
   'as-built': { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - As-built', heading: '# Terms & Definitions' },
 }
 
@@ -1433,5 +1433,124 @@ describe('v3 word budgets, and the examples condensed to Medium (#203)', () => {
     }
     const ratio = now.get('sad') / documents.get('sad').before
     assert.ok(ratio >= 0.4 && ratio <= 0.6, `the SAD is ${Math.round(ratio * 100)}% of its ${documents.get('sad').before} words`)
+  })
+})
+
+// #213 (ADR-0057): the SSAD follows the SAD's reading order and heading names, not the FV Help Tool
+// SSAD reference's. Every chapter up to Technology architecture is the SAD's, in the SAD's order;
+// the support material then stays together in one Support and operations chapter. Same Fields,
+// same bare / `?` form, so build-ready-checklist is exactly as strict as on v2.
+describe('the v3 SSAD follows the SAD\'s order and headings (#213)', () => {
+  const SSAD_REQUIRES = [
+    'document-handling.classification?',
+    'introduction.executive-summary?',
+    'introduction.purpose',
+    'introduction.in-scope',
+    'introduction.out-of-scope',
+    'introduction.content-standards?',
+    'support-and-operations.stakeholders',
+    'architecture.solution-description',
+    'dependencies.dependency-list',
+    'architecture.architectural-risks',
+    'risks.open-issues',
+    'risks.risk-register',
+    'architecture.logical-components',
+    'integration.interfaces',
+    'support-and-operations.environments-and-domains',
+    'data.data-classification',
+    'nfrs.disaster-recovery-and-backup',
+    'nfrs.scalability-and-capacity',
+    'nfrs.availability-and-continuity',
+    'security.identity-and-access',
+    'security.privacy-and-confidentiality',
+    'data-security-controls.controls',
+    'data-security-controls.inheritance-and-dependencies?',
+    'support-and-operations.operational-accounts-and-licenses',
+    'support-and-operations.monitoring-and-alerting',
+    'support-and-operations.release-procedures',
+    'support-and-operations.support-handover-readiness',
+    'glossary.terms-and-definitions',
+    'team-and-estimates.references?',
+  ]
+
+  // The example fills every SSAD Field, so every optional section shows.
+  const SSAD_OUTLINE = [
+    '# Overview',
+    '## Executive summary',
+    '## Purpose',
+    '## In scope',
+    '## Out of scope',
+    '## Content standards',
+    '# Business architecture',
+    '## Stakeholders and support contacts',
+    '# Solution overview',
+    '## Solution description',
+    '## Dependency list',
+    '## Architectural risks',
+    '# Open issues',
+    '# Risks',
+    '## Risk register',
+    '# Logical components view',
+    '# Technology architecture',
+    '## Interfaces',
+    '# Support and operations',
+    '## Environments, URLs and domains',
+    '## Data classification',
+    '## Backup and archiving policy',
+    '## Scalability and capacity',
+    '## Availability and continuity',
+    '## Identity and access management',
+    '## Privacy and confidentiality concerns',
+    '## Security concerns',
+    '## Security control inheritance and dependencies',
+    '## Operational accounts and licenses',
+    '## Monitoring and alerting',
+    '## Release procedures',
+    '## Support handover readiness',
+    '# Glossary',
+    '# References',
+  ]
+
+  const requiresOf = (definition, id) => definition.artefacts.find((a) => a.id === id).requires
+  const outlineOf = (id) =>
+    renderArtefact('kiwi-cover-mutual', id, { instancesDir: EXAMPLES_DIR, dryRun: true })
+      .markdown.split('\n')
+      .filter((line) => /^#{1,2} /.test(line) && !/\{\.unnumbered\}/.test(line))
+
+  test('the SSAD\'s requires list is the new outline, in render order', () => {
+    assert.deepEqual(requiresOf(v3(), 'ssad'), SSAD_REQUIRES)
+  })
+
+  test('no Field entered or left the SSAD, and none changed between mandatory and optional', () => {
+    const v2 = loadDefinition(DEFINITION, { version: 2 })
+    assert.deepEqual([...requiresOf(v3(), 'ssad')].sort(), [...requiresOf(v2, 'ssad'), 'document-handling.classification?'].sort())
+  })
+
+  test('the rendered SSAD has the SAD-led outline, with the support material in one chapter', () => {
+    assert.deepEqual(outlineOf('ssad'), SSAD_OUTLINE)
+  })
+
+  test('every SSAD chapter before Support and operations is a SAD chapter, in the SAD\'s order', () => {
+    const chapters = (id) => outlineOf(id).filter((line) => line.startsWith('# '))
+    const ssad = chapters('ssad')
+    const shared = ssad.slice(0, ssad.indexOf('# Support and operations'))
+    const sad = chapters('sad')
+    assert.deepEqual(sad.filter((chapter) => shared.includes(chapter)), shared)
+  })
+
+  // By its text, whatever its level: the SAD's "# Environments, URLs and domains" chapter is a
+  // section of Support and operations in the SSAD.
+  test('a section both documents render carries the SAD\'s heading, except Stakeholders and support contacts', () => {
+    const text = (line) => line.replace(/^#+ /, '')
+    const sad = new Set(outlineOf('sad').map(text))
+    const ssadOnly = outlineOf('ssad').map(text).filter((heading) => !sad.has(heading))
+    assert.deepEqual(ssadOnly, ['Content standards', 'Stakeholders and support contacts', 'Support and operations', 'Release procedures', 'Support handover readiness'])
+  })
+
+  test('the change is recorded: the v3 CHANGELOG, ADR-0057 and the User Guide', () => {
+    const changelog = loadDefinitionChangelog(DEFINITION, VERSION)
+    assert.match(changelog.slice(0, changelog.indexOf('\n## v2')), /^### The SSAD follows the SAD's order and headings \(#213\)$/m)
+    assert.ok(existsSync('docs/adr/0057-the-ssad-follows-the-sad-not-its-reference-instance.md'))
+    assert.match(readFileSync('docs/user-guide/index.md', 'utf8'), /\*\*Version 3 \(draft\)\*\* puts the SSAD in the SAD's order/)
   })
 })
