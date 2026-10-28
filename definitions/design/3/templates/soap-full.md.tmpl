@@ -9,8 +9,12 @@
      from just before Estimates into a new "# Design basis" section right
      after Out of scope — see definition.yaml's `soap-full.requires` comment
      for why this deviates from the JEDI reference's literal section order.
-     The "# Introduction" heading itself (still wrapping `overview` +
-     `background.problem`) is reference-mandated and stays unrenamed. */
+     #232 (ADR-0060): the Full SOAP is the anchor the SOAP follows, so it reads
+     like the rest of v3 rather than the JEDI reference: "# Introduction" (still
+     wrapping `overview` + `background.problem`) is "# Overview", the name every
+     later v3 document and the module's own title use; "High level ..." is
+     hyphenated, as in the SAD; and "# Questions" is "# Open questions", the
+     same Field's heading in the HLD. Order and Fields are unchanged. */
 %>
 # Metadata
 
@@ -22,7 +26,7 @@
 | Draft agreed date | <%~ it.modules['soap-full-details']['draft-agreed-date'] %> |
 | SOAP/estimate delivered date | <%~ it.modules['soap-full-details']['delivered-date'] %> |
 
-# Introduction
+# Overview
 <% if (it.modules.introduction.overview) { %>
 ## Overview
 
@@ -56,11 +60,11 @@
 <%~ it.modules['design-basis'].constraints %>
 <% } %>
 <% } %>
-# High level requirements
+# High-level requirements
 
 <%~ na(it.modules['solution-definition']['high-level-requirements']) %>
 
-# High level solution overview
+# High-level solution overview
 
 <%~ na(it.modules['solution-definition']['high-level-solution-overview']) %>
 <% if (it.modules['solution-definition']['alternatives-sketch']) { %>
@@ -87,7 +91,7 @@
 
 <%~ na(it.modules['soap-full-details'].sequencing) %>
 
-# Questions
+# Open questions
 
 <%~ na(it.modules['open-questions'].questions) %>
 

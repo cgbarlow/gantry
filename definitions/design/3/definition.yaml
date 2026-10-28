@@ -146,10 +146,11 @@ artefacts:
       This document summarises the initiative's context, solution, team and
       estimates for the business case decision.
     table-of-contents: true
-    # Order follows the reference SOAP (SAMPLE SOAP - Mobile Phone Assistance):
-    # Background and context -> Solution definition (Process flow, High level
-    # solution design, Assumptions and considerations, Feature breakdown) ->
-    # Teams, contact persons and high-level estimates -> References.
+    # v1 and v2: order follows the reference SOAP (SAMPLE SOAP - Mobile Phone
+    # Assistance): Background and context -> Solution definition (Process flow,
+    # High level solution design, Assumptions and considerations, Feature
+    # breakdown) -> Teams, contact persons and high-level estimates ->
+    # References. v3 follows the Full SOAP instead; see #232 below.
     #
     # CHANGED v2:
     #  - `introduction.assumptions?` restored. The reference SOAP carries an
@@ -172,14 +173,29 @@ artefacts:
     #    `required-at`, so a lightweight SOAP carries no scope obligation. The
     #    Full SOAP still lists both as bare field references, so producing one
     #    still forces them at this gate.
+    #
+    # #232 (ADR-0060): the SOAP follows the Full SOAP's reading order and
+    # heading names wherever the two render the same Field, rather than the
+    # SAMPLE SOAP's. The sample is one filled SOAP for one initiative, not a
+    # template its readers hold the SOAP to, and both documents are read at
+    # `business-case` from the same Shape data. So `background.problem` sits
+    # under "Overview"; `design-basis.assumptions?` moves up to a "Design basis"
+    # chapter after it, as "Assumptions"; `high-level-requirements`,
+    # `high-level-solution-overview`, `teams-required`, `estimates` and
+    # `references?` are chapters under the Full SOAP's headings, in its order.
+    # The SOAP-only Fields sit beside their nearest shared neighbour:
+    # `affected-domains` after `problem`, and `process-flow` and
+    # `feature-breakdown` inside the High-level solution overview. No Field
+    # enters or leaves, and none changes between bare and `?`, so
+    # `business-case` is exactly as strict as before.
     requires:
       [
         background.problem,
         background.affected-domains,
-        solution-definition.high-level-requirements,
-        solution-definition.process-flow,
-        solution-definition.high-level-solution-overview,
         design-basis.assumptions?,
+        solution-definition.high-level-requirements,
+        solution-definition.high-level-solution-overview,
+        solution-definition.process-flow,
         solution-definition.feature-breakdown,
         team-and-estimates.teams-required,
         team-and-estimates.estimates,
@@ -227,7 +243,14 @@ artefacts:
     # recurring backbone module is worth more than exact fidelity to one
     # legacy reference document's placement of "Assumptions". The `# Introduction`
     # heading itself (wrapping `overview` + `background.problem`) is
-    # reference-mandated and stays put, unrenamed.
+    # reference-mandated and stays put, unrenamed. (v1 and v2.)
+    #
+    # #232 (ADR-0060): the Full SOAP is the anchor the SOAP follows, so in v3
+    # it reads like the rest of the design documents rather than the JEDI
+    # template: "Introduction" is "Overview", "High level requirements" and
+    # "High level solution overview" are hyphenated as in the SAD, and
+    # "Questions" is "Open questions", the same Field's heading in the HLD.
+    # Order, Fields and `business-case` are unchanged.
     requires:
       [
         soap-full-details.epic-project,

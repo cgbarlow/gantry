@@ -68,7 +68,7 @@ const STAGE_EXAMPLE = 'kiwi-cover-mutual'
 // Every v3 Artefact, rendered from the example named here. `heading` is the document's first heading,
 // section 1: since #196 the title is on the cover, and no template opens with a title line of its own.
 const DOCUMENTS = {
-  soap: { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - Solution on a Page', heading: '# Background and context' },
+  soap: { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - Solution on a Page', heading: '# Overview' },
   'soap-full': { example: 'gantry', basename: 'Gantry hosting - Full Solution on a Page', heading: '# Metadata' },
   hld: { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - High Level Design', heading: '# Submission' },
   sad: { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - Solution Architecture Document', heading: '# Overview' },
@@ -1999,5 +1999,204 @@ describe('the v3 As-built follows the SAD\'s order and headings (#231)', () => {
     assert.match(readFileSync(join('docs/adr', adr[0]), 'utf8'), /standing template/)
     assert.match(readFileSync('docs/adr/0057-the-ssad-follows-the-sad-not-its-reference-instance.md', 'utf8'), /ADR-0060/)
     assert.match(readFileSync('docs/user-guide/index.md', 'utf8'), /\*\*Version 3 \(draft\)\*\* puts the As-built in the SAD's order/)
+  })
+})
+
+// #232 (ADR-0060): the SOAP follows the Full SOAP's reading order and heading names wherever the two
+// render the same Field, rather than the SAMPLE SOAP reference's: the Full SOAP is the anchor for the
+// business-case pair, as the SAD is for the build-stage documents. The Full SOAP itself takes v3's
+// names (Overview, hyphenated High-level headings, Open questions) but keeps its order. The SOAP-only
+// Fields sit beside their nearest shared neighbour. No Field enters or leaves either document and none
+// changes between bare and `?`, so business-case is exactly as strict as on v2.
+describe('the v3 SOAP follows the Full SOAP\'s order and headings (#232)', () => {
+  const SOAP_REQUIRES = [
+    'background.problem',
+    'background.affected-domains',
+    'design-basis.assumptions?',
+    'solution-definition.high-level-requirements',
+    'solution-definition.high-level-solution-overview',
+    'solution-definition.process-flow',
+    'solution-definition.feature-breakdown',
+    'team-and-estimates.teams-required',
+    'team-and-estimates.estimates',
+    'team-and-estimates.references?',
+  ]
+
+  // Both examples fill every SOAP Field, so every optional section shows.
+  const SOAP_OUTLINE = [
+    '# Overview',
+    '## Problem statement',
+    '## Affected domains',
+    '# Design basis',
+    '## Assumptions',
+    '# High-level requirements',
+    '# High-level solution overview',
+    '## Process flow',
+    '## Feature breakdown and involved teams',
+    '# Teams required',
+    '# Estimates',
+    '# References',
+  ]
+
+  const FULL_SOAP_OUTLINE = [
+    '# Metadata',
+    '# Overview',
+    '## Overview',
+    '## Problem statement',
+    '# Opportunity',
+    '# In scope',
+    '# Out of scope',
+    '# Design basis',
+    '## Assumptions',
+    '## Constraints',
+    '# High-level requirements',
+    '# High-level solution overview',
+    '## Alternatives sketch',
+    '# Teams required',
+    '# Dependencies',
+    '# Estimates',
+    '# Sequencing',
+    '# Open questions',
+    '# Caveats',
+    '# References',
+  ]
+
+  // The headings only the SOAP has: its SOAP-only Fields.
+  const SOAP_ONLY = ['Affected domains', 'Process flow', 'Feature breakdown and involved teams']
+
+  const slug = 'kiwi-cover-mutual'
+  const requiresOf = (definition, id) => definition.artefacts.find((a) => a.id === id).requires
+  const render = (id, { example = slug, instancesDir = EXAMPLES_DIR } = {}) =>
+    renderArtefact(example, id, { instancesDir, dryRun: true }).markdown
+  const outlineOf = (markdown) => markdown.split('\n').filter((line) => /^#{1,2} /.test(line) && !/\{\.unnumbered\}/.test(line))
+  const text = (line) => line.replace(/^#+ /, '')
+
+  // A scratch copy of a bundled example, a way to write over some of a Module's Fields in it, and a
+  // way to pin it to another version of the Definition.
+  function withExample(fn, example = slug) {
+    return withScratchDir((dir) => {
+      cpSync(join(EXAMPLES_DIR, example), join(dir, example), { recursive: true })
+      const setFields = (moduleId, fields) => {
+        const current = readModule(v3(), example, moduleId, { instancesDir: dir })
+        writeModule(v3(), example, moduleId, { ...current, fields: { ...current.fields, ...fields } }, { instancesDir: dir })
+      }
+      const pinTo = (version) => {
+        const file = join(dir, example, 'instance.yaml')
+        writeFileSync(file, readFileSync(file, 'utf8').replace(/^definitionVersion: \d+$/m, `definitionVersion: ${version}`))
+      }
+      return fn(dir, setFields, pinTo)
+    })
+  }
+
+  test('the SOAP\'s requires list is the new outline, in render order', () => {
+    assert.deepEqual(requiresOf(v3(), 'soap'), SOAP_REQUIRES)
+  })
+
+  test('no Field entered or left either document, none changed between mandatory and optional, and the Full SOAP keeps its order', () => {
+    const v2 = loadDefinition(DEFINITION, { version: 2 })
+    assert.deepEqual([...requiresOf(v3(), 'soap')].sort(), [...requiresOf(v2, 'soap')].sort())
+    assert.deepEqual(requiresOf(v3(), 'soap-full'), requiresOf(v2, 'soap-full'))
+    const shape = (definition) => definition.stages.find((stage) => stage.id === 'shape').modules
+    assert.deepEqual(shape(v3()), shape(v2))
+  })
+
+  test('with every SOAP and Full SOAP Field blank, business-case holds up exactly the Fields it held up on v2', () => {
+    withExample((dir, setFields, pinTo) => {
+      const modules = new Set([...requiresOf(v3(), 'soap'), ...requiresOf(v3(), 'soap-full')].map((entry) => entry.split('.')[0]))
+      for (const moduleId of modules) {
+        const { fields } = readModule(v3(), slug, moduleId, { instancesDir: dir })
+        setFields(moduleId, Object.fromEntries(Object.entries(fields).map(([id, value]) => [id, Array.isArray(value) ? [] : ''])))
+      }
+      const outstanding = () => {
+        const result = checkGate(slug, { instancesDir: dir, gate: 'business-case' })
+        assert.equal(result.pass, false)
+        return {
+          artefacts: result.artefacts.map((a) => [a.id, [...a.outstanding].sort()]),
+          modules: result.modules.map((m) => [m.id, [...m.outstanding].sort()]),
+        }
+      }
+      const onV3 = outstanding()
+      pinTo(2)
+      assert.deepEqual(onV3, outstanding())
+    })
+  })
+
+  for (const example of Object.keys(EXAMPLES)) {
+    test(`${example}: the rendered SOAP and Full SOAP have the new outlines`, () => {
+      assert.deepEqual(outlineOf(render('soap', { example })), SOAP_OUTLINE)
+      assert.deepEqual(outlineOf(render('soap-full', { example })), FULL_SOAP_OUTLINE)
+    })
+
+    // The same lines of content as v2 renders, in whatever order: only headings changed. Each document
+    // is read from its first section, after the front matter.
+    test(`${example}: the SOAP and Full SOAP show the same content as on v2, under the new headings`, () => {
+      withExample((dir, setFields, pinTo) => {
+        const body = (markdown, first) =>
+          markdown
+            .slice(markdown.indexOf(`\n${first}\n`))
+            .split('\n')
+            .filter((line) => line.trim() !== '' && !/^#{1,2} /.test(line))
+            .sort()
+        const onV3 = { soap: render('soap', { example, instancesDir: dir }), full: render('soap-full', { example, instancesDir: dir }) }
+        pinTo(2)
+        const onV2 = { soap: render('soap', { example, instancesDir: dir }), full: render('soap-full', { example, instancesDir: dir }) }
+        assert.deepEqual(body(onV3.soap, '# Overview'), body(onV2.soap, '# Background and context'))
+        assert.deepEqual(body(onV3.full, '# Metadata'), body(onV2.full, '# Metadata'))
+      }, example)
+    })
+  }
+
+  // Same heading, same relative order and same content: a Field both documents render sits under the
+  // Full SOAP's heading in the SOAP, not merely a heading of the same name.
+  test('every heading both documents render has the same text, in the same relative order, over the same Field', () => {
+    const [soap, full] = [render('soap'), render('soap-full')]
+    const fullHeadings = outlineOf(full)
+    const shared = outlineOf(soap).filter((heading) => fullHeadings.includes(heading))
+    assert.deepEqual(shared, fullHeadings.filter((heading) => shared.includes(heading)), 'in the Full SOAP\'s order')
+    assert.deepEqual(outlineOf(soap).filter((heading) => !shared.includes(heading)).map(text), SOAP_ONLY)
+    // The two chapter headings that open onto a section have no content of their own to compare.
+    for (const heading of shared.filter((h) => !['# Overview', '# Design basis'].includes(h))) {
+      assert.equal(sectionOf(soap, heading).trimEnd(), sectionOf(full, heading).trimEnd(), heading)
+    }
+  })
+
+  test('the SOAP-only Fields sit beside their nearest shared neighbour', () => {
+    const outline = outlineOf(render('soap'))
+    const before = (heading) => outline[outline.indexOf(heading) - 1]
+    assert.equal(before('## Affected domains'), '## Problem statement')
+    assert.equal(before('## Process flow'), '# High-level solution overview')
+    assert.equal(before('## Feature breakdown and involved teams'), '## Process flow')
+  })
+
+  test('the SOAP\'s Design basis and References show only when filled, and blank ones still pass the SOAP at business-case', () => {
+    withExample((dir, setFields) => {
+      const optional = /^# (Design basis|References)$|^## Assumptions$/
+      const headings = () => outlineOf(render('soap', { instancesDir: dir })).filter((line) => optional.test(line))
+      assert.deepEqual(headings(), ['# Design basis', '## Assumptions', '# References'])
+      setFields('design-basis', { assumptions: '' })
+      setFields('team-and-estimates', { references: [] })
+      assert.deepEqual(headings(), [])
+      const result = checkGate(slug, { instancesDir: dir, gate: 'business-case' })
+      assert.deepEqual(result.artefacts.find((a) => a.id === 'soap').outstanding, [])
+    })
+  })
+
+  // The table of contents follows the headings, so each document's chapters list in the new order.
+  test('in Word, each document\'s table of contents lists its chapters in the new order', () => {
+    for (const [id, outline] of [['soap', SOAP_OUTLINE], ['soap-full', FULL_SOAP_OUTLINE]]) {
+      const toc = tableOfContents(renderWord(slug, id).documentXml)
+      const chapters = outline.filter((line) => line.startsWith('# ')).map((line, i) => `${i + 1}\t${text(line)}`)
+      assert.deepEqual(toc.entries.filter((e) => e.style === 'TOC1').map((e) => e.text), chapters, id)
+    }
+  })
+
+  test('the change is recorded: the v3 CHANGELOG, ADR-0060 and the User Guide', () => {
+    const changelog = loadDefinitionChangelog(DEFINITION, VERSION)
+    assert.match(changelog.slice(0, changelog.indexOf('\n## v2')), /^### The SOAP follows the Full SOAP's order and headings \(#232\)$/m)
+    const adr = readdirSync('docs/adr').find((file) => file.startsWith('0060-'))
+    assert.match(readFileSync(join('docs/adr', adr), 'utf8'), /^### Applied to the SOAP and the Full SOAP$/m)
+    const guide = readFileSync('docs/user-guide/index.md', 'utf8')
+    assert.match(guide, /\*\*Version 3 \(draft\)\*\* puts the SOAP in the Full SOAP's order/)
+    assert.match(guide, /\*\*Version 3 \(draft\)\*\* gives the Full SOAP/)
   })
 })

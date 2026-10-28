@@ -51,9 +51,9 @@ fields:
     guidance: >
       What was taken as given for the design to hold. Things that would
       change the shape of the solution if they turned out false. Capture from
-      SOAP onward — this file re-opens at every later stage, and carries the
-      SOAP's "Assumptions and considerations", the Full SOAP's "Assumptions"
-      and the SAD's "Architectural Assumptions" sections.
+      SOAP onward — this file re-opens at every later stage, and renders as
+      "Assumptions" under "Design basis" in the SOAP, the Full SOAP, the SAD,
+      the SSAD and the As-built.
 
   - id: caveats
     title: Caveats

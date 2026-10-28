@@ -141,7 +141,7 @@ test('the default WASM render of an Artefact that opts in draws a captioned Merm
       const figures = captionedFigures(await download.path())
       assert.deepEqual(
         figures.map((f) => f.caption),
-        ['Diagram 1. Security architecture', 'Diagram 2. Take out insurance process', 'Diagram 3. Claims handling introductory view']
+        ['Diagram 1. Security architecture', 'Diagram 2. Claims handling introductory view', 'Diagram 3. Take out insurance process']
       )
       for (const { caption, figure } of figures) {
         assert.equal(figure.style, 'CaptionedFigure', `"${caption}" sits directly under its figure, kept with it`)

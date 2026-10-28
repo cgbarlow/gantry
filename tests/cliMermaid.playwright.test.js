@@ -87,7 +87,7 @@ test('with Chromium, `gantry render` draws each Mermaid block as a captioned PNG
     const figures = captionedFigures(docxPath)
     assert.deepEqual(
       figures.map((f) => f.caption),
-      ['Diagram 1. Security architecture', 'Diagram 2', 'Diagram 3. Take out insurance process', 'Diagram 4. Claims handling introductory view']
+      ['Diagram 1. Security architecture', 'Diagram 2', 'Diagram 3. Claims handling introductory view', 'Diagram 4. Take out insurance process']
     )
     const [security, plain] = figures
     assert.equal(security.name, 'mermaid-diagram-1.png')

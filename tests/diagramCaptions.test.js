@@ -69,7 +69,7 @@ async function withExample(edit, fn, { version = OPTED_IN } = {}) {
 }
 
 // A captioned Mermaid block at the end of the Problem statement, the SOAP's first field — so it
-// comes before the two captioned images in Solution definition.
+// comes before the two captioned images, in the High-level solution overview and its Process flow.
 const withSecurityDiagram = (text) =>
   text.replace(/\n## Affected domains/, `\n${SECURITY_FENCE}\n\n## Affected domains`)
 
@@ -101,7 +101,7 @@ test('a captioned image renders as the figure then "Diagram N. <title>", numbere
     // exactly as the browser export numbers them.
     assert.deepEqual(
       figures.map((f) => f.caption),
-      ['Diagram 2. Take out insurance process', 'Diagram 3. Claims handling introductory view']
+      ['Diagram 2. Claims handling introductory view', 'Diagram 3. Take out insurance process']
     )
     for (const { caption, figure } of figures) {
       assert.equal(figure.style, 'CaptionedFigure', `"${caption}" sits directly under its figure`)
@@ -138,7 +138,7 @@ test('only a figure takes a number: an inline image, an image with no alt text a
       const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir })
       assert.deepEqual(
         captionedFigures(unzip(result.docxPath, 'word/document.xml')).map((f) => f.caption),
-        ['Diagram 1. Take out insurance process', 'Diagram 2. Claims handling introductory view']
+        ['Diagram 1. Claims handling introductory view', 'Diagram 2. Take out insurance process']
       )
     }
   )
@@ -254,8 +254,8 @@ test('a local workspace compile hands the browser the numbered markdown for the 
   assert.doesNotMatch(compiled.markdown, /Diagram \d/)
   // The browser draws the Mermaid picture and labels it with the caption the compile resolved.
   assert.match(compiled.docxMarkdown, /```mermaid \{figure-caption="Diagram 1\. Security architecture"\}\nflowchart LR/)
-  assert.match(compiled.docxMarkdown, /!\[Diagram 2\. Take out insurance process\]\(diagram\.png\)/)
-  assert.match(compiled.docxMarkdown, /!\[Diagram 3\. Claims handling introductory view\]\(diagram\.png\)/)
+  assert.match(compiled.docxMarkdown, /!\[Diagram 2\. Claims handling introductory view\]\(diagram\.png\)/)
+  assert.match(compiled.docxMarkdown, /!\[Diagram 3\. Take out insurance process\]\(diagram\.png\)/)
 })
 
 test('a local workspace compile of an Artefact that does not opt in hands the browser the markdown as compiled', async () => {
