@@ -441,6 +441,24 @@ for (const { name, provider, serverOptions, location, client: clientFor } of PRO
     ))
 }
 
+test('Azure DevOps-backed: a logo for a Definition without one is refused without starting a stage branch', () =>
+  withLibrary(({ definitionsDir }) =>
+    withScratchInstances((instancesDir) =>
+      withRunningServerForProvider('azure-devops', { options: { definitionsDir, instancesDir, allowAzureDevOpsBaseUrlOverride: true } }, async (ctx) => {
+        const auth = { Authorization: basicAuthHeader(ctx.pat) }
+        const slug = 'plain-remote'
+        const created = await fetch(`${ctx.gantryBase}/api/instances`, json({ definition: 'plain', slug, ...PROVIDERS[0].location(ctx) }, auth))
+        assert.equal(created.status, 201, await created.text())
+        for (const init of [put({ imageBase64: b64(WIDE_LOGO) }, auth), { method: 'DELETE', headers: auth }]) {
+          const res = await fetch(`${ctx.gantryBase}/api/instance/logo?slug=${slug}`, init)
+          assert.equal(res.status, 400)
+          assert.match((await res.json()).error, /have no Logo setting/)
+        }
+        assert.equal(await PROVIDERS[0].client(ctx).branchExists(stageBranchName(slug, 'draft')), false)
+      })
+    )
+  ))
+
 test('Azure DevOps-backed: importing a Local Workspace instance carries the Logo chosen in the wizard', () =>
   withLibrary(({ definitionsDir }) =>
     withScratchInstances((instancesDir) =>
