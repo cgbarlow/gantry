@@ -73,6 +73,9 @@ with the SAD collide, consistency wins for the SSAD.
   SSAD heading; for version 3 it notes where each now lands.
 - ADR-0021's statement that "the SSAD list follows … FV Help Tool SSAD.docx"
   describes v1 and v2. For v3 the order is this ADR's.
+- #233 applied the heading rule to the one section #213 missed: the SSAD's
+  "Support handover readiness" is now the SAD's "Operational readiness". No
+  new exception was needed.
 
 ## Status
 

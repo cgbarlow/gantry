@@ -89,7 +89,7 @@ fields:
     required: false
     guidance: >
       Whether new hardware is needed and how it is sized — environment, OS /
-      version / 32-64-bit, hypervisor, memory and CPU per guest, virtualization
+      version / 32-64-bit, hypervisor, memory and CPU per guest, virtualisation
       approach, and any licensing tied to cores or memory. Include batch-processing
       RAM needs where relevant.
 
