@@ -14,7 +14,7 @@ import { definitionInstanceSettings } from '../web/lib/instanceSettings.js'
 import { countWords, overTargetNotes, TARGET_SIZES } from '../web/lib/targetSize.js'
 import { exampleModuleText } from './helpers/fixtureModules.js'
 import { withRunningServer } from './helpers/lifecycle.js'
-import { bodyParagraphs, bodyTables, docxPart, headerRowFormat, headingNumbers, keepsWithNext, numberingLevels, rowsCantSplit, styleFontSize, styleNumbering, wordStyles } from './helpers/wordDocx.js'
+import { bodyParagraphs, bodyTables, docxPart, expectedTableOfContents, headerRowFormat, headingBookmarks, headingNumbers, keepsWithNext, numberingLevels, rowsCantSplit, styleFontSize, styleNumbering, tableOfContents, wordStyles } from './helpers/wordDocx.js'
 
 // #193 (spec #192): the harness every design v3 ticket extends. `definitions/design/3` starts as a
 // draft copy of v2, and the two bundled design examples in workspaces/examples move onto it — the
@@ -73,7 +73,7 @@ const DOCUMENTS = {
   hld: { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - High Level Design', heading: '# Submission' },
   sad: { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - Solution Architecture Document', heading: '# Overview' },
   ssad: { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - Solution Support Architecture Document', heading: '# Overview' },
-  'as-built': { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - As-built', heading: '# Terms & Definitions' },
+  'as-built': { example: 'kiwi-cover-mutual', basename: 'Kiwi Cover Mutual - As-built', heading: '# Overview' },
 }
 
 // v1 and v2 must stay byte-for-byte as published: a SHA-256 over each version folder's files
@@ -139,6 +139,15 @@ function renderWord(example, artefactId) {
     const documentXml = execFileSync('unzip', ['-p', docxPath, 'word/document.xml'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
     return { result, documentXml }
   })
+}
+
+// One `#` or `##` section of rendered Markdown: its heading line and everything up to the next `#` or
+// `##` heading. Two documents that render a Field under the same heading give the same section.
+function sectionOf(markdown, heading) {
+  const start = markdown.indexOf(`\n${heading}\n`)
+  assert.ok(start >= 0, `${heading} is in the document`)
+  const next = markdown.slice(start + 1).search(/\n#{1,2} /)
+  return markdown.slice(start + 1, next < 0 ? undefined : start + 1 + next)
 }
 
 describe('design v3 is a draft copy of v2 (#193)', () => {
@@ -1601,13 +1610,6 @@ describe('the v3 SSAD follows the SAD\'s order and headings (#213)', () => {
 // (assumptions and constraints). Authors are asked for nothing new: the SAD already requires the
 // Overview paragraph at build-ready-checklist, and Design basis is optional and shows only when filled.
 describe('the v3 SSAD opens with the SAD\'s Overview paragraph and Design basis (#214)', () => {
-  const sectionOf = (markdown, heading) => {
-    const start = markdown.indexOf(`\n${heading}\n`)
-    assert.ok(start >= 0, `${heading} is in the document`)
-    const next = markdown.slice(start + 1).search(/\n#{1,2} /)
-    return markdown.slice(start + 1, next < 0 ? undefined : start + 1 + next)
-  }
-
   test('the SSAD renders the same Overview paragraph and Design basis as the SAD', () => {
     const render = (id) => renderArtefact('kiwi-cover-mutual', id, { instancesDir: EXAMPLES_DIR, dryRun: true }).markdown
     const [sad, ssad] = [render('sad'), render('ssad')]
@@ -1752,5 +1754,250 @@ describe('the v3 SAD and SSAD share handover readiness\'s heading, and v3 spells
     const guide = readFileSync('docs/user-guide/index.md', 'utf8')
     assert.match(guide, /from Environments, URLs and domains to Operational readiness/)
     assert.match(guide, /In version 3 the heading is `## Operational accounts and licences`/)
+  })
+})
+
+// #231 (ADR-0060): the As-built follows the SAD's reading order and heading names wherever the two
+// render the same Field, as the SSAD does since #213, rather than the ATLAS reference's. Its own
+// chapters (As-built design, Appendix and the four handover chapters) keep their order after the
+// shared ones. The optional Executive summary is the only Field added, so operational-handover is
+// exactly as strict as on v2. The digests in the #193 block keep v1 and v2 as they were.
+describe('the v3 As-built follows the SAD\'s order and headings (#231)', () => {
+  const AS_BUILT_REQUIRES = [
+    'introduction.executive-summary?',
+    'introduction.overview',
+    'introduction.purpose',
+    'introduction.in-scope',
+    'introduction.out-of-scope',
+    'design-basis.assumptions?',
+    'design-basis.constraints?',
+    'design-basis.caveats?',
+    'design-basis.design-principles?',
+    'design-basis.outcomes-and-deliverables?',
+    'as-built-notes.design-overview',
+    'as-built-notes.architecture-decisions?',
+    'as-built-notes.process-flows',
+    'as-built-notes.infrastructure-and-configuration',
+    'recovery-plan.recovery-approach',
+    'recovery-plan.resiliency?',
+    'recovery-plan.test-scenarios?',
+    'recovery-plan.raci?',
+    'nfrs.disaster-recovery-and-backup',
+    'data-security-controls.controls',
+    'data-security-controls.inheritance-and-dependencies?',
+    'as-built-notes.appendix?',
+    'as-built-notes.changes-from-design',
+    'as-built-notes.acceptance-criteria',
+    'as-built-notes.operational-notes?',
+    'as-built-notes.handover-confirmation',
+    'glossary.terms-and-definitions',
+  ]
+
+  // The example fills every As-built Field, so every optional section shows.
+  const AS_BUILT_OUTLINE = [
+    '# Overview',
+    '## Executive summary',
+    '## Overview',
+    '## Purpose',
+    '## In scope',
+    '## Out of scope',
+    '# Design basis',
+    '## Assumptions',
+    '## Constraints',
+    '## Caveats',
+    '## Design principles',
+    '## Outcomes and deliverables',
+    '# As-built design',
+    '## As-built overview',
+    '## Architecture decisions',
+    '## Data migration and process flows',
+    '## Infrastructure and configuration',
+    '# Failure and recovery',
+    '## Recovery approach',
+    '## Resiliency',
+    '## Test scenarios',
+    '## RACI',
+    '## Backup and archiving policy',
+    '# Security',
+    '## Security concerns',
+    '## Security control inheritance and dependencies',
+    '# Appendix',
+    '# Changes from the agreed design',
+    '# Acceptance criteria',
+    '# Operational notes',
+    '# Handover confirmation',
+    '# Glossary',
+  ]
+
+  // The headings only the As-built has: its own chapters, and the Design basis Fields the SAD leaves
+  // out of its scope.
+  const AS_BUILT_ONLY = [
+    'Caveats',
+    'Design principles',
+    'Outcomes and deliverables',
+    'As-built design',
+    'As-built overview',
+    'Architecture decisions',
+    'Data migration and process flows',
+    'Infrastructure and configuration',
+    'Appendix',
+    'Changes from the agreed design',
+    'Acceptance criteria',
+    'Operational notes',
+    'Handover confirmation',
+  ]
+
+  const slug = 'kiwi-cover-mutual'
+  const requiresOf = (definition) => definition.artefacts.find((a) => a.id === 'as-built').requires
+  const render = (id, instancesDir = EXAMPLES_DIR) => renderArtefact(slug, id, { instancesDir, dryRun: true }).markdown
+  const outlineOf = (markdown) => markdown.split('\n').filter((line) => /^#{1,2} /.test(line) && !/\{\.unnumbered\}/.test(line))
+  const text = (line) => line.replace(/^#+ /, '')
+
+  // A scratch copy of the bundled example, and a way to write over some of a Module's Fields in it.
+  function withExample(fn) {
+    return withScratchDir((dir) => {
+      cpSync(join(EXAMPLES_DIR, slug), join(dir, slug), { recursive: true })
+      const setFields = (moduleId, fields) => {
+        const current = readModule(v3(), slug, moduleId, { instancesDir: dir })
+        writeModule(v3(), slug, moduleId, { ...current, fields: { ...current.fields, ...fields } }, { instancesDir: dir })
+      }
+      return fn(dir, setFields)
+    })
+  }
+
+  test('the As-built\'s requires list is the new outline, in render order', () => {
+    assert.deepEqual(requiresOf(v3()), AS_BUILT_REQUIRES)
+  })
+
+  test('beyond the optional Executive summary, no Field entered or left the As-built, none changed between mandatory and optional, and no Module is newly mounted', () => {
+    const v2 = loadDefinition(DEFINITION, { version: 2 })
+    assert.deepEqual([...requiresOf(v3())].sort(), [...requiresOf(v2), 'introduction.executive-summary?'].sort())
+    const handover = (definition) => definition.stages.find((stage) => stage.id === 'handover').modules
+    assert.deepEqual(handover(v3()), handover(v2))
+  })
+
+  test('with every As-built Field blank, operational-handover holds up exactly the Fields it held up on v2', () => {
+    withExample((dir, setFields) => {
+      for (const moduleId of new Set(AS_BUILT_REQUIRES.map((entry) => entry.split('.')[0]))) {
+        const { fields } = readModule(v3(), slug, moduleId, { instancesDir: dir })
+        setFields(moduleId, Object.fromEntries(Object.entries(fields).map(([id, value]) => [id, Array.isArray(value) ? [] : ''])))
+      }
+      const outstanding = () => {
+        const result = checkGate(slug, { instancesDir: dir, gate: 'operational-handover' })
+        assert.equal(result.pass, false)
+        return {
+          artefact: [...result.artefacts.find((a) => a.id === 'as-built').outstanding].sort(),
+          modules: result.modules.map((m) => [m.id, [...m.outstanding].sort()]),
+        }
+      }
+      const onV3 = outstanding()
+      const file = join(dir, slug, 'instance.yaml')
+      writeFileSync(file, readFileSync(file, 'utf8').replace('definitionVersion: 3', 'definitionVersion: 2'))
+      assert.deepEqual(onV3, outstanding())
+    })
+  })
+
+  test('the rendered As-built has the SAD-led outline, with its own chapters after the shared ones', () => {
+    assert.deepEqual(outlineOf(render('as-built')), AS_BUILT_OUTLINE)
+  })
+
+  test('the chapters the As-built shares with the SAD are in the SAD\'s order', () => {
+    const chapters = (id) => outlineOf(render(id)).filter((line) => line.startsWith('# '))
+    const sad = chapters('sad')
+    const shared = chapters('as-built').filter((chapter) => sad.includes(chapter))
+    assert.deepEqual(shared, ['# Overview', '# Design basis', '# Failure and recovery', '# Security', '# Glossary'])
+    assert.deepEqual(sad.filter((chapter) => shared.includes(chapter)), shared)
+  })
+
+  // Same heading and same content: a Field both documents render sits under the SAD's heading in the
+  // As-built, not merely a heading of the same name.
+  test('a section both documents render carries the SAD\'s heading, and the same Field under it', () => {
+    const [sad, asBuilt] = [render('sad'), render('as-built')]
+    const sadHeadings = new Set(outlineOf(sad))
+    const shared = outlineOf(asBuilt).filter((heading) => sadHeadings.has(heading))
+    assert.deepEqual(outlineOf(asBuilt).filter((heading) => !shared.includes(heading)).map(text), AS_BUILT_ONLY)
+    for (const heading of shared.filter((h) => h.startsWith('## ')).concat('# Glossary')) {
+      assert.equal(sectionOf(asBuilt, heading).trimEnd(), sectionOf(sad, heading).trimEnd(), heading)
+    }
+  })
+
+  test('the Executive summary shows only when filled, and a blank one still passes operational-handover', () => {
+    withExample((dir, setFields) => {
+      assert.match(render('as-built', dir), /^## Executive summary$/m)
+      setFields('introduction', { 'executive-summary': '' })
+      assert.doesNotMatch(render('as-built', dir), /^## Executive summary$/m)
+      assert.equal(checkGate(slug, { instancesDir: dir, gate: 'operational-handover' }).pass, true)
+    })
+  })
+
+  test('with every Design basis Field blank there is no Design basis heading; with some filled, only theirs show, Assumptions first', () => {
+    withExample((dir, setFields) => {
+      const designBasis = /^#{1,2} (Design basis|Assumptions|Constraints|Caveats|Design principles|Outcomes and deliverables)$/
+      const headings = () => outlineOf(render('as-built', dir)).filter((line) => designBasis.test(line))
+      setFields('design-basis', { assumptions: '', constraints: '', caveats: '', 'design-principles': '', 'outcomes-and-deliverables': '' })
+      assert.deepEqual(headings(), [])
+      setFields('design-basis', { constraints: 'Must run in the existing data centre.', caveats: 'Valuation stays partly manual.' })
+      assert.deepEqual(headings(), ['# Design basis', '## Constraints', '## Caveats'])
+      setFields('design-basis', { assumptions: 'Claim volumes stay within 20 percent of today\'s.' })
+      assert.deepEqual(headings(), ['# Design basis', '## Assumptions', '## Constraints', '## Caveats'])
+    })
+  })
+
+  test('the Security chapter always shows Security concerns, and its inheritance section only when filled', () => {
+    withExample((dir, setFields) => {
+      const security = () => outlineOf(render('as-built', dir)).filter((line) => /^## Security /.test(line))
+      setFields('data-security-controls', { 'inheritance-and-dependencies': '' })
+      assert.deepEqual(security(), ['## Security concerns'])
+      setFields('data-security-controls', { controls: '' })
+      assert.deepEqual(security(), ['## Security concerns'])
+      assert.match(sectionOf(render('as-built', dir), '## Security concerns'), /^## Security concerns\n\n— n\/a —\n/)
+    })
+  })
+
+  // The front matter the #196 block checks in the Markdown, here in the Word document itself, as the
+  // SAD's Word tests do (above, and tests/tableOfContentsPrefill.test.js for its table of contents).
+  test('in Word, the As-built keeps the SAD\'s front matter: its cover, Document Control, then a filled-in table of contents in the new order', () => {
+    const artefact = v3().artefacts.find((a) => a.id === 'as-built')
+    const { result, documentXml } = renderWord(slug, 'as-built')
+    const paragraphs = bodyParagraphs(documentXml)
+    const documentControl = paragraphs.findIndex((p) => p.text === 'Document Control')
+    const contents = paragraphs.findIndex((p) => p.style === 'TOCHeading')
+    assert.deepEqual(
+      paragraphs.slice(0, documentControl).filter((p) => p.text.trim() !== '').map(({ style, text }) => [style, text]),
+      [
+        ['CoverClassification', 'IN-CONFIDENCE'],
+        ['Title', 'Kiwi Cover Mutual'],
+        ['Subtitle', 'As-built'],
+        ['CoverDetails', 'Version: design v3 · Operational Handover'],
+        ['CoverDetails', 'Status: Draft'],
+        ['CoverDetails', 'Author: c.barlow'],
+        ['CoverPurpose', artefact.coverPurpose.replace(/\s+/g, ' ').trim()],
+      ],
+      'the cover: classification, title, document type, version, status, author and cover purpose'
+    )
+    assert.ok(contents > documentControl, 'the table of contents follows Document Control')
+    assert.equal(paragraphs[contents].text, 'Table of Contents')
+
+    const toc = tableOfContents(documentXml)
+    assert.equal(toc.dirty, true, 'Word still rebuilds it, with page numbers, on open')
+    const styles = wordStyles(docxPart(result.docxBytes, 'word/styles.xml'))
+    const expected = expectedTableOfContents(documentXml, styles, docxPart(result.docxBytes, 'word/numbering.xml'))
+    assert.deepEqual(toc.entries.map(({ style, text }) => ({ style, text })), expected.map(({ style, text }) => ({ style, text })))
+    const bookmarks = headingBookmarks(documentXml)
+    for (const [i, entry] of toc.entries.entries()) assert.equal(bookmarks.get(entry.anchor)?.heading, expected[i].heading, entry.text)
+
+    const chapters = AS_BUILT_OUTLINE.filter((line) => line.startsWith('# ')).map((line, i) => `${i + 1}\t${text(line)}`)
+    assert.deepEqual(toc.entries.filter((e) => e.style === 'TOC1').map((e) => e.text), chapters, 'one numbered entry per chapter, in the new order')
+    assert.deepEqual(toc.entries.slice(0, 4).map((e) => e.text), ['Document Control', 'Review & sign-off', '1\tOverview', '1.1\tExecutive summary'])
+  })
+
+  test('the change is recorded: the v3 CHANGELOG, ADR-0060 (pointed to from ADR-0057) and the User Guide', () => {
+    const changelog = loadDefinitionChangelog(DEFINITION, VERSION)
+    assert.match(changelog.slice(0, changelog.indexOf('\n## v2')), /^### The As-built follows the SAD's order and headings \(#231\)$/m)
+    const adr = readdirSync('docs/adr').filter((file) => file.startsWith('0060-'))
+    assert.equal(adr.length, 1, 'one ADR-0060')
+    assert.match(readFileSync(join('docs/adr', adr[0]), 'utf8'), /standing template/)
+    assert.match(readFileSync('docs/adr/0057-the-ssad-follows-the-sad-not-its-reference-instance.md', 'utf8'), /ADR-0060/)
+    assert.match(readFileSync('docs/user-guide/index.md', 'utf8'), /\*\*Version 3 \(draft\)\*\* puts the As-built in the SAD's order/)
   })
 })

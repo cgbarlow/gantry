@@ -76,6 +76,11 @@ with the SAD collide, consistency wins for the SSAD.
 - #233 applied the heading rule to the one section #213 missed: the SSAD's
   "Support handover readiness" is now the SAD's "Operational readiness". No
   new exception was needed.
+- ADR-0060 (#231) generalises this decision into a rule for every design
+  document: a document whose source is one filled instance follows its
+  sibling anchor, and one whose source is a standing template follows that
+  template. It applies the rule to the As-built, which follows the SAD as the
+  SSAD does.
 
 ## Status
 

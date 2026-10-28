@@ -731,18 +731,20 @@ Reference: *FV Help Tool SSAD* — a filled instance for one product family, not
 
 Reference: *ATLAS – Migration Infrastructure Design – Approved* — a filled, approved design for one migration, so its lower headings are that migration's services. Fields are authored at the Operational Handover stage; the Overview, Design Basis, Glossary, Recovery Plan and Data Security Controls content is carried from Detailed Design and re-opened, not re-typed.
 
+**Version 3 (draft)** puts the As-built in the SAD's order, under the SAD's headings, wherever the two show the same content, so a reviewer at Operational Handover finds each thing where the SAD and SSAD put it: `# Overview` (Executive summary *(only when filled)*, Overview, Purpose, In scope, Out of scope) › `# Design basis` *(only when filled: Assumptions, Constraints, Caveats, Design principles, Outcomes and deliverables)* › `# As-built design` › `# Failure and recovery` (Recovery approach, then Resiliency, Test scenarios and RACI when filled, then Backup and archiving policy) › `# Security` (Security concerns, and Security control inheritance and dependencies when filled) › `# Appendix` *(only when filled)* › `# Changes from the agreed design` › `# Acceptance criteria` › `# Operational notes` *(only when filled)* › `# Handover confirmation` › `# Glossary`. The As-built's own chapters, from As-built design to Handover confirmation, keep their place. The only new field is the optional Executive summary (Overview › Executive summary `introduction.executive-summary`), the one the SAD and SSAD open with; otherwise the fields and the gate are version 2's. The table below gives version 2's headings, with a *Version 3* note on each row whose heading or place changed. See ADR-0060.
+
 | Reference heading | Where to find it in Gantry | Description / rationale |
 | --- | --- | --- |
 | `H1` Table of Contents | Not modelled | Word generates it. |
-| `H1` Terms & Definitions | Glossary › Terms and definitions `glossary.terms-and-definitions` *(carried)* → `# Terms & Definitions` | Match. |
+| `H1` Terms & Definitions | Glossary › Terms and definitions `glossary.terms-and-definitions` *(carried)* → `# Terms & Definitions` | Match. *Version 3:* `# Glossary`, the last chapter, as in the SAD and SSAD. |
 | `H1` Introduction | `# Overview` (Overview module, carried) | Named for the module. |
 | `H2` Overview | Overview › Overview `introduction.overview` → `## Overview` | Match. |
 | `H2` Purpose | Overview › Purpose `introduction.purpose` → `## Purpose` | Match. |
 | `H2` Scope | Overview › In scope and › Out of scope | The scope backbone. |
 | `H3` In Scope | Overview › In scope `introduction.in-scope` → `## In scope` | Match. |
 | `H3` Out of Scope | Overview › Out of scope `introduction.out-of-scope` → `## Out of scope` | Match. |
-| `H2` Constraints | Design Basis › Constraints `design-basis.constraints` *(optional)* → `## Constraints` under `# Design basis` | Match; carried from SOAP onward. |
-| `H2` Assumptions | Design Basis › Assumptions `design-basis.assumptions` *(optional)* → `## Assumptions` | Match. |
+| `H2` Constraints | Design Basis › Constraints `design-basis.constraints` *(optional)* → `## Constraints` under `# Design basis` | Match; carried from SOAP onward. *Version 3:* after Assumptions, as in the SAD. |
+| `H2` Assumptions | Design Basis › Assumptions `design-basis.assumptions` *(optional)* → `## Assumptions` | Match. *Version 3:* the first section of `# Design basis`, as in the SAD. |
 | `H2` Caveats | Design Basis › Caveats `design-basis.caveats` *(optional)* → `## Caveats` | Match. |
 | `H2` Design Principals | Design Basis › Design principles `design-basis.design-principles` *(optional)* → `## Design principles` | Match; the reference's spelling is corrected. |
 | `H2` Outcomes / Deliverables | Design Basis › Outcomes and deliverables `design-basis.outcomes-and-deliverables` *(optional)* → `## Outcomes and deliverables` | Match. |
@@ -773,7 +775,7 @@ Reference: *ATLAS – Migration Infrastructure Design – Approved* — a filled
 | `H4` Migration Tools | As-Built Notes › Infrastructure and configuration — sub-heading | As above. |
 | `H4` Azure Copy (AzCopy) | As-Built Notes › Infrastructure and configuration — sub-heading | As above. |
 | `H5` Azure Storage | As-Built Notes › Infrastructure and configuration — sub-heading | As above. |
-| `H5` Security Controls | Data Security Controls › Controls `data-security-controls.controls` → `# Data security controls` | Control statements go in the control register, not the infrastructure narrative. |
+| `H5` Security Controls | Data Security Controls › Controls `data-security-controls.controls` → `# Data security controls` | Control statements go in the control register, not the infrastructure narrative. *Version 3:* `## Security concerns` under `# Security`. |
 | `H4` Azure Storage Explorer | As-Built Notes › Infrastructure and configuration — sub-heading | Instance-specific service. |
 | `H4` Python (Programming Language) | As-Built Notes › Infrastructure and configuration — sub-heading | As above. |
 | `H4` Oracle Ports | As-Built Notes › Infrastructure and configuration — sub-heading | As above. |
@@ -794,7 +796,7 @@ Reference: *ATLAS – Migration Infrastructure Design – Approved* — a filled
 | `H5` Network Rules | As-Built Notes › Infrastructure and configuration — sub-heading (the full rule set belongs in the Appendix) | As above. |
 | `H4` Virtual Machines (VM) | As-Built Notes › Infrastructure and configuration — sub-heading | As above. |
 | `H5` Management | As-Built Notes › Infrastructure and configuration — sub-heading | As above. |
-| `H5` Backups | Non-Functional Requirements › Disaster recovery and backup `nfrs.disaster-recovery-and-backup` *(carried)* → `## Backup and archiving policy` under `# Recovery plan` | The backup policy lives with the recovery targets it serves. |
+| `H5` Backups | Non-Functional Requirements › Disaster recovery and backup `nfrs.disaster-recovery-and-backup` *(carried)* → `## Backup and archiving policy` under `# Recovery plan` | The backup policy lives with the recovery targets it serves. *Version 3:* the last section of `# Failure and recovery`, after the recovery approach, as in the SAD. |
 | `H4` Azure File (Storage Account) | As-Built Notes › Infrastructure and configuration — sub-heading | Instance-specific service. |
 | `H5` File Shares | As-Built Notes › Infrastructure and configuration — sub-heading | As above. |
 | `H4` Private Endpoint(s) | As-Built Notes › Infrastructure and configuration — sub-heading | As above. |
@@ -813,18 +815,19 @@ Reference: *ATLAS – Migration Infrastructure Design – Approved* — a filled
 | `H3` Identity | Data Security Controls › Controls (access-management rows); group and role names in Infrastructure and configuration | Identity design is a control; the concrete groups are configuration. |
 | `H4` Azure Security Groups | Data Security Controls › Controls; Infrastructure and configuration | As above. |
 | `H4` Azure Roles | Data Security Controls › Controls; Infrastructure and configuration | As above. |
-| `H3` Recovery Plan | Recovery Plan › Recovery approach `recovery-plan.recovery-approach` *(carried)* → `# Recovery plan` / `## Recovery approach` | Extracted from the infrastructure tree to its own chapter, shared with the SAD's Failure and recovery. |
+| `H3` Recovery Plan | Recovery Plan › Recovery approach `recovery-plan.recovery-approach` *(carried)* → `# Recovery plan` / `## Recovery approach` | Extracted from the infrastructure tree to its own chapter, shared with the SAD's Failure and recovery. *Version 3:* `# Failure and recovery` / `## Recovery approach`, the chapter's first section, as in the SAD. |
 | `H4` Azure Platform | Recovery Plan › Recovery approach | The platform's failover model. |
 | `H4` Azure Resiliency | Recovery Plan › Resiliency `recovery-plan.resiliency` *(optional)* → `## Resiliency` | Match. |
 | `H4` Azure Test Scenarios | Recovery Plan › Test scenarios `recovery-plan.test-scenarios` *(optional)* → `## Test scenarios` | Match. |
 | `H4` RACI | Recovery Plan › RACI `recovery-plan.raci` *(optional)* → `## RACI` | Match. |
-| `H1` Data Security Controls | Data Security Controls › Controls `data-security-controls.controls` *(carried)* → `# Data security controls` | Match. |
-| `H2` Inheritance & Dependencies | Data Security Controls › Inheritance and dependencies `data-security-controls.inheritance-and-dependencies` *(optional)* → `## Inheritance and dependencies` | Match. |
+| `H1` Data Security Controls | Data Security Controls › Controls `data-security-controls.controls` *(carried)* → `# Data security controls` | Match. *Version 3:* `# Security` / `## Security concerns`, the SAD's headings. |
+| `H2` Inheritance & Dependencies | Data Security Controls › Inheritance and dependencies `data-security-controls.inheritance-and-dependencies` *(optional)* → `## Inheritance and dependencies` | Match. *Version 3:* `## Security control inheritance and dependencies` under `# Security`, the SAD's heading. |
 | `H1` Appendix A | As-Built Notes › Appendix `as-built-notes.appendix` *(optional)* → `# Appendix` | A generic container for reference material that would clutter the body. |
 | `H2` Azure Firewall Rules | As-Built Notes › Appendix — sub-heading | Instance-specific. |
 | `H3` Test Use Case | As-Built Notes › Appendix — sub-heading | As above. |
 | `H2` Security Risk Assessment (SRA) | As-Built Notes › Appendix — sub-heading | As above. |
-| *(gantry-only)* `# Changes from the agreed design` · `# Acceptance criteria` · `# Operational notes` · `# Handover confirmation` | As-Built Notes › Changes from the agreed design, › Acceptance criteria, › Operational notes *(optional)*, › Handover confirmation | Rendered after the Appendix. The ATLAS is an approved *design*; these four sections are what turns an as-built record into an operational handover, and have no counterpart there. |
+| *(gantry-only)* `# Changes from the agreed design` · `# Acceptance criteria` · `# Operational notes` · `# Handover confirmation` | As-Built Notes › Changes from the agreed design, › Acceptance criteria, › Operational notes *(optional)*, › Handover confirmation | Rendered after the Appendix. The ATLAS is an approved *design*; these four sections are what turns an as-built record into an operational handover, and have no counterpart there. *Version 3:* unchanged, followed by `# Glossary`. |
+| *(gantry-only, version 3)* `## Executive summary` | Overview › Executive summary `introduction.executive-summary` *(optional, carried)* → `## Executive summary`, opening `# Overview` | The ATLAS has no executive summary; the SAD and SSAD open with one, so the As-built does too when it is filled. |
 
 #### Fields by stage
 
@@ -841,7 +844,7 @@ The table below is the field-level view of "content is introduced once and carri
 | Background and context › Affected domains `background.affected-domains` | ● SOAP | — | — | — | SOAP |
 | Background and context › Opportunity `background.opportunity` | ● Full SOAP | ● HLD | — | — | SOAP → HLD |
 | Background and context › Success criteria `background.success-criteria` | ○ editor only | ● HLD | — | — | SOAP → HLD |
-| Overview › Executive summary `introduction.executive-summary` | ○ editor only | ○ editor only | ○ SAD, SSAD | ○ editor only | SOAP → Handover |
+| Overview › Executive summary `introduction.executive-summary` | ○ editor only | ○ editor only | ○ SAD, SSAD | ○ editor only; As-built in version 3 | SOAP → Handover |
 | Overview › Overview `introduction.overview` | ○ Full SOAP | ○ editor only | ● SAD; SSAD in version 3 | ● As-built | SOAP → Handover |
 | Overview › Purpose `introduction.purpose` | ○ editor only | ○ editor only | ● SAD, SSAD | ● As-built | SOAP → Handover |
 | Overview › In scope `introduction.in-scope` | ● Full SOAP | ● HLD | ● SAD, SSAD | ● As-built | SOAP → Handover |

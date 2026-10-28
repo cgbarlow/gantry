@@ -51,7 +51,8 @@ with no loss; `business-process-flows` is renamed `process-flows`.
 `as-built.md.tmpl` renders sections 1–7 in the ATLAS reference's exact order
 (Terms & Definitions → Introduction → As-built design → Infrastructure →
 Recovery plan → Data security controls → Appendix), then the four gantry-only
-governance sections.
+governance sections. *(Design v3 replaces that order with the SAD's: see
+ADR-0060.)*
 
 ## Scope of this change (vs. deferred)
 

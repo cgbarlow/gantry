@@ -8,16 +8,18 @@
      only caller now, wrapping the include in its own guard so an entirely
      blank Design Basis section renders no heading at all. Each field is
      optional (not in as-built's `requires`), so it stays a
-     suppress-when-blank `<% if %>` section. Caller passes { designBasis }. */
-%><% if (it.designBasis.constraints) { %>
-## Constraints
-
-<%~ it.designBasis.constraints %>
-<% } %>
-<% if (it.designBasis.assumptions) { %>
+     suppress-when-blank `<% if %>` section. #231 (ADR-0060): Assumptions
+     come before Constraints, the order the SAD, SSAD and Full SOAP use.
+     Caller passes { designBasis }. */
+%><% if (it.designBasis.assumptions) { %>
 ## Assumptions
 
 <%~ it.designBasis.assumptions %>
+<% } %>
+<% if (it.designBasis.constraints) { %>
+## Constraints
+
+<%~ it.designBasis.constraints %>
 <% } %>
 <% if (it.designBasis.caveats) { %>
 ## Caveats
