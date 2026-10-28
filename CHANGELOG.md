@@ -17,6 +17,51 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.12.1 — 2026-10-28
+
+The design v3 documents now read as matched sets: the As-built follows the Solution Architecture
+Document (SAD), the SOAP follows the Full SOAP, and the last heading differences between the SAD
+and the SSAD are gone. There is nothing new to write and no Gate is stricter: no Field was added
+to or removed from a document, and none became required. v3 is still a draft; v1 and v2
+documents render exactly as before. Re-render a v3 document to pick up the new layout.
+
+**If you have design v3 Instances other than the bundled examples:** retitle their "Operational
+accounts and licenses" heading to "Operational accounts and licences" (see #233 below), or the
+SSAD will find that Field empty at `build-ready-checklist`.
+
+### Changed
+
+- **The As-built follows the SAD's order and headings** (#231). Someone reviewing the SAD, SSAD
+  and As-built together at Operational Handover now finds each thing in the same place, under the
+  same name. The As-built reads Overview, Design basis, As-built design, Failure and recovery,
+  Security, Appendix, Changes from the agreed design, Acceptance criteria, Operational notes,
+  Handover confirmation and Glossary. "Recovery plan" is now "Failure and recovery", with the
+  recovery approach before the backup policy. The data security controls sit under the SAD's
+  "Security" headings, and "Terms & Definitions" is now "Glossary", at the end. Design basis lists
+  Assumptions before Constraints. The Executive summary, when filled, now opens the As-built's
+  Overview as it does in the SAD. It's optional and was already available at Operational
+  Handover. See ADR-0060 for the rule.
+- **The SOAP follows the Full SOAP** (#232). The two business-case documents are rendered from
+  the same data, often for the same reader, and now put each Field under the same heading in the
+  same order. The Full SOAP keeps its order, but "Introduction" is now **Overview**, "Questions"
+  is now **Open questions** (the HLD's heading), and "High level" is hyphenated, **High-level**,
+  as in the SAD. The SOAP now reads Overview, Design basis (Assumptions, when filled), High-level
+  requirements, High-level solution overview, Teams required, Estimates and References (when
+  filled), under the Full SOAP's names: "Background and context" is now "Overview", "High-level
+  solution design" is "High-level solution overview", "Teams and contact persons" is "Teams
+  required" and "High-level estimates" is "Estimates". Affected domains, Process flow and Feature
+  breakdown stay in the SOAP, beside their nearest neighbours. Because the solution overview now
+  comes first, the SOAP's diagram numbers change: the claims view is Diagram 1 and the process
+  flow Diagram 2.
+- **SAD and SSAD tidy-up** (#233). The SSAD's "Support handover readiness" section is now
+  "Operational readiness", the SAD's heading for the same Field. Both documents, and the editor,
+  now spell "Operational accounts and licences" the New Zealand way. An Instance file finds each
+  Field by its title, so a v3 Instance written before this change shows its old "Operational
+  accounts and licenses" list as a separate section, and the Field as empty, until you retitle
+  the heading in the module file (or move the list across). The Field's id is unchanged, the
+  bundled Kiwi Cover Mutual example is already retitled, and v1 and v2 Instances keep the old
+  title.
+
 ## 0.12.0 — 2026-10-28
 
 Instance settings: the choices a Definition asks every Instance to make once, for the whole
