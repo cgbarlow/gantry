@@ -50,6 +50,13 @@ everything its siblings hold:
   As-built.
 - **The Full SOAP** for the business-case pair: the SOAP follows it (#232).
 
+The anchors were themselves shaped after blank templates, the *SAD Template*
+and the *JEDI Full SOAP Template*. Neither is a structure a committee reads
+every paper against, as the TAC template is for the HLD, so neither is a
+standing template in this sense. The SAD and the Full SOAP keep their order
+because they are the anchors, and a change to an anchor's order or headings
+should carry through to the siblings that follow it.
+
 ### Applied to the As-built
 
 - The Overview chapter opens with the optional Executive summary, as in the
