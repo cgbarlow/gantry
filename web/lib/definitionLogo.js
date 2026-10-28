@@ -15,7 +15,10 @@
 // Pure and dependency-free, and asynchronous only because it uses the platform's
 // (De)CompressionStream, so it runs unchanged in Node (lib/definition.js, for the server's
 // Definitions page) and in the browser (web/lib/localDefinitionFiles.js, for a Local Workspace's
-// Definition editor), as web/lib/targetSize.js does.
+// Definition editor), as web/lib/targetSize.js does. #224: the reading and replacing are written
+// as steps that ask for each (de)compression in turn, so `readHeaderLogoSync`/`replaceHeaderLogoSync`
+// can run the same steps synchronously over a caller's own codec (lib/instanceLogo.js passes
+// node:zlib's), for the render, which applies an Instance's logo to a copy of a reference document.
 
 /** The alt text a replaced logo carries: it names the organisation's logo, never the sample one. */
 export const LOGO_ALT_TEXT = 'Organisation logo'
@@ -109,6 +112,36 @@ async function transform(bytes, stream) {
   return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer())
 }
 
+// The two steps that need compression, yielded by the generators below as `{ inflate }` or
+// `{ deflate }` (raw deflate bytes in, bytes out) and answered by whichever driver runs them:
+// `runAsync` over the platform's (De)CompressionStream, or `runSync` over a caller's codec,
+// `{ inflateRaw(bytes), deflateRaw(bytes) }`, each returning a Uint8Array.
+function* inflate(data) {
+  return yield { inflate: data }
+}
+
+function* deflate(data) {
+  return yield { deflate: data }
+}
+
+async function runAsync(steps) {
+  let step = steps.next()
+  while (!step.done) {
+    const { inflate: compressed, deflate: raw } = step.value
+    step = steps.next(compressed ? await transform(compressed, new DecompressionStream('deflate-raw')) : await transform(raw, new CompressionStream('deflate-raw')))
+  }
+  return step.value
+}
+
+function runSync(steps, codec) {
+  let step = steps.next()
+  while (!step.done) {
+    const { inflate: compressed, deflate: raw } = step.value
+    step = steps.next(new Uint8Array(compressed ? codec.inflateRaw(compressed) : codec.deflateRaw(raw)))
+  }
+  return step.value
+}
+
 // A .docx's entries, from its central directory: each with its raw (still compressed) data, so an
 // entry this module doesn't change is written back exactly as it was. Throws on anything that
 // isn't a readable zip, and on ZIP64, which a reference document never needs.
@@ -152,19 +185,19 @@ function readZip(bytes) {
   return entries
 }
 
-async function entryBytes(entry) {
+function* entryBytes(entry) {
   if (entry.method === 0) return entry.data
-  if (entry.method === 8) return transform(entry.data, new DecompressionStream('deflate-raw'))
+  if (entry.method === 8) return yield* inflate(entry.data)
   throw new Error(`Unsupported zip compression method ${entry.method} for ${entry.name}`)
 }
 
-async function entryText(entry) {
-  return new TextDecoder().decode(await entryBytes(entry))
+function* entryText(entry) {
+  return new TextDecoder().decode(yield* entryBytes(entry))
 }
 
 // A new entry for `name` holding `content` (text or bytes), deflated, keeping `like`'s metadata
 // when it replaces an existing entry.
-async function newEntry(name, content, like) {
+function* newEntry(name, content, like) {
   const raw = typeof content === 'string' ? new TextEncoder().encode(content) : content
   const nameBytes = new TextEncoder().encode(name)
   return {
@@ -179,7 +212,7 @@ async function newEntry(name, content, like) {
     size: raw.length,
     internalAttributes: like?.internalAttributes ?? 0,
     externalAttributes: like?.externalAttributes ?? 0,
-    data: await transform(raw, new CompressionStream('deflate-raw')),
+    data: yield* deflate(raw),
   }
 }
 
@@ -279,11 +312,11 @@ function headerPictures(headerXml) {
 
 // The package's header parts: those [Content_Types].xml declares as headers, and any part named
 // like one (`word/header2.xml`), which is how Word and Pandoc name them.
-async function headerPartNames(entries) {
+function* headerPartNames(entries) {
   const names = new Set(entries.filter((e) => HEADER_PART_RE.test(e.name)).map((e) => e.name))
   const contentTypes = entries.find((e) => e.name === '[Content_Types].xml')
   if (contentTypes) {
-    for (const [tag] of (await entryText(contentTypes)).matchAll(/<Override\s[^>]*>/g)) {
+    for (const [tag] of (yield* entryText(contentTypes)).matchAll(/<Override\s[^>]*>/g)) {
       if (attr(tag, 'ContentType') === HEADER_CONTENT_TYPE) names.add(attr(tag, 'PartName')?.replace(/^\//, ''))
     }
   }
@@ -292,19 +325,19 @@ async function headerPartNames(entries) {
 
 // Each header's pictures, resolved to the image part they show: `[{ part, headerXml, relsPath,
 // relsXml, pictures: [{ xml, start, rId, media }] }]`, only the headers that have one.
-async function findHeaderLogos(entries) {
+function* findHeaderLogos(entries) {
   const byName = new Map(entries.map((e) => [e.name, e]))
-  const headers = await headerPartNames(entries)
+  const headers = yield* headerPartNames(entries)
   const found = []
   for (const entry of entries) {
     if (!headers.has(entry.name)) continue
-    const headerXml = await entryText(entry)
+    const headerXml = yield* entryText(entry)
     const pictures = headerPictures(headerXml)
     if (pictures.length === 0) continue
     const relsPath = relsPathFor(entry.name)
     const relsEntry = byName.get(relsPath)
     if (!relsEntry) continue
-    const relsXml = await entryText(relsEntry)
+    const relsXml = yield* entryText(relsEntry)
     const rels = relationships(relsXml)
     const resolved = []
     for (const picture of pictures) {
@@ -333,21 +366,30 @@ function contentTypeFor(contentTypesXml, partName) {
  * first header picture, or `null` when no header has one (or `docx` isn't a readable package).
  */
 export async function readHeaderLogo(docx) {
+  return runAsync(readHeaderLogoSteps(docx))
+}
+
+/** `readHeaderLogo`, run synchronously over `codec` (`{ inflateRaw, deflateRaw }`, such as node:zlib's). */
+export function readHeaderLogoSync(docx, codec) {
+  return runSync(readHeaderLogoSteps(docx), codec)
+}
+
+function* readHeaderLogoSteps(docx) {
   let entries
   try {
     entries = readZip(docx)
   } catch {
     return null
   }
-  const logos = await findHeaderLogos(entries)
+  const logos = yield* findHeaderLogos(entries)
   const media = logos[0]?.pictures[0]?.media
   if (!media) return null
   const mediaEntry = entries.find((e) => e.name === media)
   const contentTypesEntry = entries.find((e) => e.name === '[Content_Types].xml')
-  const bytes = await entryBytes(mediaEntry)
+  const bytes = yield* entryBytes(mediaEntry)
   return {
     bytes,
-    contentType: logoImageInfo(bytes)?.contentType ?? (contentTypesEntry ? contentTypeFor(await entryText(contentTypesEntry), media) : 'application/octet-stream'),
+    contentType: logoImageInfo(bytes)?.contentType ?? (contentTypesEntry ? contentTypeFor(yield* entryText(contentTypesEntry), media) : 'application/octet-stream'),
     extension: media.split('.').pop().toLowerCase(),
   }
 }
@@ -405,6 +447,15 @@ function refitPicture(drawingXml, image, mediaName) {
  * (`err.invalidImage`) or `docx` isn't a readable package.
  */
 export async function replaceHeaderLogo(docx, image) {
+  return runAsync(replaceHeaderLogoSteps(docx, image))
+}
+
+/** `replaceHeaderLogo`, run synchronously over `codec` (`{ inflateRaw, deflateRaw }`, such as node:zlib's). */
+export function replaceHeaderLogoSync(docx, image, codec) {
+  return runSync(replaceHeaderLogoSteps(docx, image), codec)
+}
+
+function* replaceHeaderLogoSteps(docx, image) {
   const info = logoImageInfo(image)
   if (!info) {
     const err = new Error(logoImageProblem(image))
@@ -412,7 +463,7 @@ export async function replaceHeaderLogo(docx, image) {
     throw err
   }
   const entries = readZip(docx)
-  const logos = await findHeaderLogos(entries)
+  const logos = yield* findHeaderLogos(entries)
   if (logos.length === 0) return { docx, replaced: 0 }
 
   // The image parts only the logo showed are dropped; one anything else still shows is kept.
@@ -421,7 +472,7 @@ export async function replaceHeaderLogo(docx, image) {
   for (const entry of entries) {
     if (!entry.name.endsWith('.rels')) continue
     const owner = entry.name.replace(/(^|\/)_rels\/([^/]*)\.rels$/, '$1$2')
-    for (const rel of relationships(await entryText(entry))) {
+    for (const rel of relationships(yield* entryText(entry))) {
       if (!rel.target || rel.mode === 'External' || logoRels.has(`${entry.name}#${rel.id}`)) continue
       oldMedia.delete(resolveTarget(owner, rel.target))
     }
@@ -447,7 +498,7 @@ export async function replaceHeaderLogo(docx, image) {
   // Override naming a part the package doesn't hold is one a strict reader may refuse.
   const contentTypes = kept.find((e) => e.name === '[Content_Types].xml')
   if (contentTypes) {
-    const original = await entryText(contentTypes)
+    const original = yield* entryText(contentTypes)
     let xml = original.replace(/<Override\s[^>]*>/g, (tag) => (oldMedia.has(attr(tag, 'PartName')?.replace(/^\//, '')) ? '' : tag))
     const hasDefault = [...xml.matchAll(/<Default\s[^>]*>/g)].some(([tag]) => attr(tag, 'Extension')?.toLowerCase() === info.extension)
     if (!hasDefault) xml = xml.replace(/(<Types\b[^>]*>)/, `$1<Default Extension="${info.extension}" ContentType="${info.contentType}"/>`)
@@ -455,8 +506,8 @@ export async function replaceHeaderLogo(docx, image) {
   }
 
   const out = []
-  for (const entry of kept) out.push(replacements.has(entry.name) ? await newEntry(entry.name, replacements.get(entry.name), entry) : entry)
-  out.push(await newEntry(mediaPart, image, null))
+  for (const entry of kept) out.push(replacements.has(entry.name) ? yield* newEntry(entry.name, replacements.get(entry.name), entry) : entry)
+  out.push(yield* newEntry(mediaPart, image, null))
   return { docx: writeZip(out), replaced }
 }
 

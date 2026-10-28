@@ -81,12 +81,18 @@ import {
   forgetWorkspace,
   readTextFile as readLocalTextFile,
   writeTextFile as writeLocalTextFile,
+  readBinaryFile as readLocalBinaryFile,
+  writeBinaryFile as writeLocalBinaryFile,
+  removeFile as removeLocalFile,
   parseWorkspaceJson,
 } from '../lib/localWorkspace.js'
-import { parseInstanceYaml, withInstanceAssignee, withStoredInstanceSettings } from '../lib/localInstanceFiles.js'
-import { resolveDefinitionStructure } from '../lib/localDefinitionFiles.js'
+import { parseInstanceYaml, withInstanceAssignee, withStoredInstanceSettings, withStoredInstanceLogo } from '../lib/localInstanceFiles.js'
+import { resolveDefinitionStructure, resolveDefinitionLogo } from '../lib/localDefinitionFiles.js'
 import { instanceSettingsWithValues } from '../lib/instanceSettings.js'
 import { InstanceSettingSelect } from '../lib/instanceSettingsView.js'
+import { instanceLogoPath, instanceLogoRecordPath } from '../lib/instanceLogo.js'
+import { logoImageInfo } from '../lib/definitionLogo.js'
+import { InstanceLogoControl } from '../lib/instanceLogoControl.js'
 
 // ---------- Shared header ----------
 // One header shape for all three Settings screens: a title (distinct per
@@ -1376,6 +1382,30 @@ async function saveInstanceSettings(slug, settings) {
   return body
 }
 
+// #224: the server-hosted Logo control's I/O, over `/api/instance/logo` (lib/server.js).
+async function loadInstanceLogo(slug) {
+  const res = await apiFetchForInstance(slug, `/api/instance/logo?slug=${encodeURIComponent(slug)}`)
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(body.message ?? body.error ?? `Couldn't read the logo (${res.status})`)
+  const bytes = Uint8Array.from(atob(body.imageBase64 ?? ''), (c) => c.charCodeAt(0))
+  return { image: new Blob([bytes], { type: body.contentType }), extension: body.extension, source: body.source }
+}
+
+async function writeInstanceLogo(slug, bytes) {
+  const res = await apiFetchForInstance(slug, `/api/instance/logo?slug=${encodeURIComponent(slug)}`, bytes
+    ? { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageBase64: bytesToBase64(bytes) }) }
+    : { method: 'DELETE' })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(body.message ?? body.error ?? `Couldn't save the logo (${res.status})`)
+  return body
+}
+
+function bytesToBase64(bytes) {
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return btoa(binary)
+}
+
 // #219 (docs/adr/0058): the Instance settings the instance's Definition offers — Target size (#202,
 // docs/adr/0054) today — under one heading, with one Save for all of them. `settings` is
 // web/lib/instanceSettings.js's description with each setting's current `value` (`instanceSettings`
@@ -1383,7 +1413,10 @@ async function saveInstanceSettings(slug, settings) {
 // whose Definition offers none gets no section, so its Settings look exactly as before. `onSave`
 // writes the changed values — the server route for a server-hosted instance, the folder's own
 // instance.yaml for a Local-workspace one.
-function InstanceSettingsSection({ settings, disabled = false, onSave }) {
+// #224: `logo`, when the Definition offers a Logo (its reference documents carry a header logo), is
+// the Logo control's I/O (web/lib/instanceLogoControl.js). It sits under the same heading but saves
+// on its own, the moment an image is picked or removed, as the Definitions page's Logo control does.
+function InstanceSettingsSection({ settings, disabled = false, onSave, logo = null }) {
   const current = () => Object.fromEntries(settings.map((setting) => [setting.id, setting.value]))
   const [draft, setDraft] = useState(current)
   const [status, setStatus] = useState('')
@@ -1423,10 +1456,15 @@ function InstanceSettingsSection({ settings, disabled = false, onSave }) {
           </div>
         `
       )}
-      <div class="workspace-field-row">
-        <button type="button" class="btn small" disabled=${disabled} onClick=${handleSave}>Save</button>
-      </div>
-      <div class="workspace-field-status">${status}</div>
+      ${settings.length
+        ? html`
+            <div class="workspace-field-row">
+              <button type="button" class="btn small" disabled=${disabled} onClick=${handleSave}>Save</button>
+            </div>
+            <div class="workspace-field-status">${status}</div>
+          `
+        : null}
+      ${logo ? html`<${InstanceLogoControl} disabled=${disabled} ...${logo} />` : null}
     </section>
   `
 }
@@ -1567,6 +1605,9 @@ function LocalInstanceSettingsPage({ query, workspaceId, slug }) {
   // #219: this instance's Definition, as far as its Instance settings need it — `null` until read, or
   // when it can't be, which offers none.
   const [structure, setStructure] = useState(null)
+  // #224: the Definition's header logo — what the instance shows without one of its own — or `null`
+  // when its reference documents carry none (or it can't be read), which offers no Logo setting.
+  const [definitionLogo, setDefinitionLogo] = useState(null)
 
   async function load() {
     setState('loading')
@@ -1591,6 +1632,7 @@ function LocalInstanceSettingsPage({ query, workspaceId, slug }) {
       } catch {
         setStructure(null)
       }
+      setDefinitionLogo(await resolveDefinitionLogo(h, rec.definition, rec.definitionVersion ?? 1).catch(() => null))
       setState('ready')
     } catch (err) {
       setError(err.message)
@@ -1643,6 +1685,29 @@ function LocalInstanceSettingsPage({ query, workspaceId, slug }) {
 
   const instanceSettings = structure && record ? instanceSettingsWithValues(structure, record) : []
 
+  // #224: the Local Workspace twin of PUT/DELETE /api/instance/logo — the image in the instance's
+  // `assets/` folder and the `logo:` key naming it, written straight into the folder.
+  const instanceFolder = `gantry-workspace/${slug}`
+  async function loadLocalLogo() {
+    const ownPath = instanceLogoPath(record)
+    const own = ownPath ? await readLocalBinaryFile(handle, `${instanceFolder}/${ownPath}`).catch(() => null) : null
+    const ownInfo = own && logoImageInfo(own)
+    if (ownInfo) return { image: new Blob([own], { type: ownInfo.contentType }), extension: ownInfo.extension, source: 'instance' }
+    return { image: new Blob([definitionLogo.bytes], { type: definitionLogo.contentType }), extension: definitionLogo.extension, source: 'definition' }
+  }
+  async function writeLocalLogo(bytes) {
+    const previous = instanceLogoPath(record)
+    const path = bytes ? instanceLogoRecordPath(logoImageInfo(bytes).extension) : null
+    if (bytes) await writeLocalBinaryFile(handle, `${instanceFolder}/${path}`, bytes)
+    const text = withStoredInstanceLogo(record, path)
+    await writeLocalTextFile(handle, `${instanceFolder}/instance.yaml`, text)
+    if (previous && previous !== path) await removeLocalFile(handle, `${instanceFolder}/${previous}`)
+    setRecord(parseInstanceYaml(text))
+  }
+  const localLogo = definitionLogo && record
+    ? { load: loadLocalLogo, replace: writeLocalLogo, remove: () => writeLocalLogo(null), reloadKey: `${slug}#${instanceLogoPath(record) ?? ''}` }
+    : null
+
   return html`
     <${SettingsHeader} title="Instance Settings" backHref=${backHrefFrom(query)} />
     <main class="settings-page">
@@ -1684,7 +1749,9 @@ function LocalInstanceSettingsPage({ query, workspaceId, slug }) {
               </div>
               <div class="workspace-field-status">${assigneeStatus}</div>
             </section>
-            ${instanceSettings.length ? html`<${InstanceSettingsSection} settings=${instanceSettings} onSave=${handleSaveInstanceSettings} />` : null}
+            ${instanceSettings.length || localLogo
+              ? html`<${InstanceSettingsSection} settings=${instanceSettings} onSave=${handleSaveInstanceSettings} logo=${localLogo} />`
+              : null}
             <section class="settings-section">
               <h2>Instance info</h2>
               <div class="result-card">
@@ -1761,11 +1828,19 @@ function RemoteInstanceSettingsPage({ query }) {
             <${WriteAccessBanner} instance=${instance} workspaceId=${workspaceId} />
             <${AssigneeSection} slug=${slug} assignee=${instance.assignee} disabled=${blocked} />
             <${RequiredReviewerSection} slug=${slug} requiredReviewer=${instance.requiredReviewer} disabled=${blocked} />
-            ${instance.instanceSettings?.length
+            ${instance.instanceSettings?.length || instance.instanceLogo
               ? html`<${InstanceSettingsSection}
-                  settings=${instance.instanceSettings}
+                  settings=${instance.instanceSettings ?? []}
                   disabled=${blocked}
                   onSave=${(settings) => saveInstanceSettings(slug, settings)}
+                  logo=${instance.instanceLogo
+                    ? {
+                        load: () => loadInstanceLogo(slug),
+                        replace: (bytes) => writeInstanceLogo(slug, bytes),
+                        remove: () => writeInstanceLogo(slug, null),
+                        reloadKey: slug,
+                      }
+                    : null}
                 />`
               : null}
             <${InstanceInfoSection} instance=${instance} />
