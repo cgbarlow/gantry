@@ -88,9 +88,18 @@ You meet them in three places, always under an **Instance settings** heading:
 
 - **Creating an Instance.** The "+ New Workspace" wizard shows them on the Instance step with the Definition's defaults already selected, so you only change what differs for your initiative. An AI agent can set them in MCP `create_instance`.
 - **Instance Settings.** Change any of them later and click **Save**. For a Workspace-backed Instance the change is saved on the current Stage branch and reviewed with the rest of that stage, on every Provider; a Local-workspace Instance saves it straight into its folder. MCP `get_instance` returns each one.
-- **The Definitions page.** A Definition that has Instance settings shows an **Instance settings** group at the end of the Outline (and a column at the end of the Map). Select it to see, for each setting, why the Definition offers it, its choices and its default. It is read-only for now.
+- **The Definitions page.** A Definition that has Instance settings shows an **Instance settings** group at the end of the Outline (and a column at the end of the Map). Select it to see, for each setting, why the Definition offers it, its choices and its default. On a draft you edit them there (see **Editing a Definition's Instance settings** below); a published version shows them read-only.
 
-A Definition with no Instance settings shows none of this anywhere: no heading in the wizard, nothing extra in Instance Settings and no section on the Definitions page. Assignee and Required reviewer aren't Instance settings. They are about people rather than the documents, and they keep their own places in Instance Settings.
+A Definition with no Instance settings shows none of this anywhere: no heading in the wizard, nothing extra in Instance Settings and no section on the Definitions page. The one exception is a draft on the Definitions page, which always lists **Classification** so its author can add markings.
+
+#### Editing a Definition's Instance settings
+
+On a draft, the Definitions page's **Instance settings** section edits each setting the same way: its choices, and a default. A Local Workspace's Definition editor has the same section, under **Instance settings**.
+
+- **Size.** Its three choices, Small, Medium and Large, are shown but can't be changed, because every field's word targets are written against them. Pick its **Default** instead. That is the size an instance works to until its author chooses one, and the size the wizard pre-selects. A Definition that doesn't set a default works to Medium, as before. In `definition.yaml` the default is written beside the classification markings, as `size: { default: small }` under `instance-settings:`.
+- **Classification.** Type a marking and click **+ Add marking** (or **+ Declare markings** for the first one), rename one by editing it, move one with ↑ and ↓, and take one out with **Remove**. The order here is the order the wizard and Instance Settings offer them in. Pick an optional **Default**, or leave it as **None**. If you rename the default marking the default follows it, and if you remove it there is no default. **Stop declaring Classification** takes the setting out of the Definition, so its instances have no Classification.
+
+Click **Save** to keep your changes and **Publish** to publish them with the rest of the draft. A default that isn't one of the choices, a blank or repeated marking, or an empty marking list is shown as a problem at the top of the section and in the toolbar's problem count, and Save and Publish refuse it until it's fixed. In a Local Workspace's Definition editor, Save keeps a draft with problems, as it does for any other problem, and Publish refuses it. An instance already created keeps whatever it chose. Only instances that never chose a value pick up a new default. Assignee and Required reviewer aren't Instance settings. They are about people rather than the documents, and they keep their own places in Instance Settings.
 
 #### Classification
 
@@ -107,7 +116,7 @@ instance-settings:
     default: IN-CONFIDENCE
 ```
 
-Each marking is printed exactly as written. The list must have at least one marking, with none blank or repeated, and a default must be one of them. Anything else is a problem that `gantry validate` and a Local Workspace report, the Definitions page shows under its Instance settings and Save and Publish refuse. A Definition an instance already uses keeps loading, but offers no Classification until it is fixed. The Definitions page shows the markings and the default read-only for now.
+Each marking is printed exactly as written. The list must have at least one marking, with none blank or repeated, and a default must be one of them. Anything else is a problem that `gantry validate` and a Local Workspace report, the Definitions page shows under its Instance settings and Save and Publish refuse. A Definition an instance already uses keeps loading, but offers no Classification until it is fixed. On a draft, the Definitions page edits the markings and the default (see **Editing a Definition's Instance settings** above).
 
 #### Your instance's own logo
 
@@ -167,7 +176,7 @@ Which fields are which type is set by the Definition, not by you — an author c
 
 ### Target size and word targets
 
-Some Definitions tell you roughly how much to write in each field. If yours does, every instance has a **Size**: **Small**, **Medium** or **Large**. Size is one of the instance's **Instance settings** (see **Instance settings** above). Medium is the default, about half of Large; Small is about a fifth. Pick the size under **Instance settings** when you create the instance in the "+ New Workspace" wizard, and change it later under the same heading in **Instance Settings**. Choose it for the solution's risk and audience: a document reviewers need to read closely in one sitting wants a smaller size than a full reference.
+Some Definitions tell you roughly how much to write in each field. If yours does, every instance has a **Size**: **Small**, **Medium** or **Large**. Size is one of the instance's **Instance settings** (see **Instance settings** above). Medium is about half of Large, and Small about a fifth. The default is the Definition's, and Medium for a Definition that doesn't set one; an instance that never chooses a size works to it. Pick the size under **Instance settings** when you create the instance in the "+ New Workspace" wizard, and change it later under the same heading in **Instance Settings**. Choose it for the solution's risk and audience: a document reviewers need to read closely in one sitting wants a smaller size than a full reference.
 
 Under each field with a word target, the editor shows the target for the instance's size and a live word count, for example `Target ~100 words (Medium) · 87 words`. Once the count goes over the target it turns amber. Diagrams in Mermaid code blocks, images and Markdown symbols aren't counted as words.
 
@@ -177,7 +186,7 @@ An AI agent writing through the MCP server sees the same targets: `get_instance`
 
 The `design` definition's v3 draft sets word targets on every field that appears in a document. Its Large targets match the bundled examples' original level of detail, and the examples are now written to Medium, so **Populate example text** shows the default amount. A Medium Solution Architecture Document comes to roughly half the length of a Large one.
 
-A Definition without word targets shows none of this: no Size in the wizard or Instance Settings, no Instance settings section on the Definitions page and no targets in the editor. For a Definition with word targets, the Definitions page's Instance settings section shows Size as offered because a number of fields declare word targets, with its three choices and its default, Medium. A Definition author sets a field's targets on the Definitions page (see *Definition versions and the Definitions page* above) or in the module's YAML as `target-words: { small: 40, medium: 100, large: 200 }`. Each must be a whole number above zero, all three sizes are needed, and only Markdown and list fields can have them. Anything else is a problem that `gantry validate` and a Local Workspace report, the Definitions page marks and Save and Publish refuse; a Definition an instance already uses keeps loading even if it has one.
+A Definition without word targets shows none of this: no Size in the wizard or Instance Settings, no Instance settings section on the Definitions page and no targets in the editor. For a Definition with word targets, the Definitions page's Instance settings section shows Size as offered because a number of fields declare word targets, with its three choices and its default (Medium, unless the Definition sets another; see **Editing a Definition's Instance settings** above). A Definition author sets a field's targets on the Definitions page (see *Definition versions and the Definitions page* above) or in the module's YAML as `target-words: { small: 40, medium: 100, large: 200 }`. Each must be a whole number above zero, all three sizes are needed, and only Markdown and list fields can have them. Anything else is a problem that `gantry validate` and a Local Workspace report, the Definitions page marks and Save and Publish refuse; a Definition an instance already uses keeps loading even if it has one.
 
 ### The editor toolbar
 

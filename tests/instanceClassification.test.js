@@ -187,7 +187,7 @@ test('storing a marking not in the Definition\'s list, or any marking on a Defin
 
 const MALFORMED = [
   ['a declaration that is not a map', 'instance-settings: [classification]\n', /^"instance-settings" must map each Instance setting's id to its declaration/],
-  ['a setting a Definition can\'t declare', 'instance-settings:\n  colour:\n    choices: [red]\n', /^Instance setting "colour" is not one a Definition can declare — Gantry knows "classification"$/],
+  ['a setting a Definition can\'t declare', 'instance-settings:\n  colour:\n    choices: [red]\n', /^Instance setting "colour" is not one a Definition can declare — Gantry knows "size", "classification"$/],
   ['a Classification with no choices', 'instance-settings:\n  classification:\n    choices: []\n', /^Instance setting "classification" declares no "choices" — list at least one marking$/],
   ['a Classification that isn\'t a map', 'instance-settings:\n  classification: [PUBLIC]\n', /^Instance setting "classification" must declare its "choices"/],
   ['a blank marking', 'instance-settings:\n  classification:\n    choices: [PUBLIC, " "]\n', /^Instance setting "classification" has a blank or non-text marking \(" "\)/],

@@ -186,30 +186,29 @@ async function openInstanceSettingsFocus(page) {
   return focus
 }
 
-for (const status of ['published', 'draft']) {
-  test(`the Definitions page shows a read-only Instance settings section for a ${status} Definition with word targets: why Size is offered, its choices and its default`, () =>
-    withFixtureServer({ definitions: ['sized'], status }, async ({ base }) => {
-      await withPage(async (page, pageErrors) => {
-        await page.goto(`${base}/definitions`)
-        await page.waitForSelector('.defn-outline', { timeout: 10_000 })
-        const focus = await openInstanceSettingsFocus(page)
-        assert.equal(await focus.getByRole('heading', { name: 'Instance settings', exact: true }).count(), 1)
-        const size = focus.locator('.instance-setting-summary[data-setting="size"]')
-        assert.match(await size.locator('h3').textContent(), /Target size/)
-        assert.match(await size.locator('.instance-setting-offered').textContent(), /Offered because 2 Fields declare word targets\./)
-        assert.equal(await size.locator('.instance-setting-choices').textContent(), 'Small · Medium · Large')
-        assert.equal(await size.locator('.instance-setting-default').textContent(), 'Medium')
-        assert.equal(await focus.locator('input, select, textarea').count(), 0, 'read-only, on a draft as on a published version')
+// #221: a draft's section is editable instead — tests/instanceSettingsEditing.playwright.test.js.
+test('the Definitions page shows a read-only Instance settings section for a published Definition with word targets: why Size is offered, its choices and its default', () =>
+  withFixtureServer({ definitions: ['sized'], status: 'published' }, async ({ base }) => {
+    await withPage(async (page, pageErrors) => {
+      await page.goto(`${base}/definitions`)
+      await page.waitForSelector('.defn-outline', { timeout: 10_000 })
+      const focus = await openInstanceSettingsFocus(page)
+      assert.equal(await focus.getByRole('heading', { name: 'Instance settings', exact: true }).count(), 1)
+      const size = focus.locator('.instance-setting-summary[data-setting="size"]')
+      assert.match(await size.locator('h3').textContent(), /Target size/)
+      assert.match(await size.locator('.instance-setting-offered').textContent(), /Offered because 2 Fields declare word targets\./)
+      assert.equal(await size.locator('.instance-setting-choices').textContent(), 'Small · Medium · Large')
+      assert.equal(await size.locator('.instance-setting-default').textContent(), 'Medium')
+      assert.equal(await focus.locator('input, select, textarea').count(), 0, 'read-only on a published version')
 
-        // The Map view offers the same section.
-        await page.getByRole('button', { name: 'Map', exact: true }).click()
-        await page.locator('.defn-map-col-instance-settings .defn-map-chip', { hasText: 'Target size' }).click()
-        await page.locator('.defn-instance-settings').waitFor({ timeout: 10_000 })
-        await page.getByRole('button', { name: 'Outline', exact: true }).click()
-        assert.deepEqual(pageErrors, [])
-      })
-    }))
-}
+      // The Map view offers the same section.
+      await page.getByRole('button', { name: 'Map', exact: true }).click()
+      await page.locator('.defn-map-col-instance-settings .defn-map-chip', { hasText: 'Target size' }).click()
+      await page.locator('.defn-instance-settings').waitFor({ timeout: 10_000 })
+      await page.getByRole('button', { name: 'Outline', exact: true }).click()
+      assert.deepEqual(pageErrors, [])
+    })
+  }))
 
 test('the Definitions page shows no Instance settings section for a Definition without word targets', () =>
   withFixtureServer({ definitions: ['plain'] }, async ({ base }) => {
@@ -228,15 +227,16 @@ test('the Definitions page shows no Instance settings section for a Definition w
 
 // The Local Workspace twin of the Definitions page (/definitions/local), with both fixture
 // Definitions seeded into the workspace's own folder through OPFS, as
-// tests/coverPageCheckbox.playwright.test.js seeds its workspace.
-test('the Local Workspace Definition editor shows the same read-only Instance settings section, and none for a Definition without word targets', () =>
+// tests/coverPageCheckbox.playwright.test.js seeds its workspace. #221: published, since a draft's
+// section is editable (tests/instanceSettingsEditing.playwright.test.js).
+test('the Local Workspace Definition editor shows the same read-only Instance settings section for a published version, and none for a Definition without word targets', () =>
   withFixtureServer({ definitions: [] }, async ({ base }) => {
     await withPage(async (page, pageErrors) => {
       await page.goto(`${base}/`)
       const files = {}
       for (const [id, moduleYaml] of [['sized', BUDGETED_MODULE], ['plain', PLAIN_MODULE]]) {
         files[`definitions/${id}/1/definition.yaml`] =
-          `id: ${id}\nversion: 1\nstatus: draft\ntitle: ${id}\ndescription: A one-stage fixture\nstages:\n  - id: draft\n    title: Draft\n    purpose: Write it\n    gate: drafted\n    modules:\n      - summary\nartefacts:\n  - id: brief\n    title: Brief\n    purpose: The brief\n    template: templates/brief.md.tmpl\n    gate: drafted\n    requires:\n      - summary\n`
+          `id: ${id}\nversion: 1\nstatus: published\ntitle: ${id}\ndescription: A one-stage fixture\nstages:\n  - id: draft\n    title: Draft\n    purpose: Write it\n    gate: drafted\n    modules:\n      - summary\nartefacts:\n  - id: brief\n    title: Brief\n    purpose: The brief\n    template: templates/brief.md.tmpl\n    gate: drafted\n    requires:\n      - summary\n`
         files[`definitions/${id}/1/modules/summary.yaml`] = moduleYaml
         files[`definitions/${id}/1/templates/brief.md.tmpl`] = '# Brief\n'
       }
@@ -256,7 +256,7 @@ test('the Local Workspace Definition editor shows the same read-only Instance se
       assert.match(await size.locator('.instance-setting-offered').textContent(), /Offered because 2 Fields declare word targets\./)
       assert.equal(await size.locator('.instance-setting-choices').textContent(), 'Small · Medium · Large')
       assert.equal(await size.locator('.instance-setting-default').textContent(), 'Medium')
-      assert.equal(await section.locator('input, select, textarea').count(), 0, 'read-only, even on a draft')
+      assert.equal(await section.locator('input, select, textarea').count(), 0, 'read-only on a published version')
 
       await page.goto(`${base}/definitions/local?ws=${encodeURIComponent(workspaceId)}&id=plain&version=1`)
       await page.waitForSelector('.local-definition-editor', { timeout: 10_000 })

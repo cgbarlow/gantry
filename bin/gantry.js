@@ -210,7 +210,7 @@ withInstanceOptions(
     .description('Create an instance')
     .option('--owner <owner>', "owner to record in each module file's frontmatter")
     .option('--assignee <assignee>', 'assignee to record on the instance record itself (#97)')
-    .option('--size <size>', 'target size — small, medium or large — for a definition that sets target-words (#202; default medium)')
+    .option('--size <size>', "target size — small, medium or large — for a definition that sets target-words (#202; default the definition's, else medium)")
     .option('--classification <marking>', "classification — one of the definition's markings — for a definition that declares them (#220; default the definition's, else none)")
     .option('--definition-version <version>', 'definition version to pin (default latest published)')
     .option('--version <version>', 'alias for --definition-version')

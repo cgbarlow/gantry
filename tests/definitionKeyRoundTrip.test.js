@@ -45,14 +45,15 @@ import { withFakeBitbucketServer, BITBUCKET_OWNER, BITBUCKET_REPOSITORY, BITBUCK
 // fixture, so it is held to the same round trip as every key before it.
 //
 // #220 (spec #223, ADR-0058) adds the Definition's `instance-settings` — the Instance settings it
-// declares, here a Classification with its own markings and a default — at the top level.
+// declares, here a Classification with its own markings and a default — at the top level. #221 adds
+// Target size's default to it, the one part of Size a Definition declares.
 
 const ORGANIZATION = 'fake-org'
 const PROJECT = 'fake-project'
 const ADO_REPOSITORY = 'fake-ado-repo'
 const ADO_VALID_PAT = 'valid-ado-test-pat'
 
-const INSTANCE_SETTINGS = { classification: { choices: ['PUBLIC', 'IN-CONFIDENCE'], default: 'PUBLIC' } }
+const INSTANCE_SETTINGS = { size: { default: 'small' }, classification: { choices: ['PUBLIC', 'IN-CONFIDENCE'], default: 'PUBLIC' } }
 const STAGE_PROVENANCE = { definition: 'elsewhere', version: 2, element: 'stage:second' }
 const ARTEFACT_PROVENANCE = { definition: 'elsewhere', version: 2, element: 'artefact:letter' }
 
@@ -63,6 +64,8 @@ status: ${status}
 title: Round Trip
 description: Sets every definition key
 instance-settings:
+  size:
+    default: small
   classification:
     choices:
       - PUBLIC
@@ -243,7 +246,7 @@ function assertTargetWordsOnDisk(moduleYamlText, where) {
 }
 
 function assertKebabKeysOnDisk(definitionYamlText, where) {
-  assert.match(definitionYamlText, /^instance-settings:\n  classification:\n    choices:\n      - PUBLIC\n      - IN-CONFIDENCE\n    default: PUBLIC$/m, where)
+  assert.match(definitionYamlText, /^instance-settings:\n  size:\n    default: small\n  classification:\n    choices:\n      - PUBLIC\n      - IN-CONFIDENCE\n    default: PUBLIC$/m, where)
   assert.match(definitionYamlText, /read-only-modules:/, where)
   assert.match(definitionYamlText, /document-control: false/, where)
   assert.match(definitionYamlText, /satisfies-gate: false/, where)
@@ -296,6 +299,17 @@ test('a save whose structure leaves instance-settings out keeps the declaration 
     const saved = writeDefinitionVersion('roundtrip', 1, { stages, artefacts, modules }, { definitionsDir })
     assert.equal(saved.problems, undefined, JSON.stringify(saved.problems))
     assert.deepEqual(saved.instanceSettings, INSTANCE_SETTINGS)
+  }))
+
+// #221: the Definitions page sends an empty declaration once its author removes the last setting, so
+// the Definition stops declaring any — written as no `instance-settings` key at all.
+test('a save whose structure carries an empty instance-settings declares none, and writes no key', () =>
+  withScratch(({ definitionsDir }) => {
+    writeLocalFixture(definitionsDir, 'roundtrip')
+    const saved = writeDefinitionVersion('roundtrip', 1, { ...localProjection('roundtrip', 1, definitionsDir), instanceSettings: {} }, { definitionsDir })
+    assert.equal(saved.problems, undefined, JSON.stringify(saved.problems))
+    assert.equal('instanceSettings' in saved, false)
+    assert.doesNotMatch(readFileSync(join(definitionsDir, 'roundtrip/1/definition.yaml'), 'utf8'), /instance-settings/)
   }))
 
 // #194: the front-matter switches default to false, so an explicit false is left out the same way.

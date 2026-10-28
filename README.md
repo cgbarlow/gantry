@@ -527,7 +527,7 @@ A markdown or list field can also state how much to write, per **Target size** (
     target-words: { small: 30, medium: 75, large: 150 }
 ```
 
-Each instance of a definition that sets any `target-words` has a size — `small`, `medium` (the default) or `large`, stored as `size:` in its `instance.yaml` — chosen in the wizard or with `gantry new --size`, changed in Instance Settings, or set by MCP `create_instance`. The editor shows each field's target for that size with a live word count, MCP `get_instance` returns it, and a save over target returns a non-blocking note. It's advisory only: the gate check and the renderer never read it, so a document renders exactly what was written. All three sizes must be positive whole numbers; `gantry validate` reports anything else as `invalid-target-words`. A definition without `target-words` shows no size anywhere.
+Each instance of a definition that sets any `target-words` has a size — `small`, `medium` or `large`, stored as `size:` in its `instance.yaml`, defaulting to the definition's own default (`instance-settings: { size: { default: small } }`, #221) or else `medium` — chosen in the wizard or with `gantry new --size`, changed in Instance Settings, or set by MCP `create_instance`. The editor shows each field's target for that size with a live word count, MCP `get_instance` returns it, and a save over target returns a non-blocking note. It's advisory only: the gate check and the renderer never read it, so a document renders exactly what was written. All three sizes must be positive whole numbers; `gantry validate` reports anything else as `invalid-target-words`. A definition without `target-words` shows no size anywhere.
 
 A definition can also give its documents a **Classification** (#220, `docs/adr/0058-instance-settings-are-declared-by-the-definition.md`), declared in `definition.yaml` as an Instance setting with its own markings and an optional default:
 
@@ -538,7 +538,7 @@ instance-settings:
     default: IN-CONFIDENCE   # optional
 ```
 
-Each instance's marking is stored as `classification:` in its `instance.yaml` — chosen in the wizard or with `gantry new --classification`, changed in Instance Settings, or set by MCP `create_instance` — and printed on every cover and page header; blank prints none. A marking outside the list, or one on a definition that declares no markings, is refused. A declaration with no choices, a blank or repeated marking, or a default that isn't one of them is reported by `gantry validate` as `invalid-instance-settings`.
+Each instance's marking is stored as `classification:` in its `instance.yaml` — chosen in the wizard or with `gantry new --classification`, changed in Instance Settings, or set by MCP `create_instance` — and printed on every cover and page header; blank prints none. A marking outside the list, or one on a definition that declares no markings, is refused. A declaration with no choices, a blank or repeated marking, or a default that isn't one of them is reported by `gantry validate` as `invalid-instance-settings`, as is a `size` declaration with choices of its own or a default other than `small`, `medium` or `large`. On a draft, the Definitions page (and a Local Workspace's definition editor) edits the markings, their order and both defaults (#221).
 
 ## Instance module files
 

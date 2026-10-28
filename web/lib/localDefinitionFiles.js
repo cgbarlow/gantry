@@ -33,6 +33,7 @@ import { sortReferenceDocxNames, summariseDefinitionLogo, applyDefinitionLogo } 
 // web/ duplicates rather than imports it, same convention as every other
 // file in this directory.
 const SINGLE_SEGMENT_RE = /^[^\\/]+$/
+const isEmptyMap = (value) => value !== null && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0
 export function isValidLocalDefinitionId(id) {
   return typeof id === 'string' && id !== '' && id !== '.' && id !== '..' && SINGLE_SEGMENT_RE.test(id)
 }
@@ -109,7 +110,8 @@ export function renderDefinitionYaml(structure) {
   obj.title = structure.title
   obj.description = structure.description
   // #220 (ADR-0058): the Definition's Instance settings, written back whenever declared, as it is.
-  if (structure.instanceSettings !== undefined) obj['instance-settings'] = structure.instanceSettings
+  // #221: an empty map (the editor's "declares nothing") is left out, as lib/definition.js does.
+  if (structure.instanceSettings !== undefined && !isEmptyMap(structure.instanceSettings)) obj['instance-settings'] = structure.instanceSettings
   obj.stages = (structure.stages ?? []).map((s) => {
     const entry = { id: s.id, title: s.title, purpose: s.purpose, gate: s.gate, modules: s.modules ?? [] }
     if (s.readOnlyModules !== undefined) entry['read-only-modules'] = s.readOnlyModules
