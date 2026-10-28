@@ -56,12 +56,12 @@ fields:
       render from here, so enter it once.
 
   - id: operational-accounts-and-licenses
-    title: Operational accounts and licenses
+    title: Operational accounts and licences
     type: list
     target-words: { small: 30, medium: 75, large: 150 }
     required: false
     guidance: >
-      Third-party accounts, subscriptions or licenses the support team must
+      Third-party accounts, subscriptions or licences the support team must
       hold to operate this solution once it's live (e.g. a CI provider, a
       hosted API) — distinct from the build-time dependencies in
       `integration`. Carries the reference SAD's "Terms & Conditions and

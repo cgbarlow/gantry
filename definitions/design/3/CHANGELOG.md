@@ -489,6 +489,30 @@ now chosen once, as an Instance setting, instead of as a Field at every Gate.
   carried over, since v3 is a draft. Choose it once in Instance Settings. Until then, documents
   print no marking.
 
+### Operational readiness in the SSAD, and New Zealand spelling (#233)
+
+Two leftovers from #213 between the SAD and the SSAD.
+
+- **One heading for handover readiness.** The SSAD's "Support handover readiness" section is now
+  "Operational readiness", the SAD's heading for the same Field
+  (`support-and-operations.support-handover-readiness`), as ADR-0057 says it should be. It stays
+  the last section of Support and operations. "Stakeholders and support contacts" is still the
+  only SSAD heading that differs from the SAD's.
+- **"Operational accounts and licences".** Both documents now spell the accounts section the New
+  Zealand way, as the SAD's "Software and licences" already did, and so does the Field's title in
+  the editor. Its id stays `operational-accounts-and-licenses`: the reader never sees it, and
+  renaming it would break every Instance. The Field's guidance says "licences" too, and
+  `integration.hardware`'s says "virtualisation". No other v3 heading or title used a US spelling.
+- **Same Fields, same Gate.** No Field entered or left either document, and
+  `build-ready-checklist` asks exactly what it asked before. The Kiwi Cover Mutual example's
+  accounts section is retitled to match, so its documents render the same content and it still
+  passes every Gate. v1 and v2 are unchanged.
+- **Other v3 Instances: retitle the accounts section.** An Instance file finds each Field by its
+  title, so a v3 Instance written before this change shows its "Operational accounts and
+  licenses" list as a section of its own, and the Field as empty until you move the list across
+  (or retitle the heading in the module file to "Operational accounts and licences"). The SSAD
+  needs that Field at `build-ready-checklist`. v1 and v2 Instances keep the old title.
+
 ### The As-built follows the SAD's order and headings (#231)
 
 The As-built followed the order of its reference, the ATLAS migration design: Terms & Definitions
