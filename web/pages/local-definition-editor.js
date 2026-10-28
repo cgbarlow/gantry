@@ -38,8 +38,11 @@ import {
   readLocalDefinitionTemplate,
   writeLocalDefinitionTemplate,
   writeLocalDefinitionReferenceDocx,
+  readLocalDefinitionLogo,
+  writeLocalDefinitionLogo,
   listLocalDefinitions,
 } from '../lib/localDefinitionFiles.js'
+import { DefinitionLogoControl } from '../lib/definitionLogoControl.js'
 
 const GATES = ['business-case', 'design-review', 'implementation-ready']
 // #149: an Artefact's gate must name one of this definition's own Stage gates (validation reports
@@ -333,7 +336,7 @@ function StageEditor({ stage, readOnly, onChange, onRemove }) {
   `
 }
 
-function ArtefactTemplateEditor({ handle, definitionId, version, artefact, readOnly }) {
+function ArtefactTemplateEditor({ handle, definitionId, version, artefact, readOnly, onReferenceDocxSaved }) {
   const [source, setSource] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -388,6 +391,7 @@ function ArtefactTemplateEditor({ handle, definitionId, version, artefact, readO
       }
       await writeLocalDefinitionReferenceDocx(handle, definitionId, version, artefact.id, bytes)
       setDocxMessage('Reference document saved.')
+      onReferenceDocxSaved?.()
     } catch (err) {
       setDocxMessage(err.message)
     } finally {
@@ -425,7 +429,7 @@ function ArtefactTemplateEditor({ handle, definitionId, version, artefact, readO
   `
 }
 
-function ArtefactEditor({ handle, definitionId, version, artefact, modules, gates, readOnly, onChange, onRemove }) {
+function ArtefactEditor({ handle, definitionId, version, artefact, modules, gates, readOnly, onChange, onRemove, onReferenceDocxSaved }) {
   const [expanded, setExpanded] = useState(false)
   const filenameTokens = [...FILENAME_BUILTIN_TOKENS, ...eligibleFilenameFields(modules, artefact)]
   const classificationOptions = coverClassificationOptions(modules, artefact)
@@ -533,7 +537,7 @@ function ArtefactEditor({ handle, definitionId, version, artefact, modules, gate
         Number and caption diagrams ("Diagram N. …") in the Word document
       </label>
       <button type="button" class="btn small ghost" onClick=${() => setExpanded(!expanded)}>${expanded ? 'Hide template' : 'Edit template'}</button>
-      ${expanded ? html`<${ArtefactTemplateEditor} handle=${handle} definitionId=${definitionId} version=${version} artefact=${artefact} readOnly=${readOnly} />` : null}
+      ${expanded ? html`<${ArtefactTemplateEditor} handle=${handle} definitionId=${definitionId} version=${version} artefact=${artefact} readOnly=${readOnly} onReferenceDocxSaved=${onReferenceDocxSaved} />` : null}
     </div>
   `
 }
@@ -552,6 +556,8 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
   // #219 (docs/adr/0058): the Instance settings this Definition offers, the same description the
   // server's Definitions page shows — read-only for now; editing them is #221.
   const instanceSettings = definitionInstanceSettings(structure)
+  // #222: bumped when a reference docx is saved, so the Logo control re-reads the header logo.
+  const [logoReload, setLogoReload] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -644,6 +650,16 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
       <label class="field-label" for="local-def-description-input">Description</label>
       <textarea id="local-def-description-input" class="wizard-input" rows="2" readOnly=${readOnly} value=${structure.description} onInput=${(e) => update({ description: e.currentTarget.value })}></textarea>
 
+      <${DefinitionLogoControl}
+        editable=${!readOnly}
+        load=${async () => {
+          const { logo, documents } = await readLocalDefinitionLogo(handle, definitionId, version)
+          return { image: logo ? new Blob([logo.bytes], { type: logo.contentType }) : null, extension: logo?.extension, documents }
+        }}
+        replace=${(bytes) => writeLocalDefinitionLogo(handle, definitionId, version, bytes)}
+        reloadKey=${`${definitionId}@${version}#${logoReload}`}
+      />
+
       <section>
         <h2>Stages</h2>
         ${structure.stages.map(
@@ -705,6 +721,7 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
               modules=${structure.modules}
               gates=${stageGates(structure)}
               readOnly=${readOnly}
+              onReferenceDocxSaved=${() => setLogoReload((n) => n + 1)}
               onChange=${(next) => {
                 const artefacts = structure.artefacts.slice()
                 artefacts[i] = next

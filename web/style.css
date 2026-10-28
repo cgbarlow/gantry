@@ -1718,6 +1718,14 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-docx-status { margin-top: 6px; }
 .defn-docx-saved { color: var(--stamp-agreed-bg); font-weight: 600; }
 
+/* A Definition's logo, the picture in its reference documents' page header (#222) */
+.defn-logo { padding: 10px 14px; border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg-raised); margin-bottom: 14px; }
+.defn-logo-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.defn-logo-preview { max-height: 40px; max-width: 200px; object-fit: contain; background: #fff; border: var(--hairline) solid var(--line); border-radius: var(--radius); padding: 2px; }
+.defn-logo .defn-hint { margin: 6px 0 0; }
+.defn-logo-status { margin: 6px 0 0; }
+label.btn.disabled { opacity: 0.4; cursor: not-allowed; }
+
 /* Chips + droplists (module refs, requires) */
 .defn-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .defn-chip { display: inline-flex; align-items: center; gap: 6px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); padding: 3px 8px; font-size: 12px; background: var(--bg-raised); }

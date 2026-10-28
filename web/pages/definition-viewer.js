@@ -13,6 +13,7 @@ import { coverClassificationOptions } from '../lib/artefactFrontMatter.js'
 import { TARGET_SIZES, targetSizeLabel, withFieldTargetWords } from '../lib/targetSize.js'
 import { definitionInstanceSettings } from '../lib/instanceSettings.js'
 import { InstanceSettingsSummary } from '../lib/instanceSettingsView.js'
+import { DefinitionLogoControl } from '../lib/definitionLogoControl.js'
 
 // The rebuilt Definitions page (WI #381, Feature #380's grilling session). Primary source:
 // web/prototypes/definition-editor.prototype.html — variant A (Outline) and C (Map) both wanted,
@@ -350,6 +351,8 @@ export function DefinitionViewerPage() {
   // carry independent in-flight state as the author moves between them without one clobbering
   // another's error/status message.
   const [docxStatus, setDocxStatus] = useState({}) // { [artefactId]: { uploading, error, message } }
+  // #222: bumped when a reference docx is replaced, so the Logo control re-reads the header logo.
+  const [logoReload, setLogoReload] = useState(0)
 
   // Drag and drop — every kind here has a button-route equivalent (reorder ↑/↓; "Add module"/"Add
   // requirement" pickers; a field's own "Move to module" control).
@@ -1124,6 +1127,7 @@ export function DefinitionViewerPage() {
         return
       }
       setDocxArtefactStatus(artefactId, { uploading: false, error: null, message: 'Replaced ✓' })
+      setLogoReload((n) => n + 1)
       setTimeout(() => setDocxArtefactStatus(artefactId, { message: null }), 2000)
     } catch (err) {
       setDocxArtefactStatus(artefactId, { uploading: false, error: err.message })
@@ -1152,6 +1156,38 @@ export function DefinitionViewerPage() {
     } catch (err) {
       setDocxArtefactStatus(artefactId, { error: err.message })
     }
+  }
+
+  // ---------------------------------------------------------------- logo (#222)
+  // The header logo of every reference document in the selected version, read and replaced in one
+  // go through `/api/definitions/:id/versions/:n/logo` (lib/server.js). Replace is offered on a
+  // draft only, matching the route's own draft-only guard, as Reference docx is.
+  function logoUrl(suffix = '') {
+    return `/api/definitions/${encodeURIComponent(selectedId)}/versions/${encodeURIComponent(String(selectedVersion))}/logo${suffix}`
+  }
+  async function loadLogo() {
+    const res = await fetch(logoUrl())
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(body.error ?? `Couldn't read the logo (${res.status})`)
+    if (!body.logo) return { image: null, documents: body.documents ?? [] }
+    const imageRes = await fetch(logoUrl('/image'))
+    if (!imageRes.ok) throw new Error(`Couldn't read the logo (${imageRes.status})`)
+    const extension = /filename="logo\.([^"]+)"/.exec(imageRes.headers.get('Content-Disposition') ?? '')?.[1]
+    return { image: await imageRes.blob(), extension, documents: body.documents ?? [] }
+  }
+  async function replaceLogo(bytes) {
+    const res = await fetch(logoUrl(), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageBase64: bytesToBase64(bytes) }) })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(body.error ?? `Replace failed (${res.status})`)
+    return body
+  }
+  function renderLogoControl() {
+    return html`<${DefinitionLogoControl}
+      editable=${isEditable && selectedDef?.home?.kind !== 'library-repo'}
+      load=${loadLogo}
+      replace=${replaceLogo}
+      reloadKey=${`${selectedId}@${selectedVersion}#${logoReload}`}
+    />`
   }
 
   // ---------------------------------------------------------------- drag and drop
@@ -2661,6 +2697,7 @@ export function DefinitionViewerPage() {
       ${!selectedId ? html`<p class="loading">Select a definition.</p>` : null}
       ${detailLoading ? html`<p class="loading">Loading…</p>` : null}
       ${detailError ? html`<p class="load-error">${detailError}</p>` : null}
+      ${detail && !detailLoading ? renderLogoControl() : null}
       ${detail && !detailLoading ? renderWorkbench() : null}
       ${renderCopyFlow()}
     </main>

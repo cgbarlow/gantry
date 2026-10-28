@@ -96,7 +96,7 @@ import {
   localDefinitionExists,
   readLocalDefinitionStructure,
   readLocalDefinitionTemplate,
-  readLocalDefinitionReferenceDocx,
+  readLocalArtefactRenderReferenceDocx,
 } from './lib/localDefinitionFiles.js'
 
 // ---------- Local workspace instances (WI #297, ADR-0029, A6) ----------
@@ -333,6 +333,9 @@ async function buildLocalComputePayload(instance) {
 // every other artefact's are skipped, same "read only what this render
 // actually needs" restraint `runLocalWorkspaceCompute` itself is under no
 // obligation to but this keeps the request body small regardless.
+// An artefact without its own reference docx is sent the definition's shared
+// `reference.docx` instead (#222), so the render uses it as lib/render.js
+// would on disk, rather than Pandoc's default.
 async function buildInlineLocalDefinitionPayload(handle, definitionId, version) {
   const structure = await readLocalDefinitionStructure(handle, definitionId, version)
   const templates = {}
@@ -343,7 +346,7 @@ async function buildInlineLocalDefinitionPayload(handle, definitionId, version) 
       const text = await readLocalDefinitionTemplate(handle, definitionId, version, name)
       if (text != null) templates[name] = text
     }
-    const docxBytes = await readLocalDefinitionReferenceDocx(handle, definitionId, version, artefact.id)
+    const docxBytes = await readLocalArtefactRenderReferenceDocx(handle, definitionId, version, artefact.id)
     if (docxBytes) referenceDocs[artefact.id] = bytesToBase64(new Uint8Array(docxBytes))
   }
   return { structure, templates, referenceDocs }

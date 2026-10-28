@@ -5,6 +5,9 @@ import { isValidSlug } from '../lib/slug.js'
 import { createBlankDefinition, writeDefinitionVersion, loadDefinition, definitionVersionProjection, buildDefinitionYamlObject, buildModuleYamlObject } from '../lib/definition.js'
 import { withScratchInstances } from './helpers/lifecycle.js'
 import { parse as parseYAML, stringify as stringifyYAML } from 'yaml'
+import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { pngImage } from './helpers/logoImages.js'
 
 import {
   isValidLocalDefinitionId,
@@ -20,12 +23,16 @@ import {
   writeLocalDefinitionTemplate,
   readLocalDefinitionReferenceDocx,
   writeLocalDefinitionReferenceDocx,
+  readLocalDefinitionLogo,
+  writeLocalDefinitionLogo,
+  readLocalArtefactRenderReferenceDocx,
   listLocalDefinitions,
   localDefinitionExists,
   resolveDefinitionStructure,
   listLocalDefinitionRows,
 } from '../web/lib/localDefinitionFiles.js'
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
+import { writeBinaryFile } from '../web/lib/localWorkspace.js'
 
 // ---------------------------------------------------------------------------
 // In-memory File System Access API stub — same minimal shape
@@ -517,6 +524,41 @@ describe('templates and reference docx', () => {
     await writeLocalDefinitionReferenceDocx(handle, 'wi384-fixture', 1, 'soap', bytes)
     const read = await readLocalDefinitionReferenceDocx(handle, 'wi384-fixture', 1, 'soap')
     assert.deepEqual(new Uint8Array(read), bytes)
+  })
+
+  // #222: the Logo control's Local Workspace half — the header logo of every reference document in
+  // the definition's own templates/ folder, read and replaced at once.
+  test('the header logo is read from every reference document and replaced in each one that has it', async () => {
+    const handle = new MemDirHandle()
+    assert.deepEqual(await readLocalDefinitionLogo(handle, 'wi384-fixture', 1), { logo: null, documents: [] }, 'no reference documents yet')
+    const v3 = new Uint8Array(readFileSync('definitions/design/3/templates/reference.docx'))
+    await writeLocalDefinitionReferenceDocx(handle, 'wi384-fixture', 1, 'soap', v3)
+    const plain = new Uint8Array(execFileSync('pandoc', ['--print-default-data-file', 'reference.docx'], { maxBuffer: 1 << 26 }))
+    await writeLocalDefinitionReferenceDocx(handle, 'wi384-fixture', 1, 'hld', plain)
+
+    const before = await readLocalDefinitionLogo(handle, 'wi384-fixture', 1)
+    assert.equal(before.logo.document, 'reference-soap.docx')
+    assert.deepEqual(before.documents, [{ name: 'reference-hld.docx', hasLogo: false }, { name: 'reference-soap.docx', hasLogo: true }])
+
+    const logo = new Uint8Array(pngImage(50, 20))
+    assert.deepEqual(await writeLocalDefinitionLogo(handle, 'wi384-fixture', 1, logo), { updated: ['reference-soap.docx'], withoutLogo: ['reference-hld.docx'] })
+    assert.deepEqual(new Uint8Array((await readLocalDefinitionLogo(handle, 'wi384-fixture', 1)).logo.bytes), logo)
+    assert.deepEqual(new Uint8Array(await readLocalDefinitionReferenceDocx(handle, 'wi384-fixture', 1, 'hld')), plain, 'the one without a logo is untouched')
+    await assert.rejects(writeLocalDefinitionLogo(handle, 'wi384-fixture', 1, new TextEncoder().encode('not an image')), /PNG or JPEG/)
+  })
+
+  // #222: a render uses an artefact's own reference document, else the definition's shared one, as
+  // lib/render.js does on disk, so a logo replaced in the shared one reaches a Local Workspace render.
+  test('the reference docx a render uses is the artefact\'s own, else the shared reference.docx, else none', async () => {
+    const handle = new MemDirHandle()
+    assert.equal(await readLocalArtefactRenderReferenceDocx(handle, 'wi384-fixture', 1, 'soap'), null, 'none at all')
+    const shared = new TextEncoder().encode('PK\x03\x04 shared')
+    await writeBinaryFile(handle, 'definitions/wi384-fixture/1/templates/reference.docx', shared)
+    assert.deepEqual(new Uint8Array(await readLocalArtefactRenderReferenceDocx(handle, 'wi384-fixture', 1, 'soap')), shared)
+    const own = new TextEncoder().encode('PK\x03\x04 soap')
+    await writeLocalDefinitionReferenceDocx(handle, 'wi384-fixture', 1, 'soap', own)
+    assert.deepEqual(new Uint8Array(await readLocalArtefactRenderReferenceDocx(handle, 'wi384-fixture', 1, 'soap')), own)
+    assert.deepEqual(new Uint8Array(await readLocalArtefactRenderReferenceDocx(handle, 'wi384-fixture', 1, 'hld')), shared)
   })
 })
 

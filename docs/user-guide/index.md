@@ -316,6 +316,8 @@ To give the documents your organisation's house style, change the styles, not th
 
 The next render uses the new styles. Documents already rendered keep their old look until you render them again.
 
+**Your logo.** The picture in the page header (in design version 3, the Contoso logo) is your definition's logo. You don't need Word to change it: at the top of the **Definitions** page, the **Logo** control shows the current logo with **Download** and, on a draft, **Replace**. Choose a PNG or JPEG under **Replace** and it goes into every reference document of that draft at once, the shared one and each artefact's own. The new logo keeps its proportions inside the space the old one took up, so a square or wide logo isn't stretched, and its alt text becomes "Organisation logo". Any other file is refused. A reference document with no picture in its header is left as it is, and the control names it. The next render of every artefact shows the new logo, wherever it is rendered. A reference document you upload afterwards under **Reference docx** keeps whatever logo it has, so replace the logo again after uploading one if you want it there too. A published version shows its logo with **Download** only. A Local Workspace's definition editor has the same control. Every picture in a reference document's header counts as the logo, so a second header picture, such as a watermark, is replaced too; keep any other picture in the footer.
+
 | Style | What uses it |
 |---|---|
 | `Heading 1` to `Heading 6` | Section headings, one level per `#` |
