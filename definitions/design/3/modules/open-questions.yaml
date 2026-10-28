@@ -8,9 +8,9 @@ title: Open Questions
 purpose: >
   List the questions that are still open and what needs to happen to resolve them.
 
-  Open from the `shape` stage onward: the Full SOAP's "Questions" section and
-  the HLD's "Open questions" section render from this one field, so a question
-  raised at SOAP carries into the HLD rather than being re-typed.
+  Open from the `shape` stage onward: the Full SOAP's and the HLD's "Open
+  questions" sections render from this one field, so a question raised at SOAP
+  carries into the HLD rather than being re-typed.
 
 fields:
   - id: questions

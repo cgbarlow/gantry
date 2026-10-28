@@ -151,19 +151,19 @@ test('renders the Full SOAP with the reference sections, metadata, static caveat
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     const result = renderArtefact('examples', 'soap-full', { instancesDir })
     assert.equal(existsSync(result.docxPath), true)
-    assert.match(result.markdown, /# Introduction\n\n## Overview[\s\S]*## Problem statement/)
+    assert.match(result.markdown, /# Overview\n\n## Overview[\s\S]*## Problem statement/)
     for (const heading of [
       'Opportunity',
       'In scope',
       'Out of scope',
-      'High level requirements',
-      'High level solution overview',
+      'High-level requirements',
+      'High-level solution overview',
       'Teams required',
       'Dependencies',
       'Assumptions',
       'Estimates',
       'Sequencing',
-      'Questions',
+      'Open questions',
       'Caveats',
       'References',
     ]) {
@@ -175,7 +175,7 @@ test('renders the Full SOAP with the reference sections, metadata, static caveat
 
     const roundTrip = execFileSync('pandoc', ['-f', 'docx', '-t', 'markdown', result.docxPath], { encoding: 'utf8' })
     assert.match(roundTrip, /Full Solution on a Page/)
-    assert.match(roundTrip, /High level requirements/)
+    assert.match(roundTrip, /High-level requirements/)
     assert.match(roundTrip, /SOAP\/estimate delivered date/)
     // pandoc's markdown writer hard-wraps the round-tripped bullet, so match across the line break.
     assert.match(roundTrip, /The actual effort will differ once the IT requirements are\s+elaborated/)
@@ -370,7 +370,7 @@ test('a local render injects a Document Control table immediately after the titl
     const titleIdx = result.markdown.indexOf('::: {custom-style="Title"}\nKiwi Cover Mutual\n:::')
     const docIdx = result.markdown.indexOf('## Document Control')
     const reviewIdx = result.markdown.indexOf('## Review & sign-off')
-    const contextIdx = result.markdown.indexOf('# Background and context')
+    const contextIdx = result.markdown.indexOf('# Overview')
     assert.ok(titleIdx >= 0 && docIdx > titleIdx, 'Document Control should be after the title')
     assert.ok(reviewIdx > docIdx, 'Review & sign-off should be after Document Control')
     assert.ok(contextIdx > reviewIdx, 'Content should be after the two tables')

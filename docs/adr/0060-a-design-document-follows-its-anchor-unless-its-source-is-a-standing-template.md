@@ -81,6 +81,40 @@ an as-built record, as Support and operations is for the SSAD. References stays
 out, because rendering it would mean mounting Teams and estimates at
 Operational Handover.
 
+### Applied to the SOAP and the Full SOAP
+
+#232. The SOAP's source, the *SAMPLE SOAP – Mobile Phone Assistance*, is one
+filled SOAP for one initiative. Both documents are rendered at the
+business-case gate from the same Shape data, often for the same reader, and
+the same Field sat under different headings in each.
+
+The Full SOAP keeps its order, but as the anchor it takes the names the rest
+of v3 uses, so the pair reads like the other design documents:
+
+- "Introduction" becomes **Overview**, the name every later v3 document and
+  the module's own title use. It still holds the Overview paragraph and the
+  Problem statement.
+- "High level requirements" and "High level solution overview" are
+  hyphenated, **High-level**, as the SAD has it.
+- "Questions" becomes **Open questions**, the same Field's heading in the HLD.
+
+The SOAP then follows the Full SOAP. Each shared Field takes the Full SOAP's
+heading, in the Full SOAP's order and at its level:
+
+- Problem statement sits under **Overview**, not "Background and context".
+- Assumptions sits under a **Design basis** chapter, as "Assumptions" rather
+  than "Assumptions and considerations". It appears only when filled.
+- **High-level requirements** and **High-level solution overview** (not
+  "High-level solution design") are chapters.
+- **Teams required** (not "Teams and contact persons") and **Estimates** (not
+  "High-level estimates") are chapters.
+- **References** is a chapter at the end, still shown only when filled.
+
+The SOAP's own Fields stay beside their nearest shared neighbour: Affected
+domains after Problem statement, and Process flow and Feature breakdown
+inside the High-level solution overview, where the Full SOAP puts its own
+Alternatives sketch.
+
 ## Consequences
 
 - Only design v3 changes. v1 and v2 are published and render exactly as before.
@@ -92,6 +126,17 @@ Operational Handover.
 - ADR-0025's statement that `as-built.md.tmpl` renders in "the ATLAS
   reference's exact order" describes v1 and v2. For v3 the order is this
   ADR's.
+- No Field enters or leaves the SOAP or the Full SOAP, and none changes
+  between bare and `?`. References stays optional in the SOAP and required in
+  the Full SOAP, so `business-case` is exactly as strict as before.
+- The User Guide's SOAP and Full SOAP reference-mapping tables still map
+  every SAMPLE SOAP and JEDI heading; for version 3 they note where each now
+  lands.
+- The SOAP's solution overview now comes before its process flow, so the
+  SOAP's diagrams are numbered in that order.
+- Renaming the Full SOAP's headings is a change to an anchor, and it carries
+  through to the SOAP that follows it. In v3 the Full SOAP's headings are no
+  longer the JEDI template's. Its order is unchanged.
 - A new design document, or a change to an existing one, starts by asking
   which kind of source it has. A filled instance means the anchor's headings
   and order. A standing template means the template's.

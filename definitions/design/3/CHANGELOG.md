@@ -547,6 +547,43 @@ HLD, whose source is a standing template, keeps its source's structure.
   table of contents follows the new order. The Kiwi Cover Mutual As-built now shows its Executive
   summary, with no change to its content, and still passes. v1 and v2 are unchanged.
 
+### The SOAP follows the Full SOAP's order and headings (#232)
+
+The SOAP and the Full SOAP are both rendered at the business-case gate from the same Shape data,
+often for the same reader, but each followed its own source: the SAMPLE SOAP and the JEDI Full SOAP
+template. The same Field appeared under different headings in each: the Problem statement under
+"Background and context" in one and "Introduction" in the other, the team list under "Teams and
+contact persons" and "Teams required". Under ADR-0060's rule the Full SOAP is the anchor for the
+pair, as the SAD is for the SSAD and As-built, and the SOAP now follows it.
+
+- **The Full SOAP takes v3's names, in its old order.** "Introduction" is now "Overview", the name
+  every later v3 document uses. "High level requirements" and "High level solution overview" are
+  hyphenated, "High-level", as in the SAD. "Questions" is now "Open questions", the same Field's
+  heading in the HLD.
+- **The SOAP's new order.** Overview (Problem statement, Affected domains); Design basis
+  (Assumptions, when filled); High-level requirements; High-level solution overview (Process flow,
+  Feature breakdown and involved teams); Teams required; Estimates; References (when filled).
+- **Shared Fields take the Full SOAP's headings, as chapters.** "Background and context" is now
+  "Overview". "Assumptions and considerations" is now "Assumptions", under a "Design basis"
+  chapter that appears only when it is filled. "High-level solution design" is now "High-level
+  solution overview". "Teams and contact persons" is now "Teams required", and "High-level
+  estimates" is now "Estimates". High-level requirements, the solution overview, Teams required,
+  Estimates and References are each a chapter, as in the Full SOAP, and the "Solution definition"
+  and "Teams, contact persons, and high-level estimates" chapters are gone.
+- **The SOAP's own Fields stay beside their nearest shared neighbour.** Affected domains follows
+  the Problem statement. Process flow and Feature breakdown and involved teams sit inside the
+  High-level solution overview, after its text, where the Full SOAP puts its Alternatives sketch.
+  The overview now comes before the process flow, so the SOAP's diagrams are numbered in that
+  order.
+- **Same Fields, same Gate.** No Field entered or left either document, and none changed between
+  mandatory and optional. References stays optional in the SOAP and mandatory in the Full SOAP, so
+  `business-case` asks exactly what it asked before. The Full SOAP's order is unchanged. Both
+  bundled examples' SOAP and Full SOAP show the same content as before under the new headings, and
+  still pass. The table of contents follows the new headings. v1 and v2 are unchanged.
+- **Guidance follows the new names.** The Overview paragraph's guidance says it opens the Full
+  SOAP's "Overview"; the Assumptions guidance says it renders as "Assumptions" under "Design
+  basis"; the Open Questions module says the Full SOAP and the HLD both head it "Open questions".
+
 ## v2
 
 Layout revision of v1. Every artefact's `requires` list re-sequenced to the reading

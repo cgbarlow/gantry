@@ -62,7 +62,7 @@ function mermaidWarnings(stderr) {
   return stderr.split('\n').filter((line) => /Mermaid/.test(line))
 }
 
-const IMAGE_CAPTIONS_AFTER_TWO_DIAGRAMS = ['Diagram 3. Take out insurance process', 'Diagram 4. Claims handling introductory view']
+const IMAGE_CAPTIONS_AFTER_TWO_DIAGRAMS = ['Diagram 3. Claims handling introductory view', 'Diagram 4. Take out insurance process']
 
 test('without Chromium installed, `gantry render` succeeds, warns once with the install command, and leaves the Mermaid diagrams as source (#198)', async () => {
   await withExample([SECURITY_FENCE, PLAIN_FENCE], ({ workspacesDir, noBrowsers }) => {
@@ -108,8 +108,8 @@ test('a document with no Mermaid diagram never needs Chromium: no warning (#198)
     assert.equal(run.status, 0, run.stderr)
     assert.deepEqual(mermaidWarnings(run.stderr), [])
     assert.deepEqual(captionedFigures(run.docxPath).map((f) => f.caption), [
-      'Diagram 1. Take out insurance process',
-      'Diagram 2. Claims handling introductory view',
+      'Diagram 1. Claims handling introductory view',
+      'Diagram 2. Take out insurance process',
     ])
   })
 })

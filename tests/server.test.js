@@ -27,15 +27,16 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
       {
         id: 'soap',
         title: 'Solution on a Page',
-        // design v3 `soap.requires`: v2's (the fixture is pinned to v3, #193). Since #220 the
-        // Classification the cover prints is an Instance setting, not a required Field.
+        // design v3 `soap.requires` (the fixture is pinned to v3, #193): v2's Fields, in the Full
+        // SOAP's order since #232. Since #220 the Classification the cover prints is an Instance
+        // setting, not a required Field.
         requires: [
           'background.problem',
           'background.affected-domains',
-          'solution-definition.high-level-requirements',
-          'solution-definition.process-flow',
-          'solution-definition.high-level-solution-overview',
           'design-basis.assumptions?',
+          'solution-definition.high-level-requirements',
+          'solution-definition.high-level-solution-overview',
+          'solution-definition.process-flow',
           'solution-definition.feature-breakdown',
           'team-and-estimates.teams-required',
           'team-and-estimates.estimates',
