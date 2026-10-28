@@ -44,6 +44,7 @@ import { advancedMode } from './lib/advancedMode.js'
 import { modulePayload, payloadKey, savedFields, saveStatusLine } from './lib/stageSave.js'
 import { isMultiValuedField, emptyFieldValue } from './lib/fieldShape.js'
 import { countWords, targetSizeLabel, withTargetWords } from './lib/targetSize.js'
+import { withInstanceSettings } from './lib/instanceSettings.js'
 import { renderEngine } from './lib/renderEngine.js'
 import { warmLoadPandocWasm, renderDocxWithWasm } from './lib/pandocWasm.js'
 import { hydrateMermaidPreview, prepareMermaidForDocx } from './lib/mermaid.js'
@@ -234,8 +235,9 @@ async function loadLocalInstance(workspaceId, slug, requestedStageId) {
   }
 
   // #202: the same Target size and per-Field targets GET /api/instance adds (web/lib/targetSize.js),
-  // so a Local-workspace instance's editor shows the same word counts.
-  return withTargetWords({
+  // so a Local-workspace instance's editor shows the same word counts — and (#219) the same
+  // `instanceSettings` (web/lib/instanceSettings.js).
+  const response = withTargetWords({
     slug,
     // #145: the same optional display-name field GET /api/instance returns (`name:` in
     // instance.yaml, or `null` when unset) — read straight off the already-parsed local
@@ -283,6 +285,7 @@ async function loadLocalInstance(workspaceId, slug, requestedStageId) {
     // `/api/local/check` round trip at all.
     localDefinitionStructure: structure,
   }, structure.modules, record.size)
+  return withInstanceSettings(response, structure, record)
 }
 
 /**

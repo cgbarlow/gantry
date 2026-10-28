@@ -11,6 +11,8 @@ import { defnView, setDefnView, defnMapExpanded, setDefnMapExpanded } from '../l
 import { planCopy, resolveCollision, applyPlan, isResolved } from '../lib/copyPlanner.js'
 import { coverClassificationOptions } from '../lib/artefactFrontMatter.js'
 import { TARGET_SIZES, targetSizeLabel, withFieldTargetWords } from '../lib/targetSize.js'
+import { definitionInstanceSettings } from '../lib/instanceSettings.js'
+import { InstanceSettingsSummary } from '../lib/instanceSettingsView.js'
 import { DefinitionLogoControl } from '../lib/definitionLogoControl.js'
 
 // The rebuilt Definitions page (WI #381, Feature #380's grilling session). Primary source:
@@ -1828,7 +1830,41 @@ export function DefinitionViewerPage() {
             </div>`
           )}
         </div>
+        ${renderInstanceSettingsOutlineGroup(d)}
       </nav>
+    `
+  }
+
+  // #219 (docs/adr/0058): the Instance settings this Definition offers — worked out from the working
+  // copy by web/lib/instanceSettings.js, so a draft's word-target edits show at once — as the
+  // Outline's last group, and a column at the end of the Map. A Definition that offers none shows
+  // neither. Each setting selects the one read-only "Instance settings" focus view.
+  function renderInstanceSettingsOutlineGroup(d) {
+    const settings = definitionInstanceSettings(d)
+    if (!settings.length) return null
+    return html`
+      <div class="defn-outline-group defn-outline-instance-settings">
+        <div class="defn-outline-group-head">
+          <span class="kicker">Instance settings · ${settings.length}</span>
+        </div>
+        ${settings.map((setting) => html`<div key=${setting.id}>${outlineNode({ type: 'instance-setting', id: setting.id, label: setting.name })}</div>`)}
+      </div>
+    `
+  }
+
+  function renderInstanceSettingsMapColumn(d) {
+    const settings = definitionInstanceSettings(d)
+    if (!settings.length) return null
+    return html`
+      <div class="defn-map-col defn-map-col-instance-settings">
+        <div class="defn-map-col-head"><span class="t">Instance settings</span></div>
+        ${settings.map((setting) => html`
+          <div key=${setting.id} class=${'defn-map-chip' + (selection.type === 'instance-setting' && selection.id === setting.id ? ' selected' : '')}
+            role="button" tabindex="0" onClick=${() => select('instance-setting', setting.id)}>
+            ${setting.name}
+          </div>
+        `)}
+      </div>
     `
   }
 
@@ -1897,6 +1933,7 @@ export function DefinitionViewerPage() {
             </div>
           ` : null}
         </div>
+        ${renderInstanceSettingsMapColumn(d)}
       </div>
     `
   }
@@ -2093,7 +2130,26 @@ export function DefinitionViewerPage() {
     if (selection.type === 'stage') return renderStageFocus(d)
     if (selection.type === 'artefact') return renderArtefactFocus(d)
     if (selection.type === 'module') return renderModuleFocus(d)
+    if (selection.type === 'instance-setting') return renderInstanceSettingsFocus(d)
     return html`<p class="loading">Select an element.</p>`
+  }
+
+  // #219 (docs/adr/0058): read-only for now, on a draft as on a published version — editing each
+  // setting's choices and default is #221.
+  function renderInstanceSettingsFocus(d) {
+    const settings = definitionInstanceSettings(d)
+    if (!settings.some((setting) => setting.id === selection.id)) return html`<p class="loading">Select an element.</p>`
+    return html`
+      <div class="defn-focus defn-instance-settings">
+        <span class="kicker">Definition</span>
+        <h2>Instance settings</h2>
+        <p class="guidance">
+          What every Instance of this Definition chooses for itself, in the "+ New Workspace" wizard and later in Instance
+          Settings. Each applies to the whole Instance, not to one stage.
+        </p>
+        <${InstanceSettingsSummary} settings=${settings} />
+      </div>
+    `
   }
 
   function renderStageFocus(d) {

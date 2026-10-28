@@ -34,6 +34,7 @@
 import { parse as parseYAML, stringify as stringifyYAML } from 'yaml'
 import { parseFieldBody, serialiseFieldBody, emptyFieldValue } from './fieldShape.js'
 import { readOnlyModuleAt } from './readOnlyModules.js'
+import { chosenInstanceSettings, withChangedInstanceSettings } from './instanceSettings.js'
 
 // Recursively sort every plain object's keys — the exact shape of
 // `lib/instance.js`'s `canonicalizeForSerialization`.
@@ -53,9 +54,10 @@ function canonicalizeForSerialization(value) {
  * The text to write at `gantry-workspace/<slug>/instance.yaml` for a new
  * local-workspace instance — the same fields `createInstance` records
  * (`definition`, `slug`, `stage` = first stage id, `assignee`,
- * `definitionVersion`), serialized canonically.
+ * `definitionVersion`, and each chosen Instance setting such as `size`),
+ * serialized canonically.
  */
-export function renderInstanceYaml({ definition, slug, stage, assignee, definitionVersion, size }) {
+export function renderInstanceYaml({ definition, slug, stage, assignee, definitionVersion, ...settings }) {
   return stringifyYAML(
     canonicalizeForSerialization({
       definition,
@@ -63,8 +65,8 @@ export function renderInstanceYaml({ definition, slug, stage, assignee, definiti
       stage,
       assignee: assignee ?? '',
       definitionVersion,
-      // #202 (docs/adr/0054): the Target size, written only when one was chosen — as lib/instance.js's createInstance does.
-      ...(size ? { size } : {}),
+      // #202/#219 (docs/adr/0054, 0058): each Instance setting, written only when one was chosen — as lib/instance.js's createInstance does.
+      ...chosenInstanceSettings(settings),
     })
   )
 }
@@ -110,13 +112,15 @@ export function withInstanceAssignee(record, assignee) {
 }
 
 /**
- * The bytes to write back to `instance.yaml` after changing the instance's
- * Target size from a local-workspace Instance Settings screen (#202,
- * docs/adr/0054) — the Local-Workspace twin of `PUT /api/instance/size`.
- * Same read-modify-write shape as `withInstanceAssignee` above.
+ * The bytes to write back to `instance.yaml` after saving the instance's
+ * Instance settings (`{ [id]: value }`, e.g. `{ size: 'large' }`) from a
+ * local-workspace Instance Settings screen (#219, docs/adr/0058) — the
+ * Local-Workspace twin of `PUT /api/instance/settings`: a blank value
+ * removes that key. Same read-modify-write shape as `withInstanceAssignee`
+ * above.
  */
-export function withInstanceSize(record, size) {
-  return stringifyYAML(canonicalizeForSerialization({ ...record, size }))
+export function withStoredInstanceSettings(record, settings) {
+  return stringifyYAML(canonicalizeForSerialization(withChangedInstanceSettings(record, settings)))
 }
 
 // ---------------------------------------------------------------------------

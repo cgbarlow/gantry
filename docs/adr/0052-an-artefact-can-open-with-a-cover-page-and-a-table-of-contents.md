@@ -436,3 +436,19 @@ header.
   nothing.
 
 Status: accepted.
+
+## Amendment (ADR-0058): the classification comes from the Instance
+
+ADR-0058 makes Classification an **Instance setting**: a list of markings
+the Definition declares, and one chosen per Instance in the "+ New
+Workspace" wizard, Instance Settings or MCP. Once a Definition declares
+markings, the cover and the page header print the Instance's marking, and
+the Artefact's `cover-classification` pointer is ignored. A Definition that
+declares no markings keeps reading the Field `cover-classification` names,
+exactly as this ADR describes, so a Definition copied into another Library
+repo keeps its markings. The Definitions page stops offering the pointer,
+and `invalid-cover-classification` validation stays.
+
+Everything else here is unchanged: the cover's layout, a blank
+classification printing nothing, and the header's `STYLEREF` field. #219
+records this amendment. The change to the render lands with #220.

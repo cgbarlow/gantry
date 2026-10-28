@@ -148,7 +148,11 @@ function installBaseUrlRoutes(page, adoBaseUrl) {
 // production uses, so this file never hand-types YAML that could drift from
 // the real schema. Returns the instance's slug and the OPFS pick-folder name
 // (for direct, out-of-band OPFS writes below).
-async function createLocalSourceInstance(page, { gantryBase, workspaceName, instanceName }) {
+//
+// `version` and `size` (#219) pick the design Definition at that version and
+// choose that Target size under the Instance step's "Instance settings"
+// heading, confirming the draft prompt when the version is a draft.
+async function createLocalSourceInstance(page, { gantryBase, workspaceName, instanceName, version, size }) {
   await page.goto(`${gantryBase}/new-workspace`)
   await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
   await page.getByRole('button', { name: 'Local', exact: true }).click()
@@ -166,15 +170,29 @@ async function createLocalSourceInstance(page, { gantryBase, workspaceName, inst
   await page.locator('#local-register-create').click()
 
   await page.waitForSelector('#instance-name')
-  await page.locator('.definition-card').first().click()
+  if (version) {
+    await page.locator('.definition-card', { hasText: '(design)' }).click()
+    await page.locator('#definition-version').selectOption(version)
+  } else {
+    await page.locator('.definition-card').first().click()
+  }
   await page.locator('#instance-name').fill(instanceName)
   const slug = await page.locator('#instance-directory').inputValue()
   await page.locator('#instance-assignee').fill('a.architect')
+  if (size) await page.getByRole('region', { name: 'Instance settings' }).locator('#instance-size').selectOption(size)
 
-  await Promise.all([
-    page.waitForNavigation({ timeout: 10_000 }),
-    page.getByRole('button', { name: 'Create instance', exact: true }).click(),
-  ])
+  if (version) {
+    await page.getByRole('button', { name: 'Create instance', exact: true }).click()
+    await Promise.all([
+      page.waitForNavigation({ timeout: 10_000 }),
+      page.getByRole('dialog', { name: 'Draft version confirmation' }).getByRole('button', { name: 'Confirm' }).click(),
+    ])
+  } else {
+    await Promise.all([
+      page.waitForNavigation({ timeout: 10_000 }),
+      page.getByRole('button', { name: 'Create instance', exact: true }).click(),
+    ])
+  }
 
   // Navigate off the editor route immediately — its own load/save logic
   // (A6, #297) keeps touching this same local workspace's files
@@ -525,6 +543,61 @@ test('Import: a slug already in use at the destination is rejected, not silently
       const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
       const instanceYaml = await client.getFileContent(`gantry-workspace/${first.slug}/instance.yaml`)
       assert.match(instanceYaml, new RegExp(`slug: ${first.slug}`))
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
+// #219 (docs/adr/0058): the source instance's Instance settings carry across
+// an import — its Target size lands pre-selected under the Instance step's
+// "Instance settings" heading and is stored at the destination.
+test('Import: a sized local instance\'s Target size is pre-selected under "Instance settings" and kept at the destination', async () => {
+  await withImportTestServer(async ({ gantryBase, adoBaseUrl }) => {
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      const pageErrors = []
+      page.on('pageerror', (err) => pageErrors.push(err.message))
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
+      await page.addInitScript(FS_MOCK_INIT)
+      await installBaseUrlRoutes(page, adoBaseUrl)
+      await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
+
+      await page.goto(`${gantryBase}/new-workspace`)
+      // design v3 (a draft) declares word targets, so it offers Size.
+      const { slug } = await createLocalSourceInstance(page, {
+        gantryBase,
+        workspaceName: 'Sized Source WS',
+        instanceName: 'Sized Import',
+        version: '3',
+        size: 'small',
+      })
+
+      await openImportSourcePanel(page, gantryBase)
+      await pickImportInstanceFromRecent(page, { workspaceName: 'Sized Source WS', slug })
+      await chooseNewDestination(page, { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY })
+
+      const group = page.getByRole('region', { name: 'Instance settings' })
+      await group.waitFor({ timeout: 10_000 })
+      assert.equal(await group.locator('#instance-size').inputValue(), 'small', 'the source instance\'s size is pre-selected, not the default')
+
+      // A draft version asks for confirmation on leaving the Instance step and again on creating.
+      const confirmDraft = () => page.getByRole('dialog', { name: 'Draft version confirmation' }).getByRole('button', { name: 'Confirm' }).click()
+      await page.getByRole('button', { name: 'Next: link a work item' }).click()
+      await confirmDraft()
+      await page.waitForSelector('#work-item-type option', { state: 'attached', timeout: 10_000 })
+      await page.locator('#new-work-item-title').fill('Sized import parent work item')
+      await page.getByRole('button', { name: 'Create instance & link' }).click()
+      await confirmDraft()
+      await page.waitForSelector('text=Instance created', { timeout: 10_000 })
+
+      const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
+      const instanceYaml = await client.getFileContent(`gantry-workspace/${slug}/instance.yaml`)
+      assert.match(instanceYaml, /^size: small$/m)
+      assert.match(instanceYaml, /^definitionVersion: 3$/m)
+      assert.deepEqual(pageErrors, [])
     } finally {
       await browser.close()
     }
