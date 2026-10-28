@@ -100,7 +100,7 @@ export function blankLocalDefinitionStructure(id, title) {
 // loadDefinition/findDefinitionProblems both start from.
 // ---------------------------------------------------------------------------
 
-/** Port of `lib/definition.js`'s `buildDefinitionYamlObject`, minus the disk-only `onDiskRaw` fallback (a local-workspace caller always has the full structure already in memory — see this file's header comment) and minus its `keyOf` kebab-case input form (#148): this takes only the camelCase structure, so a raw parsed `definition.yaml` loses `read-only-modules`, `copied-from`, `document-control`, `satisfies-gate`, `cover-page`, `cover-classification`, `cover-purpose`, `table-of-contents` and `diagram-captions` here. */
+/** Port of `lib/definition.js`'s `buildDefinitionYamlObject`, minus the disk-only `onDiskRaw` fallback (a local-workspace caller always has the full structure already in memory — see this file's header comment) and minus its `keyOf` kebab-case input form (#148): this takes only the camelCase structure, so a raw parsed `definition.yaml` loses `read-only-modules`, `copied-from`, `document-control`, `satisfies-gate`, `cover-page`, `cover-classification`, `cover-purpose`, `table-of-contents`, `diagram-captions` and `instance-settings` here. */
 export function renderDefinitionYaml(structure) {
   const obj = {}
   obj.id = structure.id
@@ -108,6 +108,8 @@ export function renderDefinitionYaml(structure) {
   obj.status = structure.status
   obj.title = structure.title
   obj.description = structure.description
+  // #220 (ADR-0058): the Definition's Instance settings, written back whenever declared, as it is.
+  if (structure.instanceSettings !== undefined) obj['instance-settings'] = structure.instanceSettings
   obj.stages = (structure.stages ?? []).map((s) => {
     const entry = { id: s.id, title: s.title, purpose: s.purpose, gate: s.gate, modules: s.modules ?? [] }
     if (s.readOnlyModules !== undefined) entry['read-only-modules'] = s.readOnlyModules
@@ -291,6 +293,8 @@ export async function readLocalDefinitionStructure(handle, definitionId, version
     description: raw.description,
     version: raw.version ?? version,
     status: raw.status,
+    // #220 (ADR-0058): projected only when declared, as lib/definition.js's definitionVersionProjection does.
+    ...(raw['instance-settings'] !== undefined ? { instanceSettings: raw['instance-settings'] } : {}),
     stages: (raw.stages ?? []).map((s) =>
       withOptional(
         { id: s.id, title: s.title, purpose: s.purpose, gate: s.gate, modules: s.modules ?? [] },

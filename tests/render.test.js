@@ -493,7 +493,6 @@ function escapeRegExp(value) {
 function seedExamplesAzureDevOpsFiles() {
   return {
     '/gantry-workspace/examples/instance.yaml': readFileSync('workspaces/examples/kiwi-cover-mutual/instance.yaml', 'utf8'),
-    '/gantry-workspace/examples/modules/document-handling.md': exampleModuleText('document-handling'),
     '/gantry-workspace/examples/modules/background.md': exampleModuleText('background'),
     '/gantry-workspace/examples/modules/introduction.md': exampleModuleText('introduction'),
     '/gantry-workspace/examples/modules/design-basis.md': exampleModuleText('design-basis'),

@@ -451,4 +451,6 @@ and `invalid-cover-classification` validation stays.
 
 Everything else here is unchanged: the cover's layout, a blank
 classification printing nothing, and the header's `STYLEREF` field. #219
-records this amendment. The change to the render lands with #220.
+records this amendment, and #220 delivers it: the render reads the
+Instance's `classification:`, and a cover whose marking is blank still gives
+Word the invisible paragraph the header's field reads.

@@ -3,10 +3,15 @@
 // the Definitions page (server and Local Workspace) can't drift in how a setting is shown.
 import { html } from 'htm/preact'
 
-/** The `<select>` for one Instance setting (`setting` from `definitionInstanceSettings`), labelled by its name for assistive tech. */
+/**
+ * The `<select>` for one Instance setting (`setting` from `definitionInstanceSettings`), labelled by
+ * its name for assistive tech. An optional setting with no default (#220's Classification) opens with
+ * "None", the blank value, so nothing has to be chosen.
+ */
 export function InstanceSettingSelect({ setting, value, id, disabled = false, onChange }) {
   return html`
     <select id=${id} class="wizard-input" aria-label=${setting.label} disabled=${disabled} value=${value} onChange=${(e) => onChange(e.currentTarget.value)}>
+      ${setting.optional ? html`<option key="" value="">None</option>` : null}
       ${setting.choices.map((choice) => html`<option key=${choice.value} value=${choice.value}>${choice.label}</option>`)}
     </select>
   `

@@ -38,6 +38,7 @@ import { readOnlyModuleProblems } from './readOnlyModules.js'
 import { diagramCaptionsProblem } from './diagramCaptions.js'
 import { artefactFrontMatterProblems } from './artefactFrontMatter.js'
 import { targetWordsProblem } from './targetSize.js'
+import { instanceSettingsDeclarationProblems } from './instanceSettings.js'
 
 // ---------------------------------------------------------------------------
 // definition/module lookup — the projection's `modules` is a plain array;
@@ -599,6 +600,8 @@ export function findLocalDefinitionProblems(structure) {
   problems.push(...gateReferenceProblems(stages, artefacts, [...modulesById.values()]))
   // #152: shared with lib/definition.js rather than ported — see web/lib/readOnlyModules.js.
   problems.push(...readOnlyModuleProblems(stages))
+  // #220: shared with lib/definition.js rather than ported — see web/lib/instanceSettings.js.
+  problems.push(...instanceSettingsDeclarationProblems(structure.instanceSettings))
 
   return problems
 }

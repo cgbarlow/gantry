@@ -231,6 +231,27 @@ test('get_instance returns the instance\'s size and each budgeted field\'s word 
   assert.match(getInstanceTool.description, /"targetWords"/)
 })
 
+// #220 (spec #223, ADR-0058): an instance carries its Instance settings — its Classification among
+// them — so an AI author knows the marking its documents print before writing.
+test('get_instance returns the instance\'s Instance settings, its Classification among them, and says so in its description', async () => {
+  const classification = { id: 'classification', label: 'Classification', choices: [{ value: 'IN-CONFIDENCE', label: 'IN-CONFIDENCE' }], default: null, optional: true, value: 'IN-CONFIDENCE' }
+  const fetch = stubFetch(({ url }) => {
+    if (url.pathname === '/api/instance/workspace') return { status: 200, body: { workspaceId: null, scope: null } }
+    if (url.pathname === '/api/instance') return { status: 200, body: { slug: 'marked-instance', modules: [], instanceSettings: [classification] } }
+    return undefined
+  })
+  try {
+    const gantryClient = createGantryClient({ baseUrl: BASE_URL, workspacePats: {} })
+    const result = await getInstanceTool.handler({ slug: 'marked-instance' }, { gantryClient })
+    assert.equal(result.isError, undefined)
+    assert.deepEqual(JSON.parse(result.content[0].text).instanceSettings, [classification])
+  } finally {
+    fetch.restore()
+  }
+  assert.match(getInstanceTool.description, /"instanceSettings"/)
+  assert.match(getInstanceTool.description, /"classification"/)
+})
+
 // ---------------------------------------------------------------------------
 // update_instance_modules
 // ---------------------------------------------------------------------------

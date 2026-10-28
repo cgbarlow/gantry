@@ -82,7 +82,7 @@ Workspaces and instances can be archived — hidden from the dashboard's default
 
 ### Instance settings
 
-Some choices apply to a whole Instance rather than to one Stage's content. Gantry calls them **Instance settings**, and the Instance's Definition decides which ones there are, what you can choose from and what is chosen if you don't. Today there is one, **Size** (see **Target size and word targets** below).
+Some choices apply to a whole Instance rather than to one Stage's content. Gantry calls them **Instance settings**, and the Instance's Definition decides which ones there are, what you can choose from and what is chosen if you don't. There are two: **Size** (see **Target size and word targets** below) and **Classification** (see **Classification** below).
 
 You meet them in three places, always under an **Instance settings** heading:
 
@@ -91,6 +91,23 @@ You meet them in three places, always under an **Instance settings** heading:
 - **The Definitions page.** A Definition that has Instance settings shows an **Instance settings** group at the end of the Outline (and a column at the end of the Map). Select it to see, for each setting, why the Definition offers it, its choices and its default. It is read-only for now.
 
 A Definition with no Instance settings shows none of this anywhere: no heading in the wizard, nothing extra in Instance Settings and no section on the Definitions page. Assignee and Required reviewer aren't Instance settings. They are about people rather than the documents, and they keep their own places in Instance Settings.
+
+#### Classification
+
+A Definition can give its documents a **Classification**, a marking such as `IN-CONFIDENCE` that tells every reader how to handle them. It applies to every document from the instance, and is printed on each one's cover and in its page header (see [Cover page and table of contents](#cover-page-and-table-of-contents)).
+
+Choose it under **Instance settings** when you create the instance, and change it later in **Instance Settings**. It is optional. Choose **None**, or leave it, and no marking is printed. If the Definition has a default marking, it is already selected, and an instance that never chooses one uses it. You can only choose one of the Definition's own markings: anything else is refused, in the wizard, in Instance Settings and over MCP. A changed marking shows in the next render.
+
+A Definition author lists the markings in `definition.yaml`, with an optional default:
+
+```yaml
+instance-settings:
+  classification:
+    choices: [UNCLASSIFIED, IN-CONFIDENCE, SENSITIVE, RESTRICTED]
+    default: IN-CONFIDENCE
+```
+
+Each marking is printed exactly as written. The list must have at least one marking, with none blank or repeated, and a default must be one of them. Anything else is a problem that `gantry validate` and a Local Workspace report, the Definitions page shows under its Instance settings and Save and Publish refuse. A Definition an instance already uses keeps loading, but offers no Classification until it is fixed. The Definitions page shows the markings and the default read-only for now.
 
 ### Definition versions and the Definitions page
 
@@ -290,7 +307,9 @@ A Definition author can give an artefact a cover page, a table of contents, or b
 
 **Cover page.** Tick **Cover page** on the artefact on the Definitions page, or set `cover-page: true` on it in `definition.yaml`. The document then opens with a cover showing the instance's name as the title, the artefact's title as the document type, the version and status from the Document Control table, the instance's assignee as author, and the artefact's cover purpose, followed by a page break. Document Control comes next. Anything without a value is left off the cover. The cover never shows diagrams or section content.
 
-The cover can also show a classification, such as `IN-CONFIDENCE`. Choose the field it comes from under **Cover classification**, or set `cover-classification: <module>.<field>` in `definition.yaml`. It must be a single-choice select or a text field that the artefact itself requires; the choice on the Definitions page lists exactly those. When the field is blank, the cover leaves the classification out.
+The cover can also show a classification, such as `IN-CONFIDENCE`. It is the instance's [Classification](#classification), an Instance setting, when the Definition lists classification markings. When the instance has none, the cover leaves the classification out.
+
+Definitions written before Instance settings may instead name a field with `cover-classification: <module>.<field>` in `definition.yaml`, a single-choice select or text field the artefact itself requires. That still works for a Definition that lists no classification markings, and is ignored for one that does. The Definitions page no longer offers it: it shows one that is already set, says whether it is still used, and has a **Remove** button.
 
 The cover's purpose line is a short statement for the reader saying what the document is, such as "This document describes the complete solution architecture for build." Write it under **Cover purpose**, or set `cover-purpose` in `definition.yaml`. Leave it empty and the cover has no purpose line. It is separate from the artefact's **Purpose**, which is written for the author and is what this guide and the Definitions page show; the cover never prints that.
 
@@ -414,7 +433,7 @@ Gantry's Settings are split by scope:
 
 - **Global Settings** holds the **Advanced mode** toggle, off by default — with it off, a browser only ever sees the Local workspace flow (see **Local workspaces** above), with no Provider, work-item or sign-off UI anywhere in the app. It also holds a **default ticketing system** choice, which only ever affects a *new* Azure DevOps Workspace's own ticketing-system override (Jira is listed but disabled). There is no global Personal Access Token here, or anywhere else: every Server-hosted Workspace holds its own **Workspace PAT** (see **Choosing a Provider** above), so this screen has nothing credential-related to set.
 - **Workspace Settings** controls the Owner and the Workspace's own PAT — set it, replace it, or clear it, entirely independently of every other workspace's own token — plus, for an Azure DevOps workspace only, a ticketing-system override (Jira is listed but disabled; a GitHub or GitLab workspace has no such choice, since its tracker is fixed by its Provider — GitHub Issues or GitLab Issues respectively). This screen also shows the Workspace's Provider and, at a glance, whether its PAT is set, missing or was rejected on the last request that used it. These settings apply to the Workspace and can be opened from an Instance that belongs to it. The same screen also holds **Archive workspace** / **Restore workspace**.
-- **Instance Settings** controls the Instance's Assignee (and, for a Workspace-backed Instance, its Required reviewer) and, under an **Instance settings** heading, whatever Instance settings its Definition offers, such as **Size** when it sets word targets (see **Instance settings** and **Target size and word targets** above), and shows read-only information about the Instance and its linked work item. The same screen also holds **Archive instance** / **Restore instance**. An archived instance is hidden from the dashboard but still opens at its direct URL.
+- **Instance Settings** controls the Instance's Assignee (and, for a Workspace-backed Instance, its Required reviewer) and, under an **Instance settings** heading, whatever Instance settings its Definition offers, such as **Size** when it sets word targets and **Classification** when it lists markings (see **Instance settings** and **Target size and word targets** above), and shows read-only information about the Instance and its linked work item. The same screen also holds **Archive instance** / **Restore instance**. An archived instance is hidden from the dashboard but still opens at its direct URL.
 
 An override narrows the scope of a setting: a workspace's own PAT and ticketing-system choice apply only to that Workspace, while an Instance's own settings affect only that one run of the Definition — nothing here falls back to a shared default any more.
 
@@ -445,7 +464,7 @@ The rendered documents are deliberately **not** a one-to-one copy of every refer
 - **Consolidation over sprawl.** Where a reference document has a chapter of viewpoints or a deep product-specific hierarchy (the SAD's Logical Components View, the SSAD's thirty product sub-sections, the ATLAS's fifty-five infrastructure headings), Gantry gives it one field. Put the finer structure inside the field as sub-headings when an instance needs it; a module per heading would mostly sit empty.
 - **Document control is the tool's job.** Version, date, commit, gate status and the review / sign-off table are rendered at the top of every document by Gantry from the instance's history and pull request — not authored as fields. Where a reference has a Document Control, Approved By, Consulted or Sign-Off section, that is what it maps to.
 
-**Version 3 (draft).** Every version 3 document opens with a [cover page and a table of contents](#cover-page-and-table-of-contents). The cover's title is the instance's name, not its slug, so the documents no longer start with a `<slug>: <document>` heading; their first heading is section 1. The cover's classification comes from **Document handling › Classification** (`document-handling.classification`), a choice of the New Zealand Protective Security Requirements markings `UNCLASSIFIED`, `IN-CONFIDENCE`, `SENSITIVE` and `RESTRICTED`. It is available at every stage and applies to every document from the instance. An organisation with a different scheme replaces the options in its own copy of the definition. It is printed in the page header of every page rather than above the cover's title; see [Word styles and your house style](#word-styles-and-your-house-style). Leave it blank and the header has no classification; pick a value that isn't one of the options (by editing the module file) and `check` warns without blocking the gate. The cover's author is the instance's assignee. Each document's cover purpose is a statement for the reader, such as "This document describes the complete solution architecture …", while its purpose stays the instruction to the author shown below. Version 3's headings are numbered 1, 1.1 and 1.1.1, and its tables share one style with a repeating header row and rows that don't split across pages; see [Word styles and your house style](#word-styles-and-your-house-style).
+**Version 3 (draft).** Every version 3 document opens with a [cover page and a table of contents](#cover-page-and-table-of-contents). The cover's title is the instance's name, not its slug, so the documents no longer start with a `<slug>: <document>` heading; their first heading is section 1. The cover's classification is the instance's [Classification](#classification), chosen from the New Zealand Protective Security Requirements markings `UNCLASSIFIED`, `IN-CONFIDENCE`, `SENSITIVE` and `RESTRICTED` when the instance is created or later in Instance Settings. There is no default. An organisation with a different scheme lists its own markings in its own copy of the definition. It is printed in the page header of every page rather than above the cover's title; see [Word styles and your house style](#word-styles-and-your-house-style). Leave it as None and the header has no classification. No stage has a "Document handling" section any more. An instance that chose a marking there before needs it chosen again in Instance Settings, because version 3 is still a draft. The cover's author is the instance's assignee. Each document's cover purpose is a statement for the reader, such as "This document describes the complete solution architecture …", while its purpose stays the instruction to the author shown below. Version 3's headings are numbered 1, 1.1 and 1.1.1, and its tables share one style with a repeating header row and rows that don't split across pages; see [Word styles and your house style](#word-styles-and-your-house-style).
 
 #### How to read the tables
 

@@ -21,7 +21,6 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { useLocation } from 'preact-iso'
 import { reorder } from '../lib/reorder.js'
-import { coverClassificationOptions } from '../lib/artefactFrontMatter.js'
 import { TARGET_SIZES, targetSizeLabel, withFieldTargetWords } from '../lib/targetSize.js'
 import { definitionInstanceSettings } from '../lib/instanceSettings.js'
 import { InstanceSettingsSummary } from '../lib/instanceSettingsView.js'
@@ -429,10 +428,9 @@ function ArtefactTemplateEditor({ handle, definitionId, version, artefact, readO
   `
 }
 
-function ArtefactEditor({ handle, definitionId, version, artefact, modules, gates, readOnly, onChange, onRemove, onReferenceDocxSaved }) {
+function ArtefactEditor({ handle, definitionId, version, artefact, modules, gates, readOnly, declaresClassification, onChange, onRemove, onReferenceDocxSaved }) {
   const [expanded, setExpanded] = useState(false)
   const filenameTokens = [...FILENAME_BUILTIN_TOKENS, ...eligibleFilenameFields(modules, artefact)]
-  const classificationOptions = coverClassificationOptions(modules, artefact)
   return html`
     <div class="local-def-element">
       <div class="local-def-element-header">
@@ -498,17 +496,28 @@ function ArtefactEditor({ handle, definitionId, version, artefact, modules, gate
         }} />
         Open the document with a cover page
       </label>
-      <label class="field-label">Cover classification</label>
-      <select class="wizard-input mono defn-cover-classification" aria-label="Cover classification" value=${artefact.coverClassification ?? ''} disabled=${readOnly} onChange=${(e) => {
-        const next = { ...artefact }
-        if (e.currentTarget.value) next.coverClassification = e.currentTarget.value
-        else delete next.coverClassification
-        onChange(next)
-      }}>
-        <option value="">None</option>
-        ${artefact.coverClassification !== undefined && !classificationOptions.some((o) => o.value === artefact.coverClassification) ? html`<option value=${String(artefact.coverClassification)}>${String(artefact.coverClassification)} (not a field this artefact can print)</option>` : null}
-        ${classificationOptions.map((o) => html`<option key=${o.value} value=${o.value}>${o.label}</option>`)}
-      </select>
+      ${artefact.coverClassification !== undefined
+        ? html`
+            <label class="field-label">Cover classification</label>
+            <div class="defn-cover-classification-legacy">
+              <code>${String(artefact.coverClassification)}</code>
+              ${readOnly
+                ? null
+                : html`<button type="button" class="btn small ghost" onClick=${() => {
+                    // #220 (ADR-0058 §6): no longer offered, since a classification is now an Instance
+                    // setting; one already set is shown, and can be removed.
+                    const next = { ...artefact }
+                    delete next.coverClassification
+                    onChange(next)
+                  }}>Remove</button>`}
+              <p class="muted defn-hint">
+                ${declaresClassification
+                  ? 'Ignored: this Definition declares classification markings, so covers print each instance\'s Classification setting.'
+                  : 'The field the cover prints as its classification. New Definitions declare classification markings as an Instance setting instead.'}
+              </p>
+            </div>
+          `
+        : null}
       <label class="field-label">Cover purpose</label>
       <textarea class="wizard-input defn-cover-purpose" rows="2" aria-label="Cover purpose" placeholder="e.g. This document describes …" value=${artefact.coverPurpose === undefined ? '' : String(artefact.coverPurpose)} readOnly=${readOnly} onInput=${(e) => {
         // #205 (ADR-0052): the statement the cover prints — empty removes the key, so no purpose line.
@@ -721,6 +730,7 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
               modules=${structure.modules}
               gates=${stageGates(structure)}
               readOnly=${readOnly}
+              declaresClassification=${instanceSettings.some((setting) => setting.id === 'classification')}
               onReferenceDocxSaved=${() => setLogoReload((n) => n + 1)}
               onChange=${(next) => {
                 const artefacts = structure.artefacts.slice()

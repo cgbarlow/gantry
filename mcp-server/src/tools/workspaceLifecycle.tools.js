@@ -107,7 +107,7 @@ async function createWorkspace(args, { gantryClient }) {
 // `workspaceId` on the actual create call, so a missing/rejected PAT is reported the same structured
 // way every other tool in this server reports it.
 async function createInstance(args, { gantryClient }) {
-  const { workspaceId, definition, slug, owner, assignee, size, definitionVersion } = args
+  const { workspaceId, definition, slug, owner, assignee, size, classification, definitionVersion } = args
 
   const [providerRes, serverRes] = await Promise.all([
     gantryClient.request({ path: '/api/workspaces', query: { archived: '1' } }),
@@ -134,6 +134,8 @@ async function createInstance(args, { gantryClient }) {
     ...(assignee !== undefined ? { assignee } : {}),
     // #202 (docs/adr/0054): the instance's Target size; gantry serve refuses it for a definition with no word budgets.
     ...(size !== undefined ? { size } : {}),
+    // #220 (docs/adr/0058): the instance's Classification, one of the definition's own markings; refused for a definition that declares none.
+    ...(classification !== undefined ? { classification } : {}),
     ...(definitionVersion !== undefined ? { definitionVersion } : {}),
   }
 
@@ -212,7 +214,8 @@ export const tools = [
       '3. owner (optional) seeds each first-stage module\'s frontmatter owner; assignee (optional) sets the instance\'s stored assignee. definitionVersion (optional) pins a specific version — omitted defaults to latest published. ' +
       '4. A Provider-backed workspace\'s credential is resolved automatically the normal way — a missing/rejected PAT is reported as a "missing_workspace_pat"/"authentication_required" error, never guessed. ' +
       '5. Only azure-devops and github workspaces are supported for instance creation today; gitlab/atlassian workspaces are reported as not-yet-supported rather than silently creating a local instance in the wrong place. ' +
-      '6. size (optional: small, medium or large) is the instance\'s Target size — how much authors write in each field — for a definition that sets word budgets (get_definition shows a field\'s "targetWords"); omitted, the instance works to medium. It is refused for a definition with no budgets.',
+      '6. size (optional: small, medium or large) is the instance\'s Target size — how much authors write in each field — for a definition that sets word budgets (get_definition shows a field\'s "targetWords"); omitted, the instance works to medium. It is refused for a definition with no budgets. ' +
+      '7. classification (optional) is the instance\'s Classification — the marking printed on every document\'s cover and page header — for a definition that declares classification markings (get_definition shows them under "instanceSettings"). It must be one of those markings, exactly as written; omitted, the instance takes the definition\'s default marking, or none. It is refused for a definition that declares no markings.',
     inputSchema: {
       workspaceId: z.string().describe('An id from list_workspaces or create_workspace.'),
       definition: z.string().describe('A known definition id.'),
@@ -220,6 +223,7 @@ export const tools = [
       owner: z.string().optional(),
       assignee: z.string().optional(),
       size: z.enum(['small', 'medium', 'large']).optional().describe('The instance\'s Target size, for a definition that sets word budgets; omitted means medium.'),
+      classification: z.string().optional().describe('The instance\'s Classification, one of the definition\'s own markings; omitted means the definition\'s default, or none.'),
       definitionVersion: z.union([z.number(), z.string()]).optional().describe('An explicit version, or "latest" (the default when omitted).'),
     },
     handler: createInstance,

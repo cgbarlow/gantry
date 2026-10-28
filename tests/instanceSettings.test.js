@@ -123,8 +123,9 @@ test('a Definition without word targets offers no Instance settings, and a malfo
     assert.deepEqual(definitionInstanceSettings({ id: 'empty', modules: [] }), [])
   }))
 
-test('the packaged Definitions: design v3 offers Size; design v1/v2 and recruitment-onboarding offer nothing, as before', () => {
-  assert.deepEqual(definitionInstanceSettings(loadDefinition('design', { version: 3 })).map((s) => s.id), ['size'])
+// #220 adds Classification to design v3 (tests/instanceClassification.test.js covers it).
+test('the packaged Definitions: design v3 offers Size and Classification; design v1/v2 and recruitment-onboarding offer nothing, as before', () => {
+  assert.deepEqual(definitionInstanceSettings(loadDefinition('design', { version: 3 })).map((s) => s.id), ['size', 'classification'])
   for (const [id, version] of [['design', 1], ['design', 2], ['recruitment-onboarding', 1], ['recruitment-onboarding', 2], ['recruitment-onboarding', 3]]) {
     assert.deepEqual(definitionInstanceSettings(loadDefinition(id, { version })), [], `${id} v${version}`)
   }
@@ -159,7 +160,7 @@ test('every write is checked the same way: an unknown setting, a value outside t
   }))
 
 test('a key is written only when a value is chosen, and a blank Settings save removes it', () => {
-  assert.deepEqual(INSTANCE_SETTING_IDS, ['size'])
+  assert.deepEqual(INSTANCE_SETTING_IDS, ['size', 'classification'])
   assert.deepEqual(chosenInstanceSettings({ size: 'large', assignee: 'a.person', slug: 'x' }), { size: 'large' })
   assert.deepEqual(chosenInstanceSettings({ size: '' }), {})
   assert.deepEqual(chosenInstanceSettings(null), {})

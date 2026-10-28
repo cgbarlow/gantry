@@ -9,9 +9,8 @@ import { Dropdown } from '../lib/dropdown.js'
 import { moduleFieldUsage } from '../lib/moduleFieldUsage.js'
 import { defnView, setDefnView, defnMapExpanded, setDefnMapExpanded } from '../lib/definitionView.js'
 import { planCopy, resolveCollision, applyPlan, isResolved } from '../lib/copyPlanner.js'
-import { coverClassificationOptions } from '../lib/artefactFrontMatter.js'
 import { TARGET_SIZES, targetSizeLabel, withFieldTargetWords } from '../lib/targetSize.js'
-import { definitionInstanceSettings } from '../lib/instanceSettings.js'
+import { definitionInstanceSettings, instanceSettingName } from '../lib/instanceSettings.js'
 import { InstanceSettingsSummary } from '../lib/instanceSettingsView.js'
 import { DefinitionLogoControl } from '../lib/definitionLogoControl.js'
 
@@ -102,9 +101,22 @@ function clone(x) {
 // lib/definition.js) naming the element that owns the problem, so the toolbar's problems count and
 // the outline/map markers can point straight at it without a second, structured "where" field.
 function problemTarget(problem) {
+  // #220 (docs/adr/0058): a problem with the Instance settings declaration anchors on the setting it
+  // names, or on the declaration as a whole when it is not a map of settings at all.
+  const setting = /^Instance setting "([^"]+)"/.exec(problem?.message ?? '')
+  if (setting) return { type: 'instance-setting', id: setting[1] }
+  if (problem?.type === 'invalid-instance-settings') return { type: 'instance-setting', id: 'instance-settings' }
   const m = /^(Stage|Artefact|Module) "([^"]+)"/.exec(problem?.message ?? '')
   if (!m) return null
   return { type: m[1].toLowerCase(), id: m[2] }
+}
+
+// #220 (docs/adr/0058 §6): what an Artefact's leftover `cover-classification` pointer still does —
+// nothing once the Definition declares classification markings, the cover's classification otherwise.
+function coverClassificationHint(d) {
+  return definitionInstanceSettings(d).some((setting) => setting.id === 'classification')
+    ? 'Ignored: this Definition declares classification markings, so covers print each instance\'s Classification setting.'
+    : 'The field the cover prints as its classification. New Definitions declare classification markings as an Instance setting instead.'
 }
 
 // #149: the gates an Artefact's `gate` and a Field's `required-at` may name — each Stage's own gate,
@@ -1839,8 +1851,18 @@ export function DefinitionViewerPage() {
   // copy by web/lib/instanceSettings.js, so a draft's word-target edits show at once — as the
   // Outline's last group, and a column at the end of the Map. A Definition that offers none shows
   // neither. Each setting selects the one read-only "Instance settings" focus view.
+  // #220: a setting whose declaration is malformed isn't offered, but is listed all the same, with its
+  // problem marker, so the problem has somewhere to be shown and fixed.
+  function instanceSettingsNav(d) {
+    const nav = definitionInstanceSettings(d).map((setting) => ({ id: setting.id, name: setting.name }))
+    for (const target of problemTargets.filter((t) => t.type === 'instance-setting')) {
+      if (!nav.some((entry) => entry.id === target.id)) nav.push({ id: target.id, name: instanceSettingName(target.id) })
+    }
+    return nav
+  }
+
   function renderInstanceSettingsOutlineGroup(d) {
-    const settings = definitionInstanceSettings(d)
+    const settings = instanceSettingsNav(d)
     if (!settings.length) return null
     return html`
       <div class="defn-outline-group defn-outline-instance-settings">
@@ -1853,7 +1875,7 @@ export function DefinitionViewerPage() {
   }
 
   function renderInstanceSettingsMapColumn(d) {
-    const settings = definitionInstanceSettings(d)
+    const settings = instanceSettingsNav(d)
     if (!settings.length) return null
     return html`
       <div class="defn-map-col defn-map-col-instance-settings">
@@ -2136,9 +2158,12 @@ export function DefinitionViewerPage() {
 
   // #219 (docs/adr/0058): read-only for now, on a draft as on a published version — editing each
   // setting's choices and default is #221.
+  // #220: any problem with the declaration is listed above the settings, as the filename problems
+  // are beside an Artefact's filename.
   function renderInstanceSettingsFocus(d) {
     const settings = definitionInstanceSettings(d)
-    if (!settings.some((setting) => setting.id === selection.id)) return html`<p class="loading">Select an element.</p>`
+    if (!instanceSettingsNav(d).some((setting) => setting.id === selection.id)) return html`<p class="loading">Select an element.</p>`
+    const declarationProblems = validationProblems.filter((p) => p.type === 'invalid-instance-settings')
     return html`
       <div class="defn-focus defn-instance-settings">
         <span class="kicker">Definition</span>
@@ -2147,6 +2172,7 @@ export function DefinitionViewerPage() {
           What every Instance of this Definition chooses for itself, in the "+ New Workspace" wizard and later in Instance
           Settings. Each applies to the whole Instance, not to one stage.
         </p>
+        ${declarationProblems.length ? html`<ul class="defn-filename-problems defn-instance-settings-problems">${declarationProblems.map((p) => html`<li class="inline-error">${p.message}</li>`)}</ul>` : null}
         <${InstanceSettingsSummary} settings=${settings} />
       </div>
     `
@@ -2285,9 +2311,9 @@ export function DefinitionViewerPage() {
     // token is explained where it's authored, not just flagged elsewhere.
     const filenameProblems = validationProblems.filter((p) => typeof p.type === 'string' && p.type.startsWith('filename-') && problemTarget(p)?.type === 'artefact' && problemTarget(p)?.id === a.id)
     const filenameTokens = [...FILENAME_BUILTIN_TOKENS, ...eligibleFilenameFields(d, a)]
-    // #194 (ADR-0052): the Fields the cover may print as a classification, and any problem with the
-    // one this artefact names, shown where it is chosen as the filename problems are above.
-    const classificationOptions = coverClassificationOptions(d.modules, a)
+    // #194 (ADR-0052): any problem with the classification Field this artefact names, shown beside it
+    // as the filename problems are above. #220 (ADR-0058 §6): the page no longer offers the pointer,
+    // since a classification is now an Instance setting; one already set is shown, and can be removed.
     const classificationProblems = validationProblems.filter((p) => p.type === 'invalid-cover-classification' && problemTarget(p)?.type === 'artefact' && problemTarget(p)?.id === a.id)
     // #205: the statement the cover prints, and any problem with it, beside the classification.
     const coverPurposeProblems = validationProblems.filter((p) => p.type === 'invalid-cover-purpose' && problemTarget(p)?.type === 'artefact' && problemTarget(p)?.id === a.id)
@@ -2338,18 +2364,17 @@ export function DefinitionViewerPage() {
                   if (checked) dd.artefacts[ai].coverPage = true
                   else delete dd.artefacts[ai].coverPage
                 }))}
-                <label class="field-label">Cover classification</label>
-                <div>
-                  <select class="wizard-input mono defn-cover-classification" aria-label="Cover classification" value=${a.coverClassification ?? ''} onChange=${(e) => updateDraft((dd) => {
-                    if (e.currentTarget.value) dd.artefacts[ai].coverClassification = e.currentTarget.value
-                    else delete dd.artefacts[ai].coverClassification
-                  })}>
-                    <option value="">None</option>
-                    ${a.coverClassification !== undefined && !classificationOptions.some((o) => o.value === a.coverClassification) ? html`<option value=${String(a.coverClassification)}>${String(a.coverClassification)} (not a field this artefact can print)</option>` : null}
-                    ${classificationOptions.map((o) => html`<option key=${o.value} value=${o.value}>${o.label}</option>`)}
-                  </select>
-                  ${classificationProblems.length ? html`<ul class="defn-filename-problems">${classificationProblems.map((p) => html`<li class="inline-error">${p.message}</li>`)}</ul>` : null}
-                </div>
+                ${a.coverClassification !== undefined
+                  ? html`
+                      <label class="field-label">Cover classification</label>
+                      <div class="defn-cover-classification-legacy">
+                        <code>${String(a.coverClassification)}</code>
+                        <button type="button" class="btn small ghost" onClick=${() => updateDraft((dd) => { delete dd.artefacts[ai].coverClassification })}>Remove</button>
+                        <p class="muted defn-hint">${coverClassificationHint(d)}</p>
+                        ${classificationProblems.length ? html`<ul class="defn-filename-problems">${classificationProblems.map((p) => html`<li class="inline-error">${p.message}</li>`)}</ul>` : null}
+                      </div>
+                    `
+                  : null}
                 <label class="field-label">Cover purpose</label>
                 <div>
                   <textarea class="wizard-input defn-cover-purpose" rows="2" aria-label="Cover purpose" placeholder="e.g. This document describes …" value=${a.coverPurpose === undefined ? '' : String(a.coverPurpose)} onInput=${(e) => updateDraft((dd) => {
@@ -2380,7 +2405,7 @@ export function DefinitionViewerPage() {
               <p><span class="field-label">Document Control</span> ${documentControlCheckbox(a, null)}</p>
               <p><span class="field-label">Counts toward gate</span> ${satisfiesGateCheckbox(a, null)}</p>
               <p><span class="field-label">Cover page</span> ${coverPageCheckbox(a, null)}</p>
-              ${a.coverClassification !== undefined ? html`<p><span class="field-label">Cover classification</span> <code>${String(a.coverClassification)}</code></p>` : null}
+              ${a.coverClassification !== undefined ? html`<p><span class="field-label">Cover classification</span> <code>${String(a.coverClassification)}</code> <span class="muted defn-hint">${coverClassificationHint(d)}</span></p>` : null}
               ${a.coverPurpose !== undefined ? html`<p><span class="field-label">Cover purpose</span> ${String(a.coverPurpose)}</p>` : null}
               <p><span class="field-label">Table of contents</span> ${tableOfContentsCheckbox(a, null)}</p>
               <p><span class="field-label">Diagram captions</span> ${diagramCaptionsCheckbox(a, null)}</p>

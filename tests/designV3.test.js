@@ -10,6 +10,7 @@ import { createInstance, readInstance, readModule, writeModule } from '../lib/in
 import { renderArtefact, unnumberedHeadingsForWord } from '../lib/render.js'
 import { checkGate } from '../lib/check.js'
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
+import { definitionInstanceSettings } from '../web/lib/instanceSettings.js'
 import { countWords, overTargetNotes, TARGET_SIZES } from '../web/lib/targetSize.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { bodyParagraphs, bodyTables, docxPart, headerRowFormat, headingNumbers, keepsWithNext, numberingLevels, rowsCantSplit, styleFontSize, styleNumbering, wordStyles } from './helpers/wordDocx.js'
@@ -50,10 +51,9 @@ const EXAMPLES = {
   gantry: { name: 'Gantry hosting', classification: 'IN-CONFIDENCE', gates: ['business-case'] },
 }
 
-// Modules v3 has that v2 doesn't, each added by the ticket named.
-const V3_ADDED_MODULES = {
-  'document-handling': 196,
-}
+// Modules v3 has that v2 doesn't, each added by the ticket named. #196's `document-handling` left
+// again in #220, when the Classification became an Instance setting (ADR-0058).
+const V3_ADDED_MODULES = {}
 
 // Each Stage's "Populate example text" source: the one example that covers every Stage.
 const STAGE_EXAMPLE = 'kiwi-cover-mutual'
@@ -658,13 +658,8 @@ describe('design v3 numbers and captions its diagrams (#195)', () => {
 })
 
 describe('v3 documents open with a cover page, a classification and a table of contents (#196)', () => {
-  const CLASSIFICATION = 'document-handling.classification'
   const MARKINGS = ['UNCLASSIFIED', 'IN-CONFIDENCE', 'SENSITIVE', 'RESTRICTED']
   const PAGE_BREAK = '<w:br w:type="page"/>'
-
-  function classificationField() {
-    return v3().modules.get('document-handling').fields.find((f) => f.id === 'classification')
-  }
 
   // The cover is everything before the first page break; the rest of the document follows it.
   function splitCover(markdown) {
@@ -682,35 +677,54 @@ describe('v3 documents open with a cover page, a classification and a table of c
     return markdown.split('\n').filter((line) => /^#{1,6} /.test(line))
   }
 
-  test('v3 has a Classification select offering exactly the four NZ Protective Security Requirements markings', () => {
-    const field = classificationField()
-    assert.equal(field.type, 'select')
-    assert.notEqual(field.multiple, true)
-    assert.deepEqual(field.options, MARKINGS)
-    assert.match(field.guidance, /Protective Security Requirements/)
-    assert.match(field.guidance, /replace (these|the) options with (its|their) own/i)
+  // #220 (ADR-0058): the Classification is an Instance setting the Definition declares, not a Field
+  // in a `document-handling` Module mounted at every Stage.
+  function classificationSetting() {
+    return definitionInstanceSettings(v3()).find((setting) => setting.id === 'classification')
+  }
+
+  test('v3 declares Classification as an Instance setting offering exactly the four NZ Protective Security Requirements markings, with no default', () => {
+    const setting = classificationSetting()
+    assert.ok(setting, 'v3 offers a Classification')
+    assert.deepEqual(setting.choices.map((choice) => choice.value), MARKINGS)
+    assert.equal(setting.default, null)
+    assert.equal(setting.optional, true, 'blank can be chosen: no marking')
+    assert.deepEqual(findDefinitionProblems(DEFINITION, { version: VERSION }), [])
+    const yaml = readFileSync(join('definitions', DEFINITION, String(VERSION), 'definition.yaml'), 'utf8')
+    assert.match(yaml, /Protective Security Requirements/)
+    assert.match(yaml, /lists\s+(#\s+)?its own markings here/)
   })
 
-  test('the Classification is mounted from the first Stage onward, so every Stage can set it', () => {
-    for (const stage of v3().stages) assert.ok(stage.modules.includes('document-handling'), stage.id)
+  test('no Stage mounts document-handling and no Artefact requires it, so no gate shows a Document handling section', () => {
+    assert.equal(v3().modules.has('document-handling'), false)
+    assert.equal(existsSync(join('definitions', DEFINITION, String(VERSION), 'modules', 'document-handling.yaml')), false)
+    for (const stage of v3().stages) assert.ok(!stage.modules.includes('document-handling'), stage.id)
+    for (const artefact of v3().artefacts) {
+      assert.ok(!artefact.requires.some((r) => r.startsWith('document-handling')), artefact.id)
+    }
   })
 
-  test('a new v3 Instance has the Classification from creation, so its first render already opens with a cover', () => {
+  test('a new v3 Instance has no marking until one is chosen, and one chosen at creation is on its first render\'s cover', () => {
     withScratchDir((instancesDir) => {
       createInstance(DEFINITION, 'claims-portal', { instancesDir, version: VERSION })
-      assert.ok(existsSync(join(instancesDir, 'claims-portal', 'modules', 'document-handling.md')))
-      const { markdown } = renderArtefact('claims-portal', 'soap', { instancesDir, dryRun: true })
-      const { cover } = splitCover(markdown)
+      assert.equal(existsSync(join(instancesDir, 'claims-portal', 'modules', 'document-handling.md')), false)
+      assert.equal('classification' in readInstance('claims-portal', { instancesDir }), false)
+      const { cover } = splitCover(renderArtefact('claims-portal', 'soap', { instancesDir, dryRun: true }).markdown)
       assert.equal(coverParagraph(cover, 'Cover Classification'), undefined, 'a blank classification is left off the cover')
       assert.equal(coverParagraph(cover, 'Title'), 'Claims Portal', 'the title is the display name, the slug title-cased')
+
+      createInstance(DEFINITION, 'marked-portal', { instancesDir, version: VERSION, classification: 'SENSITIVE' })
+      assert.equal(readInstance('marked-portal', { instancesDir }).classification, 'SENSITIVE')
+      const marked = splitCover(renderArtefact('marked-portal', 'soap', { instancesDir, dryRun: true }).markdown)
+      assert.equal(coverParagraph(marked.cover, 'Cover Classification'), 'SENSITIVE')
     })
   })
 
-  test('every v3 Artefact switches on a cover page and a table of contents, its cover classification the Classification field', () => {
+  test('every v3 Artefact switches on a cover page and a table of contents, and names no cover-classification Field', () => {
     for (const artefact of v3().artefacts) {
       assert.equal(artefact.coverPage, true, artefact.id)
       assert.equal(artefact.tableOfContents, true, artefact.id)
-      assert.equal(artefact.coverClassification, CLASSIFICATION, artefact.id)
+      assert.equal(artefact.coverClassification, undefined, artefact.id)
     }
   })
 
@@ -741,24 +755,28 @@ describe('v3 documents open with a cover page, a classification and a table of c
   })
 
   for (const [slug, { classification }] of Object.entries(EXAMPLES)) {
-    test(`${slug} has a classification from the option list`, () => {
-      const { fields } = readModule(v3(), slug, 'document-handling', { instancesDir: EXAMPLES_DIR })
-      assert.equal(fields.classification, classification)
-      assert.ok(MARKINGS.includes(fields.classification))
+    test(`${slug} stores its classification as its Instance setting, one of the markings`, () => {
+      const instance = readInstance(slug, { instancesDir: EXAMPLES_DIR })
+      assert.equal(instance.classification, classification)
+      assert.ok(MARKINGS.includes(instance.classification))
+      assert.equal(existsSync(join(EXAMPLES_DIR, slug, 'modules', 'document-handling.md')), false)
     })
   }
 
-  test('a classification that is not one of the markings warns, as any off-list select value does, without blocking the Gate', () => {
+  test('a classification that is not one of the markings is refused at creation, and one written into instance.yaml by hand prints nothing', () => {
     withScratchDir((dir) => {
-      cpSync(join(EXAMPLES_DIR, 'kiwi-cover-mutual'), join(dir, 'kiwi-cover-mutual'), { recursive: true })
-      const file = join(dir, 'kiwi-cover-mutual', 'modules', 'document-handling.md')
-      writeFileSync(file, readFileSync(file, 'utf8').replace(/\nIN-CONFIDENCE\n/, '\nTOP SECRET\n'))
-      const result = checkGate('kiwi-cover-mutual', { instancesDir: dir, gate: 'business-case' })
-      assert.equal(result.pass, true)
-      assert.ok(
-        result.warnings.some((w) => /field "Classification" has a value \("TOP SECRET"\) that is not in its option list/.test(w)),
-        JSON.stringify(result.warnings)
+      assert.throws(
+        () => createInstance(DEFINITION, 'top-secret', { instancesDir: dir, version: VERSION, classification: 'TOP SECRET' }),
+        /Unknown classification "TOP SECRET" — choose one of the Definition's markings: "UNCLASSIFIED", "IN-CONFIDENCE", "SENSITIVE", "RESTRICTED"/
       )
+      assert.equal(existsSync(join(dir, 'top-secret')), false, 'nothing is written')
+
+      cpSync(join(EXAMPLES_DIR, 'kiwi-cover-mutual'), join(dir, 'kiwi-cover-mutual'), { recursive: true })
+      const file = join(dir, 'kiwi-cover-mutual', 'instance.yaml')
+      writeFileSync(file, readFileSync(file, 'utf8').replace('classification: IN-CONFIDENCE', 'classification: TOP SECRET'))
+      const { cover } = splitCover(renderArtefact('kiwi-cover-mutual', 'soap', { instancesDir: dir, dryRun: true }).markdown)
+      assert.equal(coverParagraph(cover, 'Cover Classification'), undefined)
+      assert.equal(checkGate('kiwi-cover-mutual', { instancesDir: dir, gate: 'business-case' }).pass, true, 'it never blocks a Gate')
     })
   })
 
@@ -1442,7 +1460,6 @@ describe('v3 word budgets, and the examples condensed to Medium (#203)', () => {
 // same bare / `?` form, so build-ready-checklist is exactly as strict as on v2.
 describe('the v3 SSAD follows the SAD\'s order and headings (#213)', () => {
   const SSAD_REQUIRES = [
-    'document-handling.classification?',
     'introduction.executive-summary?',
     'introduction.overview',
     'introduction.purpose',
@@ -1528,10 +1545,11 @@ describe('the v3 SSAD follows the SAD\'s order and headings (#213)', () => {
     assert.deepEqual(requiresOf(v3(), 'ssad'), SSAD_REQUIRES)
   })
 
-  // #213 moved no Field in or out; #214 added the SAD's Overview paragraph and Design basis.
+  // #213 moved no Field in or out; #214 added the SAD's Overview paragraph and Design basis. (#196's
+  // classification Field left again in #220.)
   test('beyond #214\'s three Fields, no Field entered or left the SSAD, and none changed between mandatory and optional', () => {
     const v2 = loadDefinition(DEFINITION, { version: 2 })
-    const added = ['document-handling.classification?', 'introduction.overview', 'design-basis.assumptions?', 'design-basis.constraints?']
+    const added = ['introduction.overview', 'design-basis.assumptions?', 'design-basis.constraints?']
     assert.deepEqual([...requiresOf(v3(), 'ssad')].sort(), [...requiresOf(v2, 'ssad'), ...added].sort())
   })
 

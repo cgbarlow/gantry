@@ -466,6 +466,29 @@ the two documents rendered at the same Gate started differently.
   Fields are optional and already mounted at Detailed Design. The Kiwi Cover Mutual SSAD now shows
   all three sections with no change to its content, and still passes. v1 and v2 are unchanged.
 
+### Classification is an Instance setting (#220)
+
+Spec #223, ADR-0058. The documents' Classification is one value for the whole Instance, so it is
+now chosen once, as an Instance setting, instead of as a Field at every Gate.
+
+- **v3 declares its markings.** `definition.yaml` has `instance-settings: classification:` with the
+  four New Zealand Protective Security Requirements markings, `UNCLASSIFIED`, `IN-CONFIDENCE`,
+  `SENSITIVE` and `RESTRICTED`, and no default. An organisation with its own scheme lists its own
+  markings there in its copy of the Definition.
+- **Chosen when the Instance is created.** The "+ New Workspace" wizard shows Classification under
+  "Instance settings", beside Size, with None selected. It can be changed later in Instance
+  Settings. Leaving it blank prints no marking.
+- **Covers and page headers print the Instance's marking**, exactly where #196, #207 and #209 put
+  it. A blank marking prints nothing, as a blank Field did.
+- **No more "Document handling" section.** The `document-handling` Module is gone: no Stage mounts
+  it, no Artefact requires it, and no Artefact names it as its `cover-classification`.
+- **The bundled examples keep IN-CONFIDENCE**, now stored as `classification: IN-CONFIDENCE` in
+  each example's `instance.yaml`. Their `document-handling.md` files are removed. Every Artefact
+  still renders from them and every Gate they passed still passes.
+- **Other v3 Instances need their marking chosen again.** A marking chosen in the old Field is not
+  carried over, since v3 is a draft. Choose it once in Instance Settings. Until then, documents
+  print no marking.
+
 ## v2
 
 Layout revision of v1. Every artefact's `requires` list re-sequenced to the reading
