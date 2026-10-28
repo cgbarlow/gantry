@@ -72,10 +72,12 @@ back up, it's that branch's history to continue.
 
 ## Version numbers
 
-Currently `0.x.y-beta`. Nothing formal is promised by the numbers yet beyond
-"bigger is newer" — the `-beta` suffix is doing the honest work of saying so.
-When that changes, this section should say what the new rule is rather than
-leaving people to infer it from the sequence.
+Up to `0.11.0-beta`, versions were `0.x.y-beta`: nothing formal was promised
+by the numbers beyond "bigger is newer", and the `-beta` suffix did the honest
+work of saying so. `0.11.0` was cut without the suffix at the maintainer's
+request, with the same content as `0.11.0-beta`. Nothing more formal is promised
+by the numbers yet; when a rule is settled, this section should state it rather
+than leaving people to infer it from the sequence.
 
 ## Two different things both called CHANGELOG.md
 

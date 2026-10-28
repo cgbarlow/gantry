@@ -17,6 +17,13 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.11.0 — 2026-10-28
+
+The same Gantry as 0.11.0-beta, released without the `-beta` suffix at the maintainer's request.
+Nothing changed between the two: see 0.11.0-beta below for what's new. The design v3 SSAD now
+follows the SAD's order and headings (#213), and opens with its Overview paragraph and Design
+basis (#214).
+
 ## 0.11.0-beta — 2026-10-28
 
 The design v3 Solution Support Architecture Document (SSAD) now reads like the Solution
