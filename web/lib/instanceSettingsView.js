@@ -2,7 +2,7 @@
 // from the one description web/lib/instanceSettings.js gives — so the wizard, Instance Settings and
 // the Definitions page (server and Local Workspace) can't drift in how a setting is shown.
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useRef, useState } from 'preact/hooks'
 import {
   definitionInstanceSettings,
   instanceSettingsDeclaration,
@@ -107,7 +107,23 @@ export function InstanceSettingsEditor({ definition, onChange }) {
   const defaultOptions = [
     ...new Set([...(markings ?? []).filter((marking) => typeof marking === 'string' && marking.trim() !== ''), ...(classificationDefault ? [classificationDefault] : [])]),
   ]
-  const change = (edit) => onChange(edit(declaration))
+  // The marking the default belonged to when its author cleared that marking's text, so retyping it
+  // brings the default back: a blank marking can't be a default, so renaming one to nothing drops
+  // it, and without this, deleting a marking's text to type a new name would lose the default. Any
+  // other edit forgets it.
+  const blankedDefault = useRef(null)
+  const change = (edit) => {
+    blankedDefault.current = null
+    onChange(edit(declaration))
+  }
+  const rename = (index, marking) => {
+    const was = blankedDefault.current
+    blankedDefault.current = null
+    let next = withClassificationMarkingRenamed(declaration, index, marking)
+    if (marking === '' && classificationDefault !== '' && markings?.[index] === classificationDefault) blankedDefault.current = index
+    else if (was === index && marking !== '' && next.classification?.default === undefined) next = withInstanceSettingDefault(next, 'classification', marking)
+    onChange(next)
+  }
   return html`
     <div class="instance-settings-editor">
       ${size
@@ -146,7 +162,7 @@ export function InstanceSettingsEditor({ definition, onChange }) {
                   (marking, i) => html`
                     <li key=${i} class="instance-setting-marking">
                       <input class="wizard-input" aria-label=${`Marking ${i + 1}`} value=${typeof marking === 'string' ? marking : String(marking ?? '')}
-                        onInput=${(e) => change((d) => withClassificationMarkingRenamed(d, i, e.currentTarget.value))} />
+                        onInput=${(e) => rename(i, e.currentTarget.value)} />
                       <button type="button" class="btn small ghost" aria-label=${`Move marking ${i + 1} up`} disabled=${i === 0} onClick=${() => change((d) => withClassificationMarkingMoved(d, i, -1))}>↑</button>
                       <button type="button" class="btn small ghost" aria-label=${`Move marking ${i + 1} down`} disabled=${i === markings.length - 1} onClick=${() => change((d) => withClassificationMarkingMoved(d, i, 1))}>↓</button>
                       <button type="button" class="btn small ghost" aria-label=${`Remove marking ${i + 1}`} onClick=${() => change((d) => withClassificationMarkingRemoved(d, i))}>Remove</button>

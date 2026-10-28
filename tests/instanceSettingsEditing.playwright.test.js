@@ -123,6 +123,13 @@ test('on a draft, the Definitions page edits Size\'s default and Classification\
       await classification.getByRole('button', { name: 'Move marking 3 up' }).click()
       assert.deepEqual(await markingValues(classification), ['OFFICIAL', 'PROTECTED', 'OFFICIAL: Sensitive'])
       await classification.getByRole('combobox', { name: 'Classification default' }).selectOption('OFFICIAL')
+      // Clearing the default marking's text and typing its name again, a key at a time, keeps the
+      // default on it: the blank in between can't be a default, but it isn't lost.
+      const firstMarking = classification.getByRole('textbox', { name: 'Marking 1' })
+      await firstMarking.fill('')
+      assert.equal(await classification.getByRole('combobox', { name: 'Classification default' }).inputValue(), '')
+      await firstMarking.pressSequentially('OFFICIAL')
+      assert.equal(await classification.getByRole('combobox', { name: 'Classification default' }).inputValue(), 'OFFICIAL')
 
       // A repeated marking is a Definition problem, shown in the section, and Save refuses it.
       await addMarking(classification, 'OFFICIAL')
