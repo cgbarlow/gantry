@@ -578,10 +578,11 @@ artefacts:
       This document records what was built and the final handover information
       needed for operational use.
     table-of-contents: true
-    # Order mirrors the approved ATLAS reference design: Terms & Definitions ->
-    # Introduction -> As-built design (Overview, Architecture Decisions, flows,
-    # infrastructure) -> Recovery plan -> Data security controls -> Appendix,
-    # then the gantry-only governance sections.
+    # v1 and v2: order mirrors the approved ATLAS reference design: Terms &
+    # Definitions -> Introduction -> As-built design (Overview, Architecture
+    # Decisions, flows, infrastructure) -> Recovery plan -> Data security
+    # controls -> Appendix, then the gantry-only governance sections. v3 follows
+    # the SAD instead; see #231 below.
     #
     # CHANGED v2: v1's `requires` order contradicted that comment — it placed
     # `changes-from-design`, `acceptance-criteria` and `handover-confirmation`
@@ -608,15 +609,34 @@ artefacts:
     # and conditions (optional) fields were already adjacent under one
     # "# Introduction" heading, so the position is unchanged, only the heading
     # splits into "# Overview" and "# Design basis", both still 2nd/3rd.
+    #
+    # #231 (ADR-0060): the As-built follows the SAD's reading order and heading
+    # names wherever the two render the same Field, rather than the ATLAS
+    # reference's — the move #213 made for the SSAD (ADR-0057). The ATLAS is
+    # one filled design for one migration, not a template its readers hold the
+    # As-built to, and the As-built's readers at Operational Handover are the
+    # SAD's and SSAD's. So `introduction.executive-summary?` opens the Overview
+    # chapter, as in the SAD and SSAD; Design basis lists `assumptions?` before
+    # `constraints?`; the recovery chapter is the SAD's "Failure and recovery",
+    # `recovery-plan.*` first and `nfrs.disaster-recovery-and-backup` (Backup
+    # and archiving policy) last; `data-security-controls.*` sit in a
+    # "Security" chapter under the SAD's headings; and
+    # `glossary.terms-and-definitions` moves from first to last, the SAD's
+    # "Glossary". The As-built's own chapters (As-built design, Appendix,
+    # Changes from the agreed design, Acceptance criteria, Operational notes,
+    # Handover confirmation) keep their order after the shared ones. Only
+    # `executive-summary?` is new, and it is optional and already mounted at
+    # this Stage; no other Field enters or leaves, and none changes between
+    # bare and `?`, so `operational-handover` is exactly as strict as before.
     requires:
       [
-        glossary.terms-and-definitions,
+        introduction.executive-summary?,
         introduction.overview,
         introduction.purpose,
         introduction.in-scope,
         introduction.out-of-scope,
-        design-basis.constraints?,
         design-basis.assumptions?,
+        design-basis.constraints?,
         design-basis.caveats?,
         design-basis.design-principles?,
         design-basis.outcomes-and-deliverables?,
@@ -624,11 +644,11 @@ artefacts:
         as-built-notes.architecture-decisions?,
         as-built-notes.process-flows,
         as-built-notes.infrastructure-and-configuration,
-        nfrs.disaster-recovery-and-backup,
         recovery-plan.recovery-approach,
         recovery-plan.resiliency?,
         recovery-plan.test-scenarios?,
         recovery-plan.raci?,
+        nfrs.disaster-recovery-and-backup,
         data-security-controls.controls,
         data-security-controls.inheritance-and-dependencies?,
         as-built-notes.appendix?,
@@ -636,4 +656,5 @@ artefacts:
         as-built-notes.acceptance-criteria,
         as-built-notes.operational-notes?,
         as-built-notes.handover-confirmation,
+        glossary.terms-and-definitions,
       ]

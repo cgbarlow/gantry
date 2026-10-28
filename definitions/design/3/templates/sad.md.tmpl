@@ -242,7 +242,7 @@
 ## Privacy and confidentiality concerns
 
 <%~ na(it.modules.security['privacy-and-confidentiality']) %>
-<%~ include('templates/_dataSecurityControls.md.tmpl', { dsc, controlsHeading: '## Security concerns', inheritanceHeading: '## Security control inheritance and dependencies' }) %>
+<%~ include('templates/_dataSecurityControls.md.tmpl', { dsc }) %>
 <% if (it.modules['support-and-operations']['operational-accounts-and-licenses'] && it.modules['support-and-operations']['operational-accounts-and-licenses'].length) { %>
 ## Operational accounts and licenses
 

@@ -6,19 +6,19 @@
                    inheritance and dependencies`, controls behind a bare `<% if %>`.
        - as-built: `# Data security controls` (own top-level section) + `## Inheritance
                    and dependencies`, controls already via `na()`.
-     The heading *text* and *level* genuinely differ because the parent context differs
-     (sad nests it inside its Security view; as-built gives it its own section), and
-     unifying them would change the populated render — which WI #273's hard constraint
-     forbids. So the caller passes the two heading strings; the partial owns the shared
-     structure. R3: `controls` is a required field in both artefacts' `requires`, so its
-     heading now always renders via `na()`, never a bare `<% if %>`.
-     Caller passes { dsc, controlsHeading, inheritanceHeading }. */
+     WI #273's hard constraint (no change to the populated render) kept both namings, so
+     each caller passed its own two heading strings. #231 (ADR-0060): v3 is a draft, so
+     the As-built now nests the block in its own `# Security` chapter under the SAD's
+     headings, as the SSAD has since #213. Every caller uses the same headings, so the
+     partial owns them again. R3: `controls` is a required field in every caller's
+     `requires`, so its heading always renders via `na()`, never a bare `<% if %>`.
+     Caller passes { dsc } and supplies the enclosing `# Security` chapter. */
 %>
-<%~ it.controlsHeading %>
+## Security concerns
 
 <%~ na(it.dsc.controls) %>
 <% if (it.dsc['inheritance-and-dependencies']) { %>
-<%~ it.inheritanceHeading %>
+## Security control inheritance and dependencies
 
 <%~ it.dsc['inheritance-and-dependencies'] %>
 <% } %>

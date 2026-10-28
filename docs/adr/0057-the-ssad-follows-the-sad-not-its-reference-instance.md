@@ -73,6 +73,11 @@ with the SAD collide, consistency wins for the SSAD.
   SSAD heading; for version 3 it notes where each now lands.
 - ADR-0021's statement that "the SSAD list follows … FV Help Tool SSAD.docx"
   describes v1 and v2. For v3 the order is this ADR's.
+- ADR-0060 (#231) generalises this decision into a rule for every design
+  document: a document whose source is one filled instance follows its
+  sibling anchor, and one whose source is a standing template follows that
+  template. It applies the rule to the As-built, which follows the SAD as the
+  SSAD does.
 
 ## Status
 

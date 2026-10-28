@@ -489,6 +489,40 @@ now chosen once, as an Instance setting, instead of as a Field at every Gate.
   carried over, since v3 is a draft. Choose it once in Instance Settings. Until then, documents
   print no marking.
 
+### The As-built follows the SAD's order and headings (#231)
+
+The As-built followed the order of its reference, the ATLAS migration design: Terms & Definitions
+first, Constraints before Assumptions, a "Recovery plan" chapter with the backup policy first, and
+the data security controls in a chapter of their own under different names. Its reviewers at
+Operational Handover are the people who read the SAD and SSAD, and found the same content in
+different places under different names. The As-built now reads like the SAD wherever the two show
+the same content, as the SSAD does since #213. ADR-0060 records the rule: a document whose source is
+one filled instance follows its sibling anchor (the SAD, for the build-stage documents); only the
+HLD, whose source is a standing template, keeps its source's structure.
+
+- **The new order.** Overview (Executive summary when filled, Overview, Purpose, In scope, Out of
+  scope); Design basis; As-built design; Failure and recovery; Security; Appendix (when filled);
+  Changes from the agreed design; Acceptance criteria; Operational notes (when filled); Handover
+  confirmation; Glossary.
+- **An optional Executive summary** opens the Overview chapter, as in the SAD and SSAD.
+  `introduction.executive-summary` is in the As-built's scope as optional. It was already mounted
+  at Operational Handover.
+- **Design basis lists Assumptions before Constraints**, then Caveats, Design principles and
+  Outcomes and deliverables. The chapter still appears only when one of them is filled, and each
+  section only when its own Field is.
+- **"Recovery plan" is now "Failure and recovery"**, in the SAD's order: Recovery approach first,
+  with Resiliency, Test scenarios and RACI when filled, then Backup and archiving policy.
+- **The data security controls sit in a "Security" chapter** under the SAD's headings: "Data
+  security controls" is now "Security concerns", and "Inheritance and dependencies" is now
+  "Security control inheritance and dependencies".
+- **"Terms & Definitions" is now "Glossary"** and closes the document, after Handover
+  confirmation, where the SAD and SSAD put theirs.
+- **Same Fields otherwise, same Gate.** Apart from the optional Executive summary, no Field entered
+  or left the As-built and none changed between mandatory and optional, so `operational-handover`
+  asks exactly what it asked before. The cover page and table of contents are unchanged, and the
+  table of contents follows the new order. The Kiwi Cover Mutual As-built now shows its Executive
+  summary, with no change to its content, and still passes. v1 and v2 are unchanged.
+
 ## v2
 
 Layout revision of v1. Every artefact's `requires` list re-sequenced to the reading

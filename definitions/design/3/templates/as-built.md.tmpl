@@ -23,7 +23,17 @@
      "# Introduction" heading, so the position is unchanged; the heading
      splits into "# Overview" (required fields) and "# Design basis" (optional
      fields, still via a shared partial — `_introductionOptional.md.tmpl`
-     reworked into `_designBasisOptional.md.tmpl`), both still 2nd/3rd. */
+     reworked into `_designBasisOptional.md.tmpl`), both still 2nd/3rd.
+     #231 (ADR-0060): the As-built follows the SAD's reading order and heading
+     names wherever the two render the same Field, as the SSAD does since #213
+     (ADR-0057), rather than the ATLAS reference's. The Overview chapter opens
+     with the optional Executive summary; Design basis lists Assumptions before
+     Constraints; "# Recovery plan" becomes the SAD's "# Failure and recovery",
+     Recovery approach first and Backup and archiving policy last; the data
+     security controls sit in a "# Security" chapter under the SAD's headings;
+     the Glossary closes the document, as in the SAD and SSAD. The As-built's
+     own chapters (As-built design, Appendix and the four handover chapters)
+     keep their place — see definition.yaml's `as-built.requires` comment. */
   const intro = it.modules.introduction || {}
   const designBasis = it.modules['design-basis'] || {}
   const glossary = it.modules.glossary || {}
@@ -31,12 +41,12 @@
   const recovery = it.modules['recovery-plan'] || {}
   const dsc = it.modules['data-security-controls'] || {}
 %>
-# Terms & Definitions
-
-<%~ na(glossary['terms-and-definitions']) %>
-
 # Overview
+<% if (intro['executive-summary']) { %>
+## Executive summary
 
+<%~ intro['executive-summary'] %>
+<% } %>
 ## Overview
 
 <%~ na(intro.overview) %>
@@ -75,17 +85,19 @@
 
 <%~ na(notes['infrastructure-and-configuration']) %>
 
-# Recovery plan
-
-## Backup and archiving policy
-
-<%~ na(it.modules.nfrs['disaster-recovery-and-backup']) %>
+# Failure and recovery
 
 ## Recovery approach
 
 <%~ na(recovery['recovery-approach']) %>
 <%~ include('templates/_recoveryPlanDetail.md.tmpl', { recovery }) %>
-<%~ include('templates/_dataSecurityControls.md.tmpl', { dsc, controlsHeading: '# Data security controls', inheritanceHeading: '## Inheritance and dependencies' }) %>
+
+## Backup and archiving policy
+
+<%~ na(it.modules.nfrs['disaster-recovery-and-backup']) %>
+
+# Security
+<%~ include('templates/_dataSecurityControls.md.tmpl', { dsc }) %>
 <% if (notes.appendix) { %>
 # Appendix
 
@@ -106,3 +118,7 @@
 # Handover confirmation
 
 <%~ na(notes['handover-confirmation']) %>
+
+# Glossary
+
+<%~ na(glossary['terms-and-definitions']) %>
