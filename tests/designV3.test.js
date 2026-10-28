@@ -6,12 +6,13 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { loadDefinition, loadDefinitionChangelog, definitionVersionProjection, findDefinitionProblems } from '../lib/definition.js'
-import { createInstance, readInstance, readModule, writeModule } from '../lib/instance.js'
+import { createInstance, parseModuleFile, readInstance, readModule, writeModule } from '../lib/instance.js'
 import { renderArtefact, unnumberedHeadingsForWord } from '../lib/render.js'
 import { checkGate } from '../lib/check.js'
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
 import { definitionInstanceSettings } from '../web/lib/instanceSettings.js'
 import { countWords, overTargetNotes, TARGET_SIZES } from '../web/lib/targetSize.js'
+import { exampleModuleText } from './helpers/fixtureModules.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { bodyParagraphs, bodyTables, docxPart, headerRowFormat, headingNumbers, keepsWithNext, numberingLevels, rowsCantSplit, styleFontSize, styleNumbering, wordStyles } from './helpers/wordDocx.js'
 
@@ -1716,7 +1717,27 @@ describe('the v3 SAD and SSAD share handover readiness\'s heading, and v3 spells
     const changed = titles(v3()).filter(([id, title]) => title !== new Map(titles(v2)).get(id))
     assert.deepEqual(titles(v3()).map(([id]) => id), titles(v2).map(([id]) => id))
     assert.deepEqual(changed, [['operational-accounts-and-licenses', 'Operational accounts and licences']])
-    assert.ok(Object.keys(V3_RETITLED_FIELDS).includes('support-and-operations.operational-accounts-and-licenses'))
+    // Across every Module, a Field v2 also has keeps its title unless V3_RETITLED_FIELDS names it.
+    const retitled = []
+    for (const module of v3().modules.values()) {
+      const before = v2.modules.get(module.id)
+      for (const field of module.fields) {
+        const title = before?.fields.find((f) => f.id === field.id)?.title
+        if (title && title !== field.title) retitled.push(`${module.id}.${field.id}`)
+      }
+    }
+    assert.deepEqual(retitled, Object.keys(V3_RETITLED_FIELDS))
+  })
+
+  // Many suites seed v1/v2 instances with the example's text (tests/helpers/fixtureModules.js): the
+  // helper gives the retitled section back its v2 title, so those instances still fill the Field.
+  test('the fixture helper hands each version the accounts list under that version\'s title', () => {
+    for (const version of [2, 3]) {
+      const spec = loadDefinition(DEFINITION, { version }).modules.get('support-and-operations')
+      const parsed = parseModuleFile(exampleModuleText('support-and-operations', { definitionVersion: version }), spec)
+      assert.deepEqual(parsed.customFields, [], `v${version}`)
+      assert.equal(parsed.fields['operational-accounts-and-licenses'].length, 6, `v${version}`)
+    }
   })
 
   test('the example reads its accounts and licences list into the Field, not a custom section', () => {

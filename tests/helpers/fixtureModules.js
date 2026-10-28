@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { loadDefinition } from '../../lib/definition.js'
 
+const EXAMPLE_DIR = join('workspaces', 'examples', 'kiwi-cover-mutual')
+
 // The bundled Kiwi Cover Mutual fixture (WI #348, moved to `workspaces/examples/kiwi-cover-mutual`
 // by WI #358) carries diagrams as `![…](asset:<id>)` references backed by that instance's own
 // `assets/manifest.yaml`. Tests that borrow a fixture module's text to seed some *other* instance (a
@@ -14,7 +16,7 @@ import { loadDefinition } from '../../lib/definition.js'
 // version. An instance file finds each Field by its title, so a Field v3 retitled with its id kept
 // (#233's "Operational accounts and licences") gets back the title of the `definitionVersion` seeded.
 export function exampleModuleText(moduleId, { definitionVersion = 2 } = {}) {
-  const text = readFileSync(join('workspaces', 'examples', 'kiwi-cover-mutual', 'modules', `${moduleId}.md`), 'utf8')
+  const text = readFileSync(join(EXAMPLE_DIR, 'modules', `${moduleId}.md`), 'utf8')
   const retitled = retitledHeadings(moduleId, definitionVersion)
   return text
     .split('\n')
@@ -23,12 +25,22 @@ export function exampleModuleText(moduleId, { definitionVersion = 2 } = {}) {
     .join('\n')
 }
 
-// `## <v3 title>` → `## <title in definitionVersion>`, for each Field of the module both versions have.
+// Loaded once per version: dozens of suites call this per module, and each load validates the definition.
+const definitions = new Map()
+function designModule(version, moduleId) {
+  if (!definitions.has(version)) definitions.set(version, loadDefinition('design', { version }))
+  return definitions.get(version).modules.get(moduleId)
+}
+
+// The example's own version, read from its instance.yaml so this follows the example when it moves on.
+const exampleVersion = Number(readFileSync(join(EXAMPLE_DIR, 'instance.yaml'), 'utf8').match(/^definitionVersion:\s*(\d+)/m)[1])
+
+// `## <example's title>` → `## <title in definitionVersion>`, for each Field of the module both versions have.
 function retitledHeadings(moduleId, definitionVersion) {
   const headings = new Map()
-  if (definitionVersion === 3) return headings
-  const example = loadDefinition('design', { version: 3 }).modules.get(moduleId)
-  const seeded = loadDefinition('design', { version: definitionVersion }).modules.get(moduleId)
+  if (definitionVersion === exampleVersion) return headings
+  const example = designModule(exampleVersion, moduleId)
+  const seeded = designModule(definitionVersion, moduleId)
   if (!example || !seeded) return headings
   for (const field of example.fields) {
     const title = seeded.fields.find((f) => f.id === field.id)?.title
