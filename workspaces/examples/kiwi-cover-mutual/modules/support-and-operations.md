@@ -25,7 +25,7 @@ owner: m.walker
 - SIT — https://crm-sit.kcm.internal; Policy Data Management test LPAR
 - Development — https://crm-dev.kcm.internal; Policy Data Management stubbed
 
-## Operational accounts and licenses
+## Operational accounts and licences
 
 - BIBIT gateway (contracted name: BIBIT Merchant Payment Services, verified against the Treasury contract register) — merchant account and API credentials; Treasury
 - CRM System vendor support — support portal accounts; Technology Commercial

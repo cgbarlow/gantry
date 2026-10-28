@@ -6,12 +6,13 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { loadDefinition, loadDefinitionChangelog, definitionVersionProjection, findDefinitionProblems } from '../lib/definition.js'
-import { createInstance, readInstance, readModule, writeModule } from '../lib/instance.js'
+import { createInstance, parseModuleFile, readInstance, readModule, writeModule } from '../lib/instance.js'
 import { renderArtefact, unnumberedHeadingsForWord } from '../lib/render.js'
 import { checkGate } from '../lib/check.js'
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
 import { definitionInstanceSettings } from '../web/lib/instanceSettings.js'
 import { countWords, overTargetNotes, TARGET_SIZES } from '../web/lib/targetSize.js'
+import { exampleModuleText } from './helpers/fixtureModules.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { bodyParagraphs, bodyTables, docxPart, headerRowFormat, headingNumbers, keepsWithNext, numberingLevels, rowsCantSplit, styleFontSize, styleNumbering, wordStyles } from './helpers/wordDocx.js'
 
@@ -54,6 +55,12 @@ const EXAMPLES = {
 // Modules v3 has that v2 doesn't, each added by the ticket named. #196's `document-handling` left
 // again in #220, when the Classification became an Instance setting (ADR-0058).
 const V3_ADDED_MODULES = {}
+
+// Fields v3 retitled, keeping their id, each with the ticket named. An Instance file matches a
+// section to its Field by title, so v2 reads a retitled Field's section as a custom section.
+const V3_RETITLED_FIELDS = {
+  'support-and-operations.operational-accounts-and-licenses': '#233',
+}
 
 // Each Stage's "Populate example text" source: the one example that covers every Stage.
 const STAGE_EXAMPLE = 'kiwi-cover-mutual'
@@ -233,17 +240,25 @@ describe('the design examples are on v3 (#193)', () => {
 
   // v2 keeps reading the same files: every Field id carries over, so the example content parses
   // the same under v2 as under v3, and v2's "Populate example text" keeps filling. A Module only v3
-  // has is a file v2 never reads.
+  // has is a file v2 never reads. A Field v3 retitled is the one difference: v2 finds its section
+  // under the v3 title as a custom section, with the same content.
   test('the migrated example content still reads field-for-field under v2', () => {
     const v2 = loadDefinition(DEFINITION, { version: 2 })
     for (const slug of Object.keys(EXAMPLES)) {
       for (const file of readdirSync(join(EXAMPLES_DIR, slug, 'modules'))) {
         const moduleId = file.replace(/\.md$/, '')
         if (moduleId in V3_ADDED_MODULES) continue
-        const underV2 = readModule(v2, slug, moduleId, { instancesDir: EXAMPLES_DIR }).fields
-        const underV3 = readModule(v3(), slug, moduleId, { instancesDir: EXAMPLES_DIR }).fields
-        assert.deepEqual(underV2, underV3, `${slug}/${moduleId}`)
-        assert.ok(Object.values(underV2).some(hasContent), `${slug}/${moduleId} has content under v2`)
+        const underV2 = readModule(v2, slug, moduleId, { instancesDir: EXAMPLES_DIR })
+        const underV3 = { ...readModule(v3(), slug, moduleId, { instancesDir: EXAMPLES_DIR }).fields }
+        for (const ref of Object.keys(V3_RETITLED_FIELDS).filter((r) => r.startsWith(`${moduleId}.`))) {
+          const fieldId = ref.slice(moduleId.length + 1)
+          if (!(fieldId in underV3)) continue
+          const title = v3().modules.get(moduleId).fields.find((f) => f.id === fieldId).title
+          assert.deepEqual(underV2.customFields.find((c) => c.title === title)?.value, underV3[fieldId], `${slug}/${ref}`)
+          delete underV3[fieldId]
+        }
+        assert.deepEqual(underV2.fields, underV3, `${slug}/${moduleId}`)
+        assert.ok(Object.values(underV2.fields).some(hasContent), `${slug}/${moduleId} has content under v2`)
       }
     }
   })
@@ -1527,10 +1542,10 @@ describe('the v3 SSAD follows the SAD\'s order and headings (#213)', () => {
     '## Privacy and confidentiality concerns',
     '## Security concerns',
     '## Security control inheritance and dependencies',
-    '## Operational accounts and licenses',
+    '## Operational accounts and licences',
     '## Monitoring and alerting',
     '## Release procedures',
-    '## Support handover readiness',
+    '## Operational readiness',
     '# Glossary',
     '# References',
   ]
@@ -1566,12 +1581,12 @@ describe('the v3 SSAD follows the SAD\'s order and headings (#213)', () => {
   })
 
   // By its text, whatever its level: the SAD's "# Environments, URLs and domains" chapter is a
-  // section of Support and operations in the SSAD.
+  // section of Support and operations in the SSAD, as its "# Operational readiness" is (#233).
   test('a section both documents render carries the SAD\'s heading, except Stakeholders and support contacts', () => {
     const text = (line) => line.replace(/^#+ /, '')
     const sad = new Set(outlineOf('sad').map(text))
     const ssadOnly = outlineOf('ssad').map(text).filter((heading) => !sad.has(heading))
-    assert.deepEqual(ssadOnly, ['Content standards', 'Stakeholders and support contacts', 'Support and operations', 'Release procedures', 'Support handover readiness'])
+    assert.deepEqual(ssadOnly, ['Content standards', 'Stakeholders and support contacts', 'Support and operations', 'Release procedures'])
   })
 
   test('the change is recorded: the v3 CHANGELOG, ADR-0057 and the User Guide', () => {
@@ -1642,5 +1657,100 @@ describe('the v3 SSAD opens with the SAD\'s Overview paragraph and Design basis 
     assert.match(guide, /\| Overview › Overview `introduction\.overview` \|[^\n]*SSAD/)
     assert.match(guide, /\| Design Basis › Constraints `design-basis\.constraints` \|[^\n]*SSAD/)
     assert.match(guide, /\| Design Basis › Assumptions `design-basis\.assumptions` \|[^\n]*SSAD/)
+  })
+})
+
+// #233: two leftovers from #213. The SSAD's handover readiness section takes the SAD's heading,
+// "Operational readiness", as ADR-0057 already says it should; and v3's headings and Field titles
+// use New Zealand spelling. Only visible text changes: no Field id, no Field in or out, no Gate.
+describe('the v3 SAD and SSAD share handover readiness\'s heading, and v3 spells the NZ way (#233)', () => {
+  // US spellings a heading or title could carry. `\w{3,}` before -ize keeps size and prize out.
+  const US_SPELLING = /\b(licenses?|\w{3,}(?:iz|yz)(?:e|es|ed|ing|ation|ations)|colors?|behaviors?|centers?|honors?|favors?|labors?|catalogs?|defense|modeling|canceled|labeled|gray)\b/i
+
+  const markdownOf = (id) => renderArtefact(DOCUMENTS[id].example, id, { instancesDir: EXAMPLES_DIR, dryRun: true }).markdown
+  const headingsOf = (markdown) => markdown.split('\n').filter((line) => /^#{1,6} /.test(line))
+  const sectionBody = (markdown, heading) => {
+    const start = markdown.indexOf(`\n${heading}\n`)
+    assert.ok(start >= 0, `${heading} is in the document`)
+    const body = markdown.slice(start + heading.length + 2)
+    const next = body.search(/^#{1,2} /m)
+    return body.slice(0, next < 0 ? undefined : next).replace(/\n> Full support and operations detail[^\n]*\n?/, '').trim()
+  }
+
+  test('the SSAD heads support-handover-readiness "Operational readiness", inside Support and operations, with the SAD\'s text', () => {
+    const [sad, ssad] = [markdownOf('sad'), markdownOf('ssad')]
+    const ssadHeadings = headingsOf(ssad)
+    assert.ok(!ssadHeadings.includes('## Support handover readiness'))
+    const at = ssadHeadings.indexOf('## Operational readiness')
+    assert.ok(at > ssadHeadings.indexOf('# Support and operations') && at < ssadHeadings.indexOf('# Glossary'), 'a section of Support and operations')
+    assert.ok(headingsOf(sad).includes('# Operational readiness'))
+    assert.equal(sectionBody(ssad, '## Operational readiness'), sectionBody(sad, '# Operational readiness'))
+  })
+
+  test('both documents head the accounts section "Operational accounts and licences", with the example\'s list', () => {
+    for (const id of ['sad', 'ssad']) {
+      const markdown = markdownOf(id)
+      assert.ok(!headingsOf(markdown).includes('## Operational accounts and licenses'), id)
+      assert.match(sectionBody(markdown, '## Operational accounts and licences'), /^- BIBIT gateway/, id)
+    }
+  })
+
+  test('no v3 rendered heading, Module title or Field title uses a US spelling', () => {
+    const found = []
+    for (const [id] of Object.entries(DOCUMENTS)) {
+      for (const heading of headingsOf(markdownOf(id))) if (US_SPELLING.test(heading)) found.push(`${id}: ${heading}`)
+    }
+    for (const file of readdirSync(`definitions/${DEFINITION}/${VERSION}/templates`).filter((f) => f.endsWith('.tmpl'))) {
+      const template = readFileSync(`definitions/${DEFINITION}/${VERSION}/templates/${file}`, 'utf8')
+      for (const heading of headingsOf(template)) if (US_SPELLING.test(heading)) found.push(`${file}: ${heading}`)
+    }
+    for (const module of v3().modules.values()) {
+      if (US_SPELLING.test(module.title)) found.push(`${module.id}: ${module.title}`)
+      for (const field of module.fields) if (US_SPELLING.test(field.title)) found.push(`${module.id}.${field.id}: ${field.title}`)
+    }
+    assert.deepEqual(found, [])
+  })
+
+  test('Field ids are unchanged: only the title of operational-accounts-and-licenses changed from v2', () => {
+    const v2 = loadDefinition(DEFINITION, { version: 2 })
+    const titles = (definition) => definition.modules.get('support-and-operations').fields.map((f) => [f.id, f.title])
+    const changed = titles(v3()).filter(([id, title]) => title !== new Map(titles(v2)).get(id))
+    assert.deepEqual(titles(v3()).map(([id]) => id), titles(v2).map(([id]) => id))
+    assert.deepEqual(changed, [['operational-accounts-and-licenses', 'Operational accounts and licences']])
+    // Across every Module, a Field v2 also has keeps its title unless V3_RETITLED_FIELDS names it.
+    const retitled = []
+    for (const module of v3().modules.values()) {
+      const before = v2.modules.get(module.id)
+      for (const field of module.fields) {
+        const title = before?.fields.find((f) => f.id === field.id)?.title
+        if (title && title !== field.title) retitled.push(`${module.id}.${field.id}`)
+      }
+    }
+    assert.deepEqual(retitled, Object.keys(V3_RETITLED_FIELDS))
+  })
+
+  // Many suites seed v1/v2 instances with the example's text (tests/helpers/fixtureModules.js): the
+  // helper gives the retitled section back its v2 title, so those instances still fill the Field.
+  test('the fixture helper hands each version the accounts list under that version\'s title', () => {
+    for (const version of [2, 3]) {
+      const spec = loadDefinition(DEFINITION, { version }).modules.get('support-and-operations')
+      const parsed = parseModuleFile(exampleModuleText('support-and-operations', { definitionVersion: version }), spec)
+      assert.deepEqual(parsed.customFields, [], `v${version}`)
+      assert.equal(parsed.fields['operational-accounts-and-licenses'].length, 6, `v${version}`)
+    }
+  })
+
+  test('the example reads its accounts and licences list into the Field, not a custom section', () => {
+    const module = readModule(v3(), 'kiwi-cover-mutual', 'support-and-operations', { instancesDir: EXAMPLES_DIR })
+    assert.deepEqual(module.customFields, [])
+    assert.equal(module.fields['operational-accounts-and-licenses'].length, 6)
+  })
+
+  test('the change is recorded: the v3 CHANGELOG and the User Guide', () => {
+    const changelog = loadDefinitionChangelog(DEFINITION, VERSION)
+    assert.match(changelog.slice(0, changelog.indexOf('\n## v2')), /^### Operational readiness in the SSAD, and New Zealand spelling \(#233\)$/m)
+    const guide = readFileSync('docs/user-guide/index.md', 'utf8')
+    assert.match(guide, /from Environments, URLs and domains to Operational readiness/)
+    assert.match(guide, /In version 3 the heading is `## Operational accounts and licences`/)
   })
 })
