@@ -31,7 +31,8 @@ The SAD list follows the headings in `reference/current_design_artefacts/SAD
 Template.docx` as represented by the existing module specs and `sad.md.tmpl`.
 The SSAD list follows the support, solution overview, risk, availability and
 dependency sections in `reference/current_design_artefacts/FV Help Tool
-SSAD.docx` as represented by `ssad.md.tmpl`.
+SSAD.docx` as represented by `ssad.md.tmpl`. *(Design v3 replaces that order
+with the SAD's own: see ADR-0057.)*
 
 The SSAD source is one filled Family Violence Help Portal example, not a
 canonical blank template. Product-specific content such as the named Family

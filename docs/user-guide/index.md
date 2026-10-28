@@ -623,6 +623,8 @@ Reference: *SAD Template* (98 headings). All fields are authored at the Detailed
 
 Reference: *FV Help Tool SSAD* — a filled instance for one product family, not a blank template, so most of its headings are product names. All fields are authored at the Detailed Design stage; the SSAD is a second rendering of the same design data as the SAD, focused on what a support team needs.
 
+**Version 3 (draft)** puts the SSAD in the SAD's order, under the SAD's headings, so a reviewer reading both finds each thing in the same place: `# Overview` › `# Business architecture` (Stakeholders and support contacts) › `# Solution overview` (Solution description, Dependency list, Architectural risks) › `# Open issues` › `# Risks` (Risk register) › `# Logical components view` › `# Technology architecture` (Interfaces) › `# Support and operations` › `# Glossary` › `# References`. All the support material, from Environments, URLs and domains to Support handover readiness, stays together in the one `# Support and operations` chapter. A field the SAD also renders takes the SAD's heading, so Disaster recovery and backup is `## Backup and archiving policy`; Stakeholders and support contacts keeps its name. The fields and the gate are the same as version 2's. The table below gives version 2's headings; for version 3, read each field's heading from this outline. See ADR-0057.
+
 | Reference heading | Where to find it in Gantry | Description / rationale |
 | --- | --- | --- |
 | `H1` Executive Summary | Overview › Executive summary `introduction.executive-summary` *(optional)* → `## Executive summary` under `# Overview` | Added in version 2. Same field as the SAD's. |

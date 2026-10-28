@@ -425,6 +425,32 @@ It now shows only in the header.
 - No engine change: the exported `.md` keeps the classification line on its cover, and v1 and v2
   are unchanged.
 
+### The SSAD follows the SAD's order and headings (#213)
+
+The SSAD followed the order of its reference, the FV Help Tool SSAD: the logical components,
+architectural risks and risks came first, the Overview fourth, and one "Solution overview" chapter
+held fifteen sub-sections. The SAD, rendered at the same Gate from the same Fields, reads quite
+differently, so a reviewer of both found the same content in different places under different
+names. The SSAD now reads like the SAD (ADR-0057).
+
+- **The SAD's chapters, in the SAD's order.** Overview; Business architecture (Stakeholders and
+  support contacts); Solution overview (Solution description, Dependency list, Architectural
+  risks); Open issues; Risks (Risk register); Logical components view; Technology architecture
+  (Interfaces).
+- **Support detail stays together.** A single "Support and operations" chapter then holds
+  Environments, URLs and domains; Data classification; Backup and archiving policy; Scalability
+  and capacity; Availability and continuity; Identity and access management; Privacy and
+  confidentiality concerns; Security concerns (and control inheritance); Operational accounts and
+  licenses; Monitoring and alerting; Release procedures; and Support handover readiness. Glossary
+  and References close the document, as before.
+- **The SAD's heading names.** "Logical components" is now "Logical components view",
+  "Disaster recovery and backup" is now "Backup and archiving policy", and Open issues is a
+  chapter of its own rather than part of Risks. "Stakeholders and support contacts" keeps its
+  name.
+- **Same Fields, same Gate.** No Field entered or left the SSAD, and none changed between
+  mandatory and optional, so `build-ready-checklist` asks exactly what it asked before. The
+  Kiwi Cover Mutual SSAD still renders and passes. v1 and v2 are unchanged.
+
 ## v2
 
 Layout revision of v1. Every artefact's `requires` list re-sequenced to the reading

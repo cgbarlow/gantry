@@ -490,72 +490,65 @@ artefacts:
       This document describes the solution's design and operational readiness
       for the teams that will support it after build.
     table-of-contents: true
-    # Order follows the FV Help Tool SSAD reference: Solution Products ->
-    # Architectural Risks -> Introduction (Purpose, Scope, Content Standards) ->
-    # Solution Overview (Stakeholders, Solution Domains, third-party platforms,
-    # Support Map, URLs and environments, context model and components,
-    # integrations, licences, security, Release Procedures) -> Glossary ->
-    # References.
+    # #213: the SSAD follows the SAD's reading order and heading names, not the
+    # FV Help Tool SSAD reference's. That reference is a filled instance for one
+    # product family, not a template, and its order (Solution Products and
+    # Architectural Risks before the Introduction, one Solution Overview holding
+    # everything else) made the SSAD read nothing like the SAD rendered from the
+    # same data at the same Gate. See docs/adr/0057 — the counterpart to
+    # ADR-0032, which kept reference fidelity for the HLD.
     #
-    # CHANGED v2:
-    #  - `architecture.architectural-risks` and `architecture.logical-components`
-    #    move to the front. The reference opens with Solution Products and puts
-    #    Architectural Risks fourth, before the Introduction; v1 ordered them
-    #    11th and 12th.
-    #  - `support-and-operations.release-procedures` moves late, where the
-    #    reference puts it; v1 had it third in the support block.
-    #  - `introduction.content-standards?` is named explicitly (the reference's
-    #    "Content Standards" sub-section) rather than left to a template guard.
-    #  - `team-and-estimates.references?` added — the reference ends with a
-    #    References section that no field was wired to.
+    # Order: Overview -> Business architecture (Stakeholders and support
+    # contacts) -> Solution overview (Solution description, Dependency list,
+    # Architectural risks) -> Open issues -> Risks -> Logical components view
+    # -> Technology architecture (Interfaces) -> Support and operations ->
+    # Glossary -> References. Every chapter up to Technology architecture is the
+    # SAD's, in the SAD's order, holding only the fields the SSAD renders. The
+    # support-team material then stays together in one "Support and operations"
+    # chapter rather than spreading across the SAD's Failure and recovery,
+    # Information view, Security and Operating considerations chapters.
     #
-    # CHANGED v2 (round 2):
-    #  - `introduction.executive-summary?` opens the document (reference §1).
-    #  - `support-and-operations.operational-security-controls` →
-    #    `data-security-controls.controls` (+ `.inheritance-and-dependencies?`).
-    #    The removed field held the same kind of content — a named concern and how
-    #    it is implemented — at the same gate as the control register. The
-    #    reference SSAD's own security sections ("developer access to the
-    #    repositories is restricted to Somar staff only"; "API access to
-    #    Healthpoint is handled by the ingest API and is the only component that
-    #    calls it") are Access-management and Networking rows in the approved ATLAS
-    #    design's register. `controls` is bare here, as the removed field was, so
-    #    the gate is unchanged.
-    # Security now has two homes, layered by stage, not three: `security` for the
-    # design-time posture (opens at HLD), `data-security-controls` for the control
-    # set (opens at detailed design, re-opens as-built at handover).
+    # Same fields, same strictness: no field entered or left this list, and every
+    # entry keeps its bare / `?` form. `stakeholders`, `monitoring-and-alerting`
+    # and `operational-accounts-and-licenses` stay bare here though the SAD
+    # lists them with `?` — the SSAD is the document a support team needs them in.
     #
-    # WI #331: `introduction.executive-summary?` moves from 1st (its own
-    # standalone heading) down to join the rest of the Overview cluster —
-    # still 4th overall, matching the reference's own placement of its
-    # Introduction after Solution Products / Architectural Risks / Risks. No
-    # `design-basis` fields render in this artefact, so no other change.
+    # History, v2: `architecture.architectural-risks` / `.logical-components`
+    # opened the document and `release-procedures` sat late, both to match the
+    # FV reference; `introduction.content-standards?` and
+    # `team-and-estimates.references?` were wired in. v2 (round 2):
+    # `introduction.executive-summary?` added, and
+    # `support-and-operations.operational-security-controls` replaced by
+    # `data-security-controls.controls` (+ `.inheritance-and-dependencies?`), so
+    # security has two homes layered by stage: `security` for the design-time
+    # posture (opens at HLD), `data-security-controls` for the control set (opens
+    # at detailed design, re-opens as-built at handover).
     requires:
       [
         document-handling.classification?,
-        architecture.logical-components,
-        architecture.architectural-risks,
-        risks.risk-register,
-        risks.open-issues,
         introduction.executive-summary?,
         introduction.purpose,
         introduction.in-scope,
         introduction.out-of-scope,
         introduction.content-standards?,
-        architecture.solution-description,
         support-and-operations.stakeholders,
-        support-and-operations.environments-and-domains,
+        architecture.solution-description,
         dependencies.dependency-list,
+        architecture.architectural-risks,
+        risks.open-issues,
+        risks.risk-register,
+        architecture.logical-components,
         integration.interfaces,
+        support-and-operations.environments-and-domains,
         data.data-classification,
-        nfrs.availability-and-continuity,
         nfrs.disaster-recovery-and-backup,
         nfrs.scalability-and-capacity,
-        support-and-operations.operational-accounts-and-licenses,
+        nfrs.availability-and-continuity,
         security.identity-and-access,
         security.privacy-and-confidentiality,
         data-security-controls.controls,
         data-security-controls.inheritance-and-dependencies?,
+        support-and-operations.operational-accounts-and-licenses,
         support-and-operations.monitoring-and-alerting,
         support-and-operations.release-procedures,
         support-and-operations.support-handover-readiness,
