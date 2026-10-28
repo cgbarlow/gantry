@@ -6,6 +6,18 @@ description: >
   Design content for an initiative, from shaping through HLD approval,
   build-ready detailed design, and operational handover.
 
+# v3 (#220, ADR-0058): the documents' Classification is an Instance setting, one
+# value for the whole Instance, chosen when it is created and changed in Instance
+# Settings. These are the New Zealand Protective Security Requirements (PSR)
+# markings for information whose compromise would harm an organisation or
+# individuals. There is no default, so a new Instance has no marking until one is
+# chosen. An organisation outside New Zealand, or one with its own scheme, lists
+# its own markings here in its copy of this definition. Every Artefact's cover and
+# page header print the Instance's marking (ADR-0052).
+instance-settings:
+  classification:
+    choices: [UNCLASSIFIED, IN-CONFIDENCE, SENSITIVE, RESTRICTED]
+
 # v2 is a layout revision of v1. Every artefact's `requires` list is re-sequenced
 # to the reading order of its reference document (see CHANGES.md for the
 # heading-by-heading mapping and the confidence rating behind each move), and a
@@ -45,11 +57,9 @@ stages:
     # WI #331: `introduction` (retitled "Overview") and the new `design-basis`
     # module moved from 6th/7 to 2nd/3rd of 8, immediately after `background` —
     # the position they'd always logically belonged at, not buried near the end.
-    # v3 (#196): `document-handling` (the documents' Classification) is mounted
-    # at every Stage, from this one onward, after the content modules, so it is
-    # set before the first document is rendered and can change at any later
-    # Stage; every Artefact prints it on its cover.
-    modules: [background, introduction, design-basis, solution-definition, team-and-estimates, dependencies, soap-full-details, open-questions, document-handling]
+    # v3 (#220): `document-handling` is no longer mounted at any Stage. The
+    # documents' Classification is an Instance setting (see `instance-settings`).
+    modules: [background, introduction, design-basis, solution-definition, team-and-estimates, dependencies, soap-full-details, open-questions]
     # The instance the web form's "Populate example text" button reads from for this stage's fields — one shared instance covering every stage, so `gantry serve examples` shows every gate screen populated.
     example: kiwi-cover-mutual
 
@@ -70,7 +80,7 @@ stages:
     # artefact, so mounting them would put editor cards here that no HLD section
     # renders. Both still mount at `shape` and `detailed-design` — the
     # `design-basis` backbone accumulates there, not here.
-    modules: [hld-submission, background, introduction, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies, document-handling]
+    modules: [hld-submission, background, introduction, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies]
     example: kiwi-cover-mutual
 
   - id: detailed-design
@@ -90,7 +100,7 @@ stages:
     # module of its own to sit behind (unlike `background` at the other three
     # stages), so the pair mounts at the very front, matching the SAD's own
     # document layout.
-    modules: [introduction, design-basis, architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations, glossary, recovery-plan, data-security-controls, solution-definition, team-and-estimates, document-handling]
+    modules: [introduction, design-basis, architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations, glossary, recovery-plan, data-security-controls, solution-definition, team-and-estimates]
     example: kiwi-cover-mutual
 
   - id: handover
@@ -109,16 +119,16 @@ stages:
     # WI #331: the new `design-basis` module mounts adjacent to `introduction`
     # (retitled "Overview"), which already sat 2nd/6 at this stage — the pair
     # is now 2nd/3rd of 7.
-    modules: [glossary, introduction, design-basis, as-built-notes, recovery-plan, data-security-controls, nfrs, document-handling]
+    modules: [glossary, introduction, design-basis, as-built-notes, recovery-plan, data-security-controls, nfrs]
     example: kiwi-cover-mutual
 
 artefacts:
   # v3 (#196, spec #192): every Artefact opens with a cover page and a table of
-  # contents (ADR-0052). The cover prints the Classification from
-  # `document-handling.classification`, listed first in each `requires` (`?`,
-  # so no gate waits on it), and the instance's display name as the title, so
-  # no template opens with its own `# <slug>: <title>` line any more: section 1
-  # follows the table of contents directly.
+  # contents (ADR-0052). The cover prints the instance's display name as the
+  # title, so no template opens with its own `# <slug>: <title>` line any more:
+  # section 1 follows the table of contents directly. #220: the cover and page
+  # header print the Instance's Classification setting (`instance-settings`
+  # above), so no Artefact names a `cover-classification` Field or requires one.
   # #205: the cover prints each Artefact's `cover-purpose`, a statement for
   # the reader ("This document describes ..."). `purpose` stays the
   # instruction to the author that the User Guide and Definitions page show.
@@ -132,7 +142,6 @@ artefacts:
     # #195 (ADR-0053): number every diagram "Diagram N. <title>" in the Word document.
     diagram-captions: true
     cover-page: true
-    cover-classification: document-handling.classification
     cover-purpose: >
       This document summarises the initiative's context, solution, team and
       estimates for the business case decision.
@@ -165,7 +174,6 @@ artefacts:
     #    still forces them at this gate.
     requires:
       [
-        document-handling.classification?,
         background.problem,
         background.affected-domains,
         solution-definition.high-level-requirements,
@@ -187,7 +195,6 @@ artefacts:
     gate: business-case
     diagram-captions: true
     cover-page: true
-    cover-classification: document-handling.classification
     cover-purpose: >
       This document gives a fuller summary of the initiative, with its detailed
       scope, dependencies, sequencing, dates and open questions.
@@ -223,7 +230,6 @@ artefacts:
     # reference-mandated and stays put, unrenamed.
     requires:
       [
-        document-handling.classification?,
         soap-full-details.epic-project,
         soap-full-details.requested-lead-by,
         soap-full-details.request-date,
@@ -257,7 +263,6 @@ artefacts:
     gate: hld-arb-approved
     diagram-captions: true
     cover-page: true
-    cover-classification: document-handling.classification
     cover-purpose: >
       This document presents the proposed solution, its alternatives, risks and
       open questions for approval before detailed design.
@@ -315,7 +320,6 @@ artefacts:
     # v2 onwards — so this restores v1 behaviour for it.
     requires:
       [
-        document-handling.classification?,
         hld-submission.purpose-statement,
         hld-submission.authors-and-contributors?,
         hld-submission.decision-requested,
@@ -351,7 +355,6 @@ artefacts:
     gate: build-ready-checklist
     diagram-captions: true
     cover-page: true
-    cover-classification: document-handling.classification
     cover-purpose: >
       This document describes the complete solution architecture and its
       requirements, security, dependencies and support handover readiness for
@@ -415,7 +418,6 @@ artefacts:
     # "# Overview" and "# Design basis", still adjacent, still first.
     requires:
       [
-        document-handling.classification?,
         introduction.executive-summary?,
         introduction.overview,
         introduction.purpose,
@@ -485,7 +487,6 @@ artefacts:
     gate: build-ready-checklist
     diagram-captions: true
     cover-page: true
-    cover-classification: document-handling.classification
     cover-purpose: >
       This document describes the solution's design and operational readiness
       for the teams that will support it after build.
@@ -531,7 +532,6 @@ artefacts:
     # at detailed design, re-opens as-built at handover).
     requires:
       [
-        document-handling.classification?,
         introduction.executive-summary?,
         introduction.overview,
         introduction.purpose,
@@ -574,7 +574,6 @@ artefacts:
     gate: operational-handover
     diagram-captions: true
     cover-page: true
-    cover-classification: document-handling.classification
     cover-purpose: >
       This document records what was built and the final handover information
       needed for operational use.
@@ -611,7 +610,6 @@ artefacts:
     # splits into "# Overview" and "# Design basis", both still 2nd/3rd.
     requires:
       [
-        document-handling.classification?,
         glossary.terms-and-definitions,
         introduction.overview,
         introduction.purpose,

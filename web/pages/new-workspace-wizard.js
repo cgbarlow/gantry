@@ -277,7 +277,7 @@ const directoryField = signal('')
 const directoryTouched = signal(false)
 const assigneeField = signal('')
 // #219 (docs/adr/0058): the new instance's Instance settings — Target size (#202, docs/adr/0054)
-// today. `selectedInstanceSettings` is what the chosen definition version offers (worked out per
+// and Classification (#220). `selectedInstanceSettings` is what the chosen definition version offers (worked out per
 // selection below, from web/lib/instanceSettings.js); `instanceSettingValues` holds what the author
 // picked, `{ [id]: value }`, each setting otherwise showing its Definition's default. A definition
 // that offers none shows nothing and sends nothing, so creating its instance is unchanged.

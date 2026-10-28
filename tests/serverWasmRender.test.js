@@ -23,7 +23,6 @@ function seedFiles(slug) {
   const instanceYaml = readFileSync('workspaces/examples/kiwi-cover-mutual/instance.yaml', 'utf8').replace(/^slug: examples$/m, `slug: ${slug}`)
   return {
     [`/gantry-workspace/${slug}/instance.yaml`]: instanceYaml,
-    [`/gantry-workspace/${slug}/modules/document-handling.md`]: exampleModuleText('document-handling'),
     [`/gantry-workspace/${slug}/modules/background.md`]: exampleModuleText('background'),
     [`/gantry-workspace/${slug}/modules/introduction.md`]: exampleModuleText('introduction'),
     [`/gantry-workspace/${slug}/modules/design-basis.md`]: exampleModuleText('design-basis'),

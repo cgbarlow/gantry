@@ -1407,7 +1407,7 @@ function bytesToBase64(bytes) {
 }
 
 // #219 (docs/adr/0058): the Instance settings the instance's Definition offers — Target size (#202,
-// docs/adr/0054) today — under one heading, with one Save for all of them. `settings` is
+// docs/adr/0054) and Classification (#220) — under one heading, with one Save for all of them. `settings` is
 // web/lib/instanceSettings.js's description with each setting's current `value` (`instanceSettings`
 // on GET /api/instance, or worked out from the folder for a Local-workspace instance); an instance
 // whose Definition offers none gets no section, so its Settings look exactly as before. `onSave`

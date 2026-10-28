@@ -239,6 +239,29 @@ test('create_instance passes a chosen size through to POST /api/instances', asyn
   assert.equal(createInstanceTool.inputSchema.size.safeParse('huge').success, false)
 })
 
+// #220 (spec #223, ADR-0058): the instance's Classification can be chosen at creation, as in the
+// wizard. The markings are the definition's own, so gantry serve, not this schema, checks the value.
+test('create_instance passes a chosen classification through to POST /api/instances', async () => {
+  const fetch = stubFetch((call) => {
+    const base = stubClassification({ serverWorkspaces: [{ id: 'default', name: 'default' }] })(call)
+    if (base) return base
+    const { url, method, body } = call
+    if (url.pathname === '/api/instances' && method === 'POST') {
+      assert.deepEqual(JSON.parse(body), { definition: 'design', slug: 'my-instance', classification: 'IN-CONFIDENCE' })
+      return { status: 201, body: { slug: 'my-instance', definition: 'design' } }
+    }
+    return undefined
+  })
+  try {
+    const result = await createInstanceTool.handler({ workspaceId: 'default', definition: 'design', slug: 'my-instance', classification: 'IN-CONFIDENCE' }, { gantryClient: client() })
+    assert.equal(result.isError, undefined)
+  } finally {
+    fetch.restore()
+  }
+  assert.equal(createInstanceTool.inputSchema.classification.safeParse('ANY MARKING').success, true)
+  assert.match(createInstanceTool.description, /classification \(optional\)/)
+})
+
 test('create_instance reports missing_workspace_pat rather than calling POST /api/instances', async () => {
   const ws = { id: 'ws-1', provider: 'azure-devops', location: { organization: 'acme', project: 'widgets', repository: 'repo1' } }
   const fetch = stubFetch((call) => {

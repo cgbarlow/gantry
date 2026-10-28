@@ -366,6 +366,35 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
     })
   })
 
+  // #220 (ADR-0058): a Definition's `instance-settings` — the Instance settings it declares —
+  // survives the local-workspace Definition copy, kebab-case on disk and `instanceSettings` in the
+  // projection, exactly as the server-side lifecycle keeps it (tests/definitionKeyRoundTrip.test.js).
+  test('round-trips a Definition\'s instance-settings, and matches the server-side projection for the same structure', async () => {
+    const instanceSettings = { classification: { choices: ['OFFICIAL', 'OFFICIAL: Sensitive'], default: 'OFFICIAL' } }
+    const declared = { ...FIXTURE_STRUCTURE, instanceSettings }
+
+    const handle = new MemDirHandle()
+    await writeLocalDefinitionStructure(handle, 'wi384-fixture', 1, declared)
+    const yamlText = await (await (await (await (await (await handle.getDirectoryHandle('definitions')).getDirectoryHandle('wi384-fixture')).getDirectoryHandle('1')).getFileHandle('definition.yaml')).getFile()).text()
+    assert.deepEqual(parseYAML(yamlText)['instance-settings'], instanceSettings)
+    assert.doesNotMatch(yamlText, /instanceSettings/)
+
+    const read = await readLocalDefinitionStructure(handle, 'wi384-fixture', 1)
+    assert.deepEqual(read.instanceSettings, instanceSettings)
+    assert.deepEqual(findLocalDefinitionProblems(read), [])
+    assert.equal('instanceSettings' in (await (async () => {
+      const plain = new MemDirHandle()
+      await writeLocalDefinitionStructure(plain, 'wi384-fixture', 1, FIXTURE_STRUCTURE)
+      return readLocalDefinitionStructure(plain, 'wi384-fixture', 1)
+    })()), false, 'a Definition that declares none projects no such key')
+
+    await withScratchInstances(async (definitionsDir) => {
+      createBlankDefinition('wi384-fixture', { definitionsDir })
+      writeDefinitionVersion('wi384-fixture', 1, declared, { definitionsDir })
+      assert.deepEqual(read, definitionVersionProjection(loadDefinition('wi384-fixture', { definitionsDir, version: 1 })))
+    })
+  })
+
   // #202 (spec #192, ADR-0054): a Field's `target-words` — its word budget per Target size —
   // survives the local-workspace Definition copy too, kebab-case on disk and `targetWords` in the
   // projection, exactly as the server-side lifecycle keeps it (tests/definitionKeyRoundTrip.test.js).

@@ -43,12 +43,16 @@ import { withFakeBitbucketServer, BITBUCKET_OWNER, BITBUCKET_REPOSITORY, BITBUCK
 //
 // #202 (spec #192, ADR-0054) adds a Field's `target-words` — its word budget per Target size — to the
 // fixture, so it is held to the same round trip as every key before it.
+//
+// #220 (spec #223, ADR-0058) adds the Definition's `instance-settings` — the Instance settings it
+// declares, here a Classification with its own markings and a default — at the top level.
 
 const ORGANIZATION = 'fake-org'
 const PROJECT = 'fake-project'
 const ADO_REPOSITORY = 'fake-ado-repo'
 const ADO_VALID_PAT = 'valid-ado-test-pat'
 
+const INSTANCE_SETTINGS = { classification: { choices: ['PUBLIC', 'IN-CONFIDENCE'], default: 'PUBLIC' } }
 const STAGE_PROVENANCE = { definition: 'elsewhere', version: 2, element: 'stage:second' }
 const ARTEFACT_PROVENANCE = { definition: 'elsewhere', version: 2, element: 'artefact:letter' }
 
@@ -58,6 +62,12 @@ version: ${version}
 status: ${status}
 title: Round Trip
 description: Sets every definition key
+instance-settings:
+  classification:
+    choices:
+      - PUBLIC
+      - IN-CONFIDENCE
+    default: PUBLIC
 stages:
   - id: first
     title: First
@@ -183,6 +193,7 @@ function withScratch(fn) {
 // when they are `false` (the default is true), so an Artefact that doesn't set them has no such key.
 function assertEveryKey(projection, where) {
   const byId = (list, id) => list.find((x) => x.id === id)
+  assert.deepEqual(projection.instanceSettings, INSTANCE_SETTINGS, `${where}: instance-settings`)
   const first = byId(projection.stages, 'first')
   const second = byId(projection.stages, 'second')
   assert.deepEqual(second.modules, ['details', 'notes'], where)
@@ -232,6 +243,7 @@ function assertTargetWordsOnDisk(moduleYamlText, where) {
 }
 
 function assertKebabKeysOnDisk(definitionYamlText, where) {
+  assert.match(definitionYamlText, /^instance-settings:\n  classification:\n    choices:\n      - PUBLIC\n      - IN-CONFIDENCE\n    default: PUBLIC$/m, where)
   assert.match(definitionYamlText, /read-only-modules:/, where)
   assert.match(definitionYamlText, /document-control: false/, where)
   assert.match(definitionYamlText, /satisfies-gate: false/, where)
@@ -241,7 +253,7 @@ function assertKebabKeysOnDisk(definitionYamlText, where) {
   assert.match(definitionYamlText, /table-of-contents: true/, where)
   assert.match(definitionYamlText, /cover-purpose: This letter tells its reader what the engagement is\./, where)
   assert.match(definitionYamlText, /copied-from:/, where)
-  assert.doesNotMatch(definitionYamlText, /readOnlyModules|documentControl|satisfiesGate|diagramCaptions|coverPage|coverClassification|coverPurpose|tableOfContents|copiedFrom/, where)
+  assert.doesNotMatch(definitionYamlText, /instanceSettings|readOnlyModules|documentControl|satisfiesGate|diagramCaptions|coverPage|coverClassification|coverPurpose|tableOfContents|copiedFrom/, where)
 }
 
 function localProjection(id, version, definitionsDir) {
@@ -275,6 +287,17 @@ test('every key survives load, web-editor save, publish, new draft version and c
     assertEveryKey(localProjection('roundtrip-copy', 1, definitionsDir), 'clone')
   }))
 
+// #220: MCP `update_definition` saves only stages, artefacts and modules. A save whose structure
+// doesn't carry `instanceSettings` at all keeps the declaration on disk rather than dropping it.
+test('a save whose structure leaves instance-settings out keeps the declaration on disk', () =>
+  withScratch(({ definitionsDir }) => {
+    writeLocalFixture(definitionsDir, 'roundtrip')
+    const { stages, artefacts, modules } = localProjection('roundtrip', 1, definitionsDir)
+    const saved = writeDefinitionVersion('roundtrip', 1, { stages, artefacts, modules }, { definitionsDir })
+    assert.equal(saved.problems, undefined, JSON.stringify(saved.problems))
+    assert.deepEqual(saved.instanceSettings, INSTANCE_SETTINGS)
+  }))
+
 // #194: the front-matter switches default to false, so an explicit false is left out the same way.
 test('an Artefact that sets cover-page and table-of-contents to false keeps loading with both keys omitted from the projection', () =>
   withScratch(({ definitionsDir }) => {
@@ -300,6 +323,7 @@ test('an Artefact that sets document-control and satisfies-gate to true keeps lo
 test('the packaged definitions project exactly as before: no new keys appear on design or recruitment-onboarding', () => {
   for (const [id, version] of [['design', 1], ['design', 2], ['recruitment-onboarding', 1], ['recruitment-onboarding', 2]]) {
     const projection = localProjection(id, version, 'definitions')
+    assert.equal('instanceSettings' in projection, false, `${id} v${version}: declares no Instance settings`)
     for (const stage of projection.stages) {
       assert.deepEqual(Object.keys(stage).filter((k) => !['id', 'title', 'purpose', 'gate', 'modules', 'example'].includes(k)), [], `${id} v${version} stage ${stage.id}`)
     }

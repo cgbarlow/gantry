@@ -128,7 +128,9 @@ describe('design v3 prints the classification in the page header of every page (
     })
   })
 
-  test('the blank classification paragraph is only for a document with a cover that names a classification Field', () => {
+  // #220 (ADR-0058 §6): the classification comes from the Instance's Classification setting, so the
+  // paragraph is for a cover whose Definition declares classification markings.
+  test('the blank classification paragraph is only for a document with a cover whose Definition declares classification markings', () => {
     withScratchDir((instancesDir) => {
       createInstance('design', 'claims-portal', { instancesDir, version: 2 })
       const { markdown, docxMarkdown } = renderArtefact('claims-portal', 'soap', { instancesDir, dryRun: true })
@@ -136,10 +138,10 @@ describe('design v3 prints the classification in the page header of every page (
       assert.equal(docxMarkdown, markdown)
     })
 
-    // A scratch copy of design v3 whose SOAP drops one of the two keys at a time.
+    // A scratch copy of design v3 that drops one of the two at a time.
     for (const [label, edit] of [
-      ['a cover without a classification Field', (yaml) => yaml.replace(SOAP_KEYS, '    cover-page: true\n')],
-      ['a classification Field without a cover', (yaml) => yaml.replace(SOAP_KEYS, '    cover-classification: document-handling.classification\n')],
+      ['a cover in a Definition without classification markings', (yaml) => yaml.replace(CLASSIFICATION_DECLARATION, '')],
+      ['classification markings without a cover', (yaml) => yaml.replace(SOAP_COVER, SOAP_COVER.replace('    cover-page: true\n', ''))],
     ]) {
       withScratchDir((root) => {
         const definitionsDir = join(root, 'definitions')
@@ -147,7 +149,7 @@ describe('design v3 prints the classification in the page header of every page (
         cpSync(join('definitions', 'design'), join(definitionsDir, 'design'), { recursive: true })
         const yamlPath = join(definitionsDir, 'design', '3', 'definition.yaml')
         const yaml = readFileSync(yamlPath, 'utf8')
-        assert.ok(yaml.includes(SOAP_KEYS), 'the fixture edit must land')
+        assert.ok(yaml.includes(SOAP_COVER) && yaml.includes(CLASSIFICATION_DECLARATION), 'the fixture edit must land')
         writeFileSync(yamlPath, edit(yaml))
         createInstance('design', 'claims-portal', { instancesDir, definitionsDir, version: 3 })
         const { docxMarkdown } = renderArtefact('claims-portal', 'soap', { instancesDir, definitionsDir, dryRun: true })
@@ -212,7 +214,9 @@ test('the v3 CHANGELOG records the header classification under v3, and v3 stays 
   assert.match(v3Section, /\*\*Status: draft\b/)
 })
 
-const SOAP_KEYS = '    cover-page: true\n    cover-classification: document-handling.classification\n'
+// The SOAP's cover switch (the first in the file), and the Classification declaration (#220).
+const SOAP_COVER = '    gate: business-case\n    # #195 (ADR-0053): number every diagram "Diagram N. <title>" in the Word document.\n    diagram-captions: true\n    cover-page: true\n'
+const CLASSIFICATION_DECLARATION = 'instance-settings:\n  classification:\n    choices: [UNCLASSIFIED, IN-CONFIDENCE, SENSITIVE, RESTRICTED]\n'
 
 test('the v3 CHANGELOG records the header-only classification under v3 (#209)', () => {
   const changelog = loadDefinitionChangelog('design', 3)

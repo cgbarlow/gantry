@@ -17,6 +17,10 @@ import { withRunningServer } from './helpers/lifecycle.js'
 //
 // #205: beside them, a "Cover purpose" text box writes `cover-purpose`, the statement the cover
 // prints; emptying it removes the key.
+//
+// #220 (ADR-0058 §6): a classification is now an Instance setting, so neither editor offers the
+// "Cover classification" choice any more. An Artefact that already names one (seeded here) shows it
+// read-only with a note on what it still does and a Remove button, and it survives save and publish.
 
 const COVER_PURPOSE = 'This brief sets out the role the hiring manager needs filled.'
 
@@ -30,7 +34,12 @@ async function withDraftRecruitment(fn) {
     const v1 = join(root, '1/definition.yaml')
     writeFileSync(v1, readFileSync(v1, 'utf8').replace(/^version: 2$/m, 'version: 1'))
     const v2 = join(root, '2/definition.yaml')
-    writeFileSync(v2, readFileSync(v2, 'utf8').replace(/^status: published$/m, 'status: draft'))
+    writeFileSync(
+      v2,
+      readFileSync(v2, 'utf8')
+        .replace(/^status: published$/m, 'status: draft')
+        .replace('  - id: requisition-brief\n', '  - id: requisition-brief\n    cover-classification: engagement.type\n')
+    )
     await withRunningServer({ definitionsDir, instancesDir }, (base) => fn(base, definitionsDir))
   } finally {
     rmSync(definitionsDir, { recursive: true, force: true })
@@ -57,7 +66,7 @@ async function openFirstArtefact(page, base) {
   return { coverPage, tableOfContents: page.locator('.defn-table-of-contents input[type="checkbox"]') }
 }
 
-test('Definitions page: ticking Cover page and Table of contents, choosing a classification and writing a cover purpose writes all four, which survive save, reload and publish, then show read-only', async () => {
+test('Definitions page: ticking Cover page and Table of contents and writing a cover purpose writes all three, and with an existing cover classification all four survive save, reload and publish, then show read-only', async () => {
   await withDraftRecruitment(async (base, definitionsDir) => {
     const browser = await launchBrowser()
     try {
@@ -75,16 +84,14 @@ test('Definitions page: ticking Cover page and Table of contents, choosing a cla
       assert.equal(await tableOfContents.isChecked(), false, 'unticked by default — no table of contents')
       assert.equal(await coverPage.isDisabled(), false, 'editable on a draft')
 
-      const classification = page.locator('select.defn-cover-classification')
-      // Only the Artefact's own single-valued select/text Fields are offered: Engagement type is a
-      // select in its requires; markdown Fields such as the role summary are not.
-      const offered = await classification.locator('option').allTextContents()
-      assert.ok(offered.includes('Engagement · Engagement type'), JSON.stringify(offered))
-      assert.ok(!offered.includes('Role · Role summary'), JSON.stringify(offered))
+      assert.equal(await page.locator('select.defn-cover-classification').count(), 0, 'the pointer is no longer offered')
+      const legacy = page.locator('.defn-cover-classification-legacy')
+      assert.equal(await legacy.locator('code').textContent(), 'engagement.type', 'the one already set is shown')
+      assert.match(await legacy.textContent(), /New Definitions declare classification markings as an Instance setting instead/)
+      assert.equal(await legacy.getByRole('button', { name: 'Remove', exact: true }).count(), 1)
 
       await coverPage.check()
       await tableOfContents.check()
-      await classification.selectOption({ label: 'Engagement · Engagement type' })
       const coverPurpose = page.locator('textarea.defn-cover-purpose')
       assert.equal(await coverPurpose.inputValue(), '', 'empty by default — no purpose line on the cover')
       await coverPurpose.fill(COVER_PURPOSE)
@@ -102,7 +109,7 @@ test('Definitions page: ticking Cover page and Table of contents, choosing a cla
       ;({ coverPage, tableOfContents } = await openFirstArtefact(page, base))
       assert.equal(await coverPage.isChecked(), true, 'survives a reload')
       assert.equal(await tableOfContents.isChecked(), true, 'survives a reload')
-      assert.equal(await page.locator('select.defn-cover-classification').inputValue(), 'engagement.type')
+      assert.equal(await page.locator('.defn-cover-classification-legacy code').textContent(), 'engagement.type', 'survives a reload')
       assert.equal(await page.locator('textarea.defn-cover-purpose').inputValue(), COVER_PURPOSE, 'survives a reload')
 
       // Unticking the table of contents removes the key again rather than writing false.
@@ -179,7 +186,8 @@ test('Local Workspace editor: ticking Cover page and Table of contents and writi
       await coverPage.waitFor({ state: 'visible', timeout: 5_000 })
       assert.equal(await coverPage.isChecked(), false)
       assert.equal(await tableOfContents.isChecked(), false)
-      assert.equal(await artefactEl.locator('select.defn-cover-classification').count(), 1, 'the classification choice is there too')
+      assert.equal(await artefactEl.locator('select.defn-cover-classification').count(), 0, '#220: no classification choice is offered')
+      assert.equal(await artefactEl.locator('.defn-cover-classification-legacy').count(), 0, 'nor anything shown for an Artefact without one')
       const coverPurpose = artefactEl.locator('textarea.defn-cover-purpose')
       assert.equal(await coverPurpose.inputValue(), '')
       await coverPage.check()

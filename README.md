@@ -529,6 +529,17 @@ A markdown or list field can also state how much to write, per **Target size** (
 
 Each instance of a definition that sets any `target-words` has a size — `small`, `medium` (the default) or `large`, stored as `size:` in its `instance.yaml` — chosen in the wizard or with `gantry new --size`, changed in Instance Settings, or set by MCP `create_instance`. The editor shows each field's target for that size with a live word count, MCP `get_instance` returns it, and a save over target returns a non-blocking note. It's advisory only: the gate check and the renderer never read it, so a document renders exactly what was written. All three sizes must be positive whole numbers; `gantry validate` reports anything else as `invalid-target-words`. A definition without `target-words` shows no size anywhere.
 
+A definition can also give its documents a **Classification** (#220, `docs/adr/0058-instance-settings-are-declared-by-the-definition.md`), declared in `definition.yaml` as an Instance setting with its own markings and an optional default:
+
+```yaml
+instance-settings:
+  classification:
+    choices: [UNCLASSIFIED, IN-CONFIDENCE, SENSITIVE, RESTRICTED]
+    default: IN-CONFIDENCE   # optional
+```
+
+Each instance's marking is stored as `classification:` in its `instance.yaml` — chosen in the wizard or with `gantry new --classification`, changed in Instance Settings, or set by MCP `create_instance` — and printed on every cover and page header; blank prints none. A marking outside the list, or one on a definition that declares no markings, is refused. A declaration with no choices, a blank or repeated marking, or a default that isn't one of them is reported by `gantry validate` as `invalid-instance-settings`.
+
 ## Instance module files
 
 **`workspaces/<workspace>/my-initiative/modules/context.md`** — what someone actually writes:
@@ -605,7 +616,7 @@ npm test               # node --test with no filter — runs every *.test.js, Pl
 
 ## Validating definitions and instances
 
-`gantry validate <definition> [--json]` reports every structural problem with a definition in one pass — a missing module reference, an invalid field type, a `required`/`required-at` conflict, an artefact `gate` or a `required-at` entry that names no stage's gate, a stage whose artefacts all set `satisfies-gate: false`, a `cover-page` or `table-of-contents` that isn't `true` or `false`, a `cover-classification` that names no single-valued select or text field the artefact requires, a `cover-purpose` with no text in it — instead of fixing one, rerunning, and hitting the next.
+`gantry validate <definition> [--json]` reports every structural problem with a definition in one pass — a missing module reference, an invalid field type, a `required`/`required-at` conflict, an artefact `gate` or a `required-at` entry that names no stage's gate, a stage whose artefacts all set `satisfies-gate: false`, a `cover-page` or `table-of-contents` that isn't `true` or `false`, a `cover-classification` that names no single-valued select or text field the artefact requires, a `cover-purpose` with no text in it, an `instance-settings` declaration that isn't well-formed — instead of fixing one, rerunning, and hitting the next.
 
 `gantry check <slug> [--gate <id>] [--json]` validates an instance against a gate's requirements, PASS/FAIL with a matching exit code. Defaults to the instance's current stage; `--gate` resolves any stage's gate, so you can check readiness for a later gate before the instance actually gets there. It lists each of the gate's artefacts with its completeness and whether it counts toward the gate (an artefact with `satisfies-gate: false` is reported but never passes the gate on its own; ADR-0051), and on FAIL names the closest artefact that can pass it.
 

@@ -139,7 +139,14 @@ draft.
   `PUT /api/instance/size` stays as the same write for Size alone. Size's
   default is still Medium for every Definition.
 - **#220** adds Classification and switches design v3 over (§2, §6, Design
-  v3).
+  v3). A Definition declares it in `definition.yaml` as
+  `instance-settings: { classification: { choices: [...], default: ... } }`,
+  carried as `instanceSettings` once loaded, and an Instance stores it as
+  `classification:`. A malformed declaration is the
+  `invalid-instance-settings` problem. With no default, the wizard and
+  Instance Settings offer None beside the markings. A save whose structure
+  leaves `instanceSettings` out (MCP `update_definition` sends only stages,
+  artefacts and modules) keeps the declaration on disk.
 - **#221** lets a draft's author edit choices and defaults on the
   Definitions page, including Size's default (§4, §7).
 

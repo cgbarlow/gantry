@@ -3,8 +3,10 @@
 // reader. All of them are opt-in: absent (or `false`) means the document renders exactly as before.
 // The render honours them in lib/render.js's compileArtefact; this file holds the
 // rules both validators share — lib/definition.js (gantry validate, load, Save and Publish everywhere)
-// and web/lib/localStatus.js (a Local Workspace) — and the list of Fields both Definition editors
-// offer as a classification. Pure and dependency-free, so `lib/` imports it directly (as it does
+// and web/lib/localStatus.js (a Local Workspace). #220 (ADR-0058 §6): the Definition editors no
+// longer offer a `cover-classification` pointer, since a classification is now an Instance setting
+// (web/lib/instanceSettings.js), but one already set is still validated and printed when the
+// Definition declares no markings. Pure and dependency-free, so `lib/` imports it directly (as it does
 // web/lib/readOnlyModules.js) rather than keeping a port that could drift.
 //
 // Artefacts here are the camelCase in-memory shape (`coverPage`, `tableOfContents`,
@@ -102,32 +104,4 @@ export function artefactFrontMatterProblems(artefact, findField) {
     problem(`cover-classification: "${pointer}" is not in this artefact's own "requires" list`)
   }
   return problems
-}
-
-/**
- * The Fields an Artefact's `cover-classification` may name — exactly what
- * `artefactFrontMatterProblems` accepts — for the Definition editors to offer, in `requires` order.
- *
- * @param {{ id: string, fields?: { id: string, title?: string, type: string, multiple?: boolean }[] }[]} modules
- * @param {{ requires?: string[] }} artefact
- * @returns {{ value: string, label: string }[]}
- */
-export function coverClassificationOptions(modules, artefact) {
-  const options = []
-  const seen = new Set()
-  for (const requirement of artefact.requires ?? []) {
-    const ref = requirement.endsWith('?') ? requirement.slice(0, -1) : requirement
-    const dot = ref.indexOf('.')
-    const moduleId = dot === -1 ? ref : ref.slice(0, dot)
-    const fieldId = dot === -1 ? null : ref.slice(dot + 1)
-    const mod = (modules ?? []).find((m) => m.id === moduleId)
-    if (!mod) continue
-    for (const field of (mod.fields ?? []).filter((f) => (fieldId ? f.id === fieldId : true))) {
-      const value = `${moduleId}.${field.id}`
-      if (!canClassify(field) || seen.has(value)) continue
-      seen.add(value)
-      options.push({ value, label: `${mod.title ?? moduleId} · ${field.title ?? field.id}` })
-    }
-  }
-  return options
 }
