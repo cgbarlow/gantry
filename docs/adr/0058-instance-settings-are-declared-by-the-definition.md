@@ -143,4 +143,38 @@ draft.
 - **#221** lets a draft's author edit choices and defaults on the
   Definitions page, including Size's default (§4, §7).
 
+## Amendment (#224): an Instance's own Logo
+
+#224 lets each Instance replace the Definition's header logo (ADR-0059) with
+its own, so one Gantry can produce documents for different organisations or
+clients from one Definition. The Logo belongs with the other per-Instance
+choices: an author meets it in the "+ New Workspace" wizard and in Instance
+Settings, under the same "Instance settings" heading.
+
+It doesn't have §1's shape. A Logo isn't one of a set of choices: its
+**default** is the Definition's logo, read from the Definition's reference
+documents, and its **choice** is an optional upload. So it is described
+beside the shared module (`web/lib/instanceLogo.js`, and
+`lib/instanceLogo.js` for what needs the reference documents) rather than as
+one of its members, and its writes have their own route.
+
+- **Offered** only when the Definition's reference documents carry a header
+  logo picture, the same test the Definitions page's Logo control uses. A
+  Definition without one shows no Logo, in the wizard or in Settings, and
+  storing one is refused (§3, §5).
+- **Stored** with the Instance, in its `assets/` folder as
+  `instance-logo.png` (or `.jpeg`), and named by `logo:` in the Instance
+  record, written only when one is uploaded (§3). A render of a given commit
+  always shows the same logo.
+- **Effective value** (§4): the Instance's own logo, else the Definition's,
+  else whatever the reference document ships with.
+- **Written** by Instance creation (wizard and import, as `logoImageBase64`)
+  and by `PUT`/`DELETE /api/instance/logo` from Instance Settings, the image
+  and the record in one commit on the stage branch for each Provider, and
+  directly in a Local Workspace. Anything but a PNG or JPEG is refused.
+- **Read** by `GET /api/instance` (and so MCP `get_instance`) as
+  `instanceLogo: { own, source }`, and by `GET /api/instance/logo`, which
+  serves the logo the Instance's documents show. Uploading one over MCP is
+  out of scope.
+
 Status: accepted.

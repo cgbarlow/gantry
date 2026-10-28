@@ -397,6 +397,19 @@ export async function writeBinaryFile(rootHandle, path, data) {
   await writable.close()
 }
 
+/** Remove the file at `path` under `rootHandle`; a file (or folder) that isn't there is nothing to remove. */
+export async function removeFile(rootHandle, path) {
+  const segments = splitPath(path)
+  const fileName = segments.pop()
+  if (fileName === undefined) throw new Error(`path does not name a file: ${path}`)
+  try {
+    const dir = await resolveDirectory(rootHandle, segments, { create: false })
+    await dir.removeEntry(fileName)
+  } catch (err) {
+    if (err?.name !== 'NotFoundError') throw err
+  }
+}
+
 /**
  * List the entries of the directory at `path` (the root when `path` is
  * omitted, `'.'` or `''`), as `[{ name, kind }]` sorted by name. `kind` is

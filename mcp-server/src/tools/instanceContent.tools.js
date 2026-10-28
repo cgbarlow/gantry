@@ -118,7 +118,8 @@ export const tools = [
       '3. Pass "stage" (a stage id) or "stageNumber" to browse a stage other than the instance\'s current one; omitted, this reads the instance\'s persisted current stage. ' +
       '4. A Provider-backed instance whose workspace has no PAT configured fails with "missing_workspace_pat" — report this to the operator, do not retry. ' +
       '5. Use the response\'s "artefacts" list to find valid artefactId values for render_artefact. ' +
-      '6. When the instance\'s definition sets word budgets, the response carries the instance\'s Target size as "size" (small, medium or large; medium when none was chosen) and each budgeted field carries "targetWords" — about how many words to write in that field for this instance. Write to that length: it is a target, not a limit, and the size is the instance owner\'s choice of how much detail reviewers want.',
+      '6. When the instance\'s definition sets word budgets, the response carries the instance\'s Target size as "size" (small, medium or large; medium when none was chosen) and each budgeted field carries "targetWords" — about how many words to write in that field for this instance. Write to that length: it is a target, not a limit, and the size is the instance owner\'s choice of how much detail reviewers want. ' +
+      '7. When the instance\'s definition has a logo in its documents\' page header, the response carries "instanceLogo": { own, source } — "own" is true when the instance has uploaded its own logo, which its rendered documents show ("source": "instance"); otherwise they show the definition\'s logo ("source": "definition"). A logo is uploaded in the web app\'s wizard or Instance Settings, not over MCP.',
     inputSchema: {
       ...slugRefShape,
       stage: z.string().optional().describe('A stage id to browse instead of the instance\'s current stage.'),

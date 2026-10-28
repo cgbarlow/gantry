@@ -497,6 +497,28 @@ export async function resolveDefinitionStructure(handle, definitionId, definitio
 }
 
 /**
+ * A definition's header logo (#222), resolved in the same order as `resolveDefinitionStructure`:
+ * this workspace's own `definitions/` folder first, else the gantry server's library
+ * (`GET /api/definitions/:id/versions/:n/logo` and its `/image`). `{ bytes, contentType, extension }`,
+ * or `null` when its reference documents carry no header logo — in which case its instances are
+ * offered no Logo of their own (#224). `handle` may be `null` for a server-hosted workspace.
+ */
+export async function resolveDefinitionLogo(handle, definitionId, definitionVersion) {
+  if (handle && (await localDefinitionExists(handle, definitionId, definitionVersion))) {
+    return (await readLocalDefinitionLogo(handle, definitionId, definitionVersion)).logo
+  }
+  const base = `/api/definitions/${encodeURIComponent(definitionId)}/versions/${encodeURIComponent(String(definitionVersion))}/logo`
+  const res = await fetch(base)
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(body.error ?? `Couldn't read the logo of "${definitionId}" (${res.status})`)
+  if (!body.logo) return null
+  const imageRes = await fetch(`${base}/image`)
+  if (!imageRes.ok) throw new Error(`Couldn't read the logo of "${definitionId}" (${imageRes.status})`)
+  const extension = /filename="logo\.([^"]+)"/.exec(imageRes.headers.get('Content-Disposition') ?? '')?.[1] ?? 'png'
+  return { bytes: new Uint8Array(await imageRes.arrayBuffer()), contentType: body.logo.contentType, extension }
+}
+
+/**
  * List every `definitions/<id>/<version>/` this workspace folder currently
  * holds, as `[{ id, versions: number[] }]` sorted by id — used both for the
  * "open a local definition" picker and (with the library's own `GET

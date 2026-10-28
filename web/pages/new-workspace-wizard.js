@@ -46,12 +46,16 @@ import {
   readTextFile,
   readBinaryFile,
   writeTextFile,
+  writeBinaryFile,
   listDir,
 } from '../lib/localWorkspace.js'
 import { renderInstanceYaml, renderModuleFile as renderLocalModuleFile, parseInstanceYaml } from '../lib/localInstanceFiles.js'
-import { listLocalDefinitionRows, resolveDefinitionStructure } from '../lib/localDefinitionFiles.js'
+import { listLocalDefinitionRows, resolveDefinitionStructure, resolveDefinitionLogo, localDefinitionExists } from '../lib/localDefinitionFiles.js'
 import { definitionInstanceSettings, effectiveInstanceSetting, chosenInstanceSettings } from '../lib/instanceSettings.js'
 import { InstanceSettingSelect } from '../lib/instanceSettingsView.js'
+import { instanceLogoPath, instanceLogoRecordPath } from '../lib/instanceLogo.js'
+import { logoImageInfo } from '../lib/definitionLogo.js'
+import { InstanceLogoPicker } from '../lib/instanceLogoControl.js'
 
 // The work item type used when nothing more specific is looked up or
 // chosen — mirrors lib/workItemLink.js's own `DEFAULT_WORK_ITEM_TYPE`
@@ -279,6 +283,20 @@ const assigneeField = signal('')
 // that offers none shows nothing and sends nothing, so creating its instance is unchanged.
 const selectedInstanceSettings = signal([])
 const instanceSettingValues = signal({})
+// #224 (docs/adr/0058 amendment for #224): the new instance's own Logo, under the same heading. It is
+// offered when the chosen definition version's reference documents carry a header logo
+// (`selectedDefinitionOffersLogo`, worked out per selection below); `instanceLogo` is the picked
+// image, `{ bytes, contentType, extension }`, or `null` to use the Definition's logo. A definition
+// that offers none shows no upload and sends nothing.
+const selectedDefinitionOffersLogo = signal(false)
+const instanceLogo = signal(null)
+// Where the note beside the upload sends an author to change the Definition's own logo instead.
+const selectedDefinitionLogoHref = signal(null)
+
+// What a create request carries for the picked logo: `{ logoImageBase64 }`, or nothing.
+function chosenLogoBody() {
+  return selectedDefinitionOffersLogo.value && instanceLogo.value ? { logoImageBase64: bytesToBase64(instanceLogo.value.bytes) } : {}
+}
 
 // `{ [id]: value }` for every setting `settings` offers: the author's pick when it is one of the
 // choices, else the default — what a create request sends, under each setting's own id.
@@ -532,6 +550,7 @@ function resetWizard() {
   directoryTouched.value = false
   assigneeField.value = ''
   instanceSettingValues.value = {}
+  instanceLogo.value = null
   workItemTypes.value = []
   workItemTypesLoadError.value = ''
   parentIdField.value = ''
@@ -852,6 +871,11 @@ async function createLocalInstance() {
       throw new Error(`"${slug}" already exists in this workspace folder — choose a different Directory.`)
     }
 
+    // #224: the picked Logo, stored with the instance in its `assets/` folder before the record names it.
+    const logo = selectedDefinitionOffersLogo.value ? instanceLogo.value : null
+    const logoPath = logo ? instanceLogoRecordPath(logo.extension) : null
+    if (logo) await writeBinaryFile(handle, `gantry-workspace/${slug}/${logoPath}`, logo.bytes)
+
     await writeTextFile(
       handle,
       `gantry-workspace/${slug}/instance.yaml`,
@@ -862,6 +886,7 @@ async function createLocalInstance() {
         assignee: assigneeField.value.trim(),
         definitionVersion: version,
         ...chosenSettingValues(definitionInstanceSettings(structure)),
+        logo: logoPath,
       })
     )
     for (const moduleId of firstStage.modules ?? []) {
@@ -1141,6 +1166,12 @@ function applyImportPrefill() {
   assigneeField.value = y.assignee ?? ''
   // #202/#219: the source instance's own Instance settings (its Target size) carry over.
   instanceSettingValues.value = chosenInstanceSettings(y)
+  // #224: and its own Logo, from the assets read off it.
+  const logoName = instanceLogoPath(y)?.split('/').pop()
+  const logoAsset = logoName ? payload.assets?.find((a) => a.filename === logoName) : null
+  const logoBytes = logoAsset ? Uint8Array.from(atob(logoAsset.base64), (c) => c.charCodeAt(0)) : null
+  const logoInfo = logoBytes && logoImageInfo(logoBytes)
+  instanceLogo.value = logoInfo ? { bytes: logoBytes, contentType: logoInfo.contentType, extension: logoInfo.extension } : null
 }
 
 // Wrap the existing registerWorkspace()/pickWorkspace() destination actions
@@ -1245,6 +1276,30 @@ effect(() => {
   Promise.resolve(structure)
     .then((body) => {
       if (lookup === instanceSettingsLookup) selectedInstanceSettings.value = body ? definitionInstanceSettings(body) : []
+    })
+    .catch(() => {})
+})
+
+// #224: whether the selected definition version offers a Logo — its reference documents carry a
+// header logo — read in the same order as its Instance settings above, and where its own logo is
+// changed (its Definitions page, or a Local Workspace's Definition editor for one this workspace
+// authored). A failed lookup offers none.
+let instanceLogoLookup = 0
+effect(() => {
+  const def = selectedDefinition()
+  const v = resolvedVersion()
+  const handle = isLocalWorkspace.value ? localRegHandle.value : null
+  const workspaceId = localWorkspaceId.value
+  const lookup = ++instanceLogoLookup
+  selectedDefinitionOffersLogo.value = false
+  selectedDefinitionLogoHref.value = null
+  if (!def || v == null) return
+  const query = `id=${encodeURIComponent(def.id)}&version=${encodeURIComponent(String(v))}`
+  Promise.all([resolveDefinitionLogo(handle, def.id, v), handle ? localDefinitionExists(handle, def.id, v) : false])
+    .then(([logo, isLocal]) => {
+      if (lookup !== instanceLogoLookup) return
+      selectedDefinitionOffersLogo.value = Boolean(logo)
+      selectedDefinitionLogoHref.value = isLocal ? `/definitions/local?ws=${encodeURIComponent(workspaceId)}&${query}` : `/definitions?${query}`
     })
     .catch(() => {})
 })
@@ -1383,10 +1438,12 @@ async function createInstanceAndMaybeLink() {
           assignee: assigneeField.value.trim(),
           definitionVersion: versionToSend,
           ...chosenSettingValues(selectedInstanceSettings.value),
+          ...chosenLogoBody(),
           azureDevOps: { organization: ws.location.organization, project: ws.location.project, repository: ws.location.repository, ...(ws.location.baseUrl ? { baseUrl: ws.location.baseUrl } : {}) },
           stage: importPayload.value.stage,
           modules: importPayload.value.modules,
-          assets: importPayload.value.assets,
+          // #224: the source's own logo travels as the Logo above (kept, replaced or cleared), not as an asset.
+          assets: (importPayload.value.assets ?? []).filter((a) => `assets/${a.filename}` !== instanceLogoPath(importPayload.value.instanceYaml)),
         }),
       }, { workspaceId: ws.id })
       const body = await res.json().catch(() => ({}))
@@ -1456,6 +1513,7 @@ async function createInstanceAndMaybeLink() {
             assignee: assigneeField.value.trim(),
             definitionVersion: versionToSend,
             ...chosenSettingValues(selectedInstanceSettings.value),
+            ...chosenLogoBody(),
             ...(ws.provider === 'github'
               ? { github: { owner: ws.location.owner, repository: ws.location.repository, ...(ws.location.baseUrl ? { baseUrl: ws.location.baseUrl } : {}) } }
               : { azureDevOps: { organization: ws.location.organization, project: ws.location.project, repository: ws.location.repository, ...(ws.location.baseUrl ? { baseUrl: ws.location.baseUrl } : {}) } }),
@@ -2806,7 +2864,7 @@ function InstanceStep() {
           `}
     </div>
 
-    ${selectedInstanceSettings.value.length
+    ${selectedInstanceSettings.value.length || selectedDefinitionOffersLogo.value
       ? html`
           <section class="wizard-instance-settings" aria-labelledby="instance-settings-heading">
             <h3 id="instance-settings-heading">Instance settings</h3>
@@ -2827,6 +2885,17 @@ function InstanceStep() {
                 </div>
               `
             )}
+            ${selectedDefinitionOffersLogo.value
+              ? html`
+                  <div class="wizard-field">
+                    <${InstanceLogoPicker}
+                      value=${instanceLogo.value}
+                      onChange=${(value) => (instanceLogo.value = value)}
+                      definitionsHref=${selectedDefinitionLogoHref.value}
+                    />
+                  </div>
+                `
+              : null}
           </section>
         `
       : null}

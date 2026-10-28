@@ -520,6 +520,10 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .instance-setting-summary { margin-top: 14px; }
 .instance-setting-summary p { margin: 0 0 6px; }
 .defn-map-col-instance-settings { border-style: dashed; }
+/* #224: an Instance's own Logo, in the wizard and Instance Settings. */
+.instance-logo-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 4px 0 8px; }
+.instance-logo-preview { max-height: 40px; max-width: 200px; object-fit: contain; background: #fff; border: var(--hairline) solid var(--line); border-radius: var(--radius); padding: 2px; }
+.instance-logo-note, .instance-logo-status { margin: 6px 0 0; }
 
 /* Stage navigation dropdown (WI232) — inline in ViewModeToolbar to the right of the artefact selector */
 .stage-navigation { margin: 0; display: inline-flex; align-items: center; }

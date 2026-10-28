@@ -35,6 +35,7 @@ import { parse as parseYAML, stringify as stringifyYAML } from 'yaml'
 import { parseFieldBody, serialiseFieldBody, emptyFieldValue } from './fieldShape.js'
 import { readOnlyModuleAt } from './readOnlyModules.js'
 import { chosenInstanceSettings, withChangedInstanceSettings } from './instanceSettings.js'
+import { withInstanceLogoPath } from './instanceLogo.js'
 
 // Recursively sort every plain object's keys — the exact shape of
 // `lib/instance.js`'s `canonicalizeForSerialization`.
@@ -54,20 +55,26 @@ function canonicalizeForSerialization(value) {
  * The text to write at `gantry-workspace/<slug>/instance.yaml` for a new
  * local-workspace instance — the same fields `createInstance` records
  * (`definition`, `slug`, `stage` = first stage id, `assignee`,
- * `definitionVersion`, and each chosen Instance setting such as `size`),
- * serialized canonically.
+ * `definitionVersion`, each chosen Instance setting such as `size`, and the
+ * `logo` path of an uploaded Logo), serialized canonically.
  */
-export function renderInstanceYaml({ definition, slug, stage, assignee, definitionVersion, ...settings }) {
+export function renderInstanceYaml({ definition, slug, stage, assignee, definitionVersion, logo, ...settings }) {
   return stringifyYAML(
-    canonicalizeForSerialization({
-      definition,
-      slug,
-      stage,
-      assignee: assignee ?? '',
-      definitionVersion,
-      // #202/#219 (docs/adr/0054, 0058): each Instance setting, written only when one was chosen — as lib/instance.js's createInstance does.
-      ...chosenInstanceSettings(settings),
-    })
+    canonicalizeForSerialization(
+      // #224: `logo` (`assets/instance-logo.png`) only when one was uploaded, as createInstance writes it.
+      withInstanceLogoPath(
+        {
+          definition,
+          slug,
+          stage,
+          assignee: assignee ?? '',
+          definitionVersion,
+          // #202/#219 (docs/adr/0054, 0058): each Instance setting, written only when one was chosen — as lib/instance.js's createInstance does.
+          ...chosenInstanceSettings(settings),
+        },
+        logo ?? null
+      )
+    )
   )
 }
 
@@ -121,6 +128,17 @@ export function withInstanceAssignee(record, assignee) {
  */
 export function withStoredInstanceSettings(record, settings) {
   return stringifyYAML(canonicalizeForSerialization(withChangedInstanceSettings(record, settings)))
+}
+
+/**
+ * The bytes to write back to `instance.yaml` after setting (`path`, e.g.
+ * `assets/instance-logo.png`) or removing (`null`) the instance's own Logo
+ * from a local-workspace Instance Settings screen (#224) — the
+ * Local-Workspace twin of `PUT`/`DELETE /api/instance/logo`. The image
+ * itself is written (or removed) beside it by the caller.
+ */
+export function withStoredInstanceLogo(record, path) {
+  return stringifyYAML(canonicalizeForSerialization(withInstanceLogoPath(record, path)))
 }
 
 // ---------------------------------------------------------------------------

@@ -445,10 +445,15 @@ export function DefinitionViewerPage() {
         setDefinitions(data)
         setLoadError(null)
         if (data.length && !selectedId) {
-          const first = data.find((d) => d.id === 'design') ?? data[0]
+          // #224: `?id=<definition>&version=<n>` opens that version — the wizard's Logo note links
+          // here so an author can change the Definition's logo for every new instance.
+          const params = new URLSearchParams(window.location.search)
+          const linked = data.find((d) => d.id === params.get('id'))
+          const linkedVersion = Number(params.get('version'))
+          const first = linked ?? data.find((d) => d.id === 'design') ?? data[0]
           const defaultVersion = first.latestPublished ?? Math.max(...first.versions.map((v) => v.version))
           setSelectedId(first.id)
-          setSelectedVersion(defaultVersion)
+          setSelectedVersion(linked && first.versions.some((v) => v.version === linkedVersion) ? linkedVersion : defaultVersion)
         }
       })
       .catch((err) => setLoadError(err.message))
