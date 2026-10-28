@@ -8,11 +8,12 @@
                    and dependencies`, controls already via `na()`.
      WI #273's hard constraint (no change to the populated render) kept both namings, so
      each caller passed its own two heading strings. #231 (ADR-0060): v3 is a draft, so
-     the As-built now nests the block in its own `# Security` chapter under the SAD's
-     headings, as the SSAD has since #213. Every caller uses the same headings, so the
-     partial owns them again. R3: `controls` is a required field in every caller's
-     `requires`, so its heading always renders via `na()`, never a bare `<% if %>`.
-     Caller passes { dsc } and supplies the enclosing `# Security` chapter. */
+     the As-built now nests the block in a `# Security` chapter under the SAD's
+     headings, as the SSAD already uses them since #213. Every caller uses the same
+     headings, so the partial owns them again. R3: `controls` is a required field in
+     every caller's `requires`, so its heading always renders via `na()`, never a bare
+     `<% if %>`. Caller passes { dsc } and supplies the enclosing chapter: `# Security`
+     in the SAD and As-built, `# Support and operations` in the SSAD. */
 %>
 ## Security concerns
 

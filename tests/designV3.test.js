@@ -1833,6 +1833,17 @@ describe('the v3 As-built follows the SAD\'s order and headings (#231)', () => {
     })
   })
 
+  test('the Security chapter always shows Security concerns, and its inheritance section only when filled', () => {
+    withExample((dir, setFields) => {
+      const security = () => outlineOf(render('as-built', dir)).filter((line) => /^## Security /.test(line))
+      setFields('data-security-controls', { 'inheritance-and-dependencies': '' })
+      assert.deepEqual(security(), ['## Security concerns'])
+      setFields('data-security-controls', { controls: '' })
+      assert.deepEqual(security(), ['## Security concerns'])
+      assert.match(sectionOf(render('as-built', dir), '## Security concerns'), /^## Security concerns\n\n— n\/a —\n/)
+    })
+  })
+
   // The front matter the #196 block checks in the Markdown, here in the Word document itself, as the
   // SAD's Word tests do (above, and tests/tableOfContentsPrefill.test.js for its table of contents).
   test('in Word, the As-built keeps the SAD\'s front matter: its cover, Document Control, then a filled-in table of contents in the new order', () => {
