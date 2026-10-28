@@ -73,3 +73,32 @@ document missed still showed Contoso.
   ones (`replaceHeaderLogo` in `web/lib/definitionLogo.js`), so if a
   per-Instance logo is ever wanted it can be applied to a copy at render time
   without writing to the Definition.
+
+## Amendment (#224): a logo per Instance
+
+The first alternative above, a logo per Instance, was rejected because nobody
+had the multi-client case. Now someone does: one Gantry producing documents
+for different organisations or clients from one Definition. #224 adds it, and
+keeps the rest of this decision.
+
+1. **The Definition's logo stays in its reference documents** (§1, §2). It is
+   what an Instance shows when it has no logo of its own, and its reference
+   documents are never written by an Instance's logo.
+2. **An Instance's logo is applied at render time, to a copy.** When the
+   Instance record names a logo (ADR-0058, amendment for #224), the render
+   hands Pandoc a copy of the Artefact's reference document with the header
+   logo replaced, using `replaceHeaderLogo` from §4: proportions kept within
+   the original picture's space, alt text "Organisation logo". The rendered
+   output is never post-processed, so ADR-0056 holds. Every render path
+   compiles through `compileArtefact` (lib/render.js), which makes the copy:
+   the native render, each Provider's pushes, each WASM prepare route (which
+   hands the copy to the browser's Pandoc) and `gantry render`.
+3. **The replacement runs synchronously on the server.** The compile step is
+   synchronous, so `web/lib/definitionLogo.js` now writes its reading and
+   replacing as steps that ask for each (de)compression, run either over the
+   platform's (De)CompressionStream (as before) or over node:zlib
+   (`replaceHeaderLogoSync`).
+4. **Precedence.** The Instance's logo, else the Definition's (§2), else
+   whatever the reference document ships with (Contoso for design v3, §6).
+
+A deployment-wide logo stays rejected, for the reasons above.

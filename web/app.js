@@ -45,6 +45,7 @@ import { modulePayload, payloadKey, savedFields, saveStatusLine } from './lib/st
 import { isMultiValuedField, emptyFieldValue } from './lib/fieldShape.js'
 import { countWords, targetSizeLabel, withTargetWords } from './lib/targetSize.js'
 import { withInstanceSettings } from './lib/instanceSettings.js'
+import { instanceLogoPath } from './lib/instanceLogo.js'
 import { renderEngine } from './lib/renderEngine.js'
 import { warmLoadPandocWasm, renderDocxWithWasm } from './lib/pandocWasm.js'
 import { hydrateMermaidPreview, prepareMermaidForDocx } from './lib/mermaid.js'
@@ -307,6 +308,13 @@ async function buildLocalComputePayload(instance) {
     moduleFiles[moduleId] = await readLocalTextFile(handle, `gantry-workspace/${slug}/modules/${entry.name}`)
   }
   const payload = { definitionId: instance.definition, definitionVersion: instance.localDefinitionVersion, instanceYaml, moduleFiles }
+  // #224: the instance's own Logo, which the render puts in its documents' page header, rides along
+  // as an asset at the path its instance.yaml names (`assets/instance-logo.png`).
+  const logoPath = instanceLogoPath(parseInstanceYaml(instanceYaml))
+  if (logoPath) {
+    const logoBytes = await readLocalBinaryFile(handle, `gantry-workspace/${slug}/${logoPath}`).catch(() => null)
+    if (logoBytes) payload.assets = [{ id: logoPath.split('/').pop(), base64: bytesToBase64(logoBytes) }]
+  }
   // WI #384 — a local-workspace-authored definition never lives in this
   // server's bundled definitionsDir, so a render/compile of an instance
   // pinned to one has to ship the definition's own content alongside the
