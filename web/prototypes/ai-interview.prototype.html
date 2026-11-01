@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — throwaway. Not wired into gantry's app, not linked from web/index.html.
+  Resolves wayfinder ticket "What does the AI interview look like in the Gantry UI?"
+  (cgbarlow/gantry #243, under map #238 "Wayfinder: v0.13.0 AI interview").
+
+  Sub-shape A: mounted against a copy of the real module-editor screen (same
+  /style.css, same header / stage nav / .module / .field structure) so the
+  variants are judged next to real density, not in a vacuum. Served by
+  `gantry serve` at /prototypes/ai-interview.prototype.html. Everything is
+  in memory and scripted — no AI Provider is called, nothing is saved.
+
+  Question this answers: where the AI interview lives, how a round of question
+  cards looks (pre-selected recommendation, one-line why, cited Source
+  document, Other, multi-select, 1–4 per round), free chat alongside, the AI's
+  draft streaming into fields, the "Save and advance?" stage confirmation, and
+  how "run until stage X" progress (including drafting ahead while a stage
+  approval is pending) is shown. Switchable via ?variant=a|b|c:
+
+    A — Side panel: the interview docks to the right of the real module editor.
+        Question cards stack in the panel; the AI's draft streams straight into
+        the fields on the left, which scroll into view as they fill.
+    B — Interview page: its own full-page screen, Claude-chat style. Left rail =
+        run plan + Source documents; centre = the conversation with question
+        cards inline; right = a live draft preview. The editor isn't visible
+        until the stage confirmation hands you over to review it.
+    C — Inline in the document: no conversation thread. Each question sits as a
+        card directly under the field it feeds, like a review comment; a slim
+        sticky bar carries run progress and the free-chat box.
+
+  The "Prototype state" box (bottom-left) shows the live session state after
+  every action.
+-->
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PROTOTYPE — AI interview</title>
+<link rel="stylesheet" href="/style.css">
+<script>
+  try { document.documentElement.setAttribute('data-theme', localStorage.getItem('gantry:theme') || 'light') } catch {}
+</script>
+<style>
+  /* ---------- shared prototype bits ---------- */
+  .ai-mark { display: inline-block; font-family: var(--font-mono); font-size: 10px; padding: 1px 6px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); color: var(--text-muted); margin-left: 6px; vertical-align: middle; }
+  .cite { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+  .cite::before { content: '📄 '; }
+  .field-proto { margin: 0 0 18px; }
+  .field-proto .field-label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .field-proto .value { min-height: 44px; padding: 10px 12px; background: var(--bg-raised); border: var(--hairline) solid var(--line); border-radius: var(--radius); white-space: pre-wrap; font-size: 14px; }
+  .field-proto .value.empty { color: var(--text-muted); font-style: italic; }
+  .field-proto .value.streaming { border-color: var(--line-strong); box-shadow: inset 3px 0 0 var(--text); }
+  .field-proto .value.ai { box-shadow: inset 3px 0 0 var(--stamp-draft-bg); }
+  .caret::after { content: '▍'; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .qcard { border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius); background: var(--bg-raised); padding: 14px 16px; margin: 0 0 12px; }
+  .qcard .qhead { font-family: var(--font-display); font-weight: 600; font-size: 14px; margin: 0 0 2px; }
+  .qcard .qchip { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
+  .qcard .qbody { font-size: 13px; margin: 4px 0 10px; }
+  .qcard label.opt { display: flex; gap: 8px; align-items: flex-start; padding: 7px 8px; border: var(--hairline) solid var(--line); border-radius: var(--radius); margin: 0 0 6px; cursor: pointer; font-size: 13px; background: var(--bg); }
+  .qcard label.opt:hover { border-color: var(--line-strong); }
+  .qcard label.opt.chosen { border-color: var(--text); box-shadow: inset 3px 0 0 var(--text); }
+  .qcard label.opt input { margin-top: 3px; }
+  .qcard .opt .olabel { font-weight: 600; }
+  .qcard .opt .odesc { display: block; color: var(--text-muted); font-size: 12px; }
+  .qcard .rec { font-family: var(--font-mono); font-size: 10px; background: var(--text); color: var(--bg); padding: 0 5px; border-radius: var(--radius); margin-left: 6px; }
+  .qcard .why { font-size: 12px; margin: 8px 0 0; padding: 6px 10px; border-left: var(--border-strong) solid var(--line-strong); background: var(--bg); }
+  .qcard .other-input { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 6px 8px; margin-top: 4px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); background: var(--bg); color: var(--text); }
+  .qcard.answered { opacity: .6; }
+  .round-actions { display: flex; gap: 8px; align-items: center; }
+
+  .chatbox { display: flex; gap: 6px; }
+  .chatbox textarea { flex: 1; font: inherit; font-size: 13px; padding: 8px; min-height: 38px; resize: vertical; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); background: var(--bg-raised); color: var(--text); }
+  .msg { font-size: 13px; margin: 0 0 10px; padding: 8px 12px; border-radius: var(--radius); }
+  .msg.ai { background: var(--bg-raised); border: var(--hairline) solid var(--line); }
+  .msg.you { background: var(--text); color: var(--bg); margin-left: 15%; }
+  .msg.sys { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); padding: 2px 0; }
+
+  .runplan { list-style: none; padding: 0; margin: 0; font-size: 13px; }
+  .runplan li { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: var(--hairline) solid var(--line); }
+  .runplan li .dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--line-strong); flex-shrink: 0; }
+  .runplan li.active .dot { background: var(--text); border-color: var(--text); }
+  .runplan li.done .dot { background: var(--stamp-agreed-bg); border-color: var(--stamp-agreed-bg); }
+  .runplan li.pending .dot { background: var(--stamp-draft-bg); border-color: var(--stamp-draft-bg); }
+  .runplan li.beyond { color: var(--text-muted); text-decoration: line-through; }
+  .runplan li .rp-note { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); text-align: right; }
+  .srcdocs { list-style: none; padding: 0; margin: 0; font-size: 12px; }
+  .srcdocs li { padding: 4px 0; border-bottom: var(--hairline) solid var(--line); display: flex; justify-content: space-between; gap: 8px; }
+  .srcdocs li .meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+  .dropzone { border: 2px dashed var(--line-strong); border-radius: var(--radius); padding: 14px; text-align: center; font-size: 12px; color: var(--text-muted); margin-top: 8px; cursor: pointer; }
+  .kick label { display: block; font-size: 12px; font-weight: 600; margin: 10px 0 4px; }
+  .kick select { width: 100%; font: inherit; font-size: 13px; padding: 6px; background: var(--bg-raised); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+  .warn { font-size: 12px; padding: 6px 10px; margin-top: 6px; border-left: 3px solid var(--stamp-error-bg); background: var(--bg-raised); }
+  .banner { font-size: 13px; padding: 8px 12px; background: var(--bg-raised); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); margin: 0 0 12px; }
+  .gate-ok { font-family: var(--font-mono); font-size: 11px; color: var(--stamp-agreed-bg); }
+  h3.side { font-family: var(--font-display); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin: 18px 0 6px; }
+
+  /* ---------- Variant A: side panel ---------- */
+  #va { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 0; max-width: 1480px; margin: 0 auto; }
+  #va main#modules { max-width: none; margin: 0; padding: 0 32px 140px; }
+  #va aside { position: sticky; top: 0; height: 100vh; overflow: auto; border-left: var(--border-strong) solid var(--line-strong); background: var(--bg); padding: 16px 18px 120px; box-sizing: border-box; }
+  #va aside .panel-head { display: flex; align-items: center; justify-content: space-between; }
+  #va aside .panel-head h2 { font-family: var(--font-display); font-size: 16px; margin: 0; }
+  #va .ministeps { display: flex; gap: 4px; margin: 8px 0 12px; }
+  #va .ministeps span { flex: 1; height: 6px; border-radius: 3px; background: var(--line); }
+  #va .ministeps span.done { background: var(--stamp-agreed-bg); }
+  #va .ministeps span.active { background: var(--text); }
+  #va .ministeps span.pending { background: var(--stamp-draft-bg); }
+  #va .ministeps span.beyond { background: transparent; border: 1px dashed var(--line); }
+
+  /* ---------- Variant B: interview page ---------- */
+  #vb { display: grid; grid-template-columns: 260px minmax(0, 1fr) 360px; height: calc(100vh - 0px); }
+  #vb .rail { border-right: var(--border-strong) solid var(--line-strong); padding: 16px; overflow: auto; }
+  #vb .convo { display: flex; flex-direction: column; overflow: hidden; }
+  #vb .convo .thread { flex: 1; overflow: auto; padding: 20px 32px; }
+  #vb .convo .thread .inner { max-width: 720px; margin: 0 auto; }
+  #vb .convo .composer { border-top: var(--border-strong) solid var(--line-strong); padding: 12px 32px 70px; }
+  #vb .convo .composer .inner { max-width: 720px; margin: 0 auto; }
+  #vb .preview { border-left: var(--border-strong) solid var(--line-strong); padding: 16px; overflow: auto; background: var(--bg-raised); }
+  #vb .preview .field-proto .value { background: var(--bg); font-size: 12px; min-height: 30px; }
+  #vb .preview h4 { font-family: var(--font-display); font-size: 13px; margin: 14px 0 6px; }
+  #vb .qcard .opts-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; }
+  #vb .qcard .opts-tiles label.opt { margin: 0; flex-direction: column; }
+  #vb .bhead { display: flex; align-items: center; gap: 10px; padding: 10px 32px; border-bottom: var(--hairline) solid var(--line); font-size: 13px; }
+
+  /* ---------- Variant C: inline in the document ---------- */
+  #vc .ibar { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: var(--border-strong) solid var(--line-strong); }
+  #vc .ibar .inner { max-width: 1120px; margin: 0 auto; padding: 8px 32px; display: flex; align-items: center; gap: 14px; font-size: 13px; flex-wrap: wrap; }
+  #vc .ibar .stagepills { display: flex; gap: 4px; }
+  #vc .ibar .stagepills span { font-family: var(--font-mono); font-size: 10px; padding: 2px 6px; border: var(--hairline) solid var(--line); border-radius: var(--radius); }
+  #vc .ibar .stagepills span.active { background: var(--text); color: var(--bg); }
+  #vc .ibar .stagepills span.done { background: var(--stamp-agreed-bg); color: var(--stamp-agreed-fg); border-color: transparent; }
+  #vc .ibar .stagepills span.pending { background: var(--stamp-draft-bg); color: var(--stamp-draft-fg); border-color: transparent; }
+  #vc .ibar .stagepills span.beyond { opacity: .4; text-decoration: line-through; }
+  #vc .ibar .chatbox { flex: 1; min-width: 280px; }
+  #vc .ibar .chatbox textarea { min-height: 30px; height: 30px; }
+  #vc .qcard { margin: 8px 0 18px 24px; border-style: dashed; position: relative; }
+  #vc .qcard::before { content: ''; position: absolute; left: -18px; top: 16px; width: 14px; border-top: 1px solid var(--line-strong); }
+  #vc .chatlog { max-width: 1120px; margin: 0 auto; padding: 0 32px; }
+  #vc .toast { position: fixed; right: 20px; top: 70px; width: 320px; z-index: 6; }
+
+  /* ---------- switcher + state ---------- */
+  .proto-switcher { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 100; display: flex; align-items: center; gap: 10px; background: #111; color: #fff; padding: 6px 10px; border-radius: 999px; box-shadow: 0 4px 18px rgba(0,0,0,.35); font: 600 12px system-ui, sans-serif; }
+  .proto-switcher button { background: #333; color: #fff; border: none; border-radius: 999px; width: 28px; height: 28px; cursor: pointer; font-size: 14px; }
+  .proto-switcher .reset { width: auto; padding: 0 10px; font-size: 11px; }
+  .proto-state { position: fixed; left: 12px; bottom: 12px; z-index: 99; width: 300px; font: 11px/1.4 ui-monospace, monospace; background: #111; color: #cfc; border-radius: 6px; box-shadow: 0 4px 18px rgba(0,0,0,.35); }
+  .proto-state summary { cursor: pointer; padding: 6px 10px; color: #fff; }
+  .proto-state pre { margin: 0; padding: 0 10px 10px; max-height: 40vh; overflow: auto; white-space: pre-wrap; }
+  .proto-state .sim { padding: 0 10px 10px; }
+  .proto-state .sim button { font: inherit; background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; padding: 3px 6px; cursor: pointer; margin: 2px 2px 0 0; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+// ================================================================== scripted data
+const INSTANCE = { name: 'Claims Portal Modernisation', def: 'design', slug: 'claims-portal', ref: '#41', workspace: 'GitHub · kiwi-cover/architecture' }
+const STAGES = [
+  { id: 'shape', title: 'SOAP', gate: 'business-case' },
+  { id: 'hld-define', title: 'High-level Design', gate: 'hld-arb-approved' },
+  { id: 'detailed-design', title: 'Detailed Design', gate: 'build-ready-checklist' },
+  { id: 'handover', title: 'Operational Handover', gate: 'operational-handover' },
+]
+const SOURCE_DOCS = [
+  { name: 'Claims Portal Business Case v2.pdf', meta: 'PDF · 18 pp · 2.1 MB' },
+  { name: 'Current-state architecture.pptx', meta: 'PPTX · 24 slides · 6.4 MB' },
+  { name: 'Stakeholder workshop notes 2026-10-14.docx', meta: 'DOCX · 6 pp · 140 KB' },
+  { name: 'Claims volumes FY26.xlsx', meta: 'XLSX · 3 sheets · 88 KB' },
+]
+const EXTRA_DOC = { name: 'Whiteboard — target state.jpg', meta: 'JPG · 1 image · 1.8 MB' }
+const AI_PROVIDERS = [
+  { id: 'anthropic', label: 'Anthropic · claude-opus-5-5 (default)', cards: true },
+  { id: 'openrouter', label: 'OpenRouter · openai/gpt-5', cards: true },
+  { id: 'ollama', label: 'Ollama · llama3.1:8b (local)', cards: false },
+]
+
+// The SOAP stage's modules/fields (a subset of design v3's real ones)
+const MODULES = [
+  { id: 'background', title: 'Background and context', purpose: 'Why this initiative exists — the problem, the opportunity and how success is measured.', fields: [
+    { id: 'problem', title: 'Problem statement' }, { id: 'affected-domains', title: 'Affected domains' },
+    { id: 'opportunity', title: 'Opportunity' }, { id: 'success-criteria', title: 'Success criteria' } ] },
+  { id: 'introduction', title: 'Overview', purpose: 'What is and isn’t in scope.', fields: [
+    { id: 'in-scope', title: 'In scope' }, { id: 'out-of-scope', title: 'Out of scope' } ] },
+  { id: 'design-basis', title: 'Design Basis', purpose: 'The constraints, assumptions and principles the design rests on.', fields: [
+    { id: 'constraints', title: 'Constraints' }, { id: 'design-principles', title: 'Design principles' } ] },
+  { id: 'solution-definition', title: 'Solution Definition', purpose: 'The proposed solution at a glance.', fields: [
+    { id: 'high-level-solution-overview', title: 'High level solution overview' } ] },
+]
+const HLD_MODULES = [
+  { id: 'alternatives-considered', title: 'Alternatives considered', purpose: 'The options weighed and why the preferred one won.', fields: [ { id: 'options', title: 'Options assessed' } ] },
+]
+
+// Rounds: each question feeds one field (key = module.field) and drafts text from the answer.
+const ROUNDS = [
+  { stage: 'shape', intro: 'I’ve read your 4 Source documents. Starting with Background and context — three things the documents disagree on or leave open.', questions: [
+    { id: 'q-driver', header: 'Problem', field: 'background.problem', question: 'The business case gives three drivers for replacing the portal. Which one leads the problem statement?',
+      options: [
+        { label: 'Legacy portal end-of-support', desc: 'Vendor support ends March 2027; no security patches after.', draft: 'The member claims portal runs on a vendor platform whose support ends in March 2027, after which it receives no security patches [Claims Portal Business Case v2.pdf, p.4]. Claims handling cost and a member NPS of 12 compound the case but are not the binding constraint.' },
+        { label: 'Claims handling cost', desc: '$38 per paper claim vs $9 digital.', draft: 'Paper and phone claims cost $38 each to handle against $9 for a digital claim [Claims Portal Business Case v2.pdf, p.6], and 58% of claims still arrive on paper [Claims volumes FY26.xlsx, Summary].' },
+        { label: 'Member satisfaction', desc: 'Claims NPS of 12, lowest of all journeys.', draft: 'Claims is the lowest-scoring member journey with an NPS of 12 [Claims Portal Business Case v2.pdf, p.5].' } ],
+      rec: 0, why: 'It’s the only driver with a hard date, and the business case’s own executive summary leads with it.', cite: 'Claims Portal Business Case v2.pdf, p.4' },
+    { id: 'q-domains', header: 'Domains', field: 'background.affected-domains', multi: true, question: 'Which domains does this change touch?',
+      options: [
+        { label: 'Claims', desc: 'Lodgement, assessment, payment.' }, { label: 'Member services', desc: 'Contact centre, member self-service.' },
+        { label: 'Finance', desc: 'Claim payments reconciliation.' }, { label: 'Broker channel', desc: 'Broker-lodged claims.' } ],
+      rec: [0, 1, 2], why: 'Workshop attendees named these three; the broker channel came up only as a future phase.', cite: 'Stakeholder workshop notes 2026-10-14.docx, p.2',
+      draftMulti: (labels) => labels.map((l) => '- ' + l).join('\n') + '\n[Stakeholder workshop notes 2026-10-14.docx, p.2]' },
+    { id: 'q-target', header: 'Success', field: 'background.success-criteria', question: 'The documents give two targets for digital claim lodgement. Which goes in the success criteria?',
+      options: [
+        { label: '70% digital by FY28', desc: 'From the workshop (Oct 2026).', draft: '70% of claims lodged digitally by the end of FY28 [Stakeholder workshop notes 2026-10-14.docx, p.3], up from 42% today [Claims volumes FY26.xlsx, Summary].' },
+        { label: '60% digital by FY28', desc: 'From the business case (Jul 2026).', draft: '60% of claims lodged digitally by the end of FY28 [Claims Portal Business Case v2.pdf, p.9], up from 42% today [Claims volumes FY26.xlsx, Summary].' },
+        { label: 'Record as an open question', desc: 'Leave the figure out and raise it for the sponsor.', draft: 'Digital lodgement target to be confirmed by the sponsor — the business case says 60%, the October workshop 70% (see Open questions).' } ],
+      rec: 0, why: 'The workshop is three months newer and the sponsor was in the room.', cite: 'Stakeholder workshop notes 2026-10-14.docx, p.3' },
+  ] },
+  { stage: 'shape', intro: 'Background’s drafted. Now scope and the Design Basis.', questions: [
+    { id: 'q-broker', header: 'Scope', field: 'introduction.out-of-scope', question: 'Is broker-lodged claims in scope for this initiative?',
+      options: [
+        { label: 'Out of scope (phase 2)', desc: 'Members only for now.', draft: 'Broker-lodged claims — deferred to a phase 2 [Stakeholder workshop notes 2026-10-14.docx, p.2].' },
+        { label: 'In scope', desc: 'Brokers lodge through the same portal.', draft: 'None identified.' },
+        { label: 'Open question', desc: 'Raise it for the sponsor.', draft: 'Broker channel scope is an open question for the sponsor.' } ],
+      rec: 0, why: 'The workshop explicitly parked brokers to a second phase.', cite: 'Stakeholder workshop notes 2026-10-14.docx, p.2', alsoField: ['introduction.in-scope', 'Member-lodged claims for health and life policies via web and mobile; claim status tracking; document upload [Claims Portal Business Case v2.pdf, p.7].'] },
+    { id: 'q-hosting', header: 'Hosting', field: 'design-basis.constraints', question: 'What hosting constraint applies?',
+      options: [
+        { label: 'Azure (existing tenancy)', desc: 'Kiwi Cover’s strategic cloud.', draft: 'Must host in Kiwi Cover’s existing Azure tenancy (Australia East) [Current-state architecture.pptx, slide 7].' },
+        { label: 'AWS', desc: '', draft: 'Must host in AWS.' },
+        { label: 'Not yet decided', desc: 'Record as an assumption.', draft: 'Hosting platform not yet decided (target assumption: Azure).' } ],
+      rec: 0, why: 'Slide 7 names Azure as the strategic platform, and every current integration already runs there.', cite: 'Current-state architecture.pptx, slide 7' },
+    { id: 'q-principles', header: 'Principles', field: 'design-basis.design-principles', multi: true, question: 'Which design principles should this design commit to?',
+      options: [
+        { label: 'API-first', desc: 'Portal is a client of claims APIs.' }, { label: 'Reuse member identity', desc: 'Existing Entra External ID.' },
+        { label: 'Buy before build', desc: 'Prefer configuring a product.' }, { label: 'Cloud-native', desc: 'Managed services by default.' } ],
+      rec: [0, 1, 2], why: 'These three come straight from the architecture principles slide; cloud-native isn’t stated anywhere.', cite: 'Current-state architecture.pptx, slide 3',
+      draftMulti: (labels) => labels.map((l) => '- **' + l + '**').join('\n') + '\n[Current-state architecture.pptx, slide 3]' },
+  ] },
+  { stage: 'shape', intro: 'Last one for this stage.', questions: [
+    { id: 'q-option', header: 'Solution', field: 'solution-definition.high-level-solution-overview', question: 'The business case assessed three options. Which is the proposed solution?',
+      options: [
+        { label: 'Configure ClaimCenter portal', desc: 'Option 2 — extend the core claims product.', draft: 'Configure the member portal module of the existing claims platform (business case option 2), exposed through the API gateway and signed in with existing member identity [Claims Portal Business Case v2.pdf, p.11].' },
+        { label: 'Custom build on .NET', desc: 'Option 3.', draft: 'A custom-built portal on the existing .NET stack (business case option 3).' },
+        { label: 'SaaS claims portal', desc: 'Option 1.', draft: 'A SaaS claims portal integrated over APIs (business case option 1).' } ],
+      rec: 0, why: 'Option 2 scored highest in the business case’s evaluation and fits "buy before build".', cite: 'Claims Portal Business Case v2.pdf, p.11' },
+  ] },
+  { stage: 'hld-define', intro: 'Drafting ahead into High-level Design while SOAP waits for approval.', questions: [
+    { id: 'q-alts', header: 'Alternatives', field: 'alternatives-considered.options', multi: true, question: 'Which alternatives should the HLD record as assessed?',
+      options: [
+        { label: 'Do nothing', desc: 'Run the legacy portal unsupported.' }, { label: 'SaaS claims portal', desc: 'Business case option 1.' },
+        { label: 'Custom build', desc: 'Business case option 3.' } ],
+      rec: [0, 1, 2], why: 'ARB reviews expect "do nothing" alongside the business case’s options.', cite: 'Claims Portal Business Case v2.pdf, p.10',
+      draftMulti: (labels) => labels.map((l) => '- ' + l).join('\n') + '\n[Claims Portal Business Case v2.pdf, p.10]' },
+  ] },
+]
+
+// ================================================================== state
+const params = new URLSearchParams(location.search)
+const VARIANTS = [ ['a', 'Side panel'], ['b', 'Interview page'], ['c', 'Inline in the document'] ]
+function fresh() {
+  return {
+    variant: (params.get('variant') || 'a').toLowerCase(),
+    phase: 'kickoff', // kickoff | asking | drafting | confirm | ahead | done
+    provider: 'anthropic', runUntil: 'detailed-design', docs: SOURCE_DOCS.slice(),
+    round: 0, choices: {}, other: {}, fields: {}, aiFields: new Set(), streamingKey: null, queue: [],
+    thread: [], chatDraft: '', stageStatus: { shape: 'active' }, log: [],
+  }
+}
+let S = fresh()
+const RECORD = (entry) => S.log.push(entry)
+
+function defaultChoices(round) {
+  for (const q of ROUNDS[round].questions) {
+    if (S.choices[q.id] === undefined) S.choices[q.id] = q.multi ? new Set(q.rec) : q.rec
+  }
+}
+function start() {
+  if (!AI_PROVIDERS.find((p) => p.id === S.provider).cards) return
+  S.phase = 'asking'; S.round = 0; defaultChoices(0)
+  S.thread.push({ who: 'sys', text: `Session started · ${S.docs.length} Source documents · run until ${stageTitle(S.runUntil)}` })
+  S.thread.push({ who: 'ai', text: ROUNDS[0].intro, round: 0 })
+  render()
+}
+function answerFor(q) {
+  const c = S.choices[q.id]
+  if (q.multi) {
+    const labels = [...c].sort().map((i) => i === 'other' ? (S.other[q.id] || 'Other') : q.options[i].label)
+    return { labels, text: q.draftMulti(labels) }
+  }
+  if (c === 'other') return { labels: [S.other[q.id] || 'Other'], text: (S.other[q.id] || '') + ' [architect, in interview]' }
+  return { labels: [q.options[c].label], text: q.options[c].draft }
+}
+function submitRound() {
+  const round = ROUNDS[S.round]
+  const summary = []
+  for (const q of round.questions) {
+    const a = answerFor(q)
+    summary.push(`${q.header}: ${a.labels.join(', ')}`)
+    S.queue.push({ key: q.field, text: a.text })
+    if (q.alsoField) S.queue.push({ key: q.alsoField[0], text: q.alsoField[1] })
+    RECORD({ q: q.id, answer: a.labels, recommended: q.multi ? q.rec.map((i) => q.options[i].label) : q.options[q.rec].label, cite: q.cite, field: q.field })
+  }
+  S.thread.push({ who: 'you', text: summary.join(' · ') })
+  S.phase = 'drafting'
+  render(); stream()
+}
+let timer = null
+function stream() {
+  clearInterval(timer)
+  timer = setInterval(() => {
+    if (!S.streamingKey) {
+      const next = S.queue.shift()
+      if (!next) { clearInterval(timer); afterDrafting(); return }
+      S.streamingKey = next.key; S.fields[next.key] = ''; S._target = next.text; S.aiFields.add(next.key)
+      render()
+      document.querySelector(`[data-field-key="${next.key}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      return
+    }
+    const cur = S.fields[S.streamingKey]
+    S.fields[S.streamingKey] = S._target.slice(0, cur.length + 4)
+    const el = document.querySelector(`[data-field-key="${S.streamingKey}"]`)
+    if (el) el.textContent = S.fields[S.streamingKey]
+    if (S.fields[S.streamingKey].length >= S._target.length) { S.streamingKey = null; render() }
+  }, 18)
+}
+function afterDrafting() {
+  const next = S.round + 1
+  const leavingStage = ROUNDS[S.round].stage
+  if (next < ROUNDS.length && ROUNDS[next].stage === leavingStage) {
+    S.round = next; defaultChoices(next); S.phase = 'asking'
+    S.thread.push({ who: 'ai', text: ROUNDS[next].intro, round: next })
+  } else if (leavingStage === 'shape') {
+    S.phase = 'confirm'; S.choices['confirm'] = 0
+    S.thread.push({ who: 'ai', text: 'SOAP is drafted: 4 modules, 9 fields. The business-case gate passes. How do you want to proceed?', confirm: true })
+  } else {
+    S.phase = 'done'
+    S.thread.push({ who: 'ai', text: 'High-level Design is drafted ahead on its own branch. I’ll pause here until SOAP’s approval lands — nothing more to ask. (Prototype ends here.)' })
+  }
+  render()
+}
+const CONFIRM = { id: 'confirm', header: 'Stage', question: 'SOAP is ready. Save and advance?',
+  options: [
+    { label: 'Save, request approval, draft ahead', desc: 'One Save on the SOAP branch, open the approval PR, and keep drafting High-level Design while the Owner reviews.' },
+    { label: 'Save and stop here', desc: 'One Save, approval request, then the session pauses.' },
+    { label: 'Review in the editor first', desc: 'Nothing saved yet — I’ll hand over to the editor with the draft as unsaved changes.' },
+    { label: 'Keep refining SOAP', desc: 'Ask me more before saving.' } ],
+  rec: 0, why: 'You chose "run until Detailed Design", and drafting ahead keeps the session moving while approval is pending.', cite: null }
+function confirmStage() {
+  const c = S.choices['confirm']
+  RECORD({ q: 'confirm-shape', answer: CONFIRM.options[c].label })
+  S.thread.push({ who: 'you', text: CONFIRM.options[c].label })
+  if (c === 0 || c === 1) {
+    S.thread.push({ who: 'sys', text: 'Saved SOAP: 4 modules (1 commit "Save SOAP: Background and context, Overview, Design Basis, Solution Definition") · decisions log updated · approval requested (PR #12)' })
+    S.stageStatus.shape = 'pending'
+  }
+  if (c === 0) {
+    S.stageStatus['hld-define'] = 'active'; S.round = ROUNDS.findIndex((r) => r.stage === 'hld-define'); defaultChoices(S.round); S.phase = 'ahead'
+    S.thread.push({ who: 'ai', text: ROUNDS[S.round].intro, round: S.round })
+  } else if (c === 1) {
+    S.phase = 'done'; S.thread.push({ who: 'ai', text: 'Paused. I’ll pick up from the decisions log once SOAP is approved.' })
+  } else if (c === 2) {
+    S.phase = 'done'; S.thread.push({ who: 'ai', text: 'Over to you — the draft is in the editor as unsaved changes. (Prototype ends here.)' })
+  } else {
+    S.round = 2; S.phase = 'asking'; S.thread.push({ who: 'ai', text: 'Sure — what would you like to change? (Use the chat box.)' })
+  }
+  render()
+}
+function sendChat() {
+  const t = S.chatDraft.trim(); if (!t) return
+  S.thread.push({ who: 'you', text: t })
+  S.thread.push({ who: 'ai', text: `Noted — I’ll treat "${t}" as coming from you (cited as [architect, in interview]) and fold it into the fields it affects as I go.` })
+  RECORD({ chat: t }); S.chatDraft = ''
+  render()
+}
+function addDoc() { if (!S.docs.includes(EXTRA_DOC)) { S.docs.push(EXTRA_DOC); render() } }
+const stageTitle = (id) => STAGES.find((s) => s.id === id).title
+function stageClass(st) {
+  const idx = STAGES.findIndex((s) => s.id === st.id), target = STAGES.findIndex((s) => s.id === S.runUntil)
+  if (idx > target) return 'beyond'
+  return S.stageStatus[st.id] || ''
+}
+function stageNote(st) {
+  const c = stageClass(st)
+  if (c === 'beyond') return 'beyond target'
+  if (c === 'pending') return 'awaiting approval · PR #12'
+  if (c === 'active') return S.phase === 'ahead' || st.id === 'hld-define' ? 'drafting ahead' : 'drafting'
+  if (st.id === S.runUntil) return 'target'
+  return ''
+}
+const currentQuestions = () => (S.phase === 'confirm' ? [CONFIRM] : (S.phase === 'asking' || S.phase === 'ahead') ? ROUNDS[S.round].questions : [])
+
+// ================================================================== shared renderers
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+function qcard(q, { tiles = false, compact = false } = {}) {
+  const c = S.choices[q.id]
+  const isChosen = (i) => q.multi ? c?.has(i) : c === i
+  const isRec = (i) => q.multi ? q.rec.includes(i) : q.rec === i
+  const type = q.multi ? 'checkbox' : 'radio'
+  const opts = q.options.map((o, i) => `
+    <label class="opt ${isChosen(i) ? 'chosen' : ''}">
+      <input type="${type}" name="${q.id}" data-q="${q.id}" data-i="${i}" ${isChosen(i) ? 'checked' : ''}>
+      <span><span class="olabel">${esc(o.label)}</span>${isRec(i) ? '<span class="rec">RECOMMENDED</span>' : ''}${o.desc && !compact ? `<span class="odesc">${esc(o.desc)}</span>` : ''}</span>
+    </label>`).join('')
+  const other = `
+    <label class="opt ${isChosen('other') ? 'chosen' : ''}">
+      <input type="${type}" name="${q.id}" data-q="${q.id}" data-i="other" ${isChosen('other') ? 'checked' : ''}>
+      <span style="flex:1"><span class="olabel">Other</span>${isChosen('other') ? `<input class="other-input" data-other="${q.id}" placeholder="Type your answer…" value="${esc(S.other[q.id] || '')}">` : ''}</span>
+    </label>`
+  return `
+    <div class="qcard" data-qcard="${q.id}">
+      <div class="qchip">${esc(q.header)}${q.multi ? ' · choose any' : ''}${q.field ? ` · feeds ${esc(q.field)}` : ''}</div>
+      <p class="qhead">${esc(q.question)}</p>
+      <div class="${tiles ? 'opts-tiles' : ''}">${opts}${other}</div>
+      <p class="why"><strong>Why I recommend it:</strong> ${esc(q.why)}${q.cite ? `<br><span class="cite">${esc(q.cite)}</span>` : ''}</p>
+    </div>`
+}
+function roundActions() {
+  if (S.phase === 'confirm') return `<div class="round-actions"><button class="btn primary" data-act="confirm">Confirm</button></div>`
+  if (S.phase === 'asking' || S.phase === 'ahead') {
+    const n = ROUNDS[S.round].questions.length
+    return `<div class="round-actions"><button class="btn primary" data-act="submit">Submit ${n} answer${n > 1 ? 's' : ''}</button><span class="cite" style="font-style:normal">round ${S.round + 1}</span></div>`
+  }
+  if (S.phase === 'drafting') return `<p class="msg sys">Drafting ${esc(S.streamingKey || '…')}<span class="caret"></span></p>`
+  return ''
+}
+function kickoff() {
+  const p = AI_PROVIDERS.find((x) => x.id === S.provider)
+  return `
+    <div class="kick">
+      <p style="font-size:13px;margin:0 0 6px">The AI reads this Instance’s Source documents, then interviews you to draft each stage, saving only when you confirm. It never passes a gate that needs approval or review.</p>
+      <label>AI Provider</label>
+      <select data-set="provider">${AI_PROVIDERS.map((x) => `<option value="${x.id}" ${x.id === S.provider ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}</select>
+      ${p.cards ? '' : '<div class="warn">This model can’t produce question cards (no tool calling). Choose another AI Provider, or the interview falls back to plain chat.</div>'}
+      <label>Run until</label>
+      <select data-set="runUntil">${STAGES.map((s) => `<option value="${s.id}" ${s.id === S.runUntil ? 'selected' : ''}>${esc(s.title)} (gate: ${s.gate})</option>`).join('')}</select>
+      <label>Source documents (${S.docs.length})</label>
+      ${srcdocs()}
+      <div class="dropzone" data-act="adddoc">Drop files or click to upload · PDF, Word, PowerPoint, Excel, Markdown, text, images</div>
+      <button class="btn primary" data-act="start" ${p.cards ? '' : 'disabled'}>Start interview</button>
+    </div>`
+}
+const srcdocs = () => `<ul class="srcdocs">${S.docs.map((d) => `<li><span>${esc(d.name)}</span><span class="meta">${esc(d.meta)}</span></li>`).join('')}</ul>`
+const runplan = () => `<ul class="runplan">${STAGES.map((st) => `<li class="${stageClass(st)}"><span class="dot"></span>${esc(st.title)}<span class="rp-note">${esc(stageNote(st))}</span></li>`).join('')}</ul>`
+function threadHtml() {
+  return S.thread.map((m, idx) => {
+    const last = idx === S.thread.length - 1
+    let cards = ''
+    if (last && m.who === 'ai' && (m.round !== undefined || m.confirm)) cards = currentQuestions().map((q) => qcard(q, { tiles: S.variant === 'b', compact: S.variant === 'a' })).join('') + roundActions()
+    return `<div class="msg ${m.who}">${esc(m.text)}</div>${cards}`
+  }).join('') + (S.phase === 'drafting' ? roundActions() : '')
+}
+const chatbox = (ph = 'Tell the AI anything — "the budget is capped at $1.2M", "skip Finance"…') => `<div class="chatbox"><textarea data-chat placeholder="${esc(ph)}">${esc(S.chatDraft)}</textarea><button class="btn small" data-act="chat">Send</button></div>`
+function fieldHtml(modId, f) {
+  const key = `${modId}.${f.id}`, v = S.fields[key]
+  const cls = S.streamingKey === key ? 'streaming caret' : S.aiFields.has(key) ? 'ai' : (v ? '' : 'empty')
+  return `<div class="field-proto"><span class="field-label">${esc(f.title)}${S.aiFields.has(key) ? '<span class="ai-mark">AI draft · unsaved</span>' : ''}</span><div class="value ${cls}" data-field-key="${key}">${v ? esc(v) : 'Empty'}</div></div>`
+}
+function appHeader() {
+  return `
+    <header class="app-header">
+      <div class="brand">
+        <a class="btn small ghost" href="#">← Workspaces</a>
+        <h1>${esc(INSTANCE.name)} — ${esc(INSTANCE.def)}</h1>
+        <span class="instance-slug">${esc(INSTANCE.slug)}</span><span class="instance-ref">${esc(INSTANCE.ref)}</span>
+        ${S.variant === 'a' || S.variant === 'c' ? '<a class="btn small" href="?variant=b" data-nav>✦ AI interview</a>' : ''}
+      </div>
+      <p id="stage-line">SOAP (gate: business-case) · ${esc(INSTANCE.workspace)}</p>
+      <nav id="stage-nav">${STAGES.map((s, i) => `<button class="btn small ${i === 0 ? 'active stage-current' : ''}">${esc(s.title)}${i === 0 ? ' (current)' : ''}</button>`).join('')}</nav>
+    </header>`
+}
+const stageModules = () => (S.stageStatus['hld-define'] === 'active' ? HLD_MODULES : MODULES)
+
+// ================================================================== variants
+function variantA() {
+  const mods = stageModules()
+  const steps = STAGES.map((st) => `<span class="${stageClass(st)}" title="${esc(st.title)}"></span>`).join('')
+  return `
+    ${appHeader()}
+    <div id="va">
+      <main id="modules">
+        ${S.stageStatus['hld-define'] === 'active' ? '<div class="banner" style="margin-top:16px">Viewing <strong>High-level Design</strong> drafted ahead — SOAP is awaiting approval (PR #12).</div>' : ''}
+        ${mods.map((m) => `<section class="module"><h2>${esc(m.title)}</h2><p class="purpose">${esc(m.purpose)}</p>${m.fields.map((f) => fieldHtml(m.id, f)).join('')}</section>`).join('')}
+      </main>
+      <aside>
+        <div class="panel-head"><h2>✦ AI interview</h2><span class="cite">${S.phase === 'kickoff' ? 'not started' : esc(AI_PROVIDERS.find((p) => p.id === S.provider).label.split(' (')[0])}</span></div>
+        ${S.phase === 'kickoff' ? kickoff() : `
+          <div class="ministeps">${steps}</div>
+          <p class="cite" style="margin:0 0 12px">Run until ${esc(stageTitle(S.runUntil))} · ${S.docs.length} Source documents</p>
+          ${threadHtml()}
+          <h3 class="side">Chat</h3>${chatbox()}`}
+      </aside>
+    </div>`
+}
+function variantB() {
+  const mods = stageModules()
+  return `
+    <div id="vb">
+      <div class="rail">
+        <a class="btn small ghost" href="?variant=a" data-nav style="margin:0 0 10px">← Editor</a>
+        <div style="font-family:var(--font-display);font-weight:600">${esc(INSTANCE.name)}</div>
+        <div class="cite" style="font-style:normal">${esc(INSTANCE.workspace)}</div>
+        <h3 class="side">Run plan</h3>${runplan()}
+        <h3 class="side">Source documents</h3>${srcdocs()}
+        <div class="dropzone" data-act="adddoc">+ Add Source document</div>
+        <h3 class="side">Decisions log</h3>
+        <p class="cite" style="font-style:normal">${S.log.filter((l) => l.q).length} decisions recorded</p>
+      </div>
+      <div class="convo">
+        <div class="bhead"><strong>✦ AI interview</strong><span class="cite">${esc(AI_PROVIDERS.find((p) => p.id === S.provider).label)}</span></div>
+        <div class="thread"><div class="inner">
+          ${S.phase === 'kickoff' ? `<div style="max-width:460px">${kickoff()}</div>` : threadHtml()}
+        </div></div>
+        ${S.phase === 'kickoff' ? '' : `<div class="composer"><div class="inner">${chatbox()}</div></div>`}
+      </div>
+      <div class="preview">
+        <div class="qchip" style="font-family:var(--font-mono);font-size:10px;text-transform:uppercase">Live draft · ${esc(S.stageStatus['hld-define'] === 'active' ? 'High-level Design' : 'SOAP')}</div>
+        ${mods.map((m) => `<h4>${esc(m.title)}</h4>${m.fields.map((f) => fieldHtml(m.id, f)).join('')}`).join('')}
+      </div>
+    </div>`
+}
+function variantC() {
+  const mods = stageModules()
+  const qs = currentQuestions()
+  const byField = {}; for (const q of qs) if (q.field) byField[q.field] = q
+  const pills = STAGES.map((st) => `<span class="${stageClass(st)}">${esc(st.title)}</span>`).join('')
+  const lastAi = [...S.thread].reverse().find((m) => m.who === 'ai')
+  return `
+    ${appHeader()}
+    <div id="vc">
+      <div class="ibar"><div class="inner">
+        <strong>✦ AI</strong>
+        ${S.phase === 'kickoff' ? '<button class="btn small primary" data-act="openkick" style="margin:0">Start AI interview…</button>' : `<div class="stagepills">${pills}</div>`}
+        ${S.phase === 'kickoff' ? '' : chatbox('Tell the AI anything…')}
+        ${(S.phase === 'asking' || S.phase === 'ahead') ? `<span class="cite" style="font-style:normal">${qs.length} questions below ↓</span><button class="btn small primary" data-act="submit" style="margin:0">Submit answers</button>` : ''}
+        ${S.phase === 'drafting' ? `<span class="cite">drafting ${esc(S.streamingKey || '')}…</span>` : ''}
+      </div></div>
+      ${S.phase === 'kickoff' && S._kickOpen ? `<div class="modal-backdrop" style="display:flex"><div class="modal" style="width:440px"><h3>Start AI interview</h3>${kickoff()}<button class="btn small ghost" data-act="closekick">Cancel</button></div></div>` : ''}
+      ${lastAi && S.phase !== 'kickoff' ? `<div class="toast"><div class="msg ai">${esc(lastAi.text)}</div>${S.phase === 'confirm' ? qcard(CONFIRM, { compact: true }) + roundActions() : ''}</div>` : ''}
+      <main id="modules">
+        ${mods.map((m) => `<section class="module"><h2>${esc(m.title)}</h2><p class="purpose">${esc(m.purpose)}</p>${m.fields.map((f) => fieldHtml(m.id, f) + (byField[`${m.id}.${f.id}`] ? qcard(byField[`${m.id}.${f.id}`], { compact: true }) : '')).join('')}</section>`).join('')}
+      </main>
+    </div>`
+}
+
+// ================================================================== render + events
+function stateSnapshot() {
+  return JSON.stringify({
+    variant: S.variant, phase: S.phase, aiProvider: S.provider, runUntil: S.runUntil, round: S.round + 1,
+    stageStatus: S.stageStatus, streaming: S.streamingKey, sourceDocuments: S.docs.length,
+    choices: Object.fromEntries(Object.entries(S.choices).map(([k, v]) => [k, v instanceof Set ? [...v] : v])),
+    decisionsLog: S.log,
+  }, null, 2)
+}
+function render() {
+  const v = { a: variantA, b: variantB, c: variantC }[S.variant] || variantA
+  const label = VARIANTS.find(([k]) => k === S.variant)?.[1] ?? '?'
+  document.getElementById('root').innerHTML = v() + `
+    <div class="proto-switcher"><button data-act="prev" aria-label="Previous variant">←</button><span>${S.variant.toUpperCase()} (${esc(label)})</span><button data-act="next" aria-label="Next variant">→</button><button class="reset" data-act="reset">Restart</button></div>
+    <details class="proto-state" ${S._stateOpen ? 'open' : ''}><summary>Prototype state</summary><pre>${esc(stateSnapshot())}</pre></details>`
+  document.querySelector('.proto-state').addEventListener('toggle', (e) => (S._stateOpen = e.target.open))
+  const th = document.querySelector('#vb .thread'); if (th) th.scrollTop = th.scrollHeight
+}
+function go(delta) {
+  const keys = VARIANTS.map(([k]) => k), i = (keys.indexOf(S.variant) + delta + keys.length) % keys.length
+  setVariant(keys[i])
+}
+function setVariant(k) { S.variant = k; const u = new URL(location); u.searchParams.set('variant', k); history.replaceState(null, '', u); render() }
+document.addEventListener('click', (e) => {
+  const nav = e.target.closest('[data-nav]')
+  if (nav) { e.preventDefault(); setVariant(new URL(nav.href).searchParams.get('variant')); return }
+  const a = e.target.closest('[data-act]')?.dataset.act
+  if (!a) return
+  ;({ prev: () => go(-1), next: () => go(1), reset: () => { const v = S.variant; S = fresh(); S.variant = v; clearInterval(timer); render() },
+     start, submit: submitRound, confirm: confirmStage, chat: sendChat, adddoc: addDoc,
+     openkick: () => { S._kickOpen = true; render() }, closekick: () => { S._kickOpen = false; render() } })[a]?.()
+})
+document.addEventListener('change', (e) => {
+  const t = e.target
+  if (t.dataset.set) { S[t.dataset.set] = t.value; render(); return }
+  if (t.dataset.q) {
+    const q = [...currentQuestions()].find((x) => x.id === t.dataset.q)
+    const i = t.dataset.i === 'other' ? 'other' : Number(t.dataset.i)
+    if (q.multi) { const s = S.choices[q.id]; t.checked ? s.add(i) : s.delete(i) } else S.choices[q.id] = i
+    render()
+    if (i === 'other') document.querySelector(`[data-other="${q.id}"]`)?.focus()
+  }
+})
+document.addEventListener('input', (e) => {
+  if (e.target.dataset.other) S.other[e.target.dataset.other] = e.target.value
+  if (e.target.hasAttribute('data-chat')) S.chatDraft = e.target.value
+})
+document.addEventListener('keydown', (e) => {
+  if (e.target.matches('input, textarea, select, [contenteditable]')) {
+    if (e.key === 'Enter' && !e.shiftKey && e.target.hasAttribute('data-chat')) { e.preventDefault(); sendChat() }
+    return
+  }
+  if (e.key === 'ArrowLeft') go(-1)
+  if (e.key === 'ArrowRight') go(1)
+})
+render()
+</script>
+</body>
+</html>
