@@ -42,6 +42,7 @@ import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
 import { visualMode, refreshVisual, clearActiveCell, restoreActiveCell, activeCellSelection, focusTableCellAt } from './lib/visualMode.js'
 import { advancedMode } from './lib/advancedMode.js'
 import { modulePayload, payloadKey, savedFields, saveStatusLine } from './lib/stageSave.js'
+import { stagePayloads, stageVersionOfModules, mergeStage, conflictText, conflictValueFromText } from './lib/stageVersion.js'
 import { isMultiValuedField, emptyFieldValue } from './lib/fieldShape.js'
 import { countWords, targetSizeLabel, withTargetWords } from './lib/targetSize.js'
 import { withInstanceSettings, instanceTargetSize } from './lib/instanceSettings.js'
@@ -183,6 +184,27 @@ function assetFileUrl(assetId, slug, stageId) {
   return qs ? `${base}?${qs}` : base
 }
 
+// The Module entries of one stage, read through a local workspace's folder handle — what
+// `GET /api/instance` returns as `modules`. Used to open the stage and, again, to compare
+// the stage's version just before a Save (ADR-0068, #270).
+async function readLocalStageModules(handle, slug, stage, structure) {
+  const modulesById = new Map(structure.modules.map((m) => [m.id, m]))
+  const modules = []
+  for (const moduleId of stage.modules) {
+    const moduleSpec = modulesById.get(moduleId)
+    if (!moduleSpec) continue
+    let data = { status: 'draft', owner: '', fields: {} }
+    try {
+      const text = await readLocalTextFile(handle, localModuleFilesPath(slug, moduleId))
+      data = parseLocalModuleFile(text, moduleSpec)
+    } catch {
+      // No saved data yet for this module — the blank draft above stands, matching GET /api/instance's own "no module file yet" default.
+    }
+    modules.push(buildLocalModuleEntry(moduleSpec, stage, data, null, structure.stages))
+  }
+  return modules
+}
+
 /**
  * Reads `gantry-workspace/<slug>/instance.yaml` and every
  * `gantry-workspace/<slug>/modules/*.md` through a local workspace's
@@ -220,21 +242,8 @@ async function loadLocalInstance(workspaceId, slug, requestedStageId) {
   const stageId = requestedStageId ?? record.stage
   const stage = structure.stages.find((s) => s.id === stageId)
   if (!stage) throw new Error(`Definition "${definitionId}" has no stage "${stageId}"`)
-  const modulesById = new Map(structure.modules.map((m) => [m.id, m]))
 
-  const modules = []
-  for (const moduleId of stage.modules) {
-    const moduleSpec = modulesById.get(moduleId)
-    if (!moduleSpec) continue
-    let data = { status: 'draft', owner: '', fields: {} }
-    try {
-      const text = await readLocalTextFile(handle, localModuleFilesPath(slug, moduleId))
-      data = parseLocalModuleFile(text, moduleSpec)
-    } catch {
-      // No saved data yet for this module — the blank draft above stands, matching GET /api/instance's own "no module file yet" default.
-    }
-    modules.push(buildLocalModuleEntry(moduleSpec, stage, data, null, structure.stages))
-  }
+  const modules = await readLocalStageModules(handle, slug, stage, structure)
 
   // #202: the same Target size and per-Field targets GET /api/instance adds (web/lib/targetSize.js),
   // so a Local-workspace instance's editor shows the same word counts — and (#219) the same
@@ -261,6 +270,8 @@ async function loadLocalInstance(workspaceId, slug, requestedStageId) {
     // list an artefact fractionally earlier than a server-hosted one would.
     artefacts: structure.artefacts.filter((a) => a.gate === stage.gate).map((a) => ({ id: a.id, title: a.title, requires: a.requires, ...(a.satisfiesGate === false ? { satisfiesGate: false } : {}) })),
     modules,
+    // ADR-0068 (#270): the same fingerprint the server returns, computed here from the files just read.
+    stageVersion: stageVersionOfModules(modules),
     workItem: null,
     pullRequests: {},
     approvalStates: {},
@@ -1557,7 +1568,7 @@ function StageSaveButton() {
   const title = count
     ? `Save (${shortcut}) — ${count} module${count === 1 ? '' : 's'} with changes`
     : `Save (${shortcut}) — nothing to save`
-  const state = { saving: 'Saving…', saved: 'Saved', error: message }[phase] ?? ''
+  const state = { saving: 'Saving…', saved: message || 'Saved', error: message }[phase] ?? ''
   return html`
     <span class="stage-save">
       <button
@@ -1588,6 +1599,97 @@ function UnsavedChangesDialog({ count, onAnswer }) {
         <button type="button" class="btn ghost" onClick=${() => onAnswer('cancel')}>Cancel</button>
         <button type="button" class="btn" onClick=${() => onAnswer('discard')}>Discard</button>
         <button type="button" class="btn primary" ref=${saveRef} onClick=${() => onAnswer('save')}>Save</button>
+      </div>
+    <//>
+  `
+}
+
+// What a clashing Field is called in the dialog: its Module and its own title.
+function clashLabel(inst, conflict) {
+  const mod = inst.modules.find((m) => m.id === conflict.moduleId)
+  const name =
+    conflict.kind === 'status' ? 'Status'
+    : conflict.kind === 'owner' ? 'Owner'
+    : conflict.kind === 'custom' ? (conflict.mine ?? conflict.theirs).title
+    : mod?.fields.find((f) => `field:${f.id}` === conflict.key)?.title ?? conflict.key.replace(/^field:/, '')
+  return mod ? `${mod.title} › ${name}` : name
+}
+
+// The Field-by-Field dialog (ADR-0068, #270): shown when the stage was saved by someone else after
+// this editor read it, for each Field both sides changed. Every Field needs an answer — keep the
+// saved version, keep yours, or edit — so nothing is overwritten silently. Resolves a map for
+// mergeStage's `resolutions`, or null on Cancel.
+function StageClashDialog({ inst, conflicts, onAnswer }) {
+  const [choices, setChoices] = useState({})
+  const firstRef = useRef(null)
+  useEffect(() => firstRef.current?.focus(), [])
+  const idOf = (conflict) => `${conflict.moduleId}\u0000${conflict.key}`
+  const choose = (conflict, choice) => setChoices((previous) => ({ ...previous, [idOf(conflict)]: choice }))
+  const sideValue = (side) => (side === undefined ? undefined : side.value)
+  const answered = conflicts.every((conflict) => choices[idOf(conflict)])
+
+  function resolutions() {
+    const out = {}
+    for (const conflict of conflicts) {
+      const choice = choices[idOf(conflict)]
+      const side = choice.mode === 'theirs' ? conflict.theirs : conflict.mine
+      out[idOf(conflict)] =
+        choice.mode === 'edit'
+          ? { value: conflictValueFromText(choice.text, sideValue(conflict.mine) ?? sideValue(conflict.theirs)) }
+          : side === undefined
+            ? { remove: true }
+            : { value: side.value }
+    }
+    return out
+  }
+
+  return html`
+    <${Modal} ariaLabel="Changes saved meanwhile" onClose=${() => onAnswer(null)}>
+      <h3>Someone saved changes to this stage while you were editing</h3>
+      <p class="guidance">
+        ${conflicts.length === 1 ? 'One Field was' : `${conflicts.length} Fields were`} changed both in what is saved and in
+        your editor. Everything else has been combined. Choose what to keep for each; nothing is saved until you do.
+      </p>
+      <div class="clash-list">
+        ${conflicts.map((conflict, index) => {
+          const choice = choices[idOf(conflict)]
+          const show = (side) => (side === undefined ? '(removed)' : conflictText(side.value) || '(empty)')
+          return html`
+            <section class="clash" data-clash-field=${conflict.key} key=${idOf(conflict)}>
+              <h4>${clashLabel(inst, conflict)}</h4>
+              <div class="clash-versions">
+                <div class=${'clash-version' + (choice?.mode === 'theirs' ? ' chosen' : '')}>
+                  <h5>Saved by someone else</h5>
+                  <pre class="clash-text" data-clash-side="theirs">${show(conflict.theirs)}</pre>
+                  <button type="button" class="btn small" ref=${index === 0 ? firstRef : null} aria-pressed=${choice?.mode === 'theirs'} onClick=${() => choose(conflict, { mode: 'theirs' })}>Keep theirs</button>
+                </div>
+                <div class=${'clash-version' + (choice?.mode === 'mine' ? ' chosen' : '')}>
+                  <h5>Your version</h5>
+                  <pre class="clash-text" data-clash-side="mine">${show(conflict.mine)}</pre>
+                  <button type="button" class="btn small" aria-pressed=${choice?.mode === 'mine'} onClick=${() => choose(conflict, { mode: 'mine' })}>Keep mine</button>
+                </div>
+              </div>
+              ${choice?.mode === 'edit'
+                ? html`<textarea
+                    class="clash-edit"
+                    aria-label=${`Edit ${clashLabel(inst, conflict)}`}
+                    value=${choice.text}
+                    onInput=${(e) => choose(conflict, { mode: 'edit', text: e.target.value })}
+                  />`
+                : html`<button
+                    type="button"
+                    class="btn small ghost"
+                    onClick=${() => choose(conflict, { mode: 'edit', text: conflictText(sideValue(conflict.mine) ?? sideValue(conflict.theirs)) })}
+                  >
+                    Edit instead
+                  </button>`}
+            </section>
+          `
+        })}
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" onClick=${() => onAnswer(null)}>Cancel</button>
+        <button type="button" class="btn primary" disabled=${!answered} onClick=${() => onAnswer(resolutions())}>Save</button>
       </div>
     <//>
   `
@@ -4766,8 +4868,10 @@ function ModuleEditorPage({ slug: routeRef }) {
   // the saved text makes it clean again. Everything here reads signals and
   // refs, never this render's `instance`, because the listeners below are
   // installed once.
-  const savedRef = useRef({ key: null, payloads: new Map(), keys: new Map() })
+  const savedRef = useRef({ key: null, payloads: new Map(), keys: new Map(), version: null })
   const [leavePrompt, setLeavePrompt] = useState(null)
+  // The Field-by-Field dialog (ADR-0068, #270): `{ inst, conflicts, resolve }` while a Save waits on the author.
+  const [clashPrompt, setClashPrompt] = useState(null)
   const locationRef = useRef(null)
   locationRef.current = useLocation()
   const editorUrlRef = useRef(null)
@@ -4796,6 +4900,8 @@ function ModuleEditorPage({ slug: routeRef }) {
       key: stageKey(inst),
       payloads,
       keys: new Map([...payloads].map(([id, payload]) => [id, payloadKey(payload)])),
+      // ADR-0068 (#270): the stage's version when this baseline was read, the one a Save is checked against.
+      version: inst.stageVersion ?? null,
     }
     batch(() => {
       moduleSaveStatus.value = {}
@@ -4814,9 +4920,89 @@ function ModuleEditorPage({ slug: routeRef }) {
     if (ids.join('\n') !== current.dirtyModuleIds.join('\n')) stageSave.value = { ...current, dirtyModuleIds: ids }
   }
 
-  // Writes only the changed modules: through the folder handle for a local
-  // workspace (works offline, ADR-0029), otherwise one request — one commit on
-  // an Azure-DevOps-backed stage branch. Resolves true when the save worked.
+  // One attempt to write `payloads` for the stage, checked against `baseVersion` (ADR-0068, #270).
+  // Resolves `{ statusModules, stageVersion }` when it was written, or `{ clash: { stageVersion,
+  // current } }` — what is saved now, Module by Module — when the stage has moved on since it was
+  // read, in which case nothing was written. A local workspace is read and written through the
+  // folder handle (works offline, ADR-0029), so it makes the same check itself; any other workspace
+  // is one request, which is one commit on the stage's branch.
+  async function writeStage(inst, payloads, baseVersion) {
+    if (inst.isLocalWorkspace) {
+      const handle = localDirHandle.peek()
+      if (!handle) throw new Error('Local workspace folder is not open.')
+      const structure = inst.localDefinitionStructure
+      const stage = structure.stages.find((s) => s.id === inst.stage.id)
+      if (baseVersion) {
+        const current = await readLocalStageModules(handle, inst.slug, stage, structure)
+        const currentVersion = stageVersionOfModules(current)
+        if (currentVersion !== baseVersion) return { clash: { stageVersion: currentVersion, current: stagePayloads(current) } }
+      }
+      for (const [id, payload] of Object.entries(payloads)) {
+        const mod = inst.modules.find((m) => m.id === id)
+        const moduleSpec = {
+          id: mod.id,
+          title: mod.title,
+          fields: mod.fields.filter((f) => !f.custom).map((f) => ({ id: f.id, title: f.title, type: f.type })),
+        }
+        await writeLocalTextFile(handle, localModuleFilesPath(inst.slug, id), renderLocalModuleInstanceFile(id, moduleSpec, payload))
+      }
+      return {
+        statusModules: (await getLocalStatus(handle, inst.slug, structure, inst.stage.id)).modules,
+        stageVersion: stageVersionOfModules(await readLocalStageModules(handle, inst.slug, stage, structure)),
+      }
+    }
+    const params = new URLSearchParams({ stage: inst.stage.id, slug: inst.slug })
+    const res = await apiFetchForInstance(inst.slug, `/api/instance/modules?${params}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(baseVersion ? { modules: payloads, baseVersion } : { modules: payloads }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (res.status === 409 && body.code === 'stage_changed') return { clash: { stageVersion: body.stageVersion, current: body.current } }
+    if (!res.ok) throw new Error(body.message ?? body.error ?? `the server answered ${res.status}`)
+    return { statusModules: body.modules ?? [], stageVersion: body.stageVersion ?? null }
+  }
+
+  // Asks which version to keep for each Field both sides changed; resolves a map for mergeStage's
+  // `resolutions`, or null when the author cancels (nothing is saved).
+  function askClashes(inst, conflicts) {
+    return new Promise((resolve) => setClashPrompt({ inst, conflicts, resolve }))
+  }
+
+  // Puts the settled content of every Module into the editors and the saved baseline: Fields
+  // taken from the other side appear, and what was just written is what is saved. A Field whose
+  // value is already right is left alone, so the caret stays where it is.
+  function applySettled(inst, settled, version) {
+    const key = stageKey(inst)
+    const latest = instanceData.peek()
+    if (savedRef.current.key !== key || !latest || stageKey(latest) !== key) return
+    for (const [id, payload] of Object.entries(settled)) {
+      savedRef.current.payloads.set(id, payload)
+      savedRef.current.keys.set(id, payloadKey(payload))
+    }
+    savedRef.current.version = version
+    instanceData.value = {
+      ...latest,
+      ...(version ? { stageVersion: version } : {}),
+      modules: latest.modules.map((mod) => {
+        const payload = settled[mod.id]
+        return payload ? { ...mod, status: payload.status, owner: payload.owner, fields: savedFields(mod, payload) } : mod
+      }),
+    }
+    if (registryRef.current.stageKey !== key) return
+    const controls = new Map(registryRef.current.entries.map((entry) => [`${entry.moduleId}.${entry.field.id}`, entry]))
+    for (const { field, control, moduleId } of controls.values()) {
+      const payload = settled[moduleId]
+      if (!payload || !(field.id in payload.fields)) continue
+      if (JSON.stringify(control.getValue()) !== JSON.stringify(payload.fields[field.id])) control.setValue(payload.fields[field.id])
+    }
+  }
+
+  // Saves every changed module (ADR-0068): first against the version the stage had when it was
+  // read. If someone else has saved since, each Field is settled three ways between what the
+  // author started from, what is saved now and what the author has — only they changed it, theirs
+  // is kept; only the other side did, theirs is taken; both did, the author picks or edits — and
+  // the result is saved against the version just seen. Resolves true when the save worked.
   async function saveStage() {
     refreshDirty()
     const inst = instanceData.peek()
@@ -4829,43 +5015,54 @@ function ModuleEditorPage({ slug: routeRef }) {
     )
     stageSave.value = { ...stageSave.peek(), phase: 'saving', message: '' }
     try {
-      let statusModules
-      if (inst.isLocalWorkspace) {
-        const handle = localDirHandle.peek()
-        if (!handle) throw new Error('Local workspace folder is not open.')
-        for (const id of dirtyModuleIds) {
-          const mod = inst.modules.find((m) => m.id === id)
-          const moduleSpec = {
-            id: mod.id,
-            title: mod.title,
-            fields: mod.fields.filter((f) => !f.custom).map((f) => ({ id: f.id, title: f.title, type: f.type })),
+      const base = Object.fromEntries(savedRef.current.key === key ? savedRef.current.payloads : [])
+      let toWrite = payloads
+      let baseVersion = savedRef.current.key === key ? savedRef.current.version : null
+      let settled = null
+      let result
+      for (let attempt = 0; ; attempt++) {
+        result = await writeStage(inst, toWrite, baseVersion)
+        if (!result.clash) break
+        if (attempt >= 4) throw new Error('this stage keeps changing under you — try again in a moment')
+        const theirs = result.clash.current
+        const mineAll = { ...base, ...payloads }
+        let merge = mergeStage({ base, mine: mineAll, theirs })
+        if (merge.conflicts.length > 0) {
+          const resolutions = await askClashes(inst, merge.conflicts)
+          if (!resolutions) {
+            // Cancelled: nothing was written and the author's edits stay as they are.
+            stageSave.value = { ...stageSave.peek(), phase: 'idle', message: '' }
+            return false
           }
-          await writeLocalTextFile(handle, localModuleFilesPath(inst.slug, id), renderLocalModuleInstanceFile(id, moduleSpec, payloads[id]))
+          merge = mergeStage({ base, mine: mineAll, theirs, resolutions })
         }
-        statusModules = (await getLocalStatus(handle, inst.slug, inst.localDefinitionStructure, inst.stage.id)).modules
-      } else {
-        const params = new URLSearchParams({ stage: inst.stage.id, slug: inst.slug })
-        const res = await apiFetchForInstance(inst.slug, `/api/instance/modules?${params}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ modules: payloads }),
-        })
-        const body = await res.json().catch(() => ({}))
-        if (!res.ok) throw new Error(body.message ?? body.error ?? `the server answered ${res.status}`)
-        statusModules = body.modules ?? []
+        settled = merge.payloads
+        baseVersion = result.clash.stageVersion
+        toWrite = Object.fromEntries(merge.toWrite.map((id) => [id, merge.payloads[id]]))
+        if (merge.toWrite.length === 0) {
+          // What is saved already has everything the author had: nothing to write.
+          result = { statusModules: [], stageVersion: baseVersion }
+          break
+        }
       }
-      if (savedRef.current.key === key) {
+      if (settled) {
+        applySettled(inst, settled, result.stageVersion)
+      } else if (savedRef.current.key === key) {
         for (const id of dirtyModuleIds) {
           savedRef.current.payloads.set(id, payloads[id])
           savedRef.current.keys.set(id, payloadKey(payloads[id]))
         }
+        savedRef.current.version = result.stageVersion
       }
+      const { statusModules } = result
       batch(() => {
         moduleSaveStatus.value = {
           ...moduleSaveStatus.peek(),
-          ...Object.fromEntries(dirtyModuleIds.map((id) => [id, saveStatusLine(statusModules.find((m) => m.id === id))])),
+          ...Object.fromEntries(
+            dirtyModuleIds.filter((id) => statusModules.some((m) => m.id === id)).map((id) => [id, saveStatusLine(statusModules.find((m) => m.id === id))])
+          ),
         }
-        stageSave.value = { ...stageSave.peek(), phase: 'saved', message: '' }
+        stageSave.value = { ...stageSave.peek(), phase: 'saved', message: settled ? 'Saved — merged with changes saved meanwhile' : '' }
       })
       refreshDirty()
       setTimeout(() => {
@@ -5157,6 +5354,16 @@ function ModuleEditorPage({ slug: routeRef }) {
     />
     ${leavePrompt
       ? html`<${UnsavedChangesDialog} count=${stageSave.value.dirtyModuleIds.length} onAnswer=${answerLeavePrompt} />`
+      : null}
+    ${clashPrompt
+      ? html`<${StageClashDialog}
+          inst=${clashPrompt.inst}
+          conflicts=${clashPrompt.conflicts}
+          onAnswer=${(resolutions) => {
+            clashPrompt.resolve(resolutions)
+            setClashPrompt(null)
+          }}
+        />`
       : null}
   `
 }

@@ -204,6 +204,16 @@ If you have unsaved changes and switch stage, switch instance, follow a link in 
 
 On a Workspace-backed instance, on Azure DevOps, GitHub or GitLab alike, one Save is one commit on the stage's branch containing only the modules you changed. Saving doesn't re-render documents: they are rendered and committed only when you click **Render**, so render before requesting sign-off if the Pull Request should include up-to-date documents.
 
+#### When someone else has saved the stage meanwhile
+
+Two people can have the same stage open, and a Save never silently overwrites the other's work. When you open a stage Gantry notes what it contains (its *version*), and before every Save it checks again. If nothing has changed, your Save goes straight through. If someone else saved in the meantime, Gantry compares, Field by Field, what you started from, what is saved now and what you have:
+
+- **Only the other save changed a Field:** theirs is taken, and it appears in your editor.
+- **Only you changed a Field:** yours is kept.
+- **You both changed the same Field:** a dialog titled *Someone saved changes to this stage while you were editing* lists each such Field with the saved version beside yours. For each one choose **Keep theirs**, **Keep mine**, or **Edit instead** to write your own wording. **Save** stays greyed out until every Field has an answer, and **Cancel** saves nothing and leaves your edits in the editor.
+
+So two people editing different Fields (even in the same module) both save and neither loses anything. After a merge the Save button reads *Saved — merged with changes saved meanwhile*. Uploading an image or other file in the meantime never causes this: only a change to a Field's content does. This works the same on a local workspace, a server workspace, GitHub and Azure DevOps.
+
 ### Visual, Split and Markdown views
 
 - **Visual** (the default) shows each field the way it will read — headings, bold and italic, code, quotes, links, images and Mermaid diagrams — and you edit it in place. The markdown markers under your caret stay visible on the line you are editing, so you can always see and correct them.
