@@ -13,6 +13,7 @@ import { TARGET_SIZES, targetSizeLabel, withFieldTargetWords } from '../lib/targ
 import { definitionInstanceSettings, instanceSettingName } from '../lib/instanceSettings.js'
 import { InstanceSettingsSummary, InstanceSettingsEditor } from '../lib/instanceSettingsView.js'
 import { DefinitionLogoControl } from '../lib/definitionLogoControl.js'
+import { listStandardModules, modulesWithStandard, standardModuleVersions, STANDARD_MODULES } from '../lib/standardModules.js'
 
 // The rebuilt Definitions page (WI #381, Feature #380's grilling session). Primary source:
 // web/prototypes/definition-editor.prototype.html — variant A (Outline) and C (Map) both wanted,
@@ -89,6 +90,8 @@ function editableStructure(def) {
     title: def.title,
     description: def.description,
     instanceSettings,
+    // #283 (ADR-0065): the standard modules mounted, an empty list the same as none (Save writes neither).
+    standardModules: Array.isArray(def.standardModules) && def.standardModules.length === 0 ? undefined : def.standardModules,
     stages: def.stages,
     artefacts: def.artefacts,
     modules: def.modules,
@@ -97,6 +100,41 @@ function editableStructure(def) {
 
 function clone(x) {
   return JSON.parse(JSON.stringify(x))
+}
+
+// #283 (ADR-0065): a Definition's own Modules plus the standard modules it mounts, resolved from
+// Gantry's catalogue — what every picker, chip and lookup reads, so a Gantry-provided Module behaves
+// like any other. A standard module carries `standard: { version }`; the draft's own `modules` never
+// holds one (Save would write it out as a file).
+function everyModule(d) {
+  return modulesWithStandard(d.modules, d.standardModules)
+}
+
+// The standard modules a draft could still mount: Gantry provides them, none is mounted yet, and the
+// Definition has no Module of its own with that id.
+function unmountedStandardModules(d) {
+  const taken = new Set([...(d.modules ?? []).map((m) => m.id), ...(d.standardModules ?? []).map((m) => m.id)])
+  return listStandardModules().filter((m) => !taken.has(m.id))
+}
+
+// Mounts the newest version of a standard module on the draft (a Definition names the version it
+// mounts, and a new mount takes the latest), and on `stageId` when given.
+function mountStandardModule(dd, id, stageId) {
+  if (!(dd.standardModules ?? []).some((m) => m.id === id)) {
+    const versions = standardModuleVersions(id)
+    dd.standardModules = [...(dd.standardModules ?? []), { id, version: versions[versions.length - 1] }]
+  }
+  const stage = stageId ? dd.stages.find((st) => st.id === stageId) : null
+  if (stage && !stage.modules.includes(id)) stage.modules.push(id)
+}
+
+// Takes a standard module off the draft, and off every Stage that mounted it.
+function unmountStandardModule(dd, id) {
+  dd.standardModules = (dd.standardModules ?? []).filter((m) => m.id !== id)
+  for (const stage of dd.stages) {
+    stage.modules = stage.modules.filter((mid) => mid !== id)
+    setStageModuleReadOnly(stage, id, false)
+  }
 }
 
 // Parses the element a validation problem is anchored to out of its message — every message from
@@ -109,6 +147,9 @@ function problemTarget(problem) {
   const setting = /^Instance setting "([^"]+)"/.exec(problem?.message ?? '')
   if (setting) return { type: 'instance-setting', id: setting[1] }
   if (problem?.type === 'invalid-instance-settings') return { type: 'instance-setting', id: 'instance-settings' }
+  // #283 (ADR-0065): a standard module is a Module on the page, so its problems anchor on it.
+  const standard = /^Standard module "([^"]+)"/.exec(problem?.message ?? '')
+  if (standard) return { type: 'module', id: standard[1] }
   const m = /^(Stage|Artefact|Module) "([^"]+)"/.exec(problem?.message ?? '')
   if (!m) return null
   return { type: m[1].toLowerCase(), id: m[2] }
@@ -188,7 +229,7 @@ function eligibleFilenameFields(d, artefact) {
     const dot = ref.indexOf('.')
     const moduleId = dot === -1 ? ref : ref.slice(0, dot)
     const fieldId = dot === -1 ? null : ref.slice(dot + 1)
-    const mod = d.modules.find((m) => m.id === moduleId)
+    const mod = everyModule(d).find((m) => m.id === moduleId)
     if (!mod) continue
     const fields = fieldId ? mod.fields.filter((f) => f.id === fieldId) : mod.fields
     for (const f of fields) {
@@ -1442,6 +1483,13 @@ export function DefinitionViewerPage() {
   // "from <id> v<n>" (WI #382) — shown on every element that carries `copiedFrom`, in both the
   // outline/map and the focus pane. `element` (e.g. "module:risks.risk-register") is the tooltip,
   // not the visible label — the visible label only ever needs to answer "where did this come from".
+  // #283 (ADR-0065): marks a Module Gantry provides, wherever it is listed.
+  function providedBadge() {
+    return html`<span class="stamp small review defn-provided-badge" title="Provided by Gantry: its shape is fixed and versioned">Gantry-provided</span>`
+  }
+  function standardTitle(id) {
+    return STANDARD_MODULES[id]?.title ?? id
+  }
   function copiedFromBadge(obj) {
     if (!obj?.copiedFrom) return null
     return html`<span class="stamp small review defn-from-badge" title=${`Copied from ${obj.copiedFrom.element}`}>from ${obj.copiedFrom.definition} v${obj.copiedFrom.version}</span>`
@@ -1725,7 +1773,7 @@ export function DefinitionViewerPage() {
     const focusArtefacts = selection.type === 'artefact' ? d.artefacts.filter((a) => a.id === selection.id) : []
     const focused = focusArtefacts.length > 0
     const focusLabel = focusArtefacts.map((a) => a.title || a.id).join(' and ')
-    const usage = moduleFieldUsage(d.modules, focusArtefacts)
+    const usage = moduleFieldUsage(everyModule(d), focusArtefacts)
     return (mid, mod) => {
       const u = usage.get(mid)
       if (!u) return { ghost: false, count: null, title: undefined }
@@ -1822,6 +1870,7 @@ export function DefinitionViewerPage() {
             <span class="kicker" role="button" tabindex="0" onClick=${() => toggleGroup('modules')}>${modulesCollapsed ? '▸' : '▾'} Modules · ${d.modules.length}</span>
             ${isEditable ? html`<button class="btn small ghost" aria-label="Add module" onClick=${() => updateDraft((dd) => { const id = `new-module-${dd.modules.length + 1}`; dd.modules.push({ id, title: 'New Module', purpose: '', fields: [] }); select('module', id) })}>+</button>` : null}
             ${isEditable ? libraryPicker('module', (id) => startLibraryCopy('module', { id }, null)) : null}
+            ${renderMountStandardModule(d)}
           </div>
           ${!modulesCollapsed && d.modules.map((m, mi) =>
             html`<div key=${m.id}>
@@ -1850,9 +1899,41 @@ export function DefinitionViewerPage() {
             </div>`
           )}
         </div>
+        ${renderStandardModulesOutlineGroup(d)}
         ${renderInstanceSettingsOutlineGroup(d)}
       </nav>
     `
+  }
+
+  // #283 (ADR-0065): the standard modules this Definition mounts, as the Outline's own group — Gantry
+  // provides them, so they are listed apart from the Modules the Definition owns. A draft can mount
+  // another from the select; a mounted one is a Module like any other once a Stage lists it.
+  function renderStandardModulesOutlineGroup(d) {
+    const mounted = d.standardModules ?? []
+    if (mounted.length === 0) return null
+    return html`
+      <div class="defn-outline-group" data-testid="standard-modules-group">
+        <div class="defn-outline-group-head">
+          <span class="kicker">Standard modules · ${mounted.length}</span>
+        </div>
+        ${mounted.map((m) => outlineNode({ type: 'module', id: m.id, label: standardTitle(m.id), badge: providedBadge(), usage: moduleUsageView(d)(m.id, resolvedStandard(d, m.id)) }))}
+      </div>
+    `
+  }
+  // The Modules group's "+ Mount…": a draft mounts a standard module Gantry provides, then sees it
+  // under Standard modules. Offered only while some standard module is still unmounted.
+  function renderMountStandardModule(d) {
+    const mountable = isEditable ? unmountedStandardModules(d) : []
+    if (mountable.length === 0) return null
+    return html`
+      <select class="wizard-input defn-mount-standard" aria-label="Mount a standard module" onChange=${(e) => { const val = e.currentTarget.value; if (!val) return; updateDraft((dd) => { mountStandardModule(dd, val) }); select('module', val); e.currentTarget.value = '' }}>
+        <option value="">+ Mount standard module…</option>
+        ${mountable.map((m) => html`<option value=${m.id}>${m.title}</option>`)}
+      </select>
+    `
+  }
+  function resolvedStandard(d, id) {
+    return everyModule(d).find((m) => m.id === id && m.standard)
   }
 
   // #219 (docs/adr/0058): the Instance settings this Definition offers — worked out from the working
@@ -1905,7 +1986,7 @@ export function DefinitionViewerPage() {
   function renderMap() {
     const d = working
     const usedIds = new Set(d.stages.flatMap((s) => s.modules))
-    const unused = d.modules.filter((m) => !usedIds.has(m.id))
+    const unused = everyModule(d).filter((m) => !usedIds.has(m.id))
     const moduleUsageProps = moduleUsageView(d)
     // One module chip, for a stage column or "Not in any stage". On a draft the drag-handle props
     // are spread FIRST: htm applies props in order, so spreading them last would replace the chip's
@@ -1918,7 +1999,7 @@ export function DefinitionViewerPage() {
         <div key=${mid} ...${isEditable ? dragHandleProps({ id: mid }, 'module') : {}}
           class=${'defn-map-chip' + (selection.type === 'module' && selection.id === mid ? ' selected' : '') + (u.ghost ? ' ghost' : '')}
           role="button" tabindex="0" title=${title} aria-label=${isEditable ? title : undefined} onClick=${() => select('module', mid)}>
-          ${mod?.title ?? mid} ${copiedFromBadge(mod)}${hasProblem('module', mid) ? html`<span class="defn-problem-dot"></span>` : null}${usageCount(u.count)}
+          ${mod?.title ?? mid} ${mod?.standard ? providedBadge() : copiedFromBadge(mod)}${hasProblem('module', mid) ? html`<span class="defn-problem-dot"></span>` : null}${usageCount(u.count)}
         </div>
       `
     }
@@ -1937,7 +2018,7 @@ export function DefinitionViewerPage() {
                 <button class="btn small ghost" aria-label=${`Move stage "${s.title}" down`} disabled=${si === d.stages.length - 1} onClick=${() => updateDraft((dd) => { dd.stages = reorder(dd.stages, si, si + 1) })}>↓</button>
               </span>
             ` : null}
-            ${s.modules.map((mid) => moduleChip(mid, d.modules.find((m) => m.id === mid)))}
+            ${s.modules.map((mid) => moduleChip(mid, everyModule(d).find((m) => m.id === mid)))}
             <div class="defn-map-gate">
               <span class="kicker">Gate · ${s.gate}</span>
               ${d.artefacts.map((a, ai) => a.gate === s.gate
@@ -2162,6 +2243,7 @@ export function DefinitionViewerPage() {
     if (!d) return null
     if (selection.type === 'stage') return renderStageFocus(d)
     if (selection.type === 'artefact') return renderArtefactFocus(d)
+    if (selection.type === 'module' && (d.standardModules ?? []).some((m) => m.id === selection.id)) return renderStandardModuleFocus(d)
     if (selection.type === 'module') return renderModuleFocus(d)
     if (selection.type === 'instance-setting') return renderInstanceSettingsFocus(d)
     return html`<p class="loading">Select an element.</p>`
@@ -2224,12 +2306,12 @@ export function DefinitionViewerPage() {
           </div>
           <div class=${'defn-chips defn-droplist' + (dropTarget === `stage-drop:${si}` ? ' defn-drop-target' : '')} ...${isEditable ? stageDropZone(si) : {}}>
             ${s.modules.map((mid, mi) => {
-              const mod = d.modules.find((m) => m.id === mid)
+              const mod = everyModule(d).find((m) => m.id === mid)
               const readOnly = (s.readOnlyModules ?? []).includes(mid)
               return html`
                 <span key=${mid} class=${'defn-chip' + (readOnly ? ' read-only' : '')} ...${isEditable ? reorderZone(`stage-modules:${si}`, mi) : {}}>
                   ${isEditable ? html`<span ...${dragHandleProps({ listPath: `stage-modules:${si}`, index: mi }, 'reorder')}>⠿</span>` : null}
-                  <span role="button" tabindex="0" onClick=${() => select('module', mid)}>${mod?.title ?? mid}</span>
+                  <span role="button" tabindex="0" onClick=${() => select('module', mid)}>${mod?.title ?? mid}</span>${mod?.standard ? providedBadge() : null}
                   ${isEditable ? html`
                     <label class="defn-read-only-toggle" title="Mounted so this stage's documents and gate can use it, but edited at an earlier stage">
                       <input type="checkbox" aria-label=${`Read-only at this stage: ${mod?.title ?? mid}`} checked=${readOnly} onChange=${(e) => { const on = e.currentTarget.checked; updateDraft((dd) => setStageModuleReadOnly(dd.stages[si], mid, on)) }} />
@@ -2247,9 +2329,11 @@ export function DefinitionViewerPage() {
           </div>
           ${isEditable ? html`
             <div class="defn-editor-inline">
-              <select class="wizard-input" onChange=${(e) => { const val = e.currentTarget.value; if (!val) return; updateDraft((dd) => { if (!dd.stages[si].modules.includes(val)) dd.stages[si].modules.push(val) }); e.currentTarget.value = '' }}>
+              <select class="wizard-input" onChange=${(e) => { const val = e.currentTarget.value; if (!val) return; updateDraft((dd) => { if (val.startsWith('standard:')) mountStandardModule(dd, val.slice('standard:'.length), s.id); else if (!dd.stages[si].modules.includes(val)) dd.stages[si].modules.push(val) }); e.currentTarget.value = '' }}>
                 <option value="">+ Add module…</option>
                 ${d.modules.filter((m) => !s.modules.includes(m.id)).map((m) => html`<option value=${m.id}>${m.title}</option>`)}
+                ${(d.standardModules ?? []).filter((m) => !s.modules.includes(m.id)).map((m) => html`<option value=${m.id}>${standardTitle(m.id)} (Gantry-provided)</option>`)}
+                ${unmountedStandardModules(d).map((m) => html`<option value=${`standard:${m.id}`}>${m.title} (Gantry-provided, not mounted yet)</option>`)}
               </select>
               ${libraryPicker('module', (id) => startLibraryCopy('module', { id }, { stageIndexAddModule: si }))}
             </div>
@@ -2314,7 +2398,7 @@ export function DefinitionViewerPage() {
       groups.get(moduleId).push({ fieldId, optional, raw: r })
     }
     const allFieldOptions = []
-    for (const m of d.modules) {
+    for (const m of everyModule(d)) {
       for (const f of m.fields) {
         const ref = `${m.id}.${f.id}`
         if (!a.requires.includes(ref) && !a.requires.includes(`${ref}?`)) allFieldOptions.push({ value: ref, label: `${m.title} · ${f.title}` })
@@ -2431,7 +2515,7 @@ export function DefinitionViewerPage() {
           </div>
           <div class=${'defn-droplist' + (dropTarget === `artefact-drop:${ai}` ? ' defn-drop-target' : '')} ...${isEditable ? artefactDropZone(ai) : {}}>
             ${[...groups.entries()].map(([moduleId, entries]) => {
-              const mod = d.modules.find((m) => m.id === moduleId)
+              const mod = everyModule(d).find((m) => m.id === moduleId)
               return html`
                 <div key=${moduleId} class="defn-requires-group">
                   <span class="kicker" role="button" tabindex="0" onClick=${() => select('module', moduleId)}>${mod?.title ?? moduleId}${!mod ? html` <span class="stamp small error">missing</span>` : null}</span>
@@ -2515,6 +2599,69 @@ export function DefinitionViewerPage() {
           ` : null}
         </div>
         ${isEditable ? html`<button class="btn small ghost" onClick=${() => updateDraft((dd) => { dd.modules.splice(mi, 1) })}>Remove module ✕</button>` : null}
+      </div>
+    `
+  }
+
+  // #283 (ADR-0065): a standard module is Gantry's — its Fields are shown, never edited. A draft's
+  // author pins the version it mounts and may add guidance (after Gantry's own, on each Field) and
+  // Interview instructions (ADR-0062); anything else about the Module is not theirs to change.
+  function renderStandardModuleFocus(d) {
+    const mi = (d.standardModules ?? []).findIndex((m) => m.id === selection.id)
+    const mount = d.standardModules[mi]
+    const catalogueEntry = listStandardModules().find((m) => m.id === mount.id)
+    const shape = catalogueEntry?.versions.find((v) => v.version === mount.version)
+    const usedStages = d.stages.filter((st) => st.modules.includes(mount.id))
+    const usedArtefacts = d.artefacts.filter((a) => a.requires.some((r) => (r.endsWith('?') ? r.slice(0, -1) : r).split('.')[0] === mount.id))
+    const problems = validationProblems.filter((p) => problemTarget(p)?.id === mount.id && problemTarget(p)?.type === 'module')
+    return html`
+      <div class="defn-focus" data-testid="standard-module-focus">
+        <span class="kicker">Standard module</span>
+        <h2>${standardTitle(mount.id)} <span class="defn-id">${mount.id}</span> ${providedBadge()}</h2>
+        <p class="guidance">Gantry provides and versions this module. Its Fields are fixed; ${isEditable ? 'you choose the version and can add guidance and interview instructions.' : 'this Definition mounts the version below.'}</p>
+        ${problems.map((p) => html`<p class="inline-error">${p.message}</p>`)}
+        ${shape?.purpose ? html`<p class="guidance">${shape.purpose}</p>` : null}
+        <div class="defn-focus-row">
+          <label class="field-label" for="standard-module-version">Version</label>
+          ${isEditable
+            ? html`<select id="standard-module-version" class="wizard-input" onChange=${(e) => { const version = Number(e.currentTarget.value); updateDraft((dd) => { dd.standardModules[mi].version = version }) }}>
+                ${!shape ? html`<option value="" selected>${mount.version === undefined ? 'Choose a version' : `Version ${mount.version} (not provided)`}</option>` : null}
+                ${(catalogueEntry?.versions ?? []).map((v) => html`<option value=${String(v.version)} selected=${v.version === mount.version}>Version ${v.version}</option>`)}
+              </select>`
+            : html`<span data-testid="standard-module-version">Version ${mount.version}</span>`}
+        </div>
+        <div class="defn-focus-section">
+          <span class="kicker">Used in</span>
+          <div class="defn-chips">
+            ${usedStages.map((st) => html`<span key=${'s' + st.id} class="defn-chip" role="button" tabindex="0" onClick=${() => select('stage', st.id)}>${st.title}</span>`)}
+            ${usedArtefacts.map((a) => html`<span key=${'a' + a.id} class="defn-chip optional" role="button" tabindex="0" onClick=${() => select('artefact', a.id)}>${a.title}</span>`)}
+            ${usedStages.length === 0 && usedArtefacts.length === 0 ? html`<span class="muted">not mounted on any stage yet</span>` : null}
+          </div>
+        </div>
+        <div class="defn-focus-section">
+          <span class="kicker">Fields · ${shape?.fields.length ?? 0} (set by Gantry)</span>
+          <div class="defn-field-rows">
+            ${(shape?.fields ?? []).map((f) => html`
+              <div key=${f.id} class="defn-field-row" data-testid="standard-module-field">
+                <strong>${f.title}</strong> <span class="defn-id">${f.id}</span> <span class="muted">${f.type}</span>
+                ${f.guidance ? html`<p class="guidance">${f.guidance}</p>` : null}
+              </div>
+            `)}
+          </div>
+        </div>
+        <div class="defn-focus-section">
+          <label class="kicker" for="standard-module-guidance">Added guidance</label>
+          ${isEditable
+            ? html`<textarea id="standard-module-guidance" class="wizard-input" rows="3" value=${mount.guidance ?? ''} onInput=${(e) => { const text = e.currentTarget.value; updateDraft((dd) => { if (text === '') delete dd.standardModules[mi].guidance; else dd.standardModules[mi].guidance = text }) }}></textarea>`
+            : mount.guidance ? html`<p class="guidance" data-testid="standard-module-added-guidance">${mount.guidance}</p>` : html`<span class="muted">none</span>`}
+        </div>
+        <div class="defn-focus-section">
+          <label class="kicker" for="standard-module-interview">Interview instructions</label>
+          ${isEditable
+            ? html`<textarea id="standard-module-interview" class="wizard-input" rows="3" value=${mount.interview ?? ''} onInput=${(e) => { const text = e.currentTarget.value; updateDraft((dd) => { if (text === '') delete dd.standardModules[mi].interview; else dd.standardModules[mi].interview = text }) }}></textarea>`
+            : mount.interview ? html`<p class="guidance" data-testid="standard-module-interview">${mount.interview}</p>` : html`<span class="muted">none</span>`}
+        </div>
+        ${isEditable ? html`<button class="btn small ghost" onClick=${() => { updateDraft((dd) => { unmountStandardModule(dd, mount.id) }); setSelection({ type: null, id: null }) }}>Unmount module ✕</button>` : null}
       </div>
     `
   }

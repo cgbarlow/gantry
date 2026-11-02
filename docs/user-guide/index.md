@@ -174,6 +174,24 @@ Most fields are free text (Markdown) or a bulleted list — you type the answer.
 
 Which fields are which type is set by the Definition, not by you — an author can't turn a select into free text or the reverse from the editor. If a field's permitted answers look wrong or too narrow, that's a Definition change, made by whoever maintains it.
 
+### Standard modules
+
+Some Modules are not written by the Definition's author: **Gantry provides them**. A **standard module** has an id, a set of Fields and a version that Gantry owns, so it looks and behaves the same in every Definition that uses it. There are two so far:
+
+- **Glossary** has one Field, *Terms and definitions*, a table of **Preferred term | Definition | Avoid**.
+- **Open questions** has one Field, *Open questions*, a table of **Question | Who resolves | By when | Status**.
+
+You use one like any other Module: it appears as a card on the Stages that mount it, you fill it in and save it, you mark it `agreed`, and any Artefact that needs it draws on it. What differs is on the Definitions page. A standard module is listed under **Standard modules** in the Outline (and carries a **Gantry-provided** label wherever it appears), and its Fields are shown but can't be edited.
+
+A Definition author, on a draft:
+
+- **Mounts** one with **+ Mount…** under Standard modules, or straight from a Stage's **+ Add module…** list, where each unmounted one is offered as "(Gantry-provided, not mounted yet)". A new mount takes the newest version Gantry has. A Stage that lists it shows it; an Artefact can require it like any Module.
+- **Pins the version.** A Definition names the version it mounts, and Gantry will never change that version. When a later Gantry release adds a version 2, a published Definition on version 1 still renders exactly as it did, and its author moves to version 2 only by choosing it on a new draft.
+- **Adds guidance and Interview instructions.** *Added guidance* is shown after Gantry's own guidance on every Field of the module; *Interview instructions* steer the AI interview and only ever add to Gantry's rules.
+- **Cannot change the shape.** Save and Publish refuse a mount that sets anything besides its version, guidance and interview instructions, that names a version Gantry doesn't provide, or that sits beside a Module of the Definition's own with the same id. The problem is shown against the standard module and counted in the toolbar. In a Local Workspace's Definition editor the same mount is under **Standard modules**, and a Stage lists it by id in its comma-separated Modules.
+
+In `definition.yaml` a mount is a top-level `standard-modules:` list, written as `- id: glossary` with a `version: 1`, and optionally `guidance:` and `interview:`; a Stage then lists the id in its `modules:` like any other. There is no `modules/glossary.yaml` file, because the Module's shape is Gantry's.
+
 ### Target size and word targets
 
 Some Definitions tell you roughly how much to write in each field. If yours does, every instance has a **Size**: **Small**, **Medium** or **Large**. Size is one of the instance's **Instance settings** (see **Instance settings** above). Medium is about half of Large, and Small about a fifth. The default is the Definition's, and Medium for a Definition that doesn't set one; an instance that never chooses a size works to it. Pick the size under **Instance settings** when you create the instance in the "+ New Workspace" wizard, and change it later under the same heading in **Instance Settings**. Choose it for the solution's risk and audience: a document reviewers need to read closely in one sitting wants a smaller size than a full reference.

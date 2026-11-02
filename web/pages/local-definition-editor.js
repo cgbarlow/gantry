@@ -25,6 +25,7 @@ import { pruneStageReadOnlyModules, withModuleReadOnly } from '../lib/readOnlyMo
 import { TARGET_SIZES, targetSizeLabel, withFieldTargetWords } from '../lib/targetSize.js'
 import { definitionInstanceSettings } from '../lib/instanceSettings.js'
 import { InstanceSettingsSummary, InstanceSettingsEditor } from '../lib/instanceSettingsView.js'
+import { listStandardModules } from '../lib/standardModules.js'
 import {
   getWorkspaceHandle,
   ensurePermission,
@@ -730,6 +731,86 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
           `
         )}
         ${readOnly ? null : html`<button type="button" class="btn small ghost" onClick=${addStage}>+ Add stage</button>`}
+      </section>
+
+      <section class="local-def-standard-modules" data-testid="local-standard-modules">
+        <h2>Standard modules</h2>
+        <p class="guidance">
+          Modules Gantry provides, with a fixed shape and a version. Mount one here, then list its id in a Stage's
+          modules. You can add guidance and interview instructions; you cannot change its Fields.
+        </p>
+        ${(structure.standardModules ?? []).map((mount, i) => {
+          const entry = listStandardModules().find((m) => m.id === mount.id)
+          return html`
+            <div key=${mount.id} class="local-def-standard-module">
+              <strong>${entry?.title ?? mount.id}</strong> <span class="stamp small review">Gantry-provided</span>
+              <label class="field-label">Version</label>
+              <select
+                class="wizard-input"
+                disabled=${readOnly}
+                aria-label=${`Version of ${mount.id}`}
+                onChange=${(e) => {
+                  const standardModules = structure.standardModules.slice()
+                  standardModules[i] = { ...mount, version: Number(e.currentTarget.value) }
+                  update({ standardModules })
+                }}
+              >
+                ${(entry?.versions ?? []).map((v) => html`<option value=${String(v.version)} selected=${v.version === mount.version}>Version ${v.version}</option>`)}
+              </select>
+              <label class="field-label">Added guidance</label>
+              <textarea
+                class="wizard-input"
+                rows="2"
+                disabled=${readOnly}
+                value=${mount.guidance ?? ''}
+                onInput=${(e) => {
+                  const { guidance, ...rest } = mount
+                  const standardModules = structure.standardModules.slice()
+                  standardModules[i] = e.currentTarget.value === '' ? rest : { ...rest, guidance: e.currentTarget.value }
+                  update({ standardModules })
+                }}
+              ></textarea>
+              <label class="field-label">Interview instructions</label>
+              <textarea
+                class="wizard-input"
+                rows="2"
+                disabled=${readOnly}
+                value=${mount.interview ?? ''}
+                onInput=${(e) => {
+                  const { interview, ...rest } = mount
+                  const standardModules = structure.standardModules.slice()
+                  standardModules[i] = e.currentTarget.value === '' ? rest : { ...rest, interview: e.currentTarget.value }
+                  update({ standardModules })
+                }}
+              ></textarea>
+              ${readOnly
+                ? null
+                : html`<button
+                    type="button"
+                    class="btn small ghost"
+                    onClick=${() => update({ standardModules: structure.standardModules.filter((m) => m.id !== mount.id), stages: structure.stages.map((st) => ({ ...st, modules: st.modules.filter((id) => id !== mount.id) })) })}
+                  >Unmount ✕</button>`}
+            </div>
+          `
+        })}
+        ${readOnly
+          ? null
+          : html`<select
+              class="wizard-input"
+              aria-label="Mount a standard module"
+              onChange=${(e) => {
+                const id = e.currentTarget.value
+                if (!id) return
+                const entry = listStandardModules().find((m) => m.id === id)
+                update({ standardModules: [...(structure.standardModules ?? []), { id, version: entry.versions[entry.versions.length - 1].version }] })
+                e.currentTarget.value = ''
+              }}
+            >
+              <option value="">+ Mount a standard module…</option>
+              ${listStandardModules()
+                .filter((m) => !(structure.standardModules ?? []).some((x) => x.id === m.id) && !structure.modules.some((x) => x.id === m.id))
+                .map((m) => html`<option value=${m.id}>${m.title}</option>`)}
+            </select>`}
       </section>
 
       <section>

@@ -56,6 +56,7 @@ import { InstanceSettingSelect } from '../lib/instanceSettingsView.js'
 import { instanceLogoPath, instanceLogoRecordPath } from '../lib/instanceLogo.js'
 import { logoImageInfo } from '../lib/definitionLogo.js'
 import { InstanceLogoPicker } from '../lib/instanceLogoControl.js'
+import { modulesWithStandard } from '../lib/standardModules.js'
 
 // The work item type used when nothing more specific is looked up or
 // chosen — mirrors lib/workItemLink.js's own `DEFAULT_WORK_ITEM_TYPE`
@@ -864,7 +865,7 @@ async function createLocalInstance() {
     const structure = await resolveDefinitionStructure(handle, defId, version)
     const firstStage = structure.stages?.[0]
     if (!firstStage) throw new Error(`Definition "${defId}" has no stages`)
-    const modulesById = new Map((structure.modules ?? []).map((m) => [m.id, m]))
+    const modulesById = new Map(modulesWithStandard(structure.modules, structure.standardModules).map((m) => [m.id, m]))
 
     const existing = await listDir(handle, 'gantry-workspace').catch(() => [])
     if (existing.some((entry) => entry.name === slug && entry.kind === 'directory')) {

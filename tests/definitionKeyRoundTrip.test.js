@@ -53,6 +53,9 @@ const PROJECT = 'fake-project'
 const ADO_REPOSITORY = 'fake-ado-repo'
 const ADO_VALID_PAT = 'valid-ado-test-pat'
 
+// #283 (ADR-0065): the standard modules the fixture mounts — Gantry's, so they have no module file.
+const STANDARD_MODULES_MOUNTED = [{ id: 'glossary', version: 1, guidance: 'Use our house spellings.', interview: 'Ask for the legacy product names first.' }]
+
 const INSTANCE_SETTINGS = { size: { default: 'small' }, classification: { choices: ['PUBLIC', 'IN-CONFIDENCE'], default: 'PUBLIC' } }
 const STAGE_PROVENANCE = { definition: 'elsewhere', version: 2, element: 'stage:second' }
 const ARTEFACT_PROVENANCE = { definition: 'elsewhere', version: 2, element: 'artefact:letter' }
@@ -71,6 +74,11 @@ instance-settings:
       - PUBLIC
       - IN-CONFIDENCE
     default: PUBLIC
+standard-modules:
+  - id: glossary
+    version: 1
+    guidance: Use our house spellings.
+    interview: Ask for the legacy product names first.
 stages:
   - id: first
     title: First
@@ -78,6 +86,7 @@ stages:
     gate: first-gate
     modules:
       - details
+      - glossary
   - id: second
     title: Second
     purpose: The second stage
@@ -200,6 +209,10 @@ function assertEveryKey(projection, where) {
   const first = byId(projection.stages, 'first')
   const second = byId(projection.stages, 'second')
   assert.deepEqual(second.modules, ['details', 'notes'], where)
+  // #283: the mount survives every operation as the Definition's own key; the module itself is Gantry's, never a file or a `modules` entry.
+  assert.deepEqual(first.modules, ['details', 'glossary'], `${where}: a stage mounts a standard module by id`)
+  assert.deepEqual(projection.standardModules, STANDARD_MODULES_MOUNTED, `${where}: standard-modules`)
+  assert.equal(projection.modules.some((m) => m.id === 'glossary'), false, `${where}: a standard module is not one of the Definition's own modules`)
   assert.deepEqual(second.readOnlyModules, ['details'], `${where}: stage read-only-modules`)
   assert.deepEqual(second.copiedFrom, STAGE_PROVENANCE, `${where}: stage copied-from`)
   assert.equal('readOnlyModules' in first, false, `${where}: a stage without read-only-modules has no such key`)
@@ -247,6 +260,8 @@ function assertTargetWordsOnDisk(moduleYamlText, where) {
 
 function assertKebabKeysOnDisk(definitionYamlText, where) {
   assert.match(definitionYamlText, /^instance-settings:\n  size:\n    default: small\n  classification:\n    choices:\n      - PUBLIC\n      - IN-CONFIDENCE\n    default: PUBLIC$/m, where)
+  assert.match(definitionYamlText, /^standard-modules:\n  - id: glossary\n    version: 1\n    guidance: Use our house spellings\.\n    interview: Ask for the legacy product names first\.$/m, where)
+  assert.doesNotMatch(definitionYamlText, /standardModules/, where)
   assert.match(definitionYamlText, /read-only-modules:/, where)
   assert.match(definitionYamlText, /document-control: false/, where)
   assert.match(definitionYamlText, /satisfies-gate: false/, where)

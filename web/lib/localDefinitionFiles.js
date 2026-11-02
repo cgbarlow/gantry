@@ -112,6 +112,8 @@ export function renderDefinitionYaml(structure) {
   // #220 (ADR-0058): the Definition's Instance settings, written back whenever declared, as it is.
   // #221: an empty map (the editor's "declares nothing") is left out, as lib/definition.js does.
   if (structure.instanceSettings !== undefined && !isEmptyMap(structure.instanceSettings)) obj['instance-settings'] = structure.instanceSettings
+  // #283 (ADR-0065): the standard modules mounted, written back as they are; none mounted leaves the key out.
+  if (Array.isArray(structure.standardModules) && structure.standardModules.length > 0) obj['standard-modules'] = structure.standardModules
   obj.stages = (structure.stages ?? []).map((s) => {
     const entry = { id: s.id, title: s.title, purpose: s.purpose, gate: s.gate, modules: s.modules ?? [] }
     if (s.readOnlyModules !== undefined) entry['read-only-modules'] = s.readOnlyModules
@@ -297,6 +299,8 @@ export async function readLocalDefinitionStructure(handle, definitionId, version
     status: raw.status,
     // #220 (ADR-0058): projected only when declared, as lib/definition.js's definitionVersionProjection does.
     ...(raw['instance-settings'] !== undefined ? { instanceSettings: raw['instance-settings'] } : {}),
+    // #283 (ADR-0065): projected only when declared, as lib/definition.js's definitionVersionProjection does.
+    ...(raw['standard-modules'] !== undefined ? { standardModules: raw['standard-modules'] } : {}),
     stages: (raw.stages ?? []).map((s) =>
       withOptional(
         { id: s.id, title: s.title, purpose: s.purpose, gate: s.gate, modules: s.modules ?? [] },

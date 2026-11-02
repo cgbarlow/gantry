@@ -93,6 +93,7 @@ import {
   buildLocalModuleEntry,
 } from './lib/localInstanceFiles.js'
 import { getLocalStatus, checkLocalGate } from './lib/localStatus.js'
+import { modulesWithStandard } from './lib/standardModules.js'
 import { changedEntryFor, changedEntryLabel, alsoReapprovesLine, dashboardBadgeText, dashboardBadgeTitle, wordingText, canRestoreChange, changeLabel, restorePanelHeading } from './lib/changedSinceApproval.js'
 import {
   resolveDefinitionStructure,
@@ -188,7 +189,9 @@ function assetFileUrl(assetId, slug, stageId) {
 // `GET /api/instance` returns as `modules`. Used to open the stage and, again, to compare
 // the stage's version just before a Save (ADR-0068, #270).
 async function readLocalStageModules(handle, slug, stage, structure) {
-  const modulesById = new Map(structure.modules.map((m) => [m.id, m]))
+  // #283 (ADR-0065): a mounted standard module is looked up like any other Module.
+  const allModules = modulesWithStandard(structure.modules, structure.standardModules)
+  const modulesById = new Map(allModules.map((m) => [m.id, m]))
   const modules = []
   for (const moduleId of stage.modules) {
     const moduleSpec = modulesById.get(moduleId)
@@ -298,7 +301,7 @@ async function loadLocalInstance(workspaceId, slug, requestedStageId) {
     // no second `/api/definitions/...` fetch, and no `/api/local/status` or
     // `/api/local/check` round trip at all.
     localDefinitionStructure: structure,
-  }, structure.modules, instanceTargetSize(structure, record))
+  }, modulesWithStandard(structure.modules, structure.standardModules), instanceTargetSize(structure, record))
   return withInstanceSettings(response, structure, record)
 }
 

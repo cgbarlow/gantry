@@ -39,6 +39,7 @@ import { diagramCaptionsProblem } from './diagramCaptions.js'
 import { artefactFrontMatterProblems } from './artefactFrontMatter.js'
 import { targetWordsProblem } from './targetSize.js'
 import { instanceSettingsDeclarationProblems } from './instanceSettings.js'
+import { modulesWithStandard, standardModuleProblems } from './standardModules.js'
 
 // ---------------------------------------------------------------------------
 // definition/module lookup — the projection's `modules` is a plain array;
@@ -47,7 +48,8 @@ import { instanceSettingsDeclarationProblems } from './instanceSettings.js'
 // ---------------------------------------------------------------------------
 
 function moduleMap(structure) {
-  return new Map((structure.modules ?? []).map((m) => [m.id, m]))
+  // #283 (ADR-0065): a mounted standard module is looked up like any other Module.
+  return new Map(modulesWithStandard(structure.modules, structure.standardModules).map((m) => [m.id, m]))
 }
 
 /** Verbatim port of `lib/definition.js`'s `splitArtefactRequirement`. */
@@ -503,6 +505,8 @@ export function findLocalDefinitionProblems(structure) {
   const problems = []
   const modulesById = moduleMap(structure)
   const availableModuleIds = new Set(modulesById.keys())
+  // #283: shared with lib/definition.js rather than ported — see web/lib/standardModules.js.
+  problems.push(...standardModuleProblems(structure.standardModules, (structure.modules ?? []).map((m) => m.id)))
 
   const stages = structure.stages ?? []
   const artefacts = structure.artefacts ?? []
