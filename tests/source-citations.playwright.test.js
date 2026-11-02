@@ -157,7 +157,7 @@ test('server workspace: Use as image refuses a type an Asset cannot be, and an u
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
       const refused = await fetch(`${base}/api/instance/sources/notes/as-asset?slug=examples`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       assert.equal(refused.status, 400)
-      assert.match((await refused.json()).error, /Unsupported image file type/)
+      assert.match((await refused.json()).error, /Only a PNG or JPEG can be used as an image/)
       const missing = await fetch(`${base}/api/instance/sources/nope/as-asset?slug=examples`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       assert.equal(missing.status, 404)
       const wrongMethod = await fetch(`${base}/api/instance/sources/notes/as-asset?slug=examples`)
