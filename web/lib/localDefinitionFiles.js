@@ -102,7 +102,7 @@ export function blankLocalDefinitionStructure(id, title) {
 // loadDefinition/findDefinitionProblems both start from.
 // ---------------------------------------------------------------------------
 
-/** Port of `lib/definition.js`'s `buildDefinitionYamlObject`, minus the disk-only `onDiskRaw` fallback (a local-workspace caller always has the full structure already in memory — see this file's header comment) and minus its `keyOf` kebab-case input form (#148): this takes only the camelCase structure, so a raw parsed `definition.yaml` loses `read-only-modules`, `copied-from`, `document-control`, `satisfies-gate`, `cover-page`, `cover-classification`, `cover-purpose`, `table-of-contents`, `diagram-captions` and `instance-settings` here. */
+/** Port of `lib/definition.js`'s `buildDefinitionYamlObject`, minus the disk-only `onDiskRaw` fallback (a local-workspace caller always has the full structure already in memory — see this file's header comment) and minus its `keyOf` kebab-case input form (#148): this takes only the camelCase structure, so a raw parsed `definition.yaml` loses `read-only-modules`, `copied-from`, `document-control`, `satisfies-gate`, `cover-page`, `cover-classification`, `cover-purpose`, `table-of-contents`, `diagram-captions`, `source-appendix` and `instance-settings` here. */
 export function renderDefinitionYaml(structure) {
   const obj = {}
   obj.id = structure.id
@@ -131,6 +131,7 @@ export function renderDefinitionYaml(structure) {
     if (a.documentControl !== undefined) entry['document-control'] = a.documentControl
     if (a.satisfiesGate !== undefined) entry['satisfies-gate'] = a.satisfiesGate
     if (a.diagramCaptions !== undefined) entry['diagram-captions'] = a.diagramCaptions
+    if (a.sourceAppendix !== undefined) entry['source-appendix'] = a.sourceAppendix
     if (a.coverPage !== undefined) entry['cover-page'] = a.coverPage
     if (a.coverClassification !== undefined) entry['cover-classification'] = a.coverClassification
     if (a.coverPurpose !== undefined) entry['cover-purpose'] = a.coverPurpose
@@ -328,6 +329,8 @@ export async function readLocalDefinitionStructure(handle, definitionId, version
           documentControl: a['document-control'] === true ? undefined : a['document-control'],
           satisfiesGate: a['satisfies-gate'] === false ? false : undefined,
           diagramCaptions: a['diagram-captions'] === false ? undefined : a['diagram-captions'],
+          // #281: unless false (its default), as there.
+          sourceAppendix: a['source-appendix'] === false ? undefined : a['source-appendix'],
           coverPage: a['cover-page'] === false ? undefined : a['cover-page'],
           coverClassification: a['cover-classification'],
           // #205: no default, so projected whenever set, as there.

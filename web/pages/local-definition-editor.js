@@ -593,6 +593,16 @@ function ArtefactEditor({ handle, definitionId, version, artefact, modules, gate
         }} />
         Number and caption diagrams ("Diagram N. …") in the Word document
       </label>
+      <label class="field-label defn-source-appendix">
+        <input type="checkbox" checked=${artefact.sourceAppendix === true} disabled=${readOnly} onChange=${(e) => {
+          // #281: absent means no Sources list.
+          const next = { ...artefact }
+          if (e.currentTarget.checked) next.sourceAppendix = true
+          else delete next.sourceAppendix
+          onChange(next)
+        }} />
+        End the document with a list of the Source documents it cites
+      </label>
       <button type="button" class="btn small ghost" onClick=${() => setExpanded(!expanded)}>${expanded ? 'Hide template' : 'Edit template'}</button>
       ${expanded ? html`<${ArtefactTemplateEditor} handle=${handle} definitionId=${definitionId} version=${version} artefact=${artefact} readOnly=${readOnly} onReferenceDocxSaved=${onReferenceDocxSaved} />` : null}
     </div>

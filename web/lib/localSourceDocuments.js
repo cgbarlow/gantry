@@ -1,6 +1,6 @@
 // #279: a Local Workspace's Source documents, kept in the Instance's own `sources/` folder on the architect's machine and read and written through the folder handle, with no server round trip (ADR-0029). The folder, the manifest and the lifecycle are web/lib/sourceDocuments.js's, shared with a server workspace; this file only supplies the folder-handle half of the file interface that module is written against.
-import { readBinaryFile, readTextFile, removeFile, writeBinaryFile, writeTextFile } from './localWorkspace.js'
-import { createSourceStore } from './sourceDocuments.js'
+import { listDir, readBinaryFile, readTextFile, removeFile, writeBinaryFile, writeTextFile } from './localWorkspace.js'
+import { SourceDocumentError, USE_AS_IMAGE_REFUSAL, assetFilenameForSource, canUseSourceAsImage, createSourceStore } from './sourceDocuments.js'
 
 const isMissing = (err) => err?.name === 'NotFoundError' || err?.name === 'TypeMismatchError'
 
@@ -46,5 +46,21 @@ export function createLocalSourceStore(handle, slug, options = {}) {
       await removeFile(handle, at(path))
     },
   }
-  return createSourceStore(io, options)
+  const store = createSourceStore(io, options)
+  return {
+    ...store,
+    /**
+     * **Use as image** (#281): copies the document into the Instance's `assets/` folder as a new file of its own, the way a Local Workspace keeps every image, to be referenced as `![alt](assets/<name>)`. The Asset keeps no link back to the document: removing either leaves the other alone. Returns `{ id, filename, name, reference }`.
+     */
+    async useAsImage(id) {
+      const { entry, bytes } = await store.readOriginal(id)
+      if (!canUseSourceAsImage(entry.filename)) throw new SourceDocumentError(USE_AS_IMAGE_REFUSAL, { code: 'not-an-image' })
+      if (!bytes) throw new SourceDocumentError(`The file for "${entry.title}" is missing from this Instance's sources folder.`, { code: 'file-missing', status: 404 })
+      const taken = (await listDir(handle, at('assets')).catch(() => [])).map((e) => e.name)
+      const filename = assetFilenameForSource(entry.filename, taken)
+      await writeBinaryFile(handle, at(`assets/${filename}`), bytes)
+      const alt = entry.title.replace(/[[\]]/g, '')
+      return { id: filename, filename, name: entry.title, reference: `![${alt}](assets/${filename})` }
+    },
+  }
 }

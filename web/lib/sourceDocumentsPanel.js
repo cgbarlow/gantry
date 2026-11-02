@@ -7,11 +7,14 @@ import {
   MAX_SOURCE_BYTES,
   SOURCE_FILE_ACCEPT,
   formatBytes,
+  canUseSourceAsImage,
   isRemovedSource,
+  sourceFileExtension,
   sourceFileTypeProblem,
   sourceSizeProblem,
 } from './sourceDocuments.js'
 import { extractSourceText } from './sourceExtract.js'
+import { sourceCitationFor } from './sourceCitations.js'
 
 const NO_TEXT_REASON = {
   image: 'A picture has no text to read. The AI looks at the original.',
@@ -36,6 +39,43 @@ function download(bytes, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
+// What a browser can show in a tab without running anything from the document: a PDF, a picture or plain text. Everything else (a Word, PowerPoint or Excel file, a Markdown file's own type) is saved instead. Never a type that could run script, such as HTML.
+const VIEWABLE_TYPES = {
+  '.pdf': 'application/pdf',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.txt': 'text/plain',
+  '.md': 'text/plain',
+  '.markdown': 'text/plain',
+  '.csv': 'text/plain',
+  '.tsv': 'text/plain',
+}
+
+/**
+ * #281: opens a Source document from a citation. A PDF, picture or text file opens in a new tab; a Word, PowerPoint or spreadsheet file, which a browser can't show, is saved to the person's machine. `store` is the panel's; `entry` is `{ id, filename, title }`. Rejects with the reason when the file can't be read.
+ */
+export async function openSourceDocument(store, entry) {
+  const { bytes } = await store.readOriginal(entry.id)
+  if (!bytes) throw new Error(`The file for "${entry.title}" is missing from this Instance's sources folder.`)
+  const type = VIEWABLE_TYPES[sourceFileExtension(entry.filename)]
+  if (!type) {
+    download(bytes, entry.filename)
+    return
+  }
+  const url = URL.createObjectURL(new Blob([bytes], { type }))
+  const link = document.createElement('a')
+  link.href = url
+  link.target = '_blank'
+  link.rel = 'noopener'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
+
 function noTextNote(extraction) {
   if (extraction.problem) return extraction.problem
   return NO_TEXT_REASON[extraction.reason] ?? 'No text was read from it.'
@@ -44,7 +84,7 @@ function noTextNote(extraction) {
 /**
  * `store` is described above. `actor` is the name stamped on uploads and removals ('' when unknown). `readOnly` hides every control that changes the list (an archived Instance). `commitNote` is shown under the introduction when each change is committed to a repository as it is made (an Azure DevOps or GitHub workspace, #280). `extract(filename, bytes)` is the text reader; tests and the app use the default.
  */
-export function SourceDocumentsPanel({ store, actor = '', readOnly = false, commitNote = '', extract = extractSourceText }) {
+export function SourceDocumentsPanel({ store, actor = '', readOnly = false, commitNote = '', extract = extractSourceText, onList = null }) {
   const [list, setList] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [message, setMessage] = useState(null)
@@ -54,12 +94,14 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
 
   const reload = useCallback(async () => {
     try {
-      setList(await store.list())
+      const loaded = await store.list()
+      setList(loaded)
       setLoadError('')
+      onList?.(loaded)
     } catch (err) {
       setLoadError(err.message)
     }
-  }, [store])
+  }, [store, onList])
 
   useEffect(() => {
     setList(null)
@@ -146,6 +188,23 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
       download(bytes, entry.filename)
     })
 
+  const copyCitation = (entry) =>
+    run(async () => {
+      const citation = sourceCitationFor(entry)
+      try {
+        await navigator.clipboard.writeText(citation)
+        setMessage({ kind: 'ok', text: `Copied ${citation}. Paste it into a field where the content draws on "${entry.title}".` })
+      } catch {
+        setMessage({ kind: 'info', text: `Copy this into a field where the content draws on "${entry.title}": ${citation}` })
+      }
+    })
+
+  const useAsImage = (entry) =>
+    run(async () => {
+      const image = await store.useAsImage(entry.id, { uploadedBy: actor })
+      setMessage({ kind: 'ok', text: `Copied "${entry.title}" to the images as a new image. Insert it from the Image dialog, or paste ${image.reference}. Removing either one leaves the other alone.` })
+    })
+
   const removeConfirmed = (entry) =>
     run(async () => {
       await store.remove(entry.id, { removedBy: actor })
@@ -227,6 +286,10 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
                           </div>`
                         : html`<div class="source-documents-actions">
                             <button type="button" class="btn small ghost" disabled=${busy} onClick=${() => downloadOriginal(entry)}>Download</button>
+                            <button type="button" class="btn small ghost" disabled=${busy} onClick=${() => copyCitation(entry)} title="Copy a citation of this document to paste into a field">Copy citation</button>
+                            ${readOnly || !canUseSourceAsImage(entry.filename) || !store.useAsImage
+                              ? null
+                              : html`<button type="button" class="btn small ghost" disabled=${busy} onClick=${() => useAsImage(entry)} title="Copy this picture into the Instance's images">Use as image</button>`}
                             ${readOnly
                               ? null
                               : html`<button type="button" class="btn small ghost" disabled=${busy} onClick=${() => setRenaming({ id: entry.id, title: entry.title })}>Rename</button>

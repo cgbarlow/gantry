@@ -36,6 +36,7 @@ import { parseLocalModuleFile, parseInstanceYaml } from './localInstanceFiles.js
 import { isMultiValuedField } from './fieldShape.js'
 import { readOnlyModuleProblems } from './readOnlyModules.js'
 import { diagramCaptionsProblem } from './diagramCaptions.js'
+import { sourceAppendixProblem } from './sourceCitations.js'
 import { artefactFrontMatterProblems } from './artefactFrontMatter.js'
 import { targetWordsProblem } from './targetSize.js'
 import { instanceSettingsDeclarationProblems } from './instanceSettings.js'
@@ -598,6 +599,9 @@ export function findLocalDefinitionProblems(structure) {
     // #195: shared with lib/definition.js rather than ported — see web/lib/diagramCaptions.js.
     const captionsProblem = diagramCaptionsProblem(artefact.id, artefact.diagramCaptions)
     if (captionsProblem) problems.push(captionsProblem)
+    // #281: shared with lib/definition.js rather than ported — see web/lib/sourceCitations.js.
+    const appendixProblem = sourceAppendixProblem(artefact.id, artefact.sourceAppendix)
+    if (appendixProblem) problems.push(appendixProblem)
     // #194: shared with lib/definition.js rather than ported — see web/lib/artefactFrontMatter.js.
     problems.push(...artefactFrontMatterProblems(artefact, findFilenameField))
   }

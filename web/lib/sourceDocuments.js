@@ -160,6 +160,28 @@ export function sourceIdFor(filename, takenIds) {
   }
 }
 
+// --- Use as image (#281) ------------------------------------------------------------------------------------------------
+
+/** The image types an Asset can be (lib/assets.js's ALLOWED_EXTENSIONS), so the only Source documents **Use as image** applies to. */
+export const ASSET_IMAGE_EXTENSIONS = Object.freeze(['.png', '.jpg', '.jpeg'])
+
+/** Whether a Source document of this stored filename can be copied into Assets as an image. */
+export function canUseSourceAsImage(filename) {
+  return ASSET_IMAGE_EXTENSIONS.includes(sourceFileExtension(filename))
+}
+
+export const USE_AS_IMAGE_REFUSAL = 'Only a PNG or JPEG can be used as an image.'
+
+/**
+ * The filename a Source document gets as an Asset in a Local Workspace, whose assets are plain files referenced as `![alt](assets/<name>)`: the stored name made safe to type into that reference (no spaces, brackets or quotes), lower-case extension, and `-2` and so on added when taken. The copy is a new file of its own: nothing links it back to the document.
+ */
+export function assetFilenameForSource(storedFilename, takenFilenames) {
+  const ext = sourceFileExtension(storedFilename)
+  const name = String(storedFilename ?? '')
+  const stem = (ext ? name.slice(0, -ext.length) : name).normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '')
+  return uniqueSourceFilename(`${stem || 'image'}${ext}`, takenFilenames)
+}
+
 /** The title a document starts with: its original name without the extension. Only the title is ever editable. */
 export function defaultSourceTitle(originalFilename) {
   const name = String(originalFilename ?? '').split(/[\\/]/).pop() ?? ''

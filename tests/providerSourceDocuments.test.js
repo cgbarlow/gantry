@@ -9,6 +9,7 @@ import { createProviderSourceStore, findSourceReadBranch } from '../lib/provider
 import { resolveGitHubStageBranch } from '../lib/githubStageBranch.js'
 import { resolveStageBranch, stageBranchName } from '../lib/stageBranch.js'
 import { MAX_SOURCE_BYTES, parseSourceManifest } from '../web/lib/sourceDocuments.js'
+import { pngImage } from './helpers/sourceFixtures.js'
 import { basicAuthHeader, withRunningServerForProvider, withScratchInstances } from './helpers/lifecycle.js'
 
 // #280 (map #238, decided in #245 and #242): Source documents on Azure DevOps and GitHub workspaces. Each upload, rename, Extract text again and removal is exactly one commit on the current Stage's branch (never part of a stage Save), a later Stage's branch carries the documents of an earlier one, and a 25 MB upload goes through. The lifecycle itself is tested in tests/sourceDocuments.test.js; these cover the Provider half.
@@ -257,6 +258,45 @@ for (const spec of PROVIDERS) {
         assert.deepEqual((await (await sources()).json()).entries.map((e) => e.id), ['first', 'second'])
         assert.equal(await client.fileExists(`${ROOT}/sources/Second.md`, branch), true)
         assert.equal(await client.fileExists(`${ROOT}/sources/other.txt`, branch), true, "the colleague's commit is still there")
+      }))
+
+    test('Use as image (#281) copies a picture into assets/ as one commit and keeps no link to the document', () =>
+      withProviderInstance(spec, async ({ sources, client }) => {
+        const branch = stageBranchName(SLUG, 'shape')
+        const png = Buffer.from(pngImage())
+        for (const [filename, data] of [['Whiteboard sketch.png', png], ['Notes.txt', Buffer.from('notes')]]) {
+          const up = await sources('', json('POST', { filename, dataBase64: b64(data), uploadedBy: 'a.architect' }))
+          assert.equal(up.status, 201, await up.clone().text())
+        }
+
+        // Not a picture: refused, and nothing is committed.
+        const refused = await countingCommits(spec.commitRequest, async () => {
+          const res = await sources('/notes/as-asset', json('POST', {}))
+          assert.equal(res.status, 400)
+          assert.match((await res.json()).error, /Only a PNG or JPEG can be used as an image/)
+        })
+        assert.equal(refused, 0)
+
+        let body
+        const commits = await countingCommits(spec.commitRequest, async () => {
+          const res = await sources('/whiteboard-sketch/as-asset', json('POST', { uploadedBy: 'a.architect' }))
+          assert.equal(res.status, 201, await res.clone().text())
+          body = await res.json()
+        })
+        assert.equal(commits, 1, 'the copy is one commit')
+        assert.equal(body.asset.filename, 'Whiteboard-sketch.png')
+        assert.equal(body.reference, '![Whiteboard sketch](assets/Whiteboard-sketch.png)')
+        assert.deepEqual(await bytesOf(client, `${ROOT}/assets/Whiteboard-sketch.png`, branch), png)
+
+        // Used again: a new file, never the first overwritten.
+        const again = await (await sources('/whiteboard-sketch/as-asset', json('POST', {}))).json()
+        assert.equal(again.asset.filename, 'Whiteboard-sketch-2.png')
+
+        // Removing the document leaves the image alone.
+        const removed = await sources('/whiteboard-sketch', json('DELETE', {}))
+        assert.equal(removed.status, 200)
+        assert.equal(await client.fileExists(`${ROOT}/sources/Whiteboard sketch.png`, branch), false)
+        assert.deepEqual(await bytesOf(client, `${ROOT}/assets/Whiteboard-sketch.png`, branch), png)
       }))
 
     test('a Provider workspace answers a read with the Instance as it stands on main when no Stage has begun', () =>

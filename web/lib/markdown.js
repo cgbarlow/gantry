@@ -80,9 +80,9 @@ md.renderer.rules.link_open = (tokens, index, options, env, self) => {
 // `URL.createObjectURL()` blob URL) were silently stripped down to a bare `<img>` with no `src`
 // attribute at all, DOMPurify treating the scheme as unrecognised/unsafe exactly like it would
 // `javascript:`. This extends the default allowlist by one scheme rather than disabling
-// sanitisation (`ALLOW_UNKNOWN_PROTOCOLS`) — same set DOMPurify ships, plus `blob:`.
+// sanitisation (`ALLOW_UNKNOWN_PROTOCOLS`) — same set DOMPurify ships, plus `blob:` and #281's `source:<id>` (a citation of a Source document, which the editor's preview turns into a link that opens it — see web/app.js's activateSourceCitations).
 const ALLOWED_URI_REGEXP =
-  /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix|blob):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i
+  /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix|blob|source):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i
 
 export function renderMarkdown(source) {
   // `target` is not in DOMPurify's default attribute allowlist, so the link rule above would be

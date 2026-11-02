@@ -287,6 +287,16 @@ function tableOfContentsCheckbox(artefact, onToggle) {
   `
 }
 
+// #281: an Artefact's `source-appendix:` switch. Unticked by default (the key absent); ticking stores `true`, which ends the rendered document with a Sources list of the Source documents it cites. Unticking removes the key. `onToggle` null shows it read-only.
+function sourceAppendixCheckbox(artefact, onToggle) {
+  return html`
+    <label class="defn-source-appendix">
+      <input type="checkbox" checked=${artefact.sourceAppendix === true} disabled=${!onToggle} onChange=${onToggle ? (e) => onToggle(e.currentTarget.checked) : undefined} />
+      End the document with a list of the Source documents it cites
+    </label>
+  `
+}
+
 // #195 (ADR-0053): an Artefact's `diagram-captions:` switch. Unticked by default (the key absent);
 // ticking stores `true`, which numbers the document's diagrams "Diagram N. <title>"; unticking
 // removes the key, so a Definition that never uses it saves exactly as before. `onToggle` null
@@ -2562,6 +2572,11 @@ export function DefinitionViewerPage() {
                   if (checked) dd.artefacts[ai].diagramCaptions = true
                   else delete dd.artefacts[ai].diagramCaptions
                 }))}
+                <label class="field-label">Sources appendix</label>
+                ${sourceAppendixCheckbox(a, (checked) => updateDraft((dd) => {
+                  if (checked) dd.artefacts[ai].sourceAppendix = true
+                  else delete dd.artefacts[ai].sourceAppendix
+                }))}
               </div>
             `
           : html`
@@ -2578,6 +2593,7 @@ export function DefinitionViewerPage() {
               ${a.coverPurpose !== undefined ? html`<p><span class="field-label">Cover purpose</span> ${String(a.coverPurpose)}</p>` : null}
               <p><span class="field-label">Table of contents</span> ${tableOfContentsCheckbox(a, null)}</p>
               <p><span class="field-label">Diagram captions</span> ${diagramCaptionsCheckbox(a, null)}</p>
+              <p><span class="field-label">Sources appendix</span> ${sourceAppendixCheckbox(a, null)}</p>
             `}
         <div class="defn-focus-section">
           <div class="defn-focus-section-head">

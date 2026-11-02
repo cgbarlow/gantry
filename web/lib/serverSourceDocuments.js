@@ -40,6 +40,11 @@ export function createServerSourceClient(slug, fetchForInstance) {
     async setText(id, text) {
       return (await parse(await fetchForInstance(path(`/${encodeURIComponent(id)}/text`), { method: 'PUT', ...json({ text }) }), 'Failed to save the text')).entry
     },
+    /** **Use as image** (#281): the server copies the stored document into the Instance's Assets as a new, independent Asset. Returns `{ id, filename, name, reference }`. */
+    async useAsImage(id, { uploadedBy } = {}) {
+      const { asset, reference } = await parse(await fetchForInstance(path(`/${encodeURIComponent(id)}/as-asset`), { method: 'POST', ...json({ uploadedBy }) }), 'Failed to copy to the images')
+      return { ...asset, reference }
+    },
     async readOriginal(id) {
       const res = await fetchForInstance(path(`/${encodeURIComponent(id)}/file`))
       if (!res.ok) await parse(res, 'Failed to download')

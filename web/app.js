@@ -75,7 +75,8 @@ import {
   getFileLastModified,
 } from './lib/localWorkspace.js'
 import { wrap } from './lib/editorWrap.js'
-import { SourceDocumentsPanel } from './lib/sourceDocumentsPanel.js'
+import { SourceDocumentsPanel, openSourceDocument } from './lib/sourceDocumentsPanel.js'
+import { citedSourceIds } from './lib/sourceCitations.js'
 import { createLocalSourceStore } from './lib/localSourceDocuments.js'
 import { createServerSourceClient } from './lib/serverSourceDocuments.js'
 import { assetReference, repoAssetReference, isLocalAssetSource, resolveAssetRefs, resolveRepoAssetRefs } from './lib/assetRefs.js'
@@ -370,6 +371,14 @@ async function buildLocalComputePayload(instance) {
     moduleFiles[moduleId] = await readLocalTextFile(handle, `gantry-workspace/${slug}/modules/${entry.name}`)
   }
   const payload = { definitionId: instance.definition, definitionVersion: instance.localDefinitionVersion, instanceYaml, moduleFiles }
+  // #281: a render prints the title of each Source document the content cites, and the Sources appendix lists them. Only the manifest entries of the ones cited go (their title, filename and dates), and only when something cites one: a Source document and its text never leave the folder.
+  const citedSources = citedSourceIds(Object.values(moduleFiles).join('\n'))
+  if (citedSources.length) {
+    const { entries: sourceEntries } = await createLocalSourceStore(handle, slug).list()
+    payload.sources = sourceEntries
+      .filter((e) => citedSources.includes(e.id))
+      .map(({ id, filename, title, uploadedAt, removedAt }) => ({ id, filename, title, uploadedAt, removedAt }))
+  }
   // #224: the instance's own Logo, which the render puts in its documents' page header, rides along
   // as an asset at the path its instance.yaml names (`assets/instance-logo.png`).
   const logoPath = instanceLogoPath(parseInstanceYaml(instanceYaml))
@@ -903,6 +912,7 @@ function renderPreview(node, text) {
     )
   }
   node.innerHTML = renderMarkdown(withSources)
+  activateSourceCitations(node)
   // WI #353: ```mermaid fences render as diagrams in place. Async and fire-and-forget — a
   // re-render before a diagram finishes just leaves the swap with nothing to replace.
   hydrateMermaidPreview(node).catch(() => {})
@@ -911,6 +921,46 @@ function renderPreview(node, text) {
     const em = p.querySelector('em')
     if (em && em.textContent.startsWith('Source:')) p.classList.add('asset-source')
   })
+}
+
+// #281 (map #238): a citation of a Source document, `[Client brief, p. 4](source:client-brief)`, is a link in the editor's preview that opens the document. `sourceIndex` holds what the Instance's Source documents panel last listed, `{ <id>: { title, removed } }`, and `sourceOpener` how to open one (the panel's store knows where the files are); the preview reads them when it draws and redraws when they change. A document that was removed still shows the words the author wrote, marked "(removed)", and is not a link, because its file is gone; so does an id the Instance has no document for.
+const sourceIndex = signal(null) // null: this kind of workspace keeps no Source documents (yet), so a citation is left as the words it holds
+const sourceOpener = { open: null }
+
+function activateSourceCitations(node) {
+  const index = sourceIndex.value
+  for (const link of node.querySelectorAll('a[href^="source:"]')) {
+    const id = link.getAttribute('href').slice('source:'.length)
+    if (index === null) {
+      const plain = document.createElement('span')
+      plain.className = 'source-citation unavailable'
+      plain.title = 'Source documents are not kept for this kind of workspace yet'
+      plain.append(...link.childNodes)
+      link.replaceWith(plain)
+      continue
+    }
+    const entry = index[id]
+    if (entry && !entry.removed) {
+      link.classList.add('source-citation')
+      link.dataset.sourceId = id
+      link.title = `Open the Source document "${entry.title}"`
+      link.removeAttribute('target')
+      continue
+    }
+    const gone = document.createElement('span')
+    gone.className = `source-citation ${entry ? 'removed' : 'missing'}`
+    gone.dataset.sourceId = id
+    gone.title = entry ? `The Source document "${entry.title}" was removed` : 'No Source document in this Instance has this id'
+    gone.append(...link.childNodes, entry ? ' (removed)' : ' (not found)')
+    link.replaceWith(gone)
+  }
+  // One handler on the preview itself, replaced each time it is drawn, so redraws never stack them.
+  node.onclick = (event) => {
+    const link = event.target.closest?.('a.source-citation')
+    if (!link || !node.contains(link)) return
+    event.preventDefault()
+    sourceOpener.open?.(link.dataset.sourceId)
+  }
 }
 
 // ---------- Instance-scoped state ----------
@@ -1849,7 +1899,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
     const splitEditableCompartment = new Compartment()
     const wrapCompartment = new Compartment()
     const visualCompartment = new Compartment()
-    const visualLayer = () => visualMode({ renderMarkdown: renderPreview, historyView: () => view })
+    const visualLayer = () => visualMode({ renderMarkdown: renderPreview, historyView: () => view, sourceDocument: (id) => (sourceIndex.value === null ? { unavailable: true } : sourceIndex.value[id]), openSourceDocument: (id) => sourceOpener.open?.(id) })
     let hideToolbarTimer = null
     const state = EditorState.create({
       doc: field.value ?? '',
@@ -1960,6 +2010,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
     const stopAssetSourceSync = effect(() => {
       const _sources = assetSources.value
       const _localUrls = localAssetUrls.value
+      const _sourceDocuments = sourceIndex.value
       view.dispatch({ effects: refreshVisual.of(null) })
       splitViewRef.current?.dispatch({ effects: refreshVisual.of(null) })
     })
@@ -2613,7 +2664,7 @@ function ReadOnlyFieldValue({ field }) {
         : null
   useEffect(() => {
     if (markdown !== null) renderPreview(ref.current, markdown)
-  }, [markdown, assetSources.value])
+  }, [markdown, assetSources.value, sourceIndex.value])
   if (isEmpty) return html`<p class="read-only-value muted">Not filled in.</p>`
   if (markdown !== null) return html`<div class="read-only-value" ref=${ref}></div>`
   return html`<p class="read-only-value">${Array.isArray(value) ? value.join(', ') : value}</p>`
@@ -4921,8 +4972,43 @@ function SourceDocumentsSection({ instance }) {
     if (instance.isLocalWorkspace) return handle ? createLocalSourceStore(handle, slug) : null
     return createServerSourceClient(slug, (url, init) => apiFetchForInstance(slug, url, init))
   }, [slug, instance.isLocalWorkspace, handle])
+  const [notice, setNotice] = useState('')
+  const known = useRef({})
+  // #281: what the editor's preview needs to show a citation (the panel tells us each time it lists) and how to open one.
+  const onList = useCallback((list) => {
+    const index = {}
+    for (const e of list.entries) index[e.id] = { title: e.title, filename: e.filename, removed: Boolean(e.removedAt) }
+    known.current = index
+    sourceIndex.value = index
+  }, [])
+  useEffect(() => {
+    if (!store) return undefined
+    sourceOpener.open = async (id) => {
+      const entry = known.current[id]
+      if (!entry || entry.removed) return
+      try {
+        setNotice('')
+        await openSourceDocument(store, { id, ...entry })
+      } catch (err) {
+        setNotice(err.message)
+      }
+    }
+    return () => {
+      sourceOpener.open = null
+      sourceIndex.value = null
+    }
+  }, [store])
   if (!store) return null
-  return html`<div class="source-documents-wrap"><${SourceDocumentsPanel} store=${store} actor=${instance.assignee ?? ''} readOnly=${Boolean(instance.archived) || isWriteAccessBlocked()} commitNote=${instance.workspaceBacked ? "Each upload, rename, new text read and removal is saved straight away as its own commit on this Stage's branch. It does not wait for Save." : ''} /></div>`
+  return html`<div class="source-documents-wrap">
+    <${SourceDocumentsPanel}
+      store=${store}
+      actor=${instance.assignee ?? ''}
+      readOnly=${Boolean(instance.archived) || isWriteAccessBlocked()}
+      commitNote=${instance.workspaceBacked ? "Each upload, rename, new text read and removal is saved straight away as its own commit on this Stage's branch. It does not wait for Save." : ''}
+      onList=${onList}
+    />
+    ${notice ? html`<p class="inline-error" role="alert" data-testid="source-document-open-error">${notice}</p>` : null}
+  </div>`
 }
 
 function ViewModeToolbar({

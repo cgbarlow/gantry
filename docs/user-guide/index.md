@@ -155,8 +155,10 @@ In the Instance editor, under the toolbar, open **Source documents** to see the 
 - **Rename** changes only the title shown in the list. The document keeps the id it was given when it was added, and the name of its stored file never changes, so a citation that names it stays valid. **Download** gives you the original file back.
 - **Extract text again** reads the original once more and replaces the stored text. Use it after Gantry has been upgraded or if a read failed. If the new read fails, the text already kept is left alone.
 - **Remove** deletes the file and its text. The document stays in the list under **Removed**, with who removed it and when, so anything that mentions it still shows its title.
+- **Copy citation** puts a ready-made citation of the document on your clipboard (if the browser won't let Gantry use the clipboard, the message shows it for you to copy). See **Citing a Source document** below.
+- **Use as image** copies a picture (a PNG or JPEG) into the Instance's images as a new image. See **Use as image** below.
 
-Behind the panel, each Instance keeps a `sources/` folder next to `modules/` and `assets/`, with a `sources/manifest.yaml` that records for every document its id (made from the filename, unique, and fixed for good), stored filename, title, who added it and when, its size, its text file if it has one, and who removed it and when. Filenames are cleaned to be safe as a path, with `-2` added if the name is taken. In a Local workspace this is all inside the folder you picked, so it is yours to back up like the rest; on a Server-hosted workspace it is in the Instance's folder on the server. A Local workspace sends none of it to the Gantry server, not even when you render a document.
+Behind the panel, each Instance keeps a `sources/` folder next to `modules/` and `assets/`, with a `sources/manifest.yaml` that records for every document its id (made from the filename, unique, and fixed for good), stored filename, title, who added it and when, its size, its text file if it has one, and who removed it and when. Filenames are cleaned to be safe as a path, with `-2` added if the name is taken. In a Local workspace this is all inside the folder you picked, so it is yours to back up like the rest; on a Server-hosted workspace it is in the Instance's folder on the server. A Local workspace sends no document and no extracted text to the Gantry server, not even when you render a document; the one thing a render may send is the title, filename and dates of a document the content cites (see **The Sources appendix** below).
 
 #### Source documents on Azure DevOps and GitHub workspaces
 
@@ -167,6 +169,30 @@ On an Azure DevOps or GitHub workspace the documents are committed to the reposi
 - **Later reads use what was committed.** The list, the download and the stored text come from the branch, so the text Gantry read when you added a document is what the AI will use; it is not read out of the original again.
 - **Two people at once are both kept.** If a colleague commits to the same branch between your reading the list and your commit landing, Gantry applies your change again on top of theirs rather than overwriting it.
 - **The size limits are the same** (25 MB a document, a warning past about 100 MB in all). The Provider's own limit for a file is 100 MB, so the 25 MB limit is Gantry's. A 25 MB upload is sent as one request, so a slow connection to your Provider can make it take a while.
+
+#### Citing a Source document
+
+Wherever a figure or decision in a field came from a Source document, cite it. A citation is an ordinary Markdown link whose address is `source:` and the document's id (the id is in `sources/manifest.yaml`, and **Copy citation** writes the whole link for you):
+
+```
+Median time to payment is 12.4 working days [Client brief, p. 4](source:client-brief).
+```
+
+The words in the square brackets are yours, so you can point at a page or a section. Only a link counts as a citation: a picture (`![…](source:…)`) doesn't, and neither does anything inside a code block.
+
+- **In the editor,** a citation of a document is a link. Click it (in Visual or Split view) and the document opens: a PDF, a picture or a text file in a new tab, a Word, PowerPoint or spreadsheet file, which a browser can't show, is saved to your machine. A citation of a document that has since been **removed** keeps its words, struck back and marked "(removed)", and doesn't link anywhere because the file is gone. A citation of an id the Instance has no document for is marked "(not found)". On workspaces that don't keep Source documents yet (GitLab and Atlassian), a citation is left as the words you wrote.
+- **In Word,** the document prints a citation as plain text in brackets, `(Client brief, p. 4)`, with no hyperlink, because the people who read a Word document usually have no access to the repository. If the link's words are empty, Word prints the document's title. The exported `.md` keeps the link as you wrote it.
+- **Renaming a document** changes the title in the list but not the words already written in a citation: they are yours.
+
+#### The Sources appendix
+
+A Definition can opt an Artefact in to ending with a list of the Source documents it cites. On the Definitions page, tick **Sources appendix** on the Artefact (it is `source-appendix: true` in `definition.yaml`; on a published version it is shown read-only). The rendered document, in Word and in the exported `.md`, then ends with a **Sources** section: a table of **only the documents that Artefact cites**, in the order they are first cited, each with its title, its original filename and the date it was added. A removed document is still listed, marked "(removed)". Documents the Instance holds but the Artefact never cites are not listed, and an Artefact that cites nothing has no Sources section at all. With the setting off, which is the default (no bundled Definition turns it on), there is no list. A Definition author can only give it `true` or `false`: any other value is reported by `gantry validate` and when you save or publish the Definition, and the list is left out until it is fixed.
+
+On a Local workspace, a render sends the Gantry server only the title, filename and dates of the documents the content cites, so the server can print them. It never sends a document or its text, and sends nothing at all when the content cites no document.
+
+#### Use as image
+
+**Use as image** (a PNG or JPEG in the list) copies the picture into the Instance's images, so a field can show it as a figure. The panel then tells you how to refer to it: `![Whiteboard](asset:…)` on a Server-hosted workspace, or `![Whiteboard](assets/Whiteboard.png)` on a Local, Azure DevOps or GitHub workspace, where the copy's file name is made safe to type (no spaces) and `-2` is added if an image of that name exists. On an Azure DevOps or GitHub workspace the copy is one commit on the current Stage's branch, made straight away like the other changes to Source documents. Use the Image dialog's **Choose existing** tab to insert it. The image is a new one of its own: it is not linked back to the Source document, so removing, renaming or replacing either never changes the other. Pictures of other types (`.gif`, `.webp`) can stay as evidence but can't be used as images.
 
 ### Definition versions and the Definitions page
 

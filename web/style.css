@@ -1846,7 +1846,7 @@ label.btn.disabled { opacity: 0.4; cursor: not-allowed; }
 .defn-filename-tokens { display: flex; flex-wrap: wrap; gap: 6px; }
 .defn-filename-token { font-family: var(--font-mono); }
 .defn-filename-problems { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
-.defn-document-control, .defn-satisfies-gate, .defn-cover-page, .defn-table-of-contents, .defn-diagram-captions { display: inline-flex; align-items: center; gap: 6px; }
+.defn-document-control, .defn-satisfies-gate, .defn-cover-page, .defn-table-of-contents, .defn-diagram-captions, .defn-source-appendix { display: inline-flex; align-items: center; gap: 6px; }
 
 /* Drag and drop */
 .defn-drag-handle { cursor: grab; user-select: none; padding: 2px 6px; font-size: 14px; color: var(--text-muted); border: var(--hairline) solid transparent; border-radius: var(--radius); }
@@ -1936,6 +1936,13 @@ label.btn.disabled { opacity: 0.4; cursor: not-allowed; }
   border-radius: var(--radius);
 }
 .cm-visual .cm-vlink { text-decoration: underline; text-underline-offset: 2px; }
+/* #281: a citation of a Source document. A live one reads as a link that opens it; a removed or unknown one keeps its words, struck back and marked. */
+.cm-visual .cm-vsource { cursor: pointer; color: var(--accent, inherit); }
+.cm-visual .cm-vsource-removed, .cm-visual .cm-vsource-missing { text-decoration: line-through; color: var(--text-muted); }
+.cm-visual .cm-vsource-removed::after { content: ' (removed)'; }
+.cm-visual .cm-vsource-missing::after { content: ' (not found)'; }
+.source-citation.removed, .source-citation.missing { color: var(--text-muted); text-decoration: line-through; }
+.source-citation.removed::after, .source-citation.missing::after { text-decoration: none; }
 .cm-visual .cm-vquote { color: var(--text-muted); font-style: italic; }
 .cm-visual .cm-vcodeblock { font-family: var(--font-mono); font-size: 13px; background: var(--bg); }
 /* A horizontal rule off the caret's line (WI #376). */

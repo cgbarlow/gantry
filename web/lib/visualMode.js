@@ -791,9 +791,9 @@ function buildVisual(state, generation) {
     if (from >= caretLine.from && to <= caretLine.to) return
     replaces.push({ from, to, value: Decoration.replace({}) })
   }
-  const style = (from, to, className) => {
+  const style = (from, to, className, attributes) => {
     if (from >= to || inTable(from, to)) return
-    marks.push(Decoration.mark({ class: className }).range(from, to))
+    marks.push(Decoration.mark({ class: className, ...(attributes ? { attributes } : {}) }).range(from, to))
   }
 
   syntaxTree(state).iterate({
@@ -821,9 +821,23 @@ function buildVisual(state, generation) {
         case 'InlineCode':
           style(from, to, 'cm-vcode')
           return undefined
-        case 'Link':
-          style(from, to, 'cm-vlink')
+        case 'Link': {
+          // #281: `[text](source:<id>)` cites a Source document. A live one is clickable and opens it; a removed or unknown one keeps its words, marked as such.
+          const urlNode = node.node.getChild('URL')
+          const url = urlNode ? text.slice(urlNode.from, urlNode.to) : ''
+          const sourceId = url.startsWith('source:') ? url.slice('source:'.length) : null
+          const cited = sourceId === null ? undefined : state.facet(visualConfig).sourceDocument?.(sourceId)
+          if (cited?.unavailable) {
+            style(from, to, 'cm-vlink')
+          } else if (sourceId === null || !cited) {
+            style(from, to, sourceId === null ? 'cm-vlink' : 'cm-vlink cm-vsource-missing', sourceId === null ? undefined : { 'data-source-id': sourceId, title: 'No Source document in this Instance has this id' })
+          } else if (cited.removed) {
+            style(from, to, 'cm-vlink cm-vsource-removed', { 'data-source-id': sourceId, title: `The Source document "${cited.title}" was removed` })
+          } else {
+            style(from, to, 'cm-vlink cm-vsource', { 'data-source-id': sourceId, title: `Open the Source document "${cited.title}"` })
+          }
           return undefined
+        }
         case 'Blockquote':
           style(from, to, 'cm-vquote')
           return undefined
@@ -926,9 +940,10 @@ const visualField = StateField.define({
 })
 
 // The Visual layer, ready to drop into a compartment.
-export function visualMode({ renderMarkdown, historyView } = {}) {
+// `sourceDocument(id)` answers `{ title, removed }` for a Source document the Instance lists, or nothing; `openSourceDocument(id)` opens one (#281).
+export function visualMode({ renderMarkdown, historyView, sourceDocument, openSourceDocument } = {}) {
   return [
-    visualConfig.of({ renderMarkdown, historyView }),
+    visualConfig.of({ renderMarkdown, historyView, sourceDocument }),
     visualField,
     EditorView.lineWrapping,
     EditorView.editorAttributes.of({ class: 'cm-visual' }),
@@ -940,6 +955,9 @@ export function visualMode({ renderMarkdown, historyView } = {}) {
       },
       mousedown: (e, view) => {
         if (!e.target.closest?.('.vgrid-wrap')) clearActiveCell(view)
+        // #281: pressing on a citation of a live Source document opens it. This is the press, not the click, because the press moves the caret, which redraws the line and replaces the words under the pointer before the click could land on them. The caret lands in the text as for any press.
+        const cited = e.button === 0 ? e.target.closest?.('.cm-vsource') : null
+        if (cited && openSourceDocument) openSourceDocument(cited.getAttribute('data-source-id'))
         return false
       },
     }),
