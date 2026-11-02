@@ -116,3 +116,16 @@ export function reapprovalHistoryLine(entry) {
   const who = peopleList(entry.reviewers)
   return `Re-approved${when ? ` ${when}` : ''} by ${entry.byTitle} (Pull Request #${entry.pullRequestId}): ${fieldCountLabel(entry.fields?.length ?? 0)}.${who ? ` Approved by ${who}.` : ''}`
 }
+
+/** One earlier document Request approval refused over: `Solution on a Page (SOAP, 2 Fields changed)`. */
+export function reRenderItemLabel(item) {
+  return `${item.artefactTitle} (${item.stageTitle}, ${fieldCountLabel(item.count)} changed)`
+}
+
+/**
+ * The line Request approval's refusal gets in the Sign-off section (#276): which earlier documents have to
+ * be re-rendered on this stage's branch before approval can be requested.
+ */
+export function reRenderRefusalLine(items) {
+  return `Request sign-off needs ${items.length === 1 ? 'this document' : 'these documents'} re-rendered onto this stage first: ${items.map(reRenderItemLabel).join(', ')}.`
+}

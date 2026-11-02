@@ -10,6 +10,7 @@ const checkGateTool = tools.find((t) => t.name === 'check_gate')
 const advanceStageTool = tools.find((t) => t.name === 'advance_stage')
 const requestApprovalTool = tools.find((t) => t.name === 'request_approval')
 const checkStatusTool = tools.find((t) => t.name === 'check_status')
+const rerenderEarlierTool = tools.find((t) => t.name === 'rerender_earlier_artefact')
 const requestReviewTool = tools.find((t) => t.name === 'request_review')
 const checkReviewStatusTool = tools.find((t) => t.name === 'check_review_status')
 const reopenStageTool = tools.find((t) => t.name === 'reopen_stage')
@@ -211,6 +212,42 @@ test('request_approval forwards "gate" and returns the 400 refusal for a stage t
   } finally {
     fetch.restore()
   }
+})
+
+// #276, ADR-0069: a stage that changed Fields an earlier approved stage's documents print is refused until those
+// are re-rendered on its branch; the refusal's list is what rerender_earlier_artefact is called with.
+test('request_approval hands the re-render refusal back with its list, and rerender_earlier_artefact acts on it', async () => {
+  const reRenderRequired = [
+    { stageId: 'shape', stageTitle: 'SOAP', artefactId: 'soap', artefactTitle: 'Solution on a Page', fields: ['background.problem'], count: 1 },
+  ]
+  const fetch = stubFetch(
+    providerWorkspaceStub('ws-1', ({ url, method }) => {
+      if (url.pathname === '/api/instance/request-approval' && method === 'POST') {
+        return { status: 400, body: { error: 'Cannot request approval: re-render first', reRenderRequired } }
+      }
+      if (url.pathname === '/api/instance/rerender-earlier/soap' && method === 'POST') {
+        return { status: 200, body: { artefact: 'soap', stage: 'shape', path: 'out/Doc.docx', approvedCopyPath: 'out/approved/Doc — approved 2026-10-12.docx' } }
+      }
+      return undefined
+    })
+  )
+  try {
+    const gantryClient = createGantryClient({ baseUrl: BASE_URL, workspacePats: { 'ws-1': 'secret-pat' } })
+    const refused = await requestApprovalTool.handler({ slug: 'ado-instance' }, { gantryClient })
+    assert.equal(refused.isError, true)
+    assert.deepEqual(JSON.parse(refused.content[0].text).detail.reRenderRequired, reRenderRequired)
+
+    const rendered = await rerenderEarlierTool.handler({ slug: 'ado-instance', artefactId: 'soap' }, { gantryClient })
+    assert.equal(rendered.isError, undefined)
+    assert.match(JSON.parse(rendered.content[0].text).approvedCopyPath, /out\/approved\/Doc — approved 2026-10-12\.docx/)
+
+    const missing = await rerenderEarlierTool.handler({ slug: 'ado-instance' }, { gantryClient })
+    assert.equal(missing.isError, true)
+  } finally {
+    fetch.restore()
+  }
+  assert.match(requestApprovalTool.description, /reRenderRequired/)
+  assert.match(rerenderEarlierTool.description, /out\/approved\//)
 })
 
 test('request_approval\'s description tells a model approvals go in stage order and that a later stage is refused with a 400', () => {

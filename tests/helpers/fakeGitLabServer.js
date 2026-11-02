@@ -551,6 +551,8 @@ export function createFakeGitLabServer({
       const mergeCommit = { commitId: `fake-commit-${commitCounter}`, committedDate: date, authoredDate: date }
       branchTips.set(mr.target_branch, mergeCommit)
       mr.state = 'merged'
+      mr.merge_commit_sha = mergeCommit.commitId
+      mr.merged_at = date
       return json(200, { id: mr.id, iid: mr.iid, state: 'merged', merge_commit_sha: mergeCommit.commitId })
     }
 

@@ -625,6 +625,7 @@ export function createFakeGitHubServer({
       pr.merged = true
       pr.state = 'closed'
       pr.merge_commit_sha = mergeSha
+      pr.merged_at = date
       return json(200, { sha: mergeSha, merged: true, message: 'Pull Request successfully merged' })
     }
 

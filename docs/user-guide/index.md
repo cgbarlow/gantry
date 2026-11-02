@@ -530,6 +530,17 @@ You don't re-open the earlier Stage to fix this. The later Stage's own approval 
 
 This applies to Azure DevOps, GitHub and GitLab Workspaces. A Pull Request that changes nothing an earlier Stage prints re-approves nothing, and looks exactly as it did before.
 
+#### Re-rendering before re-approval
+
+When you request sign-off for the current Stage, that sign-off also re-approves every flagged earlier Stage. Gantry refuses **Request Sign-off** until each document of the earlier Stage that prints a changed Field has been re-rendered on the current Stage's branch. Otherwise the approved Word documents on `main` would stop matching the content they were approved on. The refusal names each document, for example *Solution on a Page (SOAP, 1 Field changed)*, and offers **Render onto this stage** beside it. Documents that print none of the changed Fields, and documents the earlier Stage never rendered, are not asked for.
+
+Rendering an earlier Stage's document onto the current Stage does two things:
+
+- **The approved copy is kept.** The document as it was approved moves to `out/approved/`, with its approval date in the name, for example `SOAP — approved 2026-10-12.docx`. It stays on the branch and, once the Pull Request merges, on `main`.
+- **The new render takes the usual name.** The file in `out/` with the usual name always means the currently approved version, and the files in `out/approved/` are the earlier ones.
+
+If a Field the document prints changes again after you render it, it has to be rendered again before you can request sign-off. The render uses the Gantry server's own Pandoc. With MCP, `request_approval` returns the same list as `reRenderRequired`, and the `rerender_earlier_artefact` tool does the render.
+
 ### Review and sign-off status
 
 Each review and sign-off item carries a Gantry status — Requested, In review, Changes requested, Approved or Rejected. On Azure DevOps this is kept separate from the native work item state, which continues to drive the board — if a project has not been set up with the custom status field, Gantry falls back to reading the native state instead, so the card still shows a sensible status. On GitHub and GitLab alike, the same five-value status is what the `gantry:review/<status>` label above carries, read straight from the issue.

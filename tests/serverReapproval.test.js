@@ -203,6 +203,9 @@ async function withApprovedSoap(providerId, fn, { linkWorkItems = false } = {}) 
           await writeOnHld('background', withFieldText(soapTexts.background, 'Problem statement', 'Reworded during HLD review.'))
           const hldBranch = await provider.resolveBranch(ctx, 'hld-define')
           await client.writeFile(DOC('High Level Design'), 'rendered hld', { branch: hldBranch })
+          // #276: the SOAP document this approval also re-approves has to be re-rendered on HLD's branch first.
+          const rerendered = await post(`/api/instance/rerender-earlier/soap?slug=${SLUG}`)
+          assert.equal(rerendered.artefact, 'soap', JSON.stringify(rerendered))
         }
         await fn({ ctx, provider, client, get, post, soapOpened, soapTexts, writeOnHld, prepareHld, linked })
       },

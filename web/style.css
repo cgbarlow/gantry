@@ -218,6 +218,9 @@ header {
 .changed-approval-note { margin: 0; font-size: 13px; color: var(--text-muted); }
 @media (max-width: 640px) { .changed-approval-versions { grid-template-columns: 1fr; } }
 .reapproval-history ul { margin: 4px 0 0; padding-left: 18px; font-size: 13px; }
+.rerender-earlier { margin: 8px 0 0; }
+.rerender-earlier-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.rerender-earlier-list li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; font-size: 13px; }
 
 /*
  * View-mode toolbar (#79) — a toolbar segmented control (Markdown / Split / Rendered) for the whole module-editor screen, ported from Variant A of web/prototypes/module-editor.prototype.html (#72).

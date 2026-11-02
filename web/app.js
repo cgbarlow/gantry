@@ -108,6 +108,8 @@ import {
   requestedStatusWithReapproval,
   waitingForReapproversLine,
   reapprovalHistoryLine,
+  reRenderRefusalLine,
+  reRenderItemLabel,
 } from './lib/changedSinceApproval.js'
 import {
   resolveDefinitionStructure,
@@ -3232,6 +3234,9 @@ function SyncedFieldsPanel({ instance }) {
   // Sign-off (#124/#125, ADR-0014/ADR-0018) — same state RequestApprovalPanel used to own.
   const [signoffStatus, setSignoffStatus] = useState('')
   const [signoffConfirming, setSignoffConfirming] = useState(false)
+  // #276 (ADR-0069): the earlier approved stages' documents Request approval refused over, still to be re-rendered onto this stage's branch.
+  const [reRenderNeeded, setReRenderNeeded] = useState([])
+  const [reRenderBusy, setReRenderBusy] = useState(null)
   const [commitHistoryOpen, setCommitHistoryOpen] = useState(false)
   const [commitHistory, setCommitHistory] = useState([])
   const [commitHistoryStatus, setCommitHistoryStatus] = useState('')
@@ -3448,9 +3453,16 @@ function SyncedFieldsPanel({ instance }) {
     )
     const body = await res.json().catch(() => ({}))
     if (!res.ok) {
+      // #276: refused until earlier approved documents are re-rendered here — offer to do it.
+      if (Array.isArray(body.reRenderRequired) && body.reRenderRequired.length > 0) {
+        setReRenderNeeded(body.reRenderRequired)
+        setSignoffStatus(reRenderRefusalLine(body.reRenderRequired))
+        return
+      }
       setSignoffStatus(`Request sign-off failed: ${body.message ?? body.error}`)
       return
     }
+    setReRenderNeeded([])
     setJustOpened(body)
     if (body.pullRequest) {
       const current = instanceData.value
@@ -3463,6 +3475,32 @@ function SyncedFieldsPanel({ instance }) {
       setSignoffStatus(`Approval withdrawn from Pull Request #${body.pullRequestId} — awaiting the Owner's review again.`)
     } else {
       setSignoffStatus(requestedStatusWithReapproval(body.pullRequestId, body.alsoReapproves))
+    }
+  }
+
+  // #276: renders one earlier approved stage's document onto this stage's branch, keeping the approved copy.
+  async function handleReRenderEarlier(item) {
+    setReRenderBusy(item.artefactId)
+    setSignoffStatus(`Rendering ${item.artefactTitle} onto this stage…`)
+    try {
+      const res = await apiFetchForInstance(
+        currentSlug.value,
+        `/api/instance/rerender-earlier/${encodeURIComponent(item.artefactId)}?slug=${encodeURIComponent(currentSlug.value)}`,
+        { method: 'POST' }
+      )
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSignoffStatus(`Render failed: ${body.message ?? body.error ?? `HTTP ${res.status}`}`)
+        return
+      }
+      const remaining = reRenderNeeded.filter((other) => other.artefactId !== item.artefactId)
+      setReRenderNeeded(remaining)
+      const kept = body.approvedCopyPath ? ` The approved copy is kept as ${body.approvedCopyPath.split('/').pop()}.` : ''
+      setSignoffStatus(
+        `${item.artefactTitle} re-rendered.${kept}${remaining.length === 0 ? ' Request Sign-off again.' : ''}`
+      )
+    } finally {
+      setReRenderBusy(null)
     }
   }
 
@@ -3856,6 +3894,33 @@ function SyncedFieldsPanel({ instance }) {
                   : isCurrentStage
                     ? null
                     : html`<p class="synced-value">Not requested</p>`}
+                ${reRenderNeeded.length > 0
+                  ? html`
+                      <div class="rerender-earlier" data-testid="rerender-earlier">
+                        <p class="guidance">
+                          This sign-off also re-approves earlier stages, so their documents are re-rendered on this stage's branch first. The approved copies are kept in <code>out/approved/</code>.
+                        </p>
+                        <ul class="rerender-earlier-list">
+                          ${reRenderNeeded.map(
+                            (item) => html`
+                              <li key=${item.artefactId} data-testid="rerender-earlier-item">
+                                <span>${reRenderItemLabel(item)}</span>
+                                <button
+                                  type="button"
+                                  class="btn small"
+                                  data-testid="rerender-earlier-button"
+                                  disabled=${reRenderBusy !== null || isEditingBlocked()}
+                                  onClick=${() => handleReRenderEarlier(item)}
+                                >
+                                  Render onto this stage
+                                </button>
+                              </li>
+                            `
+                          )}
+                        </ul>
+                      </div>
+                    `
+                  : null}
                 ${signoffStatus ? html`<p class="save-status">${signoffStatus}</p>` : null}
               </div>
             </div>

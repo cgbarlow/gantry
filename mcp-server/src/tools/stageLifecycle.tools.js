@@ -79,6 +79,28 @@ async function requestApproval(args, { gantryClient }) {
   return okResult(res.body)
 }
 
+// 3b. rerender_earlier_artefact — POST /api/instance/rerender-earlier/:artefactId. Remote workspaces only: renders
+// an earlier approved stage's document onto the current stage's branch, which request_approval requires (and
+// names in its refusal's "reRenderRequired" list) when the current stage changed a Field that document prints.
+async function rerenderEarlierArtefact(args, { gantryClient }) {
+  const { slug, scope, ref, artefactId } = args
+  if (!artefactId) {
+    return errorResult('Provide "artefactId" — one of the ids request_approval\'s refusal lists under "reRenderRequired".')
+  }
+  const resolved = await resolveWorkspaceOrError({ slug, scope, ref }, { gantryClient })
+  if (resolved.errorResult) return resolved.errorResult
+
+  const res = await gantryClient.request({
+    workspaceId: resolved.workspaceId,
+    path: `/api/instance/rerender-earlier/${encodeURIComponent(artefactId)}`,
+    method: 'POST',
+    query: { slug, scope: scope ?? resolved.scope, ref },
+  })
+  if (res.credentialError) return credentialErrorResult(res.credentialError)
+  if (!res.ok) return upstreamErrorResult(res)
+  return okResult(res.body)
+}
+
 // 4. check_status — POST /api/instance/check-status. Workspace-backed only: reads the open stage Pull
 // Request's reviewer votes and, on detecting the Owner's approval, merges it and advances the stage
 // pointer itself. Rejected outright (400) for a local instance, for the same reason as request_approval.
@@ -215,12 +237,27 @@ export const tools = [
       '4. Rejected with a 400 for a local instance — it has no Pull Request to open; call advance_stage instead. ' +
       '5. Requires a PAT for the instance\'s workspace; a missing/rejected one is reported as "missing_workspace_pat"/"authentication_required". ' +
       '6. Follow up with check_status once a reviewer has had a chance to approve. ' +
-      '7. When the stage has changed Fields an earlier approved stage prints, the Pull Request also re-approves that stage (ADR-0069): the response carries "alsoReapproves" (each with "stageId", "title", "fields", "count" and the "reviewers" who approved that stage) and those reviewers are added to the Pull Request and must approve it too. Tell the user who.',
+      '7. When the stage has changed Fields an earlier approved stage prints, the Pull Request also re-approves that stage (ADR-0069): the response carries "alsoReapproves" (each with "stageId", "title", "fields", "count" and the "reviewers" who approved that stage) and those reviewers are added to the Pull Request and must approve it too. Tell the user who. ' +
+      '8. When the current stage has changed a Field an earlier approved stage\'s documents print (check_status\'s "changedSinceApproval"), this approval also re-approves that stage and is refused with a 400 until those documents are re-rendered on this stage\'s branch (ADR-0069). The refusal\'s "reRenderRequired" lists them (artefactId, stageId, fields); call rerender_earlier_artefact for each, then request approval again.',
     inputSchema: {
       ...slugRefShape,
       gate: z.string().optional().describe('A specific gate id to request approval for, instead of the stage\'s own default.'),
     },
     handler: requestApproval,
+  },
+  {
+    name: 'rerender_earlier_artefact',
+    description:
+      '1. Renders an earlier, already-approved stage\'s document onto the current stage\'s branch of a *Workspace-backed* (GitHub, Azure DevOps or GitLab) instance — the step request_approval requires before it will open the current stage\'s Pull Request when that stage changed Fields the earlier document prints (ADR-0069). ' +
+      '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "artefactId" is required — take it from request_approval\'s refusal ("reRenderRequired"). ' +
+      '3. The previously approved copy is kept in the instance\'s out/approved/ folder, named with its approval date (for example "SOAP — approved 2026-10-12.docx"); the new render takes the usual name, so the usual name always means the currently approved version. The response gives both paths. ' +
+      '4. Refused with a 400 for an artefact that does not print a changed Field, and for a local or server instance (they have no approval to re-approve). If a Field the document prints changes again afterwards, it has to be re-rendered again. ' +
+      '5. This is a genuine write (it pushes commits to the stage branch) and renders with the gantry server\'s own Pandoc; requires a PAT for the instance\'s workspace.',
+    inputSchema: {
+      ...slugRefShape,
+      artefactId: z.string().describe('The earlier stage\'s artefact id to render onto the current stage, from request_approval\'s "reRenderRequired" list.'),
+    },
+    handler: rerenderEarlierArtefact,
   },
   {
     name: 'check_status',

@@ -76,6 +76,9 @@ async function approveSoapAndDraftHld(base, adoBaseUrl) {
     { branch: hldBranch }
   )
   await client.writeFile(`gantry-workspace/${SLUG}/out/Reapproval Ui - High Level Design.docx`, 'rendered hld', { branch: hldBranch })
+  // #276: the SOAP document this approval also re-approves has to be re-rendered on HLD's branch first.
+  const rerendered = await (await fetch(`${base}/api/instance/rerender-earlier/soap?slug=${SLUG}`, { method: 'POST', headers })).json()
+  assert.equal(rerendered.artefact, 'soap', JSON.stringify(rerendered))
 }
 
 test('a sign-off request names the earlier stage it also re-approves, waits for its reviewer, and the earlier stage shows the re-approval afterwards', async () => {
