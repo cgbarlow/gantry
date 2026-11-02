@@ -82,9 +82,9 @@ function noTextNote(extraction) {
 }
 
 /**
- * `store` is described above. `actor` is the name stamped on uploads and removals ('' when unknown). `readOnly` hides every control that changes the list (an archived Instance). `commitNote` is shown under the introduction when each change is committed to a repository as it is made (an Azure DevOps or GitHub workspace, #280). `extract(filename, bytes)` is the text reader; tests and the app use the default.
+ * `store` is described above. `actor` is the name stamped on uploads and removals ('' when unknown). `readOnly` hides every control that changes the list (an archived Instance). `commitNote` is shown under the introduction when each change is committed to a repository as it is made (an Azure DevOps or GitHub workspace, #280). `extract(filename, bytes)` is the text reader; tests and the app use the default. `compact` draws the list as the Interview page's narrow rail does (#286): titles, a "+ Add Source document" button and a drop zone, with no table; `onList(list)` is told whenever the list has been read (after a load or a change).
  */
-export function SourceDocumentsPanel({ store, actor = '', readOnly = false, commitNote = '', extract = extractSourceText, onList = null }) {
+export function SourceDocumentsPanel({ store, actor = '', readOnly = false, commitNote = '', extract = extractSourceText, onList = null, compact = false }) {
   const [list, setList] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [message, setMessage] = useState(null)
@@ -216,6 +216,43 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
   const entries = list?.entries ?? []
   const live = entries.filter((e) => !isRemovedSource(e))
   const removed = entries.filter(isRemovedSource)
+
+  if (compact) {
+    return html`
+      <div class="source-documents source-documents-compact" data-testid="source-documents-compact">
+        ${loadError ? html`<p class="inline-error" role="alert">${loadError}</p>` : null}
+        ${list === null && !loadError ? html`<p class="loading">Loading…</p>` : null}
+        ${list !== null && live.length === 0 ? html`<p class="muted" data-testid="source-documents-empty">No Source documents yet.</p>` : null}
+        ${live.length > 0
+          ? html`<ul class="srcdocs" data-testid="source-documents-list">
+              ${live.map(
+                (entry) => html`<li key=${entry.id} data-source-id=${entry.id}>
+                  <span class="srcdoc-title" title=${entry.filename}>${entry.title}</span>
+                  <span class="meta">${formatBytes(entry.size)}${entry.text ? '' : ' · no text'}</span>
+                </li>`
+              )}
+            </ul>`
+          : null}
+        ${list?.warning ? html`<p class="source-documents-warning" role="status">${list.warning}</p>` : null}
+        ${readOnly
+          ? null
+          : html`<label
+              class=${`dropzone${busy ? ' disabled' : ''}`}
+              data-testid="source-documents-dropzone"
+              onDragOver=${(e) => e.preventDefault()}
+              onDrop=${(e) => {
+                e.preventDefault()
+                const files = [...(e.dataTransfer?.files ?? [])]
+                if (files.length) uploadFiles(files)
+              }}
+            >
+              + Add Source document
+              <input type="file" multiple accept=${SOURCE_FILE_ACCEPT} aria-label="Add Source documents" data-testid="source-documents-input" style="display:none" disabled=${busy} onChange=${onPick} />
+            </label>`}
+        <p class=${`source-documents-message ${message ? message.kind : ''}`} role="status" aria-live="polite" data-testid="source-documents-message">${message ? message.text : ''}</p>
+      </div>
+    `
+  }
 
   return html`
     <details class="source-documents" data-testid="source-documents">

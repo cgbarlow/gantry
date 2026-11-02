@@ -45,6 +45,13 @@ export function createServerSourceClient(slug, fetchForInstance) {
       const { asset, reference } = await parse(await fetchForInstance(path(`/${encodeURIComponent(id)}/as-asset`), { method: 'POST', ...json({ uploadedBy }) }), 'Failed to copy to the images')
       return { ...asset, reference }
     },
+    /** The text kept for a document, or null when it has none. */
+    async readText(id) {
+      const res = await fetchForInstance(path(`/${encodeURIComponent(id)}/text`))
+      if (res.status === 404) return null
+      if (!res.ok) await parse(res, 'Failed to read the text')
+      return res.text()
+    },
     async readOriginal(id) {
       const res = await fetchForInstance(path(`/${encodeURIComponent(id)}/file`))
       if (!res.ok) await parse(res, 'Failed to download')

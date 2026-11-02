@@ -663,6 +663,69 @@ Each review and sign-off item carries a Gantry status — Requested, In review, 
 
 Use **Show commit history** in the card header to open a dialog listing the commits on the current Stage's branch. This works before a Pull Request exists, so you can see what has been committed to the Stage while it is still in progress.
 
+## The AI interview
+
+The **AI interview** is a way to draft a Stage with an AI. You give an Instance its **Source documents** (a client brief, requirements, meeting notes), connect an **AI Provider**, and open the **Interview page**. The AI reads the documents, drafts every Field they support into a live preview, and talks it through with you. Nothing is saved until you confirm the Stage, and the AI never marks a Module `agreed` or passes a Gate that needs approval or review: those stay with people.
+
+This release covers the **current Stage** of a **Local** or **Server-hosted** workspace. Azure DevOps, GitHub and GitLab workspaces don't have it yet, and neither does a Stage other than the current one; **✦ AI interview** is greyed out there and its tooltip says why. The AI does not yet ask multiple-choice question cards in rounds, keep a decisions log or resume a paused session: those arrive in later releases. Today it drafts, and you steer it in plain chat.
+
+### Before you start
+
+- **Add Source documents** to the Instance (see **Source documents** above). You can also add them from the Interview page itself, under **Source documents** in the left rail with **+ Add Source document**. The AI works from their text, so a Word file, a PDF with a text layer or a Markdown file is read; a picture or a scanned PDF has no text yet and is only listed.
+- **Connect an AI Provider** under **AI Providers** on Global Settings (see **AI Providers** above), or with **Connect an AI Provider** on the Interview page's kickoff, which opens the same dialog. An AI Provider belongs to your browser, so you set it up again in another browser.
+
+### Opening the page
+
+Choose **✦ AI interview** in the Instance editor's header. If the editor has changes you haven't saved, Gantry asks whether to save them or discard them first, because the AI reads what is *saved*. The page has three columns:
+
+- **Left rail.** The Source documents, and **+ Add Source document** (or drop a file on it). Gantry reads the text out of the file in your browser, as it does in the editor.
+- **Centre.** The conversation. The **chat box is pinned at the bottom**; it is greyed out until the interview starts.
+- **Right.** The **live draft** of the Stage's Modules. Saved content is shown as it is; the AI's drafts are marked **AI draft · unsaved**.
+
+**← Editor** takes you back to the editor, and **✦ AI interview** brings you back to the same conversation and drafts for as long as the Instance stays open. Closing or reloading the tab loses the unsaved drafts, and Gantry warns you first.
+
+### Kickoff
+
+Before the AI says anything, the centre column shows a short form:
+
+- **AI Provider.** The Default one is pre-selected. If you have none, the form says so and **Connect an AI Provider** opens the settings dialog. An AI Provider that hasn't been tested is **tested when you press Start** (the key, the model and the other checks from **Test connection**); if the test fails, the form shows why and nothing starts.
+- **A warning for a model that can't use tools.** If Test connection found that the model can't produce question cards natively, the form says so and Gantry will ask it to write its drafts in text instead (the *text fallback*). It still works, but is less reliable. Gantry never refuses a model.
+- **Artefact to aim for.** When more than one Artefact can pass this Stage's Gate (for example *SOAP* and *SOAP (full)*), you choose which one the AI works towards. The **lightest** one, the one that requires the least, is pre-selected.
+- **Source documents.** How many the AI will read, and a hint if there are none.
+- **Start interview.**
+
+### Drafting
+
+The AI opens with a short summary of what it found in the Source documents, then **drafts every Field they support**. You see each draft appear in the right-hand preview as the AI writes it.
+
+- **Read-only Modules are left out.** They are context for the AI, not something it writes.
+- **Optional Fields** are drafted only when the documents support them.
+- **Saved content is left alone.** The AI drafts into Fields that are empty. A Field that already holds content, whoever wrote it, is not touched: in this release you change it yourself in the editor. (Changing saved content through a *keep / use the AI's version / merge* card comes with question cards.) Content saved at an earlier Stage is likewise left as it is.
+- **Where a fact comes from.** A figure from a Source document is cited as `[title, p. 4](source:id)`, shown as a small 📄 mark. A fact you told the AI in the chat is written as plain fact. Something the AI proposed that you accepted is marked **(target assumption)**. The AI is told never to invent a figure, a date or a name.
+- **Nothing the example shows is sent.** The example Instance a Definition may offer (the "Populate example text" source) is for people to fill a form from; it is never given to the AI.
+
+#### Gantry checks every draft
+
+The AI writes each Field through a *draft field step*, and Gantry checks the draft before it reaches the preview:
+
+- a **select** value must be one of the Field's options;
+- the **word count** must be within the Field's budget at the Instance's Target size (see **Target size and word targets**);
+- every **figure** must be cited with a Source document or marked **(target assumption)**, unless you typed that figure yourself in the chat. A citation to a document that isn't in the Instance is also a problem.
+
+If a draft has a problem, Gantry sends it back to the AI **once**, saying what to fix. If it is still wrong, or the AI doesn't answer, the draft still appears in the preview, with the problem shown as a **warning** under the Field. A check never blocks anything: you decide.
+
+### Chatting and switching AI Provider
+
+Type in the chat box at any time: a fact ("the budget is capped at $1.2M"), a correction, or "leave out Finance". The AI reads it with the Source documents and redrafts what it affects. A figure you state needs no source.
+
+You can **switch AI Provider between any two turns** with the picker at the top of the conversation: the next turn goes to the other AI Provider, which is given the conversation so far. A switch is refused, with the reason, if the AI Provider you pick fails its test. If a call fails part-way, nothing is lost: a rejected key shows a prompt to enter a new one and the same request is sent again, a rate limit or no credit shows **Retry**, and any other failure shows the reason and **Try again**.
+
+### Saving the Stage
+
+When Gantry's **real Gate check passes** for the Artefact you chose, counting the AI's drafts as if they were saved, a **stage-end card** appears: *"Shape is ready. Save it?"* Until then, a line under the preview shows the Gate check and what is still outstanding. Fields the AI left out are for you to fill in, in the editor or by telling the AI.
+
+**Save and stop here** makes **one stage Save**, the same Save as in the editor, so it goes through the **Save check**: if a colleague saved the same Stage meanwhile, Gantry merges Field by Field and asks only about a Field you both changed. The Modules the AI wrote into stay **`draft`**; only a person marks a Module `agreed`. After the Save, the card confirms it and shows the result of the Gate check on what was saved. The drafts then show as ordinary saved content, and the editor shows them too.
+
 ## Settings
 
 Gantry's Settings are split by scope:

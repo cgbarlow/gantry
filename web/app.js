@@ -77,6 +77,7 @@ import {
 import { wrap } from './lib/editorWrap.js'
 import { SourceDocumentsPanel, openSourceDocument } from './lib/sourceDocumentsPanel.js'
 import { citedSourceIds } from './lib/sourceCitations.js'
+import { InterviewPage, clearInterviewSessions } from './lib/interviewView.js'
 import { createLocalSourceStore } from './lib/localSourceDocuments.js'
 import { createServerSourceClient } from './lib/serverSourceDocuments.js'
 import { assetReference, repoAssetReference, isLocalAssetSource, resolveAssetRefs, resolveRepoAssetRefs } from './lib/assetRefs.js'
@@ -4965,13 +4966,56 @@ function offersSourceDocuments(instance) {
   return Boolean(instance.workspace?.owner || instance.workspace?.organization)
 }
 
-function SourceDocumentsSection({ instance }) {
+// The Instance's Source document store: its own folder for a Local workspace, the server's routes otherwise. Shared by the editor's panel and the Interview page (#286).
+function useSourceStore(instance) {
   const handle = localDirHandle.value
   const slug = instance.slug
-  const store = useMemo(() => {
+  return useMemo(() => {
     if (instance.isLocalWorkspace) return handle ? createLocalSourceStore(handle, slug) : null
     return createServerSourceClient(slug, (url, init) => apiFetchForInstance(slug, url, init))
   }, [slug, instance.isLocalWorkspace, handle])
+}
+
+// #286 (map #238): the Interview page for a local or server workspace Instance, handed what only this file can reach: the Instance's Source document store, the Definition it follows, the other Stages' saved content (the AI is told what is already settled) and the stage Save.
+function InterviewScreen({ instance, editorHref, onSaveDrafts }) {
+  const store = useSourceStore(instance)
+  if (!store) return html`<p class="loading">Loading…</p>`
+  async function loadStructure() {
+    if (instance.localDefinitionStructure) return instance.localDefinitionStructure
+    const res = await fetch(`/api/definitions/${encodeURIComponent(instance.definition)}/versions/${encodeURIComponent(String(instance.definitionVersion ?? 1))}`)
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(body.error ?? `Failed to load the Definition "${instance.definition}" (${res.status})`)
+    return body
+  }
+  async function loadOtherSaved() {
+    const modules = []
+    if (instance.isLocalWorkspace) {
+      const handle = localDirHandle.peek()
+      const structure = instance.localDefinitionStructure
+      for (const stage of structure.stages) {
+        if (stage.id !== instance.stage.id) modules.push(...(await readLocalStageModules(handle, instance.slug, stage, structure)))
+      }
+    } else {
+      for (const stage of instance.stages) {
+        if (stage.id !== instance.stage.id) modules.push(...(await loadInstance(instance.slug, stage.id)).modules)
+      }
+    }
+    return modules
+  }
+  return html`<${InterviewPage}
+    instance=${instance}
+    store=${store}
+    actor=${instance.assignee ?? ''}
+    editorHref=${editorHref}
+    blockedReason=${interviewUnavailableReason(instance)}
+    loadStructure=${loadStructure}
+    loadOtherSaved=${loadOtherSaved}
+    onSaveDrafts=${onSaveDrafts}
+  />`
+}
+
+function SourceDocumentsSection({ instance }) {
+  const store = useSourceStore(instance)
   const [notice, setNotice] = useState('')
   const known = useRef({})
   // #281: what the editor's preview needs to show a citation (the panel tells us each time it lists) and how to open one.
@@ -5400,10 +5444,20 @@ function GantryBrandIcon() {
 // instance.yaml) rather than only the slug — falling back to the slug, unchanged, when no name is
 // set. Once a name is shown, the slug moves to its own small badge beside `.instance-ref` so it's
 // still visible, just no longer the primary label.
-function AppHeader({ instance }) {
+// #286: the AI interview works on the current Stage of a local or server workspace Instance (a Provider's workspace takes it with the later remote-session tickets). '' when it can be opened, else the reason it can't.
+function interviewUnavailableReason(instance) {
+  if (instance.workspaceBacked) return 'The AI interview is not available on GitHub, Azure DevOps or GitLab workspaces yet.'
+  if (instance.archived) return 'This Instance is archived. Restore it to use the AI interview.'
+  if (isWriteAccessBlocked()) return 'The AI interview needs write access to this Instance.'
+  if (instance.stage.id !== instance.currentStageId) return 'The AI interview works on the current Stage. Open the current Stage to use it.'
+  return ''
+}
+
+function AppHeader({ instance, onOpenInterview }) {
   const [openMenu, setOpenMenu] = useState(null)
   const [reviewOpen, setReviewOpen] = useState(false)
   const reviewBlocked = isArchived() || isWriteAccessBlocked()
+  const interviewReason = interviewUnavailableReason(instance)
 
   return html`
     <header class="app-header">
@@ -5427,6 +5481,18 @@ function AppHeader({ instance }) {
           open=${openMenu === 'settings'}
           onOpenChange=${(next) => setOpenMenu(next ? 'settings' : null)}
         />
+        ${onOpenInterview && !instance.workspaceBacked
+          ? html`<button
+              type="button"
+              class="btn small"
+              data-testid="open-ai-interview"
+              disabled=${Boolean(interviewReason)}
+              title=${interviewReason || 'Open the AI interview: the AI reads your Source documents and drafts this Stage with you'}
+              onClick=${onOpenInterview}
+            >
+              ✦ AI interview
+            </button>`
+          : null}
         <button
           type="button"
           class="btn small"
@@ -5543,6 +5609,9 @@ function ModuleEditorPage({ slug: routeRef }) {
       viewedStage.value = null
     })
   }, [routeRef])
+
+  // #286: an AI interview session lives while this Instance's editor page is open, so going to the editor and back keeps it.
+  useEffect(() => () => clearInterviewSessions(), [routeRef])
 
   const instance = instanceData.value
   const error = loadError.value
@@ -5989,6 +6058,75 @@ function ModuleEditorPage({ slug: routeRef }) {
     setSelectedArtefactId(artefactId)
   }
 
+  // ---- The AI interview (#286) ----
+  // The Interview page is this same route with `?interview=1`, so the Save, the Save check and its dialogs below are the editor's own.
+  const interviewUrl = new URL(locationRef.current.url, window.location.origin)
+  const interviewOpen = interviewUrl.searchParams.get('interview') === '1'
+  const editorHref = (() => {
+    const params = new URLSearchParams(interviewUrl.search)
+    params.delete('interview')
+    return interviewUrl.pathname + (params.size ? `?${params}` : '')
+  })()
+
+  async function openInterview() {
+    if (!(await confirmLeave())) return
+    // The editors of the Stage are about to go away; the Save reads the Fields' values from the page's data, not from them.
+    registryRef.current = { stageKey: null, entries: [] }
+    const params = new URLSearchParams(interviewUrl.search)
+    params.set('interview', '1')
+    locationRef.current.route(`${interviewUrl.pathname}?${params}`)
+  }
+
+  // Puts the AI's drafts into the Modules' Fields, leaves those Modules `draft`, and does the ordinary stage Save (one Save, through the
+  // Save check). On a failure or a cancelled clash the Fields go back to what was saved. `check` is Gantry's real Gate check on what
+  // was just saved, for the Artefact aimed for.
+  async function saveInterviewDrafts(drafts, { artefactId } = {}) {
+    const inst = instanceData.peek()
+    if (!inst?.stage || isEditingBlocked()) return { ok: false, message: 'This Instance cannot be written to right now.' }
+    const touched = new Set(Object.values(drafts).map((draft) => draft.moduleId))
+    instanceData.value = {
+      ...inst,
+      modules: inst.modules.map((mod) =>
+        touched.has(mod.id)
+          ? {
+              ...mod,
+              status: 'draft',
+              fields: mod.fields.map((field) => {
+                const draft = drafts[`${mod.id}.${field.id}`]
+                return draft ? { ...field, value: draft.value } : field
+              }),
+            }
+          : mod
+      ),
+    }
+    const saved = await saveStage()
+    if (!saved) {
+      const latest = instanceData.peek()
+      if (latest && stageKey(latest) === stageKey(inst)) {
+        instanceData.value = { ...latest, modules: latest.modules.map((mod) => (touched.has(mod.id) ? inst.modules.find((m) => m.id === mod.id) ?? mod : mod)) }
+      }
+      return { ok: false, message: stageSave.peek().message || 'The Save was cancelled, so nothing was saved.' }
+    }
+    let check = null
+    try {
+      const latest = instanceData.peek()
+      let result
+      if (latest.isLocalWorkspace) {
+        result = await runLocalCheck(latest)
+      } else {
+        const res = await apiFetchForInstance(latest.slug, `/api/instance/check?slug=${encodeURIComponent(latest.slug)}`)
+        result = res.ok ? await res.json() : null
+      }
+      if (result) {
+        const aimed = (result.artefacts ?? []).find((a) => a.id === artefactId)
+        check = { pass: aimed ? aimed.complete && aimed.satisfiesGate !== false : Boolean(result.pass), outstanding: aimed?.outstanding ?? [] }
+      }
+    } catch {
+      // The Gate check is a confirmation, not part of the Save: a Save that worked is reported either way.
+    }
+    return { ok: true, check }
+  }
+
   async function handleSyncFromMain() {
     if (!instance || syncing) return
     setSyncing(true)
@@ -6043,13 +6181,32 @@ function ModuleEditorPage({ slug: routeRef }) {
   // not the raw `routeRef` prop — a numeric reference (WI200) never equals `instance.slug` itself.
   if (!instance || instance.slug !== currentSlug.value) return html`<p class="loading">Loading…</p>`
 
+  const dialogs = html`
+    ${leavePrompt
+      ? html`<${UnsavedChangesDialog} count=${stageSave.value.dirtyModuleIds.length} onAnswer=${answerLeavePrompt} />`
+      : null}
+    ${clashPrompt
+      ? html`<${StageClashDialog}
+          inst=${clashPrompt.inst}
+          conflicts=${clashPrompt.conflicts}
+          onAnswer=${(resolutions) => {
+            clashPrompt.resolve(resolutions)
+            setClashPrompt(null)
+          }}
+        />`
+      : null}
+  `
+  if (interviewOpen && !instance.workspaceBacked) {
+    return html`<${InterviewScreen} instance=${instance} editorHref=${editorHref} onSaveDrafts=${saveInterviewDrafts} />${dialogs}`
+  }
+
   const selectedArtefact = instance.artefacts.find((artefact) => artefact.id === selectedArtefactId) ??
     instance.artefacts.find((artefact) => artefact.id === defaultArtefactId(instance.artefacts)) ?? null
   const visibleFieldIds = selectedArtefact ? artefactFieldIds(instance.modules, selectedArtefact) : null
   const stageSync = instance.stageSync
   const showStageSyncBanner = Boolean(stageSync?.behind) && (stageSync?.behindFiles?.length ?? 0) > 0
   return html`
-    <${AppHeader} instance=${instance} />
+    <${AppHeader} instance=${instance} onOpenInterview=${openInterview} />
     ${instance.archived
       ? html`<div class="archived-banner">
           This instance is <strong>archived</strong> and hidden from the dashboard. Restore it from
@@ -6104,19 +6261,7 @@ function ModuleEditorPage({ slug: routeRef }) {
       visibleFieldIds=${visibleFieldIds}
       onFieldRegistered=${registerField}
     />
-    ${leavePrompt
-      ? html`<${UnsavedChangesDialog} count=${stageSave.value.dirtyModuleIds.length} onAnswer=${answerLeavePrompt} />`
-      : null}
-    ${clashPrompt
-      ? html`<${StageClashDialog}
-          inst=${clashPrompt.inst}
-          conflicts=${clashPrompt.conflicts}
-          onAnswer=${(resolutions) => {
-            clashPrompt.resolve(resolutions)
-            setClashPrompt(null)
-          }}
-        />`
-      : null}
+    ${dialogs}
   `
 }
 

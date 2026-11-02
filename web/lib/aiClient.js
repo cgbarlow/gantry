@@ -89,8 +89,10 @@ export function questionCardMode(provider) {
  * added to the system prompt instead. `options`: `{ fetchImpl, origin, signal, onEvent }`.
  *
  * `onEvent` is told, as they happen: `{ type: 'text', delta, text }` (`text` is everything so far, with any
- * question block hidden), `{ type: 'preparing-questions' }` the moment a question call (or block) starts, and
- * `{ type: 'retry', errors }` when an invalid card is going back to the model.
+ * question block hidden), `{ type: 'preparing-questions' }` the moment a question call (or block) starts,
+ * `{ type: 'retry', errors }` when an invalid card is going back to the model, and, for the caller's own tools,
+ * `{ type: 'tool-start', id, name }` and `{ type: 'tool-call', call }` (#286). `input.askCards` (default true)
+ * set to false offers no question cards.
  *
  * Returns `{ kind, ... }`:
  *   'cards'  `{ via: 'native'|'text', cards, text, otherToolCalls }`  show the cards only now they are complete
@@ -100,10 +102,11 @@ export function questionCardMode(provider) {
  * to continue from: it includes the failed attempt and its error result when a card was sent back).
  * A card is shown only when its tool call is complete; an invalid one goes back to the model once.
  */
-export async function runTurn(provider, { system = '', messages = [], tools = [], knownSources } = {}, options = {}) {
+export async function runTurn(provider, { system = '', messages = [], tools = [], knownSources, askCards = true } = {}, options = {}) {
   const mode = questionCardMode(provider)
-  const fullSystem = mode === 'text' ? [system, TEXT_FALLBACK_INSTRUCTIONS].filter(Boolean).join('\n\n') : system
-  const offered = mode === 'text' ? tools : [ASK_TOOL, ...tools]
+  // #286: `askCards: false` offers no question cards at all (the Interview page drafts and chats before the cards of #287 arrive).
+  const fullSystem = mode === 'text' && askCards ? [system, TEXT_FALLBACK_INSTRUCTIONS].filter(Boolean).join('\n\n') : system
+  const offered = mode === 'text' || !askCards ? tools : [ASK_TOOL, ...tools]
   let history = messages
   let usage = EMPTY_USAGE
   let retried = false
@@ -123,9 +126,13 @@ export async function runTurn(provider, { system = '', messages = [], tools = []
         if (event.name === ASK_TOOL_NAME && !announced) {
           announced = true
           options.onEvent?.({ type: 'preparing-questions' })
+        } else if (event.name !== ASK_TOOL_NAME) {
+          options.onEvent?.({ type: 'tool-start', id: event.id, name: event.name })
         }
       } else if (event.type === 'tool-call') {
         toolCalls.push(event)
+        // #286: one of the caller's own tools is complete; the Interview page puts a drafted Field in the preview now.
+        if (event.name !== ASK_TOOL_NAME) options.onEvent?.({ type: 'tool-call', call: event })
       } else if (event.type === 'usage') {
         usage = addUsage(usage, event)
       }
