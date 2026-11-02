@@ -114,3 +114,35 @@ its threads by Field. Where the ticket left a detail open:
   same `reviews/` files itself.
 - **The manifest's `commentsAnswered` starts at 0** and is only raised when the comments are worked
   through (#303).
+
+## Amendment (#303): the review round
+
+Ticket #303 built the AI half: the round itself. Where the ticket left a detail open:
+
+- **A card is a thread, with the same commenter's tracked changes beside it.** A commenter's tracked changes in a Field that has no thread of theirs
+  there make a card of their own. Commenters **disagree** when their tracked changes touch the same paragraph of a Field; a comment beside someone
+  else's edit is not a disagreement, so those stay separate cards. The shared card offers "Accept <name>'s edit" for each commenter, and recommends
+  Revise: no single edit is the obvious answer.
+- **"Accept or revise" is two choices.** "Accept the edit" is the reviewer's edit as they tracked it; "Revise" has the AI redraft, and its draft
+  meets the keep / use the AI's version / merge card like any change to saved content. Accept is recommended only when the Field is unchanged
+  since the render; otherwise Revise is, and the card shows the old and new wording.
+- **"Unchanged since the render" is read from the document itself.** Gantry compares the Field's wording under its Word bookmark (the text as it was
+  rendered, tracked insertions left out) with what is saved now, ignoring Markdown formatting, which Word does not print as characters. A copy that
+  lost its bookmarks uses the content at the render's commit it was placed against, else the words the commenters touched. A server or Local
+  workspace has no history, so any difference from the document counts as changed.
+- **Gantry makes an accepted edit itself only when it can do so without guessing.** Deleted words must occur once in the Field (replaced by the
+  insertion beside them, paired in order), or a whole paragraph the reviewer inserted goes after the paragraph it followed. Otherwise the AI makes
+  the edit, and its draft meets the same card. Either way the edit is an unsaved preview until the round is saved.
+- **The AI never sees a real name.** Commenters are "Reviewer 1", "Reviewer 2", fixed across the Reviewed copies in the order they were brought in.
+  Every text sent to the AI is scrubbed of each commenter's name and of the parts of it ("Ana" for "Ana Reviewer"), including the architect's own
+  words and the brief's view of the decisions log, which shows a `review-answered` entry by its outcome alone.
+- **"Can't settle yet" is an open question** whose text names the Field and the first words of the comment, with the commenters as "Reviewer N".
+  The AI may offer a significant one as a Key decision only where the Key decisions module is mounted on the Stage.
+- **Joining a session.** Questions are added to the open round, or open a round of their own when the AI is waiting, or are queued for the next
+  round while it is working. A paused session cannot take them, so the page remembers the wish in the tab and the interview that resumes asks
+  them in its first round. A focused round ends when its cards are answered, calling the AI only for an answer that needs something written.
+- **The manifest's count follows the committed logs.** After a Save, the page raises `commentsAnswered` to the number of threads the Stages' logs
+  say were answered (`PUT /api/instance/reviews/answered`: one commit on the current Stage's branch for a Provider, one write for a server
+  workspace; a Local workspace writes its own). It only goes up and never past the comments the copy holds.
+- **A Save does not render again** and the **Review response list** is #304. The Interview page's summary says render again when reviewers should
+  see the changes.

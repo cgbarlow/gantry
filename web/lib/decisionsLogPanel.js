@@ -35,6 +35,32 @@ function describeSourceUpdate(entry, fieldTitle) {
   }
 }
 
+const REVIEW_OUTCOMES = {
+  accept: 'accepted the edit',
+  revise: 'asked for a revision',
+  keep: 'kept the Field as it is',
+  'cant-settle': "couldn't settle it yet, so it is an open question",
+  note: 'noted it',
+  assign: 'assigned it to another Field',
+  reopen: 're-opened the Stage to make the change',
+  leave: 'left it unanswered',
+}
+
+/** A `review-answered` entry (#303) as a sentence that stands on its own: who said what, word for word, on which Field, and what was decided. */
+function describeReviewAnswered(entry, fieldTitle) {
+  const field = asList(entry.fields).map(fieldTitle).join(', ')
+  const thread = asList(entry.threads)[0]
+  const said = []
+  if (thread) {
+    said.push(`${thread.author || 'A reviewer'}${thread.date ? ` (${day(thread.date)})` : ''} commented${thread.anchor ? ` on “${thread.anchor}”` : ''}: “${thread.text}”`)
+    for (const reply of asList(thread.replies)) said.push(`${reply.author || 'A reviewer'} replied: “${reply.text}”`)
+  }
+  for (const change of asList(entry.changes)) said.push(`${change.author || 'A reviewer'} ${change.kind === 'insertion' ? 'inserted' : 'deleted'}: “${change.text}”`)
+  const changed = entry.changedSinceRender && Object.values(entry.changedSinceRender).some(Boolean) ? ' The Field had changed since the render.' : ''
+  const own = entry.words ? ` In their own words: “${entry.words}”.` : ''
+  return `Review comment${entry.reviewName ? ` in ${entry.reviewName}` : ''}${field ? ` on ${field}` : entry.about ? ` on ${entry.about}` : ''}. ${said.join(' ')} The architect ${REVIEW_OUTCOMES[entry.outcome] ?? entry.outcome}.${changed}${own}`
+}
+
 /** One entry as a sentence for a reader: the question and the answer, or what the architect said, or what was chosen. */
 export function describeEntry(entry, { fieldTitle = (key) => key } = {}) {
   const fields = asList(entry.fields).map(fieldTitle)
@@ -67,6 +93,8 @@ export function describeEntry(entry, { fieldTitle = (key) => key } = {}) {
       return `${entry.question}${entry.why ? ` — ${entry.why}` : ''}${feeds}`
     case 'source-update':
       return describeSourceUpdate(entry, fieldTitle)
+    case 'review-answered':
+      return describeReviewAnswered(entry, fieldTitle)
     case 'returned-to-draft':
       return entry.note ?? `${entry.module ?? 'A Module'} returned to draft`
     case 'artefact':
@@ -80,7 +108,7 @@ export function describeEntry(entry, { fieldTitle = (key) => key } = {}) {
   }
 }
 
-const KIND_LABELS = { term: 'Term', answer: 'Answer', fact: 'Architect', 'saved-content': 'Saved content', 'hand-edit': 'Hand edit', 'open-question': 'Open question', artefact: 'Artefact', restart: 'Restart', 'model-change': 'Model', 'source-update': 'Brought up to date', 'returned-to-draft': 'Returned to draft' }
+const KIND_LABELS = { term: 'Term', answer: 'Answer', fact: 'Architect', 'saved-content': 'Saved content', 'hand-edit': 'Hand edit', 'open-question': 'Open question', artefact: 'Artefact', restart: 'Restart', 'model-change': 'Model', 'source-update': 'Brought up to date', 'returned-to-draft': 'Returned to draft', 'review-answered': 'Review comment answered' }
 
 function EntryRow({ entry, fieldTitle, state }) {
   return html`<li class=${'dl-entry' + (entry.kind === 'open-question' && state !== 'old' ? ' open' : '') + (state === 'old' ? ' old' : '')} data-testid="decisions-entry" data-entry-id=${entry.id} data-kind=${entry.kind} data-state=${state ?? 'current'}>

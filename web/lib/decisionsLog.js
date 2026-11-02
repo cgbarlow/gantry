@@ -22,9 +22,12 @@ export const DECISIONS_LOG_VERSION = 1
  * `source-update` (#298) is the architect's answer to a "Bring up to date" card about a Field that was Out of date: it names the Source
  * document that changed (or the earlier Field), the Field, and what was decided (keep, redraft, re-cite, redraft without it, open question).
  * `returned-to-draft` (#298) records that a Module marked `agreed` went back to `draft` because a change to it was saved, and why.
+ * `review-answered` (#303, ADR-0066) is the architect's answer to a card about one comment thread of a Reviewed copy. It holds the copy and thread ids, the commenter's
+ * real name and the date, the comment, its replies and any tracked change word for word, the Fields and whether each changed since the render, and the outcome with
+ * the architect's words, so it stands on its own even on a branch that does not hold the file.
  * The log adds more by their own tickets, and shows any kind it does not know as it is.
  */
-export const ENTRY_KINDS = Object.freeze(['answer', 'fact', 'saved-content', 'hand-edit', 'open-question', 'artefact', 'restart', 'model-change', 'term', 'save-clash', 'source-update', 'returned-to-draft'])
+export const ENTRY_KINDS = Object.freeze(['answer', 'fact', 'saved-content', 'hand-edit', 'open-question', 'artefact', 'restart', 'model-change', 'term', 'save-clash', 'source-update', 'returned-to-draft', 'review-answered'])
 
 /** Where a Stage's log lives, relative to the Instance's folder. */
 export const decisionsLogPath = (stageId) => `interview/${stageId}.yaml`

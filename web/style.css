@@ -2361,3 +2361,19 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .update-current { margin: 8px 0; }
 .update-current .value { font-size: 13px; max-height: 9em; overflow: auto; }
 .update-returned { margin: 6px 0; padding-left: 18px; font-size: 13px; }
+
+/* #303: review comments as cards on the Interview page. */
+.review-context { margin: 8px 0; font-size: 13px; }
+.review-context .review-side { margin: 0 0 8px; padding-left: 10px; border-left: 3px solid var(--line-strong); }
+.review-context .review-copy-name { margin: 0 0 6px; font-size: 12px; color: var(--text-muted); }
+.review-context ins { text-decoration: underline; }
+.review-context del { text-decoration: line-through; }
+.review-changes ul { margin: 2px 0 4px; padding-left: 18px; }
+.review-inputs { display: grid; gap: 6px; margin: 8px 0; }
+.review-inputs label { display: grid; gap: 2px; font-size: 12px; color: var(--text-muted); }
+.review-inputs textarea, .review-inputs select { font: inherit; font-size: 13px; }
+.interview-review .review-copies { margin: 6px 0; padding-left: 16px; font-size: 12px; }
+.interview-review .review-resolved { margin: 6px 0; font-size: 12px; }
+.interview-review .review-resolved ul { margin: 4px 0; padding-left: 16px; }
+.kick-review-join { display: flex; gap: 6px; align-items: flex-start; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

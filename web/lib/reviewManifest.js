@@ -63,6 +63,24 @@ export function stringifyReviewManifest(entries) {
   return stringifyYAML(entries)
 }
 
+/**
+ * The manifest entries with `commentsAnswered` raised to the counts the decisions logs say (`{ [reviewId]: n }`, web/lib/reviewRound.js
+ * `answeredCounts`). A count is only ever raised and never above the comments the copy holds, so a write that arrives twice, or late, changes nothing.
+ * Returns `{ entries, changed }`.
+ */
+export function withAnsweredCounts(entries, counts = {}) {
+  let changed = false
+  const next = entries.map((entry) => {
+    const wanted = Number(counts?.[entry.id])
+    if (!Number.isFinite(wanted) || wanted <= (entry.commentsAnswered ?? 0)) return entry
+    const capped = Math.min(Math.floor(wanted), Math.max(entry.comments ?? 0, entry.commentsAnswered ?? 0, 0) || Math.floor(wanted))
+    if (capped <= (entry.commentsAnswered ?? 0)) return entry
+    changed = true
+    return { ...entry, commentsAnswered: capped }
+  })
+  return { entries: next, changed }
+}
+
 /** The entry for `id`, or `undefined`. */
 export function findReview(entries, id) {
   return entries.find((entry) => entry.id === id)

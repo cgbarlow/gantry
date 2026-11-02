@@ -111,6 +111,8 @@ import {
   expectedFromInstance,
   loadReviewedCopies,
   localReviewIo,
+  recordAnsweredReviews,
+  recordAnsweredReviewsLocally,
   remoteReviewIo,
   reviewDay,
   threadByline,
@@ -4897,7 +4899,19 @@ function ReviewGroupView({ group }) {
 let reviewCopiesCache = { key: null, copies: [] }
 
 function ReviewCommentsPanel({ instance }) {
+  const location = useLocation()
   const tick = reviewTick.value
+  // #303: the AI interview works through review comments as a focused round of cards, where the AI interview itself is available.
+  const interviewBlocked = interviewUnavailableReason(instance, { update: true })
+  const goHere = new URL(window.location.href)
+  goHere.searchParams.set('interview', '1')
+  goHere.searchParams.set('review', '1')
+  const workThroughHref = !interviewBlocked && (!instance.workspaceBacked || offersSourceDocuments(instance)) ? `${goHere.pathname}${goHere.search}` : ''
+  function workThrough(event) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    event.preventDefault()
+    location.route(`${goHere.pathname}${goHere.search}`)
+  }
   const key = `${instance.slug}#${tick}`
   const [state, setState] = useState(() =>
     reviewCopiesCache.key === key ? { phase: 'ready', copies: reviewCopiesCache.copies, error: '' } : { phase: 'loading', copies: [], error: '' }
@@ -4926,6 +4940,9 @@ function ReviewCommentsPanel({ instance }) {
   return html`
     <section class="review-copies-panel" data-testid="review-copies-panel" aria-label="Review comments">
       <h2>Review comments</h2>
+      ${workThroughHref
+        ? html`<p class="review-note"><a class="btn small" href=${workThroughHref} data-testid="review-work-through" onClick=${workThrough}>Work through these with the AI</a> One card for each comment thread; nothing changes until you answer.</p>`
+        : null}
       ${state.copies.map(
         ({ entry, read, placed, error }) => html`
           <article class="review-copy" key=${entry.id} data-review-id=${entry.id} data-testid="review-copy">
@@ -5203,8 +5220,40 @@ function OutOfDatePanel({ instance }) {
 }
 
 // #286 (map #238): the Interview page for a local or server workspace Instance, handed what only this file can reach: the Instance's Source document store, the Definition it follows, the other Stages' saved content (the AI is told what is already settled) and the stage Save.
-function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequestApproval, onReRenderEarlier, onCheckApproval, onDraftAhead, update = false, onReopenStage, onOpenStage }) {
+function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequestApproval, onReRenderEarlier, onCheckApproval, onDraftAhead, update = false, review = false, onReopenStage, onOpenStage }) {
   const store = useSourceStore(instance)
+  const location = useLocation()
+  // #303: the kept Reviewed copies, read and placed on Fields, for the review round; read again after one is brought in.
+  const reviewVersion = reviewTick.value
+  const [reviewCopies, setReviewCopies] = useState(null)
+  const [reviewDialog, setReviewDialog] = useState(false)
+  useEffect(() => {
+    let live = true
+    loadReviewedCopies(reviewIoFor(instance))
+      .then((copies) => live && setReviewCopies(copies))
+      .catch(() => live && setReviewCopies([]))
+    return () => {
+      live = false
+    }
+  }, [instance.slug, reviewVersion])
+  function openReviewRound() {
+    const here = new URL(window.location.href)
+    here.searchParams.set('interview', '1')
+    here.searchParams.set('review', '1')
+    location.route(`${here.pathname}${here.search}`)
+  }
+  async function recordReviewAnswers(counts) {
+    if (instance.isLocalWorkspace) {
+      const handle = localDirHandle.peek()
+      await recordAnsweredReviewsLocally(instance.slug, counts, {
+        readText: (path) => readLocalTextFile(handle, path),
+        writeText: (path, text) => writeLocalTextFile(handle, path, text),
+      })
+    } else {
+      await recordAnsweredReviews(instance.slug, counts, apiFetchForInstance)
+    }
+    reviewTick.value = reviewTick.value + 1
+  }
   const outOfDate = useOutOfDate(instance)
   const decisionsStore = useDecisionsStore(instance)
   // #298: on an Azure DevOps or GitHub workspace a re-open (ADR-0026) is refused while the current Stage has a branch, and uploading a Source
@@ -5250,8 +5299,13 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequ
   // the Stage has a Pull Request on file: with none there is nothing to ask. A local or server workspace has no Provider to ask; its own
   // record of the current Stage is the report (the page does that).
   // `key`: a run (#293) moves the Instance on to its next Stage, and the page for that Stage starts afresh.
-  return html`<${OutOfDateWatcher} instance=${instance} /><${InterviewPage}
-    key=${`${instance.stage.id}${update ? '|update' : ''}`}
+  return html`<${OutOfDateWatcher} instance=${instance} />${reviewDialog ? html`<${ReviewImportDialog} instance=${instance} onClose=${() => setReviewDialog(false)} />` : null}<${InterviewPage}
+    key=${`${instance.stage.id}${update ? '|update' : ''}${review ? '|review' : ''}`}
+    review=${review}
+    reviewCopies=${reviewCopies}
+    onBringInReview=${() => setReviewDialog(true)}
+    onOpenReview=${openReviewRound}
+    onReviewAnswered=${recordReviewAnswers}
     outOfDate=${outOfDate.flags}
     newSince=${outOfDate.newSince}
     flagsReady=${outOfDate.key !== '' && (!instance.workspaceBacked || !hasFlags || stageStarted !== undefined)}
@@ -5260,7 +5314,7 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequ
     store=${store}
     actor=${instance.assignee ?? ''}
     editorHref=${editorHref}
-    blockedReason=${interviewUnavailableReason(instance, { update })}
+    blockedReason=${interviewUnavailableReason(instance, { update: update || review })}
     update=${update}
     onReopenStage=${onReopenStage}
     onOpenStage=${onOpenStage}
@@ -6368,10 +6422,13 @@ function ModuleEditorPage({ slug: routeRef }) {
   const interviewOpen = interviewUrl.searchParams.get('interview') === '1'
   // #298: `?interview=1&update=1` is Bring up to date, the Interview page on just the Fields flagged Out of date.
   const updateOpen = interviewOpen && interviewUrl.searchParams.get('update') === '1'
+  // #303: `?interview=1&review=1` is the review round, the Interview page on just the comments of the Reviewed copies kept with the Instance.
+  const reviewRoundOpen = interviewOpen && !updateOpen && interviewUrl.searchParams.get('review') === '1'
   const editorHref = (() => {
     const params = new URLSearchParams(interviewUrl.search)
     params.delete('interview')
     params.delete('update')
+    params.delete('review')
     return interviewUrl.pathname + (params.size ? `?${params}` : '')
   })()
 
@@ -6660,6 +6717,7 @@ function ModuleEditorPage({ slug: routeRef }) {
     return html`<${InterviewScreen}
         instance=${instance}
         update=${updateOpen}
+        review=${reviewRoundOpen}
         onReopenStage=${reopenInterviewStage}
         onOpenStage=${openInterviewStage}
         editorHref=${editorHref}

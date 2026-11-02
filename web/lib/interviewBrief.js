@@ -206,8 +206,10 @@ function logEntryLine(entry) {
   if (entry.recommendation) bits.push(`recommended: ${entry.recommendation}`)
   if (entry.kind === 'source-update') bits.push(`${entry.outcome ?? 'answered'}${entry.sourceTitle || entry.source ? ` (${entry.sourceTitle || entry.source} ${entry.change ?? 'changed'})` : entry.inputField ? ` (${entry.inputField} changed)` : ''}`)
   if (entry.kind === 'returned-to-draft' && entry.note) bits.push(entry.note)
+  // #303: a review comment answered is shown to the AI by its outcome alone. The commenters' real names stay in the repo (ADR-0066).
+  if (entry.kind === 'review-answered') bits.push(`a reviewer's comment was answered: ${entry.outcome ?? 'answered'}`)
   if (entry.answer) bits.push(`answer: ${asArray(entry.answer).join('; ')}`)
-  if (entry.words) bits.push(`the architect's words: "${entry.words}"`)
+  if (entry.words && entry.kind !== 'review-answered') bits.push(`the architect's words: "${entry.words}"`)
   if (asArray(entry.sources).length) bits.push(`sources: ${asArray(entry.sources).join(', ')}`)
   if (asArray(entry.fields).length) bits.push(`fed: ${asArray(entry.fields).join(', ')}`)
   if (entry.replaces) bits.push(`replaces ${asArray(entry.replaces).join(', ')}`)

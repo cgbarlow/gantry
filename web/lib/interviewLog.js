@@ -291,6 +291,16 @@ export function createSessionLog(config = {}) {
     },
 
     /**
+     * #303 (ADR-0066): the architect answered a card about one comment thread of a Reviewed copy. `entry` is `reviewEntriesFor`'s
+     * (web/lib/reviewRound.js): the copy and thread ids, the commenter, the comment, replies and tracked change word for word, the Fields
+     * and whether each changed since the render, the `outcome` (`accept`, `revise`, `keep`, `cant-settle`, `note`, `assign`, `reopen`) and the
+     * architect's `words`. The real names are kept here, in the repo; the AI is only ever told "Reviewer 1", "Reviewer 2".
+     */
+    addReviewAnswered(entry) {
+      return add({ kind: 'review-answered', ...clean(entry) })
+    },
+
+    /**
      * #298: a Module marked `agreed` goes back to `draft` because a change to it is being saved. Only a person marks a Module agreed, so
      * the log keeps why it was taken back: the Module, the Fields that changed and a note in plain words.
      */

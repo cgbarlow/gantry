@@ -10,7 +10,7 @@ import { registerInstance } from '../lib/instanceRegistry.js'
 import { registerWorkspace } from '../lib/workspaceRegistry.js'
 import { stageBranchName } from '../lib/stageBranch.js'
 import { StorageConflictError } from '../lib/storage.js'
-import { prepareReviewedCopies, readReviewManifest, storeReviewedCopies } from '../lib/reviews.js'
+import { prepareReviewedCopies, readReviewManifest, recordReviewsAnswered, storeReviewedCopies } from '../lib/reviews.js'
 import { loadDefinition } from '../lib/definition.js'
 import { REVIEWED_COPY_MAX_BYTES } from '../web/lib/reviewedCopy.js'
 import { parseReviewManifest } from '../web/lib/reviewManifest.js'
@@ -323,6 +323,87 @@ for (const { name, provider, serverOptions, location, fakeServerOptions, registe
         assert.equal(problemOf(today).text, 'We have since decided to buy a payments platform.')
         const bare = await (await fetch(`${ctx.gantryBase}/api/instance/review-basis?slug=${SLUG}&commit=${commit}&texts=0`, { headers: auth })).json()
         assert.equal(problemOf(bare).text, undefined)
+      })
+    ))
+}
+
+// ---------- #303: the answered count ----------
+
+const put = (body, headers = {}) => ({ method: 'PUT', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) })
+
+describe('the manifest’s answered count (#303)', () => {
+  test('a server workspace raises it when comments are answered, never lowers it, and refuses a body it cannot read', () =>
+    withServer(async ({ base, folder }) => {
+      const up = await fetch(`${base}/api/instance/reviews?slug=${SLUG}`, upload([['a.docx', okCopy()]]))
+      const [entry] = (await up.json()).reviews
+      assert.equal(entry.commentsAnswered, 0)
+      const raised = await fetch(`${base}/api/instance/reviews/answered?slug=${SLUG}`, put({ answered: { [entry.id]: 4 } }))
+      assert.equal(raised.status, 200, await raised.clone().text())
+      assert.equal((await raised.json()).reviews[0].commentsAnswered, 4)
+      assert.equal(parseReviewManifest(readFileSync(join(folder, 'reviews', 'manifest.yaml'), 'utf8'))[0].commentsAnswered, 4)
+      // Late or repeated: nothing goes down.
+      const lower = await fetch(`${base}/api/instance/reviews/answered?slug=${SLUG}`, put({ answered: { [entry.id]: 2 } }))
+      assert.equal((await lower.json()).reviews[0].commentsAnswered, 4)
+      // The copy holds nine comments: a count past that is held at nine.
+      const high = await fetch(`${base}/api/instance/reviews/answered?slug=${SLUG}`, put({ answered: { [entry.id]: 99 } }))
+      assert.equal((await high.json()).reviews[0].commentsAnswered, 9)
+      assert.equal((await fetch(`${base}/api/instance/reviews/answered?slug=${SLUG}`, put({ answered: { 'not an id': 1 } }))).status, 400)
+      assert.equal((await fetch(`${base}/api/instance/reviews/answered?slug=${SLUG}`, put({ answered: { [entry.id]: 'many' } }))).status, 400)
+      assert.equal((await fetch(`${base}/api/instance/reviews/answered?slug=${SLUG}`, put({}))).status, 400)
+    }))
+
+  test('any store: it is a conditional write of the manifest', async () => {
+    const storage = createInMemoryStorage()
+    const definition = loadDefinition('design', { version: 3 })
+    const options = { storage, instancesDir: 'instances/default' }
+    const prepared = await prepareReviewedCopies([{ filename: 'one.docx', bytes: okCopy() }], { slug: SLUG, definition })
+    await storeReviewedCopies(SLUG, prepared.copies, options)
+    const [entry] = await readReviewManifest(SLUG, options)
+    const entries = await recordReviewsAnswered(SLUG, { [entry.id]: 3 }, options)
+    assert.equal(entries[0].commentsAnswered, 3)
+    assert.equal((await readReviewManifest(SLUG, options))[0].commentsAnswered, 3)
+    let writes = 0
+    const putText = storage.putText.bind(storage)
+    storage.putText = async (...args) => {
+      writes++
+      return putText(...args)
+    }
+    await recordReviewsAnswered(SLUG, { [entry.id]: 3 }, options)
+    assert.equal(writes, 0, 'nothing is written when no count goes up')
+  })
+})
+
+for (const { name, provider, serverOptions, location, fakeServerOptions, register, client: clientFor, commitRequest } of PROVIDERS) {
+  test(`${name}-backed: answered counts are one commit on the Stage's branch`, () =>
+    withScratchInstances((instancesDir) =>
+      withRunningServerForProvider(provider, { options: { instancesDir, ...serverOptions }, fakeServerOptions: fakeServerOptions?.() }, async (ctx) => {
+        const auth = { Authorization: basicAuthHeader(ctx.pat) }
+        if (register) register(ctx, instancesDir)
+        else {
+          const created = await fetch(`${ctx.gantryBase}/api/instances`, post({ definition: 'design', slug: SLUG, ...location(ctx) }, auth))
+          assert.equal(created.status, 201, await created.text())
+        }
+        const client = clientFor(ctx)
+        const branch = stageBranchName(SLUG, 'shape')
+        const url = `${ctx.gantryBase}/api/instance/reviews/answered?slug=${SLUG}`
+        // No branch yet: there is nothing to update, and none is started.
+        assert.equal((await fetch(url, put({ answered: { 'copy-aaaa-0001': 1 } }, auth))).status, 409)
+        assert.equal(await client.branchExists(branch), false)
+
+        const up = await fetch(`${ctx.gantryBase}/api/instance/reviews?slug=${SLUG}`, upload([['one.docx', okCopy()]], auth))
+        const [entry] = (await up.json()).reviews
+        let response
+        const commits = await countingCommits(commitRequest, async () => {
+          response = await fetch(url, put({ answered: { [entry.id]: 2 } }, auth))
+        })
+        assert.equal(response.status, 200, await response.clone().text())
+        assert.equal(commits, 1)
+        const stored = parseReviewManifest(await client.getFileContent(`gantry-workspace/${SLUG}/reviews/manifest.yaml`, { branch }))
+        assert.equal(stored[0].commentsAnswered, 2)
+        const again = await countingCommits(commitRequest, async () => {
+          await fetch(url, put({ answered: { [entry.id]: 2 } }, auth))
+        })
+        assert.equal(again, 0, 'no count went up, so no commit')
       })
     ))
 }

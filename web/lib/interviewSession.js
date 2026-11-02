@@ -38,6 +38,12 @@
 //     draft changes goes back to `draft`, and the log keeps a `returned-to-draft` note saying why. A normal session also tells the AI which
 //     Source documents are New since last interview, to read against what is saved.
 //
+//   * (#303) works through **review comments** when the context carries `review` (the questions a Reviewed copy's threads ask, web/lib/reviewRound.js):
+//     as a focused round of cards (`review.mode` is `only`), or joined to the next round of an interview that is going (`joinReview`, or `join` at the start).
+//     One card per comment thread, answered accept or revise / keep as is / can't settle yet. An accepted tracked edit is made by Gantry when it can be
+//     made without guessing, and sits in the preview like any draft; a revision meets the keep / use the AI's version / merge card. Each answered
+//     thread is a `review-answered` entry (real names, the comment word for word); the AI is only told "Reviewer 1", "Reviewer 2".
+//
 // Nothing here saves. Drafts are an unsaved preview until the architect confirms the stage-end card.
 import { runTurn, runWithRecovery, ensureTested, EMPTY_USAGE } from './aiClient.js'
 import { ASK_TOOL_NAME, FALLBACK_FENCE } from './aiCards.js'
@@ -71,6 +77,7 @@ import { resumeOpening } from './interviewResume.js'
 import { conflictKey, conflictText, conflictValueFromText } from './stageVersion.js'
 import { reapprovalNames, reapprovalOf } from './interviewReapproval.js'
 import { UPDATE_OPENING, needsAi, newSinceNote, reciteValue, removedSourcesOf, resolveUpdateCard, returnedToDraftNote, updateAnswersText, updateCards } from './bringUpToDate.js'
+import { REVIEW_OPENING, editsToAccept, applyTrackedEdits, reviewAnswersText, reviewCards, reviewEntriesFor, reviewNeedsAi, reviewNeedsInput, reviewOpenQuestion, resolveReviewCard } from './reviewRound.js'
 import { CLASH_OPTIONS, CHANGE_OPTIONS, acceptRecommendation, answersText, changeCard, choose, chooseOther, clashCard, followsRecommendation, isAnswered, isAutoId, otherWords, releaseHeld, shapeCard, sortRound, splitReady, termChoice, withMerged } from './interviewRounds.js'
 
 export { fieldsInScope }
@@ -255,8 +262,10 @@ export function createInterviewSession(config = {}) {
     sessionWarning: null, // { others }: another session on this Stage is not Done; Start waits for Carry on alongside or Cancel (#290)
     clash: null, // { cards, merging, mergeNote }: a Save found Fields both sides changed; a round of cards settles them (#290)
     resumed: null, // the recap line when this run carries on from the decisions log (#290)
+    review: null, // Review comments (#303): { mode: 'only'|'join', total, answered, reopen, deferred, elsewhere } while this session has such cards
     update: null, // Bring up to date (#298): { mode: 'only'|'first', total, answered, reopen, deferred, elsewhere } while this session has such a round
   }
+  let queuedReview = [] // review cards waiting to join the next round of a session that is going (#303)
   let updateOpening = '' // the opening a normal session gives the AI once its Bring up to date round is answered (#298)
   const updateCauses = new Map() // module.field -> why it was Out of date, for the note when an agreed Module goes back to draft (#298)
   let clashWaiter = null // { resolve, conflicts, entryIds }: the Save waiting on the clash cards
@@ -298,6 +307,8 @@ export function createInterviewSession(config = {}) {
     round: state.round ? { ...state.round, cards: state.round.cards.map((c) => ({ ...c, selected: [...c.selected] })) } : null,
     clash: state.clash ? { ...state.clash, cards: state.clash.cards.map((c) => ({ ...c, selected: [...c.selected] })) } : null,
     sessionWarning: state.sessionWarning ? { others: state.sessionWarning.others.map((o) => ({ ...o })) } : null,
+    review: state.review ? { ...state.review, reopen: [...state.review.reopen], deferred: state.review.deferred.map((d) => ({ ...d })), elsewhere: state.review.elsewhere.map((d) => ({ ...d })) } : null,
+    queuedReview: queuedReview.length,
     update: state.update ? { ...state.update, reopen: [...state.update.reopen], deferred: state.update.deferred.map((d) => ({ ...d })), elsewhere: state.update.elsewhere.map((d) => ({ ...d })) } : null,
     openFields: openFields(),
     decisions: { ...logSummary(log.entries()), pending: log.pending().length, session: log.sessionId },
@@ -581,13 +592,18 @@ export function createInterviewSession(config = {}) {
       change.shown = true
       changes.push(changeCard({ key, fieldTitle: fieldTitle(key), saved: change.saved, proposed: change.proposed, handEdit: change.handEdit === true, reapproves: change.reapproves ?? [] }))
     }
-    const all = [...cards, ...released.filter((r) => !cards.some((c) => c.id === r.id)), ...changes]
+    // #303: review questions the architect asked for while the AI was busy join this round.
+    const joining = queuedReview.filter((q) => !answeredIds().has(q.id))
+    queuedReview = []
+    if (joining.length && state.review) state.review = { ...state.review, total: state.review.total + joining.length }
+    const all = [...cards, ...released.filter((r) => !cards.some((c) => c.id === r.id)), ...joining, ...changes]
     if (all.length === 0) {
       state.round = null
       return
     }
     const sorted = sortRound(all, requiredFieldKeys(context.definition, context.stageId, context.artefactId))
     state.round = { id: ++state.roundNo, cards: sorted, page: 0, final: state.finish === 'accepting' }
+    if (joining.length) say('sys', `${joining.length} review comment${joining.length === 1 ? ' is' : 's are'} in this round alongside the interview's questions.`, { reviewJoined: true })
     if (state.finish === 'accepting') state.finish = 'final'
   }
 
@@ -769,6 +785,122 @@ export function createInterviewSession(config = {}) {
       const causes = [...new Set(keys.map((k) => updateCauses.get(k)).filter(Boolean))]
       log.addReturnedToDraft({ module: moduleId, fields: keys, note: returnedToDraftNote({ moduleTitle, fieldTitles: keys.map(fieldTitle), cause: causes.join('; ') }) })
     }
+  }
+
+  // ---------- Review comments (#303) ----------
+
+  const EDITABLE_TYPES = new Set(['markdown', 'text', 'list'])
+
+  /** The cards for the questions in the context's `review` (web/lib/reviewRound.js), not already asked or answered. */
+  function reviewCardsFor(review) {
+    const taken = new Set([...answeredIds(), ...queuedReview.map((c) => c.id), ...(state.round?.cards ?? []).map((c) => c.id), ...state.held.map((c) => c.id)])
+    return reviewCards({
+      items: review.items ?? [],
+      labels: review.labels ?? new Map(),
+      fieldTitle,
+      stageTitle: review.stageTitle ?? ((id) => id),
+      pageStageTitle: review.pageStageTitle ?? '',
+      fieldChoices: review.fieldChoices ?? [],
+    }).filter((c) => !taken.has(c.id))
+  }
+
+  const reviewStateFor = (review, total, mode) => ({
+    mode,
+    total,
+    answered: false,
+    reopen: [],
+    deferred: (review.deferred ?? []).map((d) => ({ ...d })),
+    elsewhere: (review.elsewhere ?? []).map((d) => ({ ...d })),
+  })
+
+  /** Opens the focused round of cards about the review comments this Stage can act on. Nothing is sent to the AI yet. */
+  function openReviewRound() {
+    const review = getContext().review
+    const cards = reviewCardsFor(review)
+    state.review = reviewStateFor(review, cards.length, 'only')
+    state.round = { id: ++state.roundNo, cards, page: 0, final: false, review: true }
+    state.phase = 'asking'
+    say('sys', `${cards.length} review comment${cards.length === 1 ? '' : 's'} to work through. Answer ${cards.length === 1 ? 'its card' : 'each card'}; nothing changes until you answer, and nothing is saved until you save.`, { reviewRound: true })
+  }
+
+  const savedValue = (context, key) => {
+    const ref = splitRef(key)
+    return ref ? normalizeSavedContent(context.saved)[ref.moduleId]?.fields?.[ref.fieldId] : undefined
+  }
+
+  /**
+   * Carries out what the architect answered on review cards: a `review-answered` entry for every thread answered (once saved, it keeps the thread
+   * from being asked again), a Field kept so the AI proposes nothing for it, an accepted tracked edit made by Gantry where it can be made without
+   * guessing, an open question for what can't be settled. Returns the ids of the cards whose accepted edit is already in the preview.
+   */
+  function applyReviewResults(results, context) {
+    const applied = new Set()
+    const scope = fieldsInScope(context.definition, context.stageId)
+    for (const r of results) {
+      const review = r.card.review ?? {}
+      const key = r.outcome === 'assign' ? r.assignTo : r.key
+      const title = key ? fieldTitle(key) : review.aboutTitle || 'the document'
+      if (r.outcome === 'leave') {
+        say('sys', `Left the comment on ${title} unanswered`)
+        continue
+      }
+      if (r.outcome === 'reopen') {
+        if (r.stageId && state.review && !state.review.reopen.includes(r.stageId)) state.review = { ...state.review, reopen: [...state.review.reopen, r.stageId] }
+        say('sys', `The comment on ${title} stays unanswered until ${r.stageId} is re-opened`)
+        continue
+      }
+      let openQuestion = ''
+      if (r.outcome === 'keep') {
+        if (key) keptFields.add(key)
+        say('sys', `Kept ${title} as it is`)
+      } else if (r.outcome === 'note') {
+        say('sys', 'Noted the comment about the document')
+      } else if (r.outcome === 'cant-settle') {
+        openQuestion = reviewOpenQuestion(r, { fieldTitle, labels: context.review?.labels ?? new Map() })
+        log.addOpenQuestion({ question: openQuestion, why: review.landing?.blocker || 'A reviewer’s comment that could not be settled yet.', fields: key ? [key] : [] })
+        say('sys', `Logged an open question about ${title}`)
+      } else if (r.outcome === 'accept' && key) {
+        updateCauses.set(key, 'because a reviewer’s edit was accepted')
+        const entry = scope.get(key)
+        const saved = savedValue(context, key)
+        const made = entry && EDITABLE_TYPES.has(entry.field.type) && saved !== undefined ? applyTrackedEdits(saved, editsToAccept(r.card, r.by)) : { ok: false, reason: 'Gantry could not make the edit itself.' }
+        if (made.ok) {
+          const ref = splitRef(key)
+          const inputs = state.fieldInputs[key] ?? recordedInputs(key)
+          state.drafts[key] = { value: made.value, words: countWords(made.value), warnings: [], uncovered: [], inputs, moduleId: ref.moduleId, fieldId: ref.fieldId }
+          state.fieldInputs[key] = inputs
+          applied.add(r.card.id)
+          say('sys', `Accepted the edit to ${title}`, { drafted: key })
+        } else {
+          say('sys', `${made.reason} The AI will make the edit to ${title}, and you will see it before anything is saved.`)
+        }
+      } else if (r.outcome === 'revise' || r.outcome === 'assign') {
+        if (key) updateCauses.set(key, 'because a reviewer’s comment was answered')
+        if (r.words) otherTexts.push(r.words)
+        say('sys', `${title} will be revised`)
+      }
+      if (r.words && r.outcome !== 'revise' && r.outcome !== 'assign') otherTexts.push(r.words)
+      for (const entry of reviewEntriesFor(r, { stage: context.stageId, openedQuestion: openQuestion })) log.addReviewAnswered(entry)
+    }
+    return applied
+  }
+
+  /** The answered review cards of a round: resolved, carried out, and written for the AI. Returns `{ results, applied, text, ai }`. */
+  function answerReviewCards(cards, context) {
+    const results = cards.map(resolveReviewCard)
+    const applied = applyReviewResults(results, context)
+    const keyDecisions = standardRoles(context.definition, context.stageId).keyDecisions.inScope
+    for (const card of cards) state.answered.push({ id: card.id, header: card.header, question: card.question, field: card.field, labels: [...card.selected], other: '', followed: followsRecommendation(card) })
+    const lines = cards.map((c) => `${c.review?.fieldTitle || 'The document'}: ${c.selected.join(', ')}`)
+    say('you', lines.join('\n'), { answered: cards.length })
+    const text = reviewAnswersText(results, { fieldTitle, labels: context.review?.labels ?? new Map(), applied, keyDecisions })
+    return { results, applied, text, ai: results.some((r) => reviewNeedsAi(r, { applied, keyDecisions })) }
+  }
+
+  /** Review cards go back in the queue (chat put them away, or a round was left): they join the next round. */
+  function requeueReview(cards) {
+    const taken = new Set([...answeredIds(), ...queuedReview.map((c) => c.id)])
+    queuedReview = [...queuedReview, ...cards.filter((c) => c.type === 'review' && !taken.has(c.id))]
   }
 
   // ---------- one send ----------
@@ -1130,9 +1262,38 @@ export function createInterviewSession(config = {}) {
     const cards = finish ? round.cards.map(acceptRecommendation) : round.cards
     const open = cards.filter((c) => !isAnswered(c))
     if (open.length) return { ok: false, message: `${open.length} card${open.length === 1 ? ' is' : 's are'} not answered yet.`, firstOpen: open[0].id }
+    const unfinished = cards.filter(reviewNeedsInput)
+    if (unfinished.length) return { ok: false, message: 'Choose the Field each “Assign to a Field” answer is about.', firstOpen: unfinished[0].id }
 
-    applyChangeDecisions(cards)
-    recordAnswers(cards)
+    // #303: review comments are answered here too, alongside whatever else the round holds.
+    const reviewCardsAnswered = cards.filter((c) => c.type === 'review')
+    const others = cards.filter((c) => c.type !== 'review')
+    let reviewAnswers = null
+    if (reviewCardsAnswered.length) {
+      reviewAnswers = answerReviewCards(reviewCardsAnswered, getContext())
+      if (state.review) state.review = { ...state.review, answered: true }
+    }
+    if (others.length === 0 && reviewAnswers && !pendingAsk?.callIds.length) {
+      // Only review cards were open: the interview (if there is one) is where it was. The AI is called only if something needs writing.
+      state.round = null
+      if (!reviewAnswers.ai) {
+        state.phase = 'waiting'
+        emit()
+        return { ok: true }
+      }
+      const opening = round.review ? REVIEW_OPENING : 'The architect answered the review comments that joined this round. Work only on the Fields below, then carry on.'
+      const body = `${opening}
+
+The architect's answers to the review comments:
+${reviewAnswers.text}`
+      if (round.review) messages = [{ role: 'user', text: body }]
+      else messages = [...messages, { role: 'user', fromGantry: true, text: body }]
+      await runLoop()
+      return { ok: true }
+    }
+
+    applyChangeDecisions(others)
+    if (others.length) recordAnswers(others)
     state.round = null
     const last = round.final || state.finish === 'final'
     if (finish && !last) {
@@ -1143,7 +1304,10 @@ export function createInterviewSession(config = {}) {
     const heldIds = state.held.map((h) => h.id)
     const body = [
       `The architect answered ${cards.length === 1 ? 'the card' : `all ${cards.length} cards`} of round ${round.id}:`,
-      answersText(cards, { fieldTitle: (key) => key }),
+      answersText(others, { fieldTitle: (key) => key }),
+      reviewAnswers ? `
+Review comments they answered in this round:
+${reviewAnswers.text}` : '',
       heldIds.length ? `\nHeld back until the cards they wait on are answered (Gantry shows them then; send a card again under the same id to change it): ${heldIds.join(', ')}.` : '',
       last ? `\n${LAST_ROUND_NOTE}` : finish ? `\n${FINISH_NOTE}` : '\nRedraft the Fields these answers feed, then ask the next round of whatever is now ready, or say that you are done.',
     ]
@@ -1221,6 +1385,20 @@ export function createInterviewSession(config = {}) {
       } else if (state.cardMode === 'chat') {
         say('sys', 'This model cannot produce question cards, so it asks in plain chat. That works, but is less reliable.')
       }
+      // #303: a session that is only working through review comments opens its round before the AI is called, and ends there unless an answer needs
+      // writing. One that joins review comments to an interview queues the cards for the first round the AI asks.
+      const rev = getContext().review
+      if (rev?.items?.length && rev.mode === 'only') {
+        messages = []
+        openReviewRound()
+        emit()
+        return
+      }
+      if (rev?.items?.length && rev.mode === 'join') {
+        const cards = reviewCardsFor(rev)
+        queuedReview = [...queuedReview, ...cards]
+        state.review = reviewStateFor(rev, cards.length, 'join')
+      }
       const upd = getContext().update
       const updating = Boolean(upd?.items?.length)
       const updateOnly = updating && upd.mode === 'only'
@@ -1259,6 +1437,12 @@ export function createInterviewSession(config = {}) {
     async send(text) {
       const body = String(text ?? '').trim()
       if (!body || state.phase === 'working' || state.phase === 'kickoff' || state.phase === 'testing' || state.phase === 'paused') return
+      if (state.round?.review) {
+        // The review comments come first: chat would put them away, and the AI has not been told about them yet (#303).
+        say('sys', 'Answer the review comment cards first, then chat.')
+        emit()
+        return
+      }
       if (state.round?.update) {
         // The Bring up to date cards come first: chat would put them away, and the AI has not been told about them yet (#298).
         say('sys', 'Answer the Bring up to date cards first, then chat.')
@@ -1268,6 +1452,7 @@ export function createInterviewSession(config = {}) {
       say('you', body)
       if (state.round) {
         for (const card of state.round.cards) if (card.type === 'change' && pendingChanges.has(card.field)) pendingChanges.get(card.field).shown = false
+        requeueReview(state.round.cards)
         state.round = null
       }
       closePendingAsk('The architect did not answer these cards. They wrote in chat instead, below. Ask again if you still need them.')
@@ -1330,6 +1515,43 @@ export function createInterviewSession(config = {}) {
       messages = [...messages, { role: 'user', fromGantry: true, text: FINISH_NOTE }]
       await runLoop()
       return { ok: true }
+    },
+
+    /**
+     * Review comments (#303) join an interview that is going or paused: the questions of `review` (the same shape as the context's) are added to the
+     * round that is open, or opened as a round of their own when the AI is waiting, or queued for the next round while it is busy. Resolves
+     * `{ ok, added, where }`, `where` being `round`, `new-round` or `next-round`.
+     */
+    joinReview(review) {
+      if (!review?.items?.length) return { ok: true, added: 0, where: 'none' }
+      if (['kickoff', 'testing'].includes(state.phase)) return { ok: false, added: 0, where: 'none', message: 'Start the interview first, or work through the review comments on their own.' }
+      const cards = reviewCardsFor(review)
+      if (cards.length === 0) return { ok: true, added: 0, where: 'none' }
+      state.review = state.review ? { ...state.review, total: state.review.total + cards.length, answered: false } : reviewStateFor(review, cards.length, 'join')
+      let where = 'next-round'
+      if (state.phase === 'asking' && state.round && !state.round.update && !state.round.review && !state.clash) {
+        state.round = { ...state.round, cards: [...state.round.cards, ...cards] }
+        where = 'round'
+      } else if (state.phase === 'waiting' && !state.round && !state.clash) {
+        state.round = { id: ++state.roundNo, cards, page: 0, final: false, review: false }
+        state.phase = 'asking'
+        where = 'new-round'
+      } else {
+        queuedReview = [...queuedReview, ...cards]
+      }
+      say('sys', `${cards.length} review comment${cards.length === 1 ? '' : 's'} added ${where === 'round' ? 'to this round' : where === 'new-round' ? 'as a round of their own' : 'to the next round'}.`, { reviewJoined: true })
+      emit()
+      return { ok: true, added: cards.length, where }
+    },
+
+    /** Free text under a review card: the architect's own words, logged with the outcome. */
+    setReviewReason(cardId, text) {
+      setCard(cardId, (c) => (c.type === 'review' ? { ...c, reason: String(text ?? '') } : c))
+    },
+
+    /** The Field a review comment on the document is assigned to. Choosing one chooses "Assign to a Field". */
+    setReviewAssign(cardId, fieldKey) {
+      setCard(cardId, (c) => (c.type === 'review' ? { ...c, assignTo: String(fieldKey ?? ''), selected: fieldKey ? ['Assign to a Field'] : c.selected } : c))
     },
 
     /** Switch AI Provider between any two turns. Resolves `{ ok, message? }`. */
@@ -1484,10 +1706,12 @@ export function createInterviewSession(config = {}) {
           finish: state.finish,
           resumed: state.resumed,
           update: state.update,
+          review: state.review,
           error: state.error,
           phase: state.phase,
         },
         pendingChanges: [...pendingChanges],
+        queuedReview,
         updateOpening,
         updateCauses: [...updateCauses],
         kept: [...keptFields],
@@ -1521,6 +1745,7 @@ export function createInterviewSession(config = {}) {
         finish: s.finish ?? null,
         resumed: s.resumed ?? null,
         update: s.update ?? null,
+        review: s.review ?? null,
         error: s.error ?? null,
         kickoffError: null,
         drafting: null,
@@ -1530,6 +1755,7 @@ export function createInterviewSession(config = {}) {
       nextId = saved.nextId ?? nextId
       pendingChanges.clear()
       for (const [k, v] of saved.pendingChanges ?? []) pendingChanges.set(k, v)
+      queuedReview = saved.queuedReview ?? []
       updateOpening = saved.updateOpening ?? ''
       updateCauses.clear()
       for (const [k, v] of saved.updateCauses ?? []) updateCauses.set(k, v)
@@ -1616,6 +1842,8 @@ export function createInterviewSession(config = {}) {
       state.finish = null
       state.error = null
       state.update = null
+      state.review = null
+      queuedReview = []
       updateOpening = ''
       updateCauses.clear()
       state.phase = 'kickoff'

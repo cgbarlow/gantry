@@ -25,6 +25,8 @@ import { effectiveTargetSize, fieldTargetWords, targetSizeLabel } from './target
 import { logSummary } from './decisionsLog.js'
 import { outOfDateCountByStage, flagsForField } from './outOfDate.js'
 import { planUpdateRound, stagesToUpdate } from './bringUpToDate.js'
+import { answeredCounts, assignChoices, planReview, reviewerLabels } from './reviewRound.js'
+import { ReviewContext, ReviewInputs, ReviewSection } from './reviewView.js'
 import { beginRun, clearRun, interviewRuns, nextStage, planRows, resumableRun, runStartStage, runTargets, saveOutcome, updateRun } from './interviewRun.js'
 import { EMPTY_TOKENS, addTokens, formatTokens, hasTokens, tokenBreakdown, tokensOfLog, totalTokens } from './tokenUsage.js'
 import { describeSaved, resumeInfo } from './interviewResume.js'
@@ -117,6 +119,9 @@ function logHasSaved(log) {
   return Object.keys(log.fields ?? {}).length > 0 || (Array.isArray(log.status) && log.status.some((s) => s?.lastAiSave))
 }
 
+// Instances (by slug) whose architect asked, in this tab, for the review questions to join the interview that resumes or starts next (#303).
+const reviewJoinWanted = new Set()
+
 const MODE_LABELS = { native: 'native', text: 'text fallback', chat: 'plain chat' }
 
 /** One question card: header chip, the Field it feeds, the question, option tiles, "Why I recommend it" with its citation, and Other where it applies. */
@@ -125,7 +130,7 @@ function QuestionCard({ card, fieldTitle, session }) {
   const recommended = new Set(card.recommended)
   return html`<div class="qcard" data-testid="interview-card" data-card-id=${card.id} data-card-type=${card.type ?? 'question'} data-card-kind=${card.kind ?? ''}>
     <div class="qchip">
-      ${card.header || (card.type === 'update' ? 'Out of date' : card.type === 'change' ? 'Saved content' : card.kind === 'term' ? 'Preferred term' : card.kind === 'decision' ? 'Key decision' : 'Question')}${card.multiSelect ? ' · choose any' : ''}
+      ${card.header || (card.type === 'update' ? 'Out of date' : card.type === 'review' ? 'Review comment' : card.type === 'change' ? 'Saved content' : card.kind === 'term' ? 'Preferred term' : card.kind === 'decision' ? 'Key decision' : 'Question')}${card.multiSelect ? ' · choose any' : ''}
       ${card.field ? html` · feeds <span data-testid="card-feeds">${fieldTitle(card.field)}</span>` : null}
     </div>
     <p class="qhead" data-testid="card-question">${card.question}</p>
@@ -146,6 +151,7 @@ function QuestionCard({ card, fieldTitle, session }) {
           ${card.update.note ? html`<p class="kick-note" data-testid="update-landing">${card.update.note}</p>` : null}
         </div>`
       : null}
+    ${card.review ? html`<${ReviewContext} card=${card} />` : null}
     ${card.change
       ? html`<div class="change-compare" data-testid="change-compare">
           <div><span class="qchip">${card.change.reapproves?.length ? 'Approved' : 'Saved'}</span><div class="value" data-testid="change-saved">${isBlankValue(card.change.saved) ? 'Empty' : html`<${ValueView} value=${card.change.saved} />`}</div></div>
@@ -175,6 +181,7 @@ function QuestionCard({ card, fieldTitle, session }) {
           </label>`
         : null}
     </div>
+    ${card.review ? html`<${ReviewInputs} card=${card} session=${session} fieldTitle=${fieldTitle} />` : null}
     ${card.why || card.source
       ? html`<p class="why" data-testid="card-why">
           <strong>Why I recommend it:</strong> ${card.why}
@@ -266,12 +273,17 @@ function providerLabel(p) {
  *   update             true when the page was opened with "Bring up to date" (#298): a round of cards about exactly the Fields flagged Out of date on this Stage, and nothing else
  *   onReopenStage      (stageId) => { ok, message? }  re-opens a signed-off Stage (ADR-0026) for a Field only that Stage can change (a remote workspace), when the architect chooses it instead of saving
  *   onOpenStage        (stageId) => void  shows the Interview page on another Stage (a local or server workspace): "Bring up to date" works through the Stages in order
+ *   review             true when the page was opened with "Bring in review comments" (#303): a focused round of cards, one per unresolved comment thread of a Reviewed copy, and nothing else
+ *   reviewCopies       the kept Reviewed copies, read and placed on Fields (`loadReviewedCopies`), or null while they load
+ *   onBringInReview    () => void  opens the dialog that brings review comments in
+ *   onOpenReview       () => void  shows the Interview page as a focused review round
+ *   onReviewAnswered   ({ [reviewId]: n }) => Promise  raises the manifest's answered counts once answers are saved
  */
 // #297: `outOfDate` is the Fields flagged Out of date (web/lib/outOfDate.js) and `newSince` the documents marked New since last interview; the run plan marks each Stage that has flagged Fields and the Source documents rail marks the new documents.
-export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance, checkStatus = null, onRequestApproval, onReRenderEarlier = null, onCheckApproval, onDraftAhead, outOfDate = [], newSince = [], flagsReady = true, stageStarted, update = false, onReopenStage, onOpenStage }) {
+export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance, checkStatus = null, onRequestApproval, onReRenderEarlier = null, onCheckApproval, onDraftAhead, outOfDate = [], newSince = [], flagsReady = true, stageStarted, update = false, onReopenStage, onOpenStage, review = false, reviewCopies = null, onBringInReview, onOpenReview, onReviewAnswered }) {
   const key = `${instance.slug}|${instance.stage.id}`
   // #298: Bring up to date has its own session and working copy, so it never takes over an interview that is part-way.
-  const sessionKey = update ? `${key}|update` : key
+  const sessionKey = update ? `${key}|update` : review ? `${key}|review` : key
   // #295: on an Azure DevOps or GitHub workspace a Stage moves on only when its Pull Request merges, so the stage-end card asks for approval instead of advancing.
   const remote = isRemoteInstance(instance)
   const awaiting = openApproval(instance) // the Pull Request the Provider says is open for this Stage, else null: it overrides what the log says
@@ -301,6 +313,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const [handEditing, setHandEditing] = useState(null) // { key, error? }: the drafted Field open for a hand edit (#289)
   const [generation, setGeneration] = useState(0) // bumped to open the page afresh after a Pause (#290)
   const [flagsWaited, setFlagsWaited] = useState(false) // the wait for the Out of date check ran out (#298)
+  const [reopenedThreads, setReopenedThreads] = useState(() => new Set()) // threads resolved in Word that the architect asked to have asked after all (#303)
+  const [joinWanted, setJoinWanted] = useState(() => reviewJoinWanted.has(instance.slug)) // the review questions join the interview (#303)
+  const [reviewMessage, setReviewMessage] = useState('')
   const [asideNotice, setAsideNotice] = useState(null) // a working copy that was set aside because the committed log moved on (#290)
   const [copyRestored, setCopyRestored] = useState(false)
   const sessionRef = useRef(null)
@@ -425,7 +440,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           // #290: whether this run carries on from the decisions log, the earlier session of this architect it takes over, and the other
           // sessions still going on this Stage. Worked out when Start is pressed, from the logs as they are then.
           get resume() {
-            if (update) return null // Bring up to date is never a resumed interview (#298)
+            if (update || review) return null // Bring up to date and review comments are never a resumed interview (#298, #303)
             return resumeInfo({
               logs: { ...setup.logs, [instance.stage.id]: committedLog },
               stageId: instance.stage.id,
@@ -439,9 +454,14 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           actor,
           // #298: the documents New since last interview (a normal session's AI reads them against what is saved) and the Out of date Fields
           // this Stage can act on (the session opens with a round of cards about them). Worked out when Start is pressed.
-          newSince: update ? [] : newSince,
+          newSince: update || review ? [] : newSince,
+          // #303: the review comments this Stage can act on. `mode` is `only` on a focused round, `join` when the architect asked for them to come
+          // with the interview, else `none` (the labels are still there, so anything the AI is told is scrubbed of real names).
+          get review() {
+            return reviewPlan ? reviewContext(review ? 'only' : joinWanted ? 'join' : 'none') : undefined
+          },
           get update() {
-            return updatePlan && updatePlan.items.length
+            return !review && updatePlan && updatePlan.items.length
               ? {
                   mode: update ? 'only' : 'first',
                   items: updatePlan.items,
@@ -499,6 +519,25 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     return () => session.bind({ onChange: null })
   }, [sessionKey, setup.status])
 
+  // #303: once answers are saved, the manifest of each Reviewed copy says how many of its comments are answered. It follows the committed logs,
+  // and only ever goes up, so a write that is repeated or late changes nothing.
+  const sentCounts = useRef({})
+  useEffect(() => {
+    if (!onReviewAnswered || !reviewCopies?.length) return
+    const counts = answeredCounts({ ...stageLogs, [instance.stage.id]: committedLog })
+    const raise = {}
+    for (const { entry } of reviewCopies) {
+      const n = counts[entry.id] ?? 0
+      if (n > (entry.commentsAnswered ?? 0) && n > (sentCounts.current[entry.id] ?? 0)) raise[entry.id] = n
+    }
+    if (Object.keys(raise).length === 0) return
+    sentCounts.current = { ...sentCounts.current, ...raise }
+    Promise.resolve(onReviewAnswered(raise)).catch((err) => {
+      for (const id of Object.keys(raise)) delete sentCounts.current[id]
+      setReviewMessage(`The answered count could not be updated: ${err.message}`)
+    })
+  }, [stageLogs, committedLog, reviewCopies])
+
   // The Stage's committed decisions log is what the rail counts and what the AI is told is settled (#288).
   useEffect(() => {
     if (setup.status === 'ready' && committedLog && sessionRef.current) sessionRef.current.loadDecisions(committedLog)
@@ -552,7 +591,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const providerInUse = snap?.providerId ?? providerId
   const runStart = run?.startStageId ?? instance.stage.id // the Stage this run began on
   const multiStage = stagesList.findIndex((st) => st.id === target) > stagesList.findIndex((st) => st.id === runStart) // more than one Stage in the run
-  const stageEndReady = !update && phase === 'waiting' && draftKeys.length > 0 && Boolean(readiness?.ready) && !snap?.round && !finishing
+  const stageEndReady = !update && !review && phase === 'waiting' && draftKeys.length > 0 && Boolean(readiness?.ready) && !snap?.round && !finishing
   // #296: nothing draftable is left on a Stage drafted ahead, but Modules an earlier Stage also mounts are still held: the Waiting card offers
   // Check approval now or Stop here. Either saves the head start. A Stage whose every Module is held has nothing to draft at all, so the card
   // comes before the AI would start.
@@ -603,6 +642,33 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       : null
   // The Stages that have something to bring up to date, in order, other than this one (a local or server workspace goes through them one by one).
   const otherUpdateStages = setup.status === 'ready' && outOfDate.length ? stagesToUpdate({ flags: outOfDate, definition: setup.definition, remote, currentStageId: instance.currentStageId }).filter((st) => st.stageId !== instance.stage.id) : []
+  // #303: the review comments of the kept Reviewed copies that this Stage can act on, where each change would land (the rules of Bring up to date), and the threads Word resolved.
+  const reviewLabelMap = useMemo(() => reviewerLabels(reviewCopies ?? []), [reviewCopies])
+  const reviewPlan =
+    setup.status === 'ready' && reviewCopies
+      ? planReview({
+          copies: reviewCopies.filter((c) => !c.error),
+          logs: { ...stageLogs, [instance.stage.id]: committedLog },
+          reopened: reopenedThreads,
+          definition: definitionNow,
+          pageStageId: instance.stage.id,
+          currentStageId: instance.currentStageId,
+          remote,
+          awaiting: Object.keys(remoteRows?.pullRequests ?? {}),
+          inProgress: startedStages,
+          saved: [...instance.modules, ...otherSaved],
+        })
+      : null
+  const reviewContext = (mode) => ({
+    mode,
+    items: reviewPlan.items,
+    deferred: reviewPlan.deferred,
+    elsewhere: reviewPlan.elsewhere,
+    labels: reviewLabelMap,
+    fieldChoices: assignChoices(definitionNow, instance.stage.id),
+    stageTitle: stageTitleOf,
+    pageStageTitle: instance.stage.title,
+  })
   // #294: tokens, from what each AI Provider reported. A Stage's total is every session's status line in its committed log, except this
   // session's own (it is counted in full from memory, so its older committed line is not added twice). The session total is this run:
   // the Stages it went through before this one (from their logs) and what this session has used on this one.
@@ -612,12 +678,12 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const runStartAt = Math.max(0, Math.min(currentAt, stagesList.findIndex((st) => st.id === runStart)))
   const sessionTokens = stagesList.slice(runStartAt, currentAt).reduce((sum, st) => addTokens(sum, tokensOfLog(stageLogs[st.id])), mineHere)
   const thisStageTokens = stageTokens(instance.stage.id)
-  const resume = resumeLogs && !carryingOn && !update && phase === 'kickoff' ? resumableRun({ stages: stagesList, currentStageId: instance.stage.id, logs: resumeLogs, openPullRequests: remoteRows?.pullRequests ?? {} }) : null
+  const resume = resumeLogs && !carryingOn && !update && !review && phase === 'kickoff' ? resumableRun({ stages: stagesList, currentStageId: instance.stage.id, logs: resumeLogs, openPullRequests: remoteRows?.pullRequests ?? {} }) : null
   const stageTitleOf = (id) => stagesList.find((s) => s.id === id)?.title ?? id
 
   async function startInterview(options) {
-    // Bring up to date is not a run: it has no target Stage and never moves the Instance on (#298).
-    if (update) {
+    // Bring up to date and a review round are not runs: they have no target Stage and never move the Instance on (#298, #303).
+    if (update || review) {
       await sessionRef.current?.start(options)
       return
     }
@@ -836,7 +902,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   // Saves what Bring up to date settled (#298): the answers in the decisions log, with any re-cited or redrafted Fields, as one stage Save through
   // the Save check. It is not the end of a Stage: no run, no advance, no request for approval. The session's status line is written only when the
   // AI was used (its tokens are kept there); an answer that needed no AI leaves the Stage's status exactly as it was.
-  async function saveUpdate() {
+  async function saveUpdate(kind = 'source-update') {
     setSaving({ phase: 'saving' })
     const keys = Object.keys(drafts)
     const usedAi = hasTokens(snap?.tokens ?? EMPTY_TOKENS)
@@ -870,7 +936,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     }
     workingCopies.clear(sessionKey)
     const returned = (decisions?.entries ?? []).filter((e) => e.kind === 'returned-to-draft')
-    setSaving({ phase: 'saved', update: true, fields: keys.length, answers: (decisions?.entries ?? []).filter((e) => e.kind === 'source-update').length, returned })
+    setSaving({ phase: 'saved', update: true, fields: keys.length, answers: (decisions?.entries ?? []).filter((e) => e.kind === kind).length, returned })
     return true
   }
 
@@ -1056,6 +1122,46 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     </div>`
   }
 
+  // Review comments (#303): what this Stage has, what waits for another Stage, and what stays unanswered on a drafted-ahead Stage.
+  const reviewKickoffExtras = () => {
+    if (setup.status !== 'ready') return null
+    const here = reviewPlan?.items.length ?? 0
+    const next = reviewPlan?.stages?.[0] ?? null
+    return html`<div data-testid="interview-review-plan">
+      ${reviewCopies === null
+        ? html`<p class="kick-note" data-testid="interview-review-loading">Reading the Reviewed copies…</p>`
+        : here
+          ? html`<p class="kick-note" data-testid="interview-review-count"><strong>${here} review ${here === 1 ? 'question' : 'questions'}</strong> on ${instance.stage.title}.</p>`
+          : html`<p class="kick-note" data-testid="interview-review-none">No review comment waits on ${instance.stage.title}.</p>`}
+      ${reviewPlan?.deferred?.length
+        ? html`<p class="kick-note" data-testid="interview-review-deferred">${reviewPlan.deferred.length} review ${reviewPlan.deferred.length === 1 ? 'comment' : 'comments'} on a drafted-ahead Stage stay unanswered: a drafted-ahead branch is never changed. Ask ${reviewPlan.deferred.length === 1 ? 'it' : 'them'} once that Stage is the current one.</p>`
+        : null}
+      ${next && !remote
+        ? html`<p class="kick-note" data-testid="interview-review-next">
+            ${next.count} more on ${stageTitleOf(next.stageId)}.
+            <button type="button" class="btn small ghost" data-testid="interview-review-goto" disabled=${!onOpenStage} onClick=${() => onOpenStage?.(next.stageId)}>${here ? `Go to ${stageTitleOf(next.stageId)} first` : `Go to ${stageTitleOf(next.stageId)}`}</button>
+          </p>`
+        : null}
+    </div>`
+  }
+
+  function toggleJoinWanted(on) {
+    if (on) reviewJoinWanted.add(instance.slug)
+    else reviewJoinWanted.delete(instance.slug)
+    setJoinWanted(on)
+  }
+
+  // The review questions join the interview that is going: the open round, a round of their own, or the next one (the session decides).
+  function joinReviewNow() {
+    setReviewMessage('')
+    if (phase === 'paused' || !started) {
+      toggleJoinWanted(true)
+      return
+    }
+    const result = sessionRef.current?.joinReview(reviewContext('join'))
+    if (result && !result.ok) setReviewMessage(result.message || 'The review questions could not be added.')
+  }
+
   // Fields of a drafted-ahead Stage are left flagged and never written (ADR-0063).
   const updateDeferredNote = () => {
     const deferred = snap?.update?.deferred ?? updatePlan?.deferred ?? []
@@ -1064,6 +1170,30 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     return html`<p class="kick-note" data-testid="interview-update-deferred">
       ${deferred.length} Field${deferred.length === 1 ? '' : 's'} on ${stageIds.map(stageTitleOf).join(', ')} stay${deferred.length === 1 ? 's' : ''} flagged: ${stageIds.length === 1 ? 'that Stage is' : 'those Stages are'} drafted ahead, and a drafted-ahead branch is never changed. Bring ${deferred.length === 1 ? 'it' : 'them'} up to date once ${stageIds.length === 1 ? 'it is' : 'they are'} the current Stage.
     </p>`
+  }
+
+  // The rail's Review comments panel (#303).
+  const reviewRail = () => {
+    const running = started && phase !== 'paused'
+    const queued = snap?.queuedReview ?? 0
+    return html`<${ReviewSection}
+      copies=${reviewCopies}
+      plan=${reviewPlan}
+      running=${running}
+      paused=${phase === 'paused'}
+      joined=${queued > 0 || (phase === 'paused' && joinWanted) || (snap?.review?.mode === 'join' && !snap?.review?.answered && Boolean(snap?.round?.cards?.some((c) => c.type === 'review')))}
+      blocked=${Boolean(blockedReason)}
+      reviewPage=${review}
+      canOpen=${Boolean(onOpenReview)}
+      pageStageTitle=${instance.stage.title}
+      error=${reviewMessage}
+      stageTitleOf=${stageTitleOf}
+      onOpenStage=${onOpenStage}
+      onBringIn=${() => onBringInReview?.()}
+      onWorkThrough=${() => onOpenReview?.()}
+      onJoin=${joinReviewNow}
+      onReopen=${(threadKey) => setReopenedThreads((was) => new Set([...was, threadKey]))}
+    />`
   }
 
   const kickoff = () => {
@@ -1077,7 +1207,12 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     }
     return html`
       <div class="kick" data-testid="interview-kickoff">
-        ${update
+        ${review
+          ? html`<p class="kick-intro" data-testid="interview-review-intro">
+              <strong>Review comments.</strong> Reviewers commented on a Word document Gantry rendered. You get one card for each comment thread, and for each reviewer's tracked changes in a Field.
+              Nothing is applied automatically, and nothing is saved until you save the round.
+            </p>`
+          : update
           ? html`<p class="kick-intro" data-testid="interview-update-intro">
               <strong>Bring up to date.</strong> Some Fields drew on a Source document that has since changed. You get one card for each of them, ${instance.stage.title} first
               and the other Stages in order. Only answering a card clears its flag, and nothing is saved until you save the round.
@@ -1086,13 +1221,20 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
               The AI reads this Instance's Source documents, drafts the Fields they support, then talks them through with you. Nothing is saved
               until you confirm the Stage, and it never passes a Gate that needs approval or review.
             </p>`}
-        ${!update && updatePlan?.items.length
+        ${review ? reviewKickoffExtras() : null}
+        ${!update && !review && reviewPlan?.items.length
+          ? html`<label class="kick-note kick-review-join" data-testid="interview-kickoff-review-note">
+              <input type="checkbox" data-testid="interview-review-with-interview" checked=${joinWanted} onChange=${(e) => toggleJoinWanted(e.currentTarget.checked)} />
+              Also ask the <strong>${reviewPlan.items.length} review ${reviewPlan.items.length === 1 ? 'question' : 'questions'}</strong> in the first round. Nothing is applied until you answer.
+            </label>`
+          : null}
+        ${!update && !review && updatePlan?.items.length
           ? html`<p class="kick-note" data-testid="interview-kickoff-update-note">
               <strong>${updatePlan.items.length} Field${updatePlan.items.length === 1 ? ' is' : 's are'} Out of date.</strong>
               ${` The interview starts with a round of cards about ${updatePlan.items.length === 1 ? 'it' : 'them'}, then carries on.`}
             </p>`
           : null}
-        ${!update && newSince.length
+        ${!update && !review && newSince.length
           ? html`<p class="kick-note" data-testid="interview-kickoff-new-since">
               <strong>${newSince.length} Source document${newSince.length === 1 ? ' is' : 's are'} New since the last interview.</strong>
               ${` The AI reads ${newSince.length === 1 ? 'it' : 'them'} against what is saved, and asks a card only where ${newSince.length === 1 ? 'it adds' : 'they add'} to or ${newSince.length === 1 ? 'contradicts' : 'contradict'} something.`}
@@ -1142,7 +1284,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           : null}
         ${provider ? html`<${CardModeNote} provider=${provider} />` : null}
 
-        ${!update && choices.candidates.length > 1
+        ${!update && !review && choices.candidates.length > 1
           ? html`<label for="interview-artefact">Artefact to aim for</label>
             <select id="interview-artefact" data-testid="interview-artefact" onChange=${(e) => setPickedArtefact(e.currentTarget.value)}>
               ${choices.candidates.map((a) => html`<option key=${a.id} value=${a.id} selected=${a.id === artefactId}>${a.title ?? a.id}${a.id === choices.lightest?.id ? ' (lightest)' : ''}</option>`)}
@@ -1150,7 +1292,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
             <p class="kick-note">More than one Artefact can pass this Stage's Gate. The lightest is pre-selected; the AI drafts what the one you choose requires.</p>`
           : null}
 
-        ${!update && targets.length > 1
+        ${!update && !review && targets.length > 1
           ? html`<label for="interview-run-until">Run until</label>
             <select id="interview-run-until" data-testid="interview-run-until" onChange=${(e) => setPickedTarget(e.currentTarget.value)}>
               ${targets.map((t) => html`<option key=${t.id} value=${t.id} selected=${t.id === target}>${t.title}${t.id === instance.stage.id ? ' (this Stage only)' : ''} (gate: ${t.gate})</option>`)}
@@ -1192,10 +1334,10 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           type="button"
           class="btn primary"
           data-testid="interview-start"
-          disabled=${!providerId || phase === 'testing' || sources === null || Boolean(blockedReason) || !snap || Boolean(snap?.sessionWarning) || (update && !updatePlan?.items.length) || (!flagsReady && !flagsWaited)}
+          disabled=${!providerId || phase === 'testing' || sources === null || Boolean(blockedReason) || !snap || Boolean(snap?.sessionWarning) || (update && !updatePlan?.items.length) || (review && !reviewPlan?.items.length) || (!flagsReady && !flagsWaited)}
           onClick=${() => startInterview()}
         >
-          ${phase === 'testing' ? PROGRESS_LABELS[snap?.testStep] ?? 'Testing the AI Provider…' : update ? 'Bring up to date' : resuming ? 'Resume interview' : 'Start interview'}
+          ${phase === 'testing' ? PROGRESS_LABELS[snap?.testStep] ?? 'Testing the AI Provider…' : review ? 'Work through review comments' : update ? 'Bring up to date' : resuming ? 'Resume interview' : 'Start interview'}
         </button>
       </div>
     `
@@ -1276,10 +1418,11 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     const last = page === total - 1
     return html`<div class="round" data-testid="interview-round" data-round=${round.id} data-final=${round.final ? 'true' : 'false'} data-page=${page + 1} data-pages=${total}>
       <div class="round-head" data-testid="round-head">
-        ${round.update ? 'Bring up to date' : round.final ? 'Last round' : `Round ${round.id}`} · ${round.cards.length} ${round.update ? 'Field' : 'question'}${round.cards.length === 1 ? '' : 's'}
+        ${round.update ? 'Bring up to date' : round.review ? 'Review comments' : round.final ? 'Last round' : `Round ${round.id}`} · ${round.cards.length} ${round.update ? 'Field' : round.review ? 'comment' : 'question'}${round.cards.length === 1 ? '' : 's'}
         ${total > 1 ? ` · cards ${page * PAGE_SIZE + 1}–${page * PAGE_SIZE + shown.length} of ${round.cards.length}` : ''}
       </div>
       ${round.update ? html`<p class="round-note" data-testid="update-round-note">One card for each Field that is Out of date. Only your answer clears a flag.</p>` : null}
+      ${round.review ? html`<p class="round-note" data-testid="review-round-note">One card for each comment thread, and for each reviewer's tracked changes in a Field. Nothing is applied until you answer, and the AI sees reviewers only as Reviewer 1, Reviewer 2.</p>` : null}
       ${round.update ? updateDeferredNote() : null}
       ${round.final ? html`<p class="round-note">You chose to finish with the AI's recommendations. This is the one last round: only what the AI can't responsibly propose.</p>` : null}
       ${snap.held > 0 ? html`<p class="round-note" data-testid="round-held">${snap.held} more question${snap.held === 1 ? '' : 's'} will follow once these are answered.</p>` : null}
@@ -1459,14 +1602,74 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         : null}
       ${saving?.phase === 'error' ? html`<p class="inline-error" role="alert" data-testid="update-save-error">${saving.message}</p>` : null}
       <div class="round-actions">
-        <button type="button" class=${'btn' + (u.reopen.length ? '' : ' primary')} data-testid="update-save" disabled=${saving?.phase === 'saving' || Boolean(blockedReason) || handEditing !== null} onClick=${saveUpdate}>
+        <button type="button" class=${'btn' + (u.reopen.length ? '' : ' primary')} data-testid="update-save" disabled=${saving?.phase === 'saving' || Boolean(blockedReason) || handEditing !== null} onClick=${() => saveUpdate()}>
           ${saving?.phase === 'saving' ? 'Saving…' : u.reopen.length ? 'Save the other answers instead' : 'Save the round'}
         </button>
       </div>
     </div>`
   }
 
+  // Review comments (#303): the answers are ready to save, or have been. Nothing here advances the Instance or asks for approval.
+  const reviewEnd = () => {
+    const r = snap?.review
+    if (!r?.answered || snap?.round || snap?.clash) return null
+    const pending = snap?.decisions?.pending ?? 0
+    if (saving?.phase === 'saved' && saving.update) {
+      const next = reviewPlan?.stages?.[0] ?? null
+      return html`<div class="qcard stage-end saved" data-testid="review-saved" role="status">
+        <p class="qhead">${saving.answers || saving.fields ? 'Review comments answered and saved' : 'Nothing to save'}</p>
+        <p data-testid="review-saved-summary">
+          ${saving.answers || saving.fields
+            ? html`${saving.answers} comment${saving.answers === 1 ? '' : 's'} logged${saving.fields ? `, ${saving.fields} Field${saving.fields === 1 ? '' : 's'} changed` : ''}. The Modules stay <strong>draft</strong>: a person marks them agreed.
+              The Word documents are not re-rendered by a Save: render again when you want the reviewers to see the changes.`
+            : 'Every comment was left unanswered, so nothing was written.'}
+        </p>
+        ${saving.returned.length
+          ? html`<ul class="update-returned" data-testid="review-returned">
+              ${saving.returned.map((e) => html`<li key=${e.id} data-module=${e.module}>${e.note}</li>`)}
+            </ul>`
+          : null}
+        ${next && !remote
+          ? html`<p class="kick-note" data-testid="review-next">
+              ${next.count} more comment${next.count === 1 ? '' : 's'} on ${stageTitleOf(next.stageId)}.
+              <button type="button" class="btn small primary" data-testid="review-next-button" disabled=${!onOpenStage} onClick=${() => onOpenStage?.(next.stageId)}>Next: ${stageTitleOf(next.stageId)}</button>
+            </p>`
+          : null}
+        <div class="round-actions"><a class="btn ghost" href=${editorHref} data-testid="review-back-to-editor">Back to the editor</a></div>
+      </div>`
+    }
+    if (phase === 'working' || phase === 'testing' || phase === 'asking') return null
+    return html`<div class="qcard stage-end" data-testid="review-ready">
+      <div class="qchip">Review comments</div>
+      <p class="qhead">${r.total} comment${r.total === 1 ? '' : 's'} answered. Save the round?</p>
+      <p>${draftKeys.length ? `${draftKeys.length} Field${draftKeys.length === 1 ? ' is' : 's are'} changed in the preview. ` : 'No Field text changes. '}${pending} answer${pending === 1 ? ' is' : 's are'} waiting in the decisions log. Saving is one Stage Save.</p>
+      ${r.reopen.length
+        ? html`<div data-testid="review-reopen">
+            <p class="kick-note" data-testid="review-reopen-note">
+              You chose to re-open ${r.reopen.map(stageTitleOf).join(', ')}, because ${r.reopen.length === 1 ? 'a Field' : 'Fields'} there can't be changed from ${instance.stage.title}. Re-opening drops the other answers in this round that are not saved: bring the review comments in again from there.
+              Or save the other answers, and the comments that need ${r.reopen.map(stageTitleOf).join(', ')} stay unanswered.
+            </p>
+            <div class="round-actions">
+              ${r.reopen.map(
+                (id) => html`<button key=${id} type="button" class="btn primary" data-testid="review-reopen-button" data-stage-id=${id} disabled=${reopening.stageId !== null || saving?.phase === 'saving' || !onReopenStage} onClick=${() => reopen(id)}>
+                  ${reopening.stageId === id ? 'Re-opening…' : `Re-open ${stageTitleOf(id)}`}
+                </button>`
+              )}
+            </div>
+            ${reopening.message ? html`<p class="inline-error" role="alert" data-testid="review-reopen-error">${reopening.message}</p>` : null}
+          </div>`
+        : null}
+      ${saving?.phase === 'error' ? html`<p class="inline-error" role="alert" data-testid="review-save-error">${saving.message}</p>` : null}
+      <div class="round-actions">
+        <button type="button" class=${'btn' + (r.reopen.length ? '' : ' primary')} data-testid="review-save" disabled=${saving?.phase === 'saving' || Boolean(blockedReason) || handEditing !== null} onClick=${() => saveUpdate('review-answered')}>
+          ${saving?.phase === 'saving' ? 'Saving…' : r.reopen.length ? 'Save the other answers instead' : 'Save the round'}
+        </button>
+      </div>
+    </div>`
+  }
+
   const stageEnd = () => {
+    if (review) return reviewEnd()
     if (update) return updateEnd()
     if (saving?.phase === 'drafting-ahead') {
       return html`<div class="qcard stage-end saved" data-testid="interview-drafting-ahead" role="status">
@@ -1661,6 +1864,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         ${tokensRail()}
         <h3 class="side">Source documents</h3>
         <${SourceDocumentsPanel} store=${store} actor=${actor} readOnly=${Boolean(blockedReason)} compact=${true} onList=${onSourceList} newSince=${newSinceIds} />
+        ${setup.status === 'ready' ? reviewRail() : null}
         ${decisionsRail()}
         ${inputsLog()}
       </aside>
@@ -1719,7 +1923,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           </div>
         </div>
         <div class="interview-composer">
-          ${started && phase !== 'paused' && !update
+          ${started && phase !== 'paused' && !update && !review
             ? html`<div class="inner composer-actions">
                 <button type="button" class="btn small ghost" data-testid="interview-pause" disabled=${busy || phase === 'kickoff' || saving?.phase === 'saving' || Boolean(blockedReason) || Boolean(snap?.clash)} title="Save the decisions log and the drafts so far, then carry on later in this browser or any other. The Modules stay draft." onClick=${pauseInterview}>
                   ${saving?.phase === 'saving' && saving.pause ? 'Pausing…' : 'Pause'}

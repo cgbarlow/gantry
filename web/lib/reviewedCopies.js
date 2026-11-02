@@ -18,7 +18,7 @@ import {
   readReviewedCopy,
   summariseReview,
 } from './reviewedCopy.js'
-import { REVIEWS_MANIFEST_PATH, isReviewId, parseReviewManifest, reviewFilePath, reviewManifestEntry, stringifyReviewManifest } from './reviewManifest.js'
+import { REVIEWS_MANIFEST_PATH, isReviewId, parseReviewManifest, reviewFilePath, reviewManifestEntry, stringifyReviewManifest, withAnsweredCounts } from './reviewManifest.js'
 
 const WORD_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 export const REVIEW_FILE_ACCEPT = `.docx,${WORD_MIME}`
@@ -119,6 +119,28 @@ export async function addReviewedCopiesLocally(slug, items, io, { now = () => ne
   return added
 }
 
+/**
+ * #303: after review comments were answered, raises the manifest's answered counts (`counts` is `{ [reviewId]: n }`, from the decisions logs). A server
+ * workspace or a Provider-hosted Instance is told over HTTP; a Local workspace writes its own manifest. Resolves the manifest entries as they now stand.
+ */
+export async function recordAnsweredReviews(slug, counts, apiFetchForInstance) {
+  const res = await apiFetchForInstance(slug, `/api/instance/reviews/answered?slug=${encodeURIComponent(slug)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ answered: counts }),
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(body.message ?? body.error ?? `the server answered ${res.status}`)
+  return body.reviews
+}
+
+export async function recordAnsweredReviewsLocally(slug, counts, io) {
+  const path = `gantry-workspace/${slug}/${REVIEWS_MANIFEST_PATH}`
+  const { entries, changed } = withAnsweredCounts(parseReviewManifest(await io.readText(path).catch(() => '')), counts)
+  if (changed) await io.writeText(path, stringifyReviewManifest(entries))
+  return entries
+}
+
 // --- Reading what was kept -----------------------------------------------------------------------------------
 
 /** An `io` for a server workspace or a Provider-hosted Instance, over `apiFetchForInstance(slug, url, options)`. */
@@ -185,7 +207,7 @@ export async function loadReviewedCopy(io, entry) {
       basis = await io.basis({ commit: read.properties.commit || entry.commit, texts: true })
       placed = placeReview(read, { fieldIndex: buildFieldIndex(basis.fields), basis })
     }
-    return { entry, read, placed }
+    return { entry, read, placed, basis }
   } catch (err) {
     return { entry, error: err.message }
   }
