@@ -1,6 +1,6 @@
 # MCP access control: identity at the edge, Provider credentials behind it
 
-**Status: proposed.** Nothing below is decided or implemented. This records the shape of a decision that has to be made before the MCP server is exposed to anyone but its own operator, and names the trade-offs, so that whoever takes it is choosing rather than discovering.
+**Status: accepted** (2026-11-02) — see **Decision** at the end. Drafted as a proposal on 2026-09-23; the analysis below is that proposal, kept as written because it is the reasoning the decision rests on. Nothing new is built: the decision is to stay at position 1 now, and which position to go to — and what reopens it — is fixed in advance.
 
 `docs/adr/0043-mcp-server-is-a-separate-render-hosted-http-client.md` gave the MCP server the access model appropriate to what it then was: a single-operator client, deployed alongside a single-operator Gantry. A static bearer token (`GANTRY_MCP_ACCESS_TOKEN`) gates the server, and a map of workspace id to Personal Access Token (`GANTRY_MCP_WORKSPACE_PATS`, renamed from `GANTRY_WORKSPACE_PATS` by `#129`) supplies the credential it acts on a Provider with. `mcp-server/src/gantryClient.js` resolves a workspace's credential from that map alone; there is no per-call credential, and a workspace missing from the map produces a structured `missing_workspace_pat` error whose only remedy is an operator editing the environment and restarting.
 
@@ -48,10 +48,29 @@ Hop 1 **is** that identity layer. Building it for MCP would, for the first time,
 
 ## What would settle this
 
-Three questions, in order. None is answered here.
+Three questions, in order. Answered on 2026-11-02, below.
 
 1. Does the MCP server have public ingress, or can it be placed behind private networking?
 2. Is there a second user, and are they inside or outside the organisation that owns the workspaces?
 3. Must an action be attributable to a named person at the Provider, or is a service identity sufficient for the record being kept?
 
-Status: **proposed**, pending the three questions above. Drafted 2026-09-23 alongside `#132`, which is blocked on this decision being taken.
+## Decision
+
+The answers:
+
+1. **Public, and it stays public.** The MCP server is a public Render web service, and claude.ai's connectors reach it from Anthropic's cloud — which is how it is actually used. Moving it behind private networking would cut off every client except one running inside that network, so network posture is not available as a substitute for position 3.
+2. **No second user is planned.** There is one operator.
+3. **A named person.** Once there is more than one, an approval or stage advance must show who did it in the Provider's own history, for the reason given under *Alternatives considered*.
+
+From those:
+
+- **Now: position 1.** The single shared `GANTRY_MCP_ACCESS_TOKEN` and the `GANTRY_MCP_WORKSPACE_PATS` map stay as `docs/adr/0043` and `mcp-server/README.md` describe them. With one operator, attribution is already correct — the PAT is theirs. No hardening work is taken on alongside this.
+- **What reopens it: either need.** A second person needs MCP access, **or** someone needs a shared workspace visible only to named people rather than to everyone who can reach the deployment (`docs/adr/0047`). Either one is the same missing piece — an answer to "who is this?" — so either one unparks the work.
+- **Where it goes then: position 3, never position 2.** A public server whose actions must name a person needs real identity at the edge, and per-user static tokens would be built only to be replaced. Position 2 is skipped, not taken as a step.
+  - **Hop 1 — OAuth, designed for the whole of Gantry, not for MCP alone.** One identity layer, which the web app also uses, so the private shared workspace above comes from the same work rather than a second build.
+  - **Hop 2 — each person's own Provider sign-in** (on GitHub, a GitHub App acting on that user's behalf; each Provider's equivalent elsewhere). The Provider's history names the person, and they can do no more through Gantry than their own Provider permissions allow. A Provider App acting as itself is not enough, because it names the app.
+  - **A single-operator deployment keeps the shared token.** OAuth is switched on when there is more than one person; a solo operator never has to stand up an authorization flow.
+
+How position 3 is built — which Providers first, the sign-in flow on each, how the web app uses the identity — is not decided here. That is spec work for when it is unparked. `#132` is the parked ticket for it.
+
+Status: **accepted**, 2026-11-02, during the ADR-0048 grilling session. Drafted as proposed on 2026-09-23 alongside `#132`, which has been re-scoped from position 2 to position 3 and stays parked until the trigger above is met.
