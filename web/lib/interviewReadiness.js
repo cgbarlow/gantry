@@ -27,13 +27,14 @@ export const minWords = (budget) => Math.round(budget * MIN_BUDGET_SHARE)
 
 /**
  * Whether one Field is done. `value` is its content (draft over saved), `uncovered` the guidance points the AI said it has
- * not covered, `open` whether an open question feeds it. Returns `{ done, reasons }`, each reason a short phrase.
+ * not covered, `open` whether an open question feeds it. `handEdited` (#289): the architect wrote it themselves, so it is done when it has
+ * content: its length and coverage are theirs to judge, and Gantry's per-Field check does not run on their text. Returns `{ done, reasons }`, each reason a short phrase.
  */
-export function fieldDone({ field, value, size, uncovered = [], open = false }) {
+export function fieldDone({ field, value, size, uncovered = [], open = false, handEdited = false }) {
   const reasons = []
   if (isBlankValue(value)) {
     reasons.push('no content yet')
-  } else {
+  } else if (!handEdited) {
     const budget = fieldTargetWords(field, size)
     if (budget !== null) {
       const words = countWords(value)
@@ -63,7 +64,7 @@ export function stageReadiness({ definition, structure, stageId, artefactId, siz
     const value = draft ? draft.value : saved[module.id]?.fields?.[field.id]
     const isRequired = required.has(key)
     if (!isRequired && isBlankValue(value)) continue
-    fields[key] = { ...fieldDone({ field, value, size, uncovered: draft?.uncovered ?? [], open: open.has(key) }), required: isRequired }
+    fields[key] = { ...fieldDone({ field, value, size, uncovered: draft?.uncovered ?? [], open: open.has(key), handEdited: draft?.handEdited === true }), required: isRequired }
   }
   const gate = draftGateCheck({ structure, stageId, artefactId, modules, drafts })
   const entries = Object.values(fields)

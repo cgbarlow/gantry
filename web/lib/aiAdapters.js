@@ -243,6 +243,8 @@ export function createAnthropicParser(provider) {
   let stopReason = null
   let finished = false
   return {
+    /** The tool calls still being written, with their arguments so far (`{ id, name, json }`): lets a caller see which Field a draft is for before the call is complete. */
+    partials: () => [...blocks.values()].map(({ id, name, json }) => ({ id, name, json })),
     feed({ data }) {
       if (!data || data === '[DONE]') return []
       let obj
@@ -333,6 +335,7 @@ export function createOpenAiParser(provider) {
   }
 
   return {
+    partials: () => [...calls.values()].filter((c) => c.name).map(({ id, name, args }) => ({ id, name, json: args })),
     feed({ data }) {
       if (!data || data === '[DONE]') return []
       let obj

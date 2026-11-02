@@ -8,7 +8,7 @@
 //   * status   this session's line: who, target Stage, state, Artefact, last AI save, each model used with its tokens, the
 //              Interview instructions version and the skill versions.
 //
-// Only the architect's own words are kept. The AI's replies are never stored, and a message of thanks or "go on" feeds nothing: a
+// A hand edit of a drafted Field (#289) is kept as the text they typed. Only the architect's own words are kept. The AI's replies are never stored, and a message of thanks or "go on" feeds nothing: a
 // fact is logged only when the AI quotes text the architect typed (`findArchitectMessage`), and an acknowledgement never matches.
 //
 // Nothing here writes a file. The entries wait as `pending` until the Save that carries them succeeds (`commit`).
@@ -192,9 +192,18 @@ export function createSessionLog(config = {}) {
     },
 
     /** The architect's keep / use / merge choice on saved content. `choice` is 'keep' | 'replace' | 'merge'. */
-    addSavedContent(field, choice) {
+    addSavedContent(field, choice, { handEdit = false } = {}) {
       const replaced = currentFor('saved-content', (e) => asList(e.fields)[0] === field)
-      return add({ kind: 'saved-content', field, choice, fields: [field], ...links([field], replaced) })
+      return add({ kind: 'saved-content', field, choice, ...(handEdit ? { handEdit: true } : {}), fields: [field], ...links([field], replaced) })
+    },
+
+    /**
+     * #289: the architect edited a drafted Field by hand in the Interview page's preview. `words` is the text they typed, kept as
+     * their own (the AI's wording is never what is stored). A later hand edit of the same Field replaces this one.
+     */
+    addHandEdit(field, words) {
+      const replaced = currentFor('hand-edit', (e) => asList(e.fields)[0] === field)
+      return add({ kind: 'hand-edit', field, words: String(words), fields: [field], ...links([field], replaced) })
     },
 
     addOpenQuestion({ question, why, fields = [] }) {
@@ -229,9 +238,9 @@ export function createSessionLog(config = {}) {
 
     /**
      * What the stage Save sends for the log. `fieldInputs` is the session's `module.field -> inputs` and `fieldKeys` the Fields in
-     * this Save (the drafts plus those already saved by this session). `status` is `{ who, target, state, stages, artefact, instructions }` (`stages`: each Stage of the run and its state, #293).
+     * this Save (the drafts plus those already saved by this session); `handEdited` are those the architect edited by hand. `status` is `{ who, target, state, stages, artefact, instructions }` (`stages`: each Stage of the run and its state, #293).
      */
-    delta({ fieldInputs = {}, fieldKeys = [], status = {}, saving = false } = {}) {
+    delta({ fieldInputs = {}, fieldKeys = [], status = {}, saving = false, handEdited = [] } = {}) {
       if (saving) lastAiSave = now()
       const stands = currentLogEntries(all())
       const fields = {}
@@ -239,7 +248,8 @@ export function createSessionLog(config = {}) {
         fields[key] = {
           drafted: now(),
           inputs: (fieldInputs[key] ?? []).map((i) => ({ ...i })),
-          entries: stands.filter((e) => asList(e.fields).includes(key)).map((e) => e.id),
+          // A hand-edited Field's record is rebuilt from the edited text (#289): the Source documents it still cites, plus the hand edit.
+          entries: stands.filter((e) => asList(e.fields).includes(key) && (!handEdited.includes(key) || e.kind === 'hand-edit')).map((e) => e.id),
         }
       }
       const skills = interviewSkillVersions()

@@ -9,6 +9,7 @@ const asList = (v) => (v === undefined || v === null ? [] : Array.isArray(v) ? v
 const day = (iso) => String(iso ?? '').slice(0, 10)
 
 const CHOICES = { keep: 'kept what was saved', replace: "replaced it with the AI's version", merge: 'merged the two' }
+const HAND_CHOICES = { keep: 'kept their own edit', replace: "took the AI's version in place of their edit", merge: 'merged their edit and the AI’s version' }
 
 /** One entry as a sentence for a reader: the question and the answer, or what the architect said, or what was chosen. */
 export function describeEntry(entry, { fieldTitle = (key) => key } = {}) {
@@ -27,7 +28,10 @@ export function describeEntry(entry, { fieldTitle = (key) => key } = {}) {
     }
     case 'fact':
       return `The architect said: “${entry.words}”${feeds}`
+    case 'hand-edit':
+      return `The architect edited ${fieldTitle(entry.field)} by hand: “${entry.words}”`
     case 'saved-content':
+      if (entry.handEdit) return `Their own edit of ${fieldTitle(entry.field)}: ${HAND_CHOICES[entry.choice] ?? entry.choice}`
       return `Saved content in ${fieldTitle(entry.field)}: ${CHOICES[entry.choice] ?? entry.choice}`
     case 'open-question':
       return `${entry.question}${entry.why ? ` — ${entry.why}` : ''}${feeds}`
@@ -42,7 +46,7 @@ export function describeEntry(entry, { fieldTitle = (key) => key } = {}) {
   }
 }
 
-const KIND_LABELS = { term: 'Term', answer: 'Answer', fact: 'Architect', 'saved-content': 'Saved content', 'open-question': 'Open question', artefact: 'Artefact', restart: 'Restart', 'model-change': 'Model' }
+const KIND_LABELS = { term: 'Term', answer: 'Answer', fact: 'Architect', 'saved-content': 'Saved content', 'hand-edit': 'Hand edit', 'open-question': 'Open question', artefact: 'Artefact', restart: 'Restart', 'model-change': 'Model' }
 
 function EntryRow({ entry, fieldTitle, state }) {
   return html`<li class=${'dl-entry' + (entry.kind === 'open-question' && state !== 'old' ? ' open' : '') + (state === 'old' ? ' old' : '')} data-testid="decisions-entry" data-entry-id=${entry.id} data-kind=${entry.kind} data-state=${state ?? 'current'}>

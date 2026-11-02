@@ -764,6 +764,21 @@ If the AI would change a Field that already holds content, nothing in the previe
 - **Use the AI's version**: the AI's text replaces it in the preview (it is written only when you save the Stage), and the AI may then revise it;
 - **Merge**: the AI writes one version that keeps what is good in both.
 
+#### Editing a draft by hand
+
+Click a drafted Field in the preview (or its **Edit** button) to edit it in place. A text Field opens a text box showing the Markdown as it will be stored, a list opens one item per line, a select offers its options and a date opens a date picker. **Done** keeps your edit and **Cancel** drops it. The Interview page is the only place to edit a draft: the Instance editor shows **saved content only**, and a Module that has unsaved AI drafts carries a banner there, *"edit them on the Interview page"*, with a link.
+
+A Field you edit by hand becomes **yours**:
+
+- It is marked **Your edit · unsaved** instead of *AI draft · unsaved*, and **the AI changes it only through a card**. If the AI would change it, you get the same **Keep / Use the AI's version / Merge** card as for saved content, with your text beside the AI's. Keep is recommended. The AI is told which Fields you edited and what they now say, and to treat your words as settled fact.
+- **Gantry's checks don't run on your text.** No word budget, no "figure has no source" warning, no options check beyond the choices the editor offers. A hand-edited Field is **done** when it has content: how long it is and what it covers are your call.
+- **It is logged as a hand edit**, with the text you typed kept as your own words (see **The decisions log**). Editing the same Field again adds a new hand edit that replaces the earlier one.
+- **Its inputs are rebuilt from your text.** The decisions log then lists only the Source documents your text still cites, with your hand edit. Delete a `[title, p. 4](source:id)` citation and that document is no longer one of the Field's inputs.
+
+There is no button to hand a Field back. **Ask in the chat box** ("rewrite the problem statement as two sentences") and the AI changes it, logging your request; or **choose the AI's version** on a card. Either way the AI's text goes in and the change is logged.
+
+A Field the AI is drafting at that moment shows **drafting…** and can't be edited until its draft lands. If the AI sends a draft for a Field while you have its editor open, your edit is not overwritten: you get the card.
+
 #### When a Field is done and a Stage is ready
 
 Gantry works out for itself when a Field is **done**: it has content, it sits between about **60% of its word budget** and the budget, it covers each point its guidance asks for, and no open question feeds it. The preview marks each Field in scope **Done**, or says what is missing. A Field in scope is one the Gate requires for the Artefact you chose, or any other Field with content; an optional Field the documents don't support is simply left empty.
@@ -811,7 +826,8 @@ What the log holds:
 
 - **Your answers to question cards.** Each entry keeps the question, the options, the AI's recommendation and why, the Source document and page it cited, the answer you chose, anything you typed under **Other** in your own words, and the Field it fed.
 - **Facts you told the AI in chat, word for word.** When the AI uses something you typed, Gantry keeps *your* message as you wrote it against the Field it fed, never the AI's wording of it. Thanks, "go on" and other chat that fed nothing is not kept, and **what the AI said is never kept**: there is no transcript.
-- **Your choice on saved content**: keep, use the AI's version, or merge.
+- **Your choice on saved content**: keep, use the AI's version, or merge. The same choice on a Field you edited by hand is recorded as being about your own edit.
+- **Your hand edits**, each with the text you typed, word for word (see **Editing a draft by hand**).
 - **Term choices**: the preferred term you chose on a term card and the names to avoid (or your own wording, if you typed it). A later choice about the same thing replaces the earlier one, and a choice binds every later Stage.
 - **Open questions**, including a select Field where none of the options fitted. An open question is closed when a later answer on the same Field resolves it.
 - **The Artefact you aimed for, a change of AI Provider model between turns, and a restart marker.** **Start this stage over** (in the left rail, after a confirmation) appends the marker: the AI ignores every earlier answer from then on, saved content is untouched, and the earlier entries stay in the file.

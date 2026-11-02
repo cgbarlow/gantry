@@ -24,12 +24,19 @@
 //     tool, `read_source_document(id, range)`. Every read is recorded, and a draft carries the reads made since the last
 //     drafts, and the documents it cites, as its inputs (the `fields` part of the decisions log, ADR-0064).
 //
+//   * (#289) lets the architect **hand-edit** a drafted Field in the preview (`beginHandEdit` / `handEdit`). The edit is theirs from then
+//     on: Gantry's per-Field check does not run on it, it is logged as a `hand-edit` entry with the text they typed, and the Field's
+//     inputs are rebuilt from that text (only the Source documents it still cites). The AI changes it only through a keep / use the AI's
+//     version / merge card. Asking for a change in free chat (the AI logs the request as a fact) or choosing the AI's version on a card
+//     hands the Field back. A Field the AI is drafting at that moment (`draftingFields`) cannot be edited.
+//
 // Nothing here saves. Drafts are an unsaved preview until the architect confirms the stage-end card.
 import { runTurn, runWithRecovery, ensureTested, EMPTY_USAGE } from './aiClient.js'
 import { ASK_TOOL_NAME, FALLBACK_FENCE } from './aiCards.js'
 import { getAiProvider } from './aiProviders.js'
 import { buildInterviewBrief, normalizeSavedContent, requiredFieldKeys } from './interviewBrief.js'
-import { DRAFT_TOOL, DRAFT_TOOL_NAME, DRAFT_FENCE, DRAFT_TEXT_FALLBACK_INSTRUCTIONS, checkDraft, extractDraftBlocks, isBlankValue, stripDraftBlocks } from './interviewDraft.js'
+import { DRAFT_TOOL, DRAFT_TOOL_NAME, DRAFT_FENCE, DRAFT_TEXT_FALLBACK_INSTRUCTIONS, checkDraft, extractDraftBlocks, isBlankValue, normaliseDraftValue, citedSourceIds, stripDraftBlocks } from './interviewDraft.js'
+import { countWords } from './targetSize.js'
 import {
   READ_TOOL,
   READ_TOOL_NAME,
@@ -75,7 +82,7 @@ const FINISH_NOTE =
 
 const LAST_ROUND_NOTE = 'That was the last round. Redraft the Fields these answers feed. Ask nothing more: the architect has chosen to finish.'
 
-function sessionNote({ cardMode, textDrafts, reader }) {
+function sessionNote({ cardMode, textDrafts, reader, handEdits = [] }) {
   const lines = ['## Note for this session', '']
   if (cardMode === 'chat') {
     lines.push('Question cards are not available in this session (this model could not produce them). Where the rules say to ask a card, ask in short plain chat instead, and only what matters most.')
@@ -107,6 +114,16 @@ function sessionNote({ cardMode, textDrafts, reader }) {
       textDrafts
         ? `The Source documents are a catalogue. ${READ_TEXT_FALLBACK_INSTRUCTIONS}`
         : `The Source documents are a catalogue. Read the parts you need with the \`${READ_TOOL_NAME}\` tool before you draft from them; you may call it several times in one reply.`
+    )
+  }
+  if (handEdits.length) {
+    lines.push(
+      '',
+      '## Fields the architect edited by hand',
+      '',
+      'These Fields are now the architect\'s own wording, shown as they stand. Do not redraft them: Gantry holds a draft of one and shows the architect a keep / use your version / merge card instead, and tells you the answer. ' +
+        `If the architect asks you in chat to change one, first log their request (\`${LOG_TOOL_NAME}\`, kind "fact", a quote copied exactly from their message, and the Field in \`fields\`), then draft it: Gantry accepts a draft of a hand-edited Field only after that. Treat what they wrote as settled fact, not as something to improve.`,
+      ...handEdits.flatMap(({ key, text }) => ['', `### ${key}`, '', text])
     )
   }
   return lines.join('\n')
@@ -200,6 +217,7 @@ export function createInterviewSession(config = {}) {
     thread: [],
     drafts: {},
     drafting: null,
+    draftingFields: [], // the Fields whose draft the AI is writing right now (#289): they can't be edited until the draft lands
     preparing: false, // the AI is writing a round of cards
     error: null,
     kickoffError: null,
@@ -223,6 +241,10 @@ export function createInterviewSession(config = {}) {
   const pendingChanges = new Map() // module.field -> { saved, proposed, ... }: the AI's version of a Field that holds saved content
   const keptFields = new Set() // the architect chose to keep what is saved
   const authorised = new Set() // the architect chose the AI's version or a merge: this Field may be drafted, until it is saved
+  const handOwned = new Map() // module.field -> { text, after }: a drafted Field the architect edited by hand (#289); `after` counts the chat messages they had typed by then
+  const editing = new Set() // Fields whose hand edit is open on the page: a draft the AI sends for one meets a card, never overwrites the edit
+  const draftingByCall = new Map() // tool call id -> the Field a draft_field call being written is for (#289)
+  let textDraftFields = [] // the Fields named in the draft blocks a text-only model has written so far this turn
   const otherTexts = [] // what the architect typed as "Other" on cards: their own words, so plain fact
   let pendingAsk = null // { callIds }: the native ask_architect call the open round answers
   let cardFailures = 0
@@ -239,6 +261,8 @@ export function createInterviewSession(config = {}) {
     ...state,
     thread: state.thread.map((t) => ({ ...t })),
     drafts: { ...state.drafts },
+    draftingFields: [...state.draftingFields],
+    editingFields: [...editing],
     savedKeys: [...state.savedKeys],
     fieldInputs: { ...state.fieldInputs },
     held: state.held.length,
@@ -287,15 +311,21 @@ export function createInterviewSession(config = {}) {
     const inputNote = named.missing.length ? ` Not recorded as inputs, because they do not exist: ${named.missing.join(', ')}.` : ''
 
     // Saved content changes only through a keep / use / merge card (ADR-0065, rule 3). Only a Field the architect has let the AI
-    // change, and an unsaved draft of this session, may be written freely.
-    if (holdsSaved && !authorised.has(key)) {
-      if (keptFields.has(key)) return { ok: false, content: `${key} already holds saved content and the architect chose to keep it as it is. Do not propose a change to it again.` }
-      if (asText(check.value) === asText(saved)) return { ok: false, content: `${key} already holds saved content, and your version is the same as it, so there is nothing to change.` }
+    // change, and an unsaved draft of this session, may be written freely. A Field the architect edited by hand (#289) is theirs in the
+    // same way: what they typed stands in for the saved content, and the card says so.
+    const mine = handOwned.has(key) || editing.has(key)
+    if (mine || (holdsSaved && !authorised.has(key))) {
+      const current = mine ? (handOwned.get(key)?.text ?? asText(state.drafts[key]?.value)) : saved
+      const what = mine ? "the architect's own wording (they edited it by hand)" : 'saved content'
+      if (keptFields.has(key)) return { ok: false, content: `${key} already holds ${what} and the architect chose to keep it as it is. Do not propose a change to it again${mine ? ' unless they ask you to in chat' : ''}.` }
+      if (asText(check.value) === asText(current)) return { ok: false, content: `${key} already holds ${what}, and your version is the same as it, so there is nothing to change.` }
       const existing = pendingChanges.get(key)
-      pendingChanges.set(key, { saved, proposed: check.value, words: check.words, inputs, warnings: check.problems.map((p) => p.message), uncovered, moduleId: parsed.moduleId, fieldId: parsed.fieldId, shown: existing?.shown ?? false })
+      pendingChanges.set(key, { saved: current, proposed: check.value, words: check.words, inputs, warnings: check.problems.map((p) => p.message), uncovered, moduleId: parsed.moduleId, fieldId: parsed.fieldId, shown: existing?.shown ?? false, handEdit: mine })
       return {
         ok: false,
-        content: `${key} already holds saved content, so it is not changed. Gantry will show the architect a keep / use your version / merge card for it. Do not draft ${key} again until they have answered.${inputNote}`,
+        content: mine
+          ? `${key} is ${what}, so it is not changed. If the architect asked you in chat to change it, call ${LOG_TOOL_NAME} first (kind "fact", a quote copied exactly from their request, fields ["${key}"]) and then draft it again. Otherwise Gantry will show them a keep / use your version / merge card for it: do not draft ${key} again until they have answered.${inputNote}`
+          : `${key} already holds saved content, so it is not changed. Gantry will show the architect a keep / use your version / merge card for it. Do not draft ${key} again until they have answered.${inputNote}`,
       }
     }
 
@@ -309,6 +339,7 @@ export function createInterviewSession(config = {}) {
     }
     bounced.delete(key)
     held.delete(key)
+    handOwned.delete(key)
     state.drafts[key] = { value: check.value, words: check.words, warnings: check.problems.map((p) => p.message), uncovered, inputs, moduleId: parsed.moduleId, fieldId: parsed.fieldId }
     state.fieldInputs[key] = inputs
     say('sys', `Drafted ${entry.module.title ?? entry.module.id} · ${entry.field.title ?? entry.field.id}${check.problems.length ? ' (with a warning)' : ''}`, { drafted: key })
@@ -366,6 +397,14 @@ export function createInterviewSession(config = {}) {
     return { found, missing }
   }
 
+  /** A hand-edited Field goes back to the AI (the architect asked in chat, or chose the AI's version on a card). */
+  function handBack(key) {
+    handOwned.delete(key)
+    keptFields.delete(key)
+    pendingChanges.delete(key)
+    authorised.add(key)
+  }
+
   // ---------- the decisions log (#288) ----------
 
   /** One `log_decision` call: a fact the architect typed (kept word for word) or an open question. */
@@ -378,8 +417,12 @@ export function createInterviewSession(config = {}) {
       if (!words) return { ok: false, content: 'Not logged: that is not something the architect typed in chat (or it is only thanks or "go on"). Only their own words are logged, never yours. Quote part of their message exactly, or do not log it.' }
       if (fields.length === 0) return { ok: false, content: 'Not logged: name the Field it feeds as module.field, one listed under "Fields in scope". A message that feeds nothing is not kept.' }
       const entry = log.addFact(words, fields)
+      // #289: a request in free chat, typed after the architect's hand edit, hands that Field back to the AI.
+      const handedBack = fields.filter((f) => handOwned.has(f) && architectMessages().lastIndexOf(words) >= handOwned.get(f).after)
+      for (const f of handedBack) handBack(f)
       emit()
-      return { ok: true, content: entry ? `Logged the architect's message against ${fields.join(', ')}.` : 'That message is already logged against those Fields.' }
+      const back = handedBack.length ? ` ${handedBack.join(', ')} ${handedBack.length === 1 ? 'was' : 'were'} edited by hand and ${handedBack.length === 1 ? 'is' : 'are'} yours to change now, because the architect asked.` : ''
+      return { ok: true, content: (entry ? `Logged the architect's message against ${fields.join(', ')}.` : 'That message is already logged against those Fields.') + back }
     }
     if (input?.kind === 'open-question') {
       if (!String(input.question ?? '').trim()) return { ok: false, content: 'Not logged: an open question needs the question.' }
@@ -491,7 +534,7 @@ export function createInterviewSession(config = {}) {
     for (const [key, change] of pendingChanges) {
       if (change.shown) continue
       change.shown = true
-      changes.push(changeCard({ key, fieldTitle: fieldTitle(key), saved: change.saved, proposed: change.proposed }))
+      changes.push(changeCard({ key, fieldTitle: fieldTitle(key), saved: change.saved, proposed: change.proposed, handEdit: change.handEdit === true }))
     }
     const all = [...cards, ...released.filter((r) => !cards.some((c) => c.id === r.id)), ...changes]
     if (all.length === 0) {
@@ -527,19 +570,22 @@ export function createInterviewSession(config = {}) {
       const change = pendingChanges.get(key)
       pendingChanges.delete(key)
       const choice = card.selected[0]
+      const mine = card.change?.handEdit === true
       if (choice === CHANGE_OPTIONS.keep) {
         keptFields.add(key)
-        log.addSavedContent(key, 'keep')
-        say('sys', `Kept ${fieldTitle(key)} as saved`)
+        log.addSavedContent(key, 'keep', { handEdit: mine })
+        say('sys', mine ? `Kept ${fieldTitle(key)} as you edited it` : `Kept ${fieldTitle(key)} as saved`)
       } else if (choice === CHANGE_OPTIONS.use && change) {
         authorised.add(key)
-        log.addSavedContent(key, 'replace')
+        handOwned.delete(key)
+        log.addSavedContent(key, 'replace', { handEdit: mine })
         state.drafts[key] = { value: change.proposed, words: change.words, warnings: change.warnings, uncovered: change.uncovered, inputs: change.inputs ?? [], moduleId: change.moduleId, fieldId: change.fieldId }
         state.fieldInputs[key] = change.inputs ?? []
         say('sys', `Using the AI's version of ${fieldTitle(key)}`, { drafted: key })
       } else if (choice === CHANGE_OPTIONS.merge) {
         authorised.add(key)
-        log.addSavedContent(key, 'merge')
+        handOwned.delete(key)
+        log.addSavedContent(key, 'merge', { handEdit: mine })
         say('sys', `Merging ${fieldTitle(key)}`)
       }
     }
@@ -547,10 +593,29 @@ export function createInterviewSession(config = {}) {
 
   // ---------- one send ----------
 
+  // #289: which Field a draft being written is for. A tool call's arguments arrive in pieces (`"field":"module.field"` comes first); a
+  // text-only model's draft blocks are read from the text so far. Such a Field shows "drafting…" and can't be hand-edited.
+  const FIELD_IN_PARTIAL = /"field"\s*:\s*"([^"]+)"/
+  const DRAFT_BLOCK = new RegExp('```[ \\t]*' + DRAFT_FENCE + '[^\\n]*\\n([\\s\\S]*?)(?:```|$)', 'g')
+  const setDraftingFields = () => {
+    state.draftingFields = [...new Set([...draftingByCall.values(), ...textDraftFields])]
+  }
+  const stopDrafting = () => {
+    state.drafting = false
+    draftingByCall.clear()
+    textDraftFields = []
+    state.draftingFields = []
+  }
+
   function onEvent(event) {
     if (event.type === 'text') {
+      textDraftFields = [...String(event.text ?? '').matchAll(DRAFT_BLOCK)].map((m) => m[1].match(FIELD_IN_PARTIAL)?.[1]).filter(Boolean)
+      setDraftingFields()
       const shown = shownText(event.text)
-      if (!shown) return
+      if (!shown) {
+        if (textDraftFields.length) emit()
+        return
+      }
       if (!live) live = say('ai', '', { streaming: true })
       live.text = shown
       emit()
@@ -562,9 +627,19 @@ export function createInterviewSession(config = {}) {
         state.drafting = true
         emit()
       }
+    } else if (event.type === 'tool-progress') {
+      if (event.name !== DRAFT_TOOL_NAME) return
+      const field = String(event.partial ?? '').match(FIELD_IN_PARTIAL)?.[1]
+      if (field && draftingByCall.get(event.id) !== field) {
+        draftingByCall.set(event.id, field)
+        setDraftingFields()
+        emit()
+      }
     } else if (event.type === 'tool-call') {
       resultFor(event.call)
-      state.drafting = false
+      draftingByCall.delete(event.call.id)
+      state.drafting = draftingByCall.size > 0
+      setDraftingFields()
       emit()
     }
   }
@@ -610,8 +685,9 @@ export function createInterviewSession(config = {}) {
         ...rest,
       ]
     }
+    const handEdits = [...handOwned].map(([key, edit]) => ({ key, text: edit.text }))
     return {
-      system: `${brief.text}\n\n${sessionNote({ cardMode: state.cardMode, textDrafts, reader })}`,
+      system: `${brief.text}\n\n${sessionNote({ cardMode: state.cardMode, textDrafts, reader, handEdits })}`,
       tools: textDrafts ? [] : [DRAFT_TOOL, LOG_TOOL, ...(reader ? [READ_TOOL] : [])],
       withAttachments,
       knownSources: (context.sources ?? []).filter((s) => !s.removedAt).map((s) => ({ id: s.id, title: s.title })),
@@ -654,13 +730,15 @@ export function createInterviewSession(config = {}) {
     try {
       for (let round = 0; round < MAX_ROUNDS; round++) {
         live = null
+        textDraftFields = []
+        setDraftingFields()
         const result = await runWithRecovery(async () => {
           const provider = getAiProvider(state.providerId)
           if (!provider) throw new Error('This AI Provider no longer exists. Choose another.')
           const { textDrafts } = capabilities(provider)
           const { system, tools, withAttachments, knownSources } = await prepare(provider)
           const history = withAttachments(textDrafts ? flattenToolHistory(messages) : messages)
-          return runTurn(provider, { system, messages: history, tools, knownSources, askCards: state.cardMode !== 'chat' }, { fetchImpl, origin, signal: controller.signal, onEvent })
+          return runTurn(provider, { system, messages: history, tools, knownSources, askCards: state.cardMode !== 'chat' }, { fetchImpl, origin, signal: controller.signal, onEvent, toolProgress: true })
         }, handlers)
         state.usage = {
           inputTokens: state.usage.inputTokens + result.usage.inputTokens,
@@ -698,7 +776,7 @@ export function createInterviewSession(config = {}) {
             const note = 'Not shown: the architect chose Finish with your recommendations and has had the last round. Write your best drafts and ask nothing more.'
             if (callIds.length) for (const id of callIds) messages.push({ role: 'tool', toolCallId: id, name: ASK_TOOL_NAME, isError: true, content: note })
             else messages.push({ role: 'user', fromGantry: true, text: note })
-            state.drafting = false
+            stopDrafting()
             emit()
             continue
           }
@@ -716,7 +794,7 @@ export function createInterviewSession(config = {}) {
           }
           // Once a round of drafts has landed, the reads before it are spent: they are inputs of those drafts, not of later ones.
           if (result.otherToolCalls.some((c) => c.name === DRAFT_TOOL_NAME)) readsSinceDraft = []
-          state.drafting = false
+          stopDrafting()
           emit()
           continue
         }
@@ -776,7 +854,7 @@ export function createInterviewSession(config = {}) {
       }
     } finally {
       live = null
-      state.drafting = false
+      stopDrafting()
       state.preparing = false
       for (const t of state.thread) if (t.streaming) t.streaming = false
       emit()
@@ -996,6 +1074,8 @@ export function createInterviewSession(config = {}) {
         delete state.drafts[key]
         authorised.delete(key)
         pendingChanges.delete(key)
+        handOwned.delete(key)
+        editing.delete(key)
       }
       state.savedKeys = [...new Set([...state.savedKeys, ...keys])]
       say('sys', `Saved ${keys.length} Field${keys.length === 1 ? '' : 's'}. The Modules stay draft.`)
@@ -1012,6 +1092,7 @@ export function createInterviewSession(config = {}) {
       return log.delta({
         fieldInputs: state.fieldInputs,
         fieldKeys: keys,
+        handEdited: keys.filter((key) => state.drafts[key]?.handEdited === true),
         saving,
         status: { who: context.actor, target: target ?? context.targetStageId ?? context.stageId, state: runState, stages: stages ?? context.runStages, artefact: context.artefactId, instructions: context.instructionsVersion },
       })
@@ -1051,6 +1132,9 @@ export function createInterviewSession(config = {}) {
       pendingChanges.clear()
       keptFields.clear()
       authorised.clear()
+      handOwned.clear()
+      editing.clear()
+      stopDrafting()
       otherTexts.length = 0
       bounced.clear()
       held.clear()
@@ -1062,10 +1146,82 @@ export function createInterviewSession(config = {}) {
       return { ok: true }
     },
 
+    // ---- hand edits (#289) ----
+    /**
+     * The architect opens a drafted Field to edit it in the preview. Resolves `{ ok, message? }`: refused for a Field with no draft
+     * and for one the AI is drafting right now. While it is open, a draft the AI sends for it meets a card instead of replacing it.
+     */
+    beginHandEdit(key) {
+      if (!state.drafts[key]) return { ok: false, message: 'Only a Field with a draft can be edited here. Saved content is edited in the editor.' }
+      if (state.draftingFields.includes(key)) return { ok: false, message: 'The AI is drafting this Field. You can edit it once the draft lands.' }
+      editing.add(key)
+      emit()
+      return { ok: true }
+    },
+
+    /** The architect closed the editor without keeping what they typed. */
+    cancelHandEdit(key) {
+      if (editing.delete(key)) emit()
+    },
+
+    /**
+     * The architect's edit of a drafted Field. `text` is what they typed (a multi-valued Field: one item per line). The Field is theirs
+     * from now on: no per-Field check runs on it, a `hand-edit` entry keeps the typed text, and the Field's inputs are rebuilt from the
+     * edited text (only the Source documents it still cites). Resolves `{ ok, changed, message? }`.
+     */
+    handEdit(key, text) {
+      const draft = state.drafts[key]
+      if (!draft) return { ok: false, changed: false, message: 'Only a Field with a draft can be edited here.' }
+      if (state.draftingFields.includes(key)) return { ok: false, changed: false, message: 'The AI is drafting this Field. You can edit it once the draft lands.' }
+      const context = getContext()
+      const entry = fieldsInScope(context.definition, context.stageId).get(key)
+      if (!entry) return { ok: false, changed: false, message: `${key} is not a Field of this Stage.` }
+      const value = normaliseDraftValue(entry.field, text)
+      if (isBlankValue(value)) return { ok: false, changed: false, message: 'A Field can’t be left empty here. Type its content, or cancel to keep the draft.' }
+      editing.delete(key)
+      if (asText(value) === asText(draft.value)) {
+        emit()
+        return { ok: true, changed: false }
+      }
+      // The inputs are rebuilt from the text: each Source document it still cites (keeping its page range), and nothing else.
+      const earlier = state.fieldInputs[key] ?? []
+      const cites = new Set(citedSourceIds(Array.isArray(value) ? value.join('\n') : value))
+      const kept = earlier.filter((input) => input.source && cites.has(input.source))
+      const inputs = [...kept, ...inputsForDraft({ reads: [], value, sources: context.sources }).filter((input) => !kept.some((k) => k.source === input.source))]
+      state.drafts[key] = { value, words: countWords(value), warnings: [], uncovered: [], inputs, moduleId: draft.moduleId, fieldId: draft.fieldId, handEdited: true }
+      state.fieldInputs[key] = inputs
+      handOwned.set(key, { text: asText(value), after: architectMessages().length })
+      log.addHandEdit(key, Array.isArray(value) ? value.map((item) => `- ${item}`).join('\n') : value)
+      // A card already waiting for this Field compares against what they typed now.
+      const waiting = pendingChanges.get(key)
+      if (waiting) {
+        if (asText(waiting.proposed) === asText(value)) pendingChanges.delete(key)
+        else pendingChanges.set(key, { ...waiting, saved: asText(value), handEdit: true })
+      }
+      if (state.round) {
+        state.round = {
+          ...state.round,
+          cards: state.round.cards.flatMap((c) => {
+            if (c.type !== 'change' || c.field !== key) return [c]
+            return waiting && !pendingChanges.has(key) ? [] : [{ ...c, change: { ...c.change, saved: asText(value), handEdit: true } }]
+          }),
+        }
+        if (state.round.cards.length === 0) {
+          state.round = null
+          if (state.phase === 'asking') state.phase = 'waiting'
+        }
+      }
+      say('sys', `You edited ${fieldTitle(key)} by hand. It is yours now: the AI changes it only if you ask in chat or choose its version on a card.`, { handEdited: key })
+      emit()
+      return { ok: true, changed: true }
+    },
+
     /** Drops every unsaved draft. */
     discardDrafts() {
       state.drafts = {}
       authorised.clear()
+      handOwned.clear()
+      editing.clear()
       emit()
     },
 

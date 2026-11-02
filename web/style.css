@@ -2262,6 +2262,20 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .interview-preview .interview-warnings { list-style: none; margin: 4px 0 0; padding: 0; }
 .interview-preview .gate-line { font-family: var(--font-mono); font-size: 11px; margin-top: 16px; color: var(--text-muted); }
 .interview-preview .drafting { margin-left: 8px; color: var(--text); }
+/* #289: a drafted Field is edited in place in the preview; the editor flags Modules that hold unsaved AI drafts. */
+.interview-preview .value.hand-editable { cursor: text; }
+.interview-preview .value.hand-editable:hover { border-color: var(--line-strong); }
+.interview-preview .value.hand-edited { box-shadow: inset 3px 0 0 var(--stamp-agreed-bg); }
+.interview-page .hand-mark { color: var(--text); }
+.interview-page .drafting-mark { font-style: italic; }
+.interview-preview .hand-edit-open { margin-left: 8px; padding: 0 6px; font-size: 10px; }
+.interview-preview .hand-edit-input { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; padding: 8px 10px; background: var(--bg); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); resize: vertical; }
+.interview-preview .hand-edit select, .interview-preview .hand-edit input[type=date] { font: inherit; font-size: 12px; padding: 4px 6px; background: var(--bg); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.interview-preview .hand-edit .opt-inline { display: block; font-size: 12px; margin: 2px 0; }
+.interview-preview .hand-edit-note { font-size: 11px; color: var(--text-muted); margin: 4px 0 0; }
+.interview-preview .hand-edit-actions { display: flex; gap: 8px; margin-top: 6px; }
+.unsaved-drafts-banner { margin: 0 0 12px; padding: 8px 12px; border: var(--hairline) solid var(--warning, #b06a00); border-radius: var(--radius); font-size: 13px; }
+
 @media (max-width: 1000px) {
   .interview-page { grid-template-columns: minmax(0, 1fr); height: auto; }
   .interview-rail, .interview-preview { border: 0; border-bottom: var(--border-strong) solid var(--line-strong); }

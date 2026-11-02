@@ -110,27 +110,27 @@ export function shapeCard(card, entry) {
 }
 
 /** A card about saved content the AI would change: keep, use the AI's version, or merge. The recommendation is to keep. */
-export function changeCard({ key, fieldTitle, saved, proposed }) {
+export function changeCard({ key, fieldTitle, saved, proposed, handEdit = false }) {
   return {
     id: `change:${key}`,
     type: 'change',
-    header: 'Saved content',
-    question: `${fieldTitle} already holds content. The AI would change it. What should happen?`,
+    header: handEdit ? 'Your edit' : 'Saved content',
+    question: handEdit ? `${fieldTitle} is your own wording: you edited it by hand. The AI would change it. What should happen?` : `${fieldTitle} already holds content. The AI would change it. What should happen?`,
     options: [
-      { label: CHANGE_OPTIONS.keep, description: 'Leave what is saved exactly as it is.', draft: '' },
-      { label: CHANGE_OPTIONS.use, description: 'Put the AI’s version in the preview in place of what is saved. Nothing is written until you save the Stage.', draft: '' },
-      { label: CHANGE_OPTIONS.merge, description: 'The AI writes one version that keeps what is good in both.', draft: '' },
+      { label: CHANGE_OPTIONS.keep, description: handEdit ? 'Leave your edit exactly as it is.' : 'Leave what is saved exactly as it is.', draft: '' },
+      { label: CHANGE_OPTIONS.use, description: handEdit ? 'Put the AI’s version in the preview in place of your edit. Nothing is written until you save the Stage.' : 'Put the AI’s version in the preview in place of what is saved. Nothing is written until you save the Stage.', draft: '' },
+      { label: CHANGE_OPTIONS.merge, description: handEdit ? 'The AI writes one version that keeps what is good in your edit and in its own.' : 'The AI writes one version that keeps what is good in both.', draft: '' },
     ],
     multiSelect: false,
     recommended: [CHANGE_OPTIONS.keep],
-    why: 'Saved content changes only when you say so, so keeping it is the safe default.',
+    why: handEdit ? 'Your own wording changes only when you say so, so keeping it is the safe default.' : 'Saved content changes only when you say so, so keeping it is the safe default.',
     source: null,
     field: key,
     allowOther: false,
     selected: [CHANGE_OPTIONS.keep],
     otherOn: false,
     otherText: '',
-    change: { saved, proposed },
+    change: { saved, proposed, ...(handEdit ? { handEdit: true } : {}) },
   }
 }
 
@@ -218,9 +218,10 @@ export function answersText(cards, { fieldTitle = (key) => key } = {}) {
     if (card.type === 'change') {
       const what = card.selected[0]
       const title = fieldTitle(card.field)
-      if (what === CHANGE_OPTIONS.keep) lines.push(`  ${title} stays as saved. Do not propose a change to it again.`)
+      const mine = card.change?.handEdit
+      if (what === CHANGE_OPTIONS.keep) lines.push(mine ? `  ${title} stays as the architect wrote it. Do not propose a change to it again unless they ask you to in chat.` : `  ${title} stays as saved. Do not propose a change to it again.`)
       else if (what === CHANGE_OPTIONS.use) lines.push(`  ${title} now shows your version in the preview. You may revise it freely until it is saved.`)
-      else if (what === CHANGE_OPTIONS.merge) lines.push(`  Write one merged version of ${card.field} with draft_field now; Gantry accepts it. Keep what is good in the saved text and in yours.`)
+      else if (what === CHANGE_OPTIONS.merge) lines.push(`  Write one merged version of ${card.field} with draft_field now; Gantry accepts it. Keep what is good in ${mine ? "the architect's edit" : 'the saved text'} and in yours.`)
     }
   }
   return lines.join('\n')

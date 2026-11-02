@@ -6,10 +6,11 @@
 // This file only draws the page and wires it up. The conversation, the drafting, the rounds of question cards (#287) and the
 // checks on each draft are web/lib/interviewSession.js; the rules for a round are web/lib/interviewRounds.js; "is this Field done
 // and this Stage ready" is web/lib/interviewReadiness.js (over the Gate check of web/lib/interviewGate.js); the brief the AI is
-// given is web/lib/interviewBrief.js. Saving is the editor's own stage Save (the Save check of ADR-0068 and all), handed in as
+// given is web/lib/interviewBrief.js. A drafted Field can be hand-edited in the preview (#289): click it, type, Done. Saving is the editor's own stage Save (the Save check of ADR-0068 and all), handed in as
 // `onSaveDrafts`, so a Save from here is the same Save, one commit, with the Modules left `draft`.
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { isMultiValuedField } from './fieldShape.js'
 import { aiProviders, defaultAiProvider, updateAiProvider } from './aiProviders.js'
 import { AiProviderDialog, AiRecoveryPrompt } from './aiProvidersView.js'
 import { SourceDocumentsPanel } from './sourceDocumentsPanel.js'
@@ -30,6 +31,18 @@ export function clearInterviewSessions() {
   for (const session of sessions.values()) session.cancel()
   sessions.clear()
 }
+/**
+ * The Modules of this Stage that hold unsaved drafts from the interview (#289), for the editor's banner: the editor shows saved content
+ * only, so it points to the Interview page, where those drafts are edited. `[]` when no interview is open for the Stage.
+ */
+export function unsavedDraftModules(slug, stageId) {
+  const session = sessions.get(`${slug}|${stageId}`)
+  if (!session) return []
+  const modules = new Map()
+  for (const draft of Object.values(session.snapshot().drafts)) modules.set(draft.moduleId, (modules.get(draft.moduleId) ?? 0) + 1)
+  return [...modules].map(([moduleId, fields]) => ({ moduleId, fields }))
+}
+
 let skillsPromise = null
 const loadSkills = () => (skillsPromise ??= loadInterviewSkillsInBrowser().catch((err) => {
   skillsPromise = null
@@ -43,6 +56,47 @@ function ValueView({ value }) {
   return html`${citationSegments(value).map((seg, i) =>
     seg.cite ? html`<span key=${i} class="cite" data-source-id=${seg.id} title=${`Source document ${seg.id}`}>${seg.cite}</span>` : seg.text
   )}`
+}
+
+/**
+ * The in-place editor of one drafted Field (#289). Text is a text box showing the Markdown as stored (a citation is the link
+ * `[title, p. 4](source:id)`: delete it to drop the citation), a list is one item per line, a select is its options, a date is a date.
+ */
+function HandEditor({ field, value, error, onDone, onCancel }) {
+  const multi = isMultiValuedField(field)
+  const [text, setText] = useState(Array.isArray(value) ? value.join('\n') : String(value ?? ''))
+  const [picked, setPicked] = useState(Array.isArray(value) ? value : value ? [value] : [])
+  const done = () => onDone(field.type === 'select' ? (multi ? picked : picked[0] ?? '') : text)
+  let control
+  if (field.type === 'select' && multi) {
+    control = html`<div role="group" aria-label=${field.title ?? field.id} data-testid="interview-field-input">
+      ${(field.options ?? []).map((option) => html`<label key=${option} class="opt-inline"><input type="checkbox" checked=${picked.includes(option)} onChange=${() => setPicked(picked.includes(option) ? picked.filter((o) => o !== option) : [...picked, option])} /> ${option}</label>`)}
+    </div>`
+  } else if (field.type === 'select') {
+    control = html`<select data-testid="interview-field-input" aria-label=${field.title ?? field.id} value=${picked[0] ?? ''} onChange=${(e) => setPicked([e.currentTarget.value])}>
+      ${(field.options ?? []).map((option) => html`<option key=${option} value=${option} selected=${picked[0] === option}>${option}</option>`)}
+    </select>`
+  } else if (field.type === 'date') {
+    control = html`<input type="date" data-testid="interview-field-input" aria-label=${field.title ?? field.id} value=${text} onInput=${(e) => setText(e.currentTarget.value)} />`
+  } else {
+    control = html`<textarea
+      class="hand-edit-input"
+      data-testid="interview-field-input"
+      aria-label=${field.title ?? field.id}
+      rows=${Math.min(14, Math.max(4, text.split('\n').length + 1))}
+      value=${text}
+      onInput=${(e) => setText(e.currentTarget.value)}
+    ></textarea>`
+  }
+  return html`<div class="hand-edit" data-testid="interview-field-editor">
+    ${control}
+    ${multi && field.type !== 'select' ? html`<p class="hand-edit-note">One item per line.</p>` : null}
+    ${error ? html`<p class="inline-error" role="alert" data-testid="interview-hand-error">${error}</p>` : null}
+    <div class="hand-edit-actions">
+      <button type="button" class="btn small primary" data-testid="interview-hand-done" onClick=${done}>Done</button>
+      <button type="button" class="btn small ghost" data-testid="interview-hand-cancel" onClick=${onCancel}>Cancel</button>
+    </div>
+  </div>`
 }
 
 const MODE_LABELS = { native: 'native', text: 'text fallback', chat: 'plain chat' }
@@ -161,6 +215,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const [saving, setSaving] = useState(null)
   const [committedLog, setCommittedLog] = useState(null) // the Stage's decisions log as committed (#288)
   const [confirmRestart, setConfirmRestart] = useState(false)
+  const [handEditing, setHandEditing] = useState(null) // { key, error? }: the drafted Field open for a hand edit (#289)
   const sessionRef = useRef(null)
   const ctxRef = useRef(null)
   const threadRef = useRef(null)
@@ -404,6 +459,19 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     setSubmitMessage('')
     const result = await sessionRef.current?.finishWithRecommendations()
     if (result && !result.ok && result.message) setSubmitMessage(result.message)
+  }
+  function openHandEdit(fieldKey) {
+    const result = sessionRef.current?.beginHandEdit(fieldKey)
+    if (result?.ok) setHandEditing({ key: fieldKey, error: '' })
+  }
+  function closeHandEdit(fieldKey) {
+    sessionRef.current?.cancelHandEdit(fieldKey)
+    setHandEditing(null)
+  }
+  function finishHandEdit(fieldKey, text) {
+    const result = sessionRef.current?.handEdit(fieldKey, text)
+    if (result?.ok) setHandEditing(null)
+    else setHandEditing({ key: fieldKey, error: result?.message ?? 'That edit could not be kept.' })
   }
   const fieldTitle = (key) => {
     const [moduleId, ...rest] = String(key).split('.')
@@ -654,7 +722,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     // Only when the Gate check passes for the Artefact aimed for and every Field in scope is done; and, after "Finish with your recommendations", once the last round has been answered.
     if (!stageEndReady) return null
     const more = target !== instance.stage.id && Boolean(followingStage)
-    const busySaving = saving?.phase === 'saving' || Boolean(blockedReason)
+    const busySaving = saving?.phase === 'saving' || Boolean(blockedReason) || handEditing !== null // a hand edit that is still open waits for Done (#289)
     return html`<div class="qcard stage-end" data-testid="interview-stage-end" data-run-more=${more ? 'true' : 'false'}>
       <div class="qchip">Stage</div>
       <p class="qhead">${stage?.title ?? instance.stage.title} is ready. ${more ? 'Save and carry on?' : 'Save it?'}</p>
@@ -692,14 +760,28 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
             const draft = drafts[fieldKey]
             const savedValue = entry?.fields?.find((f) => f.id === field.id)?.value
             const budget = fieldTargetWords(field, size)
-            return html`<div key=${fieldKey} class="field-proto" data-testid="interview-field" data-field-key=${fieldKey} data-state=${draft ? 'draft' : isBlankValue(savedValue) ? 'empty' : 'saved'}>
+            // #289: a drafted Field is edited in place; one the AI is drafting right now shows "drafting…" and waits for its draft.
+            const drafting = (snap?.draftingFields ?? []).includes(fieldKey)
+            const open = handEditing?.key === fieldKey && Boolean(draft)
+            const editable = Boolean(draft) && !drafting && !open && !blockedReason
+            return html`<div key=${fieldKey} class="field-proto" data-testid="interview-field" data-field-key=${fieldKey} data-state=${draft ? 'draft' : isBlankValue(savedValue) ? 'empty' : 'saved'} data-drafting=${drafting ? 'true' : 'false'} data-hand-edited=${draft?.handEdited ? 'true' : 'false'}>
               <span class="field-label">${field.title ?? field.id}
-                ${draft ? html`<span class="ai-mark" data-testid="interview-ai-mark">AI draft · unsaved</span>` : null}
+                ${draft && !draft.handEdited ? html`<span class="ai-mark" data-testid="interview-ai-mark">AI draft · unsaved</span>` : null}
+                ${draft?.handEdited ? html`<span class="ai-mark hand-mark" data-testid="interview-hand-mark">Your edit · unsaved</span>` : null}
+                ${drafting ? html`<span class="ai-mark drafting-mark" data-testid="interview-field-drafting">drafting…</span>` : null}
                 ${draft && budget !== null ? html`<span class="field-words" title=${`${targetSizeLabel(size)} target`}>${draft.words} / ~${budget} words</span>` : null}
+                ${editable ? html`<button type="button" class="btn small ghost hand-edit-open" data-testid="interview-field-edit" onClick=${() => openHandEdit(fieldKey)}>Edit</button>` : null}
               </span>
-              <div class=${'value' + (draft ? ' ai' : isBlankValue(savedValue) ? ' empty' : '')}>
-                ${draft ? html`<${ValueView} value=${draft.value} />` : isBlankValue(savedValue) ? 'Empty' : html`<${ValueView} value=${savedValue} />`}
-              </div>
+              ${open
+                ? html`<${HandEditor} field=${field} value=${draft.value} error=${handEditing.error} onDone=${(text) => finishHandEdit(fieldKey, text)} onCancel=${() => closeHandEdit(fieldKey)} />`
+                : html`<div
+                    class=${'value' + (draft ? ' ai' : isBlankValue(savedValue) ? ' empty' : '') + (editable ? ' hand-editable' : '') + (draft?.handEdited ? ' hand-edited' : '')}
+                    data-testid="interview-field-value"
+                    title=${editable ? 'Click to edit' : undefined}
+                    onClick=${editable ? (e) => !e.target.closest?.('.cite') && openHandEdit(fieldKey) : undefined}
+                  >
+                    ${draft ? html`<${ValueView} value=${draft.value} />` : drafting ? 'drafting…' : isBlankValue(savedValue) ? 'Empty' : html`<${ValueView} value=${savedValue} />`}
+                  </div>`}
               ${draft?.inputs?.length
                 ? html`<p class="field-inputs" data-testid="interview-field-inputs">Drew on: ${draft.inputs.map(describeInput).join('; ')}</p>`
                 : null}

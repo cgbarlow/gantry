@@ -45,11 +45,25 @@ export async function* streamChat(provider, params, options = {}) {
   const sse = createSseReader()
   const decoder = new TextDecoder()
   const reader = res.body.getReader()
+  // `options.toolProgress`: also say how far each tool call's arguments have got (`{ type: 'tool-progress', id, name, partial }`), so the
+  // Interview page can tell which Field a draft is for while it is still being written (#289). Off by default.
+  const lengths = new Map()
+  function* progress() {
+    if (!options.toolProgress || !parser.partials) return
+    for (const call of parser.partials()) {
+      if (lengths.get(call.id) === call.json.length) continue
+      lengths.set(call.id, call.json.length)
+      yield { type: 'tool-progress', id: call.id, name: call.name, partial: call.json }
+    }
+  }
   try {
     for (;;) {
       const { done, value } = await reader.read()
       if (done) break
-      for (const event of sse.push(decoder.decode(value, { stream: true }))) yield* parser.feed(event)
+      for (const event of sse.push(decoder.decode(value, { stream: true }))) {
+        yield* parser.feed(event)
+        yield* progress()
+      }
     }
     for (const event of sse.push(decoder.decode())) yield* parser.feed(event)
     for (const event of sse.end()) yield* parser.feed(event)
@@ -91,7 +105,8 @@ export function questionCardMode(provider) {
  * `onEvent` is told, as they happen: `{ type: 'text', delta, text }` (`text` is everything so far, with any
  * question block hidden), `{ type: 'preparing-questions' }` the moment a question call (or block) starts,
  * `{ type: 'retry', errors }` when an invalid card is going back to the model, and, for the caller's own tools,
- * `{ type: 'tool-start', id, name }` and `{ type: 'tool-call', call }` (#286). `input.askCards` (default true)
+ * `{ type: 'tool-start', id, name }` and `{ type: 'tool-call', call }` (#286), and, when `options.toolProgress` is set,
+ * `{ type: 'tool-progress', id, name, partial }` with a call's arguments so far (#289). `input.askCards` (default true)
  * set to false offers no question cards.
  *
  * Returns `{ kind, ... }`:
@@ -129,6 +144,8 @@ export async function runTurn(provider, { system = '', messages = [], tools = []
         } else if (event.name !== ASK_TOOL_NAME) {
           options.onEvent?.({ type: 'tool-start', id: event.id, name: event.name })
         }
+      } else if (event.type === 'tool-progress') {
+        if (event.name !== ASK_TOOL_NAME) options.onEvent?.({ type: 'tool-progress', id: event.id, name: event.name, partial: event.partial })
       } else if (event.type === 'tool-call') {
         toolCalls.push(event)
         // #286: one of the caller's own tools is complete; the Interview page puts a drafted Field in the preview now.

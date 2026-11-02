@@ -77,7 +77,7 @@ import {
 import { wrap } from './lib/editorWrap.js'
 import { SourceDocumentsPanel, openSourceDocument } from './lib/sourceDocumentsPanel.js'
 import { citedSourceIds } from './lib/sourceCitations.js'
-import { InterviewPage, clearInterviewSessions } from './lib/interviewView.js'
+import { InterviewPage, clearInterviewSessions, unsavedDraftModules } from './lib/interviewView.js'
 import { createLocalSourceStore } from './lib/localSourceDocuments.js'
 import { createLocalDecisionsStore, createServerDecisionsStore, planLocalDecisions } from './lib/decisionsStore.js'
 import { DecisionsLogPanel } from './lib/decisionsLogPanel.js'
@@ -2777,9 +2777,23 @@ function ModuleCard({ mod, onFieldRegistered, visibleFieldIds }) {
     }
   }
 
+  // #289: the editor shows saved content only. A Module with AI drafts the architect has not saved says so, and where to edit them.
+  const inst = instanceData.value
+  const unsaved = inst?.stage ? unsavedDraftModules(inst.slug, inst.stage.id).find((u) => u.moduleId === mod.id) : null
+  const interviewHref = (() => {
+    const here = new URL(window.location.href)
+    here.searchParams.set('interview', '1')
+    return `${here.pathname}${here.search}`
+  })()
   return html`
     <section class="module">
       <h2 id=${headingId(mod.id, mod.title)}>${mod.title}</h2>
+      ${unsaved
+        ? html`<p class="unsaved-drafts-banner" role="status" data-testid="unsaved-ai-drafts">
+            ${unsaved.fields === 1 ? '1 Field here has an unsaved AI draft' : `${unsaved.fields} Fields here have unsaved AI drafts`}. This editor shows saved content only: edit them on the
+            <a href=${interviewHref} data-testid="unsaved-ai-drafts-link">Interview page</a>.
+          </p>`
+        : null}
       ${mod.purpose ? html`<p class="purpose">${mod.purpose}</p>` : null}
       ${mod.fields.filter((field) => !visibleFieldIds || visibleFieldIds.has(`${mod.id}.${field.id}`)).map((field) => {
         const onRegister = (control) => {
@@ -6131,6 +6145,9 @@ function ModuleEditorPage({ slug: routeRef }) {
   async function saveInterviewDrafts(drafts, { artefactId, decisions = null } = {}) {
     const inst = instanceData.peek()
     if (!inst?.stage || isEditingBlocked()) return { ok: false, message: 'This Instance cannot be written to right now.' }
+    // No editor is mounted on the Interview page. Any still registered are left over from a visit to the editor (the unsaved-drafts banner
+    // sends people back and forth, #289) and hold stale values that would hide the drafts from the Save.
+    registryRef.current = { stageKey: stageKey(inst), entries: [] }
     // #288: the decisions log is part of this Save. `writeStage` takes it with the Modules; if the Save has no Module to write
     // (the drafts equal what is saved), it is written on its own below.
     pendingDecisionsRef.current = decisions
