@@ -4553,6 +4553,80 @@ function ReopenStagePanel({ instance }) {
   `
 }
 
+// ---------- Approval merged on the Provider, not recorded yet (#144, docs/adr/0014, docs/adr/0026) ----------
+// The current stage's approval Pull Request has been merged on the Provider, but nobody has pressed Check status,
+// so Gantry hasn't recorded it and the stage still reads as current (and Re-open, which is only for completed
+// stages, is nowhere to be found). Loading the page only *reads* that (`instance.mergedApproval`); recording is
+// these two buttons, each one step. Re-open stays subject to ADR-0026's guard: when the server says it can't be
+// done the button is shown disabled with the reason.
+function MergedApprovalPanel({ instance }) {
+  const notice = instance.mergedApproval
+  const show = Boolean(notice) && instance.workspaceBacked && !isArchived() && !isWriteAccessBlocked()
+  const [busy, setBusy] = useState(null)
+  const [error, setError] = useState('')
+
+  if (!show) return null
+
+  async function record(reopen) {
+    setBusy(reopen ? 'reopen' : 'advance')
+    setError('')
+    try {
+      const params = new URLSearchParams({ slug: instance.slug })
+      const res = await apiFetchForInstance(instance.slug, `/api/instance/stage/record-approval?${params}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reopen }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.message ?? body.error ?? `Recording the approval failed (${res.status})`)
+      // The instance's stage pointer has moved (on, or back to this stage after a re-open); reload it the way Check status does.
+      const effectWillReload = viewedStage.value !== null
+      viewedStage.value = null
+      if (!effectWillReload) {
+        instanceData.value = await loadInstance(instance.slug, null)
+      }
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const moveOnLabel = notice.next ? `Record approval and move on to ${notice.next.title}` : 'Record approval'
+  return html`
+    <div class="merged-approval-panel" data-testid="merged-approval-panel" role="status">
+      <p class="merged-approval-notice">
+        <strong>Approval merged, not recorded yet.</strong> Pull Request #${notice.pullRequestId} for "${notice.title}" has been merged on the
+        Provider, but Gantry hasn't recorded the approval — that only happens when you ask it to.
+        ${notice.next
+          ? html`Record it to move on to "${notice.next.title}", or record it and re-open "${notice.title}" if late feedback means it needs more changes.`
+          : html`This is the final stage: recording the approval completes the instance.`}
+      </p>
+      <div class="merged-approval-actions">
+        <button type="button" class="btn primary" disabled=${busy !== null} onClick=${() => record(false)} data-testid="record-approval-advance">
+          ${busy === 'advance' ? 'Recording…' : moveOnLabel}
+        </button>
+        ${notice.next
+          ? html`<button
+              type="button"
+              class="btn"
+              disabled=${busy !== null || !notice.reopen?.allowed}
+              title=${notice.reopen?.allowed ? '' : notice.reopen?.reason ?? ''}
+              onClick=${() => record(true)}
+              data-testid="record-approval-reopen"
+            >
+              ${busy === 'reopen' ? 'Recording…' : 'Record approval and re-open for changes'}
+            </button>`
+          : null}
+      </div>
+      ${notice.next && !notice.reopen?.allowed
+        ? html`<p class="guidance merged-approval-reason" data-testid="record-approval-reopen-reason">Re-open isn't available: ${notice.reopen?.reason}</p>`
+        : null}
+      ${error ? html`<p class="save-status error" role="alert" data-testid="merged-approval-error">${error}</p>` : null}
+    </div>
+  `
+}
+
 // ---------- The viewed stage's whole screen: modules + work-item panel ----------
 // Keyed by stage id from the parent (see ModuleEditorPage) so switching stages remounts this wholesale — fresh CodeMirror instances, matching the old full-DOM-rebuild behaviour. "Clear all fields" and "Render" now live in the view-toggle bar (see ViewModeToolbar, ModuleEditorPage) rather than here, so the field registry they depend on is owned by ModuleEditorPage instead — `onFieldRegistered` is threaded straight through. StageNavigation now lives in ViewModeToolbar to the right of the artefact selector, not as a standalone block here.
 // "Changed since approval" in the editor (#274, ADR-0069): on the current stage, each Field an earlier approved
@@ -4931,6 +5005,7 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
   return html`
     <main id="modules" data-view-mode=${viewMode.value}>
       <${ReopenStagePanel} instance=${instance} />
+      <${MergedApprovalPanel} instance=${instance} />
       <${OutOfDatePanel} instance=${instance} />
       <${ChangedSinceApprovalPanel} instance=${instance} />
       <${ReviewCommentsPanel} instance=${instance} />

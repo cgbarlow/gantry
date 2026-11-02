@@ -615,6 +615,15 @@ One **Check status** button at the top of the card refreshes everything in a sin
 
 Check status only merges and advances the Instance's current Stage. If a later Stage's Pull Request has been approved while an earlier Stage is still waiting, nothing is merged or advanced, and the card says so: *Stage "…" is approved but waits for the earlier stage "…", the instance's current stage. Nothing was merged or advanced.* Approve the earlier Stage, use **Check status** to merge it, and check the later one again. If the Stage is already behind the current one, the message says that instead. In the `check_status` tool this appears as `merged: false` with a `waitingForStage` field naming the Stage it waits for.
 
+### When the Pull Request was merged on the Provider
+
+Sometimes the sign-off Pull Request is merged on the Provider itself, by the Owner or someone else, before anyone presses **Check status**. Gantry has not recorded that approval, so the Instance still sits on the Stage. When you open that Stage, a notice says so: *Approval merged, not recorded yet.* Gantry only looks; opening the page never records anything, because approval is recorded only when you ask. The notice offers two buttons, each one step:
+
+- **Record approval and move on to …** records the approval and moves the Instance to the next Stage, exactly as Check status does for a merged Pull Request. On the final Stage the button just says **Record approval**.
+- **Record approval and re-open for changes** records the approval, then re-opens the Stage straight away with a fresh branch from `main`, so late review comments can be handled without first moving on and walking back. The approval history is kept.
+
+Re-open follows the usual rule: it is not offered while a later Stage already has a branch of its own, including one drafted ahead by the AI, or while this Stage's own branch is still on the Provider (delete it there once the merge is done). In those cases the button is shown disabled with the reason beside it, and **Record approval and move on** is still there. Neither button works unless the Pull Request really is merged.
+
 ### Reviews
 
 Use **Request Review** in the Reviews section header to ask one or more people to look at the Stage before sign-off. Each request is tracked as its own work item — on Azure DevOps that's a work item per reviewer, and on GitHub and GitLab alike it's an issue per reviewer, even though a GitHub or GitLab issue could technically take several assignees at once: keeping one issue per reviewer is what lets Gantry show "Ana approved, Sam wants changes" as two separate statuses rather than one ambiguous one. Each request shows the reviewer's name. Reviews refresh from the card's **Check status** button, not per row. Once a Stage has more than two reviews, Gantry groups them by outcome — pending, changes requested and approved — so it is easy to see what still needs attention.

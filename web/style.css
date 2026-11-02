@@ -207,6 +207,10 @@ header {
 .changed-since-approval-notice { margin: 8px 0 0; font-size: 13px; }
 .changed-since-approval-line { margin: 6px 0 0; font-size: 13px; }
 .changed-since-approval-badge { border-color: var(--warning, #b06a00); }
+.merged-approval-panel { margin: 0 0 16px; padding: 12px; border: var(--hairline) solid var(--warning, #b06a00); border-radius: var(--radius); }
+.merged-approval-notice { margin: 0 0 10px; font-size: 14px; }
+.merged-approval-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.merged-approval-reason { margin: 8px 0 0; }
 .changed-since-approval-panel { margin: 0 0 16px; padding: 12px; border: var(--hairline) solid var(--warning, #b06a00); border-radius: var(--radius); }
 .changed-since-approval-panel h2 { margin: 0 0 8px; font-size: 16px; }
 .changed-approval-stage h3 { margin: 12px 0 8px; font-size: 14px; }
