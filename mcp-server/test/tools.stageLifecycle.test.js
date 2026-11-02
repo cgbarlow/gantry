@@ -323,6 +323,38 @@ for (const provider of ['azure-devops', 'github']) {
   }
 }
 
+test('request_approval hands alsoReapproves through, and check_status hands waitingForReviewers and reapproved through, with descriptions that say what they are (#275)', async () => {
+  const alsoReapproves = [{ stageId: 'shape', title: 'SOAP', fields: ['background.problem'], count: 1, reviewers: [{ displayName: 'SOAP Owner', uniqueName: 'soap-owner' }] }]
+  const waitingForReviewers = [{ displayName: 'SOAP Owner', uniqueName: 'soap-owner', forStages: ['SOAP'] }]
+  const reapproved = {
+    reapprovals: [{ stageId: 'shape', by: 'hld-define', pullRequestId: 7, fields: ['background.problem'], approvedAt: '2026-11-02T00:00:00.000Z' }],
+    workItemSync: [{ ok: true, stageId: 'shape', workItemId: 12 }],
+  }
+  const fetch = stubFetch(
+    providerWorkspaceStub('ws-1', ({ url, method }) => {
+      if (url.pathname === '/api/instance/request-approval' && method === 'POST') return { status: 200, body: { pullRequestId: 7, alsoReapproves } }
+      if (url.pathname === '/api/instance/check-status' && method === 'POST') {
+        return { status: 200, body: { merged: false, review: { state: 'pending' }, waitingForReviewers, message: 'Waiting for SOAP Owner to approve before this Pull Request can merge.', reapproved } }
+      }
+      return undefined
+    })
+  )
+  try {
+    const gantryClient = createGantryClient({ baseUrl: BASE_URL, workspacePats: { 'ws-1': 'secret-pat' } })
+    const opened = JSON.parse((await requestApprovalTool.handler({ slug: 'ado-instance' }, { gantryClient })).content[0].text)
+    assert.deepEqual(opened.alsoReapproves, alsoReapproves)
+    const checked = JSON.parse((await checkStatusTool.handler({ slug: 'ado-instance' }, { gantryClient })).content[0].text)
+    assert.deepEqual(checked.waitingForReviewers, waitingForReviewers)
+    assert.deepEqual(checked.reapproved, reapproved)
+    assert.match(requestApprovalTool.description, /alsoReapproves/)
+    assert.match(requestApprovalTool.description, /must approve it too/)
+    assert.match(checkStatusTool.description, /waitingForReviewers/)
+    assert.match(checkStatusTool.description, /"reapproved"/)
+  } finally {
+    fetch.restore()
+  }
+})
+
 test('check_status reports a still-pending review without merging', async () => {
   const fetch = stubFetch(
     providerWorkspaceStub('ws-1', ({ url, method }) => {

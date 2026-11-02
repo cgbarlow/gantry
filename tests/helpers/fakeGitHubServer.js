@@ -473,6 +473,17 @@ export function createFakeGitHubServer({
       return json(200, issue)
     }
 
+    // POST /repos/:owner/:repo/issues/:number/comments — adds a comment (#275's re-approval note on a linked
+    // work item). Kept on the issue as `comments`, so a test reads back what was said.
+    const issueCommentsMatch = pathname.match(new RegExp(`^${repoBasePath}/issues/(\\d+)/comments$`))
+    if (req.method === 'POST' && issueCommentsMatch) {
+      const issue = issues.get(Number(issueCommentsMatch[1]))
+      if (!issue) return json(404, { message: `No fake issue #${issueCommentsMatch[1]}` })
+      const body = await readJsonBody(req)
+      issue.comments = [...(issue.comments ?? []), { id: (issue.comments?.length ?? 0) + 1, body: body.body }]
+      return json(201, issue.comments.at(-1))
+    }
+
     // POST /repos/:owner/:repo/issues/:number/sub_issues — attaches an existing issue (by its internal
     // `id`, per real GitHub's own contract) as a sub-issue of :number. 404s outright when
     // `subIssuesEnabled` is false, simulating a repository (or GitHub Enterprise Server version)
@@ -556,7 +567,7 @@ export function createFakeGitHubServer({
       if (!pulls.has(number)) return json(404, { message: `No fake pull request #${number}` })
       const body = await readJsonBody(req)
       const state = { APPROVE: 'APPROVED', REQUEST_CHANGES: 'CHANGES_REQUESTED', COMMENT: 'COMMENTED' }[body.event] ?? 'COMMENTED'
-      const review = { id: (reviews.get(number)?.length ?? 0) + 1, user: { login: 'fake-reviewer' }, state, submitted_at: new Date().toISOString() }
+      const review = { id: (reviews.get(number)?.length ?? 0) + 1, user: { login: body.login ?? 'fake-reviewer' }, state, submitted_at: new Date().toISOString() }
       reviews.set(number, [...(reviews.get(number) ?? []), review])
       return json(200, review)
     }

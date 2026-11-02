@@ -214,7 +214,8 @@ export const tools = [
       '3. Pass "gate" (a gate id) to target a specific gate instead of the stage\'s own default. Approvals go in stage order (ADR-0063): a gate for a stage that is not the instance\'s current stage is refused with a 400 naming the current stage. ' +
       '4. Rejected with a 400 for a local instance — it has no Pull Request to open; call advance_stage instead. ' +
       '5. Requires a PAT for the instance\'s workspace; a missing/rejected one is reported as "missing_workspace_pat"/"authentication_required". ' +
-      '6. Follow up with check_status once a reviewer has had a chance to approve.',
+      '6. Follow up with check_status once a reviewer has had a chance to approve. ' +
+      '7. When the stage has changed Fields an earlier approved stage prints, the Pull Request also re-approves that stage (ADR-0069): the response carries "alsoReapproves" (each with "stageId", "title", "fields", "count" and the "reviewers" who approved that stage) and those reviewers are added to the Pull Request and must approve it too. Tell the user who.',
     inputSchema: {
       ...slugRefShape,
       gate: z.string().optional().describe('A specific gate id to request approval for, instead of the stage\'s own default.'),
@@ -231,7 +232,8 @@ export const tools = [
       '5. Requires a PAT for the instance\'s workspace, for the same reason request_approval does. ' +
       '6. An explicit rejection/changes-requested vote is reported distinctly from a merely-still-pending review — read the response\'s own fields rather than inferring from success/failure alone. ' +
       '7. An approved Pull Request for a stage that is not the instance\'s current stage is not merged or advanced (ADR-0063): the response has merged=false and a "waitingForStage" field naming the earlier stage it waits for. ' +
-      '8. The response\'s "changedSinceApproval" lists earlier approved stages whose printed Fields a later stage has changed since their approval — each with "stageId", "title", "pullRequestId", "fields" (module.field references) and "count"; empty when none. The current stage\'s approval re-approves them. Report it to the user rather than treating the earlier stage as untouched.',
+      '8. The response\'s "changedSinceApproval" lists earlier approved stages whose printed Fields a later stage has changed since their approval — each with "stageId", "title", "pullRequestId", "fields" (module.field references) and "count"; empty when none. The current stage\'s approval re-approves them. Report it to the user rather than treating the earlier stage as untouched. ' +
+      '9. A Pull Request that re-approves earlier stages is not merged until each of those stages\' reviewers has approved it as well: while one hasn\'t, merged=false, the review reads pending and "waitingForReviewers" names each (with "forStages") alongside a "message". If one of them requests changes the stage waits for that too. Once it merges, "reapproved" lists the re-approval entries recorded ("stageId", "by", "pullRequestId", "fields", "reviewers", "approvedAt") and "workItemSync" inside it reports the comment left on each re-approved stage\'s linked work item.',
     inputSchema: {
       ...slugRefShape,
       gate: z.string().optional().describe('A specific gate id to check status for, instead of the stage\'s own default.'),

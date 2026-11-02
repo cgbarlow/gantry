@@ -516,6 +516,20 @@ The flag clears as soon as no flagged Field differs from its approved text; the 
 
 If the current Stage does not show the Module a flagged Field belongs to, or shows it read-only, the panel still shows both texts but cannot restore from here.
 
+#### Re-approval by the later Stage
+
+![A Stage tab flagged Changed since approval, and the Request approval panel naming the second reviewer](/user-guide-images/changed-since-approval.png)
+
+You don't re-open the earlier Stage to fix this. The later Stage's own approval re-approves it, so a passed gate still means the right person signed off. When you **Request Sign-off** on a Stage that changed an earlier Stage's printed Fields:
+
+- **The Pull Request lists the Fields.** Its description names each earlier Stage it also re-approves and the Fields that changed, by Module and Field title, and the Sign-off section says who is needed, for example *Needs SOAP Owner to approve SOAP: 2 Fields*.
+- **A second reviewer is added.** The person who approved the earlier Stage's own Pull Request is added to this one as an extra required reviewer, alongside this Stage's Required reviewer. Gantry keeps one Required reviewer per Instance, so it reads the earlier approver off that earlier Pull Request, which also works for an Instance approved before this rule existed. If it is the same person as this Stage's reviewer, one vote covers both.
+- **Check status waits for both votes.** It won't merge until each of them has approved. While one hasn't, Check status says *Still waiting — Pull Request #7 needs SOAP Owner, whose approval re-approves SOAP, before it can merge*, and an approval from anyone else doesn't stand in. If the earlier Stage's reviewer asks for changes, the Stage waits for that too: either they approve once you've addressed it, or you use **Restore approved text** to put the wording back and ask again.
+- **The merge records it.** Once the Pull Request merges, the earlier Stage keeps its original approval and gains a re-approval entry. Open the earlier Stage's tab and a **Re-approved by a later Stage** note lists, for each one, which Stage did it, which Pull Request, which Fields, who approved it and when. Its **Changed since approval** flag clears, because its approved content is now what that merge approved. Only an edit made after the merge flags it again.
+- **A linked work item is told.** The earlier Stage's work item gets a comment saying it was re-approved (Azure DevOps History, or a comment on the GitHub or GitLab issue), the same way a re-open leaves one.
+
+This applies to Azure DevOps, GitHub and GitLab Workspaces. A Pull Request that changes nothing an earlier Stage prints re-approves nothing, and looks exactly as it did before.
+
 ### Review and sign-off status
 
 Each review and sign-off item carries a Gantry status — Requested, In review, Changes requested, Approved or Rejected. On Azure DevOps this is kept separate from the native work item state, which continues to drive the board — if a project has not been set up with the custom status field, Gantry falls back to reading the native state instead, so the card still shows a sensible status. On GitHub and GitLab alike, the same five-value status is what the `gantry:review/<status>` label above carries, read straight from the issue.

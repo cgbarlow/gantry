@@ -384,6 +384,17 @@ export function createFakeGitLabServer({
       }
     }
 
+    // POST /projects/:id/issues/:issue_iid/notes — adds a note (#275's re-approval comment on a linked work
+    // item). Kept on the issue as `notes`, so a test reads back what was said.
+    const issueNotesMatch = rest.match(/^\/issues\/(\d+)\/notes$/)
+    if (req.method === 'POST' && issueNotesMatch) {
+      const issue = issues.get(Number(issueNotesMatch[1]))
+      if (!issue) return json(404, { message: `404 Issue Not Found (fake: iid ${issueNotesMatch[1]})` })
+      const body = await readJsonBody(req)
+      issue.notes = [...(issue.notes ?? []), { id: (issue.notes?.length ?? 0) + 1, body: body.body }]
+      return json(201, issue.notes.at(-1))
+    }
+
     // ---- Merge Requests (#33) ----
     //
     // A minimal fake of GitLab's Merge Requests API: enough for `lib/gitlabPullRequestsClient.js` to

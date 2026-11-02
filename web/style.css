@@ -217,6 +217,7 @@ header {
 .changed-approval-text { margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: inherit; font-size: 13px; padding: 8px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
 .changed-approval-note { margin: 0; font-size: 13px; color: var(--text-muted); }
 @media (max-width: 640px) { .changed-approval-versions { grid-template-columns: 1fr; } }
+.reapproval-history ul { margin: 4px 0 0; padding-left: 18px; font-size: 13px; }
 
 /*
  * View-mode toolbar (#79) — a toolbar segmented control (Markdown / Split / Rendered) for the whole module-editor screen, ported from Variant A of web/prototypes/module-editor.prototype.html (#72).

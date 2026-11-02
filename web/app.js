@@ -94,7 +94,21 @@ import {
 } from './lib/localInstanceFiles.js'
 import { getLocalStatus, checkLocalGate } from './lib/localStatus.js'
 import { modulesWithStandard } from './lib/standardModules.js'
-import { changedEntryFor, changedEntryLabel, alsoReapprovesLine, dashboardBadgeText, dashboardBadgeTitle, wordingText, canRestoreChange, changeLabel, restorePanelHeading } from './lib/changedSinceApproval.js'
+import {
+  changedEntryFor,
+  changedEntryLabel,
+  alsoReapprovesLine,
+  dashboardBadgeText,
+  dashboardBadgeTitle,
+  wordingText,
+  canRestoreChange,
+  changeLabel,
+  restorePanelHeading,
+  reapprovingLine,
+  requestedStatusWithReapproval,
+  waitingForReapproversLine,
+  reapprovalHistoryLine,
+} from './lib/changedSinceApproval.js'
 import {
   resolveDefinitionStructure,
   localDefinitionExists,
@@ -3440,14 +3454,15 @@ function SyncedFieldsPanel({ instance }) {
     setJustOpened(body)
     if (body.pullRequest) {
       const current = instanceData.value
-      if (current?.stage.id === stageId) instanceData.value = { ...current, pullRequest: body.pullRequest }
+      // `alsoReapproves` (#275) is what the new Pull Request also re-approves; the screen keeps showing it as `alsoReapproving`.
+      if (current?.stage.id === stageId) instanceData.value = { ...current, pullRequest: body.pullRequest, alsoReapproving: body.alsoReapproves ?? current.alsoReapproving ?? [] }
     }
     if (body.reapproval?.method === 'comment') {
       setSignoffStatus(`Approval reset was not permitted, so a note was posted to Pull Request #${body.pullRequestId}. The Owner must review and vote again.`)
     } else if (body.reapproval) {
       setSignoffStatus(`Approval withdrawn from Pull Request #${body.pullRequestId} — awaiting the Owner's review again.`)
     } else {
-      setSignoffStatus(`Pull Request #${body.pullRequestId} opened — awaiting the Owner's review.`)
+      setSignoffStatus(requestedStatusWithReapproval(body.pullRequestId, body.alsoReapproves))
     }
   }
 
@@ -3567,6 +3582,8 @@ function SyncedFieldsPanel({ instance }) {
             messages.push(`Rejected — the Owner voted to reject Pull Request #${body.pullRequestId}. Address the feedback, then re-request sign-off.`)
           } else if (body.review?.state === 'changes-requested') {
             messages.push(`Changes requested — the Owner sent Pull Request #${body.pullRequestId} back for more work before approving.`)
+          } else if (body.waitingForReviewers?.length) {
+            messages.push(waitingForReapproversLine(body.pullRequestId, body.waitingForReviewers))
           } else {
             messages.push(`Still pending — the Owner hasn't reviewed Pull Request #${body.pullRequestId} yet.`)
           }
@@ -3797,6 +3814,9 @@ function SyncedFieldsPanel({ instance }) {
                   ? html`<p class="changed-since-approval-line" data-testid="also-reapproves">
                       Sign-off ${alsoReapprovesLine(instance.changedSinceApproval)}
                     </p>`
+                  : null}
+                ${openPullRequestId && pullRequestIsActive && reapprovingLine(instance.alsoReapproving)
+                  ? html`<p class="changed-since-approval-line" data-testid="also-reapproving">${reapprovingLine(instance.alsoReapproving)}</p>`
                   : null}
                 ${openPullRequestId
                   ? html`
@@ -5423,6 +5443,14 @@ function ModuleEditorPage({ slug: routeRef }) {
           ${instance.crossStageEdit
             ? html` <strong>${instance.crossStageEdit.title}</strong> has changes to modules shown here that haven't reached main yet — check there for the latest.`
             : null}
+        </div>`
+      : null}
+    ${instance.reapprovals?.length
+      ? html`<div class="archived-banner reapproval-history" role="status" data-testid="reapproval-history">
+          <strong>Re-approved by a later stage</strong>
+          <ul>
+            ${instance.reapprovals.map((entry) => html`<li key=${entry.pullRequestId} data-testid="reapproval-entry">${reapprovalHistoryLine(entry)}</li>`)}
+          </ul>
         </div>`
       : null}
     ${!instance.archived && writeAccessBlockedReason()

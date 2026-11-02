@@ -685,7 +685,10 @@ export function createFakeAzureDevOpsServer({
               const wsMatch = targetBranchName.match(/^gantry-workspace\/([^/]+)\//)
               if (wsMatch) scopePrefix = `/gantry-workspace/${wsMatch[1]}/`
               else if (sourceBranchName.match(/^gantry-workspace\/([^/]+)\//)) scopePrefix = `/gantry-workspace/${sourceBranchName.match(/^gantry-workspace\/([^/]+)\//)[1]}/`
-              const baseStore = targetBranch.baseStore ?? new Map()
+              // The merge base is where the branch that forked off was forked: the source for a stage branch merging into
+              // `main`, the target for `main` syncing into a stage branch. (#275: a later stage's Pull Request merges after
+              // `main` has moved on, with `instance.yaml` changed on both sides, which a real merge combines.)
+              const baseStore = (targetBranchName === 'main' ? sourceBranch.baseStore : targetBranch.baseStore) ?? new Map()
               const conflicts = []
               const allPaths = new Set()
               for (const k of sourceBranch.store.keys()) if (k.startsWith(scopePrefix)) allPaths.add(k)
