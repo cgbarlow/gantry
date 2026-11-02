@@ -1,6 +1,6 @@
 # A server workspace can be stored in an operator-declared Blob container
 
-Ticket #212, map #238 (v0.13.0). Facts from #259 (`docs/research/blob-storage.md`
+Ticket #212, amended by #261, map #238 (v0.13.0). Facts from #259 (`docs/research/blob-storage.md`
 on `research/blob-storage`). Builds on ADR-0031 (server workspace directories)
 and ADR-0068 (the Save check).
 
@@ -8,9 +8,20 @@ A container host's disk is wiped on redeploy, so today a server workspace
 survives only on a persistent volume. On Render that volume ties Gantry to one
 instance with no zero-downtime deploys.
 
-**Still a server workspace, stored somewhere else.** The "+ New Workspace"
-wizard's Server workspace option gains a **Store in** choice: the server's disk
-or one of the operator's **Blob containers**. A blob-stored workspace is a
+**Still a server workspace, stored somewhere else.** Before v0.13.0 no part
+of the app could create a server workspace. Only the reserved `default` and
+the bundled Examples existed, and the wizard's "New server workspace" in fact
+registered a remote workspace. The "+ New Workspace" wizard now gains a real
+**New server workspace**: a name, and **Store in**, either one of the
+operator's **Blob containers** or the server's disk. With Advanced mode off,
+the wizard asks whether to keep the workspace in a folder on the architect's
+computer (Local) or in a declared Blob container. A server workspace has no
+Provider, work-item or sign-off UI, so it fits that mode. Server disk and
+Provider repos stay behind Advanced mode. The Provider-repo options are renamed
+"New remote workspace" and "An existing workspace", so "server workspace" means
+one thing only. Settings lists the declared containers read-only, each with
+whether it can be reached right now, and never shows a credential. A
+blob-stored workspace is a
 folder in the container with the same layout as on disk (`workspace.json` plus
 Instance folders, Definitions, assets, `sources/`, `reviews/`, `interview/`),
 and it behaves like any server workspace. It has no commits, PRs or work items.
@@ -83,7 +94,7 @@ read, and a short lease. Only Azure Blob is built.
   the web UI and MCP.
 - There is no in-app move between disk and blob. Because the folder layout is
   identical, an operator copies the folder with Azure's tools and Gantry finds
-  it.
+  it. The copy is a new workspace, with a new id and new short numbers.
 - Tests start Azurite from npm inside the image's test stage, with
   `@azure/storage-blob` held at 12.32.x until Azurite accepts newer API
   versions.
