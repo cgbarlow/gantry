@@ -42,20 +42,34 @@ export function openApproval(instance) {
 }
 
 /**
- * The record of the Provider the run plan draws from: the Pull Request awaiting approval, by Stage, and the later Stages the AI interview
- * queued for approval. `logs` maps a Stage id to its committed decisions log. A Stage is queued when its newest session line says so
- * and the Provider has no Pull Request for it; the Provider's word overrides the log's.
+ * The record of the Provider the run plan draws from: the Pull Request awaiting approval, by Stage, the later Stages the AI interview queued
+ * for approval, and (#296) the later Stages that hold a saved head start. `logs` maps a Stage id to its committed decisions log. A Stage is
+ * queued when its newest session line says so and the Provider has no Pull Request for it; the Provider's word overrides the log's.
+ *
+ * The page may be on a Stage ahead of the Instance's current one (the AI is drafting ahead). The Pull Request awaiting approval is then the
+ * current Stage's, which this Stage's own branch carries the record of.
  */
 export function remoteRecord({ instance, stages = [], logs = {} }) {
-  const open = openApproval(instance)
-  const pullRequests = open ? { [instance.stage.id]: open } : {}
-  const queued = {}
-  for (const stage of stages) {
-    if (stage.id === instance?.stage?.id || pullRequests[stage.id]) continue
-    const status = logs[stage.id]?.status
-    if (Array.isArray(status) && status.length && status[status.length - 1].state === 'approval-queued' && !instance?.pullRequests?.[stage.id]) queued[stage.id] = true
+  const pullRequests = {}
+  const viewed = instance?.stage?.id
+  const current = instance?.currentStageId
+  if (viewed && current && viewed !== current) {
+    const id = instance.pullRequests?.[current]
+    if (id) pullRequests[current] = { id, url: pullRequestLink(instance, id) }
+  } else {
+    const open = openApproval(instance)
+    if (open) pullRequests[viewed] = open
   }
-  return { pullRequests, queued }
+  const queued = {}
+  const headStart = {}
+  for (const stage of stages) {
+    if (pullRequests[stage.id]) continue
+    const status = logs[stage.id]?.status
+    const newest = Array.isArray(status) && status.length ? status[status.length - 1].state : null
+    if (newest === 'approval-queued' && !instance?.pullRequests?.[stage.id]) queued[stage.id] = true
+    else if (newest === 'head-start' && stage.id !== current) headStart[stage.id] = true
+  }
+  return { pullRequests, queued, headStart }
 }
 
 const named = (id) => (id === undefined || id === null || id === '' ? '' : ` #${id}`)

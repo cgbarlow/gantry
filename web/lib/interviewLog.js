@@ -98,6 +98,7 @@ export function createSessionLog(config = {}) {
   let counter = 0
   const usage = new Map() // `type|model` -> { type, model, inputTokens, cachedTokens, outputTokens }
   let lastAiSave = null
+  let saves = [] // the time of each AI Save this session has made on the Stage (#296)
 
   const all = () => [...committed, ...pending]
 
@@ -142,6 +143,7 @@ export function createSessionLog(config = {}) {
         }
       }
       lastAiSave = status.lastAiSave ?? lastAiSave
+      if (Array.isArray(status.saves)) saves = [...status.saves]
     },
 
     /** The log file's entries as committed; entries of this session that the file already holds are no longer pending. */
@@ -287,7 +289,7 @@ export function createSessionLog(config = {}) {
     lastAiSave: () => lastAiSave,
 
     /** What a working copy keeps of the log (#290): the entries not yet committed, the tokens used and the counters. */
-    exportState: () => ({ sessionId, pending: pending.map((e) => ({ ...e })), counter, usage: [...usage.values()].map((u) => ({ ...u })), lastAiSave }),
+    exportState: () => ({ sessionId, pending: pending.map((e) => ({ ...e })), counter, usage: [...usage.values()].map((u) => ({ ...u })), lastAiSave, saves: [...saves] }),
     importState(saved) {
       if (!saved) return
       sessionId = saved.sessionId ?? sessionId
@@ -296,6 +298,7 @@ export function createSessionLog(config = {}) {
       usage.clear()
       for (const u of saved.usage ?? []) usage.set(`${u.type}|${u.model}`, { ...u })
       lastAiSave = saved.lastAiSave ?? null
+      saves = Array.isArray(saved.saves) ? [...saved.saves] : []
       raiseCounter([...committed, ...pending])
     },
 
@@ -325,6 +328,8 @@ export function createSessionLog(config = {}) {
           stages: status.stages,
           artefact: status.artefact,
           lastAiSave,
+          // Each AI Save of this session on the Stage, this one included (#296); kept only once the Save has worked (`commit`), so a Save that failed and was tried again is not counted twice.
+          saves: saving && lastAiSave ? [...saves.filter((t) => t !== lastAiSave), lastAiSave] : [...saves],
           models: [...usage.values()],
           instructions: status.instructions,
           skills: Object.fromEntries(skills.skills.map((s) => [s.id, s.version])),
@@ -339,6 +344,7 @@ export function createSessionLog(config = {}) {
       const sent = new Set((delta?.entries ?? []).map((e) => e.id))
       committed = appendEntries({ ...emptyDecisionsLog(), entries: committed }, pending.filter((e) => sent.has(e.id))).log.entries
       pending = pending.filter((e) => !sent.has(e.id))
+      if (Array.isArray(delta?.status?.saves)) saves = [...delta.status.saves]
     },
   }
 }

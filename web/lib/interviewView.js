@@ -31,6 +31,8 @@ import { isRemoteInstance, lastSavedBy, openApproval, remoteRecord } from './int
 import { approvedPrintedFields, changedMark, earlierDocumentsToRender, reRenderCardLine } from './interviewReapproval.js'
 import { fieldCountLabel } from './changedSinceApproval.js'
 import { copyStanding, createWorkingCopyStore, makeWorkingCopy } from './interviewWorkingCopy.js'
+import { heldModules, isDraftingAhead, withHeldModules } from './draftAhead.js'
+import { fieldsInScope } from './interviewScope.js'
 
 // One session per Instance Stage while the editor page is open, so going to the editor and back keeps the conversation and the drafts.
 const sessions = new Map()
@@ -245,14 +247,17 @@ function providerLabel(p) {
  *   onReRenderEarlier  (item) => { ok, message? }  renders one earlier approved Stage's document onto this Stage's branch (#300, ADR-0069); the stage-end Save does it, for the documents
  *                      Request approval would refuse over, before it asks. `item` is one entry of the refusal's `reRenderRequired` (`{ artefactId, artefactTitle, stageTitle, ... }`)
  *   onCheckApproval    () => { ok, merged, message }  Check status (#295); when the Pull Request has merged the Instance has moved on and the page of the next Stage replaces this one
+ *   onDraftAhead       (stageId) => { ok, message? }  moves the page on to a later Stage while the earlier one awaits approval (#296, docs/adr/0063): the Instance stays where it is and the page for that Stage replaces this one
  */
 // #297: `outOfDate` is the Fields flagged Out of date (web/lib/outOfDate.js) and `newSince` the documents marked New since last interview; the run plan marks each Stage that has flagged Fields and the Source documents rail marks the new documents.
-export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance, checkStatus = null, onRequestApproval, onReRenderEarlier = null, onCheckApproval, outOfDate = [], newSince = [] }) {
+export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance, checkStatus = null, onRequestApproval, onReRenderEarlier = null, onCheckApproval, onDraftAhead, outOfDate = [], newSince = [] }) {
   const key = `${instance.slug}|${instance.stage.id}`
   // #295: on an Azure DevOps or GitHub workspace a Stage moves on only when its Pull Request merges, so the stage-end card asks for approval instead of advancing.
   const remote = isRemoteInstance(instance)
   const awaiting = openApproval(instance) // the Pull Request the Provider says is open for this Stage, else null: it overrides what the log says
   const [approval, setApproval] = useState({ phase: 'idle', message: '' })
+  const [headStart, setHeadStart] = useState(null) // #296: the head start saved from the Waiting card: { fields, stopped }
+  const lastHeld = useRef({ key: '', list: [] }) // the Modules held when the AI was last told about them (#296)
   const [setup, setSetup] = useState({ status: 'loading' })
   const [sources, setSources] = useState(null)
   const [snap, setSnap] = useState(null)
@@ -365,7 +370,18 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const target = targets.some((t) => t.id === wantedTarget) ? wantedTarget : instance.stage.id
   const followingStage = nextStage(stagesList, instance.stage.id)
 
+  // #296 (docs/adr/0063): this Stage is being drafted ahead of the Instance's current one. It gets a head start only: the Modules an earlier,
+  // still pending Stage also mounts are held, so the AI sees them as read-only here and Gantry refuses any write to them until that Stage merges.
+  const ahead = remote && isDraftingAhead(stagesList, instance.stage.id, instance.currentStageId)
+  const held = remote && setup.status === 'ready' ? heldModules(setup.definition.stages, instance.stage.id, instance.currentStageId) : []
+  const heldKey = held.map((h) => h.id).join('|')
+  const definitionNow = setup.status === 'ready' ? withHeldModules(setup.definition, instance.stage.id, held) : null
+  const pendingTitles = [...new Set(held.map((h) => h.stageTitle))]
   const otherSaved = setup.status === 'ready' ? setup.otherSaved.filter((m) => !instance.modules.some((own) => own.id === m.id)) : []
+  // A held Module's saved content is the earlier Stage's, which this Stage's own branch may not have yet: take it from there.
+  const heldIds = new Set(held.map((h) => h.id))
+  const heldFresh = setup.status === 'ready' ? [...heldIds].map((id) => setup.otherSaved.find((m) => m.id === id)).filter(Boolean) : []
+  const ownSaved = instance.modules.filter((m) => !heldFresh.some((f) => f.id === m.id))
   // #300 (ADR-0069): on an Azure DevOps or GitHub workspace, the Fields an approved earlier Stage prints are approved content, which the AI changes only through a card that names the re-approval.
   const approvedPrinted = useMemo(
     () => (setup.status === 'ready' ? approvedPrintedFields({ definition: setup.definition, instance }) : {}),
@@ -374,12 +390,12 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   ctxRef.current =
     setup.status === 'ready'
       ? {
-          definition: setup.definition,
+          definition: definitionNow,
           approvedPrinted,
           stageId: instance.stage.id,
           artefactId,
           size: instance.size,
-          saved: [...instance.modules, ...otherSaved],
+          saved: [...ownSaved, ...heldFresh, ...otherSaved],
           sources: sources ?? [],
           skills: setup.skills,
           // #288: what the decisions log already holds, who is interviewing, and the Interview instructions version the status block records.
@@ -477,9 +493,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const readiness = useMemo(
     () =>
       setup.status === 'ready' && snap && snap.phase !== 'kickoff'
-        ? stageReadiness({ definition: setup.definition, structure: setup.structure, stageId: instance.stage.id, artefactId, size: instance.size, modules: instance.modules, drafts, openFields: snap.openFields ?? [] })
+        ? stageReadiness({ definition: definitionNow, structure: setup.structure, stageId: instance.stage.id, artefactId, size: instance.size, modules: instance.modules, drafts, openFields: snap.openFields ?? [] })
         : null,
-    [setup, instance.modules, instance.size, artefactId, snap?.drafts, snap?.openFields?.join('|'), snap?.phase]
+    [setup, heldKey, instance.modules, instance.size, artefactId, snap?.drafts, snap?.openFields?.join('|'), snap?.phase]
   )
   const gate = draftKeys.length ? readiness?.gate ?? null : null
 
@@ -490,7 +506,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const started = phase !== 'kickoff' && phase !== 'testing'
   const busy = phase === 'working' || phase === 'testing'
   const finishing = snap?.finish === 'accepting' || snap?.finish === 'final'
-  const stage = setup.status === 'ready' ? setup.definition.stages.find((s) => s.id === instance.stage.id) : null
+  const stage = setup.status === 'ready' ? definitionNow.stages.find((s) => s.id === instance.stage.id) : null
   const readOnlyIds = new Set(stage?.readOnlyModules ?? [])
   const stageModules = stage ? stage.modules.map((id) => setup.definition.modules.find((m) => m.id === id)).filter((m) => m && !readOnlyIds.has(m.id)) : []
 
@@ -499,18 +515,29 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const runStart = run?.startStageId ?? instance.stage.id // the Stage this run began on
   const multiStage = stagesList.findIndex((st) => st.id === target) > stagesList.findIndex((st) => st.id === runStart) // more than one Stage in the run
   const stageEndReady = phase === 'waiting' && draftKeys.length > 0 && Boolean(readiness?.ready) && !snap?.round && !finishing
+  // #296: nothing draftable is left on a Stage drafted ahead, but Modules an earlier Stage also mounts are still held: the Waiting card offers
+  // Check approval now or Stop here. Either saves the head start. A Stage whose every Module is held has nothing to draft at all, so the card
+  // comes before the AI would start.
+  const nothingDraftable = setup.status === 'ready' && ahead && held.length > 0 && fieldsInScope(definitionNow, instance.stage.id).size === 0
+  const waitingNow =
+    ahead &&
+    held.length > 0 &&
+    !stageEndReady &&
+    saving?.phase !== 'drafting-ahead' &&
+    ((phase === 'waiting' && !snap?.round && !finishing && Boolean(readiness) && readiness.allDone && !readiness.ready) || (phase === 'kickoff' && nothingDraftable))
   // Where the current Stage stands in the run plan.
   const settled = run && run.at === instance.stage.id && (run.phase === 'paused' || run.phase === 'done') ? run.phase : null
   let planCurrent = 'idle'
   if (saving?.phase === 'advancing') planCurrent = 'done'
   else if (saving?.phase === 'saved' && saving.approval) planCurrent = saving.approval === 'queued' ? 'approval-queued' : 'awaiting-approval'
   else if (stageEndReady) planCurrent = 'awaiting-confirmation'
+  else if (waitingNow || (headStart?.stopped && ahead && held.length > 0)) planCurrent = 'waiting-for-approval'
   else if (settled && draftKeys.length === 0) planCurrent = settled
-  else if (started || phase === 'testing') planCurrent = 'drafting'
+  else if (started || phase === 'testing') planCurrent = ahead ? 'drafting-ahead' : 'drafting'
   const outOfDateByStage = outOfDateCountByStage(outOfDate)
   // #295: the Provider's word about the Pull Requests, which overrides the log's (a Stage with one open is awaiting approval; a later Stage the log queued shows Approval queued).
   const remoteRows = remote ? remoteRecord({ instance, stages: stagesList, logs: { ...stageLogs, [instance.stage.id]: committedLog } }) : null
-  const planRowsNow = planRows({ stages: stagesList, currentStageId: instance.stage.id, targetStageId: target, current: planCurrent, remote: remoteRows }).map((row) => ({ ...row, outOfDate: outOfDateByStage[row.id] ?? 0, changedSinceApproval: remote ? changedMark(instance, row.id) : null }))
+  const planRowsNow = planRows({ stages: stagesList, currentStageId: instance.stage.id, targetStageId: target, current: planCurrent, remote: remoteRows, instanceStageId: instance.currentStageId }).map((row) => ({ ...row, outOfDate: outOfDateByStage[row.id] ?? 0, changedSinceApproval: remote ? changedMark(instance, row.id) : null }))
   // #300 (ADR-0069): the earlier documents the stage-end Save re-renders before it asks for approval, so the card says so.
   const earlierToRender = remote && setup.status === 'ready' ? earlierDocumentsToRender({ definition: setup.definition, instance, approved: approvedPrinted, draftKeys }) : []
   const newSinceIds = new Set(newSince.map((s) => s.id))
@@ -558,6 +585,22 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     startInterview()
   }, [carryingOn, setup.status, sources, snap?.phase, providerId])
 
+  // #296: the earlier Stage this one was drafted ahead of has merged (Check approval now found it): the Modules it held are open, so the AI is told.
+  useEffect(() => {
+    if (!started) {
+      lastHeld.current = { key: heldKey, list: held }
+      return
+    }
+    if (lastHeld.current.key === heldKey || phase !== 'waiting') return
+    const nowHeld = new Set(held.map((h) => h.id))
+    const opened = lastHeld.current.list.filter((h) => !nowHeld.has(h.id))
+    lastHeld.current = { key: heldKey, list: held }
+    if (opened.length === 0 || !sessionRef.current) return
+    const titleOf = (id) => setup.definition.modules.find((m) => m.id === id)?.title ?? id
+    const stageTitle = [...new Set(opened.map((h) => h.stageTitle))].join(' and ')
+    sessionRef.current.modulesOpened({ modules: opened.map((h) => ({ id: h.id, title: titleOf(h.id) })), stageTitle })
+  }, [heldKey, phase, started])
+
   // "Resume the run" on a kickoff whose logs say a run was left part-way.
   async function resumeRun() {
     setResumeMessage('')
@@ -573,6 +616,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       beginRun(instance.slug, { target: resume.targetStageId, startStageId, providerId, at: instance.stage.id })
       const asked = await requestApproval()
       if (!asked.ok) setResumeMessage(asked.message)
+      else if (resume.targetStageId !== instance.stage.id && followingStage) await draftAhead({ phase: 'saved', approval: 'requested' }) // and the session drafts ahead while the Owner reviews (#296)
       return
     }
     const follow = resume.mode === 'advance' ? followingStage : null
@@ -652,7 +696,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     const willReRender = action === 'approval' && !pause && earlierToRender.length > 0
     // #295: a Stage that isn't the Instance's current one can't ask for approval yet (Request approval refuses it), so it is queued.
     const queued = remote && action === 'approval' && instance.stage.id !== instance.currentStageId
-    const outcome = saveOutcome({ stages: stagesList, currentStageId: instance.stage.id, targetStageId: target, startStageId: runStart, action, queued })
+    const outcome = saveOutcome({ stages: stagesList, currentStageId: instance.stage.id, targetStageId: target, startStageId: runStart, action, queued, instanceStageId: instance.currentStageId })
     // #288: the decisions log goes in the same Save as the content.
     // A Pause is not the end of the Stage: the status line says `paused` and the Stage stays "in-progress" in the run's map, so a paused
     // session is not mistaken for a run that stopped after finishing the Stage (web/lib/interviewRun.js `resumableRun`).
@@ -683,6 +727,13 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         setSaving({ phase: 'paused', fields: keys.length })
         return true
       }
+      if (action === 'head-start') {
+        // #296: the head start of a Stage drafted ahead is saved (one commit on this Stage's branch, its decisions log in it). The Stage is not
+        // finished: it gets its full Save later, when it is ready.
+        setSaving(null)
+        setHeadStart((was) => ({ fields: (was?.fields ?? 0) + keys.length, stopped: false }))
+        return true
+      }
       updateRun(instance.slug, { phase: outcome.finished ? 'done' : outcome.advances || outcome.requestsApproval ? 'running' : 'paused', at: instance.stage.id })
       const saved = { phase: 'saved', check: result.check ?? null, finished: outcome.finished, approval: outcome.requestsApproval ? (queued ? 'queued' : 'requested') : null, willReRender }
       setSaving(saved)
@@ -691,6 +742,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         // The content and its log are saved; now the Pull Request (after the earlier documents the card named are re-rendered). A refusal leaves the Save as it is and says why, with a button to ask again.
         const asked = await requestApproval({ reRender: willReRender })
         if (!asked.ok) setSaving({ ...saved, approvalError: asked.message })
+        else if (!outcome.finished) await draftAhead(saved)
+      } else if (outcome.requestsApproval && queued && !outcome.finished) {
+        await draftAhead(saved)
       }
       return true
     }
@@ -765,7 +819,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     setApproval({ phase: 'checking', message: '' })
     // Asking is consent to carry on: if the Owner has approved, the next Stage starts by itself. The Check status that runs as a session
     // opens (`carry: false`) only finds out; it does not spend the AI's time until the architect resumes.
-    const carries = carry && target !== instance.stage.id && Boolean(followingStage) && Boolean(providerInUse)
+    // A page drafting ahead stays where it is when the earlier Stage merges: the held Modules open and the AI carries on with them (#296).
+    const carries = carry && !ahead && target !== instance.stage.id && Boolean(followingStage) && Boolean(providerInUse)
     if (carries) {
       if (run) updateRun(instance.slug, { carryOn: followingStage.id, phase: 'running', providerId: providerInUse })
       else beginRun(instance.slug, { target, startStageId: instance.stage.id, providerId: providerInUse, at: instance.stage.id, carryOn: followingStage.id })
@@ -778,6 +833,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     }
     if (!result.merged) {
       if (carries) updateRun(instance.slug, { carryOn: null })
+      setApproval({ phase: 'idle', message: result.message || '' })
+    } else if (ahead) {
       setApproval({ phase: 'idle', message: result.message || '' })
     }
     return result
@@ -799,6 +856,42 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       updateRun(instance.slug, { carryOn: null, phase: 'paused', at: instance.stage.id })
       setSaving({ ...saved, phase: 'saved', advanceError: result?.message || 'The Stage could not be advanced.' })
     }
+  }
+
+  // #296 (docs/adr/0063): the Stage is saved and its approval asked for (or queued), so the session moves on to the next Stage of the run
+  // while the Owner reviews: the Instance stays where it is and the page for the next Stage replaces this one and starts by itself. If the
+  // page can't move on, the run stays here and the card says why.
+  async function draftAhead(saved = saving) {
+    if (!followingStage || !onDraftAhead) return
+    setSaving({ ...saved, phase: 'drafting-ahead', advanceError: '' })
+    if (run) updateRun(instance.slug, { carryOn: followingStage.id, phase: 'running', providerId: providerInUse })
+    else beginRun(instance.slug, { target, startStageId: instance.stage.id, providerId: providerInUse, at: instance.stage.id, carryOn: followingStage.id })
+    let result
+    try {
+      result = await onDraftAhead(followingStage.id)
+    } catch (err) {
+      result = { ok: false, message: err.message }
+    }
+    if (!result?.ok) {
+      updateRun(instance.slug, { carryOn: null, phase: 'paused', at: instance.stage.id })
+      setSaving({ ...saved, phase: 'saved', advanceError: result?.message || 'The next Stage could not be opened.' })
+    }
+  }
+
+  // The Waiting card (#296). Either button saves the head start first (one commit on this Stage's branch), if there is anything unsaved.
+  // "Check approval now" then runs Check status and, if the earlier Stage merged, the held Modules open and the AI carries on with them;
+  // "Stop here" ends the session. The Stage gets its full Save later, when it is ready.
+  async function waitingAction(kind) {
+    if (Object.keys(drafts).length) {
+      const saved = await runSave({ action: 'head-start' })
+      if (!saved) return
+    }
+    if (kind === 'stop') {
+      updateRun(instance.slug, { phase: 'paused', at: instance.stage.id })
+      setHeadStart((was) => ({ fields: was?.fields ?? 0, stopped: true }))
+      return
+    }
+    await checkApproval({ carry: false })
   }
 
   // ---------- pieces ----------
@@ -829,6 +922,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           until you confirm the Stage, and it never passes a Gate that needs approval or review.
         </p>
         ${blockedReason ? html`<p class="inline-error" role="alert" data-testid="interview-blocked">${blockedReason}</p>` : null}
+        ${held.length
+          ? html`<p class="kick-note" data-testid="interview-head-start-note">This Stage is drafted ahead of ${pendingTitles.join(' and ')}, which awaits approval, so the AI gets a head start only: it drafts the Modules no pending Stage mounts. Held until then: ${held.map((h) => setup.definition.modules.find((m) => m.id === h.id)?.title ?? h.id).join(', ')}.</p>`
+          : null}
         ${asideNotice
           ? html`<div class="warn" role="status" data-testid="interview-copy-aside">
               A copy of unsaved work kept in this browser${asideNotice.savedAt ? ` (${new Date(asideNotice.savedAt).toLocaleString()})` : ''} was set aside, because this Stage's decisions log has been saved since it began. The saved log and content are what this interview carries on from.
@@ -1075,7 +1171,44 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         : html`<p class="kick-note" data-testid="interview-awaiting-last">This is the last Stage of the run. Once it is approved, the Instance moves on.</p>`}
       <div class="round-actions">
         <button type="button" class="btn primary" data-testid="interview-check-status" disabled=${checking} onClick=${() => checkApproval()}>${checking ? 'Checking…' : 'Check status'}</button>
+        ${goesOn && onDraftAhead && providerInUse
+          ? html`<button type="button" class="btn ghost" data-testid="interview-draft-ahead" disabled=${checking || Boolean(blockedReason)} onClick=${() => draftAhead({ phase: 'saved' })} title="Draft the next Stage's head start while the Owner reviews this one.">Draft ahead on ${followingStage.title}</button>`
+          : null}
       </div>
+      ${saving?.advanceError ? html`<p class="inline-error" role="alert" data-testid="interview-advance-error">${saving.advanceError}</p>` : null}
+      ${approval.message ? html`<p class="kick-note" data-testid="interview-approval-message" role="status">${approval.message}</p>` : null}
+    </div>`
+  }
+
+  // #296: nothing is left to draft on this Stage until the earlier one is approved (docs/adr/0063). One card, two choices; both save the
+  // head start as one commit on this Stage's branch. "Check approval now" runs Check status and carries on if the earlier Stage merged.
+  const waitingCard = () => {
+    const checking = approval.phase === 'checking'
+    const busySaving = saving?.phase === 'saving' || Boolean(blockedReason) || handEditing !== null
+    const titleOfModule = (id) => setup.definition.modules.find((m) => m.id === id)?.title ?? id
+    const unsaved = draftKeys.length
+    const waitsFor = pendingTitles.join(' and ')
+    return html`<div class="qcard stage-end waiting" data-testid="interview-waiting" role="status">
+      <div class="qchip">Waiting</div>
+      <p class="qhead">${stage?.title ?? instance.stage.title} waits for ${waitsFor} to be approved</p>
+      <p data-testid="interview-waiting-held">
+        ${nothingDraftable
+          ? html`Every Module this Stage can edit is also mounted by ${waitsFor}, so there is nothing to draft yet.`
+          : html`The AI has drafted what it can: the Modules no pending Stage mounts${unsaved ? ` (${unsaved} Field${unsaved === 1 ? '' : 's'} not saved yet)` : ''}.`}
+        Held until ${waitsFor} is approved and merged: ${held.map((h) => titleOfModule(h.id)).join(', ')}. Gantry refuses any write to them before then.
+      </p>
+      ${headStart?.fields ? html`<p class="gate-ok" data-testid="interview-head-start-saved">The head start is saved: ${headStart.fields} Field${headStart.fields === 1 ? '' : 's'}, as one commit on ${stage?.title ?? instance.stage.title}'s branch.</p>` : null}
+      ${saving?.phase === 'error' && !saving.pause ? html`<p class="inline-error" role="alert" data-testid="interview-save-error">${saving.message}</p>` : null}
+      ${headStart?.stopped
+        ? html`<p class="kick-note" data-testid="interview-waiting-stopped">The session stops here. ${stage?.title ?? instance.stage.title} gets its full Save later, when it is ready: open the Interview page again and press Check status once ${waitsFor} is approved.</p>`
+        : html`<p class="kick-note" data-testid="interview-waiting-note">Confirming either choice saves the head start${unsaved ? '' : ' (already saved)'} as one commit on ${stage?.title ?? instance.stage.title}'s branch. ${stage?.title ?? instance.stage.title} gets its full Save later, when it is ready.</p>
+          <div class="round-actions">
+            <button type="button" class="btn primary" data-testid="interview-check-approval-now" disabled=${busySaving || checking} onClick=${() => waitingAction('check')}>
+              ${saving?.phase === 'saving' ? 'Saving…' : checking ? 'Checking…' : 'Check approval now'}
+              <span class="rec">RECOMMENDED</span>
+            </button>
+            <button type="button" class="btn ghost" data-testid="interview-stop-here" disabled=${busySaving || checking} onClick=${() => waitingAction('stop')}>Stop here</button>
+          </div>`}
       ${approval.message ? html`<p class="kick-note" data-testid="interview-approval-message" role="status">${approval.message}</p>` : null}
     </div>`
   }
@@ -1086,6 +1219,12 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   }
 
   const stageEnd = () => {
+    if (saving?.phase === 'drafting-ahead') {
+      return html`<div class="qcard stage-end saved" data-testid="interview-drafting-ahead" role="status">
+        <p class="qhead">Saved. Drafting ahead on ${followingStage?.title ?? 'the next Stage'}…</p>
+      </div>`
+    }
+    if (waitingNow || (headStart?.stopped && ahead && held.length > 0)) return waitingCard()
     if (remote && awaiting) return awaitingCard()
     if (saving?.phase === 'saved' && remote) {
       // A remote Save that is not (yet) awaiting a Pull Request: queued behind an earlier Stage, refused by the Provider, or "Save and stop here".
@@ -1142,7 +1281,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         ? html`<p class="kick-note" data-testid="interview-run-next">This run goes on to ${followingStage.title}${target === followingStage.id ? ', its target' : `, then to ${stageTitleOf(target)}`}${remote ? ' once this Stage is approved' : ''}.</p>`
         : null}
       ${remote
-        ? html`<p class="kick-note" data-testid="interview-approval-note">A Stage moves on only when its Pull Request is approved by a person. Saving asks for that approval, then the session waits for the Owner: the AI never passes a gate.</p>`
+        ? html`<p class="kick-note" data-testid="interview-approval-note">A Stage moves on only when its Pull Request is approved by a person. ${ahead ? `Saving queues that approval: this Stage's Pull Request opens by itself once Check status sees the earlier Stage merge.` : 'Saving asks for that approval, then the session waits for the Owner.'} The AI never passes a gate.</p>`
         : null}
       ${earlierToRender.length
         ? html`<p class="kick-note rerender-note" data-testid="interview-rerender-note">${reRenderCardLine(earlierToRender)} The approved copies are kept in out/approved/. Choosing <strong>Save and stop here</strong> saves the content and leaves the documents as they are.</p>`
@@ -1289,7 +1428,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           <div class="inner">
             ${setup.status === 'loading' ? html`<p class="loading">Loading…</p>` : null}
             ${setup.status === 'error' ? html`<p class="inline-error" role="alert">${setup.message}</p>` : null}
-            ${setup.status === 'ready' && !started && !(remote && awaiting) ? kickoff() : null}
+            ${setup.status === 'ready' && !started && !(remote && awaiting) && !(waitingNow && phase === 'kickoff') ? kickoff() : null}
             ${setup.status === 'ready' && started ? thread() : null}
             ${setup.status === 'ready' && started ? roundView() : null}
             ${setup.status === 'ready' && started ? clashView() : null}

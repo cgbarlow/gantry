@@ -84,6 +84,11 @@ const FINISH_NOTE =
   'from the Source documents, the answers so far and your recommendations. Gantry marks any figure you propose "(target assumption)". ' +
   'Then ask ONE last round of cards about only the Fields you cannot responsibly propose, such as a named Owner. Ask nothing else, and do not ask a second round.'
 
+// #296 (docs/adr/0063): a Stage drafted ahead gets a head start only, and the Modules an earlier Stage also mounts are held. When that Stage is approved and merged they open.
+const opened = (modules, stageTitle) =>
+  `${stageTitle} was approved and merged, so these Modules are no longer held and are now in scope: ${modules.map((m) => `${m.title ?? m.id} (${m.id})`).join(', ')}. ` +
+  'Extend their Fields now, from the Source documents, the answers so far and what that Stage settled. Then ask your next round of cards: every question whose prerequisites are settled.'
+
 const LAST_ROUND_NOTE = 'That was the last round. Redraft the Fields these answers feed. Ask nothing more: the architect has chosen to finish.'
 
 function sessionNote({ cardMode, textDrafts, reader, handEdits = [] }) {
@@ -1093,6 +1098,18 @@ export function createInterviewSession(config = {}) {
       closePendingAsk('The architect did not answer these cards. They wrote in chat instead, below. Ask again if you still need them.')
       messages = [...messages, { role: 'user', text: body }]
       await runLoop()
+    },
+
+    /**
+     * The earlier Stage this one was drafted ahead of has been approved and merged (#296): the Modules it held back are open, and the AI is told
+     * to extend them. `modules` are `{ id, title }`. Only between turns; resolves `{ ok }`.
+     */
+    async modulesOpened({ modules = [], stageTitle = 'The earlier Stage' } = {}) {
+      if (state.phase !== 'waiting' || modules.length === 0) return { ok: false }
+      say('sys', `${stageTitle} was approved and merged. Now open: ${modules.map((m) => m.title ?? m.id).join(', ')}.`)
+      messages = [...messages, { role: 'user', fromGantry: true, text: opened(modules, stageTitle) }]
+      await runLoop()
+      return { ok: true }
     },
 
     /** Carries on after a failure (the history is intact: the architect's last message is already in it). */

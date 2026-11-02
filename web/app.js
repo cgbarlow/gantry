@@ -5110,7 +5110,7 @@ function OutOfDatePanel({ instance }) {
 }
 
 // #286 (map #238): the Interview page for a local or server workspace Instance, handed what only this file can reach: the Instance's Source document store, the Definition it follows, the other Stages' saved content (the AI is told what is already settled) and the stage Save.
-function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequestApproval, onReRenderEarlier, onCheckApproval }) {
+function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequestApproval, onReRenderEarlier, onCheckApproval, onDraftAhead }) {
   const store = useSourceStore(instance)
   const outOfDate = useOutOfDate(instance)
   const decisionsStore = useDecisionsStore(instance)
@@ -5159,6 +5159,7 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequ
     onRequestApproval=${onRequestApproval}
     onReRenderEarlier=${onReRenderEarlier}
     onCheckApproval=${onCheckApproval}
+    onDraftAhead=${onDraftAhead}
   />`
 }
 
@@ -5600,7 +5601,13 @@ function interviewUnavailableReason(instance) {
   if (instance.workspaceBacked && !offersSourceDocuments(instance)) return 'The AI interview is not available on GitLab or Atlassian workspaces yet.'
   if (instance.archived) return 'This Instance is archived. Restore it to use the AI interview.'
   if (isWriteAccessBlocked()) return 'The AI interview needs write access to this Instance.'
-  if (instance.stage.id !== instance.currentStageId) return 'The AI interview works on the current Stage. Open the current Stage to use it.'
+  if (instance.stage.id !== instance.currentStageId) {
+    // #296 (docs/adr/0063): on an Azure DevOps or GitHub workspace the AI drafts ahead on a Stage after the current one while the Owner
+    // reviews the earlier one. A Stage the Instance has moved past is complete and stays closed to it.
+    const order = (instance.stages ?? []).map((s) => s.id)
+    const ahead = instance.workspaceBacked && order.indexOf(instance.stage.id) > order.indexOf(instance.currentStageId)
+    if (!ahead) return 'The AI interview works on the current Stage. Open the current Stage to use it.'
+  }
   return ''
 }
 
@@ -6396,18 +6403,39 @@ function ModuleEditorPage({ slug: routeRef }) {
       })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) return { ok: false, merged: false, message: `Check status failed: ${body.message ?? body.error ?? res.status}` }
-      const message = approvalStatusLine(body, inst.stage.title)
-      if (body.merged) {
+      // Check status is always about the Instance's current Stage, which is not the one on the page when the AI is drafting ahead (#296).
+      const checkedTitle = inst.stages?.find((s) => s.id === inst.currentStageId)?.title ?? inst.stage.title
+      const message = approvalStatusLine(body, checkedTitle)
+      const order = (inst.stages ?? []).map((s) => s.id)
+      // A page that is on a Stage ahead of the one that merged stays where it is: the Instance has moved on, the page's Stage has not, and its held
+      // Modules are open now (#296). Only a page on the Stage that merged (or an earlier one) goes to the Instance's new current Stage.
+      const staysAhead = Boolean(body.merged) && inst.stage.id !== inst.currentStageId && order.indexOf(inst.stage.id) >= order.indexOf(body.advancedTo?.id ?? inst.currentStageId)
+      if (body.merged && !staysAhead) {
         // Reset to no explicit Stage so the page shows the Instance's new current Stage (see `advanceCurrentStage`).
         const effectWillReload = viewedStage.value !== null
         viewedStage.value = null
         if (!effectWillReload) instanceData.value = await loadInstance(inst.slug, null)
         return { ok: true, merged: true, message }
       }
-      instanceData.value = await loadInstance(inst.slug, null)
-      return { ok: true, merged: false, message }
+      instanceData.value = await loadInstance(inst.slug, inst.stage.id !== inst.currentStageId ? inst.stage.id : null)
+      return { ok: true, merged: Boolean(body.merged), message }
     } catch (err) {
       return { ok: false, merged: false, message: `Check status failed: ${err.message}` }
+    }
+  }
+
+  // #296 (docs/adr/0063): while the Owner reviews a Stage, the AI interview moves on to the next one of its run. The Instance does not move:
+  // this only shows the later Stage (as the stage switcher does), and the Interview page for it replaces the one for the Stage just saved.
+  // Never throws: resolves `{ ok: true }` or `{ ok: false, message }`.
+  async function draftAheadOnStage(stageId) {
+    const inst = instanceData.peek()
+    if (!inst?.stage || isEditingBlocked()) return { ok: false, message: 'This Instance cannot be written to right now.' }
+    try {
+      if (viewedStage.value !== stageId) viewedStage.value = stageId // the shared loading effect fetches that Stage
+      else instanceData.value = await loadInstance(inst.slug, stageId)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, message: `The next Stage could not be opened: ${err.message}` }
     }
   }
 
@@ -6489,6 +6517,7 @@ function ModuleEditorPage({ slug: routeRef }) {
         onRequestApproval=${requestInterviewApproval}
         onReRenderEarlier=${reRenderEarlierForInterview}
         onCheckApproval=${checkInterviewApproval}
+        onDraftAhead=${draftAheadOnStage}
       />${dialogs}`
   }
 

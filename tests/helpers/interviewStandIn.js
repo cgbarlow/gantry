@@ -39,6 +39,22 @@ export const trioScript = (body) => {
   return { text: `${stage} is drafted.` }
 }
 
+/**
+ * #296: the script for the trio with a shared Module (`writeTrio(dir, { shared: true })`). Scope drafts its Field and the shared Module's
+ * `body`. Shape, drafted ahead of Scope's approval, can draft only its own Module (the shared one is held), and it extends the shared
+ * Module's `more` only when it is told the Module is no longer held.
+ */
+export const sharedScript = (body) => {
+  const stage = trioStageOf(body)
+  const draft = (id, field, value) => ({ id, input: { field, value } })
+  if (body.messages.length === 1) {
+    if (stage === 's1') return { text: 'Reading for s1.', tools: [draft('d-m1', 'm1.body', 'Notes for s1: the agreed position, written out.'), draft('d-mx', 'mx.body', 'Shared position set at s1.')] }
+    return { text: `Reading for ${stage}.`, tools: [draft(`d-${stage}`, `${MODULE[stage]}.body`, `Notes for ${stage}: the agreed position, written out.`)] }
+  }
+  if (JSON.stringify(body.messages[body.messages.length - 1]).includes('no longer held')) return { text: 'Extending the shared notes.', tools: [draft('d-more', 'mx.more', 'Shape extends the shared notes.')] }
+  return { text: `${stage} is drafted.` }
+}
+
 export function withFakeAnthropic(script, fn) {
   const posts = []
   const upstream = createHttpServer((req, res) => {

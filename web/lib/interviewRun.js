@@ -12,14 +12,16 @@
 import { signal } from '@preact/signals'
 
 /** The states a row of the run plan can be in. `beyond` is a Stage after the target, which the run never reaches. */
-export const PLAN_STATES = Object.freeze(['done', 'drafting', 'awaiting-confirmation', 'awaiting-approval', 'approval-queued', 'waiting', 'paused', 'beyond'])
+export const PLAN_STATES = Object.freeze(['done', 'drafting', 'drafting-ahead', 'awaiting-confirmation', 'awaiting-approval', 'approval-queued', 'waiting-for-approval', 'waiting', 'paused', 'beyond'])
 
 const WORDS = Object.freeze({
   done: 'done',
   drafting: 'drafting',
+  'drafting-ahead': 'drafting ahead',
   'awaiting-confirmation': 'awaiting confirmation',
   'awaiting-approval': 'awaiting approval',
   'approval-queued': 'approval queued',
+  'waiting-for-approval': 'waiting for approval',
   waiting: 'waiting',
   paused: 'paused',
   beyond: 'beyond target',
@@ -49,22 +51,27 @@ export function nextStage(stages, stageId) {
  * @param {{id: string, title: string}[]} input.stages   every Stage of the Instance
  * @param {string} input.currentStageId                   the Stage the interview is on
  * @param {string} input.targetStageId                    the run's target (the current Stage when the run is one Stage)
- * @param {'idle'|'drafting'|'awaiting-confirmation'|'paused'|'done'} input.current  where the current Stage stands
- * @param {{pullRequests?: Record<string, {id: number|string, url?: string|null}>, queued?: Record<string, boolean>}} [input.remote]
- *   a Provider workspace's record (#295): the Pull Requests open for approval, by Stage, and the Stages queued for it. The Provider's word
- *   overrides the log's: a Stage with a Pull Request open is awaiting approval, and a later Stage that is queued shows Approval queued.
+ * @param {string} [input.instanceStageId]  the Stage the Instance itself is on (#296), when the interview is on a later one (drafting ahead): the Stages from it up to the interview's are not done, they are awaiting approval or queued for it
+ * @param {'idle'|'drafting'|'drafting-ahead'|'awaiting-confirmation'|'waiting-for-approval'|'paused'|'done'} input.current  where the Stage the interview is on stands
+ * @param {{pullRequests?: Record<string, {id: number|string, url?: string|null}>, queued?: Record<string, boolean>, headStart?: Record<string, boolean>}} [input.remote]
+ *   a Provider workspace's record (#295): the Pull Requests open for approval, by Stage, the Stages queued for it, and (#296) the later Stages
+ *   holding a saved head start. The Provider's word overrides the log's: a Stage with a Pull Request open is awaiting approval, and a later
+ *   Stage that is queued shows Approval queued.
  * @returns {{id: string, title: string, state: string, target: boolean, note: string, pullRequest: {id: number|string, url: string|null}|null, checkable: boolean}[]}
  */
-export function planRows({ stages, currentStageId, targetStageId, current = 'idle', remote = null }) {
+export function planRows({ stages, currentStageId, targetStageId, current = 'idle', remote = null, instanceStageId = currentStageId }) {
   const currentAt = indexOf(stages, currentStageId)
+  const instanceAt = Math.min(indexOf(stages, instanceStageId) === -1 ? currentAt : indexOf(stages, instanceStageId), currentAt)
   const targetAt = Math.max(indexOf(stages, targetStageId), currentAt)
   return (stages ?? []).map((stage, at) => {
     const open = remote?.pullRequests?.[stage.id] ?? null
+    const idleWord = remote?.queued?.[stage.id] ? 'approval-queued' : remote?.headStart?.[stage.id] ? 'waiting-for-approval' : 'waiting'
     let state
     if (at > targetAt) state = 'beyond'
-    else if (at < currentAt) state = 'done'
-    else if (at === currentAt) state = open ? 'awaiting-approval' : current === 'idle' ? 'waiting' : current
-    else state = open ? 'awaiting-approval' : remote?.queued?.[stage.id] ? 'approval-queued' : 'waiting'
+    // #296: a Stage before the interview's that the Instance has not moved past is pending, not done: its Pull Request is open, or it is queued behind one.
+    else if (at < currentAt) state = at < instanceAt ? 'done' : open || at === instanceAt ? 'awaiting-approval' : 'approval-queued'
+    else if (at === currentAt) state = open ? 'awaiting-approval' : current === 'idle' ? idleWord : current
+    else state = open ? 'awaiting-approval' : idleWord
     const target = at === targetAt
     const pullRequest = state === 'awaiting-approval' && open ? { id: open.id, url: open.url ?? null } : null
     return {
@@ -88,8 +95,9 @@ export function planRows({ stages, currentStageId, targetStageId, current = 'idl
  * @param {string} input.currentStageId
  * @param {string} input.targetStageId
  * @param {string} input.startStageId  the Stage the run began on
- * @param {'advance'|'stop'|'approval'} input.action  "Save, advance, carry on" (a local or server workspace), "Save and stop here", or
- *   "Save, request approval, draft ahead" (a remote workspace, #295)
+ * @param {'advance'|'stop'|'approval'|'head-start'} input.action  "Save, advance, carry on" (a local or server workspace), "Save and stop here",
+ *   "Save, request approval, draft ahead" (a remote workspace, #295), or the Waiting card's save of the head start (#296)
+ * @param {string} [input.instanceStageId]  the Stage the Instance is on, when the Save is of a Stage drafted ahead of it (#296): the Stages from it up to this one are awaiting approval
  * @param {boolean} [input.queued]  the Stage is not the Instance's current one, so its approval can't be asked for yet and is queued (#295)
  * @returns {{state: string, finished: boolean, advances: boolean, requestsApproval: boolean, nextStageId: string|null, stages: Record<string, string>}}
  *   `state` is the Stage's state in the status block; `stages` is each Stage of the run and its state, which the same Save records.
@@ -97,20 +105,24 @@ export function planRows({ stages, currentStageId, targetStageId, current = 'idl
  *   and the Stage is `awaiting-approval` (`approval-queued`) until a Check status sees its Pull Request merge. At the target Stage the run is
  *   done, whatever the Owner's answer: the session has nothing more to draft.
  */
-export function saveOutcome({ stages, currentStageId, targetStageId, startStageId, action, queued = false }) {
+export function saveOutcome({ stages, currentStageId, targetStageId, startStageId, action, queued = false, instanceStageId = currentStageId }) {
   const currentAt = indexOf(stages, currentStageId)
+  const instanceAt = Math.min(indexOf(stages, instanceStageId) === -1 ? currentAt : indexOf(stages, instanceStageId), currentAt)
   const targetAt = Math.max(indexOf(stages, targetStageId), currentAt)
   const startAt = Math.min(indexOf(stages, startStageId) === -1 ? currentAt : indexOf(stages, startStageId), currentAt)
   const finished = currentAt >= targetAt
   const approval = action === 'approval'
   const advances = !finished && action === 'advance'
   const waitWord = queued ? 'approval-queued' : 'awaiting-approval'
-  const state = finished ? 'done' : approval ? waitWord : action === 'advance' ? 'saved' : 'paused'
+  // #296: the Waiting card saves the head start of a Stage drafted ahead: it is not finished, it waits for the earlier Stage's approval.
+  const headStart = action === 'head-start'
+  // A Stage queued behind an earlier one is not done at the target: its Pull Request still has to open (#296), so the log says so.
+  const state = headStart ? 'head-start' : finished ? (approval && queued ? waitWord : 'done') : approval ? waitWord : action === 'advance' ? 'saved' : 'paused'
   const map = {}
   for (let at = startAt; at <= targetAt; at++) {
     const id = stages[at].id
-    if (at < currentAt) map[id] = 'done'
-    else if (at === currentAt) map[id] = approval ? waitWord : finished || advances ? 'done' : 'paused'
+    if (at < currentAt) map[id] = at < instanceAt ? 'done' : at === instanceAt ? 'awaiting-approval' : 'approval-queued'
+    else if (at === currentAt) map[id] = headStart ? 'head-start' : approval ? waitWord : finished || advances ? 'done' : 'paused'
     else map[id] = 'waiting'
   }
   return { state, finished, advances, requestsApproval: approval, nextStageId: advances ? stages[currentAt + 1]?.id ?? null : null, stages: map }

@@ -349,7 +349,10 @@ export function buildInterviewBrief({ definition, stageId, artefactId, size, sav
   const readOnlyIds = new Set(Array.isArray(stage.readOnlyModules) ? stage.readOnlyModules : [])
   const stageModules = (stage.modules ?? []).map((id) => moduleById.get(id)).filter(Boolean)
   const inScope = stageModules.filter((m) => !readOnlyIds.has(m.id))
-  const readOnlyHere = stageModules.filter((m) => readOnlyIds.has(m.id))
+  // #296: Modules held while an earlier Stage awaits approval (web/lib/draftAhead.js): read-only here for now, with the Stage whose approval opens each.
+  const heldFor = new Map((Array.isArray(stage.heldModules) ? stage.heldModules : []).map((h) => [h.id, h]))
+  const readOnlyHere = stageModules.filter((m) => readOnlyIds.has(m.id) && !heldFor.has(m.id))
+  const heldHere = stageModules.filter((m) => heldFor.has(m.id))
 
   // --- 4. the Artefact aimed for ---
   const candidates = (definition.artefacts ?? []).filter((a) => a.gate === stage.gate && a.satisfiesGate !== false)
@@ -448,7 +451,12 @@ export function buildInterviewBrief({ definition, stageId, artefactId, size, sav
   if (readOnlyHere.length) {
     fieldLines.push(`Read-only on this Stage (context only; do not draft or change them): ${readOnlyHere.map((m) => `${m.title ?? m.id} (\`${m.id}\`)`).join(', ')}.`)
   }
-  if (inScope.length === 0) fieldLines.push('No Module on this Stage can be drafted: every Module is read-only here.')
+  if (heldHere.length) {
+    fieldLines.push(
+      `Head start only: this Stage is being drafted ahead, while ${[...new Set(heldHere.map((m) => heldFor.get(m.id).stageTitle))].join(' and ')} awaits approval. Held until then, because that Stage also mounts them (do not draft, change or ask about them; Gantry refuses any write to them): ${heldHere.map((m) => `${m.title ?? m.id} (\`${m.id}\`, held until ${heldFor.get(m.id).stageTitle} is approved)`).join(', ')}. Draft only the Modules in scope above. You are told when a held Module opens.`
+    )
+  }
+  if (inScope.length === 0) fieldLines.push(heldHere.length ? 'No Module on this Stage can be drafted yet: every Module it can edit is held until an earlier Stage is approved.' : 'No Module on this Stage can be drafted: every Module is read-only here.')
   parts.set('fields', fieldLines.join('\n').trimEnd())
 
   // --- 6. saved content, every Module ---
@@ -469,7 +477,7 @@ export function buildInterviewBrief({ definition, stageId, artefactId, size, sav
     const fields = content[mod.id]?.fields ?? {}
     const written = (mod.fields ?? []).filter((f) => !isBlank(fields[f.id]))
     if (!here && written.length === 0) continue
-    const tag = !here ? 'on another Stage' : readOnlyIds.has(mod.id) ? 'read-only here' : 'in scope'
+    const tag = !here ? 'on another Stage' : heldFor.has(mod.id) ? `held until ${heldFor.get(mod.id).stageTitle} is approved` : readOnlyIds.has(mod.id) ? 'read-only here' : 'in scope'
     savedLines.push(`### ${mod.title ?? mod.id} (\`${mod.id}\`, ${tag}${content[mod.id]?.status ? `, status ${content[mod.id].status}` : ''})`)
     for (const f of mod.fields ?? []) {
       const value = fields[f.id]

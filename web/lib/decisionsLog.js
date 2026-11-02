@@ -76,7 +76,11 @@ export function sessionStatus(input = {}) {
   const runStages = Object.fromEntries(Object.entries(stages).map(([id, state]) => [safeToken(id, 80), safeToken(state, 40)]).filter(([id, state]) => id && state))
   if (Object.keys(runStages).length) status.stages = runStages
   status.artefact = safeToken(input.artefact, 80) || null
-  status.lastAiSave = typeof input.lastAiSave === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(input.lastAiSave) ? input.lastAiSave : null
+  const isoTime = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)
+  status.lastAiSave = isoTime(input.lastAiSave) ? input.lastAiSave : null
+  // #296: every AI Save this session made on the Stage, oldest first. A Stage can have more than one (a head start saved while an earlier Stage awaits approval, then the rest once it has merged), and the log records each. `lastAiSave` is the newest.
+  const saves = asArray(input.saves).filter(isoTime).slice(-100)
+  if (saves.length) status.saves = saves
   status.models = asArray(input.models).map(modelUsage).filter((m) => m.type && m.model)
   status.instructions = safeToken(input.instructions, 80) || null
   const skills = isObject(input.skills) ? input.skills : {}
