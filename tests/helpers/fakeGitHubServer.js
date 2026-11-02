@@ -225,7 +225,10 @@ export function createFakeGitHubServer({
     // single file (object response) and a folder listing (array response), exactly like the real API.
     if (req.method === 'GET' && pathname.startsWith(`${repoBasePath}/contents`)) {
       const branchName = url.searchParams.get('ref') ?? 'main'
-      const store = branches.get(branchName) ?? new Map()
+      // `ref` may be a commit id as well as a branch name, as on the real API (#273: reading a stage's
+      // content as it stood at its approval). A commit's tree is the immutable file set it was made with.
+      const commitTree = commits.get(branchName)?.treeSha
+      const store = branches.get(branchName) ?? (commitTree ? trees.get(commitTree) : undefined) ?? new Map()
       const scopePath = pathname.slice(`${repoBasePath}/contents`.length).replace(/^\/+/, '')
       const normalizedScope = scopePath === '' ? '' : scopePath.replace(/\/+$/, '')
 

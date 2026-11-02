@@ -92,6 +92,7 @@ import {
   buildLocalModuleEntry,
 } from './lib/localInstanceFiles.js'
 import { getLocalStatus, checkLocalGate } from './lib/localStatus.js'
+import { changedEntryFor, changedEntryLabel, alsoReapprovesLine, dashboardBadgeText, dashboardBadgeTitle } from './lib/changedSinceApproval.js'
 import {
   resolveDefinitionStructure,
   localDefinitionExists,
@@ -3687,6 +3688,11 @@ function SyncedFieldsPanel({ instance }) {
                     ? html`<button type="button" class="btn small" disabled=${isEditingBlocked()} onClick=${afterUnsavedCheck(handleCheckAndMaybeRequestSignoff)}>Request Sign-off</button>`
                     : null}
                 </div>
+                ${isCurrentStage && alsoReapprovesLine(instance.changedSinceApproval)
+                  ? html`<p class="changed-since-approval-line" data-testid="also-reapproves">
+                      Sign-off ${alsoReapprovesLine(instance.changedSinceApproval)}
+                    </p>`
+                  : null}
                 ${openPullRequestId
                   ? html`
                       <ul class="review-list">
@@ -4629,18 +4635,28 @@ function AppHeader({ instance }) {
         />
       </div>
       <p id="stage-line">${instance.stage.title} (gate: ${instance.stage.gate})</p>
+      ${instance.changedSinceApproval?.length
+        ? html`<p class="changed-since-approval-notice" data-testid="changed-since-approval-notice">
+            <strong>Changed since approval:</strong>
+            ${instance.changedSinceApproval.map((entry) => changedEntryLabel(entry)).join(' · ')}
+            — a later stage changed Fields these approved stages print. The current stage's approval re-approves them.
+          </p>`
+        : null}
       <nav id="stage-nav">
         ${instance.stages.map((stage) => {
           const isCurrent = stage.id === instance.currentStageId
           const isViewed = stage.id === instance.stage.id
+          const changed = changedEntryFor(instance.changedSinceApproval, stage.id)
           return html`
             <button
               type="button"
               key=${stage.id}
-              class=${'btn small' + (isViewed ? ' active' : '') + (isCurrent ? ' stage-current' : '')}
+              class=${'btn small' + (isViewed ? ' active' : '') + (isCurrent ? ' stage-current' : '') + (changed ? ' stage-changed-since-approval' : '')}
+              data-changed-since-approval=${changed ? 'true' : undefined}
+              title=${changed ? `Changed since approval — ${changedEntryLabel(changed)}` : undefined}
               onClick=${isViewed ? undefined : afterUnsavedCheck(() => (viewedStage.value = stage.id))}
             >
-              ${stage.title}${isCurrent ? ' (current)' : ''}
+              ${stage.title}${isCurrent ? ' (current)' : ''}${changed ? html` <span class="changed-since-approval-flag">Changed since approval</span>` : null}
             </button>
           `
         })}
@@ -5189,6 +5205,13 @@ function StatusStamp({ status }) {
   return html`<span class="stamp ${statusStampClass(status)}">${status.toUpperCase()}</span>`
 }
 
+// #273: the dashboard row's flag for an instance whose earlier approved stage has changed since approval.
+function changedSinceApprovalBadge(inst) {
+  const text = dashboardBadgeText(inst.changedSinceApproval)
+  if (!text) return null
+  return html`<span class="pr-badge changed-since-approval-badge" data-testid="changed-since-approval-badge" title=${dashboardBadgeTitle(inst.changedSinceApproval)}>${text}</span>`
+}
+
 function pullRequestBadge(inst) {
   if (!inst.workspace || inst.pullRequestId == null) return null
   const status = inst.pullRequestStatus
@@ -5723,6 +5746,7 @@ function InstanceCard({ inst, editHref, checkStatus, onCheck }) {
           <span class="instance-card-status">
             <${StatusStamp} status=${inst.status} />
             ${pullRequestBadge(inst)}
+            ${changedSinceApprovalBadge(inst)}
           </span>
         </div>
         <div class="instance-card-context">

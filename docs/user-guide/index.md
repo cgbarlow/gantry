@@ -443,6 +443,20 @@ A later Stage that you start before the earlier one is approved builds on the ea
 
 The linked work item is a tracking surface, not the approval mechanism. The Pull Request is what gates a Workspace-backed Stage, and there is no separate in-app Request Approval button — the sign-off flow is the approval mechanism.
 
+### Changed since approval
+
+A Stage is approved when its Pull Request is merged. Later Stages can still change what it said, because Modules are shared: a Module mounted at SOAP and again at High-level Design can be edited from either. When a later Stage changes a Field that an earlier approved Stage's Artefacts print, that earlier Stage is flagged **Changed since approval**. Only Fields the earlier Stage's Artefacts print count; a Field that only a later Artefact prints can grow freely without raising the flag. Every earlier approved Stage is checked, not just the one before, and a change that landed on `main` without anyone re-approving it is flagged the same way, including on an Instance approved before this check existed.
+
+The flag shows in five places:
+
+- **The Stage tab.** The earlier Stage's tab in the Stage navigation carries a **Changed since approval** marker.
+- **The Stage status.** A line under the Stage heading names each flagged Stage and how many Fields changed, for example *SOAP: 2 Fields*.
+- **The Request approval panel.** The Sign-off section of the Work Item Detail card reads, for example, *also re-approves SOAP: 2 Fields*, so you know what a sign-off request is taking on before you make it.
+- **The dashboard.** The Instance's row shows a **Changed since approval** badge.
+- **MCP.** The `check_status` tool returns the same list as `changedSinceApproval`, each entry giving the Stage, the Pull Request that approved it and the Fields that changed.
+
+Local and server workspaces never show it: they have no Pull Request approval to have changed since.
+
 ### Review and sign-off status
 
 Each review and sign-off item carries a Gantry status — Requested, In review, Changes requested, Approved or Rejected. On Azure DevOps this is kept separate from the native work item state, which continues to drive the board — if a project has not been set up with the custom status field, Gantry falls back to reading the native state instead, so the card still shows a sensible status. On GitHub and GitLab alike, the same five-value status is what the `gantry:review/<status>` label above carries, read straight from the issue.

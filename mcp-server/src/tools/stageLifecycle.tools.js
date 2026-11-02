@@ -230,7 +230,8 @@ export const tools = [
       '4. Rejected with a 400 for a local instance — it has no Pull Request to check. ' +
       '5. Requires a PAT for the instance\'s workspace, for the same reason request_approval does. ' +
       '6. An explicit rejection/changes-requested vote is reported distinctly from a merely-still-pending review — read the response\'s own fields rather than inferring from success/failure alone. ' +
-      '7. An approved Pull Request for a stage that is not the instance\'s current stage is not merged or advanced (ADR-0063): the response has merged=false and a "waitingForStage" field naming the earlier stage it waits for.',
+      '7. An approved Pull Request for a stage that is not the instance\'s current stage is not merged or advanced (ADR-0063): the response has merged=false and a "waitingForStage" field naming the earlier stage it waits for. ' +
+      '8. The response\'s "changedSinceApproval" lists earlier approved stages whose printed Fields a later stage has changed since their approval — each with "stageId", "title", "pullRequestId", "fields" (module.field references) and "count"; empty when none. The current stage\'s approval re-approves them. Report it to the user rather than treating the earlier stage as untouched.',
     inputSchema: {
       ...slugRefShape,
       gate: z.string().optional().describe('A specific gate id to check status for, instead of the stage\'s own default.'),

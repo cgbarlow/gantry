@@ -287,6 +287,28 @@ test('check_status merges the Pull Request and advances the stage once approved'
   }
 })
 
+test('check_status hands the changedSinceApproval list through, and says what it is', async () => {
+  const changedSinceApproval = [
+    { stageId: 'shape', title: 'SOAP', pullRequestId: 3, approvalCommit: 'abc123', fields: ['background.problem'], count: 1 },
+  ]
+  const fetch = stubFetch(
+    providerWorkspaceStub('ws-1', ({ url, method }) => {
+      if (url.pathname === '/api/instance/check-status' && method === 'POST') {
+        return { status: 200, body: { merged: false, review: { state: 'pending' }, changedSinceApproval } }
+      }
+      return undefined
+    })
+  )
+  try {
+    const gantryClient = createGantryClient({ baseUrl: BASE_URL, workspacePats: { 'ws-1': 'secret-pat' } })
+    const result = await checkStatusTool.handler({ slug: 'ado-instance' }, { gantryClient })
+    assert.deepEqual(JSON.parse(result.content[0].text).changedSinceApproval, changedSinceApproval)
+    assert.match(checkStatusTool.description, /changedSinceApproval/)
+  } finally {
+    fetch.restore()
+  }
+})
+
 test('check_status reports a still-pending review without merging', async () => {
   const fetch = stubFetch(
     providerWorkspaceStub('ws-1', ({ url, method }) => {

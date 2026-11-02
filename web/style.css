@@ -202,6 +202,11 @@ header {
 #stage-line { color: var(--text-muted); margin: 6px 0 0; font-size: 13px; }
 #stage-nav { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
 #stage-nav button.stage-current { border-color: var(--line-strong); }
+#stage-nav button.stage-changed-since-approval { border-color: var(--warning, #b06a00); }
+.changed-since-approval-flag { margin-left: 4px; padding: 1px 4px; border: var(--hairline) solid var(--warning, #b06a00); border-radius: var(--radius); font-family: var(--font-mono); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.changed-since-approval-notice { margin: 8px 0 0; font-size: 13px; }
+.changed-since-approval-line { margin: 6px 0 0; font-size: 13px; }
+.changed-since-approval-badge { border-color: var(--warning, #b06a00); }
 
 /*
  * View-mode toolbar (#79) — a toolbar segmented control (Markdown / Split / Rendered) for the whole module-editor screen, ported from Variant A of web/prototypes/module-editor.prototype.html (#72).

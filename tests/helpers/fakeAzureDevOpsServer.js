@@ -83,6 +83,15 @@ export function createFakeAzureDevOpsServer({
   // under it 404s/lists empty, exactly like an unset repo did before any
   // branch other than `main` existed at all.
   const branches = new Map()
+  // objectId -> the file set a branch held when its tip was that commit (#273: reading a file "at a
+  // commit" via `versionDescriptor.versionType=commit`). Recorded on every `branches.set`, since a branch
+  // only ever moves forward by replacing its entry; a snapshot is a copy, so later pushes can't alter it.
+  const commitSnapshots = new Map()
+  const setBranch = branches.set.bind(branches)
+  branches.set = (name, branch) => {
+    if (branch?.objectId && branch.store) commitSnapshots.set(branch.objectId, new Map(branch.store))
+    return setBranch(name, branch)
+  }
   // A single counter shared across every branch, not one per branch —
   // real Azure DevOps commit ids are globally unique regardless of which
   // ref they're reachable from, and `failAfterPushes`'s "N real pushes"
@@ -161,6 +170,8 @@ export function createFakeAzureDevOpsServer({
       mergeStatus: pr.mergeStatus,
       lastMergeSourceCommit: pr.lastMergeSourceCommit,
       lastMergeTargetCommit: pr.lastMergeTargetCommit,
+      // Present once completed, as on the real API: the commit the merge landed on the target branch as.
+      ...(pr.lastMergeCommit ? { lastMergeCommit: pr.lastMergeCommit } : {}),
       completionOptions: pr.completionOptions,
       url: `${basePath}/pullRequests/${pr.pullRequestId}`,
     }
@@ -281,8 +292,9 @@ export function createFakeAzureDevOpsServer({
       // branch-aware — each branch has its own independent store below,
       // never one shared flat one.
       const branchName = url.searchParams.get('versionDescriptor.version') ?? 'main'
-      const branch = branches.get(branchName)
-      const store = branch?.store ?? new Map()
+      const versionType = url.searchParams.get('versionDescriptor.versionType') ?? 'branch'
+      const branch = versionType === 'commit' ? undefined : branches.get(branchName)
+      const store = versionType === 'commit' ? commitSnapshots.get(branchName) ?? new Map() : branch?.store ?? new Map()
 
       const scopePath = url.searchParams.get('scopePath')
       // A `scopePath` (+`recursionLevel`, always `OneLevel` for this fake's one real caller, lib/azureDevOpsClient.js's `listFolder`) requests a folder listing instead of a single file's content — the fake repo's flat `store` has no real notion of folders, so a folder's existence/children are derived from whatever file paths happen to start with `${scopePath}/`: the first remaining path segment is an immediate child, a folder itself if more segments follow it, a file otherwise. 404s (matching a real not-found path) if nothing in the store starts with that prefix, mirroring how a single-file `path` lookup 404s below.
@@ -371,10 +383,10 @@ export function createFakeAzureDevOpsServer({
       }
       // Without `includeContent=true` the real Items API answers with the item's metadata alone.
       if (url.searchParams.get('includeContent') !== 'true') {
-        return json(200, { path, isFolder: false, objectId: branch.objectId })
+        return json(200, { path, isFolder: false, objectId: branch?.objectId ?? branchName })
       }
       contentLog?.push({ path, via: 'content' })
-      return json(200, { path, content: Buffer.isBuffer(stored) ? stored.toString('utf8') : stored, objectId: branch.objectId })
+      return json(200, { path, content: Buffer.isBuffer(stored) ? stored.toString('utf8') : stored, objectId: branch?.objectId ?? branchName })
     }
 
     if (req.method === 'GET' && pathname === `${basePath}/refs`) {
@@ -717,7 +729,11 @@ export function createFakeAzureDevOpsServer({
         if (patch.completionOptions !== undefined) pr.completionOptions = patch.completionOptions
         if (patch.title !== undefined) pr.title = patch.title
         if (patch.description !== undefined) pr.description = patch.description
-        if (patch.status === 'completed' && pr.mergeStatus !== 'conflicts') pr.closedDate = new Date().toISOString()
+        if (patch.status === 'completed' && pr.mergeStatus !== 'conflicts') {
+          pr.closedDate = new Date().toISOString()
+          const mergedTarget = branches.get(pr.targetRefName.replace(/^refs\/heads\//, ''))
+          if (mergedTarget) pr.lastMergeCommit = { commitId: mergedTarget.objectId }
+        }
         if (pr.mergeStatus === 'conflicts') {
           return json(409, { message: 'TF401034: Merge conflicts', mergeStatus: 'conflicts' })
         }
