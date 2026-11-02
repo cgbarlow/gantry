@@ -2326,3 +2326,19 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .interview-rail .runplan .rp-note { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); text-align: right; }
 .interview-page .qcard .btn .rec { background: transparent; color: inherit; border: var(--hairline) solid currentColor; }
 .interview-page .kick-resume { padding: 10px 12px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); margin: 0 0 12px; }
+
+/* #297: Out of date Fields and Source document marks */
+.stamp.new { background: var(--stamp-draft-bg); color: var(--stamp-draft-fg); margin-left: 6px; }
+.source-documents .stamp.review[data-testid="source-replaced-by"] { margin-left: 6px; text-transform: none; letter-spacing: 0.02em; }
+.source-documents .stamp.new { text-transform: none; letter-spacing: 0.02em; }
+.source-replaces { font: inherit; font-size: 12px; padding: 4px 6px; margin-left: 8px; max-width: 100%; background: var(--bg); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.interview-rail .source-replaces { margin: 6px 0 0; width: 100%; box-sizing: border-box; }
+.interview-rail .srcdocs .stamp { flex-basis: auto; font-size: 9px; }
+.out-of-date-banner { margin: 0 0 16px; padding: 10px 12px; border: var(--hairline) solid var(--warning, #b06a00); border-radius: var(--radius); font-size: 13px; }
+.out-of-date-banner h2 { margin: 0 0 6px; font-size: 14px; }
+.out-of-date-banner ul { margin: 0; padding: 0; list-style: none; }
+.out-of-date-banner li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 3px 0; }
+.out-of-date-banner .ood-fields { color: var(--text-muted); font-size: 12px; }
+.out-of-date-mark { margin: 12px 0 2px; padding: 3px 8px; font-size: 12px; border-left: 3px solid var(--warning, #b06a00); background: transparent; color: var(--text); }
+.interview-rail .runplan .rp-ood { font-family: var(--font-mono); font-size: 10px; padding: 0 5px; border: var(--hairline) solid var(--warning, #b06a00); border-radius: var(--radius); white-space: nowrap; }
+.interview-preview .field-out-of-date { font-size: 11px; color: var(--text); border-left: 3px solid var(--warning, #b06a00); padding-left: 6px; margin: 2px 0; }

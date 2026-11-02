@@ -153,6 +153,7 @@ In the Instance editor, under the toolbar, open **Source documents** to see the 
 
 - **Upload documents.** Choose one or more files. Gantry takes Word (`.docx`), PowerPoint (`.pptx`), spreadsheets (`.xlsx`, `.csv`, `.tsv`), PDFs, Markdown and text files, and images (`.png`, `.jpg`, `.gif`, `.webp`). The older `.doc`, `.ppt` and `.xls` formats aren't read: save them in the newer format first. An upload is always a new document with its own place in the list, even if it is named like one already there, so "Client brief v3" sits alongside "Client brief v2" until someone removes the older one.
 - **A document can be at most 25 MB.** A bigger file is refused with a message naming the limit, both in the browser and again on the server. Once an Instance's documents add up to more than about 100 MB, the panel shows a warning (it is a warning, not a refusal): remove the ones you no longer need.
+- **This replaces…** is a picker beside the upload button. Choose an older document in it before you upload and the new one is recorded as replacing it ("Client brief v3 replaces v2"). The older document is never edited or removed: it stays in the list, still citable, marked **replaced by Client brief v3**, and the link is kept in the manifest. Pick one file at a time when you use it. Leave the picker on its first choice for an ordinary upload. See **Keeping drafts up to date when a document changes** below.
 - **Gantry reads the text when you add a document.** The reading happens in your browser, using files that come with Gantry, so nothing is fetched from the internet and the document never leaves your machine to be read. Word and PowerPoint (speaker notes included) become Markdown, a spreadsheet becomes one table per sheet (at most 1,000 rows each), and a PDF becomes its text, page by page. The text is stored next to the original, in the Instance's `sources/.text/` folder. A picture, and a scanned PDF with no text in it, get no text; the list says **NO TEXT** for them. **TEXT READ** means there is text.
 - **Rename** changes only the title shown in the list. The document keeps the id it was given when it was added, and the name of its stored file never changes, so a citation that names it stays valid. **Download** gives you the original file back.
 - **Extract text again** reads the original once more and replaces the stored text. Use it after Gantry has been upgraded or if a read failed. If the new read fails, the text already kept is left alone.
@@ -161,7 +162,7 @@ In the Instance editor, under the toolbar, open **Source documents** to see the 
 - **Use as image** copies a picture (a PNG or JPEG) into the Instance's images as a new image. See **Use as image** below.
 - **Read visually** (on a PDF only) tells the AI to look at the PDF itself instead of reading its text. Use it for a PDF whose diagrams or layout matter, where text extraction jumbles the labels. The list then shows **READ VISUALLY**, and the button becomes **Read as text**. It only has an effect with an AI Provider that takes PDFs; see **How the AI reads your Source documents** below. On an Azure DevOps or GitHub workspace the change is one commit on the current Stage's branch, like the others.
 
-Behind the panel, each Instance keeps a `sources/` folder next to `modules/` and `assets/`, with a `sources/manifest.yaml` that records for every document its id (made from the filename, unique, and fixed for good), stored filename, title, who added it and when, its size, its text file if it has one, `readVisually: true` while a PDF is marked Read visually, and who removed it and when. Filenames are cleaned to be safe as a path, with `-2` added if the name is taken. In a Local workspace this is all inside the folder you picked, so it is yours to back up like the rest; on a Server-hosted workspace it is in the Instance's folder on the server. A Local workspace sends no document and no extracted text to the Gantry server, not even when you render a document; the one thing a render may send is the title, filename and dates of a document the content cites (see **The Sources appendix** below).
+Behind the panel, each Instance keeps a `sources/` folder next to `modules/` and `assets/`, with a `sources/manifest.yaml` that records for every document its id (made from the filename, unique, and fixed for good), stored filename, title, who added it and when, its size, its text file if it has one, `readVisually: true` while a PDF is marked Read visually, `replaces` (the id of the older document it supersedes) on a document uploaded with **This replaces…**, `textChangedAt` (when its text was last read again and actually came out different), and who removed it and when. Filenames are cleaned to be safe as a path, with `-2` added if the name is taken. In a Local workspace this is all inside the folder you picked, so it is yours to back up like the rest; on a Server-hosted workspace it is in the Instance's folder on the server. A Local workspace sends no document and no extracted text to the Gantry server, not even when you render a document; the one thing a render may send is the title, filename and dates of a document the content cites (see **The Sources appendix** below).
 
 #### Source documents on Azure DevOps and GitHub workspaces
 
@@ -192,6 +193,33 @@ The words in the square brackets are yours, so you can point at a page or a sect
 A Definition can opt an Artefact in to ending with a list of the Source documents it cites. On the Definitions page, tick **Sources appendix** on the Artefact (it is `source-appendix: true` in `definition.yaml`; on a published version it is shown read-only). The rendered document, in Word and in the exported `.md`, then ends with a **Sources** section: a table of **only the documents that Artefact cites**, in the order they are first cited, each with its title, its original filename and the date it was added. A removed document is still listed, marked "(removed)". Documents the Instance holds but the Artefact never cites are not listed, and an Artefact that cites nothing has no Sources section at all. With the setting off, which is the default (no bundled Definition turns it on), there is no list. A Definition author can only give it `true` or `false`: any other value is reported by `gantry validate` and when you save or publish the Definition, and the list is left out until it is fixed.
 
 On a Local workspace, a render sends the Gantry server only the title, filename and dates of the documents the content cites, so the server can print them. It never sends a document or its text, and sends nothing at all when the content cites no document.
+
+#### Keeping drafts up to date when a document changes
+
+A Field that was written from a Source document can go stale when that document changes. Gantry watches for three kinds of change, and flags the Fields that drew on the document as **Out of date** straight away:
+
+- **Removed.** The document was removed.
+- **Replaced.** A newer document was uploaded with **This replaces…** pointing at it.
+- **Read again with different text.** **Extract text again** gave a text that is not the same as the one kept. Reading a document again and getting exactly the same text changes nothing and flags nothing.
+
+A Field is flagged when either of these is true:
+
+- the Stage's decisions log says the AI drafted it from that document (see **The decisions log**), or
+- its content cites the document with `source:<id>`, whoever wrote it, so hand-written content is covered too.
+
+A Field the AI drafted from another Field is flagged as well once that Field no longer says what the draft saw: for example when the Save check took a colleague's different wording of it because only they had changed it.
+
+A new document that replaces nothing flags no Field. It is marked **New since last interview**, in the list and in the Interview page's rail, until the next AI interview saves; the next interview reads it against what is already saved. Nothing is marked until an interview has run.
+
+You see the flags in three places:
+
+- **A banner** at the top of the editor, one line per change: *4 Fields drew on Client brief, now replaced by Client brief v3: Bring up to date*, naming the Fields. **Bring up to date** opens the Interview page; on a workspace that doesn't have the AI interview yet (Azure DevOps, GitHub, GitLab), the banner says so and still shows the flags.
+- **A mark on each Field**: *Out of date: Client brief was replaced by Client brief v3*.
+- **A mark on each run-plan row** on the Interview page, such as *3 Out of date*, for every Stage with flagged Fields (a Field that only cites the document is counted on each Stage that shows its Module).
+
+Gantry looks when you open the Instance and again after every change to the Source documents and after every Save. It never polls. A flag is worked out from the manifest, the decisions logs and the saved content each time, so nothing extra is stored and it works the same on every kind of workspace. On an Azure DevOps or GitHub workspace, where the decisions log is not kept yet, the flags cover the content that cites the document.
+
+A flag goes when the Field is drafted again after the change, or when the architect has answered for it, or when the citation is edited away. Gantry only flags: it never changes your content by itself. Working through the flagged Fields with the AI (keep, redraft, re-cite) arrives with the next release.
 
 #### Use as image
 
@@ -821,6 +849,7 @@ A Stage is often drafted straight after the one before it. **Run until** at the 
 
 - **Run plan.** The left rail shows one row for every Stage of the Instance, in order, with where it stands: **drafting** (the AI is working on it), **awaiting confirmation** (its stage-end card is up), **waiting** (not reached yet), **done** (saved, and the Instance has moved past it) or **paused**. The Stage you picked is marked **target**, and the Stages after it are struck through, because this run does not reach them. The rows change as the interview goes, so you can see at a glance where it is.
 - **The stage-end card.** On every Stage but the last of the run, the card has two buttons. **Save, advance, carry on** (recommended) makes one stage Save, **advances the Instance to the next Stage** (the Gate is checked again first, exactly as with **Advance to next stage** in the editor), and the AI starts the next Stage by itself, with the same AI Provider and the lightest Artefact that can pass its Gate. **Save and stop here** makes the one Save and **pauses** the run. On the last Stage of the run, the one you picked, the card has one button, **Save and finish the run**.
+- **Out of date marks.** A row also shows a mark such as **3 Out of date** when Fields on that Stage drew on a Source document that has since been removed, replaced or read again with different text (see **Keeping drafts up to date when a document changes**). The mark is only a flag: the Interview page doesn't redraft those Fields by itself yet. The Source documents in the rail show **replaced by …** and **New since last interview** the same way the list in the editor does, and the **This replaces…** picker is there too.
 - **In order.** Stages are drafted in order, and never skipped. The AI starts a Stage only after you have confirmed the one before it.
 - **Done.** The run is **done** when the card of the Stage you picked is confirmed. The Instance then stands at that Stage; it is not advanced past it.
 - **If it cannot advance.** If the Gate no longer passes, or the Instance cannot be written to, the Save has still happened and the card says why the Stage did not advance. The run stays paused on that Stage; fix the cause and choose **Resume the run**.

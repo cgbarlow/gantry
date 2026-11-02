@@ -81,6 +81,8 @@ import { InterviewPage, clearInterviewSessions, unsavedDraftModules } from './li
 import { createLocalSourceStore } from './lib/localSourceDocuments.js'
 import { createLocalDecisionsStore, createServerDecisionsStore, planLocalDecisions } from './lib/decisionsStore.js'
 import { DecisionsLogPanel } from './lib/decisionsLogPanel.js'
+import { flagsForField, outOfDateBannerLines, outOfDateCountByStage, outOfDateFieldNote } from './lib/outOfDate.js'
+import { loadOutOfDate, outOfDateState, sourceListTick } from './lib/outOfDateState.js'
 import { createServerSourceClient } from './lib/serverSourceDocuments.js'
 import { assetReference, repoAssetReference, isLocalAssetSource, resolveAssetRefs, resolveRepoAssetRefs } from './lib/assetRefs.js'
 import { IdentityPicker } from './lib/identityPicker.js'
@@ -2779,6 +2781,8 @@ function ModuleCard({ mod, onFieldRegistered, visibleFieldIds }) {
 
   // #289: the editor shows saved content only. A Module with AI drafts the architect has not saved says so, and where to edit them.
   const inst = instanceData.value
+  const outOfDateNow = outOfDateState.value
+  const outOfDateFlagsNow = inst?.stage && outOfDateNow.key === `${inst.slug}|${inst.stage.id}` ? outOfDateNow.flags : []
   const unsaved = inst?.stage ? unsavedDraftModules(inst.slug, inst.stage.id).find((u) => u.moduleId === mod.id) : null
   const interviewHref = (() => {
     const here = new URL(window.location.href)
@@ -2795,11 +2799,17 @@ function ModuleCard({ mod, onFieldRegistered, visibleFieldIds }) {
           </p>`
         : null}
       ${mod.purpose ? html`<p class="purpose">${mod.purpose}</p>` : null}
-      ${mod.fields.filter((field) => !visibleFieldIds || visibleFieldIds.has(`${mod.id}.${field.id}`)).map((field) => {
+      ${mod.fields.filter((field) => !visibleFieldIds || visibleFieldIds.has(`${mod.id}.${field.id}`)).flatMap((field) => {
         const onRegister = (control) => {
           controlsRef.current[field.id] = control
           onFieldRegistered(field, control, mod.id)
         }
+        // #297: a Field that drew on a Source document that has since changed says so, above the Field. The mark is a keyed sibling, so the Field itself is never remounted when it appears.
+        const flags = flagsForField(outOfDateFlagsNow, `${mod.id}.${field.id}`)
+        const mark = flags.length
+          ? html`<p key=${`ood-${field.id}`} class="out-of-date-mark" role="status" data-testid="field-out-of-date" data-field=${`${mod.id}.${field.id}`}>${outOfDateFieldNote(flags)}</p>`
+          : null
+        const rendered = (() => {
         if (field.type === 'select') {
           return html`<${SelectField} key=${field.id} field=${field} moduleId=${mod.id} onRegister=${onRegister} />`
         }
@@ -2832,6 +2842,8 @@ function ModuleCard({ mod, onFieldRegistered, visibleFieldIds }) {
               onRequestSection=${() => setSectionAfterId(field.id)}
               onRequestList=${() => setListAfterId(field.id)}
             />`
+        })()
+        return mark ? [mark, rendered] : [rendered]
       })}
       <div class="save-status">${moduleSaveStatus.value[mod.id] ?? ''}</div>
       ${imageFieldId !== null
@@ -4917,6 +4929,7 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
   return html`
     <main id="modules" data-view-mode=${viewMode.value}>
       <${ReopenStagePanel} instance=${instance} />
+      <${OutOfDatePanel} instance=${instance} />
       <${ChangedSinceApprovalPanel} instance=${instance} />
       <${ReviewCommentsPanel} instance=${instance} />
       <${DecisionsLogSection} instance=${instance} />
@@ -5018,9 +5031,87 @@ function DecisionsLogSection({ instance }) {
   return html`<${DecisionsLogPanel} log=${log} stageTitle=${instance.stage.title} fieldTitle=${fieldTitle} resumeHref=${canResume ? `${here.pathname}${here.search}` : ''} />`
 }
 
+// #297 (map #238, decided in #249): another Stage's saved Modules, read the way each workspace kind reads them, for working out which Fields are Out of date.
+async function loadStageModulesOf(instance, stage) {
+  if (instance.isLocalWorkspace) {
+    const structure = instance.localDefinitionStructure
+    const full = structure?.stages?.find((s) => s.id === stage.id)
+    return full ? readLocalStageModules(localDirHandle.peek(), instance.slug, full, structure) : []
+  }
+  return (await loadInstance(instance.slug, stage.id)).modules
+}
+
+// #297: the Fields of this Instance that drew on a Source document that has since changed (removed, replaced, or read again with different text), and the documents added since the last interview. The watcher works them out on opening and again after every Source document change and Save (nothing polls); the editor's banner and Field marks, the Source documents panel and the Interview page read what it found.
+function OutOfDateWatcher({ instance }) {
+  const sourceStore = useSourceStore(instance)
+  const decisionsStore = useDecisionsStore(instance)
+  const mountedAt = useRef(sourceListTick.peek())
+  const listed = sourceListTick.value
+  const savedTick = decisionsLogTick.value
+  const key = `${instance.slug}|${instance.stage.id}`
+  useEffect(() => {
+    // The Source documents panel lists the documents on opening and bumps the tick: that is the signal to look, so opening costs one pass.
+    if (!sourceStore || listed === mountedAt.current || !offersSourceDocuments(instance)) return undefined
+    let live = true
+    loadOutOfDate({
+      sourceStore,
+      decisionsStore,
+      stages: instance.stages ?? [],
+      currentStageId: instance.stage.id,
+      currentModules: instance.modules,
+      loadStageModules: (stage) => loadStageModulesOf(instance, stage),
+    })
+      .then((result) => live && (outOfDateState.value = { key, ...result }))
+      .catch(() => live && (outOfDateState.value = { key, flags: [], newSince: [], sources: [] }))
+    return () => {
+      live = false
+    }
+  }, [sourceStore, decisionsStore, key, listed, savedTick, instance.stageVersion])
+  return null
+}
+
+// What the watcher last found for the Instance and Stage on screen (nothing for another one's).
+function useOutOfDate(instance) {
+  const state = outOfDateState.value
+  return state.key === `${instance.slug}|${instance.stage.id}` ? state : { key: '', flags: [], newSince: [], sources: [] }
+}
+
+// The editor's banner: one line per changed document, such as "4 Fields drew on Client brief, now replaced", with the way to bring them up to date (the Interview page, which works on the current Stage of a local or server workspace).
+function OutOfDatePanel({ instance }) {
+  const { flags } = useOutOfDate(instance)
+  const lines = outOfDateBannerLines(flags)
+  if (lines.length === 0) return null
+  const reason = interviewUnavailableReason(instance)
+  const here = new URL(window.location.href)
+  here.searchParams.set('interview', '1')
+  const fieldName = (key) => {
+    const [moduleId, ...rest] = String(key).split('.')
+    const mod = instance.modules.find((m) => m.id === moduleId)
+    const field = mod?.fields?.find((f) => f.id === rest.join('.'))
+    return mod && field ? `${mod.title ?? mod.id} › ${field.title ?? field.id}` : key
+  }
+  return html`
+    <section class="out-of-date-banner" data-testid="out-of-date-banner" role="status" aria-label="Out of date Fields">
+      <h2>Out of date</h2>
+      <ul>
+        ${lines.map(
+          (line) => html`<li key=${`${line.source ?? 'field'}|${line.change}`} data-source=${line.source ?? ''} data-change=${line.change}>
+            <span data-testid="out-of-date-line">${line.text}:</span>
+            ${reason
+              ? html`<span class="ood-fields" title=${reason}>Bring up to date from the Interview page (${reason})</span>`
+              : html`<a class="btn small" href=${`${here.pathname}${here.search}`} data-testid="bring-up-to-date">Bring up to date</a>`}
+            <span class="ood-fields">${line.fields.map(fieldName).join(', ')}</span>
+          </li>`
+        )}
+      </ul>
+    </section>
+  `
+}
+
 // #286 (map #238): the Interview page for a local or server workspace Instance, handed what only this file can reach: the Instance's Source document store, the Definition it follows, the other Stages' saved content (the AI is told what is already settled) and the stage Save.
 function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance }) {
   const store = useSourceStore(instance)
+  const outOfDate = useOutOfDate(instance)
   const decisionsStore = useDecisionsStore(instance)
   if (!store || !decisionsStore) return html`<p class="loading">Loading…</p>`
   async function loadStructure() {
@@ -5058,8 +5149,10 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance }) {
     return res.ok && body.merged ? { [instance.stage.id]: 'approved' } : {}
   }
   // `key`: a run (#293) moves the Instance on to its next Stage, and the page for that Stage starts afresh.
-  return html`<${InterviewPage}
+  return html`<${OutOfDateWatcher} instance=${instance} /><${InterviewPage}
     key=${instance.stage.id}
+    outOfDate=${outOfDate.flags}
+    newSince=${outOfDate.newSince}
     instance=${instance}
     store=${store}
     actor=${instance.assignee ?? ''}
@@ -5076,6 +5169,8 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance }) {
 
 function SourceDocumentsSection({ instance }) {
   const store = useSourceStore(instance)
+  const { newSince } = useOutOfDate(instance)
+  const newSinceIds = useMemo(() => new Set(newSince.map((s) => s.id)), [newSince])
   const [notice, setNotice] = useState('')
   const known = useRef({})
   // #281: what the editor's preview needs to show a citation (the panel tells us each time it lists) and how to open one.
@@ -5110,6 +5205,7 @@ function SourceDocumentsSection({ instance }) {
       readOnly=${Boolean(instance.archived) || isWriteAccessBlocked()}
       commitNote=${instance.workspaceBacked ? "Each upload, rename, new text read and removal is saved straight away as its own commit on this Stage's branch. It does not wait for Save." : ''}
       onList=${onList}
+      newSince=${newSinceIds}
     />
     ${notice ? html`<p class="inline-error" role="alert" data-testid="source-document-open-error">${notice}</p>` : null}
   </div>`
@@ -6373,7 +6469,7 @@ function ModuleEditorPage({ slug: routeRef }) {
       onClearAllFields=${clearAllFields}
       requestApprovalSlug=${advancedMode.value && instance.workspaceBacked ? instance.slug : null}
     />
-    ${offersSourceDocuments(instance) ? html`<${SourceDocumentsSection} instance=${instance} />` : null}
+    ${offersSourceDocuments(instance) ? html`<${OutOfDateWatcher} instance=${instance} /><${SourceDocumentsSection} instance=${instance} />` : null}
     <${StageScreen}
       key=${instance.stage.id}
       instance=${instance}

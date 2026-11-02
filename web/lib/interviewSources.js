@@ -23,7 +23,9 @@
 //      `fields` part of the decisions log, ADR-0064; #288 commits it). The fingerprint is of the text the AI saw, so a
 //      document that changes later can be told apart (#297).
 import { citedSourceIds } from './interviewDraft.js'
-import { formatBytes, sourceFileExtension, sourceFileKind } from './sourceDocuments.js'
+import { fingerprintText, formatBytes, sourceFileExtension, sourceFileKind } from './sourceDocuments.js'
+
+export { fingerprintText }
 
 export const READ_TOOL_NAME = 'read_source_document'
 export const READ_FENCE = 'gantry-read'
@@ -230,21 +232,6 @@ export function attachmentNote({ images, documents }) {
 }
 
 // ---------- reading ----------
-
-/** `cyrb53`: a small, fast, well-spread hash. A fingerprint only has to tell one text from another, not resist an attack. */
-export function fingerprintText(text) {
-  let h1 = 0xdeadbeef
-  let h2 = 0x41c6ce57
-  const input = String(text ?? '')
-  for (let i = 0; i < input.length; i++) {
-    const ch = input.charCodeAt(i)
-    h1 = Math.imul(h1 ^ ch, 2654435761)
-    h2 = Math.imul(h2 ^ ch, 1597334677)
-  }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909)
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909)
-  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(14, '0')
-}
 
 /** The headings of a text with where each starts: `[{ level, title, start }]` (a fenced block's lines are not headings). */
 function headingsOf(text) {

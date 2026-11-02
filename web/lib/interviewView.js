@@ -23,6 +23,7 @@ import { citationSegments, isBlankValue } from './interviewDraft.js'
 import { describeInput, planSourceAccess } from './interviewSources.js'
 import { effectiveTargetSize, fieldTargetWords, targetSizeLabel } from './targetSize.js'
 import { logSummary } from './decisionsLog.js'
+import { outOfDateCountByStage } from './outOfDate.js'
 import { beginRun, clearRun, interviewRuns, nextStage, planRows, resumableRun, runStartStage, runTargets, saveOutcome, updateRun } from './interviewRun.js'
 import { EMPTY_TOKENS, addTokens, formatTokens, hasTokens, tokenBreakdown, tokensOfLog, totalTokens } from './tokenUsage.js'
 import { describeSaved, resumeInfo } from './interviewResume.js'
@@ -234,7 +235,8 @@ function providerLabel(p) {
  *   onAdvance       () => { ok, message? }  moves the Instance on to its next Stage, for a run's "Save, advance, carry on" (#293); the page for that Stage then replaces this one
  *   checkStatus     () => { [stageId]: state }  Check status, run once when the page opens on a workspace that has a Provider to ask (#290); what it reports overrides the file
  */
-export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance, checkStatus = null }) {
+// #297: `outOfDate` is the Fields flagged Out of date (web/lib/outOfDate.js) and `newSince` the documents marked New since last interview; the run plan marks each Stage that has flagged Fields and the Source documents rail marks the new documents.
+export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance, checkStatus = null, outOfDate = [], newSince = [] }) {
   const key = `${instance.slug}|${instance.stage.id}`
   const [setup, setSetup] = useState({ status: 'loading' })
   const [sources, setSources] = useState(null)
@@ -480,7 +482,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   else if (stageEndReady) planCurrent = 'awaiting-confirmation'
   else if (settled && draftKeys.length === 0) planCurrent = settled
   else if (started || phase === 'testing') planCurrent = 'drafting'
-  const planRowsNow = planRows({ stages: stagesList, currentStageId: instance.stage.id, targetStageId: target, current: planCurrent })
+  const outOfDateByStage = outOfDateCountByStage(outOfDate)
+  const planRowsNow = planRows({ stages: stagesList, currentStageId: instance.stage.id, targetStageId: target, current: planCurrent }).map((row) => ({ ...row, outOfDate: outOfDateByStage[row.id] ?? 0 }))
+  const newSinceIds = new Set(newSince.map((s) => s.id))
   // #294: tokens, from what each AI Provider reported. A Stage's total is every session's status line in its committed log, except this
   // session's own (it is counted in full from memory, so its older committed line is not added twice). The session total is this run:
   // the Stages it went through before this one (from their logs) and what this session has used on this one.
@@ -1040,6 +1044,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
             ${planRowsNow.map(
               (row) => html`<li key=${row.id} class=${`rp-${row.state}${row.target ? ' rp-target' : ''}`} data-testid="run-plan-row" data-stage-id=${row.id} data-state=${row.state} data-target=${row.target ? 'true' : 'false'}>
                 <span class="dot"></span><span class="rp-title">${row.title}</span>
+                ${row.outOfDate
+                  ? html`<span class="rp-ood" data-testid="run-plan-out-of-date" title="Fields on this Stage drew on a Source document that has since changed">${row.outOfDate} Out of date</span>`
+                  : null}
                 ${rowTokens(row.id)}
                 <span class="rp-note">${row.note}</span>
               </li>`
@@ -1048,7 +1055,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         </div>
         ${tokensRail()}
         <h3 class="side">Source documents</h3>
-        <${SourceDocumentsPanel} store=${store} actor=${actor} readOnly=${Boolean(blockedReason)} compact=${true} onList=${onSourceList} />
+        <${SourceDocumentsPanel} store=${store} actor=${actor} readOnly=${Boolean(blockedReason)} compact=${true} onList=${onSourceList} newSince=${newSinceIds} />
         ${decisionsRail()}
         ${inputsLog()}
       </aside>

@@ -206,7 +206,8 @@ export function sourceFilePath(storedFilename) {
 
 // --- the manifest ---------------------------------------------------------------------------------------------------
 
-const ENTRY_KEYS = ['id', 'filename', 'title', 'uploadedBy', 'uploadedAt', 'size', 'text', 'readVisually', 'removedBy', 'removedAt']
+// #297: `replaces` (on the NEW document) is the id of the older one it supersedes, and `textChangedAt` the time the text read from the document last became different from what it was. Both are kept only when set, so a manifest that never used them is unchanged byte for byte.
+const ENTRY_KEYS = ['id', 'filename', 'title', 'uploadedBy', 'uploadedAt', 'size', 'text', 'readVisually', 'replaces', 'textChangedAt', 'removedBy', 'removedAt']
 
 /** One manifest entry with its keys in a fixed order and only the ones that have a value, so two writers produce the same bytes. */
 export function normalizeSourceEntry(entry) {
@@ -236,6 +237,41 @@ export function parseSourceManifest(text) {
 
 export function stringifySourceManifest(entries) {
   return stringifyYAML(entries.map(normalizeSourceEntry))
+}
+
+// --- fingerprints and replacing (#297) ----------------------------------------------------------------------------------
+
+/** `cyrb53`: a small, fast, well-spread hash. A fingerprint only has to tell one text from another, not resist an attack. */
+export function fingerprintText(text) {
+  let h1 = 0xdeadbeef
+  let h2 = 0x41c6ce57
+  const input = String(text ?? '')
+  for (let i = 0; i < input.length; i++) {
+    const ch = input.charCodeAt(i)
+    h1 = Math.imul(h1 ^ ch, 2654435761)
+    h2 = Math.imul(h2 ^ ch, 1597334677)
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909)
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909)
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(14, '0')
+}
+
+/**
+ * Which document replaced which: a Map of an older document's id to the newest entry whose `replaces` names it. The older document stays in the list (still citable, marked "replaced by <new>"); only the newer one holds the link.
+ */
+export function replacedByMap(entries) {
+  const map = new Map()
+  for (const entry of entries ?? []) {
+    if (!entry?.replaces) continue
+    const there = map.get(entry.replaces)
+    if (!there || String(entry.uploadedAt ?? '') >= String(there.uploadedAt ?? '')) map.set(entry.replaces, entry)
+  }
+  return map
+}
+
+/** The entry that replaced document `id`, or null. */
+export function replacedBy(entries, id) {
+  return replacedByMap(entries).get(id) ?? null
 }
 
 /** Whether a document has been removed (its file and text are gone, its entry stays). */
@@ -327,7 +363,7 @@ export function createSourceStore(io, options = {}) {
     },
 
     /**
-     * Adds a document: always a new one with its own id and stored name, even when it is named like an existing one. `data` is `{ filename, bytes, text?, title?, uploadedBy? }`. Refused when it is empty or over MAX_SOURCE_BYTES (the server's half of the browser's own check), or when `text` is past MAX_SOURCE_TEXT_CHARS. Returns `{ entry, totalBytes, warning }`.
+     * Adds a document: always a new one with its own id and stored name, even when it is named like an existing one. `data` is `{ filename, bytes, text?, title?, uploadedBy?, replaces? }`; `replaces` (#297) is the id of an older document this one supersedes, recorded on the new entry (the older one stays as it is and shows "replaced by"). Refused when it is empty or over MAX_SOURCE_BYTES (the server's half of the browser's own check), or when `text` is past MAX_SOURCE_TEXT_CHARS. Returns `{ entry, totalBytes, warning }`.
      */
     async upload(data) {
       const bytes = data.bytes
@@ -343,7 +379,9 @@ export function createSourceStore(io, options = {}) {
 
       // The manifest entry goes in first: it is what reserves the name and id against another upload, so the files below can never be written over by one.
       let created
+      const replaces = typeof data.replaces === 'string' && data.replaces.trim() ? data.replaces.trim() : undefined
       const result = await mutateManifest((entries) => {
+        if (replaces !== undefined) liveEntry(entries, replaces)
         const filename = uniqueSourceFilename(cleaned, entries.map((e) => e.filename))
         const id = sourceIdFor(cleaned, entries.map((e) => e.id))
         created = normalizeSourceEntry({
@@ -354,6 +392,7 @@ export function createSourceStore(io, options = {}) {
           uploadedAt: now(),
           size,
           text: text === null ? undefined : sourceTextRef(filename),
+          replaces,
         })
         return { entries: [...entries, created] }
       })
@@ -407,13 +446,16 @@ export function createSourceStore(io, options = {}) {
       }
       const { entries } = await readManifest()
       const entry = liveEntry(entries, id)
+      // #297: what the text was before, so a re-read that gives the very same text changes nothing downstream.
+      const before = entry.text ? ((await io.readText(sourceTextPath(entry.filename)))?.text ?? '') : ''
       const has = await writeTextFor(entry, text)
       const textRef = has ? sourceTextRef(entry.filename) : undefined
+      const changed = fingerprintText(before) !== fingerprintText(has ? text : '')
       let updated
       await mutateManifest((current) => {
         const live = liveEntry(current, id)
         const { text: _text, ...rest } = live
-        updated = normalizeSourceEntry({ ...rest, text: textRef })
+        updated = normalizeSourceEntry({ ...rest, text: textRef, ...(changed ? { textChangedAt: now() } : {}) })
         return { entries: current.map((e) => (e.id === id ? updated : e)) }
       })
       return updated

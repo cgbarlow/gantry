@@ -27,8 +27,8 @@ export function createServerSourceClient(slug, fetchForInstance) {
       const { entries, totalBytes, warning } = await parse(await fetchForInstance(path()), 'Failed to load Source documents')
       return { entries, totalBytes, warning }
     },
-    async upload({ filename, bytes, text, title, uploadedBy }) {
-      const res = await fetchForInstance(path(), { method: 'POST', ...json({ filename, dataBase64: bytesToBase64(bytes), text, title, uploadedBy }) })
+    async upload({ filename, bytes, text, title, uploadedBy, replaces }) {
+      const res = await fetchForInstance(path(), { method: 'POST', ...json({ filename, dataBase64: bytesToBase64(bytes), text, title, uploadedBy, replaces }) })
       return parse(res, 'Failed to upload')
     },
     async rename(id, title) {

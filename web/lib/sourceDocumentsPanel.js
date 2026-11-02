@@ -9,6 +9,7 @@ import {
   formatBytes,
   canUseSourceAsImage,
   isRemovedSource,
+  replacedByMap,
   sourceFileExtension,
   sourceFileKind,
   sourceFileTypeProblem,
@@ -16,6 +17,7 @@ import {
 } from './sourceDocuments.js'
 import { extractSourceText } from './sourceExtract.js'
 import { sourceCitationFor } from './sourceCitations.js'
+import { sourceListTick } from './outOfDateState.js'
 
 const NO_TEXT_REASON = {
   image: 'A picture has no text to read. An AI Provider that reads images is sent the picture itself; others list it as unreadable.',
@@ -83,15 +85,19 @@ function noTextNote(extraction) {
 }
 
 /**
+ * #297: `newSince` is the set of document ids marked **New since last interview** (worked out from the decisions logs by the caller). Each document that a newer one replaces shows "replaced by <new>", and the upload has a "This replaces…" picker that records the link in the manifest.
+ *
  * `store` is described above. `actor` is the name stamped on uploads and removals ('' when unknown). `readOnly` hides every control that changes the list (an archived Instance). `commitNote` is shown under the introduction when each change is committed to a repository as it is made (an Azure DevOps or GitHub workspace, #280). `extract(filename, bytes)` is the text reader; tests and the app use the default. `compact` draws the list as the Interview page's narrow rail does (#286): titles, a "+ Add Source document" button and a drop zone, with no table; `onList(list)` is told whenever the list has been read (after a load or a change).
  */
-export function SourceDocumentsPanel({ store, actor = '', readOnly = false, commitNote = '', extract = extractSourceText, onList = null, compact = false }) {
+export function SourceDocumentsPanel({ store, actor = '', readOnly = false, commitNote = '', extract = extractSourceText, onList = null, compact = false, newSince = null }) {
   const [list, setList] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [message, setMessage] = useState(null)
   const [busy, setBusy] = useState(false)
   const [renaming, setRenaming] = useState(null)
   const [confirmRemove, setConfirmRemove] = useState(null)
+  // #297: the older document the next upload replaces ('' for none).
+  const [replaces, setReplaces] = useState('')
 
   const reload = useCallback(async () => {
     try {
@@ -99,6 +105,8 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
       setList(loaded)
       setLoadError('')
       onList?.(loaded)
+      // #297: tells the editor and the Interview page to look again for Out of date Fields.
+      sourceListTick.value += 1
     } catch (err) {
       setLoadError(err.message)
     }
@@ -124,6 +132,10 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
   }
 
   async function uploadFiles(files) {
+    if (replaces && files.length > 1) {
+      setMessage({ kind: 'error', text: 'Pick one file at a time when it replaces another document.' })
+      return
+    }
     for (const file of files) {
       const typeProblem = sourceFileTypeProblem(file.name)
       const sizeProblem = sourceSizeProblem(file.size, file.name)
@@ -136,12 +148,15 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
         const bytes = new Uint8Array(await file.arrayBuffer())
         const extraction = await extract(file.name, bytes)
         setMessage({ kind: 'info', text: `Saving ${file.name}…` })
-        const { entry } = await store.upload({ filename: file.name, bytes, text: extraction.text ?? undefined, uploadedBy: actor })
+        const older = replaces ? entries.find((e) => e.id === replaces) : null
+        const { entry } = await store.upload({ filename: file.name, bytes, text: extraction.text ?? undefined, uploadedBy: actor, ...(replaces ? { replaces } : {}) })
+        setReplaces('')
         await reload()
+        const replacing = older ? ` It replaces "${older.title}", which stays in the list and can still be cited.` : ''
         setMessage(
           extraction.text !== null
-            ? { kind: 'ok', text: `Added "${entry.title}" and read its text.` }
-            : { kind: extraction.problem ? 'warn' : 'ok', text: `Added "${entry.title}". ${noTextNote(extraction)}` }
+            ? { kind: 'ok', text: `Added "${entry.title}" and read its text.${replacing}` }
+            : { kind: extraction.problem ? 'warn' : 'ok', text: `Added "${entry.title}". ${noTextNote(extraction)}${replacing}` }
         )
       })
     }
@@ -231,6 +246,24 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
   const entries = list?.entries ?? []
   const live = entries.filter((e) => !isRemovedSource(e))
   const removed = entries.filter(isRemovedSource)
+  const replacedByEntry = replacedByMap(entries)
+  const isNewSince = (entry) => Boolean(newSince?.has?.(entry.id)) && !entry.replaces
+  // #297: the marks a document carries after the title.
+  const marks = (entry) => [
+    replacedByEntry.has(entry.id)
+      ? html`<span class="stamp review" data-testid="source-replaced-by" title="A newer document replaces this one. This one is kept and can still be cited.">replaced by ${replacedByEntry.get(entry.id).title}</span>`
+      : null,
+    isNewSince(entry)
+      ? html`<span class="stamp new" data-testid="source-new-since" title="Added since the last AI interview. The next interview reads it against what is saved.">New since last interview</span>`
+      : null,
+  ]
+  const replacesPicker = () =>
+    live.length > 0 && !readOnly
+      ? html`<select class="source-replaces" data-testid="source-replaces" aria-label="This replaces…" value=${replaces} disabled=${busy} onChange=${(e) => setReplaces(e.currentTarget.value)}>
+          <option value="" selected=${replaces === ''}>This replaces… (nothing)</option>
+          ${live.map((e) => html`<option key=${e.id} value=${e.id} selected=${replaces === e.id}>This replaces… ${e.title}</option>`)}
+        </select>`
+      : null
 
   if (compact) {
     return html`
@@ -244,6 +277,7 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
                 (entry) => html`<li key=${entry.id} data-source-id=${entry.id}>
                   <span class="srcdoc-title" title=${entry.filename}>${entry.title}</span>
                   <span class="meta">${formatBytes(entry.size)}${entry.text ? '' : ' · no text'}</span>
+                  ${marks(entry)}
                   ${sourceFileKind(entry.filename) === 'pdf' && store.setReadVisually
                     ? html`<label class="srcdoc-visual" title="Send the PDF itself to an AI Provider that takes PDFs, instead of its text">
                         <input type="checkbox" data-testid="source-read-visually" checked=${entry.readVisually === true} disabled=${busy || readOnly} onChange=${() => toggleReadVisually(entry)} />
@@ -255,6 +289,7 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
             </ul>`
           : null}
         ${list?.warning ? html`<p class="source-documents-warning" role="status">${list.warning}</p>` : null}
+        ${replacesPicker()}
         ${readOnly
           ? null
           : html`<label
@@ -292,6 +327,7 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
                 Upload documents
                 <input type="file" multiple accept=${SOURCE_FILE_ACCEPT} aria-label="Upload Source documents" data-testid="source-documents-input" style="display:none" disabled=${busy} onChange=${onPick} />
               </label>
+              ${replacesPicker()}
             </div>`}
         <p class=${`source-documents-message ${message ? message.kind : ''}`} role="status" aria-live="polite" data-testid="source-documents-message">${message ? message.text : ''}</p>
         ${list === null && !loadError ? html`<p class="loading">Loading…</p>` : null}
@@ -326,6 +362,7 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
                             <button type="button" class="btn small ghost" onClick=${() => setRenaming(null)}>Cancel</button>
                           </form>`
                         : html`<span class="source-documents-title-text">${entry.title}</span>`}
+                      ${marks(entry)}
                     </td>
                     <td class="source-documents-file">${entry.filename}</td>
                     <td>${formatBytes(entry.size)}</td>
@@ -371,6 +408,7 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
                 ${removed.map(
                   (entry) => html`<li key=${entry.id} data-source-id=${entry.id}>
                     <span class="source-documents-removed-title">${entry.title}</span>
+                    ${marks(entry)}
                     <span class="muted"> · removed ${formatWhen(entry.removedAt)}${entry.removedBy ? ` by ${entry.removedBy}` : ''}</span>
                   </li>`
                 )}

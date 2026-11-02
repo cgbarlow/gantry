@@ -310,6 +310,33 @@ for (const spec of PROVIDERS) {
         assert.deepEqual(await bytesOf(client, `${ROOT}/assets/Whiteboard-sketch.png`, branch), png)
       }))
 
+    // #297: what makes a Field Out of date is recorded in the manifest the same way here as on a server workspace.
+    test('"This replaces..." and a real change of text are recorded in the manifest, each in the one commit of its operation', () =>
+      withProviderInstance(spec, async ({ sources, client }) => {
+        const branch = stageBranchName(SLUG, 'shape')
+        await sources('', json('POST', { filename: 'Client brief v2.docx', dataBase64: b64('v2'), text: 'old text' }))
+
+        let upload
+        const uploadCommits = await countingCommits(spec.commitRequest, async () => {
+          upload = await sources('', json('POST', { filename: 'Client brief v3.docx', dataBase64: b64('v3'), text: 'new text', replaces: 'client-brief-v2' }))
+        })
+        assert.equal(upload.status, 201, await upload.clone().text())
+        assert.equal(uploadCommits, 1)
+        const manifest = parseSourceManifest(await client.getFileContent(`${ROOT}/sources/manifest.yaml`, { branch }))
+        assert.equal(manifest.find((e) => e.id === 'client-brief-v3').replaces, 'client-brief-v2')
+        assert.equal(manifest.find((e) => e.id === 'client-brief-v2').replaces, undefined)
+        assert.equal(manifest.find((e) => e.id === 'client-brief-v2').removedAt, undefined, 'the older document stays')
+
+        const refused = await sources('', json('POST', { filename: 'Other.docx', dataBase64: b64('x'), replaces: 'nope' }))
+        assert.equal(refused.status, 404)
+
+        // The same text read again changes nothing; different text records when it changed.
+        await sources('/client-brief-v3/text', json('PUT', { text: 'new text' }))
+        assert.equal(parseSourceManifest(await client.getFileContent(`${ROOT}/sources/manifest.yaml`, { branch })).find((e) => e.id === 'client-brief-v3').textChangedAt, undefined)
+        await sources('/client-brief-v3/text', json('PUT', { text: 'different text' }))
+        assert.ok(parseSourceManifest(await client.getFileContent(`${ROOT}/sources/manifest.yaml`, { branch })).find((e) => e.id === 'client-brief-v3').textChangedAt)
+      }))
+
     test('a Provider workspace answers a read with the Instance as it stands on main when no Stage has begun', () =>
       withProviderInstance(spec, async ({ ctx }) => {
         const definition = loadDefinition('design', { version: 3 })
