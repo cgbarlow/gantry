@@ -6,8 +6,62 @@ v2 (#193), and each later ticket records its change here under its own `### <cha
 heading. v1 and v2 stay published and unchanged, so instances pinned to them render exactly as
 before.
 
-**Status: draft.** New design instances are still created on v2, the latest published version.
-v3 stays a draft when spec #192 is complete; publishing it is the process owner's step.
+**Status: published with Gantry 0.13.0 (#308).** v3 is now the latest published version, so a new
+design Instance is created on it. An Instance already on v1 or v2 keeps its version and renders
+exactly as before; nothing is migrated.
+
+### Interview instructions, standard modules and a Sources appendix (#308)
+
+v3 is built for the AI interview (ADR-0062, ADR-0065). It moves the decisions, glossary and open
+questions onto Gantry's standard modules, gains its own Interview instructions, and turns on the
+Sources appendix. v1 and v2 are unchanged. An Instance on an older version keeps rendering the same
+and gets the AI interview on Gantry's own rules, without these extras.
+
+- **Glossary and Open questions are Gantry's standard modules** (version 1 of each), mounted on the
+  same Stages as before. v3's own `glossary` and `open-questions` Modules are gone. The Glossary's
+  one Field is now `terms` (it was `glossary.terms-and-definitions`) and is the same three-column
+  table, its last column named "Avoid". Open questions keeps `questions` and is a table: Question,
+  Who resolves, By when, Status. The SAD, SSAD, As-built, Full SOAP and HLD print them under the
+  headings they always had.
+- **Key decisions replaces the two decisions tables.** `architecture.design-decisions` and
+  `as-built-notes.architecture-decisions` are removed. The Key decisions standard module is mounted
+  on Detailed Design (straight after Architecture) and Operational Handover, with the prefix `AD`
+  and the WH(Y) style: each decision is one sentence ("In the context of ... facing ... we decided
+  for ... and neglected ... to achieve ... accepting that ..."), with typed links to the decisions
+  it depends on, supersedes or relates to. It is one list, so the As-built keeps the SAD's AD
+  numbers and a decision taken during the build takes the next one. The SAD prints it as "Key
+  decisions" and the As-built as "Key decisions" in its As-built design chapter; both used to print
+  a table.
+- **Which decisions need governance endorsement is still design's own rule.** Every Key decision is
+  an AD; only one that needs endorsement (enterprise reuse, a new platform or product, an
+  architecture precedent, or endorsement explicitly required) also names an ADR, as `ADRYYY` until
+  it is registered, then its number. The mount's guidance and Interview instructions say so, and
+  say plainly not to assume ARB endorsement is needed. The ADR is written at the end of the
+  decision's title, e.g. `AD01: Shared services (ADR031)`, since a WH(Y) decision has no ADR
+  column.
+- **Interview instructions** at the Definition, on every Stage, and on the Key decisions and
+  Glossary mounts: New Zealand spelling, one preferred name per system, a source for every figure,
+  the ADR rule, what each Stage's reader is deciding, and how to record a decision taken during the
+  build.
+- **Sources appendix.** Every Artefact sets `source-appendix: true`, so one that cites a Source
+  document ends with a Sources table of the documents it cites. One that cites nothing renders as
+  before.
+- **The bundled examples are updated.** `kiwi-cover-mutual` has a `key-decisions` Module of eight
+  decisions (AD01 to AD08, two with registered ADRs, AD08 taken during the build) in place of the
+  two tables, its Glossary uses the "Avoid" column, and its Open questions have a Status. `gantry`'s
+  Open questions use the same table.
+- **Word budgets.** The Key decisions Field's budgets are Gantry's (Small 200, Medium 420, Large 720)
+  and the Glossary's and Open questions' are the ones v3 already had, so the budget record under
+  "Word budgets" below has one row for `key-decisions.decisions` in place of the two decisions
+  Fields and `glossary.terms` for `glossary.terms-and-definitions`. Kiwi Cover Mutual's eight
+  decisions were first written at 713 words and are condensed to 420, the Medium budget.
+- **No Gate changes.** Each Field is required, or optional, exactly where it was.
+
+### Moving an Instance from v2, for this change (#308)
+
+The other v3 changes are listed under their own headings. For this one, move each Key decision from the SAD's and As-built's tables into a `key-decisions.md` Module in the
+WH(Y) style, keeping the AD numbers; rename the Glossary's last column to "Avoid"; give the Open
+questions table a Status column; then set `definitionVersion: 3`. Gantry does not do this for you.
 
 ### Started as a copy of v2 (#193)
 
@@ -311,7 +365,6 @@ and the budgets derived from it:
 | `security.privacy-and-confidentiality` | 164 | — | 170 | 85 | 35 |
 | `architecture.business-context` | 264 | — | 270 | 135 | 55 |
 | `architecture.solution-users` | 107 | — | 110 | 55 | 20 |
-| `architecture.design-decisions` | 309 | — | 310 | 185 | 95 |
 | `architecture.architectural-risks` | 150 | — | 150 | 75 | 30 |
 | `architecture.solution-description` | 391 | — | 400 | 200 | 80 |
 | `architecture.constraints` | 110 | — | 110 | 55 | 20 |
@@ -337,7 +390,8 @@ and the budgets derived from it:
 | `support-and-operations.release-procedures` | 137 | — | 140 | 70 | 30 |
 | `support-and-operations.support-handover-readiness` | 107 | — | 110 | 55 | 20 |
 | `support-and-operations.decommission` | 134 | — | 140 | 70 | 30 |
-| `glossary.terms-and-definitions` | 451 | — | 460 | 275 | 140 |
+| `glossary.terms` | 451 | — | 460 | 275 | 140 |
+| `key-decisions.decisions` | 713 | — | 720 | 420 | 200 |
 | `recovery-plan.recovery-approach` | 260 | — | 260 | 130 | 50 |
 | `recovery-plan.resiliency` | 101 | — | 110 | 55 | 20 |
 | `recovery-plan.test-scenarios` | 124 | — | 130 | 80 | 40 |
@@ -345,7 +399,6 @@ and the budgets derived from it:
 | `data-security-controls.controls` | 368 | — | 370 | 220 | 110 |
 | `data-security-controls.inheritance-and-dependencies` | 127 | — | 130 | 65 | 25 |
 | `as-built-notes.design-overview` | 177 | — | 180 | 90 | 35 |
-| `as-built-notes.architecture-decisions` | 185 | — | 190 | 115 | 55 |
 | `as-built-notes.process-flows` | 327 | — | 330 | 165 | 65 |
 | `as-built-notes.infrastructure-and-configuration` | 309 | — | 310 | 155 | 60 |
 | `as-built-notes.appendix` | 144 | — | 150 | 90 | 45 |

@@ -147,11 +147,13 @@ describe('the validator knows the setting', () => {
     assert.ok(!('source-appendix' in off.artefacts[0]))
   })
 
-  test('design v3 and the other bundled Definitions leave it off', () => {
-    for (const version of [1, 2, 3]) {
+  test('design v1 and v2 leave it off, and design v3 (#308) turns it on for every Artefact', () => {
+    for (const version of [1, 2]) {
       const definition = loadDefinition('design', { definitionsDir: 'definitions', version })
       assert.ok(definition.artefacts.every((a) => a.sourceAppendix === undefined), `design v${version}`)
     }
+    const v3 = loadDefinition('design', { definitionsDir: 'definitions', version: 3 })
+    assert.ok(v3.artefacts.length > 0 && v3.artefacts.every((a) => a.sourceAppendix === true), 'design v3')
   })
 })
 
@@ -220,11 +222,15 @@ async function withCitingExample({ appendix, manifest = MANIFEST }, fn) {
     assert.notEqual(cited, background, 'the citation lands in the Background')
     writeFileSync(backgroundPath, cited)
     cpSync('definitions/design', join(definitionsDir, 'design'), { recursive: true })
+    // Design v3 turns the appendix on for every Artefact (#308). Take it out of all of them, then put it back on the Solution on a Page alone when `appendix` is true.
+    const defPath = join(definitionsDir, 'design', '3', 'definition.yaml')
+    const text = readFileSync(defPath, 'utf8')
+    assert.match(text, /^    source-appendix: true$/m)
+    const without = text.replace(/^    source-appendix: true\n/gm, '')
+    writeFileSync(defPath, without)
     if (appendix) {
-      const defPath = join(definitionsDir, 'design', '3', 'definition.yaml')
-      const text = readFileSync(defPath, 'utf8')
-      const edited = text.replace('    diagram-captions: true\n', '    diagram-captions: true\n    source-appendix: true\n')
-      assert.notEqual(edited, text)
+      const edited = without.replace('    diagram-captions: true\n', '    diagram-captions: true\n    source-appendix: true\n')
+      assert.notEqual(edited, without)
       writeFileSync(defPath, edited)
     }
     if (manifest) {

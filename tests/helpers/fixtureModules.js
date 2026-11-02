@@ -16,7 +16,7 @@ const EXAMPLE_DIR = join('workspaces', 'examples', 'kiwi-cover-mutual')
 // version. An instance file finds each Field by its title, so a Field v3 retitled with its id kept
 // (#233's "Operational accounts and licences") gets back the title of the `definitionVersion` seeded.
 export function exampleModuleText(moduleId, { definitionVersion = 2 } = {}) {
-  const text = readFileSync(join(EXAMPLE_DIR, 'modules', `${moduleId}.md`), 'utf8')
+  const text = withVersion2Sections(moduleId, definitionVersion, readFileSync(join(EXAMPLE_DIR, 'modules', `${moduleId}.md`), 'utf8'))
   const retitled = retitledHeadings(moduleId, definitionVersion)
   return text
     .split('\n')
@@ -47,4 +47,19 @@ function retitledHeadings(moduleId, definitionVersion) {
     if (title && title !== field.title) headings.set(`## ${field.title}`, `## ${title}`)
   }
   return headings
+}
+
+// #308: design v3 moved the two decisions tables into the Key decisions module (`key-decisions.md`), so
+// the example no longer carries them. A v1 or v2 Instance still has the Fields, and its SAD and
+// As-built Gates still need them, so a fixture seeded for those versions gets the v2 tables back.
+const DECISIONS_TABLE_HEAD = '| AD | Decision | ADR |\n|----------|----------------------------------------------------------------------|------------|\n'
+const VERSION_2_SECTIONS = {
+  architecture: `\n## Design decisions\n\n${DECISIONS_TABLE_HEAD}| AD01 | **Shared services, not point-to-point.** CIS and Claims InfoServ serve customer and claim data; applications don't hold copies. An ADR because the services are built for enterprise reuse. | ADRYYY |\n| AD02 | **Policy Data Management stays the system of record, exposed as services.** Four CICS transactions over MQ. An ADR because it sets the precedent for exposing the mainframe as services. | ADRYYY |\n| AD03 | **The CRM System orchestrates Handle Claim; Claims InfoServ owns claim state**, valuation, routing rules and the audit trail. | |\n`,
+  'as-built-notes': `\n## Architecture decisions\n\n${DECISIONS_TABLE_HEAD}| AD01 | **Shared services** — as designed. | ADR031 |\n| AD02 | **Policy Data Management exposed as services** — PDM-01 to PDM-04 live in the April and May windows. | ADR032 |\n| AD03 | **CRM System orchestrates, Claims InfoServ owns state** — nightly checks find no drift. | |\n`,
+}
+
+function withVersion2Sections(moduleId, definitionVersion, text) {
+  const section = VERSION_2_SECTIONS[moduleId]
+  if (!section || definitionVersion >= 3 || text.includes(section.trim().split('\n')[0])) return text
+  return `${text.trimEnd()}\n${section}`
 }

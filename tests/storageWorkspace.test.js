@@ -35,6 +35,7 @@ import { exampleModuleText } from './helpers/fixtureModules.js'
 import { pngImage } from './helpers/logoImages.js'
 import { docxPart } from './helpers/wordDocx.js'
 import { copyTreeIntoStorage } from './helpers/copyTreeIntoStorage.js'
+import { draftDesignV3Copy } from './helpers/designDraft.js'
 
 // #265 (ADR-0070): a server workspace can be kept in a store other than the server's disk. These run
 // one against an in-memory store that has only the asynchronous half of the storage seam (no
@@ -309,7 +310,13 @@ describe('a server workspace\'s Definitions in a store', () => {
   })
 
   test('keep their templates, reference documents and logo in the store', async () => {
-    await copyTreeIntoStorage(storage, join('definitions', 'design', '3'), `${dir}/design/3`)
+    // design v3 is published (#308); the store's copy is a draft, since a logo and reference documents are only written to a draft.
+    const draftV3 = draftDesignV3Copy()
+    try {
+      await copyTreeIntoStorage(storage, draftV3, `${dir}/design/3`)
+    } finally {
+      rmSync(draftV3, { recursive: true, force: true })
+    }
 
     await writeDefinitionTemplateToStorage(storage, dir, 'design', 3, 'extra.md.tmpl', '# Extra\n')
     assert.equal(await readDefinitionTemplateFromStorage(storage, dir, 'design', 3, 'extra.md.tmpl'), '# Extra\n')

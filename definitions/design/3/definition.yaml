@@ -1,10 +1,24 @@
 id: design
 version: 3
-status: draft
+status: published
 title: Solution Design
 description: >
   Design content for an initiative, from shaping through HLD approval,
   build-ready detailed design, and operational handover.
+# v3 (#308, ADR-0062): Interview instructions. They only add to Gantry's own rules for the AI
+# interview; they never override them. This note applies to every Stage; each Stage and each
+# standard module below adds its own.
+interview: >
+  These documents are read by architects, delivery teams and the governance board, and an
+  architecture review reads them closely. Use New Zealand spelling. Name the solution, its
+  platforms and its products by one name each, from the first draft, and use the Glossary's
+  preferred term in headings, tables and prose; when the architect uses two names for one thing,
+  ask which is preferred rather than choosing. Every figure (a volume, a peak, a retention
+  period, a cost) needs its source or "(target assumption)"; ask which it is before drafting a
+  figure into a Field. A design decision is an AD; only a decision that needs governance
+  endorsement also names an ADR, and an ADR is not an ARB agenda item. Do not assume ARB
+  endorsement is needed. Ask who owns each risk and mark an owner who is not yet confirmed
+  "(interim)".
 
 # v3 (#220, ADR-0058): the documents' Classification is an Instance setting, one
 # value for the whole Instance, chosen when it is created and changed in Instance
@@ -38,6 +52,69 @@ instance-settings:
 # the README's worked example, so `define` has been split into `hld-define` and
 # `detailed-design`. See docs/adr/0001 for why.
 
+# v3 (#308, ADR-0065): the Glossary, Open questions and Key decisions are Gantry's standard
+# modules, not modules of this Definition, so the AI interview and every reader find them in one
+# shape. The Definition names the version it mounts (a published version never changes) and can add
+# guidance and Interview instructions to each; it cannot change their Fields.
+#
+#  - `glossary.terms` replaces v2's `glossary.terms-and-definitions`: the same table, with the
+#    last column named "Avoid" rather than "Variants to avoid".
+#  - `open-questions.questions` is a table (Question | Who resolves | By when | Status).
+#  - `key-decisions.decisions` replaces `architecture.design-decisions` (SAD) and
+#    `as-built-notes.architecture-decisions` (As-built), which were two Fields holding one list.
+#    It is one list, so the As-built keeps the SAD's decision numbers and adds the decisions made
+#    during the build after them. Decisions are numbered AD01, AD02, ... and written in the WH(Y)
+#    style.
+standard-modules:
+  - id: glossary
+    version: 1
+    guidance: >
+      Name the solution itself, its platforms and its products, each with its variants to avoid
+      (former names, informal names, other spellings), so every other Field uses one name in
+      headings, tables, diagrams and prose. Prefer the architecture name; a contracted product
+      name goes in the licences table's "Contracted name" column once it has been verified.
+
+      The SAD, SSAD and As-built reference documents all carry this section, so it is required
+      from `build-ready-checklist` onward. A reader unfamiliar with the organisation's systems
+      must be able to follow the document unaided.
+    interview: >
+      Offer to draft a Glossary row whenever two people use different names for the same
+      system, platform or product, and ask which name is preferred before using either in a Field.
+  - id: open-questions
+    version: 1
+    guidance: >
+      Open from the `shape` stage onward: the Full SOAP's and the HLD's "Open questions"
+      sections render from this one Field, so a question raised at SOAP carries into the HLD
+      rather than being re-typed. A question that matures into a risk moves to
+      `risks.risk-register` or `risks.open-issues` at detailed design.
+  - id: key-decisions
+    version: 1
+    prefix: AD
+    style: why
+    guidance: >
+      Every Key decision here is an Architecture Decision (AD). Say what else was on the table,
+      not just what was decided. Deepen the `solution-definition.high-level-solution-overview`
+      sketch to build-ready depth rather than starting over.
+
+      Only an AD that needs governance endorsement also names an ADR (Architecture Decision
+      Record): end its title with the ADR in brackets, e.g. `(ADRYYY)`, using the placeholder
+      `ADRYYY` until the ADR is registered and then its number. A decision is an ADR candidate
+      only where at least one of these holds: enterprise reuse exists; a new platform or product
+      is introduced; an architecture precedent is created; or governance endorsement is
+      explicitly required. Most decisions meet none of them and stay ADs.
+
+      Don't assume ARB endorsement is needed. A decision is not an ADR, and an ADR is not an ARB
+      item.
+
+      At handover, keep the design-time numbers. A decision made during the build takes the next
+      number, and a design-time decision that the build changed is superseded by a new one that
+      says so, rather than being rewritten to match what was built.
+    interview: >
+      For each candidate decision ask whether it is an ADR candidate (enterprise reuse, a new
+      platform or product, an architecture precedent, or governance endorsement explicitly
+      required) and name the ADR in the title only if it is. Do not offer a decision as a Key
+      decision just to make the list longer.
+
 stages:
   - id: shape
     title: SOAP
@@ -59,6 +136,13 @@ stages:
     # the position they'd always logically belonged at, not buried near the end.
     # v3 (#220): `document-handling` is no longer mounted at any Stage. The
     # documents' Classification is an Instance setting (see `instance-settings`).
+    # v3 (#308): the SOAP is read for a business case decision, so the interview starts from the
+    # problem and the decision wanted, not from the solution.
+    interview: >
+      Start from the business problem and the decision the reader is asked to make, then the
+      solution. Ask for dates and dependencies early; they are the part of a SOAP most often
+      left until last and found wrong. Record a question the architect cannot yet answer as an
+      open question rather than leaving a Field vague.
     modules: [background, introduction, design-basis, solution-definition, team-and-estimates, dependencies, soap-full-details, open-questions]
     # The instance the web form's "Populate example text" button reads from for this stage's fields — one shared instance covering every stage, so `gantry serve examples` shows every gate screen populated.
     example: kiwi-cover-mutual
@@ -80,6 +164,12 @@ stages:
     # artefact, so mounting them would put editor cards here that no HLD section
     # renders. Both still mount at `shape` and `detailed-design` — the
     # `design-basis` backbone accumulates there, not here.
+    # v3 (#308): the High-level Design goes to approval before detailed design begins.
+    interview: >
+      Ask what else was considered before recording the preferred option, and what it was
+      rejected for. Ask what the approver is being asked to decide and by when. Keep this Stage
+      light: nfrs, risks, security and dependencies are deepened at Detailed Design, so do not
+      press for build-ready detail here.
     modules: [hld-submission, background, introduction, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies]
     example: kiwi-cover-mutual
 
@@ -100,7 +190,15 @@ stages:
     # module of its own to sit behind (unlike `background` at the other three
     # stages), so the pair mounts at the very front, matching the SAD's own
     # document layout.
-    modules: [introduction, design-basis, architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations, glossary, recovery-plan, data-security-controls, solution-definition, team-and-estimates]
+    # v3 (#308): `key-decisions` (the Key decisions standard module) sits straight after
+    # `architecture`, where the SAD prints it, and replaces `architecture.design-decisions`.
+    interview: >
+      The SAD must be enough for a team that did not shape the solution to build it. Deepen the
+      Shape and HLD content rather than starting over, and ask what each integration, data flow and
+      environment is called before drawing it. When the architect explains why a design is the way
+      it is, check whether that is a Key decision (hard to reverse, surprising without its
+      context, a real trade-off) and offer it as one if so.
+    modules: [introduction, design-basis, architecture, key-decisions, integration, data, nfrs, security, risks, dependencies, support-and-operations, glossary, recovery-plan, data-security-controls, solution-definition, team-and-estimates]
     example: kiwi-cover-mutual
 
   - id: handover
@@ -119,7 +217,14 @@ stages:
     # WI #331: the new `design-basis` module mounts adjacent to `introduction`
     # (retitled "Overview"), which already sat 2nd/6 at this stage — the pair
     # is now 2nd/3rd of 7.
-    modules: [glossary, introduction, design-basis, as-built-notes, recovery-plan, data-security-controls, nfrs]
+    # v3 (#308): the Key decisions carry over from Detailed Design (one list, so the SAD's
+    # numbers are kept) and are printed in the As-built's "As-built design" chapter.
+    interview: >
+      Record what was built, not what was designed. Ask first what differs from the agreed design
+      and why, then confirm the rest as built. A decision taken during the build is a new Key
+      decision with the next number; do not edit a design-time decision to match what was built.
+      Ask for names, addresses and values from the build record, not from memory.
+    modules: [glossary, introduction, design-basis, key-decisions, as-built-notes, recovery-plan, data-security-controls, nfrs]
     example: kiwi-cover-mutual
 
 artefacts:
@@ -146,6 +251,8 @@ artefacts:
       This document summarises the initiative's context, solution, team and
       estimates for the business case decision.
     table-of-contents: true
+    # v3 (#308, #281): ends the document with the Source documents it cites, if any.
+    source-appendix: true
     # v1 and v2: order follows the reference SOAP (SAMPLE SOAP - Mobile Phone
     # Assistance): Background and context -> Solution definition (Process flow,
     # High level solution design, Assumptions and considerations, Feature
@@ -215,6 +322,7 @@ artefacts:
       This document gives a fuller summary of the initiative, with its detailed
       scope, dependencies, sequencing, dates and open questions.
     table-of-contents: true
+    source-appendix: true
     # Order follows the JEDI Full SOAP reference document exactly: the
     # front-matter metadata block, then Introduction, Problem statement,
     # Opportunity, In Scope, Out of Scope, High Level Requirements, High level
@@ -290,6 +398,7 @@ artefacts:
       This document presents the proposed solution, its alternatives, risks and
       open questions for approval before detailed design.
     table-of-contents: true
+    source-appendix: true
     # Order follows the TAC HLD reference template: cover block -> Problem
     # Statement (Current state, Desired future state, In scope / out of scope,
     # Success criteria, Non-functional requirements) -> Proposed solution
@@ -383,6 +492,7 @@ artefacts:
       requirements, security, dependencies and support handover readiness for
       build.
     table-of-contents: true
+    source-appendix: true
     # Order follows SAD Template.docx: Introduction / Overview -> Business
     # Architecture View -> Solution Overview (+ Dependencies) -> High Level
     # Architectural View -> Open Issues -> Logical Components View ->
@@ -413,7 +523,7 @@ artefacts:
     # and "Systems Management & Monitoring"), and `team-and-estimates.references`
     # (the reference's "References" under Document Control).
     # MERGED: `integration.environments` -> `support-and-operations.environments-and-domains`.
-    # NOTE: `glossary.terms-and-definitions` is retained although SAD Template.docx
+    # NOTE: `glossary.terms` is retained although SAD Template.docx
     # has no glossary section — the v1 comment claiming it does is incorrect. The
     # SSAD and the as-built references both carry one and it is worth keeping.
     #
@@ -456,7 +566,7 @@ artefacts:
         architecture.solution-description,
         dependencies.dependencies-overview,
         dependencies.dependency-list,
-        architecture.design-decisions,
+        key-decisions.decisions,
         architecture.architectural-risks,
         architecture.constraints,
         architecture.standards,
@@ -497,7 +607,7 @@ artefacts:
         nfrs.other-nfrs,
         support-and-operations.decommission?,
         support-and-operations.support-handover-readiness,
-        glossary.terms-and-definitions,
+        glossary.terms,
         team-and-estimates.references?,
       ]
 
@@ -514,6 +624,7 @@ artefacts:
       This document describes the solution's design and operational readiness
       for the teams that will support it after build.
     table-of-contents: true
+    source-appendix: true
     # #213: the SSAD follows the SAD's reading order and heading names, not the
     # FV Help Tool SSAD reference's. That reference is a filled instance for one
     # product family, not a template, and its order (Solution Products and
@@ -584,7 +695,7 @@ artefacts:
         support-and-operations.monitoring-and-alerting,
         support-and-operations.release-procedures,
         support-and-operations.support-handover-readiness,
-        glossary.terms-and-definitions,
+        glossary.terms,
         team-and-estimates.references?,
       ]
 
@@ -601,6 +712,7 @@ artefacts:
       This document records what was built and the final handover information
       needed for operational use.
     table-of-contents: true
+    source-appendix: true
     # v1 and v2: order mirrors the approved ATLAS reference design: Terms &
     # Definitions -> Introduction -> As-built design (Overview, Architecture
     # Decisions, flows, infrastructure) -> Recovery plan -> Data security
@@ -644,7 +756,7 @@ artefacts:
     # `recovery-plan.*` first and `nfrs.disaster-recovery-and-backup` (Backup
     # and archiving policy) last; `data-security-controls.*` sit in a
     # "Security" chapter under the SAD's headings; and
-    # `glossary.terms-and-definitions` moves from first to last, the SAD's
+    # `glossary.terms` moves from first to last, the SAD's
     # "Glossary". The As-built's own chapters (As-built design, Appendix,
     # Changes from the agreed design, Acceptance criteria, Operational notes,
     # Handover confirmation) keep their order after the shared ones. Only
@@ -664,7 +776,7 @@ artefacts:
         design-basis.design-principles?,
         design-basis.outcomes-and-deliverables?,
         as-built-notes.design-overview,
-        as-built-notes.architecture-decisions?,
+        key-decisions.decisions?,
         as-built-notes.process-flows,
         as-built-notes.infrastructure-and-configuration,
         recovery-plan.recovery-approach,
@@ -679,5 +791,5 @@ artefacts:
         as-built-notes.acceptance-criteria,
         as-built-notes.operational-notes?,
         as-built-notes.handover-confirmation,
-        glossary.terms-and-definitions,
+        glossary.terms,
       ]

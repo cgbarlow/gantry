@@ -29,7 +29,7 @@ fields:
       The integration points themselves — protocol, direction, and what
       crosses the boundary.
 
-      Use the glossary's preferred terms (`glossary.terms-and-definitions`)
+      Use the glossary's preferred terms (`glossary.terms`)
       consistently in headings, tables, diagrams and prose.
 
       Add a Status column giving each interface's status: `existing`,
@@ -47,7 +47,7 @@ fields:
       reached, including hosting and sites. Keep hardware, bandwidth, network devices,
       protocols and storage details in the dedicated fields below.
 
-      Use the glossary's preferred terms (`glossary.terms-and-definitions`)
+      Use the glossary's preferred terms (`glossary.terms`)
       consistently in headings, tables, diagrams and prose.
 
       Use the architecture name by default — the glossary's preferred term —
@@ -75,7 +75,7 @@ fields:
       solution once it is live belong in
       `support-and-operations.operational-accounts-and-licenses`.
 
-      Use the glossary's preferred terms (`glossary.terms-and-definitions`)
+      Use the glossary's preferred terms (`glossary.terms`)
       consistently in headings, tables, diagrams and prose.
 
       Use the architecture name by default — the glossary's preferred term —
@@ -140,7 +140,7 @@ fields:
       unidirectional or bidirectional, and the environments the path exists in.
       Only new or changed protocols, not every existing enabled one.
 
-      Use the glossary's preferred terms (`glossary.terms-and-definitions`)
+      Use the glossary's preferred terms (`glossary.terms`)
       consistently in headings, tables, diagrams and prose.
 
   - id: san

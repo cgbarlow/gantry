@@ -12,6 +12,8 @@ import { checkGate } from '../lib/check.js'
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
 import { definitionInstanceSettings } from '../web/lib/instanceSettings.js'
 import { countWords, overTargetNotes, TARGET_SIZES } from '../web/lib/targetSize.js'
+import { parseKeyDecisions, keyDecisionProblems } from '../web/lib/keyDecisions.js'
+import { keyDecisionsSettings } from '../web/lib/standardModules.js'
 import { exampleModuleText } from './helpers/fixtureModules.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { bodyParagraphs, bodyTables, docxPart, expectedTableOfContents, headerRowFormat, headingBookmarks, headingNumbers, keepsWithNext, numberingLevels, rowsCantSplit, styleFontSize, styleNumbering, tableOfContents, wordStyles } from './helpers/wordDocx.js'
@@ -54,10 +56,18 @@ const EXAMPLES = {
 
 // Modules v3 has that v2 doesn't, each added by the ticket named. #196's `document-handling` left
 // again in #220, when the Classification became an Instance setting (ADR-0058).
-const V3_ADDED_MODULES = {}
+const V3_ADDED_MODULES = { 'key-decisions': '#308' }
 
 // Fields v3 retitled, keeping their id, each with the ticket named. An Instance file matches a
 // section to its Field by title, so v2 reads a retitled Field's section as a custom section.
+// Fields v3 moved into one of Gantry's standard modules (#308), under a new id: the v2 Field is read from the same section.
+const V3_RENAMED_FIELDS = {
+  'glossary.terms': 'terms-and-definitions',
+}
+
+// v2's reference to a Field v3 moved into a standard module (#308), as v3 names it.
+const inV3 = (ref) => ref.replace('glossary.terms-and-definitions', 'glossary.terms').replace('as-built-notes.architecture-decisions', 'key-decisions.decisions').replace('architecture.design-decisions', 'key-decisions.decisions')
+
 const V3_RETITLED_FIELDS = {
   'support-and-operations.operational-accounts-and-licenses': '#233',
 }
@@ -150,18 +160,20 @@ function sectionOf(markdown, heading) {
   return markdown.slice(start + 1, next < 0 ? undefined : start + 1 + next)
 }
 
-describe('design v3 is a draft copy of v2 (#193)', () => {
-  test('v3 is a draft, and v1 and v2 stay published', () => {
-    assert.equal(v3().status, 'draft')
+describe('design v3 started as a copy of v2 (#193) and is published (#308)', () => {
+  test('v3 is published, and so are v1 and v2', () => {
+    assert.equal(v3().status, 'published')
     assert.equal(v3().version, VERSION)
     assert.equal(loadDefinition(DEFINITION, { version: 1 }).status, 'published')
     assert.equal(loadDefinition(DEFINITION, { version: 2 }).status, 'published')
   })
 
-  test('a new design Instance still pins v2, the latest published version', () => {
+  test('a new design Instance pins v3, the latest published version, and one on v2 stays on v2', () => {
     withScratchDir((instancesDir) => {
       createInstance(DEFINITION, 'new-initiative', { instancesDir })
-      assert.equal(readInstance('new-initiative', { instancesDir }).definitionVersion, 2)
+      assert.equal(readInstance('new-initiative', { instancesDir }).definitionVersion, 3)
+      createInstance(DEFINITION, 'older-initiative', { instancesDir, version: 2 })
+      assert.equal(readInstance('older-initiative', { instancesDir }).definitionVersion, 2)
     })
   })
 
@@ -191,13 +203,13 @@ describe('design v3 is a draft copy of v2 (#193)', () => {
     for (const id of Object.keys(V3_ADDED_MODULES)) assert.ok(v3().modules.has(id), `v3 has ${id}`)
   })
 
-  test('the v3 CHANGELOG opens with a draft v3 section citing the parent spec, with the v2 and v1 history below it', () => {
+  test('the v3 CHANGELOG opens with a published v3 section citing the parent spec, with the v2 and v1 history below it', () => {
     const changelog = loadDefinitionChangelog(DEFINITION, VERSION)
     const sections = [...changelog.matchAll(/^## (v\d+)\b/gm)].map((m) => m[1])
     assert.deepEqual(sections, ['v3', 'v2', 'v1'])
     const v3Section = changelog.slice(0, changelog.indexOf('\n## v2'))
     assert.match(v3Section, /#192/)
-    assert.match(v3Section, /\*\*Status: draft\b/)
+    assert.match(v3Section, /\*\*Status: published\b/)
     // The history below is v2's own CHANGELOG, carried whole.
     assert.ok(changelog.endsWith(loadDefinitionChangelog(DEFINITION, 2)), 'v2\'s CHANGELOG follows the v3 section')
   })
@@ -251,14 +263,21 @@ describe('the design examples are on v3 (#193)', () => {
   // the same under v2 as under v3, and v2's "Populate example text" keeps filling. A Module only v3
   // has is a file v2 never reads. A Field v3 retitled is the one difference: v2 finds its section
   // under the v3 title as a custom section, with the same content.
-  test('the migrated example content still reads field-for-field under v2', () => {
+  // Read from a scratch copy: a Module whose heading is not the title the version gives it (Open questions is "Open Questions" in v2, #308) is rewritten when it is read.
+  test('the migrated example content still reads field-for-field under v2', () => withScratchDir((scratch) => {
+    cpSync(EXAMPLES_DIR, scratch, { recursive: true })
     const v2 = loadDefinition(DEFINITION, { version: 2 })
     for (const slug of Object.keys(EXAMPLES)) {
-      for (const file of readdirSync(join(EXAMPLES_DIR, slug, 'modules'))) {
+      for (const file of readdirSync(join(scratch, slug, 'modules'))) {
         const moduleId = file.replace(/\.md$/, '')
         if (moduleId in V3_ADDED_MODULES) continue
-        const underV2 = readModule(v2, slug, moduleId, { instancesDir: EXAMPLES_DIR })
-        const underV3 = { ...readModule(v3(), slug, moduleId, { instancesDir: EXAMPLES_DIR }).fields }
+        const underV2 = readModule(v2, slug, moduleId, { instancesDir: scratch })
+        const underV3 = { ...readModule(v3(), slug, moduleId, { instancesDir: scratch }).fields }
+        for (const [ref, v2Id] of Object.entries(V3_RENAMED_FIELDS).filter(([r]) => r.startsWith(`${moduleId}.`))) {
+          const v3Id = ref.slice(moduleId.length + 1)
+          underV3[v2Id] = underV3[v3Id]
+          delete underV3[v3Id]
+        }
         for (const ref of Object.keys(V3_RETITLED_FIELDS).filter((r) => r.startsWith(`${moduleId}.`))) {
           const fieldId = ref.slice(moduleId.length + 1)
           if (!(fieldId in underV3)) continue
@@ -270,7 +289,7 @@ describe('the design examples are on v3 (#193)', () => {
         assert.ok(Object.values(underV2.fields).some(hasContent), `${slug}/${moduleId} has content under v2`)
       }
     }
-  })
+  }))
 })
 
 describe('every v3 Artefact renders from the example data (#193)', () => {
@@ -295,105 +314,117 @@ describe('every v3 Artefact renders from the example data (#193)', () => {
   }
 })
 
-// #200 (GF-007, GF-008): design decisions are an AD | Decision | ADR table. Every decision gets an
-// AD id; only a decision that needs governance endorsement carries an ADR, as `ADRYYY` until the ADR
-// is registered. The SAD's `architecture.design-decisions` and the as-built's
-// `as-built-notes.architecture-decisions` share the table.
-describe('design decisions are an AD | Decision | ADR table, without assuming ARB endorsement (#200)', () => {
-  const DECISION_FIELDS = [
-    ['architecture', 'design-decisions'],
-    ['as-built-notes', 'architecture-decisions'],
-  ]
+// #200 (GF-007, GF-008), #308 (ADR-0065): design decisions are Key decisions, numbered AD01, AD02, … and
+// written in the WH(Y) style. Every decision is an AD; only a decision that needs governance
+// endorsement also names an ADR, at the end of its title, as `ADRYYY` until the ADR is registered. v1
+// and v2 kept them in an `AD | Decision | ADR` table (`architecture.design-decisions` in the SAD,
+// `as-built-notes.architecture-decisions` in the As-built); v3 has one list, the Key decisions standard
+// module, which both documents print.
+describe('design decisions are Key decisions in the WH(Y) style, without assuming ARB endorsement (#200, #308)', () => {
   const ADR_CRITERIA = [
     /enterprise reuse/i,
     /new platform or product/i,
     /architecture precedent/i,
-    /governance endorsement is explicitly required/i,
+    /governance endorsement explicitly required|governance endorsement is explicitly required/i,
   ]
+  const mount = () => v3().standardModules.find((m) => m.id === 'key-decisions')
+  const decisions = () => parseKeyDecisions(exampleValue('key-decisions.decisions')).decisions
+  const adrOf = (decision) => /\((ADR(?:YYY|\d{3}))\)$/.exec(decision.title)?.[1]
 
-  function guidanceOf(moduleId, fieldId) {
-    return v3().modules.get(moduleId).fields.find((f) => f.id === fieldId).guidance
-  }
-
-  // The rows of the one pipe table in a Field value, as arrays of trimmed cells; the header row first.
-  function tableRows(markdown) {
-    return markdown
-      .split('\n')
-      .filter((line) => line.trim().startsWith('|') && !/^\|[\s|:-]+\|$/.test(line.trim()))
-      .map((line) => line.trim().replace(/^\||\|$/g, '').split('|').map((cell) => cell.trim()))
-  }
-
-  function exampleDecisions(moduleId, fieldId) {
-    const value = readModule(v3(), 'kiwi-cover-mutual', moduleId, { instancesDir: EXAMPLES_DIR }).fields[fieldId]
-    const [header, ...rows] = tableRows(value)
-    return { value, header, rows }
-  }
-
-  test('the design-decisions guidance asks for the table, the four ADR-candidate criteria, the ADRYYY placeholder and no assumed ARB endorsement', () => {
-    const guidance = guidanceOf('architecture', 'design-decisions')
-    assert.ok(guidance.includes('`| AD | Decision | ADR |`'), 'names the table and its columns')
-    assert.match(guidance, /AD01/)
-    for (const criterion of ADR_CRITERIA) assert.match(guidance, criterion)
-    assert.match(guidance, /`ADRYYY`/)
-    assert.match(guidance, /don't assume ARB endorsement/i)
-    assert.match(guidance, /A decision is not an ADR, and an ADR is not an ARB item/)
+  test('v3 mounts Key decisions with the AD prefix and the WH(Y) style, on Detailed Design and Operational Handover', () => {
+    assert.deepEqual({ version: mount().version, prefix: mount().prefix, style: mount().style }, { version: 1, prefix: 'AD', style: 'why' })
+    assert.deepEqual(keyDecisionsSettings(mount()), { prefix: 'AD', style: 'why' })
+    const stagesWith = v3().stages.filter((s) => s.modules.includes('key-decisions')).map((s) => s.id)
+    assert.deepEqual(stagesWith, ['detailed-design', 'handover'])
+    const detailed = v3().stages.find((s) => s.id === 'detailed-design').modules
+    assert.equal(detailed.indexOf('key-decisions'), detailed.indexOf('architecture') + 1, 'straight after Architecture, where the SAD prints it')
   })
 
-  test('the as-built architecture-decisions guidance asks for the same table, keeping the SAD\'s AD ids', () => {
-    const guidance = guidanceOf('as-built-notes', 'architecture-decisions')
-    assert.ok(guidance.includes('`| AD | Decision | ADR |`'))
-    assert.match(guidance, /architecture\.design-decisions/)
-    assert.match(guidance, /`ADRYYY`/)
-  })
-
-  for (const [moduleId, fieldId] of DECISION_FIELDS) {
-    test(`the example's ${moduleId}.${fieldId} is the table, and only a minority of decisions carry an ADR`, () => {
-      const { value, header, rows } = exampleDecisions(moduleId, fieldId)
-      assert.deepEqual(header, ['AD', 'Decision', 'ADR'])
-      assert.ok(rows.length >= 3, value)
-      rows.forEach(([ad, decision, adr], i) => {
-        assert.equal(ad, `AD${String(i + 1).padStart(2, '0')}`, 'AD ids run AD01, AD02, … in order')
-        assert.ok(decision, `${ad} states its decision`)
-        assert.match(adr, /^(ADR(YYY|\d{3}))?$/, `${ad}'s ADR is blank, ADRYYY or a registered ADR number`)
-      })
-      const withAdr = rows.filter(([, , adr]) => adr)
-      assert.ok(withAdr.length > 0, 'some decisions need an ADR')
-      assert.ok(withAdr.length < rows.length / 2, 'only a minority of decisions need an ADR')
-    })
-  }
-
-  test('the SAD\'s ADRs not yet registered use the ADRYYY placeholder; the as-built keeps the SAD\'s AD ids and ADR decisions', () => {
-    const sad = exampleDecisions('architecture', 'design-decisions').rows
-    const asBuilt = exampleDecisions('as-built-notes', 'architecture-decisions').rows
-    assert.ok(sad.some(([, , adr]) => adr === 'ADRYYY'))
-    for (const [ad, , adr] of sad) {
-      const built = asBuilt.find(([id]) => id === ad)
-      assert.ok(built, `${ad} carries into the as-built`)
-      assert.equal(Boolean(built[2]), Boolean(adr), `${ad} needs an ADR in both or neither`)
+  test('the two decisions tables are gone from v3, and v1 and v2 keep them', () => {
+    assert.equal(v3().modules.get('architecture').fields.some((f) => f.id === 'design-decisions'), false)
+    assert.equal(v3().modules.get('as-built-notes').fields.some((f) => f.id === 'architecture-decisions'), false)
+    for (const version of [1, 2]) {
+      const old = loadDefinition(DEFINITION, { version })
+      assert.ok(old.modules.get('architecture').fields.some((f) => f.id === 'design-decisions'), `v${version}`)
     }
   })
 
-  test('the rendered v3 SAD shows the table under Design decisions, in Markdown and in Word', () => {
+  test('the mount keeps the rule about which decisions need governance endorsement: the four ADR-candidate criteria, the ADRYYY placeholder and no assumed ARB endorsement', () => {
+    for (const criterion of ADR_CRITERIA) {
+      assert.match(mount().guidance, criterion)
+      assert.match(mount().interview, criterion)
+    }
+    assert.match(mount().guidance, /`ADRYYY`/)
+    assert.match(mount().guidance, /don't assume ARB endorsement/i)
+    assert.match(mount().guidance, /A decision is not an ADR, and an ADR is not an ARB item/)
+    assert.match(v3().interview, /Do not assume ARB endorsement/)
+    // The mount's guidance and interview reach the Module the Stage editor and the AI read.
+    assert.match(v3().modules.get('key-decisions').fields[0].guidance, /A decision is not an ADR/)
+    assert.match(v3().modules.get('key-decisions').interview, /ADR candidate/)
+  })
+
+  test('the As-built keeps the SAD\'s numbers and numbers a decision made during the build next', () => {
+    assert.match(mount().guidance, /At handover, keep the design-time numbers/)
+    assert.match(v3().stages.find((s) => s.id === 'handover').interview, /next number/)
+  })
+
+  test('the example holds eight decisions numbered AD01 to AD08 in the WH(Y) style, and only a minority name an ADR', () => {
+    const list = decisions()
+    assert.deepEqual(list.map((d) => d.number), [1, 2, 3, 4, 5, 6, 7, 8])
+    for (const decision of list) {
+      for (const key of ['inContext', 'facing', 'decided', 'neglected', 'achieve', 'accepting']) {
+        assert.ok(decision[key].trim(), `AD${decision.number} has ${key}`)
+      }
+    }
+    const withAdr = list.filter(adrOf)
+    assert.ok(withAdr.length > 0, 'some decisions need an ADR')
+    assert.ok(withAdr.length < list.length / 2, 'only a minority of decisions need an ADR')
+    assert.deepEqual(withAdr.map((d) => d.number), [1, 2])
+    assert.deepEqual(keyDecisionProblems(exampleValue('key-decisions.decisions'), { prefix: 'AD', style: 'why' }), [])
+  })
+
+  test('the rendered v3 SAD shows the decisions under Key decisions as WH(Y) statements with AD numbers, in Markdown and in Word', () => {
     const { markdown } = renderArtefact('kiwi-cover-mutual', 'sad', { instancesDir: EXAMPLES_DIR, dryRun: true })
-    const section = markdown.slice(markdown.indexOf('## Design decisions'), markdown.indexOf('## Architectural risks'))
-    assert.deepEqual(tableRows(section)[0], ['AD', 'Decision', 'ADR'])
-    assert.match(section, /\| AD01 \|/)
+    const section = markdown.slice(markdown.indexOf('## Key decisions'), markdown.indexOf('## Architectural risks'))
+    assert.match(section, /\*\*AD01: Shared services, not point-to-point \(ADR031\)\*\*/)
+    assert.match(section, /In the context of shared customer and claim data/)
+    assert.match(section, /we decided for CIS and Claims InfoServ as shared services/)
+    assert.match(section, /Relates to AD01\./)
+    assert.doesNotMatch(section, /\| AD \| Decision \| ADR \|/)
 
     const { documentXml } = renderWord('kiwi-cover-mutual', 'sad')
     // The heading, not its entry in the table of contents (#206).
-    const heading = /<w:pStyle w:val="Heading2" ?\/><\/w:pPr><w:r><w:t xml:space="preserve">Design decisions</.exec(documentXml)
+    const heading = /<w:pStyle w:val="Heading2" ?\/><\/w:pPr><w:r><w:t xml:space="preserve">Key decisions</.exec(documentXml)
+    assert.ok(heading, 'a Key decisions heading')
     const after = documentXml.slice(heading.index + heading[0].length)
-    const nextHeading = after.indexOf('w:pStyle w:val="Heading2"')
-    const table = after.indexOf('<w:tbl>')
-    assert.ok(table > 0 && table < nextHeading, 'a Word table follows the Design decisions heading')
-    assert.match(after.slice(table, after.indexOf('</w:tbl>')), /AD01[\s\S]*ADRYYY/)
+    const text = after.slice(0, after.indexOf('w:pStyle w:val="Heading2"')).replace(/<[^>]+>/g, '')
+    assert.match(text, /AD01: Shared services[\s\S]*In the context of[\s\S]*AD08/)
   })
 
-  test('the rendered v3 as-built shows the table under Architecture decisions', () => {
-    const { markdown } = renderArtefact('kiwi-cover-mutual', 'as-built', { instancesDir: EXAMPLES_DIR, dryRun: true })
-    const start = markdown.indexOf('## Architecture decisions')
-    const section = markdown.slice(start, markdown.indexOf('\n#', start + 1))
-    assert.deepEqual(tableRows(section)[0], ['AD', 'Decision', 'ADR'])
+  test('the rendered v3 As-built prints the same decisions under Key decisions, with the decision made during the build', () => {
+    const sadMd = renderArtefact('kiwi-cover-mutual', 'sad', { instancesDir: EXAMPLES_DIR, dryRun: true }).markdown
+    const built = renderArtefact('kiwi-cover-mutual', 'as-built', { instancesDir: EXAMPLES_DIR, dryRun: true }).markdown
+    const sectionOf2 = (md) => {
+      const start = md.indexOf('## Key decisions')
+      return md.slice(start, md.indexOf('\n## ', start + 1))
+    }
+    assert.ok(built.includes('## Key decisions'), 'the As-built has a Key decisions section')
+    assert.match(sectionOf2(built), /\*\*AD08: The policy-lookup cache is 5 minutes/)
+    assert.equal(sectionOf2(built), sectionOf2(sadMd), 'one list, printed the same in both')
+    assert.doesNotMatch(built, /## Architecture decisions/)
+  })
+
+  test('an Instance with no Key decisions still renders the As-built without the section, and the SAD still needs them', () => {
+    withScratchDir((dir) => {
+      cpSync(join(EXAMPLES_DIR, 'kiwi-cover-mutual'), join(dir, 'kiwi-cover-mutual'), { recursive: true })
+      // An empty Module, as a new Instance has before anything is written to it.
+      writeModule(v3(), 'kiwi-cover-mutual', 'key-decisions', { status: 'draft', owner: '', fields: {} }, { instancesDir: dir })
+      const { markdown } = renderArtefact('kiwi-cover-mutual', 'as-built', { instancesDir: dir, dryRun: true })
+      assert.doesNotMatch(markdown, /## Key decisions/)
+      assert.equal(checkGate('kiwi-cover-mutual', { instancesDir: dir, gate: 'operational-handover' }).pass, true, 'optional in the As-built')
+      const sad = checkGate('kiwi-cover-mutual', { instancesDir: dir, gate: 'build-ready-checklist' }).artefacts.find((a) => a.id === 'sad')
+      assert.deepEqual(sad.outstanding, ['key-decisions.decisions'], 'required for the SAD')
+    })
   })
 })
 
@@ -554,8 +585,8 @@ describe('v3 guidance and example: sourced figures, preferred terms, architectur
 
   describe('preferred terms (GF-006)', () => {
     test('the glossary guidance asks for the preferred term for the solution, its platforms and products, and the variants to avoid', () => {
-      const { guidance } = v3Field('glossary.terms-and-definitions')
-      assert.match(guidance, /Preferred term \| Definition \| Variants to avoid/)
+      const { guidance } = v3Field('glossary.terms')
+      assert.match(guidance, /Preferred term \| Definition \| Avoid/)
       assert.match(guidance, /the solution itself, its platforms and its products/)
       assert.match(guidance, /headings, tables, diagrams and prose/)
     })
@@ -569,8 +600,8 @@ describe('v3 guidance and example: sourced figures, preferred terms, architectur
 
     // Preferred term -> its variants to avoid, from the example glossary.
     function examplePreferredTerms() {
-      const [table] = markdownTables(exampleValue('glossary.terms-and-definitions'))
-      assert.deepEqual(table.header, ['Preferred term', 'Definition', 'Variants to avoid'])
+      const [table] = markdownTables(exampleValue('glossary.terms'))
+      assert.deepEqual(table.header, ['Preferred term', 'Definition', 'Avoid'])
       return table
     }
 
@@ -1513,7 +1544,7 @@ describe('the v3 SSAD follows the SAD\'s order and headings (#213)', () => {
     'support-and-operations.monitoring-and-alerting',
     'support-and-operations.release-procedures',
     'support-and-operations.support-handover-readiness',
-    'glossary.terms-and-definitions',
+    'glossary.terms',
     'team-and-estimates.references?',
   ]
 
@@ -1574,7 +1605,7 @@ describe('the v3 SSAD follows the SAD\'s order and headings (#213)', () => {
   test('beyond #214\'s three Fields, no Field entered or left the SSAD, and none changed between mandatory and optional', () => {
     const v2 = loadDefinition(DEFINITION, { version: 2 })
     const added = ['introduction.overview', 'design-basis.assumptions?', 'design-basis.constraints?']
-    assert.deepEqual([...requiresOf(v3(), 'ssad')].sort(), [...requiresOf(v2, 'ssad'), ...added].sort())
+    assert.deepEqual([...requiresOf(v3(), 'ssad')].sort(), [...requiresOf(v2, 'ssad').map(inV3), ...added].sort())
   })
 
   test('the rendered SSAD has the SAD-led outline, with the support material in one chapter', () => {
@@ -1602,7 +1633,7 @@ describe('the v3 SSAD follows the SAD\'s order and headings (#213)', () => {
     const changelog = loadDefinitionChangelog(DEFINITION, VERSION)
     assert.match(changelog.slice(0, changelog.indexOf('\n## v2')), /^### The SSAD follows the SAD's order and headings \(#213\)$/m)
     assert.ok(existsSync('docs/adr/0057-the-ssad-follows-the-sad-not-its-reference-instance.md'))
-    assert.match(readFileSync('docs/user-guide/index.md', 'utf8'), /\*\*Version 3 \(draft\)\*\* puts the SSAD in the SAD's order/)
+    assert.match(readFileSync('docs/user-guide/index.md', 'utf8'), /\*\*Version 3\*\* puts the SSAD in the SAD's order/)
   })
 })
 
@@ -1775,7 +1806,7 @@ describe('the v3 As-built follows the SAD\'s order and headings (#231)', () => {
     'design-basis.design-principles?',
     'design-basis.outcomes-and-deliverables?',
     'as-built-notes.design-overview',
-    'as-built-notes.architecture-decisions?',
+    'key-decisions.decisions?',
     'as-built-notes.process-flows',
     'as-built-notes.infrastructure-and-configuration',
     'recovery-plan.recovery-approach',
@@ -1790,7 +1821,7 @@ describe('the v3 As-built follows the SAD\'s order and headings (#231)', () => {
     'as-built-notes.acceptance-criteria',
     'as-built-notes.operational-notes?',
     'as-built-notes.handover-confirmation',
-    'glossary.terms-and-definitions',
+    'glossary.terms',
   ]
 
   // The example fills every As-built Field, so every optional section shows.
@@ -1809,7 +1840,7 @@ describe('the v3 As-built follows the SAD\'s order and headings (#231)', () => {
     '## Outcomes and deliverables',
     '# As-built design',
     '## As-built overview',
-    '## Architecture decisions',
+    '## Key decisions',
     '## Data migration and process flows',
     '## Infrastructure and configuration',
     '# Failure and recovery',
@@ -1837,7 +1868,6 @@ describe('the v3 As-built follows the SAD\'s order and headings (#231)', () => {
     'Outcomes and deliverables',
     'As-built design',
     'As-built overview',
-    'Architecture decisions',
     'Data migration and process flows',
     'Infrastructure and configuration',
     'Appendix',
@@ -1871,9 +1901,10 @@ describe('the v3 As-built follows the SAD\'s order and headings (#231)', () => {
 
   test('beyond the optional Executive summary, no Field entered or left the As-built, none changed between mandatory and optional, and no Module is newly mounted', () => {
     const v2 = loadDefinition(DEFINITION, { version: 2 })
-    assert.deepEqual([...requiresOf(v3())].sort(), [...requiresOf(v2), 'introduction.executive-summary?'].sort())
+    assert.deepEqual([...requiresOf(v3())].sort(), [...requiresOf(v2).map(inV3), 'introduction.executive-summary?'].sort())
     const handover = (definition) => definition.stages.find((stage) => stage.id === 'handover').modules
-    assert.deepEqual(handover(v3()), handover(v2))
+    // The one Module v3 mounts that v2 didn't is Key decisions (#308), which replaces as-built-notes.architecture-decisions.
+    assert.deepEqual(handover(v3()).filter((id) => id !== 'key-decisions'), handover(v2))
   })
 
   test('with every As-built Field blank, operational-handover holds up exactly the Fields it held up on v2', () => {
@@ -1890,10 +1921,15 @@ describe('the v3 As-built follows the SAD\'s order and headings (#231)', () => {
           modules: result.modules.map((m) => [m.id, [...m.outstanding].sort()]),
         }
       }
+      // The Glossary and Key decisions are Gantry's standard modules (#308): their Fields carry no
+      // `required-at`, so they are held up by the As-built's own bare requirement (the Artefact list
+      // above, renamed) and not by a Module-level entry, which v2's Glossary had.
+      const comparable = ({ artefact, modules }) => ({ artefact: artefact.map(inV3).sort(), modules: modules.filter(([id]) => !['glossary', 'key-decisions'].includes(id)) })
       const onV3 = outstanding()
       const file = join(dir, slug, 'instance.yaml')
       writeFileSync(file, readFileSync(file, 'utf8').replace('definitionVersion: 3', 'definitionVersion: 2'))
-      assert.deepEqual(onV3, outstanding())
+      assert.deepEqual(comparable(onV3), comparable(outstanding()))
+      assert.ok(onV3.artefact.includes('glossary.terms'), 'the Glossary still holds up the As-built')
     })
   })
 
@@ -1998,7 +2034,7 @@ describe('the v3 As-built follows the SAD\'s order and headings (#231)', () => {
     assert.equal(adr.length, 1, 'one ADR-0060')
     assert.match(readFileSync(join('docs/adr', adr[0]), 'utf8'), /standing template/)
     assert.match(readFileSync('docs/adr/0057-the-ssad-follows-the-sad-not-its-reference-instance.md', 'utf8'), /ADR-0060/)
-    assert.match(readFileSync('docs/user-guide/index.md', 'utf8'), /\*\*Version 3 \(draft\)\*\* puts the As-built in the SAD's order/)
+    assert.match(readFileSync('docs/user-guide/index.md', 'utf8'), /\*\*Version 3\*\* puts the As-built in the SAD's order/)
   })
 })
 
@@ -2196,7 +2232,7 @@ describe('the v3 SOAP follows the Full SOAP\'s order and headings (#232)', () =>
     const adr = readdirSync('docs/adr').find((file) => file.startsWith('0060-'))
     assert.match(readFileSync(join('docs/adr', adr), 'utf8'), /^### Applied to the SOAP and the Full SOAP$/m)
     const guide = readFileSync('docs/user-guide/index.md', 'utf8')
-    assert.match(guide, /\*\*Version 3 \(draft\)\*\* puts the SOAP in the Full SOAP's order/)
-    assert.match(guide, /\*\*Version 3 \(draft\)\*\* gives the Full SOAP/)
+    assert.match(guide, /\*\*Version 3\*\* puts the SOAP in the Full SOAP's order/)
+    assert.match(guide, /\*\*Version 3\*\* gives the Full SOAP/)
   })
 })

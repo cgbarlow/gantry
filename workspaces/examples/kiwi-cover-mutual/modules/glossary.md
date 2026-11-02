@@ -7,7 +7,7 @@ owner: p.natarajan
 
 ## Terms and definitions
 
-| Preferred term | Definition | Variants to avoid |
+| Preferred term | Definition | Avoid |
 | --- | --- | --- |
 | BIBIT gateway | The third-party payment gateway for premium collection and claims payment | payment provider, Bibit |
 | CIS | Customer Information Service: the new shared service for customer, contact and policy-summary data | Customer Master, customer hub |

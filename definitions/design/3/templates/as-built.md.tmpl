@@ -38,6 +38,7 @@
   const designBasis = it.modules['design-basis'] || {}
   const glossary = it.modules.glossary || {}
   const notes = it.modules['as-built-notes'] || {}
+  const keyDecisions = it.modules['key-decisions'] || {}
   const recovery = it.modules['recovery-plan'] || {}
   const dsc = it.modules['data-security-controls'] || {}
 %>
@@ -72,10 +73,10 @@
 ## As-built overview
 
 <%~ na(notes['design-overview']) %>
-<% if (notes['architecture-decisions']) { %>
-## Architecture decisions
+<% if (keyDecisions.decisions) { %>
+## Key decisions
 
-<%~ notes['architecture-decisions'] %>
+<%~ keyDecisions.decisions %>
 <% } %>
 ## Data migration and process flows
 
@@ -121,4 +122,4 @@
 
 # Glossary
 
-<%~ na(glossary['terms-and-definitions']) %>
+<%~ na(glossary.terms) %>

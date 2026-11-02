@@ -15,19 +15,6 @@ The following diagram presents the application usage viewpoint as built.
 
 The diagram shows how each step uses its services as designed, with one addition: Register also reserves the claim number up front, so a document can be indexed before acceptance.
 
-## Architecture decisions
-
-| AD | Decision | ADR |
-|----------|----------------------------------------------------------------------|------------|
-| AD01 | **Shared services** — as designed. | ADR031 |
-| AD02 | **Policy Data Management exposed as services** — PDM-01 to PDM-04 live in the April and May windows. | ADR032 |
-| AD03 | **CRM System orchestrates, Claims InfoServ owns state** — nightly checks find no drift. | |
-| AD04 | **Payments via the Financial Application** — the BIBIT gateway now calls back rather than being polled. | |
-| AD05 | **Claim-indexed documents** — migration completed with a clean reconciliation. | |
-| AD06 | **Switchable increments** — fallbacks exercised quarterly. | |
-| AD07 | **No new platform** — held. | |
-| AD08 | **New during the build: policy-lookup cache cut to 5 minutes**, after UAT showed claims accepted against a just-changed policy. | |
-
 ## Data migration and process flows
 
 ### Handle Claim as built

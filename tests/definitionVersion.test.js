@@ -36,9 +36,9 @@ test('definitions/design/1 exists with version 1 published and no top-level defi
   assert.throws(() => readFileSync('definitions/design/definition.yaml', 'utf8'), /ENOENT/)
 })
 
-test('loadDefinition without version resolves to latest published (v2, WI #318)', () => {
+test('loadDefinition without version resolves to latest published (v3, #308)', () => {
   const def = loadDefinition('design')
-  assert.equal(def.version, 2)
+  assert.equal(def.version, 3)
   assert.equal(def.status, 'published')
 })
 
@@ -62,7 +62,10 @@ test('listDefinitions returns one row per definition with versions and latestPub
   // WI #318: design v2 is now also published, alongside (not replacing) v1.
   assert.equal(design.versions[1].version, 2)
   assert.equal(design.versions[1].status, 'published')
-  assert.equal(design.latestPublished, 2)
+  // #308: design v3 is published too.
+  assert.equal(design.versions[2].version, 3)
+  assert.equal(design.versions[2].status, 'published')
+  assert.equal(design.latestPublished, 3)
 })
 
 test('instance with no definitionVersion behaves as v1 (compat path)', () => {

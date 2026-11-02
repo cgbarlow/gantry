@@ -18,7 +18,7 @@
      `module.field?` requires entry is in scope but not gate-blocking (WI
      #276), so it renders as a suppress-when-blank `<% if %>` section; a bare
      entry always renders its heading via na() — including
-     `glossary.terms-and-definitions`, which v1 rendered with a bare `<% if %>`
+     `glossary.terms`, which v1 rendered with a bare `<% if %>`
      despite being a bare (gate-blocking) requires entry. WI #331: this
      template already unified the framing and conditions clusters under one
      "# Introduction" heading — that heading now splits into "# Overview" and
@@ -105,9 +105,9 @@
 <% it.modules.dependencies['dependency-list'].forEach(function(item) { %>- <%~ item %>
 <% }) %>
 
-## Design decisions
+## Key decisions
 
-<%~ na(it.modules.architecture['design-decisions']) %>
+<%~ na(it.modules['key-decisions'].decisions) %>
 
 ## Architectural risks
 
@@ -285,7 +285,7 @@
 
 # Glossary
 
-<%~ na(it.modules.glossary['terms-and-definitions']) %>
+<%~ na(it.modules.glossary.terms) %>
 <% if (it.modules['team-and-estimates'].references && it.modules['team-and-estimates'].references.length) { %>
 # References
 
