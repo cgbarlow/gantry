@@ -197,7 +197,7 @@ export function createSessionLog(config = {}) {
 
     /**
      * What the stage Save sends for the log. `fieldInputs` is the session's `module.field -> inputs` and `fieldKeys` the Fields in
-     * this Save (the drafts plus those already saved by this session). `status` is `{ who, target, state, artefact, instructions }`.
+     * this Save (the drafts plus those already saved by this session). `status` is `{ who, target, state, stages, artefact, instructions }` (`stages`: each Stage of the run and its state, #293).
      */
     delta({ fieldInputs = {}, fieldKeys = [], status = {}, saving = false } = {}) {
       if (saving) lastAiSave = now()
@@ -217,6 +217,7 @@ export function createSessionLog(config = {}) {
           who: status.who ?? who(),
           target: status.target,
           state: status.state,
+          stages: status.stages,
           artefact: status.artefact,
           lastAiSave,
           models: [...usage.values()],

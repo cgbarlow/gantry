@@ -968,16 +968,16 @@ export function createInterviewSession(config = {}) {
 
     /**
      * What the stage Save writes into the decisions log (#288): the entries not yet committed, the inputs of every Field in this Save
-     * and this session's status. `runState` is `in-progress`, `ready` or `saved`; `saving` stamps the time of the AI save.
+     * and this session's status. `runState` is `in-progress`, `ready`, `saved`, `paused` or `done`; `saving` stamps the time of the AI save. `target` and `stages` (#293) are the run's target Stage and each Stage's state.
      */
-    decisionsDelta({ runState = 'in-progress', saving = false } = {}) {
+    decisionsDelta({ runState = 'in-progress', saving = false, target, stages } = {}) {
       const context = getContext()
       const keys = [...new Set([...Object.keys(state.drafts), ...state.savedKeys])]
       return log.delta({
         fieldInputs: state.fieldInputs,
         fieldKeys: keys,
         saving,
-        status: { who: context.actor, target: context.targetStageId ?? context.stageId, state: runState, artefact: context.artefactId, instructions: context.instructionsVersion },
+        status: { who: context.actor, target: target ?? context.targetStageId ?? context.stageId, state: runState, stages: stages ?? context.runStages, artefact: context.artefactId, instructions: context.instructionsVersion },
       })
     },
 

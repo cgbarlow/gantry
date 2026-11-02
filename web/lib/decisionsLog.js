@@ -2,7 +2,7 @@
 // Stage's `modules/`, `sources/` and `assets/` in every workspace kind and committed in the same Save as the Stage's content.
 //
 // Three parts:
-//   * `status`   one entry per session: who, the run's target Stage, this Stage's state, the Artefact aimed for, the last AI save,
+//   * `status`   one entry per session: who, the run's target Stage, this Stage's state (and, in a run, each Stage's state), the Artefact aimed for, the last AI save,
 //                each AI Provider type and model used (with its tokens), the Interview instructions version, the skill versions.
 //                Never a key, an address or a custom name: `sessionStatus` builds an entry from a short list of known keys only.
 //   * `fields`   one record per drafted Field: what it was drafted from (Source documents and pages, earlier-Stage Fields), each
@@ -67,6 +67,10 @@ export function sessionStatus(input = {}) {
   if (KEY_LIKE.test(status.who)) status.who = ''
   status.target = safeToken(input.target, 80) || null
   status.state = safeToken(input.state, 40) || null
+  // #293: each Stage of a run and its state, so a paused run knows where it stands. Stage ids and state words only.
+  const stages = isObject(input.stages) ? input.stages : {}
+  const runStages = Object.fromEntries(Object.entries(stages).map(([id, state]) => [safeToken(id, 80), safeToken(state, 40)]).filter(([id, state]) => id && state))
+  if (Object.keys(runStages).length) status.stages = runStages
   status.artefact = safeToken(input.artefact, 80) || null
   status.lastAiSave = typeof input.lastAiSave === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(input.lastAiSave) ? input.lastAiSave : null
   status.models = asArray(input.models).map(modelUsage).filter((m) => m.type && m.model)

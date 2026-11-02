@@ -2285,3 +2285,17 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .interview-rail .dl-summary { font-size: 12px; margin: 0 0 6px; }
 .interview-rail .dl-summary .dl-open-count { color: var(--warning, #b06a00); font-weight: 600; }
 .interview-rail .dl-restart { margin-top: 8px; }
+
+/* ---------- The run plan and "Run until" (#293) ---------- */
+.interview-rail .runplan { list-style: none; padding: 0; margin: 0; font-size: 13px; }
+.interview-rail .runplan li { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: var(--hairline) solid var(--line); }
+.interview-rail .runplan .dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--line-strong); flex-shrink: 0; }
+.interview-rail .runplan .rp-drafting .dot { background: var(--text); border-color: var(--text); }
+.interview-rail .runplan .rp-awaiting-confirmation .dot { background: var(--stamp-draft-bg); border-color: var(--stamp-draft-bg); }
+.interview-rail .runplan .rp-paused .dot { background: var(--stamp-draft-bg); border-color: var(--stamp-draft-bg); }
+.interview-rail .runplan .rp-done .dot { background: var(--stamp-agreed-bg); border-color: var(--stamp-agreed-bg); }
+.interview-rail .runplan .rp-beyond { color: var(--text-muted); text-decoration: line-through; }
+.interview-rail .runplan .rp-target .rp-title { font-weight: 600; }
+.interview-rail .runplan .rp-note { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); text-align: right; }
+.interview-page .qcard .btn .rec { background: transparent; color: inherit; border: var(--hairline) solid currentColor; }
+.interview-page .kick-resume { padding: 10px 12px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); margin: 0 0 12px; }

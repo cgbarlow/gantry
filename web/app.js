@@ -4275,6 +4275,53 @@ function SyncedFieldsPanel({ instance }) {
   `
 }
 
+// Moves `instance` on to its next Stage: the gate is checked again first (the browser for a Local workspace, the server's own
+// `advance-stage` for a server one), then the stage pointer moves and the page is told to load the new current Stage. Used by the
+// "Advance to next stage" panel below and by the AI interview's "Save, advance, carry on" (#293). Never throws: resolves
+// `{ ok: true, toStage }` or `{ ok: false, message }`, the message being what the panel shows as its status. `onMoved(toStage)` is
+// called once the stage pointer has moved and before the page loads the new Stage, which can replace what is on screen.
+async function advanceCurrentStage(instance, { onMoved } = {}) {
+  let toStage
+  if (instance.isLocalWorkspace) {
+    try {
+      const checkBody = await runLocalCheck(instance)
+      if (!checkBody.pass) return { ok: false, message: formatGateFailure(checkBody) }
+      const handle = localDirHandle.value
+      if (!handle) throw new Error('Local workspace folder is not open.')
+      const slug = instance.slug
+      const idx = instance.stages.findIndex((s) => s.id === instance.stage.id)
+      const nextStage = instance.stages[idx + 1]
+      if (!nextStage) return { ok: false, message: 'Already at the final stage.' }
+      const instanceYamlText = await readLocalTextFile(handle, `gantry-workspace/${slug}/instance.yaml`)
+      const record = parseInstanceYaml(instanceYamlText)
+      await writeLocalTextFile(handle, `gantry-workspace/${slug}/instance.yaml`, withInstanceStage(record, nextStage.id))
+      toStage = nextStage
+    } catch (err) {
+      return { ok: false, message: err.offline ? LOCAL_OFFLINE_MESSAGE : `Advance failed: ${err.message}` }
+    }
+  } else {
+    try {
+      const res = await apiFetchForInstance(instance.slug, `/api/instance/advance-stage?slug=${encodeURIComponent(instance.slug)}`, { method: 'POST' })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) return { ok: false, message: `Advance failed: ${body.message ?? body.error}` }
+      toStage = body.toStage
+    } catch (err) {
+      return { ok: false, message: `Advance failed: ${err.message}` }
+    }
+  }
+  onMoved?.(toStage)
+  // Reset to no explicit stage so the form now shows the instance's new current stage, otherwise `viewedStage` would still hold
+  // the (now-completed) stage's id. Assigning `viewedStage.value` already re-triggers the shared instance-loading effect near
+  // the top of this file whenever it is a genuine change; fetching directly as well would race that effect's own fetch, so this
+  // fetches only when `viewedStage.value` was already `null`, the one case where setting it again is a no-op the effect never sees.
+  const effectWillReload = viewedStage.value !== null
+  viewedStage.value = null
+  if (!effectWillReload) {
+    instanceData.value = instance.isLocalWorkspace ? await loadLocalInstance(instance.localWorkspaceId, instance.slug, null) : await loadInstance(instance.slug, null)
+  }
+  return { ok: true, toStage }
+}
+
 // ---------- Stage advancement (local instances only; #115, ADR-0012) ----------
 // The self-serve "Advance to next stage" action: never rendered at all for
 // a Workspace-backed instance (`instance.workspaceBacked` — that one always
@@ -4325,79 +4372,14 @@ function AdvanceStagePanel({ instance }) {
     setConfirming(true)
   }
 
-  // Re-checks the gate (client-side, `runLocalCheck`, WI #313) before writing
-  // the new stage (the same defense-in-depth the server-backed `advanceStage`
-  // path gets for free by re-evaluating the gate server-side) — a local
-  // instance has no server-side call of its own to fall back on for that, so
-  // this repeats the check done above rather than trusting the earlier PASS
-  // is still current.
-  async function handleConfirmAdvanceLocal() {
-    setConfirming(false)
-    setStatus('Advancing…')
-    try {
-      const checkBody = await runLocalCheck(instance)
-      if (!checkBody.pass) {
-        setStatus(formatGateFailure(checkBody))
-        return
-      }
-      const handle = localDirHandle.value
-      if (!handle) throw new Error('Local workspace folder is not open.')
-      const slug = instance.slug
-      const idx = instance.stages.findIndex((s) => s.id === instance.stage.id)
-      const nextStage = instance.stages[idx + 1]
-      if (!nextStage) {
-        setStatus('Already at the final stage.')
-        return
-      }
-      const instanceYamlText = await readLocalTextFile(handle, `gantry-workspace/${slug}/instance.yaml`)
-      const record = parseInstanceYaml(instanceYamlText)
-      await writeLocalTextFile(handle, `gantry-workspace/${slug}/instance.yaml`, withInstanceStage(record, nextStage.id))
-      setStatus(`Advanced to "${nextStage.title}".`)
-      const effectWillReload = viewedStage.value !== null
-      viewedStage.value = null
-      if (!effectWillReload) {
-        instanceData.value = await loadLocalInstance(instance.localWorkspaceId, slug, null)
-      }
-    } catch (err) {
-      setStatus(err.offline ? LOCAL_OFFLINE_MESSAGE : `Advance failed: ${err.message}`)
-    }
-  }
-
+  // The gate is re-checked before the stage moves (client-side for a local instance, `runLocalCheck`, WI #313; the server's own
+  // `advance-stage` otherwise): a local instance has no server-side call of its own to fall back on, so this repeats the check
+  // done above rather than trusting the earlier PASS is still current. See `advanceCurrentStage`.
   async function handleConfirmAdvance() {
-    if (instance.isLocalWorkspace) {
-      await handleConfirmAdvanceLocal()
-      return
-    }
     setConfirming(false)
     setStatus('Advancing…')
-    const res = await apiFetchForInstance(currentSlug.value, `/api/instance/advance-stage?slug=${encodeURIComponent(currentSlug.value)}`, {
-      method: 'POST',
-    })
-    const body = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      setStatus(`Advance failed: ${body.message ?? body.error}`)
-      return
-    }
-    setStatus(`Advanced to "${body.toStage.title}".`)
-    // Reset to no explicit stage so the form now shows the instance's new
-    // current stage — otherwise `viewedStage` would still hold this
-    // (now-completed) stage's id and the screen would appear unchanged.
-    //
-    // Assigning `viewedStage.value` here already re-triggers the shared
-    // instance-loading effect (near the top of this file) *whenever it's
-    // a genuine change* — e.g. the user had at some point explicitly
-    // clicked this (the current) stage's own nav button, leaving
-    // `viewedStage.value` set to its id rather than `null`. Also calling
-    // `loadInstance` directly below in that case would race that effect's
-    // own fetch (mirrors the exact hazard `ModuleEditorPage`'s own
-    // `batch()` comment describes) — so this only fetches directly when
-    // `viewedStage.value` was already `null`, the one case where setting
-    // it to `null` again is a no-op the effect will never react to.
-    const effectWillReload = viewedStage.value !== null
-    viewedStage.value = null
-    if (!effectWillReload) {
-      instanceData.value = await loadInstance(currentSlug.value, null)
-    }
+    const result = await advanceCurrentStage(instance, { onMoved: (toStage) => setStatus(`Advanced to "${toStage.title}".`) })
+    if (!result.ok) setStatus(result.message)
   }
 
   function handleDecline() {
@@ -5023,7 +5005,7 @@ function DecisionsLogSection({ instance }) {
 }
 
 // #286 (map #238): the Interview page for a local or server workspace Instance, handed what only this file can reach: the Instance's Source document store, the Definition it follows, the other Stages' saved content (the AI is told what is already settled) and the stage Save.
-function InterviewScreen({ instance, editorHref, onSaveDrafts }) {
+function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance }) {
   const store = useSourceStore(instance)
   const decisionsStore = useDecisionsStore(instance)
   if (!store || !decisionsStore) return html`<p class="loading">Loading…</p>`
@@ -5049,7 +5031,9 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts }) {
     }
     return modules
   }
+  // `key`: a run (#293) moves the Instance on to its next Stage, and the page for that Stage starts afresh.
   return html`<${InterviewPage}
+    key=${instance.stage.id}
     instance=${instance}
     store=${store}
     actor=${instance.assignee ?? ''}
@@ -5059,6 +5043,7 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts }) {
     loadOtherSaved=${loadOtherSaved}
     decisionsStore=${decisionsStore}
     onSaveDrafts=${onSaveDrafts}
+    onAdvance=${onAdvance}
   />`
 }
 
@@ -6205,6 +6190,14 @@ function ModuleEditorPage({ slug: routeRef }) {
     return { ok: true, check }
   }
 
+  // #293: "Save, advance, carry on" moves the Instance on to its next Stage once the Save has worked. The Gate is checked again here,
+  // on what was just saved, by the same code as the editor's "Advance to next stage".
+  async function advanceInterviewStage() {
+    const inst = instanceData.peek()
+    if (!inst?.stage || isEditingBlocked()) return { ok: false, message: 'This Instance cannot be written to right now.' }
+    return advanceCurrentStage(inst)
+  }
+
   async function handleSyncFromMain() {
     if (!instance || syncing) return
     setSyncing(true)
@@ -6275,7 +6268,7 @@ function ModuleEditorPage({ slug: routeRef }) {
       : null}
   `
   if (interviewOpen && !instance.workspaceBacked) {
-    return html`<${InterviewScreen} instance=${instance} editorHref=${editorHref} onSaveDrafts=${saveInterviewDrafts} />${dialogs}`
+    return html`<${InterviewScreen} instance=${instance} editorHref=${editorHref} onSaveDrafts=${saveInterviewDrafts} onAdvance=${advanceInterviewStage} />${dialogs}`
   }
 
   const selectedArtefact = instance.artefacts.find((artefact) => artefact.id === selectedArtefactId) ??

@@ -22,6 +22,7 @@ import { citationSegments, isBlankValue } from './interviewDraft.js'
 import { describeInput, planSourceAccess } from './interviewSources.js'
 import { effectiveTargetSize, fieldTargetWords, targetSizeLabel } from './targetSize.js'
 import { logSummary } from './decisionsLog.js'
+import { beginRun, clearRun, interviewRuns, nextStage, planRows, resumableRun, runTargets, saveOutcome, updateRun } from './interviewRun.js'
 
 // One session per Instance Stage while the editor page is open, so going to the editor and back keeps the conversation and the drafts.
 const sessions = new Map()
@@ -129,14 +130,22 @@ function providerLabel(p) {
  *   loadOtherSaved  () => the other Stages' Modules (same shape as `instance.modules`), for the brief
  *   decisionsStore  { read(stageId) } the Stage's decisions log (#288, web/lib/decisionsStore.js)
  *   onSaveDrafts    (drafts, { artefactId, decisions }) => { ok, message?, check? }  puts the drafts in the Modules and does the stage Save, writing the decisions log in the same Save
+ *   onAdvance       () => { ok, message? }  moves the Instance on to its next Stage, for a run's "Save, advance, carry on" (#293); the page for that Stage then replaces this one
  */
-export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts }) {
+export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance }) {
   const key = `${instance.slug}|${instance.stage.id}`
   const [setup, setSetup] = useState({ status: 'loading' })
   const [sources, setSources] = useState(null)
   const [snap, setSnap] = useState(null)
-  const [pickedProvider, setPickedProvider] = useState(null)
+  // #293: the run in this tab for this Instance, if any. A run that has carried on into this Stage starts it by itself.
+  const run = interviewRuns.value[instance.slug] ?? null
+  const carryingOn = run?.carryOn === instance.stage.id
+  const [pickedProvider, setPickedProvider] = useState(carryingOn ? run.providerId ?? null : null)
   const [pickedArtefact, setPickedArtefact] = useState(null)
+  const [pickedTarget, setPickedTarget] = useState(carryingOn ? run.target : null)
+  const [resumeLogs, setResumeLogs] = useState(null) // the committed logs of this Stage and the one before it, which say whether a run was left part-way
+  const [resumeMessage, setResumeMessage] = useState('')
+  const autoStarted = useRef(false)
   const [connecting, setConnecting] = useState(false)
   const [recovery, setRecovery] = useState(null)
   const [switchMessage, setSwitchMessage] = useState('')
@@ -156,12 +165,21 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   useEffect(() => {
     let cancelled = false
     setSetup({ status: 'loading' })
-    Promise.all([loadStructure(), loadSkills(), loadOtherSaved().catch(() => []), decisionsStore?.read(instance.stage.id).catch(() => null) ?? null])
-      .then(([structure, skills, otherSaved, committedLog]) => {
+    const stageAt = (instance.stages ?? []).findIndex((st) => st.id === instance.stage.id)
+    const previousId = stageAt > 0 ? instance.stages[stageAt - 1].id : null
+    Promise.all([
+      loadStructure(),
+      loadSkills(),
+      loadOtherSaved().catch(() => []),
+      decisionsStore?.read(instance.stage.id).catch(() => null) ?? null,
+      previousId ? decisionsStore?.read(previousId).catch(() => null) ?? null : null,
+    ])
+      .then(([structure, skills, otherSaved, committedLog, previousLog]) => {
         if (cancelled) return
         const definition = { ...structure, modules: modulesWithStandard(structure.modules, structure.standardModules) }
         setSetup({ status: 'ready', structure, definition, skills, otherSaved })
         setCommittedLog(committedLog)
+        setResumeLogs({ [instance.stage.id]: committedLog, ...(previousId ? { [previousId]: previousLog } : {}) })
       })
       .catch((err) => !cancelled && setSetup({ status: 'error', message: err.message }))
     return () => {
@@ -194,6 +212,12 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const choices = useMemo(() => (setup.status === 'ready' ? artefactChoices(setup.definition, instance.stage.id) : { candidates: [], lightest: null }), [setup, instance.stage.id])
   const artefactId = pickedArtefact ?? choices.lightest?.id ?? null
 
+  // #293: the run's target Stage ("Run until"). The current Stage when no other is picked, which is a run of one Stage.
+  const stagesList = instance.stages ?? []
+  const targets = runTargets(stagesList, instance.stage.id)
+  const target = targets.some((t) => t.id === pickedTarget) ? pickedTarget : instance.stage.id
+  const followingStage = nextStage(stagesList, instance.stage.id)
+
   const otherSaved = setup.status === 'ready' ? setup.otherSaved.filter((m) => !instance.modules.some((own) => own.id === m.id)) : []
   ctxRef.current =
     setup.status === 'ready'
@@ -208,6 +232,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           // #288: what the decisions log already holds, who is interviewing, and the Interview instructions version the status block records.
           decisions: committedLog,
           actor,
+          targetStageId: target,
           instructionsVersion: `${setup.definition.id ?? instance.definition}@${instance.definitionVersion ?? setup.structure.version ?? 1}`,
           // #292: a picture, or a scanned or "Read visually" PDF, is sent as the original; the session reads it when it builds a request.
           readOriginal: async (id) => (await store.readOriginal(id)).bytes ?? null,
@@ -276,8 +301,64 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const readOnlyIds = new Set(stage?.readOnlyModules ?? [])
   const stageModules = stage ? stage.modules.map((id) => setup.definition.modules.find((m) => m.id === id)).filter((m) => m && !readOnlyIds.has(m.id)) : []
 
+  // ---- the run (#293) ----
+  const providerInUse = snap?.providerId ?? providerId
+  const runStart = run?.startStageId ?? instance.stage.id // the Stage this run began on
+  const multiStage = stagesList.findIndex((st) => st.id === target) > stagesList.findIndex((st) => st.id === runStart) // more than one Stage in the run
+  const stageEndReady = phase === 'waiting' && draftKeys.length > 0 && Boolean(readiness?.ready) && !snap?.round && !finishing
+  // Where the current Stage stands in the run plan.
+  const settled = run && run.at === instance.stage.id && (run.phase === 'paused' || run.phase === 'done') ? run.phase : null
+  let planCurrent = 'idle'
+  if (saving?.phase === 'advancing') planCurrent = 'done'
+  else if (stageEndReady) planCurrent = 'awaiting-confirmation'
+  else if (settled && draftKeys.length === 0) planCurrent = settled
+  else if (started || phase === 'testing') planCurrent = 'drafting'
+  const planRowsNow = planRows({ stages: stagesList, currentStageId: instance.stage.id, targetStageId: target, current: planCurrent })
+  const resume = resumeLogs && !carryingOn && phase === 'kickoff' ? resumableRun({ stages: stagesList, currentStageId: instance.stage.id, logs: resumeLogs }) : null
+  const stageTitleOf = (id) => stagesList.find((s) => s.id === id)?.title ?? id
+
   async function startInterview() {
+    // A run of one Stage is still a run: its plan and its status block say where it stands. A Stage the run carried on into carries on the same run.
+    const sameRun = run && run.phase === 'running' && run.target === target
+    if (carryingOn) updateRun(instance.slug, { carryOn: null, at: instance.stage.id })
+    else beginRun(instance.slug, { target, startStageId: sameRun ? run.startStageId : instance.stage.id, providerId: providerInUse, at: instance.stage.id })
     await sessionRef.current?.start()
+  }
+
+  // The Stage before this one carried on into it: start the interview by itself, with the AI Provider the run was using.
+  useEffect(() => {
+    if (!carryingOn) return
+    if (snap && snap.phase !== 'kickoff') {
+      updateRun(instance.slug, { carryOn: null })
+      return
+    }
+    if (autoStarted.current || setup.status !== 'ready' || sources === null || !snap || !providerId || blockedReason) return
+    autoStarted.current = true
+    startInterview()
+  }, [carryingOn, setup.status, sources, snap?.phase, providerId])
+
+  // "Resume the run" on a kickoff whose logs say a run was left part-way.
+  async function resumeRun() {
+    setResumeMessage('')
+    if (!resume) return
+    if (!providerId) {
+      setResumeMessage('Choose an AI Provider, or connect one.')
+      return
+    }
+    setPickedTarget(resume.targetStageId)
+    const follow = resume.mode === 'advance' ? followingStage : null
+    if (resume.mode === 'advance' && !follow) {
+      setResumeMessage('There is no next Stage to carry on with.')
+      return
+    }
+    beginRun(instance.slug, { target: resume.targetStageId, startStageId: resume.fromStageId, providerId, at: instance.stage.id, carryOn: follow ? follow.id : instance.stage.id })
+    if (follow) {
+      const result = await onAdvance()
+      if (!result.ok) {
+        updateRun(instance.slug, { carryOn: null })
+        setResumeMessage(result.message || 'The Stage could not be advanced.')
+      }
+    }
   }
 
   async function sendChat() {
@@ -315,11 +396,15 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     return mod && field ? `${mod.title ?? mod.id} · ${field.title ?? field.id}` : key
   }
 
-  async function saveStage() {
+  // The stage-end card's two buttons (#293). `action` is "advance" (Save, advance, carry on) or "stop" (Save and stop here): both make
+  // the one stage Save; "advance" then moves the Instance on and the next Stage's interview starts by itself. The status block of the
+  // decisions log, written in the same Save, records the run's target and each Stage's state, so a paused run can be resumed.
+  async function saveStage(action = 'stop') {
     setSaving({ phase: 'saving' })
     const keys = Object.keys(drafts)
+    const outcome = saveOutcome({ stages: stagesList, currentStageId: instance.stage.id, targetStageId: target, startStageId: runStart, action })
     // #288: the decisions log goes in the same Save as the content.
-    const decisions = sessionRef.current?.decisionsDelta({ runState: 'saved', saving: true }) ?? null
+    const decisions = sessionRef.current?.decisionsDelta({ runState: outcome.state, saving: true, target, stages: outcome.stages }) ?? null
     let result
     try {
       result = await onSaveDrafts(drafts, { artefactId, decisions })
@@ -336,9 +421,30 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           sessionRef.current?.loadDecisions(fresh)
         }
       }
-      setSaving({ phase: 'saved', check: result.check ?? null })
+      updateRun(instance.slug, { phase: outcome.finished ? 'done' : outcome.advances ? 'running' : 'paused', at: instance.stage.id })
+      const saved = { phase: 'saved', check: result.check ?? null, finished: outcome.finished }
+      setSaving(saved)
+      if (outcome.advances) await carryOn(saved)
     } else {
       setSaving({ phase: 'error', message: result.message || 'The Save did not go through.' })
+    }
+  }
+
+  // Moves the run on to the next Stage, which has been saved. The page for that Stage replaces this one and starts by itself;
+  // if the Instance can't be advanced (the Gate no longer passes, say), the run stays paused here and the card says why.
+  async function carryOn(saved = saving) {
+    if (!followingStage) return
+    setSaving({ ...saved, phase: 'advancing', advanceError: '' })
+    updateRun(instance.slug, { carryOn: followingStage.id, phase: 'running', providerId: providerInUse })
+    let result
+    try {
+      result = await onAdvance()
+    } catch (err) {
+      result = { ok: false, message: err.message }
+    }
+    if (!result?.ok) {
+      updateRun(instance.slug, { carryOn: null, phase: 'paused', at: instance.stage.id })
+      setSaving({ ...saved, phase: 'saved', advanceError: result?.message || 'The Stage could not be advanced.' })
     }
   }
 
@@ -357,6 +463,12 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const kickoff = () => {
     const status = provider?.test?.status
     const sourceCount = (sources ?? []).filter((s) => !s.removedAt).length
+    // A run that carried on into this Stage starts it by itself: the form only comes back if that start fails.
+    if (carryingOn && !snap?.kickoffError) {
+      return html`<div class="kick" data-testid="interview-kickoff">
+        <p class="kick-intro" data-testid="interview-carrying-on" role="status">Carrying on the run to ${stageTitleOf(target)}: starting ${instance.stage.title}…</p>
+      </div>`
+    }
     return html`
       <div class="kick" data-testid="interview-kickoff">
         <p class="kick-intro">
@@ -364,6 +476,16 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           until you confirm the Stage, and it never passes a Gate that needs approval or review.
         </p>
         ${blockedReason ? html`<p class="inline-error" role="alert" data-testid="interview-blocked">${blockedReason}</p>` : null}
+        ${resume
+          ? html`<div class="kick-resume" data-testid="interview-resume-note" role="status">
+              <p class="kick-note">
+                <strong>A run to ${stageTitleOf(resume.targetStageId)} was paused${resume.mode === 'advance' ? ` after ${stageTitleOf(resume.fromStageId)} was saved` : ` before ${instance.stage.title}`}.</strong>
+                Resuming ${resume.mode === 'advance' ? `moves on to ${followingStage?.title ?? 'the next Stage'} and ` : ''}carries on to ${stageTitleOf(resume.targetStageId)}.
+              </p>
+              <button type="button" class="btn small primary" data-testid="interview-resume" disabled=${!providerId || Boolean(blockedReason) || !snap} onClick=${resumeRun}>Resume the run</button>
+              ${resumeMessage ? html`<p class="inline-error" role="alert" data-testid="interview-resume-error">${resumeMessage}</p>` : null}
+            </div>`
+          : null}
 
         <label for="interview-provider">AI Provider</label>
         ${providers.length
@@ -387,6 +509,18 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
               ${choices.candidates.map((a) => html`<option key=${a.id} value=${a.id} selected=${a.id === artefactId}>${a.title ?? a.id}${a.id === choices.lightest?.id ? ' (lightest)' : ''}</option>`)}
             </select>
             <p class="kick-note">More than one Artefact can pass this Stage's Gate. The lightest is pre-selected; the AI drafts what the one you choose requires.</p>`
+          : null}
+
+        ${targets.length > 1
+          ? html`<label for="interview-run-until">Run until</label>
+            <select id="interview-run-until" data-testid="interview-run-until" onChange=${(e) => setPickedTarget(e.currentTarget.value)}>
+              ${targets.map((t) => html`<option key=${t.id} value=${t.id} selected=${t.id === target}>${t.title}${t.id === instance.stage.id ? ' (this Stage only)' : ''} (gate: ${t.gate})</option>`)}
+            </select>
+            <p class="kick-note" data-testid="interview-run-until-note">
+              ${target === instance.stage.id
+                ? 'The interview covers this Stage only. Pick a later Stage to carry on into it: the run plan on the left shows the Stages in order.'
+                : `The AI drafts each Stage in order, up to and including ${stageTitleOf(target)}, and you confirm each one. A Stage is never skipped. Later Stages aim for their lightest Artefact.`}
+            </p>`
           : null}
 
         ${unreadableNote()}
@@ -443,7 +577,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         ? confirmRestart
           ? html`<div class="dl-restart" data-testid="interview-restart-confirm" role="alert">
               <p class="kick-note">Start over: the AI ignores every earlier answer from now on. Saved content is not touched, and the log keeps what was said before.</p>
-              <button type="button" class="btn small" data-testid="interview-restart-yes" onClick=${() => { sessionRef.current?.startOver(); setConfirmRestart(false); setSaving(null) }}>Start this stage over</button>
+              <button type="button" class="btn small" data-testid="interview-restart-yes" onClick=${() => { sessionRef.current?.startOver(); clearRun(instance.slug); setConfirmRestart(false); setSaving(null) }}>Start this stage over</button>
               <button type="button" class="btn small ghost" onClick=${() => setConfirmRestart(false)}>Keep going</button>
             </div>`
           : html`<button type="button" class="btn small ghost dl-restart" data-testid="interview-restart" disabled=${busy} onClick=${() => setConfirmRestart(true)}>Start this stage over</button>`
@@ -483,21 +617,45 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const stageEnd = () => {
     if (saving?.phase === 'saved') {
       return html`<div class="qcard stage-end saved" data-testid="interview-saved" role="status">
-        <p class="qhead">Saved</p>
+        <p class="qhead">${saving.finished && multiStage ? 'Saved. The run is done.' : 'Saved'}</p>
         <p>${stage?.title ?? instance.stage.title} is saved as one Stage Save. The Modules stay <strong>draft</strong>: a person marks them agreed.</p>
         ${saving.check ? html`<p class="gate-ok" data-testid="interview-saved-gate">${saving.check.pass ? `The ${instance.stage.gate} Gate check passes.` : `The Gate check still reports: ${saving.check.outstanding?.join(', ') || 'see the editor'}.`}</p>` : null}
+        ${saving.finished && multiStage ? html`<p data-testid="interview-run-done">${stageTitleOf(target)} was the target, so the run is done.</p>` : null}
+        ${!saving.finished && followingStage
+          ? html`<p data-testid="interview-run-paused">The run is paused here, before ${followingStage.title}. Resume moves on to ${followingStage.title} and carries on to ${stageTitleOf(target)}. You can also come back to this page later and resume from the kickoff.</p>
+              ${saving.advanceError ? html`<p class="inline-error" role="alert" data-testid="interview-advance-error">${saving.advanceError}</p>` : null}
+              <div class="round-actions">
+                <button type="button" class="btn primary" data-testid="interview-resume" onClick=${() => carryOn(saving)}>Resume the run</button>
+              </div>`
+          : null}
+      </div>`
+    }
+    if (saving?.phase === 'advancing') {
+      return html`<div class="qcard stage-end saved" data-testid="interview-advancing" role="status">
+        <p class="qhead">Saved. Moving on to ${followingStage?.title ?? 'the next Stage'}…</p>
       </div>`
     }
     // Only when the Gate check passes for the Artefact aimed for and every Field in scope is done; and, after "Finish with your recommendations", once the last round has been answered.
-    if (phase !== 'waiting' || draftKeys.length === 0 || !readiness?.ready || snap?.round || finishing) return null
-    return html`<div class="qcard stage-end" data-testid="interview-stage-end">
+    if (!stageEndReady) return null
+    const more = target !== instance.stage.id && Boolean(followingStage)
+    const busySaving = saving?.phase === 'saving' || Boolean(blockedReason)
+    return html`<div class="qcard stage-end" data-testid="interview-stage-end" data-run-more=${more ? 'true' : 'false'}>
       <div class="qchip">Stage</div>
-      <p class="qhead">${stage?.title ?? instance.stage.title} is ready. Save it?</p>
+      <p class="qhead">${stage?.title ?? instance.stage.title} is ready. ${more ? 'Save and carry on?' : 'Save it?'}</p>
       <p>${draftKeys.length} Field${draftKeys.length === 1 ? '' : 's'} drafted; all ${readiness.total} Field${readiness.total === 1 ? '' : 's'} in scope are done. The ${instance.stage.gate} Gate check passes for ${readiness.gate.artefact?.title ?? 'the Artefact'}. One Save writes them; the Modules stay <strong>draft</strong>.</p>
       ${saving?.phase === 'error' ? html`<p class="inline-error" role="alert" data-testid="interview-save-error">${saving.message}</p>` : null}
+      ${more
+        ? html`<p class="kick-note" data-testid="interview-run-next">This run goes on to ${followingStage.title}${target === followingStage.id ? ', its target' : `, then to ${stageTitleOf(target)}`}.</p>`
+        : null}
       <div class="round-actions">
-        <button type="button" class="btn primary" data-testid="interview-save" disabled=${saving?.phase === 'saving' || Boolean(blockedReason)} onClick=${saveStage}>
-          ${saving?.phase === 'saving' ? 'Saving…' : 'Save and stop here'}
+        ${more
+          ? html`<button type="button" class="btn primary" data-testid="interview-save-advance" disabled=${busySaving} onClick=${() => saveStage('advance')}>
+              ${saving?.phase === 'saving' ? 'Saving…' : 'Save, advance, carry on'}
+              <span class="rec">RECOMMENDED</span>
+            </button>`
+          : null}
+        <button type="button" class=${'btn' + (more ? ' ghost' : ' primary')} data-testid="interview-save" disabled=${busySaving} onClick=${() => saveStage('stop')}>
+          ${saving?.phase === 'saving' && !more ? 'Saving…' : more ? 'Save and stop here' : multiStage ? 'Save and finish the run' : 'Save and stop here'}
         </button>
       </div>
     </div>`
@@ -555,6 +713,16 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         <a class="btn small ghost" href=${editorHref} data-testid="interview-back">← Editor</a>
         <div class="interview-instance">${instance.name || instance.slug}</div>
         <div class="cite">${instance.stage.title} (gate: ${instance.stage.gate})</div>
+        <div data-testid="run-plan">
+          <h3 class="side">Run plan</h3>
+          <ol class="runplan">
+            ${planRowsNow.map(
+              (row) => html`<li key=${row.id} class=${`rp-${row.state}${row.target ? ' rp-target' : ''}`} data-testid="run-plan-row" data-stage-id=${row.id} data-state=${row.state} data-target=${row.target ? 'true' : 'false'}>
+                <span class="dot"></span><span class="rp-title">${row.title}</span><span class="rp-note">${row.note}</span>
+              </li>`
+            )}
+          </ol>
+        </div>
         <h3 class="side">Source documents</h3>
         <${SourceDocumentsPanel} store=${store} actor=${actor} readOnly=${Boolean(blockedReason)} compact=${true} onList=${onSourceList} />
         ${decisionsRail()}
