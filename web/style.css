@@ -571,6 +571,18 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .defn-map-col-interview { border-style: dashed; }
 .defn-interview-text { width: 100%; box-sizing: border-box; resize: vertical; }
 .defn-interview-readonly { margin: 0; white-space: pre-wrap; }
+/* #285: the read-only "Gantry's interview rules" view beside the Interview instructions editor. */
+.defn-interview-rules { margin-top: 16px; }
+.defn-interview-rules > summary { cursor: pointer; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.defn-interview-rules-versions { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.defn-interview-rules-list { margin: 8px 0; padding-left: 22px; }
+.defn-interview-rules-list li { margin-bottom: 8px; }
+.defn-interview-rules-h { font-family: var(--font-display); font-weight: 600; font-size: 13px; margin: 14px 0 4px; }
+.defn-interview-rules-skills { margin: 4px 0; padding-left: 22px; }
+.defn-interview-rules-credit { margin: 6px 0; font-size: 12px; color: var(--text-muted); }
+.defn-interview-rules-more { margin-top: 8px; }
+.defn-interview-rules-more > summary { cursor: pointer; font-size: 13px; }
+.defn-interview-rules-more ul { padding-left: 22px; }
 /* #224: an Instance's own Logo, in the wizard and Instance Settings. */
 .instance-logo-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 4px 0 8px; }
 .instance-logo-preview { max-height: 40px; max-width: 200px; object-fit: contain; background: #fff; border: var(--hairline) solid var(--line); border-radius: var(--radius); padding: 2px; }

@@ -17,6 +17,7 @@ import { listStandardModules, modulesWithStandard, standardModuleVersions, newMo
 import { KeyDecisionsMountSettings } from '../lib/keyDecisionsMountView.js'
 import { KEY_DECISIONS_ID } from '../lib/keyDecisions.js'
 import { InterviewInstructions } from '../lib/interviewInstructionsView.js'
+import { InterviewRules } from '../lib/interviewRulesView.js'
 import { interviewText } from '../lib/interviewInstructions.js'
 
 // The rebuilt Definitions page (WI #381, Feature #380's grilling session). Primary source:
@@ -2009,6 +2010,7 @@ export function DefinitionViewerPage() {
           problems=${validationProblems.filter((p) => problemTarget(p)?.type === 'interview')}
           onChange=${(text) => updateDraft((dd) => { dd.interview = text })}
         />
+        <${InterviewRules} />
       </div>
     `
   }

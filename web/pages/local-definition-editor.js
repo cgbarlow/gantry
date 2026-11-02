@@ -29,6 +29,7 @@ import { listStandardModules, newMountSettings } from '../lib/standardModules.js
 import { KeyDecisionsMountSettings } from '../lib/keyDecisionsMountView.js'
 import { KEY_DECISIONS_ID } from '../lib/keyDecisions.js'
 import { InterviewInstructions } from '../lib/interviewInstructionsView.js'
+import { InterviewRules } from '../lib/interviewRulesView.js'
 import { interviewText } from '../lib/interviewInstructions.js'
 import {
   getWorkspaceHandle,
@@ -924,6 +925,7 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
                 problems=${problems.filter((p) => p.type === 'invalid-interview' && /^Interview instructions on the Definition/.test(p.message))}
                 onChange=${(text) => update(text === '' ? { interview: undefined } : { interview: text })}
               />
+              <${InterviewRules} />
             </section>
           `
         : null}
