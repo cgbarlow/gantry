@@ -25,7 +25,9 @@ import { pruneStageReadOnlyModules, withModuleReadOnly } from '../lib/readOnlyMo
 import { TARGET_SIZES, targetSizeLabel, withFieldTargetWords } from '../lib/targetSize.js'
 import { definitionInstanceSettings } from '../lib/instanceSettings.js'
 import { InstanceSettingsSummary, InstanceSettingsEditor } from '../lib/instanceSettingsView.js'
-import { listStandardModules } from '../lib/standardModules.js'
+import { listStandardModules, newMountSettings } from '../lib/standardModules.js'
+import { KeyDecisionsMountSettings } from '../lib/keyDecisionsMountView.js'
+import { KEY_DECISIONS_ID } from '../lib/keyDecisions.js'
 import { InterviewInstructions } from '../lib/interviewInstructionsView.js'
 import { interviewText } from '../lib/interviewInstructions.js'
 import {
@@ -767,6 +769,17 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
               >
                 ${(entry?.versions ?? []).map((v) => html`<option value=${String(v.version)} selected=${v.version === mount.version}>Version ${v.version}</option>`)}
               </select>
+              ${mount.id === KEY_DECISIONS_ID
+                ? html`<${KeyDecisionsMountSettings}
+                    mount=${mount}
+                    editable=${!readOnly}
+                    onChange=${(change) => {
+                      const standardModules = structure.standardModules.slice()
+                      standardModules[i] = { ...mount, ...change }
+                      update({ standardModules })
+                    }}
+                  />`
+                : null}
               <label class="field-label">Added guidance</label>
               <textarea
                 class="wizard-input"
@@ -812,7 +825,7 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
                 const id = e.currentTarget.value
                 if (!id) return
                 const entry = listStandardModules().find((m) => m.id === id)
-                update({ standardModules: [...(structure.standardModules ?? []), { id, version: entry.versions[entry.versions.length - 1].version }] })
+                update({ standardModules: [...(structure.standardModules ?? []), { id, version: entry.versions[entry.versions.length - 1].version, ...newMountSettings(id) }] })
                 e.currentTarget.value = ''
               }}
             >

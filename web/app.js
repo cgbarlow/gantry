@@ -95,6 +95,19 @@ import {
 import { getLocalStatus, checkLocalGate } from './lib/localStatus.js'
 import { modulesWithStandard } from './lib/standardModules.js'
 import {
+  parseKeyDecisions,
+  serialiseKeyDecisions,
+  addDecision,
+  removeDecision,
+  moveDecision,
+  hasStyleText,
+  decisionReference,
+  keyDecisionProblems,
+  STYLE_PARTS,
+  STYLE_TITLES,
+  LINK_TYPES,
+} from './lib/keyDecisions.js'
+import {
   changedEntryFor,
   changedEntryLabel,
   alsoReapprovesLine,
@@ -2409,6 +2422,159 @@ function ListField({ field, moduleId, onRegister, onRemove, onRequestSection, on
   `
 }
 
+// ---------- Key decisions (#284, ADR-0065) ----------
+// The Key decisions standard module's one Field is Markdown to Save, the merge, the render and every other
+// surface; this editor reads and writes the text inside it (web/lib/keyDecisions.js). Each decision has a
+// number given once, and Move up / Move down / Remove leave every number as it is. The Definition chose the
+// style (`keyDecisions.style`): the default parts, or WH(Y)'s six-part statement and typed links.
+function DecisionTextArea({ label, hint, value, disabled, onInput, testId }) {
+  const ref = useRef(null)
+  useEffect(() => autosizeTextarea(ref.current), [value])
+  return html`
+    <label class="decision-part">
+      <span class="decision-part-label">${label}</span>
+      <textarea ref=${ref} rows="2" disabled=${disabled} placeholder=${hint} data-testid=${testId} value=${value} onInput=${(e) => { autosizeTextarea(e.currentTarget); onInput(e.currentTarget.value) }}></textarea>
+    </label>
+  `
+}
+
+function DecisionsField({ field, moduleId, keyDecisions, onRegister }) {
+  const { prefix, style } = keyDecisions
+  const [parsed, setParsed] = useState(() => parseKeyDecisions(field.value ?? ''))
+  // The text exactly as stored stays the Field's value until the first edit, so opening a Field written by hand
+  // (and so not in this editor's exact layout) never counts as a change.
+  const storedRef = useRef(field.value ?? '')
+  const parsedRef = useRef(parsed)
+  const touchedRef = useRef(false)
+  const textOf = (value) => (touchedRef.current ? serialiseKeyDecisions(value, { prefix }) : storedRef.current)
+
+  function update(next) {
+    touchedRef.current = true
+    parsedRef.current = next
+    setParsed(next)
+    noteContentEdit()
+  }
+
+  useEffect(() => {
+    onRegister({
+      getValue: () => textOf(parsedRef.current),
+      setValue: (value) => {
+        storedRef.current = value ?? ''
+        touchedRef.current = false
+        parsedRef.current = parseKeyDecisions(storedRef.current)
+        setParsed(parsedRef.current)
+        noteContentEdit()
+      },
+    })
+    // eslint-disable-next-line
+  }, [])
+
+  const blocked = isEditingBlocked()
+  const parts = STYLE_PARTS[style]
+  const otherStyle = style === 'why' ? 'default' : 'why'
+  const headingIdForField = moduleId ? headingId(moduleId, field.title) : null
+  const text = textOf(parsed)
+  const words = field.targetWords ? countWords(text) : 0
+  const problems = keyDecisionProblems(text, { prefix, style })
+  const setDecision = (number, change) => update({ ...parsed, decisions: parsed.decisions.map((d) => (d.number === number ? { ...d, ...change } : d)) })
+
+  return html`
+    <div class="field field-decisions" data-testid="key-decisions-field" data-style=${style} data-prefix=${prefix}>
+      ${headingIdForField
+        ? html`<h3 id=${headingIdForField} class="field-heading">${field.title}${field.required ? ' *' : ''}</h3><label class="visually-hidden" style="display:none">${field.title}${field.required ? ' *' : ''}</label>`
+        : html`<label>${field.title}${field.required ? ' *' : ''}</label>`}
+      ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
+      <p class="decisions-style muted" data-testid="decision-style">Decision style: ${STYLE_TITLES[style]}</p>
+      ${field.targetWords ? html`<${FieldTargetWords} field=${field} words=${words} />` : null}
+      ${parsed.decisions.length === 0 ? html`<p class="muted decisions-empty">No decisions recorded yet.</p>` : null}
+      ${parsed.decisions.map((decision, index) => {
+        const reference = decisionReference(prefix, decision.number)
+        const otherTargets = parsed.decisions.filter((d) => d.number !== decision.number)
+        return html`
+          <section class="decision-card" key=${decision.number} data-testid="decision" data-number=${decision.number}>
+            <header class="decision-card-head">
+              <span class="decision-number" data-testid="decision-number">${reference}</span>
+              <input
+                type="text"
+                class="decision-title"
+                aria-label=${`Title of ${reference}`}
+                placeholder="Decision title"
+                disabled=${blocked}
+                value=${decision.title}
+                onInput=${(e) => setDecision(decision.number, { title: e.currentTarget.value })}
+              />
+              ${!blocked
+                ? html`
+                    <span class="decision-actions">
+                      <button type="button" class="btn small ghost" disabled=${index === 0} aria-label=${`Move ${reference} up`} onClick=${() => update(moveDecision(parsed, decision.number, -1))}>↑</button>
+                      <button type="button" class="btn small ghost" disabled=${index === parsed.decisions.length - 1} aria-label=${`Move ${reference} down`} onClick=${() => update(moveDecision(parsed, decision.number, 1))}>↓</button>
+                      <button type="button" class="btn small ghost" aria-label=${`Remove ${reference}`} onClick=${() => update(removeDecision(parsed, decision.number))}>Remove</button>
+                    </span>
+                  `
+                : null}
+            </header>
+            ${decision.lead ? html`<p class="decision-lead muted">${decision.lead}</p>` : null}
+            ${parts.map(
+              (part) => html`<${DecisionTextArea}
+                key=${part.key}
+                label=${part.label}
+                hint=${part.hint}
+                value=${decision[part.key] ?? ''}
+                disabled=${blocked}
+                testId=${`decision-${part.key}`}
+                onInput=${(value) => setDecision(decision.number, { [part.key]: value })}
+              />`
+            )}
+            ${hasStyleText(decision, otherStyle)
+              ? html`
+                  <details class="decision-other-style" data-testid="decision-other-style">
+                    <summary>Also holds text written in the ${STYLE_TITLES[otherStyle]} style (kept, and printed as written)</summary>
+                    ${STYLE_PARTS[otherStyle].filter((part) => (decision[part.key] ?? '').trim() !== '').map((part) => html`<p><strong>${part.label}:</strong> ${decision[part.key]}</p>`)}
+                  </details>
+                `
+              : null}
+            ${style === 'why'
+              ? html`
+                  <div class="decision-links" data-testid="decision-links">
+                    ${decision.links.map(
+                      (link, linkIndex) => html`
+                        <div class="decision-link" key=${linkIndex} data-testid="decision-link">
+                          <select
+                            aria-label=${`Link type of ${reference}`}
+                            disabled=${blocked}
+                            value=${link.type}
+                            onChange=${(e) => setDecision(decision.number, { links: decision.links.map((l, i) => (i === linkIndex ? { ...l, type: e.currentTarget.value } : l)) })}
+                          >
+                            ${LINK_TYPES.map((t) => html`<option value=${t.type}>${t.label}</option>`)}
+                          </select>
+                          <select
+                            aria-label=${`Link target of ${reference}`}
+                            disabled=${blocked}
+                            value=${link.to === null ? '' : String(link.to)}
+                            onChange=${(e) => setDecision(decision.number, { links: decision.links.map((l, i) => (i === linkIndex ? { ...l, to: Number(e.currentTarget.value), raw: decisionReference(prefix, Number(e.currentTarget.value)) } : l)) })}
+                          >
+                            ${link.to === null || !parsed.decisions.some((d) => d.number === link.to) ? html`<option value=${link.to === null ? '' : String(link.to)}>${link.to === null ? link.raw : `${decisionReference(prefix, link.to)} (not in this list)`}</option>` : null}
+                            ${otherTargets.map((d) => html`<option value=${String(d.number)}>${decisionReference(prefix, d.number)}${d.title ? ` ${d.title}` : ''}</option>`)}
+                          </select>
+                          ${!blocked ? html`<button type="button" class="btn small ghost" aria-label=${`Remove link from ${reference}`} onClick=${() => setDecision(decision.number, { links: decision.links.filter((_, i) => i !== linkIndex) })}>✕</button>` : null}
+                        </div>
+                      `
+                    )}
+                    ${!blocked && otherTargets.length > 0
+                      ? html`<button type="button" class="btn small ghost" data-testid="add-decision-link" onClick=${() => setDecision(decision.number, { links: [...decision.links, { type: 'relates-to', to: otherTargets[0].number, raw: decisionReference(prefix, otherTargets[0].number) }] })}>+ Add link</button>`
+                      : null}
+                  </div>
+                `
+              : null}
+          </section>
+        `
+      })}
+      ${problems.length > 0 ? html`<ul class="decisions-problems" data-testid="decision-problems">${problems.map((p) => html`<li>${p}</li>`)}</ul>` : null}
+      ${!blocked ? html`<button type="button" class="btn small" data-testid="add-decision" onClick=${() => update(addDecision(parsed))}>Add decision</button>` : null}
+    </div>
+  `
+}
+
 // ---------- Read-only carried-forward module (#152, docs/adr/0050) ----------
 // A module the viewed stage lists in `read-only-modules`: mounted so the stage's documents render and
 // its gate can be evaluated, but owned — and edited — at an earlier stage. Shown as its saved content
@@ -2557,6 +2723,9 @@ function ModuleCard({ mod, onFieldRegistered, visibleFieldIds }) {
         }
         if (field.type === 'date') {
           return html`<${DateField} key=${field.id} field=${field} moduleId=${mod.id} onRegister=${onRegister} />`
+        }
+        if (mod.keyDecisions && field.type === 'markdown' && !field.custom) {
+          return html`<${DecisionsField} key=${field.id} field=${field} moduleId=${mod.id} keyDecisions=${mod.keyDecisions} onRegister=${onRegister} />`
         }
         const isList = isMultiValuedField(field)
         return isList

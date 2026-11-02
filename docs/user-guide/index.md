@@ -198,10 +198,11 @@ Which fields are which type is set by the Definition, not by you — an author c
 
 ### Standard modules
 
-Some Modules are not written by the Definition's author: **Gantry provides them**. A **standard module** has an id, a set of Fields and a version that Gantry owns, so it looks and behaves the same in every Definition that uses it. There are two so far:
+Some Modules are not written by the Definition's author: **Gantry provides them**. A **standard module** has an id, a set of Fields and a version that Gantry owns, so it looks and behaves the same in every Definition that uses it. There are three:
 
 - **Glossary** has one Field, *Terms and definitions*, a table of **Preferred term | Definition | Avoid**.
 - **Open questions** has one Field, *Open questions*, a table of **Question | Who resolves | By when | Status**.
+- **Key decisions** has one Field, *Key decisions*, a numbered list of the significant decisions (see **Key decisions** below).
 
 You use one like any other Module: it appears as a card on the Stages that mount it, you fill it in and save it, you mark it `agreed`, and any Artefact that needs it draws on it. What differs is on the Definitions page. A standard module is listed under **Standard modules** in the Outline (and carries a **Gantry-provided** label wherever it appears), and its Fields are shown but can't be edited.
 
@@ -210,9 +211,36 @@ A Definition author, on a draft:
 - **Mounts** one with **+ Mount…** under Standard modules, or straight from a Stage's **+ Add module…** list, where each unmounted one is offered as "(Gantry-provided, not mounted yet)". A new mount takes the newest version Gantry has. A Stage that lists it shows it; an Artefact can require it like any Module.
 - **Pins the version.** A Definition names the version it mounts, and Gantry will never change that version. When a later Gantry release adds a version 2, a published Definition on version 1 still renders exactly as it did, and its author moves to version 2 only by choosing it on a new draft.
 - **Adds guidance and Interview instructions.** *Added guidance* is shown after Gantry's own guidance on every Field of the module; *Interview instructions* steer the AI interview and only ever add to Gantry's rules.
-- **Cannot change the shape.** Save and Publish refuse a mount that sets anything besides its version, guidance and interview instructions, that names a version Gantry doesn't provide, or that sits beside a Module of the Definition's own with the same id. The problem is shown against the standard module and counted in the toolbar. In a Local Workspace's Definition editor the same mount is under **Standard modules**, and a Stage lists it by id in its comma-separated Modules.
+- **Cannot change the shape.** Save and Publish refuse a mount that sets anything besides its version, guidance and interview instructions (Key decisions also takes a prefix and a style, below), that names a version Gantry doesn't provide, or that sits beside a Module of the Definition's own with the same id. The problem is shown against the standard module and counted in the toolbar. In a Local Workspace's Definition editor the same mount is under **Standard modules**, and a Stage lists it by id in its comma-separated Modules.
 
 In `definition.yaml` a mount is a top-level `standard-modules:` list, written as `- id: glossary` with a `version: 1`, and optionally `guidance:` and `interview:`; a Stage then lists the id in its `modules:` like any other. There is no `modules/glossary.yaml` file, because the Module's shape is Gantry's.
+
+#### Key decisions
+
+The **Key decisions** module holds only the decisions that matter: hard to reverse, surprising without their context, and the result of a real trade-off. Routine choices belong elsewhere.
+
+**Numbers.** Each decision gets a number when you add it, such as **AD01**, and keeps it. Moving a decision up or down, or removing one, never renumbers the others, so a document or another decision that refers to "AD03" still means the same decision. A number that has been used is not given out again, even after its decision is removed. The prefix (the letters before the number) is the Definition's. If a later version of the Definition changes it, your decisions keep their numbers and take the new prefix the next time they are saved or printed.
+
+**Editing.** The Stage editor shows one card per decision, with **Add decision**, **↑**, **↓** and **Remove**. The card's fields depend on the Definition's decision style:
+
+- **Default.** Title, *Context*, *Decision*, *Why*, *Considered options* and *Consequences*.
+- **WH(Y)** (from [cgbarlow/adr](https://github.com/cgbarlow/adr)). Title, then the six parts of one sentence: *In the context of*, *Facing*, *We decided for*, *And neglected*, *To achieve* and *Accepting that*. Each decision can also have **links** to other Key decisions, each *Depends on*, *Supersedes* or *Relates to*, chosen from a list of the other decisions. WH(Y)'s governance details and Definition of Done are not part of Gantry's version.
+
+**In the Word document.** A default-style decision prints with its labelled parts. A WH(Y) decision prints as its one sentence — "In the context of …, facing …, we decided for … and neglected …, to achieve …, accepting that …." — with a line under it for each kind of link, such as "Depends on AD01, AD04." The sentence leaves out any part you left empty.
+
+**Checks.** *Check* warns, without stopping a Gate, about two decisions with the same number, a link to a decision that is not in the list, a decision linked to itself, a loop in *Depends on* or *Supersedes*, and links in a Definition that uses the default style (which has none). A decision you removed that others still link to is flagged the same way, and the link is left for you to fix.
+
+**Mounting it.** On a draft, **+ Mount…** offers Key decisions like the other standard modules, and its page has **Prefix** (1 to 6 capital letters, "KD" if you don't choose) and **Decision style** (*Default* or *WH(Y)*). In a Local Workspace's Definition editor they are under **Standard modules**. In `definition.yaml`:
+
+```yaml
+standard-modules:
+  - id: key-decisions
+    version: 1
+    prefix: AD        # 1 to 6 capital letters
+    style: why        # "default" or "why" (WH(Y))
+```
+
+Save, Publish and `gantry validate` refuse a prefix that isn't 1 to 6 capital letters and a style that isn't `default` or `why`. Prefix and style belong to Key decisions only; the other standard modules still refuse them. In the instance file the Field is ordinary text, one bold line per decision (`**AD01: Use PostgreSQL**`) followed by its labelled parts, so it reads well in a pull request; an AI agent writing over MCP can write the same text.
 
 ### Target size and word targets
 

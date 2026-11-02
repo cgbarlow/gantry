@@ -39,7 +39,7 @@ import { diagramCaptionsProblem } from './diagramCaptions.js'
 import { artefactFrontMatterProblems } from './artefactFrontMatter.js'
 import { targetWordsProblem } from './targetSize.js'
 import { instanceSettingsDeclarationProblems } from './instanceSettings.js'
-import { modulesWithStandard, standardModuleProblems } from './standardModules.js'
+import { modulesWithStandard, standardModuleProblems, keyDecisionWarnings } from './standardModules.js'
 import { interviewInstructionsProblems } from './interviewInstructions.js'
 
 // ---------------------------------------------------------------------------
@@ -146,7 +146,7 @@ function buildModuleStatus(modulesById, stage, moduleId, exists, parsedFields) {
     fields,
     outstanding,
     complete: exists && outstanding.length === 0,
-    warnings: [...selectOffListWarnings(moduleSpec, exists, parsedFields), ...dateFormatWarnings(moduleSpec, exists, parsedFields)],
+    warnings: [...selectOffListWarnings(moduleSpec, exists, parsedFields), ...dateFormatWarnings(moduleSpec, exists, parsedFields), ...keyDecisionWarnings(moduleSpec, exists, parsedFields)],
   }
 }
 

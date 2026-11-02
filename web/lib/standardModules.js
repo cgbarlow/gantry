@@ -12,12 +12,17 @@
 //       version: 1               # required: a Definition names the version it mounts
 //       guidance: ...            # optional: added to every Field's own guidance
 //       interview: ...           # optional: Interview instructions for this Module (ADR-0062)
+//     - id: key-decisions
+//       version: 1
+//       prefix: AD               # Key decisions only: the numbers' prefix (AD01, AD02, …); default KD
+//       style: why               # Key decisions only: `default` or `why` (WH(Y)); default `default`
 //   stages:
 //     - id: shape
 //       modules: [background, glossary]   # mounted on a Stage like any other Module
 //
 // A Definition can add guidance and Interview instructions to a standard module and can do nothing
-// else to it: no key of the mount changes the shape, and a Definition's own `modules/glossary.yaml`
+// else to it (Key decisions also takes its numbers' prefix and its decision style, which choose how it
+// is written, not what Fields it has): no key of the mount changes the shape, and a Definition's own `modules/glossary.yaml`
 // with the same id is refused. The shape is Gantry's, so the AI (and a reader) can rely on it being the
 // same in every Definition.
 //
@@ -29,6 +34,8 @@
 // Pure and dependency-free, like web/lib/instanceSettings.js, so `lib/` imports it directly. Fields
 // are the camelCase in-memory shape (`targetWords`), the same as a loaded Module's.
 
+import { KEY_DECISIONS_ID, DEFAULT_PREFIX, DEFAULT_STYLE, DECISION_STYLES, PREFIX_RE, keyDecisionProblems } from './keyDecisions.js'
+
 const deepFreeze = (value) => {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
     Object.freeze(value)
@@ -39,7 +46,6 @@ const deepFreeze = (value) => {
 
 /**
  * Gantry's standard modules, by id then version. Add a version; never edit one that has shipped.
- * (Key decisions, the third standard module in ADR-0065, is its own ticket.)
  */
 export const STANDARD_MODULES = deepFreeze({
   glossary: {
@@ -80,10 +86,61 @@ export const STANDARD_MODULES = deepFreeze({
       },
     },
   },
+  // #284 (ADR-0065): significant decisions only, numbered. The Field is Markdown to everything else;
+  // web/lib/keyDecisions.js owns the text inside it. `styleGuidance` is added after `guidance`, by the
+  // decision style the Definition mounts it with.
+  'key-decisions': {
+    title: 'Key decisions',
+    versions: {
+      1: {
+        title: 'Key decisions',
+        purpose: 'Record the significant design decisions: each one hard to reverse, surprising without its context, and the result of a real trade-off. Each has a number that stays the same when decisions are reordered or removed.',
+        fields: [
+          {
+            id: 'decisions',
+            title: 'Key decisions',
+            type: 'markdown',
+            targetWords: { small: 200, medium: 420, large: 720 },
+            guidance:
+              'Record only a decision that is hard to reverse, surprising without its context, and the result of a real trade-off; routine choices belong elsewhere. Add a decision with Add decision. Its number is given once and never changes, so other documents and decisions can refer to it by number.',
+          },
+        ],
+        styleGuidance: {
+          default:
+            'Write each decision as: Context (the situation and forces), Decision (what was decided), Why (the reasons), Considered options (what else was weighed) and Consequences (what follows, good and bad).',
+          why:
+            'Write each decision as one statement: "In the context of …, facing …, we decided for … and neglected …, to achieve …, accepting that …." Then link it to the decisions it depends on, supersedes or relates to.',
+        },
+      },
+    },
+  },
 })
 
 /** The only keys a Definition's mount of a standard module may carry. Anything else would change what Gantry provides. */
 export const STANDARD_MODULE_MOUNT_KEYS = Object.freeze(['id', 'version', 'guidance', 'interview'])
+
+/** Key decisions also takes how its numbers are written (`prefix`) and which decision style it uses (`style`). */
+const KEY_DECISIONS_MOUNT_KEYS = Object.freeze([...STANDARD_MODULE_MOUNT_KEYS, 'prefix', 'style'])
+
+/** The keys a mount of standard module `id` may carry. */
+export const standardModuleMountKeys = (id) => (id === KEY_DECISIONS_ID ? KEY_DECISIONS_MOUNT_KEYS : STANDARD_MODULE_MOUNT_KEYS)
+
+/** A Key decisions mount's prefix and style, with the defaults for either left out (`KD`, `default`). */
+export function keyDecisionsSettings(mount) {
+  return {
+    prefix: typeof mount?.prefix === 'string' && PREFIX_RE.test(mount.prefix) ? mount.prefix : DEFAULT_PREFIX,
+    style: DECISION_STYLES.includes(mount?.style) ? mount.style : DEFAULT_STYLE,
+  }
+}
+
+/** A new mount's own settings: Key decisions is written out with its defaults (so the Definition says what it uses), nothing else has any. */
+export const newMountSettings = (id) => (id === KEY_DECISIONS_ID ? { prefix: DEFAULT_PREFIX, style: DEFAULT_STYLE } : {})
+
+/** The Key decisions settings a Module resolved from a mount carries (`standard.prefix`, `standard.style`), or `undefined` for any other Module. */
+export function moduleKeyDecisions(module) {
+  if (!module || module.id !== KEY_DECISIONS_ID || !module.standard) return undefined
+  return keyDecisionsSettings(module.standard)
+}
 
 const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 
@@ -117,6 +174,25 @@ export function standardModuleShape(id, version, catalogue = STANDARD_MODULES) {
 }
 
 /**
+ * #284: what is wrong with a Key decisions Module's saved decisions (a number used twice, a link to a
+ * decision that isn't there, a loop), as the status warnings both twins (lib/status.js and
+ * web/lib/localStatus.js) report. A content problem like an off-list select value: it warns, never
+ * blocks the Gate. `[]` for any other Module, or one that isn't saved yet.
+ */
+export function keyDecisionWarnings(moduleSpec, exists, parsedFields) {
+  const settings = moduleKeyDecisions(moduleSpec)
+  if (!exists || !settings) return []
+  const warnings = []
+  for (const field of moduleSpec.fields) {
+    if (typeof parsedFields[field.id] !== 'string') continue
+    for (const problem of keyDecisionProblems(parsedFields[field.id], settings)) {
+      warnings.push(`Module "${moduleSpec.title}" field "${field.title}": ${problem}`)
+    }
+  }
+  return warnings
+}
+
+/**
  * One mount, resolved to an ordinary Module (camelCase, as `moduleFromRaw` returns) marked
  * `standard: { version }`. The mount's `guidance` is added after Gantry's own on every Field, and its
  * `interview` rides on the Module. `undefined` when the mount names no such id or version, so a caller
@@ -127,16 +203,19 @@ export function resolveStandardModule(mount, catalogue = STANDARD_MODULES) {
   const shape = standardModuleShape(mount.id, mount.version, catalogue)
   if (!shape) return undefined
   const added = typeof mount.guidance === 'string' && mount.guidance.trim() !== '' ? mount.guidance.trim() : null
+  const keyDecisions = mount.id === KEY_DECISIONS_ID ? keyDecisionsSettings(mount) : undefined
+  const styleGuidance = keyDecisions ? shape.styleGuidance?.[keyDecisions.style] : undefined
   const resolved = {
     id: mount.id,
     title: shape.title,
     purpose: shape.purpose,
     fields: shape.fields.map((field) => {
       const copy = { ...field, ...(field.targetWords ? { targetWords: { ...field.targetWords } } : {}) }
+      if (styleGuidance) copy.guidance = copy.guidance ? `${copy.guidance}\n\n${styleGuidance}` : styleGuidance
       if (added) copy.guidance = copy.guidance ? `${copy.guidance}\n\n${added}` : added
       return copy
     }),
-    standard: { version: mount.version },
+    standard: keyDecisions ? { version: mount.version, ...keyDecisions } : { version: mount.version },
   }
   if (typeof mount.interview === 'string' && mount.interview.trim() !== '') resolved.interview = mount.interview.trim()
   return resolved
@@ -195,6 +274,8 @@ export function modulesWithStandard(modules, mounts, catalogue = STANDARD_MODULE
  *   change the shape), or the Definition has its own Module with the same id.
  * - `duplicate-standard-module`: mounted twice (a Definition mounts one version of each).
  * - `invalid-standard-module-text`: guidance or interview isn't text.
+ * - `invalid-key-decisions-prefix` / `invalid-key-decisions-style` (#284): Key decisions' prefix isn't 1 to 6
+ *   capital letters, or its style isn't `default` or `why`.
  */
 export function standardModuleProblems(declared, ownModuleIds = [], catalogue = STANDARD_MODULES) {
   if (declared === undefined) return []
@@ -226,12 +307,21 @@ export function standardModuleProblems(declared, ownModuleIds = [], catalogue = 
     } else if (!Number.isInteger(mount.version) || !available.includes(mount.version)) {
       problems.push({ type: 'unknown-standard-module-version', message: `${where} names version ${JSON.stringify(mount.version)}, which Gantry does not provide (available: ${available.join(', ')})` })
     }
+    const allowed = standardModuleMountKeys(mount.id)
     for (const key of Object.keys(mount)) {
-      if (STANDARD_MODULE_MOUNT_KEYS.includes(key)) continue
+      if (allowed.includes(key)) continue
       problems.push({
         type: 'standard-module-shape-changed',
         message: `${where} sets "${key}", which would change its shape — Gantry owns that; a Definition can only add guidance and interview instructions`,
       })
+    }
+    if (mount.id === KEY_DECISIONS_ID) {
+      if (mount.prefix !== undefined && !(typeof mount.prefix === 'string' && PREFIX_RE.test(mount.prefix))) {
+        problems.push({ type: 'invalid-key-decisions-prefix', message: `${where} sets prefix ${JSON.stringify(mount.prefix)} — a prefix is 1 to 6 capital letters, such as "AD"` })
+      }
+      if (mount.style !== undefined && !DECISION_STYLES.includes(mount.style)) {
+        problems.push({ type: 'invalid-key-decisions-style', message: `${where} sets style ${JSON.stringify(mount.style)} — a decision style is "default" or "why" (WH(Y))` })
+      }
     }
     for (const key of ['guidance', 'interview']) {
       if (mount[key] !== undefined && typeof mount[key] !== 'string') {

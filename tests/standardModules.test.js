@@ -114,14 +114,15 @@ function writeInstance(instancesDir, { terms = '| Term | Meaning | Avoid |\n| --
 
 // ---------- the catalogue ----------
 
-test('Gantry provides Glossary and Open questions, each at version 1', () => {
-  assert.deepEqual(Object.keys(STANDARD_MODULES), ['glossary', 'open-questions'])
+test('Gantry provides Glossary, Open questions and Key decisions, each at version 1', () => {
+  assert.deepEqual(Object.keys(STANDARD_MODULES), ['glossary', 'open-questions', 'key-decisions'])
   assert.deepEqual(standardModuleVersions('glossary'), [1])
   assert.deepEqual(standardModuleVersions('open-questions'), [1])
   assert.deepEqual(standardModuleVersions('no-such-module'), [])
   assert.deepEqual(listStandardModules().map((m) => [m.id, m.title, m.versions.map((v) => v.version)]), [
     ['glossary', 'Glossary', [1]],
     ['open-questions', 'Open questions', [1]],
+    ['key-decisions', 'Key decisions', [1]],
   ])
 })
 
@@ -253,7 +254,7 @@ test('the validator refuses a mount that names a version Gantry does not provide
 test('the validator refuses a standard module Gantry does not provide', () => {
   const problems = standardModuleProblems([{ id: 'risks', version: 1 }])
   assert.deepEqual(problems.map((p) => p.type), ['unknown-standard-module'])
-  assert.match(problems[0].message, /Gantry provides: glossary, open-questions/)
+  assert.match(problems[0].message, /Gantry provides: glossary, open-questions, key-decisions/)
 })
 
 test('the validator refuses a mount that would change the shape: Fields, title, purpose, or anything but guidance and interview', () => {

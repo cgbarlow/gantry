@@ -13,7 +13,9 @@ import { TARGET_SIZES, targetSizeLabel, withFieldTargetWords } from '../lib/targ
 import { definitionInstanceSettings, instanceSettingName } from '../lib/instanceSettings.js'
 import { InstanceSettingsSummary, InstanceSettingsEditor } from '../lib/instanceSettingsView.js'
 import { DefinitionLogoControl } from '../lib/definitionLogoControl.js'
-import { listStandardModules, modulesWithStandard, standardModuleVersions, STANDARD_MODULES } from '../lib/standardModules.js'
+import { listStandardModules, modulesWithStandard, standardModuleVersions, newMountSettings, STANDARD_MODULES } from '../lib/standardModules.js'
+import { KeyDecisionsMountSettings } from '../lib/keyDecisionsMountView.js'
+import { KEY_DECISIONS_ID } from '../lib/keyDecisions.js'
 import { InterviewInstructions } from '../lib/interviewInstructionsView.js'
 import { interviewText } from '../lib/interviewInstructions.js'
 
@@ -126,7 +128,7 @@ function unmountedStandardModules(d) {
 function mountStandardModule(dd, id, stageId) {
   if (!(dd.standardModules ?? []).some((m) => m.id === id)) {
     const versions = standardModuleVersions(id)
-    dd.standardModules = [...(dd.standardModules ?? []), { id, version: versions[versions.length - 1] }]
+    dd.standardModules = [...(dd.standardModules ?? []), { id, version: versions[versions.length - 1], ...newMountSettings(id) }]
   }
   const stage = stageId ? dd.stages.find((st) => st.id === stageId) : null
   if (stage && !stage.modules.includes(id)) stage.modules.push(id)
@@ -2704,6 +2706,13 @@ export function DefinitionViewerPage() {
               </select>`
             : html`<span data-testid="standard-module-version">Version ${mount.version}</span>`}
         </div>
+        ${mount.id === KEY_DECISIONS_ID
+          ? html`<${KeyDecisionsMountSettings}
+              mount=${mount}
+              editable=${isEditable}
+              onChange=${(change) => updateDraft((dd) => { Object.assign(dd.standardModules[mi], change) })}
+            />`
+          : null}
         <div class="defn-focus-section">
           <span class="kicker">Used in</span>
           <div class="defn-chips">

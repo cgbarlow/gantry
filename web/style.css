@@ -2080,3 +2080,20 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .ai-provider-advanced { margin-top: 12px; }
 .ai-provider-advanced > summary { cursor: pointer; font-family: var(--font-display); font-weight: 600; font-size: 12px; }
 .ai-provider-default { margin-top: 14px; }
+
+/* Key decisions (#284, ADR-0065): one card per decision, numbered once. */
+.field-decisions .decisions-style { font-size: 12px; margin: 0 0 8px; }
+.decision-card { margin: 0 0 12px; padding: 10px 12px; border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg-raised); }
+.decision-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; }
+.decision-number { font-family: var(--font-mono); font-size: 12px; font-weight: 600; padding: 2px 6px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.decision-title { flex: 1 1 220px; min-width: 0; font-family: var(--font-body, inherit); font-size: 13px; padding: 6px 8px; border-radius: var(--radius); border: var(--border-strong) solid var(--line-strong); background: var(--bg); color: var(--text); }
+.decision-actions { display: inline-flex; gap: 4px; }
+.decision-actions .btn, .decision-link .btn, .decision-links > .btn { margin: 0; }
+.decision-part { display: block; margin: 0 0 8px; }
+.decision-part-label { display: block; font-size: 12px; font-weight: 600; margin: 0 0 2px; }
+.decision-part textarea { width: 100%; box-sizing: border-box; resize: none; overflow: hidden; font-family: var(--font-body, inherit); font-size: 13px; line-height: 1.5; padding: 6px 8px; border-radius: var(--radius); border: var(--border-strong) solid var(--line-strong); background: var(--bg); color: var(--text); }
+.decision-links { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.decision-link { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.decision-link select { font-family: var(--font-body, inherit); font-size: 13px; padding: 5px 8px; border-radius: var(--radius); border: var(--border-strong) solid var(--line-strong); background: var(--bg); color: var(--text); max-width: 100%; }
+.decision-other-style { font-size: 12px; margin: 0 0 8px; }
+.decisions-problems { font-size: 12px; color: var(--warning, #b06a00); margin: 6px 0 8px; padding-left: 18px; }
