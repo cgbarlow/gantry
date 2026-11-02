@@ -92,3 +92,16 @@ than leaving people to infer it from the sequence.
 They have nothing to do with each other. A change to the `design` definition's
 structure goes in the definition's changelog; a change to Gantry goes in the
 root one. A change that is both gets an entry in each.
+
+## Live Provider checks (Source documents, #280)
+
+The unit tests run Source documents against *fake* GitHub and Azure DevOps servers, so they prove the commit count and the stacked branches but not how a real Provider behaves or how long a 25 MB upload takes. `scripts/live-source-document-check.mjs` does that against a real repository, using a throwaway token with write access and a scratch repository that has a `main` branch:
+
+```
+GANTRY_LIVE_PAT=<token> node scripts/live-source-document-check.mjs github --owner <owner> --repository <repo>
+GANTRY_LIVE_PAT=<token> node scripts/live-source-document-check.mjs azure-devops --organization <org> --project <project> --repository <repo>
+```
+
+It uploads a 25 MB document and checks: it finishes within 10 seconds, it is exactly one commit, it reads back byte for byte, `main` is untouched; rename, Extract text again and remove are one commit each; and a later Stage's branch inherits the earlier Stage's documents. It writes only to `gantry-workspace/live-check-<time>/...` branches and deletes them afterwards (`--keep` leaves them). Run it on both Providers whenever the upload path changes and before raising the 25 MB limit.
+
+If the upload is slower than 10 seconds on either Provider, record the measured time on #280 and lower `MAX_SOURCE_BYTES` in `web/lib/sourceDocuments.js` (and the "25 MB" wording in the user guide and ADR-0066/0067) to what that Provider managed. `tests/liveSourceDocumentCheck.test.js` runs the same script against the fakes so the script itself stays working.
