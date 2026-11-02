@@ -11,7 +11,7 @@
 // the AI never answers), the draft reaches the preview anyway with the problems as warnings. A check never blocks.
 //
 // Pure (no DOM, no network), like web/lib/aiCards.js, so the unit tests drive all of it.
-import { countWords, fieldTargetWords, targetSizeLabel } from './targetSize.js'
+import { countWords, fieldOverBudget, targetSizeLabel } from './targetSize.js'
 import { isMultiValuedField } from './fieldShape.js'
 
 export const DRAFT_TOOL_NAME = 'draft_field'
@@ -160,19 +160,21 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 
 /**
  * Checks one draft. `field` is the Definition's Field (camelCase: `{ id, type, options, multiple, targetWords }`).
- * `input`: `{ size, architectText, knownSourceIds }`. Returns `{ value, words, problems }`: `value` is the draft as the Field
+ * `input`: `{ size, architectText, knownSourceIds, exact, label }`. `exact` (the stage Save's check of what an outside agent wrote,
+ * #306) takes a select value as written instead of matching an option case-insensitively, since the written value is what
+ * gets stored; `label` replaces the Field id in the messages (`module.field`). Returns `{ value, words, problems }`: `value` is the draft as the Field
  * stores it, `problems` is a list of `{ kind, message }` (`options`, `budget`, `figures`, `citation`, `date`), each written
  * to be sent back to the model.
  */
-export function checkDraft(field, rawValue, { size, architectText = '', knownSourceIds } = {}) {
+export function checkDraft(field, rawValue, { size, architectText = '', knownSourceIds, exact = false, label } = {}) {
   const value = normaliseDraftValue(field, rawValue)
   const words = countWords(value)
   const problems = []
-  const where = `${field.id}`
+  const where = label ?? `${field.id}`
 
   if (field.type === 'select') {
     const options = Array.isArray(field.options) ? field.options : []
-    const canon = (v) => options.find((o) => o === v) ?? options.find((o) => o.toLowerCase() === String(v).trim().toLowerCase())
+    const canon = (v) => options.find((o) => o === v) ?? (exact ? undefined : options.find((o) => o.toLowerCase() === String(v).trim().toLowerCase()))
     const chosen = Array.isArray(value) ? value : value === '' ? [] : [value]
     const fixed = chosen.map((v) => canon(v) ?? v)
     const off = fixed.filter((v) => !options.includes(v))
@@ -189,9 +191,9 @@ export function checkDraft(field, rawValue, { size, architectText = '', knownSou
     return { value, words, problems }
   }
 
-  const budget = fieldTargetWords(field, size)
-  if (budget !== null && words > budget) {
-    problems.push({ kind: 'budget', message: `${where}: ${words} words is over the ${targetSizeLabel(size)} budget of about ${budget}. Tighten it to ${budget} words or fewer.` })
+  const over = fieldOverBudget(field, value, size)
+  if (over !== null) {
+    problems.push({ kind: 'budget', message: `${where}: ${over.words} words is over the ${targetSizeLabel(size)} budget of about ${over.target}. Tighten it to ${over.target} words or fewer.` })
   }
   const text = Array.isArray(value) ? value.join('\n') : value
   const figures = unsourcedFigures(text, architectText)

@@ -89,6 +89,17 @@ export function targetWordsFieldCount(modules) {
 }
 
 /**
+ * The one over-budget rule, shared by the stage Save's notes and the AI interview's draft check: `{ words, target }` when
+ * `value` is over `field`'s word budget at `size`, or `null` when it is within it or the Field declares no budget.
+ */
+export function fieldOverBudget(field, value, size) {
+  const target = fieldTargetWords(field, size)
+  if (target === null) return null
+  const words = countWords(value)
+  return words > target ? { words, target } : null
+}
+
+/**
  * Words in a Field's value as a reader would count them: Markdown punctuation (`-`, `|`, `#`, `**`)
  * is not a word, a link counts its text, and fenced code blocks (a Mermaid diagram's source) and
  * images are left out. A list Field's items are counted together. Advisory, so it aims to be
@@ -156,10 +167,9 @@ export function overTargetNotes(modules, written, storedSize) {
     const fields = record?.fields
     if (!fields || typeof fields !== 'object') continue
     for (const [fieldId, value] of Object.entries(fields)) {
-      const target = fieldTargetWords(specs.get(moduleId)?.fields?.find((f) => f.id === fieldId), size)
-      if (target === null) continue
-      const words = countWords(value)
-      if (words <= target) continue
+      const over = fieldOverBudget(specs.get(moduleId)?.fields?.find((f) => f.id === fieldId), value, size)
+      if (over === null) continue
+      const { words, target } = over
       notes.push({
         module: moduleId,
         field: fieldId,

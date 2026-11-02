@@ -313,7 +313,7 @@ Under each field with a word target, the editor shows the target for the instanc
 
 The target is advice, not a limit. You can always save a field that's over its target, it never stops a gate passing, and a document renders exactly what you wrote, at any size. Gantry never shortens your content for you. Changing the size changes the targets you see, not anything already written.
 
-An AI agent writing through the MCP server sees the same targets: `get_instance` gives each field's target for the instance's size, and when `update_instance_modules` saves a field that's over its target, the save still succeeds and its response carries a note such as `nfrs.performance: 420 words, Medium target ~150` so the agent can tighten it.
+An AI agent writing through the MCP server sees the same targets: `get_instance` gives each field's target for the instance's size, and when `update_instance_modules` saves a field that's over its target, the save still succeeds and its response carries a note such as `nfrs.performance: 420 words, Medium target ~150` so the agent can tighten it. The same response carries a `fieldNotes` list with that note and the other two per-Field checks (see **Gantry checks every draft** below).
 
 The `design` definition's v3 draft sets word targets on every field that appears in a document. Its Large targets match the bundled examples' original level of detail, and the examples are now written to Medium, so **Populate example text** shows the default amount. A Medium Solution Architecture Document comes to roughly half the length of a Large one.
 
@@ -713,6 +713,8 @@ The AI writes each Field through a *draft field step*, and Gantry checks the dra
 - every **figure** must be cited with a Source document or marked **(target assumption)**, unless you typed that figure yourself in the chat. A citation to a document that isn't in the Instance is also a problem.
 
 If a draft has a problem, Gantry sends it back to the AI **once**, saying what to fix. If it is still wrong, or the AI doesn't answer, the draft still appears in the preview, with the problem shown as a **warning** under the Field. A check never blocks anything: you decide.
+
+An outside agent writing through the MCP server is held to the same three checks on **every** content write, whether or not it is running an interview. When `update_instance_modules` saves a Field with a select value that isn't exactly one of the options, a word count over the budget, or a figure with no source, the save still succeeds and the response carries a note for each problem under `fieldNotes`, naming the Field and saying how to fix it. A clean write returns an empty list. The checks are the same code the draft step uses, so the two never disagree. An outside agent can't tell which figures you typed yourself, so it may be noted for one; tell it where the figure came from and mark it **(target assumption)** or cite the Source document.
 
 ### Chatting and switching AI Provider
 

@@ -326,6 +326,32 @@ test('update_instance_modules returns over-budget notes beside a successful save
   assert.match(updateInstanceModulesTool.description, /"targetWordNotes"/)
 })
 
+// #306 (ADR-0067): every content write is checked Field by Field; the notes ride beside the save, as the
+// over-budget notes do, and a clean write carries an empty list.
+test('update_instance_modules returns the per-Field notes beside a successful save, and an empty list for a clean write', async () => {
+  const note = { module: 'nfrs', field: 'priority', kind: 'options', message: 'nfrs.priority: "Urgent" is not one of the options. Use exactly: "High", "Low".' }
+  let reply = [note]
+  const fetch = stubFetch(({ url, method }) => {
+    if (url.pathname === '/api/instance/workspace') return { status: 200, body: { workspaceId: null, scope: null } }
+    if (url.pathname === '/api/instance/modules' && method === 'PUT') return { status: 200, body: { saved: ['nfrs'], commit: null, fieldNotes: reply } }
+    return undefined
+  })
+  try {
+    const gantryClient = createGantryClient({ baseUrl: BASE_URL, workspacePats: {} })
+    const args = { slug: 'noted-instance', modules: { nfrs: { fields: { priority: 'Urgent' } } } }
+    const noted = await updateInstanceModulesTool.handler(args, { gantryClient })
+    assert.equal(noted.isError, undefined)
+    assert.deepEqual(JSON.parse(noted.content[0].text).fieldNotes, [note])
+    reply = []
+    const clean = await updateInstanceModulesTool.handler(args, { gantryClient })
+    assert.deepEqual(JSON.parse(clean.content[0].text).fieldNotes, [])
+  } finally {
+    fetch.restore()
+  }
+  assert.match(updateInstanceModulesTool.description, /"fieldNotes"/)
+  assert.match(updateInstanceModulesTool.description, /\(target assumption\)/)
+})
+
 test('update_instance_modules reports missing_workspace_pat and never calls PUT /api/instance/modules', async () => {
   const fetch = stubFetch(({ url }) => {
     if (url.pathname === '/api/instance/workspace') return { status: 200, body: { workspaceId: 'ws-2', scope: 'ws-2' } }
