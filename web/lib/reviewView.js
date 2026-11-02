@@ -80,8 +80,9 @@ export function ReviewInputs({ card, session, fieldTitle }) {
  *   plan           `planReview`'s result for this Stage, or null
  *   running        a session is under way: the questions join its next round
  *   paused         the session was paused: they join when it resumes
+ *   responseCount / onDownloadResponse  how many answered comments the decisions logs hold (#304), and the download of the Review response list they make
  */
-export function ReviewSection({ copies, plan, running, paused = false, joined = false, blocked = false, reviewPage = false, canOpen = true, pageStageTitle = 'this Stage', onBringIn, onWorkThrough, onJoin, onReopen, stageTitleOf = (id) => id, onOpenStage, error = '' }) {
+export function ReviewSection({ copies, plan, running, paused = false, joined = false, blocked = false, reviewPage = false, canOpen = true, pageStageTitle = 'this Stage', onBringIn, onWorkThrough, onJoin, onReopen, stageTitleOf = (id) => id, onOpenStage, error = '', responseCount = 0, onDownloadResponse = null }) {
   const items = plan?.items.length ?? 0
   const resolved = plan?.resolved ?? []
   const elsewhere = plan?.stages ?? []
@@ -100,6 +101,9 @@ export function ReviewSection({ copies, plan, running, paused = false, joined = 
             )}
           </ul>`}
     ${error ? html`<p class="inline-error" role="alert" data-testid="interview-review-error">${error}</p>` : null}
+    ${responseCount > 0 && onDownloadResponse
+      ? html`<button type="button" class="btn small" data-testid="interview-response-download" onClick=${onDownloadResponse}>Download Review response list (${responseCount})</button>`
+      : null}
     ${plan
       ? html`<p class="kick-note" data-testid="interview-review-count">
           ${items ? html`<strong>${items} review ${items === 1 ? 'question' : 'questions'}</strong> on ${pageStageTitle}.` : 'No review question waits on this Stage.'}

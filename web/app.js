@@ -120,6 +120,7 @@ import {
 } from './lib/reviewedCopies.js'
 import { REVIEWED_COPY_MAX_BYTES } from './lib/reviewedCopy.js'
 import { describeReview } from './lib/reviewManifest.js'
+import { downloadReviewResponseList } from './lib/reviewResponse.js'
 import { modulesWithStandard } from './lib/standardModules.js'
 import {
   parseKeyDecisions,
@@ -4898,6 +4899,15 @@ function ReviewGroupView({ group }) {
 // The copies read last, so switching Stage (which remounts the panel) doesn't read every one again.
 let reviewCopiesCache = { key: null, copies: [] }
 
+// The Definition version an Instance was made from: a Local workspace holds it itself, otherwise the server serves it.
+async function loadDefinitionStructure(instance) {
+  if (instance.localDefinitionStructure) return instance.localDefinitionStructure
+  const res = await fetch(`/api/definitions/${encodeURIComponent(instance.definition)}/versions/${encodeURIComponent(String(instance.definitionVersion ?? 1))}`)
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(body.error ?? `Failed to load the Definition "${instance.definition}" (${res.status})`)
+  return body
+}
+
 function ReviewCommentsPanel({ instance }) {
   const location = useLocation()
   const tick = reviewTick.value
@@ -4911,6 +4921,29 @@ function ReviewCommentsPanel({ instance }) {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
     event.preventDefault()
     location.route(`${goHere.pathname}${goHere.search}`)
+  }
+  // #304 (ADR-0066): the Review response list, made on demand from the decisions logs. Nothing is written to the Reviewed copy or committed.
+  const decisionsStore = useDecisionsStore(instance)
+  const [response, setResponse] = useState({ phase: 'idle', message: '' })
+  async function downloadResponseList() {
+    setResponse({ phase: 'working', message: '' })
+    try {
+      const structure = await loadDefinitionStructure(instance)
+      const stages = structure.stages ?? instance.stages
+      const logs = Object.fromEntries(await Promise.all(stages.map(async (st) => [st.id, await decisionsStore.read(st.id).catch(() => null)])))
+      const modules = modulesWithStandard(structure.modules, structure.standardModules)
+      const fieldTitle = (fieldKey) => {
+        const [moduleId, ...rest] = String(fieldKey).split('.')
+        const mod = modules.find((m) => m.id === moduleId)
+        const field = mod?.fields?.find((f) => f.id === rest.join('.'))
+        return mod && field ? `${mod.title ?? mod.id} · ${field.title ?? field.id}` : String(fieldKey)
+      }
+      const stageTitle = (id) => stages.find((st) => st.id === id)?.title ?? id
+      const made = downloadReviewResponseList(logs, { instanceName: instance.name || instance.slug, fieldTitle, stageTitle })
+      setResponse({ phase: 'idle', message: made ? '' : 'No comment has been answered yet, so there is nothing to list.' })
+    } catch (err) {
+      setResponse({ phase: 'error', message: `The Review response list could not be made: ${err.message}` })
+    }
   }
   const key = `${instance.slug}#${tick}`
   const [state, setState] = useState(() =>
@@ -4942,6 +4975,13 @@ function ReviewCommentsPanel({ instance }) {
       <h2>Review comments</h2>
       ${workThroughHref
         ? html`<p class="review-note"><a class="btn small" href=${workThroughHref} data-testid="review-work-through" onClick=${workThrough}>Work through these with the AI</a> One card for each comment thread; nothing changes until you answer.</p>`
+        : null}
+      ${decisionsStore && state.copies.some(({ entry }) => (entry.commentsAnswered ?? 0) > 0)
+        ? html`<p class="review-note" data-testid="review-response">
+            <button type="button" class="btn small" data-testid="review-response-download" disabled=${response.phase === 'working'} onClick=${downloadResponseList}>${response.phase === 'working' ? 'Making the list…' : 'Download Review response list'}</button>
+            Each answered comment, who made it, what was decided and why, as a Word document to send back. Gantry never changes the Reviewed copy or replies to the commenters.
+          </p>
+          ${response.message ? html`<p class=${response.phase === 'error' ? 'inline-error' : 'review-note'} role=${response.phase === 'error' ? 'alert' : 'status'} data-testid="review-response-message">${response.message}</p>` : null}`
         : null}
       ${state.copies.map(
         ({ entry, read, placed, error }) => html`
@@ -5272,13 +5312,7 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequ
     }
   }, [instance.slug, instance.currentStageId, hasFlags])
   if (!store || !decisionsStore) return html`<p class="loading">Loading…</p>`
-  async function loadStructure() {
-    if (instance.localDefinitionStructure) return instance.localDefinitionStructure
-    const res = await fetch(`/api/definitions/${encodeURIComponent(instance.definition)}/versions/${encodeURIComponent(String(instance.definitionVersion ?? 1))}`)
-    const body = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(body.error ?? `Failed to load the Definition "${instance.definition}" (${res.status})`)
-    return body
-  }
+  const loadStructure = () => loadDefinitionStructure(instance)
   async function loadOtherSaved() {
     const modules = []
     if (instance.isLocalWorkspace) {

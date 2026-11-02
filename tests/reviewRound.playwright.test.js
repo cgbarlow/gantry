@@ -1,12 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parse as parseYAML } from 'yaml'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { withRunningServer, withScratchInstances } from './helpers/lifecycle.js'
 import { seedProviders, withFakeAnthropic } from './helpers/interviewStandIn.js'
 import { RENDER_PROPERTIES, reviewedCopy } from './helpers/reviewedCopyFixture.js'
+import { readPackageTexts } from '../web/lib/definitionLogo.js'
 
 // #303 (parent #238, decided in #251): review comments as a focused interview round, on a server workspace. A real server and relay, a real
 // Chromium page and a stand-in for Anthropic. The rules (which comment is a card, the recommendation, what an answer means, no real name to the
@@ -171,7 +172,7 @@ test('server workspace: the review round asks one card per unresolved thread, an
     await page.click('[data-testid="review-save"]')
     await page.getByTestId('review-saved').waitFor()
     assert.match(await page.textContent('[data-testid="review-saved-summary"]'), /9 comments logged, 2 Fields changed/)
-    assert.match(await page.textContent('[data-testid="review-saved-summary"]'), /not re-rendered/)
+    assert.match(await page.textContent('[data-testid="review-rerender-nudge"]'), /Render again.*a Save never renders the Word documents/s, 'the nudge to render again shows after the Save')
 
     // On disk: the edit, the Module still draft, the log with the real names and the full comments, and the manifest's count.
     const module = readFileSync(join(folder, 'modules', 'background.md'), 'utf8')
@@ -300,4 +301,60 @@ test('server workspace: review comments are brought in from the Interview page i
     },
     { copy: false }
   )
+})
+
+// #304 (ADR-0066): the Review response list. Built from the decisions log on demand and downloaded as Word; nothing is written to the Reviewed copy or committed.
+const wordText = async (path) => (await readPackageTexts(new Uint8Array(readFileSync(path)), (name) => name === 'word/document.xml')).get('word/document.xml')
+
+test('server workspace: after a review round the Review response list downloads as Word, from the Interview page and from the editor, and nothing is written for it', async () => {
+  await withReviewServer(async ({ page, base, folder, entry }) => {
+    const reviewsBefore = readdirSync(join(folder, 'reviews')).sort()
+    const copyBefore = readFileSync(join(folder, 'reviews', `${entry.id}.docx`))
+    await page.goto(`${base}/instance/${SLUG}?interview=1&review=1`)
+    await page.waitForSelector('[data-testid="interview-review-intro"]')
+    assert.equal(await page.locator('[data-testid="interview-response-download"]').count(), 0, 'with no comment answered there is no list to download')
+    await page.click('[data-testid="interview-start"]')
+    await page.waitForSelector('[data-testid="interview-round"]')
+    await answerRound(page, new Map([['Add the team', 'Keep as is']]))
+    await page.getByTestId('review-ready').waitFor()
+    await page.click('[data-testid="review-save"]')
+    await page.getByTestId('review-saved').waitFor()
+    assert.match(await page.textContent('[data-testid="review-rerender-nudge"]'), /Render again/)
+    assert.match(await page.textContent('[data-testid="review-rerender-nudge"]'), /hld/i)
+
+    const [download] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid="review-response-download"]')])
+    assert.match(download.suggestedFilename(), /Review response list\.docx$/)
+    const path = await download.path()
+    const document = await wordText(path)
+    assert.match(document, /9 comments answered/)
+    assert.match(document, /Add the team/)
+    assert.match(document, /Ben Commenter/)
+    assert.match(document, /Ana Reviewer/)
+    assert.match(document, /Kept as it was/)
+    assert.match(document, /Edit accepted/)
+    assert.equal((document.match(/<w:tr>/g) ?? []).length, 10, 'a header row and a row for each of the nine answered threads')
+    // The rail offers the same download once there are answers.
+    assert.match(await page.textContent('[data-testid="interview-response-download"]'), /\(9\)/)
+
+    // Nothing was written for the list: the Reviewed copy is as it was, and no other file appeared under reviews/.
+    assert.deepEqual(readdirSync(join(folder, 'reviews')).sort(), reviewsBefore)
+    assert.ok(readFileSync(join(folder, 'reviews', `${entry.id}.docx`)).equals(copyBefore), 'the Reviewed copy is never changed')
+    assert.deepEqual(readdirSync(folder).filter((f) => /response/i.test(f)), [])
+
+    // The editor's Review comments panel offers it too, once the manifest says comments are answered.
+    await page.goto(`${base}/instance/${SLUG}`)
+    await page.getByTestId('review-copies-panel').waitFor()
+    await page.getByTestId('review-response').waitFor()
+    const [again] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid="review-response-download"]')])
+    assert.equal(again.suggestedFilename(), download.suggestedFilename())
+    assert.match(await wordText(await again.path()), /Add the team/)
+  })
+})
+
+test('server workspace: the editor offers no Review response list until a comment has been answered', async () => {
+  await withReviewServer(async ({ page, base }) => {
+    await page.goto(`${base}/instance/${SLUG}`)
+    await page.getByTestId('review-copies-panel').waitFor()
+    assert.equal(await page.locator('[data-testid="review-response"]').count(), 0)
+  })
 })

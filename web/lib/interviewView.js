@@ -27,6 +27,7 @@ import { outOfDateCountByStage, flagsForField } from './outOfDate.js'
 import { planUpdateRound, stagesToUpdate } from './bringUpToDate.js'
 import { answeredCounts, assignChoices, planReview, reviewerLabels } from './reviewRound.js'
 import { ReviewContext, ReviewInputs, ReviewSection } from './reviewView.js'
+import { downloadReviewResponseList, hasReviewResponses, reviewResponseRows } from './reviewResponse.js'
 import { beginRun, clearRun, interviewRuns, nextStage, planRows, resumableRun, runStartStage, runTargets, saveOutcome, updateRun } from './interviewRun.js'
 import { EMPTY_TOKENS, addTokens, formatTokens, hasTokens, tokenBreakdown, tokensOfLog, totalTokens } from './tokenUsage.js'
 import { describeSaved, resumeInfo } from './interviewResume.js'
@@ -1172,6 +1173,14 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     </p>`
   }
 
+  // #304 (ADR-0066): the Review response list, built on demand from the Stages' committed decisions logs. Gantry never writes it anywhere: it is a download.
+  const responseLogs = { ...stageLogs, [instance.stage.id]: committedLog }
+  const responseList = reviewResponseRows(responseLogs, { fieldTitle: (key) => fieldLabel(setup.definition, key), stageTitle: stageTitleOf })
+  const downloadResponseList = () => downloadReviewResponseList(responseLogs, { instanceName: instance.name || instance.slug, fieldTitle: (key) => fieldLabel(setup.definition, key), stageTitle: stageTitleOf })
+  // The documents the answered comments were made on: the ones to render again for the commenters to see the changes (a Save never renders, ADR-0034).
+  const answeredNow = answeredCounts(responseLogs)
+  const toRenderAgain = [...new Set((reviewCopies ?? []).filter(({ entry }) => answeredNow[entry.id] > 0).map(({ entry }) => (instance.artefacts ?? []).find((a) => a.id === entry.artefact)?.title ?? entry.artefact))]
+
   // The rail's Review comments panel (#303).
   const reviewRail = () => {
     const running = started && phase !== 'paused'
@@ -1193,6 +1202,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       onWorkThrough=${() => onOpenReview?.()}
       onJoin=${joinReviewNow}
       onReopen=${(threadKey) => setReopenedThreads((was) => new Set([...was, threadKey]))}
+      responseCount=${responseList.rows.length}
+      onDownloadResponse=${downloadResponseList}
     />`
   }
 
@@ -1620,10 +1631,18 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         <p class="qhead">${saving.answers || saving.fields ? 'Review comments answered and saved' : 'Nothing to save'}</p>
         <p data-testid="review-saved-summary">
           ${saving.answers || saving.fields
-            ? html`${saving.answers} comment${saving.answers === 1 ? '' : 's'} logged${saving.fields ? `, ${saving.fields} Field${saving.fields === 1 ? '' : 's'} changed` : ''}. The Modules stay <strong>draft</strong>: a person marks them agreed.
-              The Word documents are not re-rendered by a Save: render again when you want the reviewers to see the changes.`
+            ? html`${saving.answers} comment${saving.answers === 1 ? '' : 's'} logged${saving.fields ? `, ${saving.fields} Field${saving.fields === 1 ? '' : 's'} changed` : ''}. The Modules stay <strong>draft</strong>: a person marks them agreed.`
             : 'Every comment was left unanswered, so nothing was written.'}
         </p>
+        ${saving.answers
+          ? html`<p class="kick-note" data-testid="review-rerender-nudge" role="note">
+              <strong>Render again</strong> when you want the commenters to see the changes: a Save never renders the Word documents${toRenderAgain.length ? html`, so ${toRenderAgain.join(', ')} still ${toRenderAgain.length === 1 ? 'reads' : 'read'} as it did when they commented` : ''}.
+              Gantry does not edit the Reviewed copy or reply to the commenters; the <strong>Review response list</strong> is what you can send them.
+            </p>`
+          : null}
+        ${responseList.rows.length
+          ? html`<div class="round-actions"><button type="button" class="btn small" data-testid="review-response-download" onClick=${downloadResponseList}>Download the Review response list (Word)</button></div>`
+          : null}
         ${saving.returned.length
           ? html`<ul class="update-returned" data-testid="review-returned">
               ${saving.returned.map((e) => html`<li key=${e.id} data-module=${e.module}>${e.note}</li>`)}

@@ -146,3 +146,21 @@ Ticket #303 built the AI half: the round itself. Where the ticket left a detail 
   workspace; a Local workspace writes its own). It only goes up and never past the comments the copy holds.
 - **A Save does not render again** and the **Review response list** is #304. The Interview page's summary says render again when reviewers should
   see the changes.
+
+## Amendment (#304): the Review response list
+
+Ticket #304 built the last part: what Gantry offers in place of writing back. Where the ticket left a detail open:
+
+- **It is made in the browser, from the logs, each time it is asked for**, and handed to the browser as a download. It is not stored, not written
+  into the Instance's files and not committed, so there is nothing to keep in step with the log. The same builder (`web/lib/reviewResponse.js`) has
+  no DOM, so the server or an outside agent (ADR-0067) can make the same list from the same logs.
+- **One table for each Reviewed copy**, a row for each answered thread: comment (with replies and tracked change word for word), commenter, Field,
+  outcome and reason. A thread answered twice (in two Stages' logs) is one row, the latest answer. The columns are plain Word, so the architect can
+  edit the wording before sending it.
+- **The reason is the architect's own words, or a dash.** Gantry does not write a reason the architect did not give.
+- **The outcome says only what happened.** "Revise" and "Accept the edit" through the AI end in a keep / use / merge card; if the log shows the
+  architect then kept what was saved, the row reads "Looked at; the wording stayed as it was". On a shared card, a commenter whose edit was not the
+  one accepted reads "Another commenter's edit was accepted instead".
+- **Where it is offered:** the Interview page's rail and the card after a round is saved (with the nudge to render again), and the editor's Review
+  comments panel once the manifest says a comment is answered. The nudge names the documents the answered comments were made on; re-rendering
+  stays a button the architect presses.
