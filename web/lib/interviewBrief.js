@@ -45,6 +45,7 @@ import { INTERVIEW_RULES_VERSION, INTERVIEW_RULES, interviewRulesText } from './
 import { adapterText } from './interviewAdapter.js'
 import { INTERVIEW_SKILLS, interviewSkillVersions, interviewSkillsCredit } from './interviewSkills.js'
 import { pagesSummary } from './interviewSources.js'
+import { currentLogEntries } from './decisionsLog.js'
 import { effectiveTargetSize, fieldTargetWords, targetSizeLabel } from './targetSize.js'
 
 /** The Source documents go in whole while the pack is at most this share of the model's context window. */
@@ -192,22 +193,8 @@ export function parseGlossaryTerms(markdown) {
 
 // --- the decisions log ------------------------------------------------------------------------------------------------
 
-/**
- * The entries of a decisions log (docs/adr/0064) that currently hold: everything after the last
- * restart marker, without an entry a later one `replaces`, and with an open question dropped once a
- * later entry `resolves` it. `decisions` is `{ entries }` or the entries themselves. An entry is
- * `{ id, kind, question?, recommendation?, answer?, words?, sources?, fields?, term?, preferred?,
- * avoid?, replaces?, resolves? }`; `kind` is one of `answer`, `term`, `open-question`, `restart`, or
- * anything the log adds later (shown as it is).
- */
-export function currentLogEntries(decisions) {
-  const all = (Array.isArray(decisions) ? decisions : decisions?.entries ?? []).filter((e) => e && typeof e === 'object')
-  const lastRestart = all.map((e) => e.kind).lastIndexOf('restart')
-  const entries = lastRestart === -1 ? all : all.slice(lastRestart + 1)
-  const replaced = new Set(entries.map((e) => e.replaces).filter(Boolean).flat())
-  const resolved = new Set(entries.map((e) => e.resolves).filter(Boolean).flat())
-  return entries.filter((e) => e.kind !== 'restart' && !replaced.has(e.id) && !(e.kind === 'open-question' && resolved.has(e.id)))
-}
+// `currentLogEntries` (what currently holds in a decisions log) lives with the log itself, web/lib/decisionsLog.js.
+export { currentLogEntries }
 
 function termChoicesFrom(entries) {
   return entries.filter((e) => e.kind === 'term' && typeof (e.preferred ?? e.term) === 'string' && (e.preferred ?? e.term).trim() !== '')
@@ -219,7 +206,7 @@ function logEntryLine(entry) {
   if (entry.question) bits.push(entry.question)
   if (entry.kind === 'term') bits.push(`prefer "${entry.preferred ?? entry.term}"${asArray(entry.avoid).length ? `, avoid ${asArray(entry.avoid).map((a) => `"${a}"`).join(', ')}` : ''}`)
   if (entry.recommendation) bits.push(`recommended: ${entry.recommendation}`)
-  if (entry.answer) bits.push(`answer: ${entry.answer}`)
+  if (entry.answer) bits.push(`answer: ${asArray(entry.answer).join('; ')}`)
   if (entry.words) bits.push(`the architect's words: "${entry.words}"`)
   if (asArray(entry.sources).length) bits.push(`sources: ${asArray(entry.sources).join(', ')}`)
   if (asArray(entry.fields).length) bits.push(`fed: ${asArray(entry.fields).join(', ')}`)

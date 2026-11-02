@@ -124,7 +124,7 @@ test('a pack over the threshold is a catalogue, and the AI reads a section by id
 
   // The brief carried a catalogue, not the text, and the AI was handed the reader beside the draft tool.
   const first = ai.calls[0].body
-  assert.deepEqual(first.tools.map((t) => t.name), ['ask_architect', 'draft_field', 'read_source_document'])
+  assert.deepEqual(first.tools.map((t) => t.name), ['ask_architect', 'draft_field', 'log_decision', 'read_source_document'])
   assert.match(first.system, /only a catalogue is shown/)
   assert.match(first.system, /read_source_document\(id, range\)/)
   assert.match(first.system, /\*\*Client brief\*\* \(id `brief`/)
@@ -210,7 +210,7 @@ test('a small pack is sent whole and the AI is not offered the reader', async ()
   const ai = fakeAi(() => anthropicReply({ text: 'Nothing to draft.' }))
   const { session } = sessionWith(ai, { sources: [{ id: 'brief', title: 'Client brief', filename: 'brief.md', size: 40, text: 'The insurer wants faster claims.' }] })
   await session.start()
-  assert.deepEqual(ai.calls[0].body.tools.map((t) => t.name), ['ask_architect', 'draft_field'])
+  assert.deepEqual(ai.calls[0].body.tools.map((t) => t.name), ['ask_architect', 'draft_field', 'log_decision'])
   assert.match(ai.calls[0].body.system, /The insurer wants faster claims\./)
   assert.doesNotMatch(ai.calls[0].body.system, /The Source documents are a catalogue/)
 })

@@ -21,6 +21,7 @@ import { modulesWithStandard } from './standardModules.js'
 import { citationSegments, isBlankValue } from './interviewDraft.js'
 import { describeInput, planSourceAccess } from './interviewSources.js'
 import { effectiveTargetSize, fieldTargetWords, targetSizeLabel } from './targetSize.js'
+import { logSummary } from './decisionsLog.js'
 
 // One session per Instance Stage while the editor page is open, so going to the editor and back keeps the conversation and the drafts.
 const sessions = new Map()
@@ -126,9 +127,10 @@ function providerLabel(p) {
  *   blockedReason   a sentence when the Instance can't be written to (archived, no write access), else ''
  *   loadStructure   () => the Definition version projection
  *   loadOtherSaved  () => the other Stages' Modules (same shape as `instance.modules`), for the brief
- *   onSaveDrafts    (drafts, { artefactId }) => { ok, message?, check? }  puts the drafts in the Modules and does the stage Save
+ *   decisionsStore  { read(stageId) } the Stage's decisions log (#288, web/lib/decisionsStore.js)
+ *   onSaveDrafts    (drafts, { artefactId, decisions }) => { ok, message?, check? }  puts the drafts in the Modules and does the stage Save, writing the decisions log in the same Save
  */
-export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, onSaveDrafts }) {
+export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts }) {
   const key = `${instance.slug}|${instance.stage.id}`
   const [setup, setSetup] = useState({ status: 'loading' })
   const [sources, setSources] = useState(null)
@@ -140,6 +142,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const [switchMessage, setSwitchMessage] = useState('')
   const [chat, setChat] = useState('')
   const [saving, setSaving] = useState(null)
+  const [committedLog, setCommittedLog] = useState(null) // the Stage's decisions log as committed (#288)
+  const [confirmRestart, setConfirmRestart] = useState(false)
   const sessionRef = useRef(null)
   const ctxRef = useRef(null)
   const threadRef = useRef(null)
@@ -152,11 +156,12 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   useEffect(() => {
     let cancelled = false
     setSetup({ status: 'loading' })
-    Promise.all([loadStructure(), loadSkills(), loadOtherSaved().catch(() => [])])
-      .then(([structure, skills, otherSaved]) => {
+    Promise.all([loadStructure(), loadSkills(), loadOtherSaved().catch(() => []), decisionsStore?.read(instance.stage.id).catch(() => null) ?? null])
+      .then(([structure, skills, otherSaved, committedLog]) => {
         if (cancelled) return
         const definition = { ...structure, modules: modulesWithStandard(structure.modules, structure.standardModules) }
         setSetup({ status: 'ready', structure, definition, skills, otherSaved })
+        setCommittedLog(committedLog)
       })
       .catch((err) => !cancelled && setSetup({ status: 'error', message: err.message }))
     return () => {
@@ -200,6 +205,10 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           saved: [...instance.modules, ...otherSaved],
           sources: sources ?? [],
           skills: setup.skills,
+          // #288: what the decisions log already holds, who is interviewing, and the Interview instructions version the status block records.
+          decisions: committedLog,
+          actor,
+          instructionsVersion: `${setup.definition.id ?? instance.definition}@${instance.definitionVersion ?? setup.structure.version ?? 1}`,
           // #292: a picture, or a scanned or "Read visually" PDF, is sent as the original; the session reads it when it builds a request.
           readOriginal: async (id) => (await store.readOriginal(id)).bytes ?? null,
         }
@@ -220,6 +229,11 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     session.bind({ getContext: () => ctxRef.current, handlers: { askForKey: ask('key'), askToRetry: ask('retry') }, onChange: setSnap })
     return () => session.bind({ onChange: null })
   }, [key, setup.status])
+
+  // The Stage's committed decisions log is what the rail counts and what the AI is told is settled (#288).
+  useEffect(() => {
+    if (setup.status === 'ready' && committedLog && sessionRef.current) sessionRef.current.loadDecisions(committedLog)
+  }, [committedLog, setup.status])
 
   // Before the interview starts, the session follows the picker (and a Default that arrives from "Connect an AI Provider").
   useEffect(() => {
@@ -304,14 +318,24 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   async function saveStage() {
     setSaving({ phase: 'saving' })
     const keys = Object.keys(drafts)
+    // #288: the decisions log goes in the same Save as the content.
+    const decisions = sessionRef.current?.decisionsDelta({ runState: 'saved', saving: true }) ?? null
     let result
     try {
-      result = await onSaveDrafts(drafts, { artefactId })
+      result = await onSaveDrafts(drafts, { artefactId, decisions })
     } catch (err) {
       result = { ok: false, message: err.message }
     }
     if (result.ok) {
       sessionRef.current?.markSaved(keys)
+      if (decisions) {
+        sessionRef.current?.commitDecisions(decisions)
+        const fresh = await decisionsStore?.read(instance.stage.id).catch(() => null)
+        if (fresh) {
+          setCommittedLog(fresh)
+          sessionRef.current?.loadDecisions(fresh)
+        }
+      }
       setSaving({ phase: 'saved', check: result.check ?? null })
     } else {
       setSaving({ phase: 'error', message: result.message || 'The Save did not go through.' })
@@ -402,6 +426,28 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           </li>`
         )}
       </ul>
+    </div>`
+  }
+
+  // The decisions log (#288): a count in the rail, with the open questions called out. The full, read-only panel is in the editor.
+  const decisionsRail = () => {
+    const summary = snap?.decisions ?? logSummary(committedLog)
+    return html`<div data-testid="interview-decisions">
+      <h3 class="side">Decisions log <span class="dl-count" data-testid="interview-decisions-count">${summary.count}</span></h3>
+      <p class="dl-summary" data-testid="interview-decisions-summary">
+        ${summary.count === 0 ? 'Nothing decided yet.' : `${summary.latest.length} decision${summary.latest.length === 1 ? '' : 's'}`}
+        ${summary.open.length ? html` · <span class="dl-open-count" data-testid="interview-decisions-open">${summary.open.length} open question${summary.open.length === 1 ? '' : 's'}</span>` : null}
+        ${snap?.decisions?.pending ? html` · <span data-testid="interview-decisions-unsaved">${snap.decisions.pending} not saved yet</span>` : null}
+      </p>
+      ${started && !blockedReason
+        ? confirmRestart
+          ? html`<div class="dl-restart" data-testid="interview-restart-confirm" role="alert">
+              <p class="kick-note">Start over: the AI ignores every earlier answer from now on. Saved content is not touched, and the log keeps what was said before.</p>
+              <button type="button" class="btn small" data-testid="interview-restart-yes" onClick=${() => { sessionRef.current?.startOver(); setConfirmRestart(false); setSaving(null) }}>Start this stage over</button>
+              <button type="button" class="btn small ghost" onClick=${() => setConfirmRestart(false)}>Keep going</button>
+            </div>`
+          : html`<button type="button" class="btn small ghost dl-restart" data-testid="interview-restart" disabled=${busy} onClick=${() => setConfirmRestart(true)}>Start this stage over</button>`
+        : null}
     </div>`
   }
 
@@ -511,6 +557,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         <div class="cite">${instance.stage.title} (gate: ${instance.stage.gate})</div>
         <h3 class="side">Source documents</h3>
         <${SourceDocumentsPanel} store=${store} actor=${actor} readOnly=${Boolean(blockedReason)} compact=${true} onList=${onSourceList} />
+        ${decisionsRail()}
         ${inputsLog()}
       </aside>
 

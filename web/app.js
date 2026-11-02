@@ -79,6 +79,8 @@ import { SourceDocumentsPanel, openSourceDocument } from './lib/sourceDocumentsP
 import { citedSourceIds } from './lib/sourceCitations.js'
 import { InterviewPage, clearInterviewSessions } from './lib/interviewView.js'
 import { createLocalSourceStore } from './lib/localSourceDocuments.js'
+import { createLocalDecisionsStore, createServerDecisionsStore, planLocalDecisions } from './lib/decisionsStore.js'
+import { DecisionsLogPanel } from './lib/decisionsLogPanel.js'
 import { createServerSourceClient } from './lib/serverSourceDocuments.js'
 import { assetReference, repoAssetReference, isLocalAssetSource, resolveAssetRefs, resolveRepoAssetRefs } from './lib/assetRefs.js'
 import { IdentityPicker } from './lib/identityPicker.js'
@@ -4611,6 +4613,8 @@ function ChangedSinceApprovalPanel({ instance }) {
 
 // Bumped after a copy is brought in, so the panel reads the list again.
 const reviewTick = signal(0)
+// #288: bumped after a Save that wrote the decisions log, so the editor's Decisions log panel reads the file again.
+const decisionsLogTick = signal(0)
 
 // Today's content of every Field of a Local workspace's Definition (a folder keeps no history to rebuild a
 // render from), for placing comments by text; `texts: false` gives the Fields alone.
@@ -4919,6 +4923,7 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
       <${ReopenStagePanel} instance=${instance} />
       <${ChangedSinceApprovalPanel} instance=${instance} />
       <${ReviewCommentsPanel} instance=${instance} />
+      <${DecisionsLogSection} instance=${instance} />
       ${advancedMode.value
         ? html`<${SyncedFieldsPanel} key=${instance.workItem ? 'linked' : 'unlinked'} instance=${instance} />`
         : null}
@@ -4976,10 +4981,52 @@ function useSourceStore(instance) {
   }, [slug, instance.isLocalWorkspace, handle])
 }
 
+// #288 (map #238, docs/adr/0064): the Instance's decisions log store: its own folder for a Local workspace, /api/instance/decisions otherwise.
+function useDecisionsStore(instance) {
+  const handle = localDirHandle.value
+  const slug = instance.slug
+  return useMemo(() => {
+    if (instance.workspaceBacked) return null // a Provider workspace takes the decisions log with the remote-session tickets
+    if (instance.isLocalWorkspace) return handle ? createLocalDecisionsStore(handle, slug) : null
+    return createServerDecisionsStore(slug, (url, init) => apiFetchForInstance(slug, url, init))
+  }, [slug, instance.isLocalWorkspace, instance.workspaceBacked, handle])
+}
+
+// The read-only Decisions log panel in the editor (#288): this Stage's latest answers, open questions and, on request, its history.
+// `reloadKey` changes after a Save so the panel reads the file again.
+function DecisionsLogSection({ instance }) {
+  const store = useDecisionsStore(instance)
+  const [log, setLog] = useState(null)
+  const tick = decisionsLogTick.value
+  useEffect(() => {
+    if (!store) return undefined
+    let live = true
+    store
+      .read(instance.stage.id)
+      .then((found) => live && setLog(found))
+      .catch(() => live && setLog(null))
+    return () => {
+      live = false
+    }
+  }, [store, instance.stage.id, tick])
+  if (!store) return null
+  const fieldTitle = (key) => {
+    const [moduleId, ...rest] = String(key).split('.')
+    const mod = instance.modules.find((m) => m.id === moduleId)
+    const field = mod?.fields?.find((f) => f.id === rest.join('.'))
+    return mod && field ? `${mod.title ?? mod.id} · ${field.title ?? field.id}` : key
+  }
+  const here = new URL(window.location.href)
+  here.searchParams.set('interview', '1')
+  const canResume = instance.stage.id === instance.currentStageId && !instance.archived
+  return html`<${DecisionsLogPanel} log=${log} stageTitle=${instance.stage.title} fieldTitle=${fieldTitle} resumeHref=${canResume ? `${here.pathname}${here.search}` : ''} />`
+}
+
 // #286 (map #238): the Interview page for a local or server workspace Instance, handed what only this file can reach: the Instance's Source document store, the Definition it follows, the other Stages' saved content (the AI is told what is already settled) and the stage Save.
 function InterviewScreen({ instance, editorHref, onSaveDrafts }) {
   const store = useSourceStore(instance)
-  if (!store) return html`<p class="loading">Loading…</p>`
+  const decisionsStore = useDecisionsStore(instance)
+  if (!store || !decisionsStore) return html`<p class="loading">Loading…</p>`
   async function loadStructure() {
     if (instance.localDefinitionStructure) return instance.localDefinitionStructure
     const res = await fetch(`/api/definitions/${encodeURIComponent(instance.definition)}/versions/${encodeURIComponent(String(instance.definitionVersion ?? 1))}`)
@@ -5010,6 +5057,7 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts }) {
     blockedReason=${interviewUnavailableReason(instance)}
     loadStructure=${loadStructure}
     loadOtherSaved=${loadOtherSaved}
+    decisionsStore=${decisionsStore}
     onSaveDrafts=${onSaveDrafts}
   />`
 }
@@ -5641,6 +5689,8 @@ function ModuleEditorPage({ slug: routeRef }) {
   // refs, never this render's `instance`, because the listeners below are
   // installed once.
   const savedRef = useRef({ key: null, payloads: new Map(), keys: new Map(), version: null })
+  // #288: the decisions log the next stage Save is to write with the Modules (set by the Interview page's Save, taken by `writeStage`).
+  const pendingDecisionsRef = useRef(null)
   const [leavePrompt, setLeavePrompt] = useState(null)
   // The Field-by-Field dialog (ADR-0068, #270): `{ inst, conflicts, resolve }` while a Save waits on the author.
   const [clashPrompt, setClashPrompt] = useState(null)
@@ -5709,6 +5759,10 @@ function ModuleEditorPage({ slug: routeRef }) {
         const currentVersion = stageVersionOfModules(current)
         if (currentVersion !== baseVersion) return { clash: { stageVersion: currentVersion, current: stagePayloads(current) } }
       }
+      // #288: the Stage's decisions log is worked out first (a delta that would change an entry fails here, before any Module is
+      // written) and written with the Modules.
+      const decisions = pendingDecisionsRef.current
+      const logPlan = decisions ? await planLocalDecisions(handle, inst.slug, inst.stage.id, decisions) : null
       for (const [id, payload] of Object.entries(payloads)) {
         const mod = inst.modules.find((m) => m.id === id)
         const moduleSpec = {
@@ -5717,6 +5771,11 @@ function ModuleEditorPage({ slug: routeRef }) {
           fields: mod.fields.filter((f) => !f.custom).map((f) => ({ id: f.id, title: f.title, type: f.type })),
         }
         await writeLocalTextFile(handle, localModuleFilesPath(inst.slug, id), renderLocalModuleInstanceFile(id, moduleSpec, payload))
+      }
+      if (logPlan) {
+        await writeLocalTextFile(handle, logPlan.path, logPlan.text)
+        pendingDecisionsRef.current = null
+        decisionsLogTick.value += 1
       }
       return {
         statusModules: (await getLocalStatus(handle, inst.slug, structure, inst.stage.id)).modules,
@@ -5727,11 +5786,15 @@ function ModuleEditorPage({ slug: routeRef }) {
     const res = await apiFetchForInstance(inst.slug, `/api/instance/modules?${params}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(baseVersion ? { modules: payloads, baseVersion } : { modules: payloads }),
+      body: JSON.stringify({ modules: payloads, ...(baseVersion ? { baseVersion } : {}), ...(pendingDecisionsRef.current ? { decisions: pendingDecisionsRef.current } : {}) }),
     })
     const body = await res.json().catch(() => ({}))
     if (res.status === 409 && body.code === 'stage_changed') return { clash: { stageVersion: body.stageVersion, current: body.current } }
     if (!res.ok) throw new Error(body.message ?? body.error ?? `the server answered ${res.status}`)
+    if (pendingDecisionsRef.current) {
+      pendingDecisionsRef.current = null
+      decisionsLogTick.value += 1
+    }
     return { statusModules: body.modules ?? [], stageVersion: body.stageVersion ?? null }
   }
 
@@ -6080,9 +6143,12 @@ function ModuleEditorPage({ slug: routeRef }) {
   // Puts the AI's drafts into the Modules' Fields, leaves those Modules `draft`, and does the ordinary stage Save (one Save, through the
   // Save check). On a failure or a cancelled clash the Fields go back to what was saved. `check` is Gantry's real Gate check on what
   // was just saved, for the Artefact aimed for.
-  async function saveInterviewDrafts(drafts, { artefactId } = {}) {
+  async function saveInterviewDrafts(drafts, { artefactId, decisions = null } = {}) {
     const inst = instanceData.peek()
     if (!inst?.stage || isEditingBlocked()) return { ok: false, message: 'This Instance cannot be written to right now.' }
+    // #288: the decisions log is part of this Save. `writeStage` takes it with the Modules; if the Save has no Module to write
+    // (the drafts equal what is saved), it is written on its own below.
+    pendingDecisionsRef.current = decisions
     const touched = new Set(Object.values(drafts).map((draft) => draft.moduleId))
     instanceData.value = {
       ...inst,
@@ -6100,7 +6166,19 @@ function ModuleEditorPage({ slug: routeRef }) {
       ),
     }
     const saved = await saveStage()
+    if (saved && pendingDecisionsRef.current) {
+      try {
+        const store = inst.isLocalWorkspace ? createLocalDecisionsStore(localDirHandle.peek(), inst.slug) : createServerDecisionsStore(inst.slug, (url, init) => apiFetchForInstance(inst.slug, url, init))
+        await store.write(inst.stage.id, pendingDecisionsRef.current)
+        decisionsLogTick.value += 1
+      } catch (err) {
+        pendingDecisionsRef.current = null
+        return { ok: false, message: `The Stage was saved, but its decisions log was not: ${err.message}` }
+      }
+      pendingDecisionsRef.current = null
+    }
     if (!saved) {
+      pendingDecisionsRef.current = null
       const latest = instanceData.peek()
       if (latest && stageKey(latest) === stageKey(inst)) {
         instanceData.value = { ...latest, modules: latest.modules.map((mod) => (touched.has(mod.id) ? inst.modules.find((m) => m.id === mod.id) ?? mod : mod)) }

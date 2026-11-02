@@ -168,7 +168,7 @@ test('the AI opens with a summary, drafts Fields through draft_field, and the dr
 
   // The AI was offered the question card tool and the draft tool, and told the Stage's rules and the Source document.
   const first = ai.calls[0].body
-  assert.deepEqual(first.tools.map((t) => t.name), ['ask_architect', 'draft_field'])
+  assert.deepEqual(first.tools.map((t) => t.name), ['ask_architect', 'draft_field', 'log_decision'])
   assert.match(first.system, /Draft first/)
   assert.match(first.system, /The insurer wants faster claims\./)
   assert.match(first.system, /call the `ask_architect` tool, one round at a time/)

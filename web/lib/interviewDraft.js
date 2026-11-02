@@ -38,6 +38,16 @@ export const DRAFT_TOOL = {
         items: { type: 'string' },
         description: 'The points the Field’s guidance asks for that this draft does not cover yet, one short phrase each. Leave it out, or empty, when the draft covers them all. A Field with uncovered points is not done.',
       },
+      inputs: {
+        type: 'array',
+        description:
+          'What this Field is drafted from, so the decisions log can tell later when it goes out of date: each is {"source": "<Source document id>", "range": "pages 3-5"} (range optional) ' +
+          'or {"field": "module.field"} for a Field of an earlier Stage or a read-only Module. Gantry checks each exists, records a fingerprint of it, and adds what it saw you read.',
+        items: {
+          type: 'object',
+          properties: { source: { type: 'string' }, range: { type: 'string' }, field: { type: 'string' } },
+        },
+      },
     },
     required: ['field', 'value'],
   },
@@ -70,7 +80,7 @@ export function extractDraftBlocks(text) {
       const parsed = JSON.parse(match[1])
       const list = Array.isArray(parsed) ? parsed : parsed?.drafts ? parsed.drafts : [parsed]
       for (const item of list) {
-        if (item && typeof item.field === 'string' && 'value' in item) drafts.push({ field: item.field, value: item.value, ...(Array.isArray(item.uncovered) ? { uncovered: item.uncovered } : {}) })
+        if (item && typeof item.field === 'string' && 'value' in item) drafts.push({ field: item.field, value: item.value, ...(Array.isArray(item.uncovered) ? { uncovered: item.uncovered } : {}), ...(Array.isArray(item.inputs) ? { inputs: item.inputs } : {}) })
         else errors.push('A draft block needs {"field": "module.field", "value": ...}.')
       }
     } catch (err) {

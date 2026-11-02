@@ -668,7 +668,7 @@ Use **Show commit history** in the card header to open a dialog listing the comm
 
 The **AI interview** is a way to draft a Stage with an AI. You give an Instance its **Source documents** (a client brief, requirements, meeting notes), connect an **AI Provider**, and open the **Interview page**. The AI reads the documents, drafts every Field they support into a live preview, and talks it through with you. Nothing is saved until you confirm the Stage, and the AI never marks a Module `agreed` or passes a Gate that needs approval or review: those stay with people.
 
-This release covers the **current Stage** of a **Local** or **Server-hosted** workspace. Azure DevOps, GitHub and GitLab workspaces don't have it yet, and neither does a Stage other than the current one; **✦ AI interview** is greyed out there and its tooltip says why. The AI asks you **question cards** in rounds (see below). It does not yet commit a decisions log or resume a paused session: those arrive in later releases.
+This release covers the **current Stage** of a **Local** or **Server-hosted** workspace. Azure DevOps, GitHub and GitLab workspaces don't have it yet, and neither does a Stage other than the current one; **✦ AI interview** is greyed out there and its tooltip says why. The AI asks you **question cards** in rounds (see below). Every Save also commits the Stage's **decisions log** (see below). Resuming a paused session in another browser, and a Pause button, arrive in a later release.
 
 ### Before you start
 
@@ -724,7 +724,7 @@ Gantry decides how each Source document reaches the AI, for the AI Provider you 
 
 - **A pack that fits is sent whole.** While the extracted text of all the documents comes to no more than about half of the model's context window, the AI is given every document in full.
 - **A pack that doesn't fit becomes a catalogue.** Past that, the AI is given a *catalogue* instead: each document's id, title, kind, size, page count and outline, and none of its text. It also gets a `read_source_document` tool, and reads the parts it needs by document id and range: pages (`pages 3-5`), a section by its heading (`section: Scope`), or character offsets (`0-20000`). One read returns at most 30,000 characters and says where to carry on. This is also how a small local model with a short window can take part. A model that doesn't use tools asks for a read in text instead (the text fallback), so no model is refused.
-- **Reads are recorded.** Each read shows in the conversation (*Read Client brief (section "Scope")*) and is recorded as an **input** of the Fields the AI then drafts, together with the documents the draft cites. The Interview page shows them under **Decisions log · inputs** in the left rail, and as *Drew on: …* under each drafted Field. Each input carries a fingerprint of the text the AI saw, so a document that changes later can be told apart. (Committing the log with the Stage Save arrives with the decisions log.)
+- **Reads are recorded.** Each read shows in the conversation (*Read Client brief (section "Scope")*) and is recorded as an **input** of the Fields the AI then drafts, together with the documents the draft cites. The Interview page shows them under **Decisions log · inputs** in the left rail, and as *Drew on: …* under each drafted Field, and the decisions log keeps them (see **The decisions log**). Each input carries a fingerprint of the text the AI saw, so a document that changes later can be told apart. (Committing the log with the Stage Save arrives with the decisions log.)
 - **PDFs are sent as text by default.** That is far cheaper than sending the PDF, and works with every AI Provider.
 - **A PDF is sent as the PDF itself** only when its text is empty (a scan) or you marked it **Read visually**, *and* the AI Provider takes PDFs: Anthropic, OpenAI, and OpenRouter (with a model that reads images; Gantry then tells OpenRouter to hand the PDF straight to the model, so no separate OCR charge appears on your OpenRouter account). Where the AI Provider doesn't take PDFs, a PDF marked Read visually falls back to its text, and says so in the conversation; a scan with no text is listed as unreadable.
 - **Pictures are sent as they are** (PNG, JPEG, GIF, WebP) to a model whose **Test connection** found it **reads images**. A text-only model is told the picture is unreadable and won't rely on it. A picture over 5 MB is not sent, and neither is any original once all the originals together would pass 15 MB; both are listed as unreadable with the reason.
@@ -774,6 +774,29 @@ You can **switch AI Provider between any two turns** with the picker at the top 
 When the Stage is **ready** (Gantry's **real Gate check passes** for the Artefact you chose, counting the AI's drafts as if they were saved, and every Field in scope is done), a **stage-end card** appears: *"Shape is ready. Save it?"* It does not appear while question cards are open or while the last round after **Finish with your recommendations** is waiting. Until then, a line under the preview shows the Gate check, what is still outstanding and how many Fields are done. Fields the AI left out are for you to fill in, in the editor or by telling the AI.
 
 **Save and stop here** makes **one stage Save**, the same Save as in the editor, so it goes through the **Save check**: if a colleague saved the same Stage meanwhile, Gantry merges Field by Field and asks only about a Field you both changed. The Modules the AI wrote into stay **`draft`**; only a person marks a Module `agreed`. After the Save, the card confirms it and shows the result of the Gate check on what was saved. The drafts then show as ordinary saved content, and the editor shows them too.
+
+### The decisions log
+
+Every Stage keeps a **decisions log**: the record of what was decided in the interview. It is a file, `interview/<stage>.yaml`, kept next to the Instance's `modules/`, `sources/` and `assets/` folders, in the same place for every kind of workspace. **It is committed in the same Save as the Stage's content**, so the Save from the Interview page writes the Modules and the log together (on a Local workspace both go into your folder; on a server workspace they are one request, and in a Blob container one all-or-nothing write). Closing the tab before you save loses the answers you gave since the last Save, as it loses the drafts.
+
+What the log holds:
+
+- **Your answers to question cards.** Each entry keeps the question, the options, the AI's recommendation and why, the Source document and page it cited, the answer you chose, anything you typed under **Other** in your own words, and the Field it fed.
+- **Facts you told the AI in chat, word for word.** When the AI uses something you typed, Gantry keeps *your* message as you wrote it against the Field it fed, never the AI's wording of it. Thanks, "go on" and other chat that fed nothing is not kept, and **what the AI said is never kept**: there is no transcript.
+- **Your choice on saved content**: keep, use the AI's version, or merge.
+- **Open questions**, including a select Field where none of the options fitted. An open question is closed when a later answer on the same Field resolves it.
+- **The Artefact you aimed for, a change of AI Provider model between turns, and a restart marker.** **Start this stage over** (in the left rail, after a confirmation) appends the marker: the AI ignores every earlier answer from then on, saved content is untouched, and the earlier entries stay in the file.
+- **For each drafted Field, what it was drafted from**: the Source documents and pages, and Fields of earlier Stages, each with a fingerprint of what was read, plus the entries that fed it. The AI names these when it drafts a Field; Gantry checks they exist and adds every read and citation it saw. This record is overwritten when the Field is redrafted, and it is what lets Gantry tell later that a draft has gone out of date.
+- **A status block, one line per interview session**: who ran it, the Stage it was aimed at, the Stage's state, the Artefact aimed for, the time of the last AI save, each AI Provider *type* and *model* used with its input, cached and output tokens, the Interview instructions version, and the versions of the bundled skills. **It never holds an API key, an address or a name you gave an AI Provider.** There is no money figure.
+
+**Entries are only ever added.** A changed answer is a new entry that *replaces* the old one, and an open question is closed by an entry that *resolves* it; Gantry never edits or deletes an entry, and refuses a Save that would.
+
+You see the log in two places, and neither lets you edit it:
+
+- **The Interview rail** shows a **Decisions log** count (the latest decisions plus the open questions), with open questions called out and how many entries are not saved yet.
+- **The Decisions log panel** in the Instance editor, above the Stage's Modules, for each Stage that has one. It shows the **latest answers**, the **open questions** highlighted with **Resume to answer** (which opens the Interview page on the current Stage), and **Show history** for every entry including the replaced ones. The log is never printed in a rendered Artefact.
+
+When you open the Interview page on a Stage that has a log, the AI is told what the log already settles and does not ask it again.
 
 ## Settings
 

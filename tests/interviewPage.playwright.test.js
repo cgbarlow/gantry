@@ -451,7 +451,7 @@ test('server workspace: a large pack is read through the catalogue, a scan and a
 
           // The pack is over half the model's window, so the AI got a catalogue and the reader, not the text.
           const first = posts[0].body
-          assert.deepEqual(first.tools.map((t) => t.name), ['ask_architect', 'draft_field', 'read_source_document'])
+          assert.deepEqual(first.tools.map((t) => t.name), ['ask_architect', 'draft_field', 'log_decision', 'read_source_document'])
           assert.match(first.system, /only a catalogue is shown/)
           assert.doesNotMatch(first.system, /alpha alpha alpha/)
 

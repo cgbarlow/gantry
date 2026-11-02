@@ -158,7 +158,7 @@ test('a round holds every ready card, sorted by priority, with the recommendatio
   assert.deepEqual(first.selected, ['Alpha'], 'the recommendation is pre-selected')
   assert.equal(first.allowOther, true)
   assert.equal(snap.round.cards[1].source.title, 'Client brief', 'a cited Source document is named by its title')
-  assert.deepEqual(ai.calls[0].body.tools.map((t) => t.name), ['ask_architect', 'draft_field'])
+  assert.deepEqual(ai.calls[0].body.tools.map((t) => t.name), ['ask_architect', 'draft_field', 'log_decision'])
 })
 
 test('submitting a round answers the ask_architect call; the answers feed a redraft', async () => {

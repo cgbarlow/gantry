@@ -2265,3 +2265,23 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
   .interview-thread { padding: 16px; max-height: 70vh; }
   .interview-head, .interview-composer { padding-left: 16px; padding-right: 16px; }
 }
+
+/* #288: the decisions log. The editor's read-only panel, and the count and the restart control in the Interview rail. */
+.decisions-log-panel { margin: 0 0 16px; padding: 12px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.decisions-log-panel h2 { margin: 0 0 4px; font-size: 16px; }
+.decisions-log-panel h3 { margin: 12px 0 6px; font-size: 13px; }
+.decisions-log-panel .dl-stage { font-weight: 400; color: var(--text-muted); }
+.decisions-log-panel .dl-count, .interview-rail .dl-count { display: inline-block; min-width: 18px; padding: 0 6px; font-family: var(--font-mono); font-size: 11px; text-align: center; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.decisions-log-panel .dl-note { margin: 2px 0 8px; font-size: 13px; color: var(--text-muted); }
+.decisions-log-panel .dl-list, .decisions-log-panel .dl-open ul { list-style: none; margin: 0 0 8px; padding: 0; font-size: 13px; }
+.dl-entry { display: grid; grid-template-columns: 110px 1fr; gap: 2px 10px; padding: 6px 0; border-bottom: var(--hairline) solid var(--line); }
+.dl-entry .dl-kind { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); padding-top: 2px; }
+.dl-entry .dl-text { overflow-wrap: anywhere; }
+.dl-entry .dl-meta { grid-column: 2; font-size: 11px; color: var(--text-muted); }
+.dl-entry.old .dl-text { color: var(--text-muted); text-decoration: line-through; text-decoration-color: var(--line-strong); }
+.decisions-log-panel .dl-open { margin: 0 0 8px; padding: 8px 10px; border: var(--hairline) solid var(--warning, #b06a00); border-left-width: 4px; border-radius: var(--radius); }
+.decisions-log-panel .dl-open h3 { margin-top: 0; color: var(--warning, #b06a00); }
+.dl-entry.open .dl-kind { color: var(--warning, #b06a00); font-weight: 600; }
+.interview-rail .dl-summary { font-size: 12px; margin: 0 0 6px; }
+.interview-rail .dl-summary .dl-open-count { color: var(--warning, #b06a00); font-weight: 600; }
+.interview-rail .dl-restart { margin-top: 8px; }

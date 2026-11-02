@@ -39,6 +39,7 @@ import {
   attachmentNote,
   describeInput,
   extractReadBlocks,
+  fingerprintText,
   inputsForDraft,
   loadAttachments,
   planSourceAccess,
@@ -47,6 +48,8 @@ import {
   stripReadBlocks,
 } from './interviewSources.js'
 import { fieldsInScope } from './interviewScope.js'
+import { LOG_TOOL, LOG_TOOL_NAME, LOG_FENCE, LOG_TEXT_FALLBACK_INSTRUCTIONS, createSessionLog, extractLogBlocks, stripLogBlocks } from './interviewLog.js'
+import { findArchitectMessage, logSummary } from './decisionsLog.js'
 import { CHANGE_OPTIONS, acceptRecommendation, answersText, changeCard, choose, chooseOther, followsRecommendation, isAnswered, isAutoId, otherWords, releaseHeld, shapeCard, sortRound, splitReady } from './interviewRounds.js'
 
 export { fieldsInScope }
@@ -55,7 +58,7 @@ export { fieldsInScope }
 export const MAX_ROUNDS = 24
 
 // What the architect sees of the AI's text: neither the draft blocks nor the read requests a text-only model writes.
-const shownText = (text) => stripReadBlocks(stripDraftBlocks(text))
+const shownText = (text) => stripLogBlocks(stripReadBlocks(stripDraftBlocks(text)))
 
 /** After this many turns in a row whose question cards were unusable, the rest of the session is asked in plain chat. */
 export const CARD_FAILURES_BEFORE_CHAT = 2
@@ -91,6 +94,10 @@ function sessionNote({ cardMode, textDrafts, reader }) {
       ? `Write each Field in a fenced \`${DRAFT_FENCE}\` block. ${DRAFT_TEXT_FALLBACK_INSTRUCTIONS}`
       : `Write each Field by calling the \`${DRAFT_TOOL_NAME}\` tool, never as chat. You may call it for several Fields in one reply.`,
     'A Field that already holds saved content is not changed by a draft: Gantry shows the architect a keep / use your version / merge card, and tells you the answer. Do not call draft_field for it again until they have answered; if they chose merge, call it once with the merged version.',
+    textDrafts
+      ? `${LOG_TEXT_FALLBACK_INSTRUCTIONS}`
+      : `When the architect tells you something in chat that you use in a Field, call the \`${LOG_TOOL_NAME}\` tool (kind "fact") with a quote copied exactly from their message and the Fields it feeds; for a question that stays open (including a select Field where none of the options fits) call it with kind "open-question". Answers to cards are logged by Gantry itself. Never log thanks or "go on".`,
+    'In draft_field, name what each Field is drafted from in `inputs` (Source document ids with a page range, or a Field of an earlier Stage as module.field): Gantry checks they exist and records them in the decisions log.',
     'Gantry works out for itself whether a Field is done: it has content, sits between about 60% of its word budget and its budget, covers each point of its guidance (list any it does not in `uncovered`), and no open question feeds it. The Stage is ready only when the Gate check passes and every such Field is done.'
   )
   if (reader) {
@@ -152,8 +159,9 @@ function flattenToolHistory(messages) {
     if (m.role === 'assistant' && m.toolCalls?.length) {
       const blocks = m.toolCalls
         .map((c) => {
-          if (c.name === DRAFT_TOOL_NAME) return '```' + DRAFT_FENCE + '\n' + JSON.stringify({ field: c.input?.field, value: c.input?.value }) + '\n```'
+          if (c.name === DRAFT_TOOL_NAME) return '```' + DRAFT_FENCE + '\n' + JSON.stringify({ field: c.input?.field, value: c.input?.value, ...(c.input?.inputs ? { inputs: c.input.inputs } : {}) }) + '\n```'
           if (c.name === READ_TOOL_NAME) return '```' + READ_FENCE + '\n' + JSON.stringify({ id: c.input?.id, range: c.input?.range }) + '\n```'
+          if (c.name === LOG_TOOL_NAME) return '```' + LOG_FENCE + '\n' + JSON.stringify(c.input ?? {}) + '\n```'
           if (c.name === ASK_TOOL_NAME) return '```' + FALLBACK_FENCE + '\n' + JSON.stringify({ questions: c.input?.questions ?? [] }) + '\n```'
           return null
         })
@@ -182,6 +190,8 @@ const asText = (value) => (Array.isArray(value) ? value.join('\n') : String(valu
  */
 export function createInterviewSession(config = {}) {
   let { providerId, getContext, handlers = {}, fetchImpl, origin, onChange } = config
+  // #288: what the decisions log is to hold, collected as the interview goes and handed to the stage Save (`decisionsDelta`).
+  const log = createSessionLog({ now: config.now, newSessionId: config.newSessionId, who: () => getContext?.()?.actor ?? '' })
   const state = {
     phase: 'kickoff', // kickoff | testing | working | asking | waiting | error
     providerId,
@@ -233,12 +243,14 @@ export function createInterviewSession(config = {}) {
     answered: state.answered.map((a) => ({ ...a })),
     round: state.round ? { ...state.round, cards: state.round.cards.map((c) => ({ ...c, selected: [...c.selected] })) } : null,
     openFields: openFields(),
+    decisions: { ...logSummary(log.entries()), pending: log.pending().length, session: log.sessionId },
   })
   const say = (who, text, extra = {}) => {
     const item = { id: nextId++, who, text, ...extra }
     state.thread.push(item)
     return item
   }
+  const architectMessages = () => messages.filter((m) => m.role === 'user' && m !== messages[0] && !m.fromGantry).map((m) => m.text)
   const architectText = () => [...messages.filter((m) => m.role === 'user' && m !== messages[0] && !m.fromGantry).map((m) => m.text), ...otherTexts].join('\n')
   const fieldTitle = (key) => {
     const context = getContext()
@@ -266,7 +278,9 @@ export function createInterviewSession(config = {}) {
     const check = checkDraft(entry.field, rawValue, { size: context.size, architectText: architectText(), knownSourceIds, markAssumptions: state.finish !== null })
     const uncovered = extra.uncovered ?? []
     // The inputs are what the AI read before this draft plus what it cites. A draft sent back keeps the ones it had, because the reads are cleared once a round of drafts has landed.
-    const inputs = mergeInputs(held.get(key)?.inputs, inputsForDraft({ reads: readsSinceDraft, value: check.value, sources: context.sources }))
+    const named = namedInputs(extra.inputs, context)
+    const inputs = mergeInputs(held.get(key)?.inputs, [...inputsForDraft({ reads: readsSinceDraft, value: check.value, sources: context.sources }), ...named.found])
+    const inputNote = named.missing.length ? ` Not recorded as inputs, because they do not exist: ${named.missing.join(', ')}.` : ''
 
     // Saved content changes only through a keep / use / merge card (ADR-0065, rule 3). Only a Field the architect has let the AI
     // change, and an unsaved draft of this session, may be written freely.
@@ -277,7 +291,7 @@ export function createInterviewSession(config = {}) {
       pendingChanges.set(key, { saved, proposed: check.value, words: check.words, inputs, warnings: check.problems.map((p) => p.message), uncovered, moduleId: parsed.moduleId, fieldId: parsed.fieldId, shown: existing?.shown ?? false })
       return {
         ok: false,
-        content: `${key} already holds saved content, so it is not changed. Gantry will show the architect a keep / use your version / merge card for it. Do not draft ${key} again until they have answered.`,
+        content: `${key} already holds saved content, so it is not changed. Gantry will show the architect a keep / use your version / merge card for it. Do not draft ${key} again until they have answered.${inputNote}`,
       }
     }
 
@@ -297,15 +311,63 @@ export function createInterviewSession(config = {}) {
     return {
       ok: true,
       content: check.problems.length
-        ? `${key} is in the preview, with a warning for the architect: ${check.problems.map((p) => p.message).join(' ')}`
-        : `${key} is in the preview (${check.words} words).`,
+        ? `${key} is in the preview, with a warning for the architect: ${check.problems.map((p) => p.message).join(' ')}${inputNote}`
+        : `${key} is in the preview (${check.words} words).${inputNote}`,
     }
   }
 
   const mergeInputs = (earlier = [], later = []) => {
     const out = [...earlier]
-    for (const input of later) if (!out.some((i) => i.source === input.source && (i.range ?? null) === (input.range ?? null))) out.push(input)
+    for (const input of later) if (!out.some((i) => (i.source ?? i.field) === (input.source ?? input.field) && (i.range ?? null) === (input.range ?? null))) out.push(input)
     return out
+  }
+
+  /**
+   * The inputs the AI named in its draft (#288): a Source document of this Instance, or a Field of an earlier Stage or a read-only
+   * Module that holds content. Each that exists gets a fingerprint of what it holds now; each that doesn't is reported back.
+   */
+  function namedInputs(list, context) {
+    const found = []
+    const missing = []
+    const savedModules = normalizeSavedContent(context.saved)
+    for (const item of Array.isArray(list) ? list : []) {
+      if (typeof item?.source === 'string' && item.source.trim()) {
+        const id = item.source.trim()
+        const doc = (context.sources ?? []).find((d) => d && d.id === id && !d.removedAt)
+        if (!doc) missing.push(`source ${id}`)
+        else found.push({ source: id, title: doc.title || doc.filename || id, range: item.range ? String(item.range).trim() : null, fingerprint: typeof doc.text === 'string' && doc.text.trim() ? fingerprintText(doc.text) : null })
+      } else if (typeof item?.field === 'string' && item.field.trim()) {
+        const ref = splitRef(item.field)
+        const value = ref ? savedModules[ref.moduleId]?.fields?.[ref.fieldId] : undefined
+        if (!ref || value === undefined || isBlankValue(value)) missing.push(`field ${item.field}`)
+        else found.push({ field: `${ref.moduleId}.${ref.fieldId}`, title: fieldTitle(`${ref.moduleId}.${ref.fieldId}`), range: null, fingerprint: fingerprintText(asText(value)) })
+      }
+    }
+    return { found, missing }
+  }
+
+  // ---------- the decisions log (#288) ----------
+
+  /** One `log_decision` call: a fact the architect typed (kept word for word) or an open question. */
+  function runLog(input) {
+    const context = getContext()
+    const scope = fieldsInScope(context.definition, context.stageId)
+    const fields = [...new Set((Array.isArray(input?.fields) ? input.fields : input?.field ? [input.field] : []).map((f) => String(f).trim()).filter((f) => scope.has(f)))]
+    if (input?.kind === 'fact') {
+      const words = findArchitectMessage(architectMessages(), input.quote)
+      if (!words) return { ok: false, content: 'Not logged: that is not something the architect typed in chat (or it is only thanks or "go on"). Only their own words are logged, never yours. Quote part of their message exactly, or do not log it.' }
+      if (fields.length === 0) return { ok: false, content: 'Not logged: name the Field it feeds as module.field, one listed under "Fields in scope". A message that feeds nothing is not kept.' }
+      const entry = log.addFact(words, fields)
+      emit()
+      return { ok: true, content: entry ? `Logged the architect's message against ${fields.join(', ')}.` : 'That message is already logged against those Fields.' }
+    }
+    if (input?.kind === 'open-question') {
+      if (!String(input.question ?? '').trim()) return { ok: false, content: 'Not logged: an open question needs the question.' }
+      const entry = log.addOpenQuestion({ question: input.question, why: input.why, fields })
+      emit()
+      return { ok: true, content: entry ? 'Logged the open question.' : 'That open question is already logged.' }
+    }
+    return { ok: false, content: 'Not logged: kind must be "fact" or "open-question".' }
   }
 
   // ---------- reading (#292) ----------
@@ -341,11 +403,12 @@ export function createInterviewSession(config = {}) {
   function resultFor(call) {
     if (handled.has(call.id)) return handled.get(call.id)
     let result
-    if (call.name !== DRAFT_TOOL_NAME && call.name !== READ_TOOL_NAME) result = { ok: false, content: `There is no tool called ${call.name}.` }
+    if (call.name !== DRAFT_TOOL_NAME && call.name !== READ_TOOL_NAME && call.name !== LOG_TOOL_NAME) result = { ok: false, content: `There is no tool called ${call.name}.` }
     else if (call.invalid || call.input === null || call.input === undefined) {
       result = { ok: false, content: `The arguments were not valid JSON: ${call.invalid ?? (call.name === READ_TOOL_NAME ? 'send {"id": "document-id", "range": "pages 3-5"}' : 'send {"field": "module.field", "value": ...}')}.` }
     } else if (call.name === READ_TOOL_NAME) result = runRead(call.input)
-    else result = acceptDraft(call.input.field, call.input.value, { uncovered: Array.isArray(call.input.uncovered) ? call.input.uncovered.map(String) : [] })
+    else if (call.name === LOG_TOOL_NAME) result = runLog(call.input)
+    else result = acceptDraft(call.input.field, call.input.value, { uncovered: Array.isArray(call.input.uncovered) ? call.input.uncovered.map(String) : [], inputs: call.input.inputs })
     handled.set(call.id, result)
     return result
   }
@@ -415,6 +478,7 @@ export function createInterviewSession(config = {}) {
     for (const card of cards) {
       const own = otherWords(card)
       if (own) otherTexts.push(own)
+      if (card.type !== 'change') log.addAnswer(card, { round: state.roundNo, words: own, answers: [...card.selected], followed: followsRecommendation(card) })
       state.answered.push({ id: card.id, header: card.header, question: card.question, field: card.field, labels: [...card.selected], other: own, followed: followsRecommendation(card) })
     }
     const lines = cards.map((c) => `${c.header || c.question}: ${[...c.selected, ...(otherWords(c) ? [`“${otherWords(c)}”`] : [])].join(', ')}`)
@@ -430,14 +494,17 @@ export function createInterviewSession(config = {}) {
       const choice = card.selected[0]
       if (choice === CHANGE_OPTIONS.keep) {
         keptFields.add(key)
+        log.addSavedContent(key, 'keep')
         say('sys', `Kept ${fieldTitle(key)} as saved`)
       } else if (choice === CHANGE_OPTIONS.use && change) {
         authorised.add(key)
+        log.addSavedContent(key, 'replace')
         state.drafts[key] = { value: change.proposed, words: change.words, warnings: change.warnings, uncovered: change.uncovered, inputs: change.inputs ?? [], moduleId: change.moduleId, fieldId: change.fieldId }
         state.fieldInputs[key] = change.inputs ?? []
         say('sys', `Using the AI's version of ${fieldTitle(key)}`, { drafted: key })
       } else if (choice === CHANGE_OPTIONS.merge) {
         authorised.add(key)
+        log.addSavedContent(key, 'merge')
         say('sys', `Merging ${fieldTitle(key)}`)
       }
     }
@@ -473,6 +540,7 @@ export function createInterviewSession(config = {}) {
    */
   async function prepare(provider) {
     const context = getContext()
+    if (context.decisions) log.load(context.decisions)
     plan = planSourceAccess({ sources: context.sources, provider })
     const attachments = await loadAttachments({ sources: context.sources, plan, loadBytes: context.readOriginal, cache: attachmentCache })
     for (const [id, reason] of Object.entries(attachments.problems)) plan.set(id, { how: 'unreadable', kind: plan.get(id)?.kind, reason })
@@ -483,7 +551,7 @@ export function createInterviewSession(config = {}) {
       artefactId: context.artefactId,
       size: context.size,
       saved: context.saved,
-      decisions: [],
+      decisions: log.entries(),
       sources: sourcesForBrief(context.sources, plan),
       skills: context.skills,
       contextWindow: provider.contextWindow,
@@ -508,7 +576,7 @@ export function createInterviewSession(config = {}) {
     }
     return {
       system: `${brief.text}\n\n${sessionNote({ cardMode: state.cardMode, textDrafts, reader })}`,
-      tools: textDrafts ? [] : [DRAFT_TOOL, ...(reader ? [READ_TOOL] : [])],
+      tools: textDrafts ? [] : [DRAFT_TOOL, LOG_TOOL, ...(reader ? [READ_TOOL] : [])],
       withAttachments,
       knownSources: (context.sources ?? []).filter((s) => !s.removedAt).map((s) => ({ id: s.id, title: s.title })),
     }
@@ -565,6 +633,7 @@ export function createInterviewSession(config = {}) {
           cacheWriteTokens: state.usage.cacheWriteTokens + result.usage.cacheWriteTokens,
         }
         const provider = getAiProvider(state.providerId)
+        if (provider) log.addUsage(provider, result.usage)
         const textDrafts = provider ? capabilities(provider).textDrafts : false
         // The attachments go on the first message of each request and are not kept in the history, so a switch of AI Provider can decide them afresh.
         const base = (result.messages ?? messages).map((m, i) => (i === 0 ? messages[0] : m))
@@ -583,7 +652,8 @@ export function createInterviewSession(config = {}) {
             if (result.otherToolCalls.some((c) => c.name === DRAFT_TOOL_NAME)) readsSinceDraft = []
           } else {
             const { drafts } = extractDraftBlocks(result.text)
-            for (const d of drafts) acceptDraft(d.field, d.value, { uncovered: d.uncovered })
+            for (const d of drafts) acceptDraft(d.field, d.value, { uncovered: d.uncovered, inputs: d.inputs })
+            for (const request of extractLogBlocks(result.text).requests) runLog(request)
             if (drafts.length) readsSinceDraft = []
           }
           const callIds = (result.assistantMessage.toolCalls ?? []).filter((c) => c.name === ASK_TOOL_NAME).map((c) => c.id)
@@ -627,9 +697,11 @@ export function createInterviewSession(config = {}) {
           const requested = extractReadBlocks(result.text)
           // Reads are answered first, so a draft in the same reply is checked with them already recorded as its inputs.
           const answers = requested.reads.map((r) => runRead(r))
-          const outcomes = drafts.map((d) => ({ d, ...acceptDraft(d.field, d.value, { uncovered: d.uncovered }) }))
+          const outcomes = drafts.map((d) => ({ d, ...acceptDraft(d.field, d.value, { uncovered: d.uncovered, inputs: d.inputs }) }))
+          const logged = extractLogBlocks(result.text)
+          const logOutcomes = logged.requests.map((request) => runLog(request))
           if (drafts.length) readsSinceDraft = []
-          notes.push(...errors, ...requested.errors, ...outcomes.filter((o) => !o.ok).map((o) => o.content))
+          notes.push(...errors, ...requested.errors, ...logged.errors, ...outcomes.filter((o) => !o.ok).map((o) => o.content), ...logOutcomes.filter((o) => !o.ok).map((o) => o.content))
           if (round < MAX_ROUNDS - 1 && (answers.length || (notes.length && outcomes.some((o) => !o.ok) && held.size))) {
             retry = true
             readsReply = answers.length ? `Gantry's reply to your read requests:\n\n${answers.map((a) => a.content).join('\n\n')}` : ''
@@ -673,6 +745,17 @@ export function createInterviewSession(config = {}) {
       for (const t of state.thread) if (t.streaming) t.streaming = false
       emit()
     }
+  }
+
+  // The Artefact the architect aims for is a decision of the interview (#288).
+  function recordArtefact() {
+    const context = getContext()
+    const { candidates } = artefactChoices(context.definition, context.stageId)
+    const chosen = candidates.find((a) => a.id === context.artefactId)
+    if (!chosen) return
+    const latest = log.entries().filter((e) => e.kind === 'artefact').at(-1)
+    if (latest?.artefact === chosen.id) return
+    log.addArtefact({ artefact: chosen.id, title: chosen.title ?? chosen.id, candidates: candidates.map((a) => a.id) })
   }
 
   // ---------- the session's methods ----------
@@ -779,6 +862,7 @@ export function createInterviewSession(config = {}) {
         say('sys', 'This model cannot produce question cards, so it asks in plain chat. That works, but is less reliable.')
       }
       messages = [{ role: 'user', text: OPENING }]
+      recordArtefact()
       await runLoop()
     },
 
@@ -859,8 +943,10 @@ export function createInterviewSession(config = {}) {
       } catch (err) {
         return { ok: false, message: err?.message || 'That AI Provider could not be tested.' }
       }
+      const before = getAiProvider(state.providerId)
       state.providerId = id
       const now = getAiProvider(id)
+      if (before && now && (before.type !== now.type || before.model !== now.model)) log.addModelChange({ type: before.type, model: before.model }, { type: now.type, model: now.model })
       state.cardMode = capabilities(now).baseline
       cardFailures = 0
       say('sys', `Switched to ${now?.name ?? 'another AI Provider'}${now?.model ? ` (${now.model})` : ''}`)
@@ -878,6 +964,66 @@ export function createInterviewSession(config = {}) {
       state.savedKeys = [...new Set([...state.savedKeys, ...keys])]
       say('sys', `Saved ${keys.length} Field${keys.length === 1 ? '' : 's'}. The Modules stay draft.`)
       emit()
+    },
+
+    /**
+     * What the stage Save writes into the decisions log (#288): the entries not yet committed, the inputs of every Field in this Save
+     * and this session's status. `runState` is `in-progress`, `ready` or `saved`; `saving` stamps the time of the AI save.
+     */
+    decisionsDelta({ runState = 'in-progress', saving = false } = {}) {
+      const context = getContext()
+      const keys = [...new Set([...Object.keys(state.drafts), ...state.savedKeys])]
+      return log.delta({
+        fieldInputs: state.fieldInputs,
+        fieldKeys: keys,
+        saving,
+        status: { who: context.actor, target: context.targetStageId ?? context.stageId, state: runState, artefact: context.artefactId, instructions: context.instructionsVersion },
+      })
+    },
+
+    /** The Stage's committed decisions log as the page read it (again): what the AI is told is settled, and what the rail counts. */
+    loadDecisions(file) {
+      log.load(file)
+      emit()
+    },
+
+    /** The Save that carried `delta` worked: its entries are part of the committed log now. */
+    commitDecisions(delta) {
+      log.commit(delta)
+      emit()
+    },
+
+    /**
+     * "Start this stage over": appends a restart marker (the AI ignores every earlier answer from then on) and puts the session
+     * back at the kickoff. Unsaved drafts are dropped; saved content is untouched.
+     */
+    startOver() {
+      if (state.phase === 'working' || state.phase === 'testing') return { ok: false, message: 'Wait for the AI to finish its turn first.' }
+      controller?.abort()
+      log.addRestart()
+      messages = []
+      state.thread = []
+      state.drafts = {}
+      state.fieldInputs = {}
+      state.savedKeys = []
+      state.round = null
+      state.held = []
+      state.answered = []
+      state.finish = null
+      state.error = null
+      state.phase = 'kickoff'
+      pendingChanges.clear()
+      keptFields.clear()
+      authorised.clear()
+      otherTexts.length = 0
+      bounced.clear()
+      held.clear()
+      handled.clear()
+      readsSinceDraft = []
+      pendingAsk = null
+      cardFailures = 0
+      emit()
+      return { ok: true }
     },
 
     /** Drops every unsaved draft. */
