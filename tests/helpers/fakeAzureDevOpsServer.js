@@ -67,7 +67,16 @@ export function createFakeAzureDevOpsServer({
   // `hasWriteAccess` calls. Defaults to `true`; pass `false` to simulate a PAT that reads fine but
   // cannot write.
   canWrite = true,
+  // #263: when an array, every request that actually serves a file's content (the JSON `content` of
+  // `includeContent=true`, or an octet-stream download) appends `{ path, via }` to it — how a test
+  // proves a "does it exist" check never downloaded the file.
+  contentLog,
 } = {}) {
+  // #263: contents pushed with `contentType: 'base64encoded'` — what real Azure DevOps stores as the
+  // decoded bytes. The octet-stream download below decodes exactly these (matched by content, so the
+  // marker survives branch clones and merges, which copy the store). Every other string is text.
+  const base64Contents = new Set()
+
   // One independent { store, objectId } per branch — a branch with no
   // entry here has never had a commit (mirrors the pre-#118 "commitCount
   // === 0" case for `main`): its ref doesn't exist yet and every path
@@ -343,7 +352,29 @@ export function createFakeAzureDevOpsServer({
       if (!store.has(path)) {
         return json(404, { message: `TF401174: Item ${path} not found (fake server).` })
       }
-      return json(200, { path, content: store.get(path), objectId: branch.objectId })
+      const stored = store.get(path)
+      // #263: a download (`$format=octetStream`) streams the stored blob's real bytes. A string pushed
+      // with `contentType: 'base64encoded'` is decoded; a Buffer seeded straight into `files` is served
+      // as is. Legacy fixtures seed an image's base64 text as a plain string under a png/jpg name (this
+      // fake's pre-#263 convention, which the old asset reads decoded by guessing) — decoded the same
+      // way here so those fixtures keep meaning "an image".
+      if (url.searchParams.get('$format')?.toLowerCase() === 'octetstream') {
+        let bytes
+        if (Buffer.isBuffer(stored)) bytes = stored
+        else if (base64Contents.has(stored)) bytes = Buffer.from(stored, 'base64')
+        else if (/\.(png|jpe?g)$/i.test(path) && /^[A-Za-z0-9+/=\s]+$/.test(stored) && stored.replace(/\s/g, '').length % 4 === 0) bytes = Buffer.from(stored, 'base64')
+        else bytes = Buffer.from(stored, 'utf8')
+        contentLog?.push({ path, via: 'download' })
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' })
+        res.end(bytes)
+        return
+      }
+      // Without `includeContent=true` the real Items API answers with the item's metadata alone.
+      if (url.searchParams.get('includeContent') !== 'true') {
+        return json(200, { path, isFolder: false, objectId: branch.objectId })
+      }
+      contentLog?.push({ path, via: 'content' })
+      return json(200, { path, content: Buffer.isBuffer(stored) ? stored.toString('utf8') : stored, objectId: branch.objectId })
     }
 
     if (req.method === 'GET' && pathname === `${basePath}/refs`) {
@@ -459,6 +490,7 @@ export function createFakeAzureDevOpsServer({
             store.delete(change.item.path)
           } else {
             store.set(change.item.path, change.newContent.content)
+            if (change.newContent.contentType === 'base64encoded') base64Contents.add(change.newContent.content)
           }
         }
       }
@@ -911,7 +943,7 @@ export function createFakeAzureDevOpsServer({
  * Starts a `createFakeAzureDevOpsServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/server.test.js`'s `withRunningServer` helper's shape (per #82's testing decisions). Shared by `tests/azureDevOpsClient.test.js` and `tests/instance.test.js` so this lifecycle isn't duplicated across both.
  */
 export function withFakeAzureDevOpsServer(
-  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes, denyReviewerVoteReset, rejectIdentityRequests, repoExists, connectionDataUser, simulateMissingReviewStatusField, canWrite },
+  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes, denyReviewerVoteReset, rejectIdentityRequests, repoExists, connectionDataUser, simulateMissingReviewStatusField, canWrite, contentLog },
   fn
 ) {
   return new Promise((resolve, reject) => {
@@ -931,6 +963,7 @@ export function withFakeAzureDevOpsServer(
       connectionDataUser,
       simulateMissingReviewStatusField,
       canWrite,
+      contentLog,
     })
     server.listen(0, async () => {
       const { port } = server.address()

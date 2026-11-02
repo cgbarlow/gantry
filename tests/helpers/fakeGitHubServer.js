@@ -78,6 +78,14 @@ export function createFakeGitHubServer({
   subIssuesEnabled = true,
   mergeRefusal = null,
   viewerPermissions = { admin: false, maintain: false, push: true, triage: true, pull: true },
+  // #263: real GitHub's Contents API only returns a file's base64 `content` inline up to 1 MB; above
+  // that (to its 100 MB cap) `content` is empty with `encoding: "none"`, and the bytes come from a
+  // second request using the raw media type. `inlineContentLimit` is that 1 MB threshold, overridable
+  // so a test can exercise the large-file path without allocating megabytes it does not need.
+  inlineContentLimit = 1_000_000,
+  // #263: when an array, every request that actually serves a file's bytes (inline or raw) appends
+  // `{ path, via }` to it — how a test proves a "does it exist" check never downloaded the content.
+  contentLog,
 } = {}) {
   const issues = new Map() // number -> issue object
   const issueIdToNumber = new Map() // internal id -> number
@@ -226,13 +234,21 @@ export function createFakeGitHubServer({
       // assuming it's UTF-8 text first, is what makes this byte-accurate for a binary file.
       if (store.has(`/${normalizedScope}`)) {
         const content = store.get(`/${normalizedScope}`)
-        return json(200, {
-          type: 'file',
-          name: normalizedScope.split('/').pop(),
-          path: normalizedScope,
-          content: content.toString('base64'),
-          encoding: 'base64',
-        })
+        const meta = { type: 'file', name: normalizedScope.split('/').pop(), path: normalizedScope, size: content.length, sha: `blob-of-${normalizedScope}` }
+        if (content.length > 100 * 1024 * 1024) {
+          return json(403, { message: 'This API returns blobs up to 1 MB in size. The requested blob is too large to fetch via the API (fake: over 100 MB).' })
+        }
+        if ((req.headers['accept'] ?? '').includes('application/vnd.github.raw')) {
+          contentLog?.push({ path: normalizedScope, via: 'raw' })
+          res.writeHead(200, { 'Content-Type': 'application/vnd.github.raw+json' })
+          res.end(content)
+          return
+        }
+        if (content.length > inlineContentLimit) {
+          return json(200, { ...meta, content: '', encoding: 'none' })
+        }
+        contentLog?.push({ path: normalizedScope, via: 'inline' })
+        return json(200, { ...meta, content: content.toString('base64'), encoding: 'base64' })
       }
 
       // Otherwise, treat it as a folder listing — derive immediate children from stored paths, the
@@ -604,7 +620,7 @@ export function createFakeGitHubServer({
 
 /** Starts a `createFakeGitHubServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/helpers/fakeAzureDevOpsServer.js`'s own `withFakeAzureDevOpsServer` shape. */
 export function withFakeGitHubServer(
-  { owner, repository, validPat, files, branchFiles, repoExists, ownerType, collaborators, orgMembers, permissions, subIssuesEnabled, mergeRefusal, viewerPermissions },
+  { owner, repository, validPat, files, branchFiles, repoExists, ownerType, collaborators, orgMembers, permissions, subIssuesEnabled, mergeRefusal, viewerPermissions, inlineContentLimit, contentLog },
   fn
 ) {
   return new Promise((resolve, reject) => {
@@ -622,6 +638,8 @@ export function withFakeGitHubServer(
       subIssuesEnabled,
       mergeRefusal,
       viewerPermissions,
+      inlineContentLimit,
+      contentLog,
     })
     server.listen(0, async () => {
       const { port } = server.address()
