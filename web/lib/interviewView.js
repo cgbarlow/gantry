@@ -3,9 +3,10 @@
 // kickoff form first and the free-chat composer pinned at the bottom. Right: the live draft preview of the Stage's Modules,
 // where the AI's drafts appear as they are written, marked "AI draft · unsaved".
 //
-// This file only draws the page and wires it up. The conversation, the drafting and the checks on each draft are
-// web/lib/interviewSession.js; "is this Stage ready" is web/lib/interviewGate.js; the brief the AI is given is
-// web/lib/interviewBrief.js. Saving is the editor's own stage Save (the Save check of ADR-0068 and all), handed in as
+// This file only draws the page and wires it up. The conversation, the drafting, the rounds of question cards (#287) and the
+// checks on each draft are web/lib/interviewSession.js; the rules for a round are web/lib/interviewRounds.js; "is this Field done
+// and this Stage ready" is web/lib/interviewReadiness.js (over the Gate check of web/lib/interviewGate.js); the brief the AI is
+// given is web/lib/interviewBrief.js. Saving is the editor's own stage Save (the Save check of ADR-0068 and all), handed in as
 // `onSaveDrafts`, so a Save from here is the same Save, one commit, with the Modules left `draft`.
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
@@ -13,7 +14,8 @@ import { aiProviders, defaultAiProvider, updateAiProvider } from './aiProviders.
 import { AiProviderDialog, AiRecoveryPrompt } from './aiProvidersView.js'
 import { SourceDocumentsPanel } from './sourceDocumentsPanel.js'
 import { artefactChoices, createInterviewSession } from './interviewSession.js'
-import { draftGateCheck } from './interviewGate.js'
+import { stageReadiness } from './interviewReadiness.js'
+import { PAGE_SIZE, isAnswered, pageCards, pageCount } from './interviewRounds.js'
 import { loadInterviewSkillsInBrowser } from './interviewSkills.js'
 import { modulesWithStandard } from './standardModules.js'
 import { citationSegments, isBlankValue } from './interviewDraft.js'
@@ -39,6 +41,76 @@ function ValueView({ value }) {
   return html`${citationSegments(value).map((seg, i) =>
     seg.cite ? html`<span key=${i} class="cite" data-source-id=${seg.id} title=${`Source document ${seg.id}`}>${seg.cite}</span>` : seg.text
   )}`
+}
+
+const MODE_LABELS = { native: 'native', text: 'text fallback', chat: 'plain chat' }
+
+/** One question card: header chip, the Field it feeds, the question, option tiles, "Why I recommend it" with its citation, and Other where it applies. */
+function QuestionCard({ card, fieldTitle, session }) {
+  const type = card.multiSelect ? 'checkbox' : 'radio'
+  const recommended = new Set(card.recommended)
+  return html`<div class="qcard" data-testid="interview-card" data-card-id=${card.id} data-card-type=${card.type ?? 'question'}>
+    <div class="qchip">
+      ${card.header || (card.type === 'change' ? 'Saved content' : 'Question')}${card.multiSelect ? ' · choose any' : ''}
+      ${card.field ? html` · feeds <span data-testid="card-feeds">${fieldTitle(card.field)}</span>` : null}
+    </div>
+    <p class="qhead" data-testid="card-question">${card.question}</p>
+    ${card.change
+      ? html`<div class="change-compare" data-testid="change-compare">
+          <div><span class="qchip">Saved</span><div class="value" data-testid="change-saved"><${ValueView} value=${card.change.saved} /></div></div>
+          <div><span class="qchip">The AI's version</span><div class="value ai" data-testid="change-proposed"><${ValueView} value=${card.change.proposed} /></div></div>
+        </div>`
+      : null}
+    <div class="opts-tiles" role=${card.multiSelect ? 'group' : 'radiogroup'} aria-label=${card.question}>
+      ${card.options.map((option) => {
+        const chosen = card.selected.includes(option.label)
+        return html`<label key=${option.label} class=${'opt' + (chosen ? ' chosen' : '')} data-testid="card-option" data-option=${option.label} data-chosen=${chosen ? 'true' : 'false'}>
+          <input type=${type} name=${card.id} checked=${chosen} onChange=${() => session.choose(card.id, option.label)} />
+          <span>
+            <span class="olabel">${option.label}</span>${recommended.has(option.label) ? html`<span class="rec" data-testid="card-recommended">RECOMMENDED</span>` : null}
+            ${option.description ? html`<span class="odesc">${option.description}</span>` : null}
+          </span>
+        </label>`
+      })}
+      ${card.allowOther
+        ? html`<label class=${'opt' + (card.otherOn ? ' chosen' : '')} data-testid="card-other" data-chosen=${card.otherOn ? 'true' : 'false'}>
+            <input type=${type} name=${card.id} checked=${card.otherOn} onChange=${() => session.chooseOther(card.id)} />
+            <span style="flex:1">
+              <span class="olabel">Other</span>
+              ${card.otherOn
+                ? html`<input class="other-input" data-testid="card-other-input" aria-label="Your own answer" placeholder="Type your answer…" value=${card.otherText} onInput=${(e) => session.setOtherText(card.id, e.currentTarget.value)} />`
+                : null}
+            </span>
+          </label>`
+        : null}
+    </div>
+    ${card.why || card.source
+      ? html`<p class="why" data-testid="card-why">
+          <strong>Why I recommend it:</strong> ${card.why}
+          ${card.source ? html` <span class="cite" data-testid="card-cite" data-source-id=${card.source.document} title=${`Source document ${card.source.document}`}>${card.source.title ?? card.source.document}${card.source.location ? `, ${card.source.location}` : ''}</span>` : null}
+        </p>`
+      : null}
+  </div>`
+}
+
+/** What the kickoff says about how this AI Provider will ask its questions: native, then text, then plain chat. */
+function CardModeNote({ provider }) {
+  const found = provider.test?.questionCards
+  const mode = found === 'text' ? 'text' : found === 'chat' ? 'chat' : 'native'
+  return html`<div data-testid="interview-card-mode" data-mode=${mode}>
+    <p class="kick-note">
+      <strong>Question cards:</strong>
+      ${mode === 'native'
+        ? found === 'native'
+          ? ' native. This model asks with a tool, so every question appears as a card.'
+          : ' native, tried first. Gantry finds out when you start.'
+        : mode === 'text'
+          ? ' text fallback. This model can\'t use tools, so it asks and drafts in text. That works, but it is less reliable.'
+          : ' plain chat. This model can\'t produce question cards, so it asks in chat and you answer there. That works, but it is less reliable.'}
+      Gantry never refuses a model: it tries native, then text, then plain chat.
+    </p>
+    ${mode !== 'native' ? html`<div class="warn" role="status" data-testid="interview-text-fallback">${mode === 'text' ? "This model can't use tools, so Gantry will ask for its drafts and questions in text (the text fallback)." : 'Questions will be asked in plain chat.'}</div>` : null}
+  </div>`
 }
 
 function providerLabel(p) {
@@ -172,15 +244,20 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     return () => window.removeEventListener('beforeunload', guard)
   }, [draftKeys.length > 0])
 
-  // ---- readiness ----
-  const gate = useMemo(
-    () => (setup.status === 'ready' && draftKeys.length ? draftGateCheck({ structure: setup.structure, stageId: instance.stage.id, artefactId, modules: instance.modules, drafts }) : null),
-    [setup, instance.modules, artefactId, snap?.drafts]
+  // ---- readiness: the Gate check passes for the Artefact aimed for and every Field in scope is done ----
+  const readiness = useMemo(
+    () =>
+      setup.status === 'ready' && snap && snap.phase !== 'kickoff'
+        ? stageReadiness({ definition: setup.definition, structure: setup.structure, stageId: instance.stage.id, artefactId, size: instance.size, modules: instance.modules, drafts, openFields: snap.openFields ?? [] })
+        : null,
+    [setup, instance.modules, instance.size, artefactId, snap?.drafts, snap?.openFields?.join('|'), snap?.phase]
   )
+  const gate = draftKeys.length ? readiness?.gate ?? null : null
 
   const phase = snap?.phase ?? 'kickoff'
   const started = phase !== 'kickoff' && phase !== 'testing'
   const busy = phase === 'working' || phase === 'testing'
+  const finishing = snap?.finish === 'accepting' || snap?.finish === 'final'
   const stage = setup.status === 'ready' ? setup.definition.stages.find((s) => s.id === instance.stage.id) : null
   const readOnlyIds = new Set(stage?.readOnlyModules ?? [])
   const stageModules = stage ? stage.modules.map((id) => setup.definition.modules.find((m) => m.id === id)).filter((m) => m && !readOnlyIds.has(m.id)) : []
@@ -204,6 +281,24 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       setSwitchMessage(result.message)
       setPickedProvider(snap?.providerId ?? null)
     }
+  }
+
+  const [submitMessage, setSubmitMessage] = useState('')
+  async function submitRound() {
+    setSubmitMessage('')
+    const result = await sessionRef.current?.submitRound()
+    if (result && !result.ok) setSubmitMessage(result.message)
+  }
+  async function finishNow() {
+    setSubmitMessage('')
+    const result = await sessionRef.current?.finishWithRecommendations()
+    if (result && !result.ok && result.message) setSubmitMessage(result.message)
+  }
+  const fieldTitle = (key) => {
+    const [moduleId, ...rest] = String(key).split('.')
+    const mod = setup.status === 'ready' ? setup.definition.modules.find((m) => m.id === moduleId) : null
+    const field = mod?.fields?.find((f) => f.id === rest.join('.'))
+    return mod && field ? `${mod.title ?? mod.id} · ${field.title ?? field.id}` : key
   }
 
   async function saveStage() {
@@ -260,11 +355,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
               ${status === 'passed' ? `Ready. ${provider.model} passed its test.` : status === 'failed' ? `Its last test failed: ${provider.test.message}` : 'Untested. Gantry tests it when you start.'}
             </p>`
           : null}
-        ${provider?.test?.questionCards === 'text'
-          ? html`<div class="warn" role="status" data-testid="interview-text-fallback">
-              This model can't use tools, so it can't produce question cards natively. Gantry will ask it to write its drafts in text instead (the text fallback). That works, but it is less reliable.
-            </div>`
-          : null}
+        ${provider ? html`<${CardModeNote} provider=${provider} />` : null}
 
         ${choices.candidates.length > 1
           ? html`<label for="interview-artefact">Artefact to aim for</label>
@@ -314,6 +405,35 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     </div>`
   }
 
+  const roundView = () => {
+    const round = snap?.round
+    if (!round || phase !== 'asking') return null
+    const total = pageCount(round.cards.length)
+    const page = Math.min(round.page, total - 1)
+    const shown = pageCards(round.cards, page)
+    const unanswered = round.cards.filter((c) => !isAnswered(c)).length
+    const last = page === total - 1
+    return html`<div class="round" data-testid="interview-round" data-round=${round.id} data-final=${round.final ? 'true' : 'false'} data-page=${page + 1} data-pages=${total}>
+      <div class="round-head" data-testid="round-head">
+        ${round.final ? 'Last round' : `Round ${round.id}`} · ${round.cards.length} question${round.cards.length === 1 ? '' : 's'}
+        ${total > 1 ? ` · cards ${page * PAGE_SIZE + 1}–${page * PAGE_SIZE + shown.length} of ${round.cards.length}` : ''}
+      </div>
+      ${round.final ? html`<p class="round-note">You chose to finish with the AI's recommendations. This is the one last round: only what the AI can't responsibly propose.</p>` : null}
+      ${snap.held > 0 ? html`<p class="round-note" data-testid="round-held">${snap.held} more question${snap.held === 1 ? '' : 's'} will follow once these are answered.</p>` : null}
+      ${shown.map((card) => html`<${QuestionCard} key=${card.id} card=${card} fieldTitle=${fieldTitle} session=${sessionRef.current} />`)}
+      <div class="round-actions">
+        ${total > 1 ? html`<button type="button" class="btn small ghost" data-testid="round-back" disabled=${page === 0} onClick=${() => sessionRef.current?.setPage(page - 1)}>Back</button>` : null}
+        ${total > 1 ? html`<span class="round-page" data-testid="round-page">${page + 1} of ${total}</span>` : null}
+        ${!last ? html`<button type="button" class="btn small" data-testid="round-next" onClick=${() => sessionRef.current?.setPage(page + 1)}>Next</button>` : null}
+        ${last
+          ? html`<button type="button" class="btn primary" data-testid="round-submit" disabled=${unanswered > 0} onClick=${submitRound}>Submit ${round.cards.length} answer${round.cards.length === 1 ? '' : 's'}</button>`
+          : null}
+        ${unanswered > 0 ? html`<span class="round-page" data-testid="round-unanswered">${unanswered} still to answer</span>` : null}
+      </div>
+      ${submitMessage ? html`<p class="inline-error" role="alert" data-testid="round-error">${submitMessage}</p>` : null}
+    </div>`
+  }
+
   const stageEnd = () => {
     if (saving?.phase === 'saved') {
       return html`<div class="qcard stage-end saved" data-testid="interview-saved" role="status">
@@ -322,11 +442,12 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         ${saving.check ? html`<p class="gate-ok" data-testid="interview-saved-gate">${saving.check.pass ? `The ${instance.stage.gate} Gate check passes.` : `The Gate check still reports: ${saving.check.outstanding?.join(', ') || 'see the editor'}.`}</p>` : null}
       </div>`
     }
-    if (phase !== 'waiting' || draftKeys.length === 0 || !gate?.pass) return null
+    // Only when the Gate check passes for the Artefact aimed for and every Field in scope is done; and, after "Finish with your recommendations", once the last round has been answered.
+    if (phase !== 'waiting' || draftKeys.length === 0 || !readiness?.ready || snap?.round || finishing) return null
     return html`<div class="qcard stage-end" data-testid="interview-stage-end">
       <div class="qchip">Stage</div>
       <p class="qhead">${stage?.title ?? instance.stage.title} is ready. Save it?</p>
-      <p>${draftKeys.length} Field${draftKeys.length === 1 ? '' : 's'} drafted. The ${instance.stage.gate} Gate check passes for ${gate.artefact?.title ?? 'the Artefact'}. One Save writes them; the Modules stay <strong>draft</strong>.</p>
+      <p>${draftKeys.length} Field${draftKeys.length === 1 ? '' : 's'} drafted; all ${readiness.total} Field${readiness.total === 1 ? '' : 's'} in scope are done. The ${instance.stage.gate} Gate check passes for ${readiness.gate.artefact?.title ?? 'the Artefact'}. One Save writes them; the Modules stay <strong>draft</strong>.</p>
       ${saving?.phase === 'error' ? html`<p class="inline-error" role="alert" data-testid="interview-save-error">${saving.message}</p>` : null}
       <div class="round-actions">
         <button type="button" class="btn primary" data-testid="interview-save" disabled=${saving?.phase === 'saving' || Boolean(blockedReason)} onClick=${saveStage}>
@@ -362,6 +483,11 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
               ${draft?.inputs?.length
                 ? html`<p class="field-inputs" data-testid="interview-field-inputs">Drew on: ${draft.inputs.map(describeInput).join('; ')}</p>`
                 : null}
+              ${readiness?.fields?.[fieldKey]
+                ? html`<span class=${'field-done' + (readiness.fields[fieldKey].done ? ' is-done' : '')} data-testid="interview-field-done" data-done=${readiness.fields[fieldKey].done ? 'true' : 'false'}>
+                    ${readiness.fields[fieldKey].done ? '✓ Done' : `Not done: ${readiness.fields[fieldKey].reasons.join('; ')}`}
+                  </span>`
+                : null}
               ${draft?.warnings?.length
                 ? html`<ul class="interview-warnings" data-testid="interview-warning">${draft.warnings.map((w, i) => html`<li key=${i} class="warn">${w}</li>`)}</ul>`
                 : null}
@@ -371,7 +497,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       })}
       ${draftKeys.length && gate
         ? html`<p class=${'gate-line' + (gate.pass ? ' gate-ok' : '')} data-testid="interview-gate-line">
-            Gate check (${gate.artefact?.title ?? 'no Artefact'}): ${gate.pass ? 'passes' : `not yet. Outstanding: ${gate.outstanding.join(', ') || 'see the editor'}`}
+            Gate check (${gate.artefact?.title ?? 'no Artefact'}): ${gate.pass ? 'passes' : `not yet. Outstanding: ${gate.outstanding.join(', ') || 'see the editor'}`}${readiness ? `. ${readiness.doneCount} of ${readiness.total} Field${readiness.total === 1 ? '' : 's'} in scope done` : ''}
           </p>`
         : null}
     `
@@ -396,6 +522,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
                 ${providers.map((p) => html`<option key=${p.id} value=${p.id} selected=${p.id === snap?.providerId}>${providerLabel(p)}</option>`)}
               </select>`
             : null}
+          ${started ? html`<span class="mode-chip" data-testid="interview-mode" data-mode=${snap?.cardMode} title="How the AI asks its questions: a native tool call, then text, then plain chat.">Cards: ${MODE_LABELS[snap?.cardMode] ?? 'native'}</span>` : null}
           ${switchMessage ? html`<span class="inline-error" role="alert" data-testid="interview-switch-error">${switchMessage}</span>` : null}
         </div>
         <div class="interview-thread" data-testid="interview-thread" ref=${threadRef}>
@@ -404,6 +531,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
             ${setup.status === 'error' ? html`<p class="inline-error" role="alert">${setup.message}</p>` : null}
             ${setup.status === 'ready' && !started ? kickoff() : null}
             ${setup.status === 'ready' && started ? thread() : null}
+            ${setup.status === 'ready' && started ? roundView() : null}
             ${recovery
               ? html`<${AiRecoveryPrompt}
                   kind=${recovery.kind}
@@ -430,11 +558,19 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
                   <span class="muted"> or switch AI Provider above.</span>
                 </div>`
               : null}
-            ${busy && started && !snap?.drafting && !(snap.thread[snap.thread.length - 1]?.streaming) ? html`<p class="msg sys" data-testid="interview-working">Working<span class="caret"></span></p>` : null}
+            ${busy && started && snap?.preparing ? html`<p class="msg sys" data-testid="interview-preparing">Preparing questions<span class="caret"></span></p>` : null}
+            ${busy && started && !snap?.drafting && !snap?.preparing && !(snap.thread[snap.thread.length - 1]?.streaming) ? html`<p class="msg sys" data-testid="interview-working">Working<span class="caret"></span></p>` : null}
             ${stageEnd()}
           </div>
         </div>
         <div class="interview-composer">
+          ${started
+            ? html`<div class="inner composer-actions">
+                <button type="button" class="btn small ghost" data-testid="interview-finish" disabled=${busy || phase === 'kickoff'} title="Accept every recommendation, then answer one last round about only what the AI can't responsibly propose." onClick=${finishNow}>
+                  Finish with your recommendations
+                </button>
+              </div>`
+            : null}
           <div class="inner chatbox">
             <textarea
               data-testid="interview-chat"

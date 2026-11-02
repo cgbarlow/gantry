@@ -104,6 +104,30 @@ function requiredByArtefact(artefact, moduleId, field, gate) {
   return false
 }
 
+/**
+ * The Fields of `stageId` the Gate requires, as a Set of `module.field` keys: for the Artefact aimed for, or, with none
+ * chosen, those every Artefact that can pass the Gate requires (the brief's own "required"). Read-only Modules are left out.
+ * The readiness check and the order of a round of cards use it (#287).
+ */
+export function requiredFieldKeys(definition, stageId, artefactId) {
+  const stage = (definition?.stages ?? []).find((s) => s.id === stageId)
+  const keys = new Set()
+  if (!stage) return keys
+  const moduleById = new Map(asList(definition.modules).map((m) => [m.id, m]))
+  const readOnlyIds = new Set(Array.isArray(stage.readOnlyModules) ? stage.readOnlyModules : [])
+  const candidates = (definition.artefacts ?? []).filter((a) => a.gate === stage.gate && a.satisfiesGate !== false)
+  const aimed = artefactId ? (definition.artefacts ?? []).find((a) => a.id === artefactId) : candidates.length === 1 ? candidates[0] : undefined
+  for (const id of stage.modules ?? []) {
+    const mod = moduleById.get(id)
+    if (!mod || readOnlyIds.has(id)) continue
+    for (const field of mod.fields ?? []) {
+      const required = aimed ? requiredByArtefact(aimed, id, field, stage.gate) : candidates.length > 0 && candidates.every((a) => requiredByArtefact(a, id, field, stage.gate))
+      if (required) keys.add(`${id}.${field.id}`)
+    }
+  }
+  return keys
+}
+
 // A fence longer than any run of the fence character inside, so saved content or a document's text can never close it.
 function fence(text, char = '~') {
   const longest = Math.max(0, ...[...String(text).matchAll(new RegExp(`\\${char}+`, 'g'))].map((m) => m[0].length))

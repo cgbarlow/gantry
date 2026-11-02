@@ -24,7 +24,7 @@ export const DRAFT_TOOL = {
     'Write one Field of the Stage into the architect’s live draft preview. Call it once per Field you can draft from the Source documents ' +
     'or from what the architect has told you. Gantry checks the draft (a select value must be one of its options, the word count must be ' +
     'within budget, every figure must be cited or marked) and tells you if something must be fixed; fix it once. A Field that already ' +
-    'holds saved content is refused. Nothing is saved until the architect confirms the Stage.',
+    'holds saved content is not changed by this call: Gantry shows the architect a keep / use your version / merge card, and a draft you send after they choose to merge is accepted. Nothing is saved until the architect confirms the Stage.',
   parameters: {
     type: 'object',
     properties: {
@@ -32,6 +32,11 @@ export const DRAFT_TOOL = {
       value: {
         description: 'The Field’s content: Markdown text for a text Field, one string per item for a list or a Field that allows several choices, or exactly one of the options for a select Field.',
         anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
+      },
+      uncovered: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'The points the Field’s guidance asks for that this draft does not cover yet, one short phrase each. Leave it out, or empty, when the draft covers them all. A Field with uncovered points is not done.',
       },
     },
     required: ['field', 'value'],
@@ -41,7 +46,7 @@ export const DRAFT_TOOL = {
 /** What a model without tool calling is told, in place of the tool, so it can still draft (the text fallback). */
 export const DRAFT_TEXT_FALLBACK_INSTRUCTIONS =
   `To draft a Field, write one fenced code block tagged ${DRAFT_FENCE} containing JSON of the form ` +
-  `{"field":"module.field","value":"the Field's content"} (use an array of strings for a list or a Field that allows several choices). ` +
+  `{"field":"module.field","value":"the Field's content"} (use an array of strings for a list or a Field that allows several choices; add "uncovered":["a guidance point not yet covered"] if the draft leaves any). ` +
   'Write one block per Field. Gantry checks each draft and replies with anything to fix; fix it once. ' +
   'Keep your chat short and outside the blocks.'
 
@@ -65,7 +70,7 @@ export function extractDraftBlocks(text) {
       const parsed = JSON.parse(match[1])
       const list = Array.isArray(parsed) ? parsed : parsed?.drafts ? parsed.drafts : [parsed]
       for (const item of list) {
-        if (item && typeof item.field === 'string' && 'value' in item) drafts.push({ field: item.field, value: item.value })
+        if (item && typeof item.field === 'string' && 'value' in item) drafts.push({ field: item.field, value: item.value, ...(Array.isArray(item.uncovered) ? { uncovered: item.uncovered } : {}) })
         else errors.push('A draft block needs {"field": "module.field", "value": ...}.')
       }
     } catch (err) {
@@ -132,6 +137,30 @@ export function unsourcedFigures(text, architectText = '') {
   return found
 }
 
+/**
+ * `text` with "(target assumption)" added to every clause that holds a figure with no source (#287, "Finish with your
+ * recommendations"): the AI proposed the figure and the architect accepted it without a source, which is exactly what the
+ * marker says. A cited figure, an already marked one, and one the architect typed (`architectText`) are left alone. The
+ * marker goes at the end of the clause, before its closing full stop, so one mark covers a clause's figures.
+ */
+export function markTargetAssumptions(text, architectText = '') {
+  const originals = []
+  const masked = String(text ?? '')
+    .replace(/\[[^\]]*\]\(source:[^)]*\)|\(\s*target assumption\s*\)/gi, (m) => {
+      originals.push(m)
+      return CITED
+    })
+  const pieces = masked.split(/(;|\.(?=\s|$)|\n|\|)/)
+  for (let i = 0; i < pieces.length; i += 2) {
+    const clause = pieces[i]
+    if (!clause.trim() || unsourcedFigures(clause, architectText).length === 0) continue
+    const trailing = clause.match(/\s*$/)[0]
+    pieces[i] = `${clause.slice(0, clause.length - trailing.length)} (target assumption)${trailing}`
+  }
+  let n = 0
+  return pieces.join('').replace(new RegExp(CITED, 'g'), () => originals[n++])
+}
+
 /** The ids of the Source documents a text cites, in order, as `[...](source:<id>)`. */
 export function citedSourceIds(text) {
   return [...String(text ?? '').matchAll(/\]\(source:([^)\s]+)\)/g)].map((m) => m[1])
@@ -160,14 +189,15 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 
 /**
  * Checks one draft. `field` is the Definition's Field (camelCase: `{ id, type, options, multiple, targetWords }`).
- * `input`: `{ size, architectText, knownSourceIds, exact, label }`. `exact` (the stage Save's check of what an outside agent wrote,
+ * `input`: `{ size, architectText, knownSourceIds, exact, label, markAssumptions }`. `exact` (the stage Save's check of what an outside agent wrote,
  * #306) takes a select value as written instead of matching an option case-insensitively, since the written value is what
- * gets stored; `label` replaces the Field id in the messages (`module.field`). Returns `{ value, words, problems }`: `value` is the draft as the Field
+ * gets stored; `label` replaces the Field id in the messages (`module.field`); `markAssumptions` marks unsourced figures
+ * "(target assumption)" instead of reporting them (#287). Returns `{ value, words, problems }`: `value` is the draft as the Field
  * stores it, `problems` is a list of `{ kind, message }` (`options`, `budget`, `figures`, `citation`, `date`), each written
  * to be sent back to the model.
  */
-export function checkDraft(field, rawValue, { size, architectText = '', knownSourceIds, exact = false, label } = {}) {
-  const value = normaliseDraftValue(field, rawValue)
+export function checkDraft(field, rawValue, { size, architectText = '', knownSourceIds, exact = false, label, markAssumptions = false } = {}) {
+  let value = normaliseDraftValue(field, rawValue)
   const words = countWords(value)
   const problems = []
   const where = label ?? `${field.id}`
@@ -191,6 +221,9 @@ export function checkDraft(field, rawValue, { size, architectText = '', knownSou
     return { value, words, problems }
   }
 
+  // #287: after "Finish with your recommendations" Gantry marks the unsourced figures itself instead of sending the draft back.
+  if (markAssumptions) value = Array.isArray(value) ? value.map((item) => markTargetAssumptions(item, architectText)) : markTargetAssumptions(value, architectText)
+  const proseWords = markAssumptions ? countWords(value) : words
   const over = fieldOverBudget(field, value, size)
   if (over !== null) {
     problems.push({ kind: 'budget', message: `${where}: ${over.words} words is over the ${targetSizeLabel(size)} budget of about ${over.target}. Tighten it to ${over.target} words or fewer.` })
@@ -210,5 +243,5 @@ export function checkDraft(field, rawValue, { size, architectText = '', knownSou
       problems.push({ kind: 'citation', message: `${where}: ${unknown.map((id) => `source:${id}`).join(', ')} ${unknown.length === 1 ? 'is' : 'are'} not a Source document of this Instance. Cite one that is listed: ${knownSourceIds.join(', ') || '(none)'}.` })
     }
   }
-  return { value, words, problems }
+  return { value, words: proseWords, problems }
 }

@@ -166,12 +166,12 @@ test('the AI opens with a summary, drafts Fields through draft_field, and the dr
   assert.deepEqual(ai1, ['I found one brief: the insurer wants faster claims.', 'Drafted what the brief supports. Who owns this?'])
   assert.equal(snap.thread.filter((t) => t.drafted).length, 2)
 
-  // The AI was offered the draft tool and no question cards, and told the Stage's rules and the Source document.
+  // The AI was offered the question card tool and the draft tool, and told the Stage's rules and the Source document.
   const first = ai.calls[0].body
-  assert.deepEqual(first.tools.map((t) => t.name), ['draft_field'])
+  assert.deepEqual(first.tools.map((t) => t.name), ['ask_architect', 'draft_field'])
   assert.match(first.system, /Draft first/)
   assert.match(first.system, /The insurer wants faster claims\./)
-  assert.match(first.system, /Question cards are not available in this session yet/)
+  assert.match(first.system, /call the `ask_architect` tool, one round at a time/)
   // The tool results went back to the AI in the second request.
   assert.deepEqual(toolResults(ai.calls[1]).map((r) => [r.tool_use_id, Boolean(r.is_error)]), [['t1', false], ['t2', false]])
 })

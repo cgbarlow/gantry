@@ -22,6 +22,7 @@ export const ASK_TOOL_SCHEMA = {
       items: {
         type: 'object',
         properties: {
+          id: { type: 'string', description: 'A short unique id, needed only when another card in the tree waits for this one (see "after").' },
           header: { type: 'string', description: 'A word or two naming the topic, shown as the card’s heading.' },
           question: { type: 'string', description: 'The question itself.' },
           options: {
@@ -55,6 +56,16 @@ export const ASK_TOOL_SCHEMA = {
             required: ['document'],
           },
           field: { type: 'string', description: 'The Field this answer feeds, as module.field, when it feeds one.' },
+          after: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'The ids of cards that must be answered before this one can be asked. Gantry holds the card back until they are, then shows it.',
+          },
+          kind: {
+            type: 'string',
+            enum: ['disagreement', 'missing'],
+            description: '"disagreement" when Source documents disagree, "missing" when a fact the Stage needs is in none of them. Leave out for any other question. Gantry uses it to order the cards in a round.',
+          },
         },
         required: ['question', 'options', 'recommended'],
       },
@@ -111,7 +122,8 @@ function resolveSource(document, knownSources) {
  * document must be one of them.
  *
  * A card in `cards` is normalised: `{ id, header, question, options: [{label, description, draft}],
- * multiSelect, recommended: [label], why, source: {document, location} | null, field }`.
+ * multiSelect, recommended: [label], why, source: {document, location} | null, field, after?, kind? }`
+ * (`after` and `kind` are present only when the model sent them; #287).
  */
 export function validateCards(input, { knownSources } = {}) {
   const errors = []
@@ -161,6 +173,9 @@ export function validateCards(input, { knownSources } = {}) {
       }
     }
 
+    const after = (Array.isArray(q.after) ? q.after : q.after ? [q.after] : []).map(str).filter(Boolean)
+    const kind = ['disagreement', 'missing'].includes(str(q.kind).toLowerCase()) ? str(q.kind).toLowerCase() : ''
+
     let source = null
     if (q.source !== undefined && q.source !== null && q.source !== '') {
       const document = str(typeof q.source === 'string' ? q.source : q.source?.document)
@@ -187,6 +202,8 @@ export function validateCards(input, { knownSources } = {}) {
         why: str(q.why),
         source,
         field: str(q.field) || null,
+        ...(after.length ? { after } : {}),
+        ...(kind ? { kind } : {}),
       })
     }
   })

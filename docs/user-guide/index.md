@@ -668,7 +668,7 @@ Use **Show commit history** in the card header to open a dialog listing the comm
 
 The **AI interview** is a way to draft a Stage with an AI. You give an Instance its **Source documents** (a client brief, requirements, meeting notes), connect an **AI Provider**, and open the **Interview page**. The AI reads the documents, drafts every Field they support into a live preview, and talks it through with you. Nothing is saved until you confirm the Stage, and the AI never marks a Module `agreed` or passes a Gate that needs approval or review: those stay with people.
 
-This release covers the **current Stage** of a **Local** or **Server-hosted** workspace. Azure DevOps, GitHub and GitLab workspaces don't have it yet, and neither does a Stage other than the current one; **✦ AI interview** is greyed out there and its tooltip says why. The AI does not yet ask multiple-choice question cards in rounds, commit a decisions log or resume a paused session: those arrive in later releases. Today it drafts, and you steer it in plain chat.
+This release covers the **current Stage** of a **Local** or **Server-hosted** workspace. Azure DevOps, GitHub and GitLab workspaces don't have it yet, and neither does a Stage other than the current one; **✦ AI interview** is greyed out there and its tooltip says why. The AI asks you **question cards** in rounds (see below). It does not yet commit a decisions log or resume a paused session: those arrive in later releases.
 
 ### Before you start
 
@@ -690,7 +690,7 @@ Choose **✦ AI interview** in the Instance editor's header. If the editor has c
 Before the AI says anything, the centre column shows a short form:
 
 - **AI Provider.** The Default one is pre-selected. If you have none, the form says so and **Connect an AI Provider** opens the settings dialog. An AI Provider that hasn't been tested is **tested when you press Start** (the key, the model and the other checks from **Test connection**); if the test fails, the form shows why and nothing starts.
-- **A warning for a model that can't use tools.** If Test connection found that the model can't produce question cards natively, the form says so and Gantry will ask it to write its drafts in text instead (the *text fallback*). It still works, but is less reliable. Gantry never refuses a model.
+- **How the AI will ask.** The form says whether this model asks **natively** (with a tool, so every question is a card), in **text** (the *text fallback*: a model that can't use tools writes its questions and drafts in a block Gantry reads), or in **plain chat** (a model that can do neither; you answer in the chat box). Gantry tries them in that order and never refuses a model. The text fallback and plain chat work, but are less reliable. If a model keeps sending cards Gantry can't use, the interview carries on in plain chat and says so.
 - **Artefact to aim for.** When more than one Artefact can pass this Stage's Gate (for example *SOAP* and *SOAP (full)*), you choose which one the AI works towards. The **lightest** one, the one that requires the least, is pre-selected.
 - **Source documents.** How many the AI will read, and a hint if there are none.
 - **A warning for documents this model can't read.** If the chosen AI Provider can't read a picture, or a scanned PDF, the form lists them before you start, so you can choose another AI Provider or carry on without them.
@@ -702,7 +702,7 @@ The AI opens with a short summary of what it found in the Source documents, then
 
 - **Read-only Modules are left out.** They are context for the AI, not something it writes.
 - **Optional Fields** are drafted only when the documents support them.
-- **Saved content is left alone.** The AI drafts into Fields that are empty. A Field that already holds content, whoever wrote it, is not touched: in this release you change it yourself in the editor. (Changing saved content through a *keep / use the AI's version / merge* card comes with question cards.) Content saved at an earlier Stage is likewise left as it is.
+- **Saved content changes only through a card.** The AI drafts into Fields that are empty. A Field that already holds content, whoever wrote it, is never overwritten: if the AI would change it, you get a **Keep / Use the AI's version / Merge** card (see below). Content saved at an earlier Stage is extended to this Stage's depth, never rewritten.
 - **Where a fact comes from.** A figure from a Source document is cited as `[title, p. 4](source:id)`, shown as a small 📄 mark. A fact you told the AI in the chat is written as plain fact. Something the AI proposed that you accepted is marked **(target assumption)**. The AI is told never to invent a figure, a date or a name.
 - **Nothing the example shows is sent.** The example Instance a Definition may offer (the "Populate example text" source) is for people to fill a form from; it is never given to the AI.
 
@@ -730,6 +730,38 @@ Gantry decides how each Source document reaches the AI, for the AI Provider you 
 - **Pictures are sent as they are** (PNG, JPEG, GIF, WebP) to a model whose **Test connection** found it **reads images**. A text-only model is told the picture is unreadable and won't rely on it. A picture over 5 MB is not sent, and neither is any original once all the originals together would pass 15 MB; both are listed as unreadable with the reason.
 - **Unreadable is said, not hidden.** The kickoff form warns before you start, the conversation says it once when the interview starts (and again if you switch to an AI Provider with different abilities), and the AI is told which documents it can't see so that it asks you instead of guessing.
 
+### Question cards and rounds
+
+After drafting, the AI asks you what it needs as **question cards**. The questions come in **rounds**: a round holds every question whose prerequisites are already settled, and a question that depends on another is held back until you have answered that one (then it appears by itself). Within a round the cards are sorted: first those about Fields the Gate requires, then Source documents that disagree, then facts that are missing, then optional Fields. Cards show **four at a time** with **Back** and **Next**, and the round is **submitted together** with **Submit**. When you submit, the AI redrafts the Fields your answers feed.
+
+Each card has:
+
+- a **header chip** naming the topic, the Field your answer feeds, and "choose any" when you may pick several;
+- the **question**, and **option tiles** with the AI's recommendation already selected and badged **RECOMMENDED**;
+- a one-line **Why I recommend it**, with the Source document and the page or slide it rests on;
+- an **Other** tile, added by Gantry, which opens a text box for your own words. What you type there is your own fact, so a figure in it needs no source.
+
+A card about a **select** Field shows exactly the options the Definition allows, with no Other: if none of them fits, say so in the chat box and the AI logs it as an open question rather than inventing an option.
+
+The cards stay on screen while you read the preview, and you can type in the chat box too. If you type while cards are open, the cards are put away and the AI answers what you wrote; it asks again if it still needs them.
+
+#### Keep, use the AI's version, or merge
+
+If the AI would change a Field that already holds content, nothing in the preview changes until you decide. A card shows the saved text beside the AI's version and offers:
+
+- **Keep**: the saved text stays exactly as it is, and the AI is told not to propose a change to it again. This is the recommended choice;
+- **Use the AI's version**: the AI's text replaces it in the preview (it is written only when you save the Stage), and the AI may then revise it;
+- **Merge**: the AI writes one version that keeps what is good in both.
+
+#### When a Field is done and a Stage is ready
+
+Gantry works out for itself when a Field is **done**: it has content, it sits between about **60% of its word budget** and the budget, it covers each point its guidance asks for, and no open question feeds it. The preview marks each Field in scope **Done**, or says what is missing. A Field in scope is one the Gate requires for the Artefact you chose, or any other Field with content; an optional Field the documents don't support is simply left empty.
+
+The Stage is **ready** when the Gate check passes for the Artefact you chose **and** every Field in scope is done. Only then does the stage-end card appear (see **Saving the Stage**).
+
+#### Finish with your recommendations
+
+**Finish with your recommendations** sits above the chat box and is always available. It **accepts every pending recommendation**: the cards still open are answered with the AI's recommendations (any you have already answered keep your answer). The AI redrafts, and any figure it proposed that isn't from a Source document or from you is marked **(target assumption)**. Then the AI asks **one last round**, about only the Fields it can't responsibly propose, such as a named Owner. The stage-end card waits until you have answered that round.
 
 ### Chatting and switching AI Provider
 
@@ -739,7 +771,7 @@ You can **switch AI Provider between any two turns** with the picker at the top 
 
 ### Saving the Stage
 
-When Gantry's **real Gate check passes** for the Artefact you chose, counting the AI's drafts as if they were saved, a **stage-end card** appears: *"Shape is ready. Save it?"* Until then, a line under the preview shows the Gate check and what is still outstanding. Fields the AI left out are for you to fill in, in the editor or by telling the AI.
+When the Stage is **ready** (Gantry's **real Gate check passes** for the Artefact you chose, counting the AI's drafts as if they were saved, and every Field in scope is done), a **stage-end card** appears: *"Shape is ready. Save it?"* It does not appear while question cards are open or while the last round after **Finish with your recommendations** is waiting. Until then, a line under the preview shows the Gate check, what is still outstanding and how many Fields are done. Fields the AI left out are for you to fill in, in the editor or by telling the AI.
 
 **Save and stop here** makes **one stage Save**, the same Save as in the editor, so it goes through the **Save check**: if a colleague saved the same Stage meanwhile, Gantry merges Field by Field and asks only about a Field you both changed. The Modules the AI wrote into stay **`draft`**; only a person marks a Module `agreed`. After the Save, the card confirms it and shows the result of the Gate check on what was saved. The drafts then show as ordinary saved content, and the editor shows them too.
 

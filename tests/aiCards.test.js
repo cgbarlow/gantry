@@ -166,3 +166,17 @@ test('text meant for the screen never shows the block, even one still being writ
   assert.equal(startsQuestionBlock('```json\n{}\n```'), false)
   assert.equal(extractQuestionBlocks('no block').found, false)
 })
+
+test('a card can name the cards it comes after and say what kind of question it is (#287); both are optional', () => {
+  const plain = validateCards({ questions: [q()] }).cards[0]
+  assert.equal('after' in plain, false)
+  assert.equal('kind' in plain, false)
+  const card = validateCards({ questions: [q({ id: 'second', after: ['first', ' '], kind: 'Disagreement' }), q({ kind: 'surprise', after: 'one' })] }).cards
+  assert.equal(card[0].id, 'second')
+  assert.deepEqual(card[0].after, ['first'])
+  assert.equal(card[0].kind, 'disagreement')
+  assert.equal('kind' in card[1], false, 'an unknown kind is ignored')
+  assert.deepEqual(card[1].after, ['one'], 'a single id is accepted')
+  const props = ASK_TOOL.parameters.properties.questions.items.properties
+  assert.ok(props.id && props.after && props.kind, 'the model is told about them')
+})

@@ -60,15 +60,19 @@ function anthropicReply({ text, tools = [] }) {
 
 const CITE = '[Client brief, p. 1](source:client-brief)'
 const draft = (id, field, value) => ({ id, input: { field, value } })
+// #287: a Field is done only at about 60% of its word budget, so the scripted drafts are written at the length of a real draft.
+const fill = (n) => Array.from({ length: n }, (_, i) => `w${i}`).join(' ')
 const SOAP_DRAFTS = [
-  draft('t1', 'background.problem', `Claims take too long to settle ${CITE}.`),
-  draft('t2', 'background.affected-domains', ['Claims', 'Member services']),
-  draft('t3', 'solution-definition.high-level-requirements', `Members must lodge claims online ${CITE}.`),
-  draft('t4', 'solution-definition.high-level-solution-overview', 'Configure the existing claims platform.'),
-  draft('t5', 'solution-definition.process-flow', 'A member lodges, an assessor reviews, payment is made.'),
-  draft('t6', 'solution-definition.feature-breakdown', 'Lodge a claim. Track its status.'),
-  draft('t7', 'team-and-estimates.teams-required', ['Claims', 'Integration']),
+  draft('t1', 'background.problem', `Claims take too long to settle ${CITE}. ${fill(90)}.`),
+  draft('t2', 'background.affected-domains', ['Claims', 'Member services', fill(18)]),
+  draft('t3', 'solution-definition.high-level-requirements', `Members must lodge claims online ${CITE}. ${fill(110)}.`),
+  draft('t4', 'solution-definition.high-level-solution-overview', `Configure the existing claims platform. ${fill(65)}.`),
+  draft('t5', 'solution-definition.process-flow', `A member lodges, an assessor reviews, payment is made. ${fill(70)}.`),
+  draft('t6', 'solution-definition.feature-breakdown', `Lodge a claim. Track its status. ${fill(70)}.`),
+  draft('t7', 'team-and-estimates.teams-required', ['Claims', 'Integration', fill(60)]),
 ]
+const ESTIMATE_RAW = `Delivery takes 12 weeks. ${fill(70)}.`
+const ESTIMATE_MARKED = `Delivery takes 12 weeks (target assumption). ${fill(70)}.`
 
 // `script(body, n, key)` returns { text, tools } for the nth POST /v1/messages.
 function withFakeAnthropic(script, fn) {
@@ -121,8 +125,8 @@ function exampleSentence() {
 }
 
 const interviewScript = (body, n) => {
-  if (n === 0) return { text: 'I found one brief: claims take too long to settle.', tools: [...SOAP_DRAFTS, draft('t8', 'team-and-estimates.estimates', 'Delivery takes 12 weeks.')] }
-  if (n === 1) return { tools: [draft('t9', 'team-and-estimates.estimates', 'Delivery takes 12 weeks (target assumption).')] }
+  if (n === 0) return { text: 'I found one brief: claims take too long to settle.', tools: [...SOAP_DRAFTS, draft('t8', 'team-and-estimates.estimates', ESTIMATE_RAW)] }
+  if (n === 1) return { tools: [draft('t9', 'team-and-estimates.estimates', ESTIMATE_MARKED)] }
   if (n === 2) return { text: 'SOAP is drafted. Who is the sponsor?' }
   return { text: 'Noted: the sponsor is Pat.' }
 }
@@ -214,7 +218,7 @@ test('server workspace: start an interview, watch drafts fill the preview, chat,
           const design = loadDefinition('design', { definitionsDir: 'definitions', version: 3 })
           const background = readModule(design, SLUG, 'background', { instancesDir: join(instancesDir, 'default') })
           assert.match(background.fields.problem, /Claims take too long to settle \[Client brief, p\. 1\]\(source:client-brief\)\./)
-          assert.deepEqual(background.fields['affected-domains'], ['Claims', 'Member services'])
+          assert.deepEqual(background.fields['affected-domains'], ['Claims', 'Member services', fill(18)])
           assert.equal(background.status, 'draft')
           assert.equal(readModule(design, SLUG, 'team-and-estimates', { instancesDir: join(instancesDir, 'default') }).status, 'draft')
           // The preview now shows them as saved content, no longer unsaved drafts.
@@ -232,7 +236,7 @@ test('server workspace: start an interview, watch drafts fill the preview, chat,
   }
 })
 
-test('server workspace: a Field with saved content is left alone, and an over-budget draft is sent back once then shown with a warning', async () => {
+test('server workspace: a Field with saved content changes only through a keep / use / merge card, and an over-budget draft is sent back once then shown with a warning', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-286-'))
   try {
     createInstance('design', SLUG, { instancesDir, definitionVersion: 3 })
@@ -254,13 +258,20 @@ test('server workspace: a Field with saved content is left alone, and an over-bu
           await page.goto(`${base}/instance/${SLUG}?interview=1`)
           await page.waitForSelector('[data-testid="interview-start"]:not([disabled])')
           await page.click('[data-testid="interview-start"]')
-          await page.waitForFunction(() => document.querySelector('[data-testid="interview-msg"][data-who="ai"]:last-of-type') && !document.querySelector('[data-testid="interview-working"]'))
-          // The saved Field is untouched; its draft was refused.
+          await page.waitForSelector('[data-testid="interview-card"][data-card-type="change"]')
+          // The saved Field is untouched; its draft was held back and became a card.
           assert.equal(await field(page, 'background.affected-domains').getAttribute('data-state'), 'saved')
           assert.match(await field(page, 'background.affected-domains').textContent(), /Finance/)
           const refused = posts[1].body.messages.at(-1).content.find((b) => b.tool_use_id === 'a2')
           assert.equal(refused.is_error, true)
           assert.match(refused.content, /already holds saved content/)
+          const change = page.locator('[data-testid="interview-card"][data-card-type="change"]')
+          assert.match(await change.locator('[data-testid="change-saved"]').textContent(), /Finance/)
+          assert.match(await change.locator('[data-testid="change-proposed"]').textContent(), /Claims/)
+          assert.deepEqual(await change.locator('[data-testid="card-option"]').evaluateAll((els) => els.map((e) => e.getAttribute('data-option'))), ['Keep', "Use the AI's version", 'Merge'])
+          assert.equal(await change.locator('[data-testid="card-other"]').count(), 0, 'no Other on a keep / use / merge card')
+          assert.equal(await change.locator('[data-testid="card-option"][data-option="Keep"] [data-testid="card-recommended"]').count(), 1)
+          assert.equal(await field(page, 'background.affected-domains').getAttribute('data-state'), 'saved', 'nothing changes before the answer')
           // The long draft went back once, came back long, and shows with a warning.
           const warning = field(page, 'background.problem').locator('[data-testid="interview-warning"]')
           await warning.waitFor()
@@ -269,6 +280,12 @@ test('server workspace: a Field with saved content is left alone, and an over-bu
           // The Gate check hasn't passed (most required Fields are empty): no stage-end card.
           assert.equal(await page.locator('[data-testid="interview-stage-end"]').count(), 0)
           assert.match(await page.textContent('[data-testid="interview-gate-line"]'), /not yet/)
+
+          // Use the AI's version: it replaces the saved text in the preview as an unsaved draft.
+          await change.locator('[data-testid="card-option"][data-option="Use the AI\'s version"]').click()
+          await page.click('[data-testid="round-submit"]')
+          await page.waitForFunction(() => document.querySelector('[data-testid="interview-field"][data-field-key="background.affected-domains"]')?.getAttribute('data-state') === 'draft')
+          assert.match(await field(page, 'background.affected-domains').textContent(), /Claims/)
         })
       )
     )
@@ -316,7 +333,7 @@ test('connecting an AI Provider from the kickoff, and the editor button is off o
 
 test('local workspace: the same interview reads and saves through the folder, and a Source document added from the rail is read', async () => {
   await withFakeAnthropic(
-    (body, n) => (n === 0 ? { text: 'One brief.', tools: SOAP_DRAFTS.concat(draft('t8', 'team-and-estimates.estimates', 'Delivery takes 12 weeks (target assumption).')) } : { text: 'Drafted.' }),
+    (body, n) => (n === 0 ? { text: 'One brief.', tools: SOAP_DRAFTS.concat(draft('t8', 'team-and-estimates.estimates', ESTIMATE_MARKED)) } : { text: 'Drafted.' }),
     (aiBase, posts) =>
       withRunningServer({ allowPrivateAiUrls: true }, (base) =>
         withPage(async (page) => {
@@ -434,7 +451,7 @@ test('server workspace: a large pack is read through the catalogue, a scan and a
 
           // The pack is over half the model's window, so the AI got a catalogue and the reader, not the text.
           const first = posts[0].body
-          assert.deepEqual(first.tools.map((t) => t.name), ['draft_field', 'read_source_document'])
+          assert.deepEqual(first.tools.map((t) => t.name), ['ask_architect', 'draft_field', 'read_source_document'])
           assert.match(first.system, /only a catalogue is shown/)
           assert.doesNotMatch(first.system, /alpha alpha alpha/)
 

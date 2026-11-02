@@ -2220,6 +2220,29 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .interview-page .qcard .qchip { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
 .interview-page .qcard .qhead { font-family: var(--font-display); font-weight: 600; font-size: 14px; margin: 0 0 6px; }
 .interview-page .round-actions { display: flex; gap: 8px; align-items: center; }
+/* #287: rounds of question cards, option tiles, "Other", the saved-content card and Finish with your recommendations. */
+.interview-page .round { margin: 12px 0 18px; }
+.interview-page .round-head { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin: 0 0 6px; }
+.interview-page .round-note { font-size: 12px; color: var(--text-muted); margin: 0 0 8px; }
+.interview-page .round .qcard { margin: 0 0 12px; }
+.interview-page .qcard .opts-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; }
+.interview-page .qcard label.opt { display: flex; gap: 8px; align-items: flex-start; padding: 7px 8px; border: var(--hairline) solid var(--line); border-radius: var(--radius); cursor: pointer; font-size: 13px; background: var(--bg); margin: 0; }
+.interview-page .qcard label.opt:hover { border-color: var(--line-strong); }
+.interview-page .qcard label.opt.chosen { border-color: var(--text); box-shadow: inset 3px 0 0 var(--text); }
+.interview-page .qcard label.opt input[type="radio"], .interview-page .qcard label.opt input[type="checkbox"] { margin-top: 3px; }
+.interview-page .qcard .olabel { font-weight: 600; }
+.interview-page .qcard .odesc { display: block; color: var(--text-muted); font-size: 12px; }
+.interview-page .qcard .rec { font-family: var(--font-mono); font-size: 10px; background: var(--text); color: var(--bg); padding: 0 5px; border-radius: var(--radius); margin-left: 6px; }
+.interview-page .qcard .why { font-size: 12px; margin: 8px 0 0; padding: 6px 10px; border-left: var(--border-strong) solid var(--line-strong); background: var(--bg); }
+.interview-page .qcard .other-input { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 6px 8px; margin-top: 4px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); background: var(--bg); color: var(--text); }
+.interview-page .change-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin: 0 0 10px; }
+.interview-page .change-compare .value { padding: 8px 10px; background: var(--bg); border: var(--hairline) solid var(--line); border-radius: var(--radius); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.interview-page .change-compare .value.ai { box-shadow: inset 3px 0 0 var(--stamp-draft-bg); }
+.interview-page .round-actions .round-page { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.interview-page .composer-actions { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; flex-wrap: wrap; }
+.interview-page .mode-chip { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; padding: 1px 6px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); color: var(--text-muted); }
+.interview-preview .field-done { display: block; font-family: var(--font-mono); font-size: 10px; margin-top: 3px; color: var(--text-muted); }
+.interview-preview .field-done.is-done { color: var(--stamp-agreed-bg); }
 .interview-page .gate-ok { font-family: var(--font-mono); font-size: 11px; color: var(--stamp-agreed-bg); }
 .interview-preview { border-left: var(--border-strong) solid var(--line-strong); padding: 16px; overflow: auto; background: var(--bg-raised); }
 .interview-preview .preview-chip { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
