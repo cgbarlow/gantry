@@ -45,7 +45,7 @@ import { INTERVIEW_RULES_VERSION, INTERVIEW_RULES, interviewRulesText } from './
 import { adapterText } from './interviewAdapter.js'
 import { INTERVIEW_SKILLS, interviewSkillVersions, interviewSkillsCredit } from './interviewSkills.js'
 import { pagesSummary } from './interviewSources.js'
-import { currentLogEntries } from './decisionsLog.js'
+import { OUTSIDE_AGENT, currentLogEntries } from './decisionsLog.js'
 import { glossarySeed, openQuestionsToCarry, standardRoles, standardRolesLines, termChoices } from './interviewStandard.js'
 import { effectiveTargetSize, fieldTargetWords, targetSizeLabel } from './targetSize.js'
 import { reapprovalNames, reapprovalOf } from './interviewReapproval.js'
@@ -215,6 +215,8 @@ function logEntryLine(entry) {
   if (asArray(entry.sources).length) bits.push(`sources: ${asArray(entry.sources).join(', ')}`)
   if (asArray(entry.fields).length) bits.push(`fed: ${asArray(entry.fields).join(', ')}`)
   if (entry.replaces) bits.push(`replaces ${asArray(entry.replaces).join(', ')}`)
+  // #307 (ADR-0067): an outside agent's entry is that agent's account of the architect, which Gantry could not check against what they typed.
+  if (entry.recordedBy === OUTSIDE_AGENT) bits.push('recorded by an outside agent')
   return `- ${entry.id ? `[${entry.id}] ` : ''}${label}: ${bits.join(' · ') || '(no detail)'}`
 }
 
@@ -243,7 +245,7 @@ export function sourceOutline(text, limit = 12) {
 
 const sourceTitle = (s) => attr(s.title || s.filename || s.id)
 
-function sourcesPart({ sources, contextWindow, readerTool, access }) {
+function sourcesPart({ sources, contextWindow, readerTool, readerText, access }) {
   const live = liveSources(sources)
   // #292: a document `access` says is unreadable has no text to count even if it holds some (it cannot be read at all).
   const readable = (s) => typeof s.text === 'string' && s.text.trim() !== '' && access?.[s.id]?.how !== 'unreadable'
@@ -262,7 +264,7 @@ function sourcesPart({ sources, contextWindow, readerTool, access }) {
     catalogued: [],
     withoutText: withoutText.map((s) => s.id),
     attached: withoutText.filter((s) => access?.[s.id]?.how === 'attach').map((s) => s.id),
-    unreadable: withoutText.filter((s) => access ? access[s.id]?.how !== 'attach' : true).map((s) => s.id),
+    unreadable: withoutText.filter((s) => access ? access[s.id]?.how !== 'attach' && access[s.id]?.how !== 'tool' : true).map((s) => s.id),
   }
 
   if (mode === 'none') return { text: 'This Instance has no Source documents. Draft nothing from evidence; ask for the facts you need, and cite nothing.', summary }
@@ -283,7 +285,9 @@ function sourcesPart({ sources, contextWindow, readerTool, access }) {
   } else {
     lines.push(
       `The documents' text (about ${packTokens.toLocaleString('en-US')} tokens) is more than half this model's window (${windowTokens.toLocaleString('en-US')} tokens), so only a catalogue is shown: each document's id, title, kind, size and outline.`,
-      readerTool
+      readerTool && readerText
+        ? readerText
+        : readerTool
         ? 'Read a document, or part of one, with `read_source_document(id, range)` before relying on or citing it. A range is `pages 3-5` (a PDF), `section: Heading text` (one of the outline headings below) or `start-end` character offsets. Whatever you read is recorded as an input of the Fields you draft from it.'
         : 'You cannot open these documents here. Do not cite or rely on anything beyond what this catalogue shows; where a fact would need a document, ask the architect for it.',
       ''
@@ -308,7 +312,10 @@ function sourcesPart({ sources, contextWindow, readerTool, access }) {
     for (const s of withoutText) {
       const a = access[s.id]
       const what = `${sourceTitle(s)} (id \`${attr(s.id)}\`, ${attr(s.filename)})`
-      if (a?.how === 'attach') {
+      if (a?.how === 'tool') {
+        // #307: an outside agent has no first message to attach to: it opens the document itself, and a picture comes back as a picture.
+        lines.push(`- ${what}: no text was read from it. Open it with the \`read_source_document\` tool${a.kind === 'pdf' ? ' (a scanned PDF comes back as its pages)' : a.kind === 'image' ? ' (a picture comes back as a picture)' : ''}, look at what it shows, and cite it by its id.`)
+      } else if (a?.how === 'attach') {
         lines.push(`- ${what}: attached to the first message as ${a.kind === 'pdf' ? 'the PDF itself' : 'a picture'}. Look at the attachment, and cite it by its id.`)
       } else {
         lines.push(`- ${what}: UNREADABLE (${a?.reason ?? 'no text could be read from it'}). Do not rely on or cite it; where it would matter, ask the architect what it shows.`)
@@ -341,9 +348,10 @@ function sourcesPart({ sources, contextWindow, readerTool, access }) {
  * @param {object} input.skills          from `loadInterviewSkills`
  * @param {number} [input.contextWindow] the model's context window in tokens
  * @param {boolean} [input.readerTool]   whether a catalogue can be read from (the `read_source_document` tool of #292)
+ * @param {string} [input.readerText]    how to read a catalogued document, when the caller's tool is not the Interview page's (#307: an outside agent's `read_source_document` takes a page)
  * @param {object} [input.sourceAccess]  `{ [id]: { how: 'text'|'attach'|'unreadable', kind, reason?, note? } }` from `planSourceAccess` (#292); without it a document with no text is simply listed
  */
-export function buildInterviewBrief({ definition, stageId, artefactId, size, saved, decisions, earlierDecisions = [], sources, skills, contextWindow, readerTool = false, sourceAccess, approvedPrinted = {}, reopenable = [] }) {
+export function buildInterviewBrief({ definition, stageId, artefactId, size, saved, decisions, earlierDecisions = [], sources, skills, contextWindow, readerTool = false, readerText, sourceAccess, approvedPrinted = {}, reopenable = [] }) {
   const stage = (definition?.stages ?? []).find((s) => s.id === stageId)
   if (!stage) throw new Error(`The Definition has no Stage "${stageId}" to interview for`)
   if (!skills?.skills?.length) throw new Error('The interview skills are not loaded')
@@ -527,7 +535,7 @@ export function buildInterviewBrief({ definition, stageId, artefactId, size, sav
   parts.set('glossary', glossaryLines.join('\n'))
 
   // --- 8. Source documents ---
-  const sourcesResult = sourcesPart({ sources, contextWindow, readerTool, access: sourceAccess })
+  const sourcesResult = sourcesPart({ sources, contextWindow, readerTool, readerText, access: sourceAccess })
   parts.set('sources', sourcesResult.text)
 
   // --- 9. the decisions log so far ---

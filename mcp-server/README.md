@@ -86,7 +86,7 @@ checks what changed since the writer read it (`docs/adr/0068`).
   not echoed in the failure; `get_instance` is the one place to read it.
 - With no `stageVersion` the call saves as it did before the check, so existing agents keep working, and the
   response carries `overwrittenFields`: every Field the call overwrote (it held content and now holds something
-  else). Requiring the version comes with outside agent sessions (ADR-0067).
+  else). In an interview session the version is required (see "Running an AI interview session" below).
 
 The comparison itself lives in gantry serve, so it is the same in every workspace kind.
 
@@ -119,6 +119,41 @@ response says whether any text was read and why not (a picture, a scanned PDF, a
 **Access control is unchanged.** These are files in the same repository an agent could already read with the workspace's PAT;
 no new credential, route or permission is involved. A Local workspace's files are on the architect's computer and are not reachable
 from here, so none of these tools can reach one. ADR-0048 stays proposed.
+
+## Running an AI interview session
+
+Following `docs/adr/0067`, an outside agent can run the whole AI interview itself. It asks its questions in its own chat (question
+cards are web-only) and Gantry gives it what Gantry's own AI gets and holds it to the same rules. The rules live in `gantry serve`;
+these tools are thin calls to it.
+
+| Tool | What it does |
+| --- | --- |
+| `get_interview_brief` | The interview brief for a stage (`brief`, nine parts in precedence order: Gantry's rules, the pinned skills, Interview instructions, the stage, Fields in scope, saved content, preferred terms, Source documents, the decisions log so far), built by the same code as the in-app AI's, plus a `recap` of the stage's log, the `heldModules` of a drafted-ahead stage and the `stageVersion` to save against. Read-only. |
+| `start_interview_session` | Starts a "run until stage X" session: returns the `session` to pass on (an id, `runUntil`, state), the brief and recap, `stageVersion` and `notes` (another session still going on the stage, held modules). Writes nothing. |
+| `pause_interview_session` | Saves the entries, the session status (state `paused`) and, if `modules` are passed, the drafts so far, in one commit. |
+| `resume_interview_session` | Resumes from the last commit, whichever side paused: runs Check status once first on a workspace whose stage has a Pull Request, then returns the brief and recap and takes over the paused session (`who` or `session` picks it). The committed log wins. |
+| `update_instance_modules` | Takes `session`, `entries` and `stageVersion`. The stage-summary confirm is its one save: the content, the entries and the status in one commit. |
+| `advance_stage`, `request_approval` | Take `session` so Gantry can hold the agent to the in-app AI's rules. |
+| `get_review_response_list` | The Review response list as a Word document (`docxBase64`), built on demand from the stages' logs. |
+| `record_review_answers` | Raises each Reviewed copy's "comments answered" count once the outcomes are saved. |
+
+**A session moves between the browser and an agent through the last commit.** There is no session state on the server. A session is
+recorded only by what the agent saves (its entries and a status line in the stage's `interview/<stage>.yaml`), so a session paused
+in the browser resumes with `resume_interview_session` and one paused here resumes in the browser, which recaps from the same log.
+
+**Saving.** Pass `session` (`id`, `runUntil`, `state`, `model`, `who`) and `entries` to `update_instance_modules` at the stage-summary
+confirm. `stageVersion` is required in a session (a save without it is refused with `code: "stage_version_required"`; a stale one with
+`stage_changed`, as outside a session). Entries have the shape the browser's log has (`answer`, `fact`, `open-question`, `term`,
+`saved-content`, `source-update`, `review-answered`, ...). Gantry assigns each its `id`, time and session, stamps it
+`recordedBy: "outside agent"` with the `agentModel` the agent reports, writes the session status (model named, tokens `"not
+reported"`), and rebuilds the log's `fields` section from the content's `source:` citations and the entries that name each Field, so
+Out of date detection works on a stage an agent drafted. Nothing is committed per answer.
+
+**Guard rails.** In a session Gantry refuses, with `code: "session-guard"` or the existing code and the in-app AI's reason: passing a
+gate (`advance_stage` is refused on a workspace with Pull Requests, and elsewhere until the session saved the stage with state
+`saved`), `request_approval` for a stage the session has not saved, approvals out of stage order (refused for everyone,
+`docs/adr/0063`) and writes to a module an earlier stage with an open Pull Request also mounts (`shared-module-pending`, also for
+everyone). A call that names no session is treated like a person in the web UI: nothing new is refused.
 
 ## Adding a tool
 

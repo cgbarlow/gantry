@@ -14,6 +14,16 @@ async function resolveWorkspaceOrError({ slug, scope, ref }, { gantryClient }) {
   return { workspaceId: res.body?.workspaceId, scope: res.body?.scope }
 }
 
+// #307 (ADR-0067): the session an outside agent says it is in, as gantry serve takes it (lib/outsideAgentSession.js `parseSession`).
+export const sessionShape = z.object({
+  id: z.string().describe('The session id start_interview_session gave you.'),
+  runUntil: z.string().optional().describe('The stage id the run is to reach ("run until stage X").'),
+  state: z.enum(['in-progress', 'paused', 'saved', 'done', 'awaiting-approval', 'approval-queued', 'head-start']).optional().describe('This stage\'s state after this save: "saved" when the architect chose to carry on to the next stage, "paused" for a pause, "done" at the end of the run, "awaiting-approval" after request_approval on a workspace with Pull Requests. Default "in-progress".'),
+  model: z.string().optional().describe('The model you are, as you report it (for example "claude-opus-4-1"). Recorded in the session status; Gantry records tokens as "not reported".'),
+  who: z.string().optional().describe('The architect you are interviewing, so a session paused in the browser by them can be resumed by name.'),
+  artefact: z.string().optional().describe('The artefact id aimed for.'),
+})
+
 const slugRefShape = {
   slug: z.string().optional().describe('The instance slug. Provide this or "ref".'),
   scope: z.string().optional().describe('The opaque workspace-scope token GET /api/instance/workspace or a prior instance lookup returned. Pins the lookup to one workspace when a bare slug is ambiguous.'),
@@ -74,8 +84,8 @@ async function getInstance(args, { gantryClient }) {
   return okResult({ ...res.body, outOfDateError: reason })
 }
 
-async function updateInstanceModules(args, { gantryClient }) {
-  const { slug, scope, ref, stage, modules, stageVersion } = args
+export async function updateInstanceModules(args, { gantryClient }) {
+  const { slug, scope, ref, stage, modules, stageVersion, session, entries } = args
   if (!modules || Object.keys(modules).length === 0) {
     return errorResult('Provide at least one entry in "modules" to save.')
   }
@@ -87,7 +97,8 @@ async function updateInstanceModules(args, { gantryClient }) {
     path: '/api/instance/modules',
     method: 'PUT',
     query: { slug, scope: scope ?? resolved.scope, ref, stage },
-    body: stageVersion ? { modules, baseVersion: stageVersion } : { modules },
+    // #307 (ADR-0067): in an interview session the entries and session status ride in the same commit as the content, and the version is required (gantry serve says so).
+    body: { modules, ...(stageVersion ? { baseVersion: stageVersion } : {}), ...(session ? { session } : {}), ...(entries ? { entries } : {}) },
   })
   if (res.credentialError) return credentialErrorResult(res.credentialError)
   // ADR-0068 (#272): the stage moved on since get_instance returned this version. Nothing was written.
@@ -173,6 +184,7 @@ export const tools = [
       '7. When a field you wrote is over its word target (get_instance\'s "targetWords"), the save still succeeds and the response carries "targetWordNotes", one per such field (e.g. "nfrs.performance: 420 words, Medium target ~150") — tighten that field and save again. ' +
       '8. Pass "stageVersion", the value get_instance returned for this stage, to make sure you do not overwrite a colleague\'s changes. If the stage has changed since (the architect saved in the editor, or another session did), nothing is saved and the call fails with code "stage_changed", the stage\'s new "stageVersion" and "differingFields": the Fields in your call that are saved differently now, as "moduleId.fieldId". Call get_instance again, read what changed, settle any difference with the architect, then save again with the new version. A saved call returns the stage\'s new "stageVersion" to use next. ' +
       '9. Without "stageVersion" the call still saves, as it always did, but the response carries "overwrittenFields": every Field it overwrote, as "moduleId.fieldId" — those that held content and now hold something else. Tell the architect about any you were not meant to change. Passing the version is strongly preferred. ' +
+      '9a. In an AI interview session (start_interview_session), pass the "session" you were given and the "entries" to record, and "stageVersion" is required: without it the save is refused with code "stage_version_required". Do this once, when the architect confirms the stage summary (state "saved" if they chose to carry on to the next stage, "in-progress" or "done" otherwise): the entries, the session status and the rebuilt Fields record are committed with the content in one commit, never one commit per answer. Gantry stamps each entry "recorded by an outside agent", names your model in the session status (tokens "not reported") and rebuilds the log\'s Fields section from the content\'s source: citations and the entries that name each Field, so a Field drafted from a Source document is flagged Out of date when that document changes. Outside a session nothing changes: leave "session" and "entries" out. ' +
       '10. Every write is checked Field by Field, the way Gantry checks its own AI\'s drafts, whether or not an interview session is running. The response carries "fieldNotes": one note per problem, each with "module", "field", "kind" and a "message" saying how to fix it — "options" (a select value that is not exactly one of the Field\'s options), "budget" (over the word target) and "figures" (a figure with no source: cite it as [title, p. 4](source:<id>) from a Source document, or mark it "(target assumption)" if you are proposing it; a figure the architect told you in the interview needs no mark, but it is noted here, so say so to the architect). An empty list means a clean write. Notes never block the save: fix the Field and save again.',
     inputSchema: {
       ...slugRefShape,
@@ -181,6 +193,8 @@ export const tools = [
       modules: z
         .record(z.string(), z.any())
         .describe('Object keyed by moduleId, each value a partial module record: { status?, owner?, fields?, layout? }.'),
+      session: sessionShape.optional().describe('The interview session you are in (the one start_interview_session or resume_interview_session gave you), with its current state. Leave it out outside a session.'),
+      entries: z.array(z.record(z.string(), z.any())).optional().describe('Decisions-log entries to record with this save (session only): each { kind, ... } with kind one of answer, fact, open-question, term, saved-content, source-update, review-answered, hand-edit, artefact, restart, save-clash, returned-to-draft. Gantry assigns the id, time, session and the "recorded by an outside agent" label.'),
     },
     handler: updateInstanceModules,
   },

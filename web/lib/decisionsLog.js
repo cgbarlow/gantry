@@ -17,6 +17,16 @@ import { parse as parseYAML, stringify as stringifyYAML } from 'yaml'
 export const DECISIONS_LOG_VERSION = 1
 
 /**
+ * #307 (ADR-0067): what an entry and a session status are stamped with when an **outside agent** over MCP recorded them. The agent's account of
+ * the architect's words is the agent's, and Gantry cannot check a quote it did not see typed, so the label tells a reader whose account it is.
+ */
+export const OUTSIDE_AGENT = 'outside agent'
+/** The AI Provider "type" an outside agent's model is listed under in a status entry (never a key, an address or a custom name). */
+export const OUTSIDE_AGENT_TYPE = 'outside-agent'
+/** What a status entry says of an outside agent's token use: it reports none. */
+export const TOKENS_NOT_REPORTED = 'not reported'
+
+/**
  * The entry kinds built by #288, `term` (#291): a **term choice**, the preferred term and the names to avoid, which binds every later Stage,
  * and `hand-edit` (#289): the architect's own edit of a drafted Field in the Interview page's preview, kept as the text they typed.
  * `source-update` (#298) is the architect's answer to a "Bring up to date" card about a Field that was Out of date: it names the Source
@@ -63,9 +73,10 @@ export function safeToken(value, max = 120) {
 const count = (n) => (Number.isFinite(Number(n)) && Number(n) > 0 ? Math.round(Number(n)) : 0)
 
 /** One model's line in a status entry. `tokens` is null for an outside agent, whose tokens are "not reported". */
-export function modelUsage({ type, model, inputTokens, cachedTokens, outputTokens, reported = true } = {}) {
+export function modelUsage({ type, model, inputTokens, cachedTokens, outputTokens, reported = true, tokens } = {}) {
   const line = { type: safeToken(type, 40), model: safeToken(model) }
-  if (reported === false) return { ...line, tokens: 'not reported' }
+  // A line read back from the file (tokens: 'not reported') stays "not reported" when it is written again.
+  if (reported === false || tokens === TOKENS_NOT_REPORTED) return { ...line, tokens: 'not reported' }
   return { ...line, inputTokens: count(inputTokens), cachedTokens: count(cachedTokens), outputTokens: count(outputTokens) }
 }
 
@@ -89,6 +100,8 @@ export function sessionStatus(input = {}) {
   const saves = asArray(input.saves).filter(isoTime).slice(-100)
   if (saves.length) status.saves = saves
   status.models = asArray(input.models).map(modelUsage).filter((m) => m.type && m.model)
+  // #307: the session was run by an outside agent over MCP (ADR-0067); the label is the only value accepted.
+  if (input.recordedBy === OUTSIDE_AGENT) status.recordedBy = OUTSIDE_AGENT
   status.instructions = safeToken(input.instructions, 80) || null
   const skills = isObject(input.skills) ? input.skills : {}
   status.skills = Object.fromEntries(Object.entries(skills).map(([id, version]) => [safeToken(id, 60), safeToken(version, 60)]).filter(([id, version]) => id && version))

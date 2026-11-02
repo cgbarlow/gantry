@@ -125,7 +125,7 @@ function EntryRow({ entry, fieldTitle, state }) {
   return html`<li class=${'dl-entry' + (entry.kind === 'open-question' && state !== 'old' ? ' open' : '') + (state === 'old' ? ' old' : '')} data-testid="decisions-entry" data-entry-id=${entry.id} data-kind=${entry.kind} data-state=${state ?? 'current'}>
     <span class="dl-kind">${KIND_LABELS[entry.kind] ?? entry.kind}</span>
     <span class="dl-text">${describeEntry(entry, { fieldTitle })}</span>
-    <span class="dl-meta">${[entry.who, day(entry.at)].filter(Boolean).join(' · ')}${entry.replaces ? ' · replaces an earlier entry' : ''}${entry.resolves ? ' · closes an open question' : ''}</span>
+    <span class="dl-meta">${[entry.who, day(entry.at), entry.recordedBy ? `recorded by an ${entry.recordedBy}` : ''].filter(Boolean).join(' · ')}${entry.replaces ? ' · replaces an earlier entry' : ''}${entry.resolves ? ' · closes an open question' : ''}</span>
   </li>`
 }
 

@@ -1,0 +1,327 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { createGantryClient } from '../src/gantryClient.js'
+import { tools } from '../src/tools/interviewSession.tools.js'
+import { tools as instanceTools } from '../src/tools/instanceContent.tools.js'
+import { tools as stageTools } from '../src/tools/stageLifecycle.tools.js'
+import { stubFetch } from './helpers/fakeFetch.js'
+
+// #307 (docs/adr/0067): an outside agent running an AI interview session. Every test mocks at the HTTP seam; the routes themselves
+// (the brief, the labelled entries, the guard rails) are tested against a real `gantry serve` in the main package
+// (tests/outsideAgentRoutes.test.js, tests/outsideAgentProviders.test.js).
+
+const BASE_URL = 'https://gantry.example.test'
+const tool = (name) => tools.find((t) => t.name === name)
+const instanceTool = (name) => instanceTools.find((t) => t.name === name)
+const stageTool = (name) => stageTools.find((t) => t.name === name)
+const payload = (result) => JSON.parse(result.content[0].text)
+
+const INSTANCE = {
+  stage: { id: 'shape', title: 'Shape' },
+  currentStageId: 'shape',
+  stages: [
+    { id: 'shape', title: 'Shape' },
+    { id: 'design', title: 'Design' },
+  ],
+  stageVersion: 'aaaaaaaaaaaaaaaa',
+  workspaceBacked: false,
+}
+const BRIEF = {
+  stage: { id: 'shape', title: 'Shape', gate: 'g1' },
+  brief: '## 1. Gantry\'s interview rules\n...',
+  parts: [{ order: 1, id: 'rules' }],
+  recap: { resuming: false, line: 'Starting Shape: nothing is logged for this Stage yet.', sessions: [], adoptable: null, others: [] },
+  heldModules: [],
+  instructions: 'You are an outside agent...',
+}
+
+function route(extra) {
+  return (call) => {
+    const { url } = call
+    if (url.pathname === '/api/instance/workspace') return { status: 200, body: { workspaceId: url.searchParams.get('slug') === 'ado-instance' ? 'ws-1' : 'srv-1', scope: 'scope-1' } }
+    if (url.pathname === '/api/workspaces') return { status: 200, body: [{ id: 'ws-1', provider: 'azure-devops' }] }
+    if (url.pathname === '/api/server-workspaces') return { status: 200, body: [{ id: 'srv-1' }] }
+    return extra(call)
+  }
+}
+
+async function withClient(handler, fn, workspacePats = {}) {
+  const fetch = stubFetch(route(handler))
+  try {
+    return await fn(createGantryClient({ baseUrl: BASE_URL, workspacePats }), fetch)
+  } finally {
+    fetch.restore()
+  }
+}
+
+test('the cluster registers its tools with the instance addressing arguments', () => {
+  assert.deepEqual(tools.map((t) => t.name), ['get_interview_brief', 'start_interview_session', 'pause_interview_session', 'resume_interview_session', 'get_review_response_list', 'record_review_answers'])
+  for (const t of tools) for (const key of ['slug', 'scope', 'ref']) assert.ok(t.inputSchema[key], `${t.name} takes ${key}`)
+})
+
+test('every tool refuses a call with neither slug nor ref, without touching the network', async () => {
+  await withClient(
+    () => {
+      throw new Error('should not be called')
+    },
+    async (gantryClient, fetch) => {
+      for (const t of tools) {
+        const result = await t.handler({ session: { id: 's-1' }, answered: { r1: 1 } }, { gantryClient })
+        assert.equal(result.isError, true, t.name)
+        assert.match(payload(result).error, /slug.*ref/, t.name)
+      }
+      assert.equal(fetch.calls.length, 0)
+    }
+  )
+})
+
+test('get_interview_brief returns the server\'s brief and recap with the stage version to save against', async () => {
+  await withClient(
+    ({ url }) => {
+      if (url.pathname === '/api/instance') return { status: 200, body: INSTANCE }
+      if (url.pathname === '/api/instance/interview-brief') {
+        assert.equal(url.searchParams.get('stage'), 'shape', 'the current stage when none is named')
+        assert.equal(url.searchParams.get('who'), 'a.architect')
+        return { status: 200, body: BRIEF }
+      }
+      return undefined
+    },
+    async (gantryClient) => {
+      const result = await tool('get_interview_brief').handler({ slug: 'my-instance', who: 'a.architect' }, { gantryClient })
+      const body = payload(result)
+      assert.equal(body.stageVersion, 'aaaaaaaaaaaaaaaa')
+      assert.equal(body.brief, BRIEF.brief)
+      assert.equal(body.recap.line, BRIEF.recap.line)
+    }
+  )
+})
+
+test('start_interview_session hands back a session to pass on, the brief, and writes nothing', async () => {
+  await withClient(
+    ({ url, method }) => {
+      assert.equal(method, 'GET', 'starting a session commits nothing')
+      if (url.pathname === '/api/instance') return { status: 200, body: INSTANCE }
+      if (url.pathname === '/api/instance/interview-brief') return { status: 200, body: { ...BRIEF, recap: { ...BRIEF.recap, others: [{ session: 's-other', who: 'b.architect', state: 'in-progress' }] }, heldModules: [{ id: 'risks', stageTitle: 'Shape' }] } }
+      return undefined
+    },
+    async (gantryClient) => {
+      const body = payload(await tool('start_interview_session').handler({ slug: 'my-instance', runUntil: 'design', model: 'claude-opus-4-1', who: 'a.architect' }, { gantryClient }))
+      assert.match(body.session.id, /^s-[0-9a-f]{6}$/)
+      assert.deepEqual({ ...body.session, id: undefined }, { id: undefined, runUntil: 'design', state: 'in-progress', model: 'claude-opus-4-1', who: 'a.architect' })
+      assert.equal(body.stageVersion, 'aaaaaaaaaaaaaaaa')
+      assert.equal(body.brief, BRIEF.brief)
+      assert.equal(body.notes.length, 2)
+      assert.match(body.notes[0], /Another session on this stage is not done: s-other \(b\.architect\)/)
+      assert.match(body.notes[1], /head start only: risks/)
+    }
+  )
+})
+
+test('start_interview_session refuses a run target that is not a stage, or comes before the stage', async () => {
+  await withClient(
+    ({ url }) => {
+      if (url.pathname === '/api/instance') return { status: 200, body: { ...INSTANCE, stage: { id: 'design' }, currentStageId: 'design' } }
+      if (url.pathname === '/api/instance/interview-brief') return { status: 200, body: BRIEF }
+      return undefined
+    },
+    async (gantryClient) => {
+      assert.match(payload(await tool('start_interview_session').handler({ slug: 'x', runUntil: 'nope' }, { gantryClient })).error, /must be a stage id of this instance: shape, design/)
+      assert.match(payload(await tool('start_interview_session').handler({ slug: 'x', runUntil: 'shape' }, { gantryClient })).error, /comes before the stage being interviewed/)
+    }
+  )
+})
+
+test('resume_interview_session takes over the paused session, runs Check status once first on a Provider workspace, and follows a merge', async () => {
+  let checked = 0
+  await withClient(
+    ({ url, method }) => {
+      if (url.pathname === '/api/instance') {
+        // After the merge the instance is on the next stage.
+        const moved = checked > 0
+        return { status: 200, body: { ...INSTANCE, workspaceBacked: true, pullRequests: { shape: 7 }, stage: { id: moved ? 'design' : 'shape' }, currentStageId: moved ? 'design' : 'shape' } }
+      }
+      if (url.pathname === '/api/instance/check-status') {
+        assert.equal(method, 'POST')
+        checked++
+        return { status: 200, body: { merged: true, advancedTo: { id: 'design', title: 'Design' }, message: 'Approved.' } }
+      }
+      if (url.pathname === '/api/instance/interview-brief') {
+        assert.equal(url.searchParams.get('stage'), 'design', 'the new current stage after the merge')
+        return { status: 200, body: { ...BRIEF, stage: { id: 'design' }, recap: { ...BRIEF.recap, resuming: true, sessions: [{ session: 's-b1', state: 'paused', target: 'design' }], adoptable: { session: 's-b1', who: 'a.architect', state: 'paused', target: 'design' } } } }
+      }
+      return undefined
+    },
+    async (gantryClient) => {
+      const body = payload(await tool('resume_interview_session').handler({ slug: 'ado-instance', who: 'a.architect', model: 'claude-opus-4-1' }, { gantryClient }))
+      assert.equal(checked, 1, 'Check status ran once')
+      assert.deepEqual(body.checkStatus, { ran: true, merged: true, message: 'Approved.', advancedTo: { id: 'design', title: 'Design' }, review: null })
+      assert.equal(body.adopted, true)
+      assert.equal(body.session.id, 's-b1', 'the paused session is carried on')
+      assert.equal(body.session.runUntil, 'design')
+      assert.match(body.next, /committed log wins/)
+    },
+    { 'ws-1': 'pat' }
+  )
+})
+
+test('resume_interview_session on a server workspace runs no Check status and starts a new session when nothing is paused', async () => {
+  await withClient(
+    ({ url }) => {
+      if (url.pathname === '/api/instance/check-status') throw new Error('a server workspace has no Pull Request to check')
+      if (url.pathname === '/api/instance') return { status: 200, body: INSTANCE }
+      if (url.pathname === '/api/instance/interview-brief') return { status: 200, body: BRIEF }
+      return undefined
+    },
+    async (gantryClient) => {
+      const body = payload(await tool('resume_interview_session').handler({ slug: 'my-instance' }, { gantryClient }))
+      assert.deepEqual(body.checkStatus, { ran: false })
+      assert.equal(body.adopted, false)
+      assert.match(body.session.id, /^s-[0-9a-f]{6}$/)
+    }
+  )
+})
+
+test('pause_interview_session with no modules saves the log alone, as state paused', async () => {
+  await withClient(
+    ({ url, method, body }) => {
+      if (url.pathname === '/api/instance/decisions') {
+        assert.equal(method, 'PUT')
+        const sent = JSON.parse(body)
+        assert.equal(sent.session.state, 'paused', 'a pause forces the state')
+        assert.equal(sent.entries.length, 1)
+        return { status: 200, body: { log: {}, session: { id: 's-1', state: 'paused', recordedBy: 'outside agent', entriesRecorded: 1 } } }
+      }
+      return undefined
+    },
+    async (gantryClient) => {
+      const result = await tool('pause_interview_session').handler({ slug: 'my-instance', session: { id: 's-1', state: 'in-progress' }, entries: [{ kind: 'open-question', question: 'Q?' }] }, { gantryClient })
+      assert.equal(result.isError, undefined)
+      assert.equal(payload(result).session.recordedBy, 'outside agent')
+    }
+  )
+})
+
+test('pause_interview_session with drafts is a stage save: one PUT with the version, the session and the entries', async () => {
+  await withClient(
+    ({ url, method, body }) => {
+      if (url.pathname === '/api/instance/modules') {
+        assert.equal(method, 'PUT')
+        const sent = JSON.parse(body)
+        assert.equal(sent.baseVersion, 'aaaaaaaaaaaaaaaa')
+        assert.equal(sent.session.state, 'paused')
+        assert.deepEqual(sent.entries, [{ kind: 'fact', words: 'We launch in March.', fields: ['m.f'] }])
+        return { status: 200, body: { saved: ['m'], commit: 'abc123', stageVersion: 'bbbbbbbbbbbbbbbb', session: { id: 's-1', state: 'paused' }, fieldNotes: [] } }
+      }
+      return undefined
+    },
+    async (gantryClient) => {
+      const result = await tool('pause_interview_session').handler(
+        { slug: 'my-instance', session: { id: 's-1' }, stageVersion: 'aaaaaaaaaaaaaaaa', modules: { m: { fields: { f: 'x' } } }, entries: [{ kind: 'fact', words: 'We launch in March.', fields: ['m.f'] }] },
+        { gantryClient }
+      )
+      const body = payload(result)
+      assert.equal(body.paused, true)
+      assert.equal(body.stageVersion, 'bbbbbbbbbbbbbbbb')
+      assert.equal(body.commit, 'abc123')
+    }
+  )
+})
+
+test('update_instance_modules sends the session and entries with the version, and surfaces a refusal for a missing version', async () => {
+  await withClient(
+    ({ url, body }) => {
+      if (url.pathname === '/api/instance/modules') {
+        const sent = JSON.parse(body)
+        if (!sent.baseVersion) return { status: 400, body: { code: 'stage_version_required', error: 'An outside agent in an interview session must pass the "stageVersion"' } }
+        assert.deepEqual(sent.session, { id: 's-1', state: 'saved', model: 'claude-opus-4-1' })
+        assert.equal(sent.entries.length, 1)
+        return { status: 200, body: { saved: ['m'], stageVersion: 'bbbbbbbbbbbbbbbb', session: { id: 's-1', state: 'saved', recordedBy: 'outside agent', entriesRecorded: 1 } } }
+      }
+      return undefined
+    },
+    async (gantryClient) => {
+      const args = { slug: 'my-instance', modules: { m: { fields: { f: 'x' } } }, session: { id: 's-1', state: 'saved', model: 'claude-opus-4-1' }, entries: [{ kind: 'answer', question: 'Q', answer: 'A' }] }
+      const refused = await instanceTool('update_instance_modules').handler(args, { gantryClient })
+      assert.equal(refused.isError, true)
+      assert.equal(payload(refused).detail.code, 'stage_version_required')
+      const saved = await instanceTool('update_instance_modules').handler({ ...args, stageVersion: 'aaaaaaaaaaaaaaaa' }, { gantryClient })
+      assert.equal(payload(saved).session.recordedBy, 'outside agent')
+    }
+  )
+})
+
+test('update_instance_modules outside a session sends neither a session nor entries', async () => {
+  await withClient(
+    ({ url, body }) => {
+      if (url.pathname === '/api/instance/modules') {
+        assert.deepEqual(JSON.parse(body), { modules: { m: { fields: { f: 'x' } } } })
+        return { status: 200, body: { saved: ['m'] } }
+      }
+      return undefined
+    },
+    async (gantryClient) => {
+      assert.equal((await instanceTool('update_instance_modules').handler({ slug: 'my-instance', modules: { m: { fields: { f: 'x' } } } }, { gantryClient })).isError, undefined)
+    }
+  )
+})
+
+test('advance_stage and request_approval pass the session id so Gantry can hold the agent to the in-app AI\'s rules', async () => {
+  const seen = []
+  await withClient(
+    ({ url, method }) => {
+      if (url.pathname === '/api/instance/advance-stage' || url.pathname === '/api/instance/request-approval') {
+        seen.push([url.pathname, method, url.searchParams.get('session')])
+        return { status: 400, body: { code: 'session-guard', error: 'An AI in an interview session never passes a Gate' } }
+      }
+      return undefined
+    },
+    async (gantryClient) => {
+      const advance = await stageTool('advance_stage').handler({ slug: 'my-instance', session: 's-1' }, { gantryClient })
+      assert.equal(advance.isError, true)
+      assert.equal(payload(advance).detail.code, 'session-guard')
+      await stageTool('request_approval').handler({ slug: 'my-instance', session: 's-1' }, { gantryClient })
+      await stageTool('advance_stage').handler({ slug: 'my-instance' }, { gantryClient })
+    }
+  )
+  assert.deepEqual(seen, [
+    ['/api/instance/advance-stage', 'POST', 's-1'],
+    ['/api/instance/request-approval', 'POST', 's-1'],
+    ['/api/instance/advance-stage', 'POST', null],
+  ])
+})
+
+test('get_review_response_list returns the document and counts, or says there is nothing to list', async () => {
+  let rows = 2
+  await withClient(
+    ({ url }) => {
+      if (url.pathname === '/api/instance/review-response') {
+        return { status: 200, body: rows ? { rows, copies: [{ id: 'r1', name: 'HLD', rows }], filename: 'Plan - Review response list.docx', docxBase64: 'UEs=' } : { rows: 0, note: 'No comment of a Reviewed copy has been answered yet' } }
+      }
+      return undefined
+    },
+    async (gantryClient) => {
+      const full = payload(await tool('get_review_response_list').handler({ slug: 'my-instance' }, { gantryClient }))
+      assert.equal(full.rows, 2)
+      assert.equal(full.docxBase64, 'UEs=')
+      rows = 0
+      assert.match(payload(await tool('get_review_response_list').handler({ slug: 'my-instance' }, { gantryClient })).note, /No comment/)
+    }
+  )
+})
+
+test('record_review_answers raises the answered counts, and needs some', async () => {
+  await withClient(
+    ({ url, method, body }) => {
+      if (url.pathname === '/api/instance/reviews/answered') {
+        assert.equal(method, 'PUT')
+        assert.deepEqual(JSON.parse(body), { answered: { r1: 3 } })
+        return { status: 200, body: { reviews: [{ id: 'r1', comments: 4, commentsAnswered: 3 }] } }
+      }
+      return undefined
+    },
+    async (gantryClient) => {
+      assert.equal(payload(await tool('record_review_answers').handler({ slug: 'my-instance', answered: { r1: 3 } }, { gantryClient })).reviewedCopies[0].commentsAnswered, 3)
+      assert.equal((await tool('record_review_answers').handler({ slug: 'my-instance', answered: {} }, { gantryClient })).isError, true)
+    }
+  )
+})

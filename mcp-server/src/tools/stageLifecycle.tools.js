@@ -44,7 +44,7 @@ async function checkGate(args, { gantryClient }) {
 // (it must go through request_approval/check_status instead) or if the current stage's gate hasn't
 // passed — never trust a prior check_gate call, always let this 400 speak for itself.
 async function advanceStage(args, { gantryClient }) {
-  const { slug, scope, ref } = args
+  const { slug, scope, ref, session } = args
   const resolved = await resolveWorkspaceOrError({ slug, scope, ref }, { gantryClient })
   if (resolved.errorResult) return resolved.errorResult
 
@@ -52,7 +52,7 @@ async function advanceStage(args, { gantryClient }) {
     workspaceId: resolved.workspaceId,
     path: '/api/instance/advance-stage',
     method: 'POST',
-    query: { slug, scope: scope ?? resolved.scope, ref },
+    query: { slug, scope: scope ?? resolved.scope, ref, session },
   })
   if (res.credentialError) return credentialErrorResult(res.credentialError)
   if (!res.ok) return upstreamErrorResult(res)
@@ -63,7 +63,7 @@ async function advanceStage(args, { gantryClient }) {
 // stage Pull Request, re-checking the gate server-side first. Rejected outright (400) for a local
 // instance — it has no Pull Request to open; use advance_stage instead.
 async function requestApproval(args, { gantryClient }) {
-  const { slug, scope, ref, gate } = args
+  const { slug, scope, ref, gate, session } = args
   const resolved = await resolveWorkspaceOrError({ slug, scope, ref }, { gantryClient })
   if (resolved.errorResult) return resolved.errorResult
 
@@ -71,7 +71,7 @@ async function requestApproval(args, { gantryClient }) {
     workspaceId: resolved.workspaceId,
     path: '/api/instance/request-approval',
     method: 'POST',
-    query: { slug, scope: scope ?? resolved.scope, ref },
+    query: { slug, scope: scope ?? resolved.scope, ref, session },
     body: { gate },
   })
   if (res.credentialError) return credentialErrorResult(res.credentialError)
@@ -224,8 +224,12 @@ export const tools = [
       '1. Self-serve "Advance to next stage" for a *local* instance only — moves its persisted stage pointer forward by one, gated on the current stage\'s gate having genuinely passed (re-checked server-side, never trusted from a prior check_gate call). ' +
       '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref". ' +
       '3. Rejected with a 400 for a Workspace-backed instance — it advances only once its stage\'s own Pull Request is merged, via request_approval -> check_status instead. ' +
-      '4. No credential is required or consulted; this only ever writes to local instance data.',
-    inputSchema: { ...slugRefShape },
+      '4. No credential is required or consulted; this only ever writes to local instance data. ' +
+      '5. In an AI interview session, pass "session" (the session id): an outside agent in a session is held to the in-app AI\'s rules, so Gantry refuses to advance until the architect confirmed the stage summary and the session saved the stage with the state "saved" (update_instance_modules), and always refuses on a Workspace-backed instance, whose Gate needs the Owner\'s approval: an AI never passes a Gate. The refusal carries code "session-guard" and the reason. Outside a session, leave "session" out and nothing new is refused.',
+    inputSchema: {
+      ...slugRefShape,
+      session: z.string().optional().describe('The interview session id, when you are in a session. Leave it out otherwise.'),
+    },
     handler: advanceStage,
   },
   {
@@ -242,6 +246,7 @@ export const tools = [
     inputSchema: {
       ...slugRefShape,
       gate: z.string().optional().describe('A specific gate id to request approval for, instead of the stage\'s own default.'),
+      session: z.string().optional().describe('The interview session id, when you are in a session. In a session Gantry refuses to open the Pull Request until the session has saved the stage (code "session-guard"); approvals out of stage order are refused for everyone. Leave it out otherwise.'),
     },
     handler: requestApproval,
   },
