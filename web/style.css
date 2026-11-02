@@ -2120,3 +2120,38 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .decision-link select { font-family: var(--font-body, inherit); font-size: 13px; padding: 5px 8px; border-radius: var(--radius); border: var(--border-strong) solid var(--line-strong); background: var(--bg); color: var(--text); max-width: 100%; }
 .decision-other-style { font-size: 12px; margin: 0 0 8px; }
 .decisions-problems { font-size: 12px; color: var(--warning, #b06a00); margin: 6px 0 8px; padding-left: 18px; }
+
+/* #279 — the Source documents panel under the editor toolbar: a collapsible strip with the upload control and one row per document. */
+.source-documents-wrap { max-width: 1120px; margin: 0 auto; padding: 0 32px; }
+.source-documents { border-bottom: var(--hairline) solid var(--line); }
+.source-documents > summary { cursor: pointer; padding: 10px 0; font-family: var(--font-display); font-weight: 600; font-size: 13px; }
+.source-documents-count { color: var(--text-muted); font-weight: 400; }
+.source-documents-body { padding: 0 0 14px; }
+.source-documents-intro { margin: 0 0 10px; max-width: 760px; }
+.source-documents-warning { margin: 0 0 10px; padding: 6px 10px; border-left: 3px solid var(--stamp-draft-bg); font-size: 13px; }
+.source-documents-upload { margin-bottom: 6px; }
+.source-documents-message { min-height: 1.3em; margin: 6px 0; font-size: 13px; }
+.source-documents-message.error { color: var(--stamp-error-bg); }
+.source-documents-message.warn { color: var(--stamp-draft-bg); }
+.source-documents-message.info { color: var(--text-muted); }
+.source-documents-empty { margin: 6px 0; font-size: 13px; }
+.source-documents-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.source-documents-table th { text-align: left; font-family: var(--font-display); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); padding: 6px 10px 6px 0; border-bottom: var(--border-strong) solid var(--line-strong); }
+.source-documents-table td { padding: 8px 10px 8px 0; border-bottom: var(--hairline) solid var(--line); vertical-align: middle; }
+.source-documents-title-text { font-weight: 600; }
+.source-documents-file { color: var(--text-muted); word-break: break-all; }
+.source-documents-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }
+.source-documents-confirm span { font-size: 12px; }
+.source-documents-rename { display: flex; gap: 6px; align-items: center; }
+.source-documents-rename input { flex: 1; min-width: 160px; }
+.source-documents-removed { margin-top: 10px; font-size: 13px; }
+.source-documents-removed > summary { cursor: pointer; color: var(--text-muted); }
+.source-documents-removed ul { margin: 6px 0 0; padding-left: 18px; }
+.source-documents-removed-title { text-decoration: line-through; }
+@media (max-width: 720px) {
+  .source-documents-wrap { padding: 0 16px; }
+  .source-documents-table thead { display: none; }
+  .source-documents-table tr { display: block; padding: 8px 0; border-bottom: var(--hairline) solid var(--line); }
+  .source-documents-table td { display: block; border: 0; padding: 2px 0; }
+  .source-documents-actions { justify-content: flex-start; }
+}

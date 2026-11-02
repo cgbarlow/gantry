@@ -1,6 +1,6 @@
 // gantry's production UI entry point — Preact, delivered via HTM tagged templates with no build step, per docs/adr/0006-preact-frontend-framework.md. `preact-iso` provides the routing shell — the instance dashboard (#77) at `/`, the module editor at `/instance/:slug`, the "+ New Workspace" wizard at `/new-workspace` (see web/pages/new-workspace-wizard.js, #110/#126, which replaced the old URL-first instance-setup wizard entirely) — and `@preact/signals` holds the instance-scoped state (the viewed slug and stage, the fetched instance data) that's shared across the module editor screen's header, nav, and module list, exactly as today's DOM version threaded a `stageId` through a single re-render function.
 import { html, render } from 'htm/preact'
-import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { signal, effect, batch } from '@preact/signals'
 import { LocationProvider, Router, Route, useLocation } from 'preact-iso'
 import { EditorView, basicSetup } from 'codemirror'
@@ -75,6 +75,9 @@ import {
   getFileLastModified,
 } from './lib/localWorkspace.js'
 import { wrap } from './lib/editorWrap.js'
+import { SourceDocumentsPanel } from './lib/sourceDocumentsPanel.js'
+import { createLocalSourceStore } from './lib/localSourceDocuments.js'
+import { createServerSourceClient } from './lib/serverSourceDocuments.js'
 import { assetReference, repoAssetReference, isLocalAssetSource, resolveAssetRefs, resolveRepoAssetRefs } from './lib/assetRefs.js'
 import { IdentityPicker } from './lib/identityPicker.js'
 import {
@@ -4905,6 +4908,18 @@ const VIEW_MODE_HOTKEY = { ctrlKey: true, shiftKey: true, key: 'v' }
 // folded the old standalone Review/Sign-off panel's review and sign-off
 // functionality into that card, so this shortcut now targets it directly)
 // and briefly highlights it so the author's eye is drawn down.
+// #279 (map #238): the Source documents panel under the toolbar of a local-workspace or server-workspace Instance — the evidence an architect uploads before connecting any AI Provider. A local Instance reads and writes its own folder through the handle; a server one goes through /api/instance/sources. Azure DevOps and GitHub Instances don't have it yet (#280). The person's name stamped on an upload is the Instance's assignee, the nearest thing to an identity a local or server workspace has.
+function SourceDocumentsSection({ instance }) {
+  const handle = localDirHandle.value
+  const slug = instance.slug
+  const store = useMemo(() => {
+    if (instance.isLocalWorkspace) return handle ? createLocalSourceStore(handle, slug) : null
+    return createServerSourceClient(slug, (url, init) => apiFetchForInstance(slug, url, init))
+  }, [slug, instance.isLocalWorkspace, handle])
+  if (!store) return null
+  return html`<div class="source-documents-wrap"><${SourceDocumentsPanel} store=${store} actor=${instance.assignee ?? ''} readOnly=${Boolean(instance.archived)} /></div>`
+}
+
 function ViewModeToolbar({
   instance,
   visibleFieldIds,
@@ -5991,6 +6006,7 @@ function ModuleEditorPage({ slug: routeRef }) {
       onClearAllFields=${clearAllFields}
       requestApprovalSlug=${advancedMode.value && instance.workspaceBacked ? instance.slug : null}
     />
+    ${instance.workspaceBacked ? null : html`<${SourceDocumentsSection} instance=${instance} />`}
     <${StageScreen}
       key=${instance.stage.id}
       instance=${instance}

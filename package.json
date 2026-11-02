@@ -31,6 +31,7 @@
     "htm": "^3.1.1",
     "markdown-it": "^15.0.0",
     "mermaid": "^11.17.2",
+    "officeparser": "8.5.0",
     "pandoc-wasm": "1.1.0",
     "preact": "^10.29.8",
     "preact-iso": "^2.12.2",
