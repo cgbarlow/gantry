@@ -36,7 +36,8 @@ export function openApproval(instance) {
   if (!isRemoteInstance(instance)) return null
   const id = instance.pullRequests?.[instance.stage?.id]
   if (!id || instance.stage.id !== instance.currentStageId) return null
-  const status = instance.pullRequest?.status
+  // GitHub's instance carries no Pull Request summary, so the status the server read from the Provider (#299) stands in for it: a re-opened Stage's old Pull Request was completed.
+  const status = instance.pullRequest?.status ?? instance.pullRequestState
   if (status && status !== 'active') return null
   return { id, url: pullRequestLink(instance, id) }
 }

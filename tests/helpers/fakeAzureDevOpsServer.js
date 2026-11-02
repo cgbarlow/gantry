@@ -791,12 +791,28 @@ export function createFakeAzureDevOpsServer({
         return json(200, {})
       }
 
+      // #299: threads are stored whole so a test can read back what the Owner wrote (and prove gantry wrote none). `author` on a comment names the
+      // Owner (the real API takes it from the credential); `threadContext` makes it an inline comment on a file.
+      if (subResource === 'threads' && req.method === 'GET') {
+        return json(200, { value: pr.threads ?? [], count: (pr.threads ?? []).length })
+      }
       if (subResource === 'threads' && req.method === 'POST') {
         let raw = ''
         for await (const chunk of req) raw += chunk
         const body = JSON.parse(raw)
         pr.comments ??= []
         pr.comments.push(...(body.comments ?? []))
+        pr.threads ??= []
+        const threadId = pr.threads.length + 1
+        const published = new Date(Date.now() + threadId).toISOString()
+        const thread = {
+          id: threadId,
+          status: body.status ?? 'active',
+          publishedDate: published,
+          ...(body.threadContext ? { threadContext: body.threadContext } : {}),
+          comments: (body.comments ?? []).map((c, i) => ({ id: i + 1, parentCommentId: c.parentCommentId ?? 0, content: c.content, commentType: c.commentType ?? 'text', publishedDate: published, author: c.author ?? { displayName: 'Fake Pusher' } })),
+        }
+        pr.threads.push(thread)
         return json(201, { id: pr.comments.length, comments: body.comments ?? [], status: body.status ?? 'active' })
       }
     }

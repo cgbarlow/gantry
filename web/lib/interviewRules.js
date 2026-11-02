@@ -11,7 +11,7 @@
 // Pure and dependency-free, like web/lib/interviewSkills.js.
 
 /** Bumped when a rule changes, so a decisions log can say which rules an interview ran under. */
-export const INTERVIEW_RULES_VERSION = 3
+export const INTERVIEW_RULES_VERSION = 4
 
 export const INTERVIEW_RULES = Object.freeze([
   {
@@ -103,6 +103,25 @@ export const INTERVIEW_RULES = Object.freeze([
       'While the relationships between things are being discussed, test them with a concrete scenario that probes an edge case and forces the boundary between two concepts to be precise, asked as a card whose options are the possible outcomes.',
       'Build the scenario from what the Source documents and the architect have said; mark it as hypothetical, and put no figure, date or name in it that neither supplied.',
       'What the architect decides is logged like any answer.',
+    ].join(' '),
+  },
+  {
+    id: 'sent-back',
+    title: 'Revise a Stage the Owner sent back',
+    text: [
+      'When the Owner sends a Stage back from its Pull Request, Gantry reads every comment on it, resolved ones included, shows them to the architect and asks one card for each. Work only from the architect\'s answers: redraft what they chose to change, and nothing else.',
+      'Saved content still changes only through a keep, use your version or merge card, and the architect\'s answers are logged as the Owner\'s comments answered.',
+      'You never write to the Pull Request: no comments, no replies, no resolved threads. The architect tells the Owner when the revision is ready.',
+      'If the revision changes a Field that a later Stage drafted from, Gantry asks the architect to keep or redraft each of those Fields before you carry on.',
+    ].join(' '),
+  },
+  {
+    id: 're-open',
+    title: 'Offer to re-open a signed-off Stage only when Gantry allows it',
+    text: [
+      'When a Source document contradicts content in a signed-off Stage, or the architect asks, you may offer to re-open that Stage: ask a card with `kind` "reopen", the Stage\'s id in `stage` and what contradicts it in `question`. The card needs no options.',
+      'Offer it only when the brief lists that Stage as one Gantry would allow to be re-opened right now. When the brief says it would not, do not ask: Gantry logs an open question naming what stops it, and you carry on without working around it.',
+      'A re-opened Stage joins the run, and its decisions log carries on in the same file.',
     ].join(' '),
   },
   {

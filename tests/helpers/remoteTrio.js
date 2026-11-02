@@ -19,6 +19,20 @@ export const ROOT = `gantry-workspace/${SLUG}`
 const INSTANCE_YAML = `definition: trio\nslug: ${SLUG}\nstage: s1\ndefinitionVersion: 1\n`
 export const json = (method, body, headers = {}) => ({ method, headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) })
 
+const adoPullRequestUrl = (ctx, pullRequestId) => `${ctx.providerBaseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/${REPOSITORY}/pullrequests/${pullRequestId}`
+const adoVote = (ctx, pullRequestId, vote) =>
+  fetch(`${adoPullRequestUrl(ctx, pullRequestId)}/reviewers/owner-1`, {
+    method: 'PUT',
+    headers: { Authorization: basicAuthHeader(ctx.pat), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ displayName: 'The Owner', vote }),
+  })
+const ghReview = (ctx, pullRequestId, event) =>
+  fetch(`${ctx.providerBaseUrl}/repos/${GITHUB_OWNER}/${GITHUB_REPOSITORY}/pulls/${pullRequestId}/reviews`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${ctx.pat}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ event }),
+  })
+
 export const PROVIDERS = [
   {
     name: 'Azure DevOps',
@@ -28,12 +42,25 @@ export const PROVIDERS = [
     prPath: /\/pullrequest\/\d+$/,
     location: (ctx) => ({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: ctx.providerBaseUrl }),
     client: (ctx) => createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: ctx.pat, baseUrl: ctx.providerBaseUrl }),
-    approve: (ctx, pullRequestId) =>
-      fetch(`${ctx.providerBaseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/${REPOSITORY}/pullrequests/${pullRequestId}/reviewers/owner-1`, {
-        method: 'PUT',
+    approve: (ctx, pullRequestId) => adoVote(ctx, pullRequestId, 10),
+    // #299: the Owner on the Provider. `comment` writes one comment (`resolved` closes its thread where the Provider has threads), `requestChanges`
+    // and `reject` cast the Owner's vote, and `written` is everything on the Pull Request, so a test can prove the AI wrote none of it.
+    requestChanges: (ctx, pullRequestId) => adoVote(ctx, pullRequestId, -5),
+    reject: (ctx, pullRequestId) => adoVote(ctx, pullRequestId, -10),
+    comment: (ctx, pullRequestId, { body, author = 'The Owner', resolved = false }) =>
+      fetch(`${adoPullRequestUrl(ctx, pullRequestId)}/threads?api-version=7.1`, {
+        method: 'POST',
         headers: { Authorization: basicAuthHeader(ctx.pat), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ displayName: 'The Owner', vote: 10 }),
+        body: JSON.stringify({ comments: [{ parentCommentId: 0, content: body, author: { displayName: author } }], status: resolved ? 'fixed' : 'active' }),
       }),
+    // A merged Stage's branch is deleted by the Provider on completion; the fakes keep it, so a test that re-opens a Stage deletes it as the Provider would.
+    deleteBranch: async (ctx, client, branch) =>
+      fetch(`${ctx.providerBaseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/${REPOSITORY}/refs?api-version=7.1`, {
+        method: 'POST',
+        headers: { Authorization: basicAuthHeader(ctx.pat), 'Content-Type': 'application/json' },
+        body: JSON.stringify([{ name: `refs/heads/${branch}`, oldObjectId: await client.getBranchObjectId(branch), newObjectId: '0'.repeat(40) }]),
+      }),
+    written: async (ctx, pullRequestId) => JSON.stringify(await (await fetch(`${adoPullRequestUrl(ctx, pullRequestId)}/threads?api-version=7.1`, { headers: { Authorization: basicAuthHeader(ctx.pat) } })).json()),
   },
   {
     name: 'GitHub',
@@ -43,12 +70,28 @@ export const PROVIDERS = [
     prPath: /\/pull\/\d+$/,
     location: (ctx) => ({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, baseUrl: ctx.providerBaseUrl }),
     client: (ctx) => createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: ctx.pat, baseUrl: ctx.providerBaseUrl }),
-    approve: (ctx, pullRequestId) =>
-      fetch(`${ctx.providerBaseUrl}/repos/${GITHUB_OWNER}/${GITHUB_REPOSITORY}/pulls/${pullRequestId}/reviews`, {
+    approve: (ctx, pullRequestId) => ghReview(ctx, pullRequestId, 'APPROVE'),
+    requestChanges: (ctx, pullRequestId) => ghReview(ctx, pullRequestId, 'REQUEST_CHANGES'),
+    // GitHub has no separate rejection vote: a Pull Request the Owner closes without merging is its rejection.
+    reject: (ctx, pullRequestId) =>
+      fetch(`${ctx.providerBaseUrl}/repos/${GITHUB_OWNER}/${GITHUB_REPOSITORY}/pulls/${pullRequestId}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${ctx.pat}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: 'closed' }),
+      }),
+    comment: (ctx, pullRequestId, { body, author = 'The Owner' }) =>
+      fetch(`${ctx.providerBaseUrl}/repos/${GITHUB_OWNER}/${GITHUB_REPOSITORY}/pulls/${pullRequestId}/comments`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${ctx.pat}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ event: 'APPROVE' }),
+        body: JSON.stringify({ body, login: author, path: 'modules/m1.md', line: 3 }),
       }),
+    deleteBranch: (ctx, client, branch) =>
+      fetch(`${ctx.providerBaseUrl}/repos/${GITHUB_OWNER}/${GITHUB_REPOSITORY}/git/refs/heads/${branch}`, { method: 'DELETE', headers: { Authorization: `Bearer ${ctx.pat}` } }),
+    written: async (ctx, pullRequestId) => {
+      const repo = `${ctx.providerBaseUrl}/repos/${GITHUB_OWNER}/${GITHUB_REPOSITORY}`
+      const get = async (path) => (await fetch(`${repo}${path}`, { headers: { Authorization: `Bearer ${ctx.pat}` } })).json()
+      return JSON.stringify([await get(`/pulls/${pullRequestId}/comments`), await get(`/issues/${pullRequestId}/comments`), await get(`/pulls/${pullRequestId}/reviews`)])
+    },
   },
 ]
 

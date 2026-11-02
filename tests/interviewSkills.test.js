@@ -84,8 +84,8 @@ describe('loading the skills', () => {
 })
 
 describe("Gantry's interview rules", () => {
-  test('are the six the ticket names, then the four for terms, Key decisions, open questions and scenarios (#291), plus nothing that overrides them', () => {
-    assert.deepEqual(INTERVIEW_RULES.map((r) => r.id), ['draft-first', 'provenance', 'saved-content', 'select-fields', 'stage-ready', 'terms', 'key-decisions', 'open-questions', 'scenarios', 'finish'])
+  test('are the six the ticket names, then the four for terms, Key decisions, open questions and scenarios (#291), the two for a Stage sent back and for re-opening one (#299), plus nothing that overrides them', () => {
+    assert.deepEqual(INTERVIEW_RULES.map((r) => r.id), ['draft-first', 'provenance', 'saved-content', 'select-fields', 'stage-ready', 'terms', 'key-decisions', 'open-questions', 'scenarios', 'sent-back', 're-open', 'finish'])
     const text = interviewRulesText()
     assert.match(text, /source:<id>/)
     assert.match(text, /"\(target assumption\)"/)

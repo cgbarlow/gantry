@@ -12,7 +12,7 @@ export const MIN_OPTIONS = 2
 export const MAX_OPTIONS = 4
 
 /** What a card can be about, beyond an ordinary question (#287, #291). Gantry orders a round by it and logs a `term` and a `decision` answer for what it is. */
-export const CARD_KINDS = Object.freeze(['disagreement', 'missing', 'term', 'decision'])
+export const CARD_KINDS = Object.freeze(['disagreement', 'missing', 'term', 'decision', 'reopen'])
 
 /** The JSON Schema of the `ask_architect` tool's input. A round holds any number of questions (ADR-0065). */
 export const ASK_TOOL_SCHEMA = {
@@ -64,13 +64,14 @@ export const ASK_TOOL_SCHEMA = {
             items: { type: 'string' },
             description: 'The ids of cards that must be answered before this one can be asked. Gantry holds the card back until they are, then shows it.',
           },
+          stage: { type: 'string', description: 'For a "reopen" card only: the id of the signed-off Stage you offer to re-open.' },
           kind: {
             type: 'string',
-            enum: ['disagreement', 'missing', 'term', 'decision'],
+            enum: ['disagreement', 'missing', 'term', 'decision', 'reopen'],
             description:
               '"disagreement" when Source documents disagree, "missing" when a fact the Stage needs is in none of them, ' +
               '"term" to settle which name to prefer for one thing (the options ARE the names; the one chosen is the preferred term and the others become names to avoid), ' +
-              '"decision" for a Key decision (see "decision"). Leave out for any other question. Gantry uses it to order the cards in a round.',
+              '"decision" for a Key decision (see "decision"), "reopen" to offer to re-open a signed-off Stage (see "stage"; it needs no options, and Gantry makes the card only when it would allow the re-open). Leave out for any other question. Gantry uses it to order the cards in a round.',
           },
           meaning: { type: 'string', description: 'For a "term" card: one line saying what the thing is, which becomes its definition in the Glossary.' },
           decision: {
@@ -110,6 +111,7 @@ export const TEXT_FALLBACK_INSTRUCTIONS =
   `Each question has ${MIN_OPTIONS} to ${MAX_OPTIONS} options and its recommendation is one of them. ` +
   `"source" is optional, and its document must be one of the listed Source documents. Do not add an "Other" option. ` +
   `Add "kind":"term" (with "meaning") to settle which name to prefer, or "kind":"decision" (with "decision":{"hardToReverse":"...","surprising":"...","tradeOff":"..."}) for a Key decision. ` +
+  `To offer to re-open a signed-off Stage, write a question with "kind":"reopen" and "stage":"<the Stage's id>"; it needs no options. ` +
   'Write nothing after the block: the architect answers on the cards.'
 
 function str(value) {
@@ -162,6 +164,13 @@ export function validateCards(input, { knownSources } = {}) {
     const before = errors.length
     const question = str(q.question)
     if (!question) errors.push(`${at}.question is missing: write the question.`)
+    // #299: an offer to re-open a signed-off Stage names the Stage and says why; Gantry writes the choices itself, so it needs no options.
+    if (str(q.kind).toLowerCase() === 'reopen') {
+      const stage = str(q.stage)
+      if (!stage) errors.push(`${at}.stage is missing: name the id of the signed-off Stage you offer to re-open.`)
+      if (errors.length === before) cards.push({ id: str(q.id) || `q-${cards.length + 1}`, header: str(q.header), question, options: [], multiSelect: false, recommended: [], why: str(q.why), source: null, field: null, kind: 'reopen', stage })
+      return
+    }
 
     const rawOptions = Array.isArray(q.options) ? q.options : []
     const options = rawOptions.map((o) => ({

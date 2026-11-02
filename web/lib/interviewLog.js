@@ -308,6 +308,31 @@ export function createSessionLog(config = {}) {
       return add({ kind: 'returned-to-draft', ...clean({ module, fields, note }) })
     },
 
+    /**
+     * #299: the architect answered a comment the Owner left on the Stage's Pull Request when they sent it back. Keeps who wrote it, where, an
+     * excerpt and a link, what was decided (`outcome`: `change`, `no-change`, `open-question` or `other`, with `words` when they gave their own),
+     * and `entries`, the ids of the entries that answered it (the card's answer, an open question it logged). Nothing is ever written back to the
+     * Pull Request: this is the only trace of the answer.
+     */
+    addPrCommentAnswered({ comment, outcome, words, entries = [] }) {
+      return add({
+        kind: 'pr-comment-answered',
+        ...clean({
+          pullRequest: comment.pullRequestId,
+          comment: comment.id,
+          author: comment.author,
+          url: comment.url,
+          excerpt: comment.excerpt,
+          path: comment.path,
+          line: comment.line,
+          resolved: comment.resolved ? true : undefined,
+          outcome,
+          words: words || undefined,
+          entries,
+        }),
+      })
+    },
+
     /** Takes back entries that were never sent (a Save that was cancelled after its clash cards were answered). */
     discard(ids) {
       const drop = new Set(ids)

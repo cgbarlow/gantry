@@ -101,6 +101,7 @@ function homeStagesOf(flags, definition, moduleId) {
  * @param {string[]} [input.awaiting]  Stages with a Pull Request open
  * @param {string[]} [input.inProgress]  Stages known to be started (a branch exists), for the re-open check
  * @param {object[]|object} [input.saved]  the saved content of every Module
+ * @param {boolean} [input.staleLater]  (#299) the flags are Fields of a drafted-ahead Stage drafted from content an earlier Stage's revision changed: the Fields no pending Stage holds are asked about, on the Stage's own branch
  * @returns {{
  *   items: { key: string, flags: object[], homes: string[], saved: string, landing: { kind: 'in-place'|'own-branch'|'carry-forward'|'reopen'|'open-question', stageId?: string, blocker?: string } }[],
  *   deferred: { key: string, stageId: string }[],
@@ -109,7 +110,7 @@ function homeStagesOf(flags, definition, moduleId) {
  *   `items` are the Fields to ask about, earliest Stage first. `deferred` are Fields of a drafted-ahead Stage: left flagged and never written.
  *   `elsewhere` (local and server workspaces) are Fields whose Module is edited on another Stage: they are asked about when the page is on it.
  */
-export function planUpdateRound({ flags = [], definition, pageStageId, currentStageId = pageStageId, remote = false, awaiting = [], inProgress = [], saved = [] } = {}) {
+export function planUpdateRound({ flags = [], definition, pageStageId, currentStageId = pageStageId, remote = false, awaiting = [], inProgress = [], saved = [], staleLater = false } = {}) {
   const indexOf = stageIndexOf(definition)
   const stages = definition?.stages ?? []
   const pageAt = indexOf(pageStageId)
@@ -120,7 +121,17 @@ export function planUpdateRound({ flags = [], definition, pageStageId, currentSt
   const elsewhere = []
   // A page on a drafted-ahead Stage (after the current one) never changes anything: its branch is never written (ADR-0063).
   if (remote && pageAt > indexOf(currentStageId)) {
-    for (const key of groupFlags(flags).keys()) if (scope.has(key)) deferred.push({ key, stageId: pageStageId })
+    for (const [key, list] of groupFlags(flags)) {
+      if (!scope.has(key)) continue
+      // #299: a Field drafted from an earlier Field that has since changed is a Field of this Stage's own: it is asked about here, and any change
+      // lands on this Stage's own branch. Anything else (a Source document's change) waits until the Stage is current.
+      if (staleLater && list.every((f) => f.cause === 'field')) {
+        const moduleId = key.split('.')[0]
+        const fieldId = key.split('.').slice(1).join('.')
+        items.push({ key, flags: list, homes: homeStagesOf(list, definition, moduleId), saved: asText(normalizeSavedContent(saved)[moduleId]?.fields?.[fieldId]), landing: { kind: 'in-place' } })
+      } else deferred.push({ key, stageId: pageStageId })
+    }
+    items.sort((a, b) => a.key.localeCompare(b.key))
     return { items, deferred, elsewhere }
   }
   for (const [key, list] of groupFlags(flags)) {
@@ -361,7 +372,7 @@ export const needsAi = (result) => result.outcome === 'redraft' || result.outcom
 
 /** What the AI is told to begin a session that is only bringing Fields up to date. */
 export const UPDATE_OPENING =
-  'Bring the Out of date Fields up to date. Source documents changed after some Fields were drafted, and Gantry flagged those Fields. ' +
+  'Bring the Out of date Fields up to date. A Source document, or an earlier Field, that some Fields were drafted from has changed since, and Gantry flagged those Fields. ' +
   'The architect has been shown a card for each flagged Field, and their answers are below. Work only on the Fields they chose to redraft. ' +
   'Do not begin the interview, do not read the Source documents for anything else, and do not ask about anything else; when the redrafts are done, say so in one line.'
 

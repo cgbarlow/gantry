@@ -154,6 +154,10 @@ export function createFakeGitHubServer({
   const pulls = new Map() // number -> { number, head, base, title, body, state, merged, requested_reviewers }
   let pullCounter = 0
   const reviews = new Map() // number -> [{ id, user, state, submitted_at }]
+  // #299: the comments on a pull request, as the Owner writes them on the Provider: the conversation (`issues/:n/comments`) and the inline comments on the diff (`pulls/:n/comments`).
+  const conversationComments = new Map() // number -> [{ id, user, body, created_at, html_url }]
+  const inlineComments = new Map() // number -> [{ id, user, body, path, line, created_at, html_url, in_reply_to_id }]
+  let commentCounter = 0
 
   async function readJsonBody(req) {
     let raw = ''
@@ -476,7 +480,8 @@ export function createFakeGitHubServer({
     // POST /repos/:owner/:repo/issues/:number/comments — adds a comment (#275's re-approval note on a linked
     // work item). Kept on the issue as `comments`, so a test reads back what was said.
     const issueCommentsMatch = pathname.match(new RegExp(`^${repoBasePath}/issues/(\\d+)/comments$`))
-    if (req.method === 'POST' && issueCommentsMatch) {
+    // (#299: a pull request is an issue too on real GitHub; here a number that is not a fake issue falls through to the pull request comments below.)
+    if (req.method === 'POST' && issueCommentsMatch && issues.has(Number(issueCommentsMatch[1]))) {
       const issue = issues.get(Number(issueCommentsMatch[1]))
       if (!issue) return json(404, { message: `No fake issue #${issueCommentsMatch[1]}` })
       const body = await readJsonBody(req)
@@ -545,6 +550,14 @@ export function createFakeGitHubServer({
       if (!pr) return json(404, { message: `No fake pull request #${pullMatch[1]}` })
       return json(200, pr)
     }
+    // #299: the Owner closes a pull request without merging it (their rejection of a Stage); only `state` is taken.
+    if (req.method === 'PATCH' && pullMatch) {
+      const pr = pulls.get(Number(pullMatch[1]))
+      if (!pr) return json(404, { message: `No fake pull request #${pullMatch[1]}` })
+      const body = await readJsonBody(req)
+      if (body.state) pr.state = body.state
+      return json(200, pr)
+    }
 
     const requestedReviewersMatch = pathname.match(new RegExp(`^${repoBasePath}/pulls/(\\d+)/requested_reviewers$`))
     if (req.method === 'POST' && requestedReviewersMatch) {
@@ -567,9 +580,33 @@ export function createFakeGitHubServer({
       if (!pulls.has(number)) return json(404, { message: `No fake pull request #${number}` })
       const body = await readJsonBody(req)
       const state = { APPROVE: 'APPROVED', REQUEST_CHANGES: 'CHANGES_REQUESTED', COMMENT: 'COMMENTED' }[body.event] ?? 'COMMENTED'
-      const review = { id: (reviews.get(number)?.length ?? 0) + 1, user: { login: body.login ?? 'fake-reviewer' }, state, submitted_at: new Date().toISOString() }
+      const review = { id: (reviews.get(number)?.length ?? 0) + 1, user: { login: body.login ?? 'fake-reviewer' }, state, submitted_at: new Date().toISOString(), ...(body.body ? { body: body.body } : {}) }
       reviews.set(number, [...(reviews.get(number) ?? []), review])
       return json(200, review)
+    }
+
+    // #299: the comments on a pull request (read by lib/githubPullRequestsClient.js's getPullRequestComments). The Owner writes them with POST
+    // (`login` names who); a test reads them back with GET to prove gantry wrote none.
+    const commentsMatch = pathname.match(new RegExp(`^${repoBasePath}/(issues|pulls)/(\\d+)/comments$`))
+    if (commentsMatch) {
+      const number = Number(commentsMatch[2])
+      const store = commentsMatch[1] === 'issues' ? conversationComments : inlineComments
+      if (!pulls.has(number)) return json(404, { message: `No fake pull request #${number}` })
+      if (req.method === 'GET') return json(200, store.get(number) ?? [])
+      if (req.method === 'POST') {
+        const body = await readJsonBody(req)
+        const id = ++commentCounter
+        const comment = {
+          id,
+          user: { login: body.login ?? 'fake-reviewer' },
+          body: body.body ?? '',
+          created_at: new Date(Date.now() + id).toISOString(),
+          html_url: `https://github.example/${owner}/${repository}/pull/${number}#discussion_r${id}`,
+          ...(commentsMatch[1] === 'pulls' ? { path: body.path ?? 'modules/m1.md', line: body.line ?? 1, in_reply_to_id: body.in_reply_to_id } : {}),
+        }
+        store.set(number, [...(store.get(number) ?? []), comment])
+        return json(201, comment)
+      }
     }
 
     // GET /repos/:owner/:repo/pulls/:number/commits — #13's getPullRequestCommits. This fake's git

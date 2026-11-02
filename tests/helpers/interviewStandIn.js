@@ -16,7 +16,7 @@ export function anthropicReply({ text, tools = [] }) {
     index++
   }
   for (const tool of tools) {
-    events.push(['content_block_start', { type: 'content_block_start', index, content_block: { type: 'tool_use', id: tool.id, name: 'draft_field', input: {} } }])
+    events.push(['content_block_start', { type: 'content_block_start', index, content_block: { type: 'tool_use', id: tool.id, name: tool.name ?? 'draft_field', input: {} } }])
     const json = JSON.stringify(tool.input)
     events.push(['content_block_delta', { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: json.slice(0, 11) } }])
     events.push(['content_block_delta', { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: json.slice(11) } }])
@@ -52,6 +52,31 @@ export const sharedScript = (body) => {
     return { text: `Reading for ${stage}.`, tools: [draft(`d-${stage}`, `${MODULE[stage]}.body`, `Notes for ${stage}: the agreed position, written out.`)] }
   }
   if (JSON.stringify(body.messages[body.messages.length - 1]).includes('no longer held')) return { text: 'Extending the shared notes.', tools: [draft('d-more', 'mx.more', 'Shape extends the shared notes.')] }
+  return { text: `${stage} is drafted.` }
+}
+
+/**
+ * #299: the script for revising a Stage the Owner sent back, and for the Bring up to date round that follows it. Shape's draft names Scope's Field as
+ * an input, so a revision that changes Scope's Field makes Shape's draft stale (by fingerprint). A revision redrafts Scope's Field; Bring up to
+ * date redrafts Shape's. `offerReopen` (a Stage id) makes Shape's first turn also offer to re-open that Stage.
+ */
+export const revisionScript = ({ offerReopen = null } = {}) => (body) => {
+  const stage = trioStageOf(body)
+  const first = JSON.stringify(body.messages[0])
+  const draft = (id, field, value, inputs) => ({ id, input: { field, value, ...(inputs ? { inputs } : {}) } })
+  if (first.includes('Revise this Stage')) {
+    if (body.messages.length === 1) return { text: 'Reading the comments.', tools: [draft('d-rev', 'm1.body', 'Revised notes for s1: the owner is named, as the Owner asked.')] }
+    return { text: 'The revision is drafted.' }
+  }
+  if (first.includes('Bring the Out of date Fields up to date')) {
+    if (body.messages.length === 1) return { text: 'Redrafting.', tools: [draft('d-up', 'm2.body', 'Redrafted notes for s2: they follow the revised scope.', [{ field: 'm1.body' }])] }
+    return { text: 'Shape is brought up to date.' }
+  }
+  if (body.messages.length === 1) {
+    const tools = [draft(`d-${stage}`, `${MODULE[stage]}.body`, `Notes for ${stage}: the agreed position, written out.`, stage === 's2' ? [{ field: 'm1.body' }] : undefined)]
+    if (offerReopen && stage === 's2') tools.push({ id: 'ask-reopen', name: 'ask_architect', input: { questions: [{ kind: 'reopen', stage: offerReopen, question: 'A new Source document contradicts the approved scope.' }] } })
+    return { text: `Reading for ${stage}.`, tools }
+  }
   return { text: `${stage} is drafted.` }
 }
 

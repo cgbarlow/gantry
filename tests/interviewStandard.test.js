@@ -105,8 +105,8 @@ describe('term choices', () => {
 describe('a term card and a decision card from the AI', () => {
   const base = (over = {}) => ({ question: 'Which name?', options: [{ label: 'Claim' }, { label: 'Case' }], recommended: 'Claim', ...over })
 
-  test('the tool offers both kinds', () => {
-    assert.deepEqual(ASK_TOOL_SCHEMA.properties.questions.items.properties.kind.enum, ['disagreement', 'missing', 'term', 'decision'])
+  test('the tool offers the kinds (#299 adds an offer to re-open a signed-off Stage)', () => {
+    assert.deepEqual(ASK_TOOL_SCHEMA.properties.questions.items.properties.kind.enum, ['disagreement', 'missing', 'term', 'decision', 'reopen'])
   })
 
   test('a term card keeps its meaning and takes one choice only', () => {

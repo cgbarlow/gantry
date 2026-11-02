@@ -61,6 +61,15 @@ function describeReviewAnswered(entry, fieldTitle) {
   return `Review comment${entry.reviewName ? ` in ${entry.reviewName}` : ''}${field ? ` on ${field}` : entry.about ? ` on ${entry.about}` : ''}. ${said.join(' ')} The architect ${REVIEW_OUTCOMES[entry.outcome] ?? entry.outcome}.${changed}${own}`
 }
 
+const PR_OUTCOMES = { change: 'the content was changed', 'no-change': 'no change was needed', 'open-question': 'logged as an open question', other: "answered in the architect's own words" }
+
+/** A `pr-comment-answered` entry (#299) as a sentence: who wrote the comment on the Pull Request, an excerpt, and how it was answered. */
+function describePrComment(entry) {
+  const where = entry.path ? ` on ${String(entry.path).replace(/^\/+/, '')}${entry.line ? ` (line ${entry.line})` : ''}` : ''
+  const pr = entry.pullRequest ? ` on Pull Request #${entry.pullRequest}` : ''
+  return `${entry.author || 'The Owner'}${pr}${where}${entry.resolved ? ' (resolved)' : ''}: “${entry.excerpt ?? ''}” — ${PR_OUTCOMES[entry.outcome] ?? entry.outcome ?? 'answered'}${entry.words ? `: “${entry.words}”` : ''}`
+}
+
 /** One entry as a sentence for a reader: the question and the answer, or what the architect said, or what was chosen. */
 export function describeEntry(entry, { fieldTitle = (key) => key } = {}) {
   const fields = asList(entry.fields).map(fieldTitle)
@@ -95,6 +104,8 @@ export function describeEntry(entry, { fieldTitle = (key) => key } = {}) {
       return describeSourceUpdate(entry, fieldTitle)
     case 'review-answered':
       return describeReviewAnswered(entry, fieldTitle)
+    case 'pr-comment-answered':
+      return describePrComment(entry)
     case 'returned-to-draft':
       return entry.note ?? `${entry.module ?? 'A Module'} returned to draft`
     case 'artefact':
@@ -108,7 +119,7 @@ export function describeEntry(entry, { fieldTitle = (key) => key } = {}) {
   }
 }
 
-const KIND_LABELS = { term: 'Term', answer: 'Answer', fact: 'Architect', 'saved-content': 'Saved content', 'hand-edit': 'Hand edit', 'open-question': 'Open question', artefact: 'Artefact', restart: 'Restart', 'model-change': 'Model', 'source-update': 'Brought up to date', 'returned-to-draft': 'Returned to draft', 'review-answered': 'Review comment answered' }
+const KIND_LABELS = { term: 'Term', answer: 'Answer', fact: 'Architect', 'saved-content': 'Saved content', 'hand-edit': 'Hand edit', 'open-question': 'Open question', artefact: 'Artefact', restart: 'Restart', 'model-change': 'Model', 'source-update': 'Brought up to date', 'returned-to-draft': 'Returned to draft', 'review-answered': 'Review comment answered', 'pr-comment-answered': 'PR comment answered' }
 
 function EntryRow({ entry, fieldTitle, state }) {
   return html`<li class=${'dl-entry' + (entry.kind === 'open-question' && state !== 'old' ? ' open' : '') + (state === 'old' ? ' old' : '')} data-testid="decisions-entry" data-entry-id=${entry.id} data-kind=${entry.kind} data-state=${state ?? 'current'}>

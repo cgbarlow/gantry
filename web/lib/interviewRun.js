@@ -12,7 +12,7 @@
 import { signal } from '@preact/signals'
 
 /** The states a row of the run plan can be in. `beyond` is a Stage after the target, which the run never reaches. */
-export const PLAN_STATES = Object.freeze(['done', 'drafting', 'drafting-ahead', 'awaiting-confirmation', 'awaiting-approval', 'approval-queued', 'waiting-for-approval', 'waiting', 'paused', 'beyond'])
+export const PLAN_STATES = Object.freeze(['done', 'drafting', 'drafting-ahead', 'awaiting-confirmation', 'awaiting-approval', 'approval-queued', 'waiting-for-approval', 'waiting', 'paused', 'beyond', 'revising'])
 
 const WORDS = Object.freeze({
   done: 'done',
@@ -25,6 +25,7 @@ const WORDS = Object.freeze({
   waiting: 'waiting',
   paused: 'paused',
   beyond: 'beyond target',
+  revising: 'revising',
 })
 
 /** The plain words for a plan state, as the rail shows them. */
@@ -52,7 +53,7 @@ export function nextStage(stages, stageId) {
  * @param {string} input.currentStageId                   the Stage the interview is on
  * @param {string} input.targetStageId                    the run's target (the current Stage when the run is one Stage)
  * @param {string} [input.instanceStageId]  the Stage the Instance itself is on (#296), when the interview is on a later one (drafting ahead): the Stages from it up to the interview's are not done, they are awaiting approval or queued for it
- * @param {'idle'|'drafting'|'drafting-ahead'|'awaiting-confirmation'|'waiting-for-approval'|'paused'|'done'} input.current  where the Stage the interview is on stands
+ * @param {'idle'|'drafting'|'drafting-ahead'|'awaiting-confirmation'|'waiting-for-approval'|'paused'|'done'|'revising'} input.current  where the Stage the interview is on stands (`revising`, #299: the Owner sent it back and the AI is revising it, though its Pull Request is still open)
  * @param {{pullRequests?: Record<string, {id: number|string, url?: string|null}>, queued?: Record<string, boolean>, headStart?: Record<string, boolean>}} [input.remote]
  *   a Provider workspace's record (#295): the Pull Requests open for approval, by Stage, the Stages queued for it, and (#296) the later Stages
  *   holding a saved head start. The Provider's word overrides the log's: a Stage with a Pull Request open is awaiting approval, and a later
@@ -70,7 +71,7 @@ export function planRows({ stages, currentStageId, targetStageId, current = 'idl
     if (at > targetAt) state = 'beyond'
     // #296: a Stage before the interview's that the Instance has not moved past is pending, not done: its Pull Request is open, or it is queued behind one.
     else if (at < currentAt) state = at < instanceAt ? 'done' : open || at === instanceAt ? 'awaiting-approval' : 'approval-queued'
-    else if (at === currentAt) state = open ? 'awaiting-approval' : current === 'idle' ? idleWord : current
+    else if (at === currentAt) state = current === 'revising' ? 'revising' : open ? 'awaiting-approval' : current === 'idle' ? idleWord : current
     else state = open ? 'awaiting-approval' : idleWord
     const target = at === targetAt
     const pullRequest = state === 'awaiting-approval' && open ? { id: open.id, url: open.url ?? null } : null

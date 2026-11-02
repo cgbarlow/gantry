@@ -23,7 +23,7 @@ import { citationSegments, isBlankValue } from './interviewDraft.js'
 import { describeInput, planSourceAccess } from './interviewSources.js'
 import { effectiveTargetSize, fieldTargetWords, targetSizeLabel } from './targetSize.js'
 import { logSummary } from './decisionsLog.js'
-import { outOfDateCountByStage, flagsForField } from './outOfDate.js'
+import { outOfDateCountByStage, findOutOfDateFields, flagsForField } from './outOfDate.js'
 import { planUpdateRound, stagesToUpdate } from './bringUpToDate.js'
 import { answeredCounts, assignChoices, planReview, reviewerLabels } from './reviewRound.js'
 import { ReviewContext, ReviewInputs, ReviewSection } from './reviewView.js'
@@ -31,7 +31,8 @@ import { downloadReviewResponseList, hasReviewResponses, reviewResponseRows } fr
 import { beginRun, clearRun, interviewRuns, nextStage, planRows, resumableRun, runStartStage, runTargets, saveOutcome, updateRun } from './interviewRun.js'
 import { EMPTY_TOKENS, addTokens, formatTokens, hasTokens, tokenBreakdown, tokensOfLog, totalTokens } from './tokenUsage.js'
 import { describeSaved, resumeInfo } from './interviewResume.js'
-import { isRemoteInstance, lastSavedBy, openApproval, remoteRecord } from './interviewApproval.js'
+import { isRemoteInstance, lastSavedBy, openApproval, pullRequestLink, remoteRecord } from './interviewApproval.js'
+import { SENT_BACK_CHOICES, reopenOffer, staleLaterFields } from './prRevision.js'
 import { approvedPrintedFields, changedMark, earlierDocumentsToRender, reRenderCardLine } from './interviewReapproval.js'
 import { fieldCountLabel } from './changedSinceApproval.js'
 import { copyStanding, createWorkingCopyStore, makeWorkingCopy } from './interviewWorkingCopy.js'
@@ -40,6 +41,11 @@ import { fieldsInScope } from './interviewScope.js'
 
 // One session per Instance Stage while the editor page is open, so going to the editor and back keeps the conversation and the drafts.
 const sessions = new Map()
+/** A Stage that was re-opened (#299) starts afresh in this tab: the session it had before is dropped. */
+export function forgetInterviewSession(slug, stageId) {
+  sessions.get(`${slug}|${stageId}`)?.cancel()
+  sessions.delete(`${slug}|${stageId}`)
+}
 export function clearInterviewSessions() {
   for (const session of sessions.values()) session.cancel()
   sessions.clear()
@@ -145,6 +151,13 @@ function QuestionCard({ card, fieldTitle, session }) {
       : null}
     ${card.change?.reapproves?.length
       ? html`<p class="kick-note reapproval-note" data-testid="change-reapproval" role="note">Approved by ${card.change.reapproves.map((s) => s.title).join(', ')}. Changing this Field changes approved content, so ${card.change.reapproves.map((s) => s.title).join(', ')} is re-approved with this Stage: its documents are re-rendered and its approver must approve too.</p>`
+      : null}
+    ${card.comment
+      ? html`<p class="kick-note" data-testid="comment-card-note">
+          ${card.comment.resolved ? 'The Owner marked this thread resolved, and it is asked about all the same. ' : ''}${card.comment.url
+            ? html`<a href=${card.comment.url} target="_blank" rel="noopener noreferrer" data-testid="comment-link">Open the comment on the Provider</a>`
+            : null}
+        </p>`
       : null}
     ${card.update
       ? html`<div class="update-current" data-testid="update-current">
@@ -281,15 +294,20 @@ function providerLabel(p) {
  *   onReviewAnswered   ({ [reviewId]: n }) => Promise  raises the manifest's answered counts once answers are saved
  */
 // #297: `outOfDate` is the Fields flagged Out of date (web/lib/outOfDate.js) and `newSince` the documents marked New since last interview; the run plan marks each Stage that has flagged Fields and the Source documents rail marks the new documents.
-export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance, checkStatus = null, onRequestApproval, onReRenderEarlier = null, onCheckApproval, onDraftAhead, outOfDate = [], newSince = [], flagsReady = true, stageStarted, update = false, onReopenStage, onOpenStage, review = false, reviewCopies = null, onBringInReview, onOpenReview, onReviewAnswered }) {
+export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance, checkStatus = null, onRequestApproval, onReRenderEarlier = null, onCheckApproval, onDraftAhead, outOfDate = [], newSince = [], flagsReady = true, stageStarted, update = false, onReopenStage, onOpenStage, review = false, reviewCopies = null, onBringInReview, onOpenReview, onReviewAnswered, revise = false, loadPrComments = null, onReviseStage = null, onLeaveRevision = null, onUpdateStage = null }) {
   const key = `${instance.slug}|${instance.stage.id}`
   // #298: Bring up to date has its own session and working copy, so it never takes over an interview that is part-way.
-  const sessionKey = update ? `${key}|update` : review ? `${key}|review` : key
+  // #299: a revision of a Stage the Owner sent back has its own session too.
+  const sessionKey = update ? `${key}|update` : revise ? `${key}|revise` : review ? `${key}|review` : key
   // #295: on an Azure DevOps or GitHub workspace a Stage moves on only when its Pull Request merges, so the stage-end card asks for approval instead of advancing.
   const remote = isRemoteInstance(instance)
   const awaiting = openApproval(instance) // the Pull Request the Provider says is open for this Stage, else null: it overrides what the log says
   const [approval, setApproval] = useState({ phase: 'idle', message: '' })
   const [headStart, setHeadStart] = useState(null) // #296: the head start saved from the Waiting card: { fields, stopped }
+  // #299: what the last Check status said when the Owner sent the Stage back or rejected it: { kind, stageId, stageTitle, pullRequestId, stopped? }
+  const [sentBack, setSentBack] = useState(null)
+  // #299: every comment on the Stage's Pull Request, read when a revision opens: { status: 'idle'|'loading'|'ready'|'error', list, pullRequestId, message }
+  const [prComments, setPrComments] = useState({ status: revise ? 'loading' : 'idle', list: [], pullRequestId: null, message: '' })
   const lastHeld = useRef({ key: '', list: [] }) // the Modules held when the AI was last told about them (#296)
   const [setup, setSetup] = useState({ status: 'loading' })
   const [sources, setSources] = useState(null)
@@ -373,6 +391,23 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     }
   }, [key, generation])
 
+  // #299: a revision reads every comment on the Stage's Pull Request, resolved ones included, when it opens. Read-only: nothing is written to the Pull Request.
+  useEffect(() => {
+    if (!revise) return undefined
+    if (!loadPrComments) {
+      setPrComments({ status: 'error', list: [], pullRequestId: null, message: 'The Pull Request comments cannot be read here.' })
+      return undefined
+    }
+    let live = true
+    setPrComments({ status: 'loading', list: [], pullRequestId: null, message: '' })
+    Promise.resolve(loadPrComments(instance.stage.id))
+      .then((result) => live && setPrComments(result?.ok ? { status: 'ready', list: result.comments ?? [], pullRequestId: result.pullRequestId ?? null, message: '' } : { status: 'error', list: [], pullRequestId: null, message: result?.message || 'The Pull Request comments could not be read.' }))
+      .catch((err) => live && setPrComments({ status: 'error', list: [], pullRequestId: null, message: err.message }))
+    return () => {
+      live = false
+    }
+  }, [revise, key, generation])
+
   // ---- the Source documents, with the text read out of each, whenever the list changes ----
   // Stable between renders: the panel reloads its list whenever this changes, and every list it reads sets state here (#292).
   const storeRef = useRef(store)
@@ -441,13 +476,14 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           // #290: whether this run carries on from the decisions log, the earlier session of this architect it takes over, and the other
           // sessions still going on this Stage. Worked out when Start is pressed, from the logs as they are then.
           get resume() {
-            if (update || review) return null // Bring up to date and review comments are never a resumed interview (#298, #303)
+            if (update || review || revise) return null // Bring up to date, review comments and a revision are never a resumed interview (#298, #303, #299)
             return resumeInfo({
               logs: { ...setup.logs, [instance.stage.id]: committedLog },
               stageId: instance.stage.id,
               stageTitle: instance.stage.title,
               actor,
-              providerStates: setup.providerStates,
+              // A Stage re-opened for this run (#299) was approved and merged: the sessions that interviewed it before are finished with it.
+              providerStates: run?.reopened === instance.stage.id ? { ...setup.providerStates, [instance.stage.id]: 'approved' } : setup.providerStates,
               stages: setup.structure.stages ?? [],
               fieldTitle: (fieldKey) => fieldLabel(setup.definition, fieldKey),
             })
@@ -455,14 +491,24 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           actor,
           // #298: the documents New since last interview (a normal session's AI reads them against what is saved) and the Out of date Fields
           // this Stage can act on (the session opens with a round of cards about them). Worked out when Start is pressed.
-          newSince: update || review ? [] : newSince,
+          newSince: update || review || revise ? [] : newSince,
+          // #299: the Owner sent this Stage back: every comment on its Pull Request, for the round of cards that opens the revision. And the signed-off
+          // Stages the AI may offer to re-open, each with whether Gantry would allow it right now.
+          get revise() {
+            return revise && prComments.status === 'ready'
+              ? { comments: prComments.list, pullRequestId: prComments.pullRequestId, pullRequestUrl: pullRequestLink(instance, prComments.pullRequestId), stageTitle: instance.stage.title }
+              : undefined
+          },
+          get reopen() {
+            return reopenList
+          },
           // #303: the review comments this Stage can act on. `mode` is `only` on a focused round, `join` when the architect asked for them to come
           // with the interview, else `none` (the labels are still there, so anything the AI is told is scrubbed of real names).
           get review() {
             return reviewPlan ? reviewContext(review ? 'only' : joinWanted ? 'join' : 'none') : undefined
           },
           get update() {
-            return !review && updatePlan && updatePlan.items.length
+            return !review && !revise && updatePlan && updatePlan.items.length
               ? {
                   mode: update ? 'only' : 'first',
                   items: updatePlan.items,
@@ -607,6 +653,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const settled = run && run.at === instance.stage.id && (run.phase === 'paused' || run.phase === 'done') ? run.phase : null
   let planCurrent = 'idle'
   if (saving?.phase === 'advancing') planCurrent = 'done'
+  // #299: a revision is under way (the row says so), and once it is saved the Stage is back to awaiting approval.
+  else if (saving?.phase === 'saved' && saving.revision) planCurrent = 'awaiting-approval'
+  else if (revise && (started || phase === 'testing')) planCurrent = 'revising'
   else if (saving?.phase === 'saved' && saving.approval) planCurrent = saving.approval === 'queued' ? 'approval-queued' : 'awaiting-approval'
   else if (stageEndReady) planCurrent = 'awaiting-confirmation'
   else if (waitingNow || (headStart?.stopped && ahead && held.length > 0)) planCurrent = 'waiting-for-approval'
@@ -628,8 +677,21 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         (remoteRows?.pullRequests?.[st.id] || (st.id === instance.currentStageId && (stageStarted ?? instance.stageBranchExists)) || logHasSaved(st.id === instance.stage.id ? committedLog : stageLogs[st.id]))
     )
     .map((st) => st.id)
+  // #299: after a revision, the Fields of a Stage drafted ahead that were drafted from content the revision changed (found by fingerprint in the
+  // decisions logs) get a keep / redraft round before the run carries on. Only Fields no pending Stage holds, and only on their own branch.
+  const staleHere =
+    setup.status === 'ready' && ahead && remote
+      ? findOutOfDateFields({
+          sources: [],
+          logs: { ...setup.logs, [instance.stage.id]: committedLog },
+          modules: [...instance.modules, ...otherSaved],
+          stageModules: Object.fromEntries((setup.definition.stages ?? []).map((st) => [st.id, st.modules ?? []])),
+        }).filter((flag) => flag.cause === 'field' && flag.stages.includes(instance.stage.id))
+      : []
   const updatePlan =
-    setup.status === 'ready' && outOfDate.length && !ahead // a drafted-ahead branch is never changed (ADR-0063): its flagged Fields wait until it is the current Stage
+    setup.status === 'ready' && staleHere.length
+      ? planUpdateRound({ flags: staleHere, definition: definitionNow, pageStageId: instance.stage.id, currentStageId: instance.currentStageId, remote, staleLater: true, saved: [...instance.modules, ...otherSaved] })
+      : setup.status === 'ready' && outOfDate.length && !ahead // a drafted-ahead branch is never changed by a Source document's change (ADR-0063): its flagged Fields wait until it is the current Stage
       ? planUpdateRound({
           flags: outOfDate,
           definition: definitionNow,
@@ -642,6 +704,11 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         })
       : null
   // The Stages that have something to bring up to date, in order, other than this one (a local or server workspace goes through them one by one).
+  const currentAtIndex = stagesList.findIndex((st) => st.id === instance.currentStageId)
+  const reopenList =
+    remote && setup.status === 'ready' && !ahead
+      ? stagesList.slice(0, Math.max(0, currentAtIndex)).map((st) => ({ id: st.id, title: st.title, ...reopenOffer({ stages: stagesList, currentStageId: instance.currentStageId, targetId: st.id, inProgress: startedStages }) }))
+      : []
   const otherUpdateStages = setup.status === 'ready' && outOfDate.length ? stagesToUpdate({ flags: outOfDate, definition: setup.definition, remote, currentStageId: instance.currentStageId }).filter((st) => st.stageId !== instance.stage.id) : []
   // #303: the review comments of the kept Reviewed copies that this Stage can act on, where each change would land (the rules of Bring up to date), and the threads Word resolved.
   const reviewLabelMap = useMemo(() => reviewerLabels(reviewCopies ?? []), [reviewCopies])
@@ -683,8 +750,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const stageTitleOf = (id) => stagesList.find((s) => s.id === id)?.title ?? id
 
   async function startInterview(options) {
-    // Bring up to date and a review round are not runs: they have no target Stage and never move the Instance on (#298, #303).
-    if (update || review) {
+    // Bring up to date, a review round and a revision are not runs: they have no target Stage and never move the Instance on (#298, #303, #299).
+    if (update || review || revise) {
       await sessionRef.current?.start(options)
       return
     }
@@ -699,7 +766,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   // still waiting, sent back) overrides what the log last recorded. A page that was open when the request was made does not: it knows.
   const openedAwaiting = useRef(awaiting !== null)
   useEffect(() => {
-    if (remote && openedAwaiting.current && !carryingOn && onCheckApproval) checkApproval({ carry: false })
+    if (remote && openedAwaiting.current && !carryingOn && !revise && onCheckApproval) checkApproval({ carry: false })
   }, [])
 
   // The Stage before this one carried on into it: start the interview by itself, with the AI Provider the run was using.
@@ -907,7 +974,12 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     setSaving({ phase: 'saving' })
     const keys = Object.keys(drafts)
     const usedAi = hasTokens(snap?.tokens ?? EMPTY_TOKENS)
-    const delta = sessionRef.current?.decisionsDelta({ runState: 'done', saving: usedAi, target: instance.stage.id, stages: { [instance.stage.id]: 'done' } }) ?? null
+    // A Stage that is awaiting approval, queued for it or holding a head start keeps that status: bringing a Field up to date must not make it look finished (#299).
+    const before = Array.isArray(committedLog?.status) && committedLog.status.length ? committedLog.status[committedLog.status.length - 1] : null
+    const keepsState = ['approval-queued', 'awaiting-approval', 'head-start'].includes(before?.state)
+    const delta = keepsState
+      ? sessionRef.current?.decisionsDelta({ runState: before.state, saving: usedAi, target: before.target ?? instance.stage.id, stages: before.stages ?? { [instance.stage.id]: before.state } }) ?? null
+      : sessionRef.current?.decisionsDelta({ runState: 'done', saving: usedAi, target: instance.stage.id, stages: { [instance.stage.id]: 'done' } }) ?? null
     const decisions = delta && !usedAi ? { ...delta, status: undefined } : delta
     // Every Field was left flagged: nothing was answered, so there is nothing to write (and no empty log file or commit to make).
     if (keys.length === 0 && (decisions?.entries ?? []).length === 0) {
@@ -941,7 +1013,83 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     return true
   }
 
+  // #299: saves the revision of a Stage the Owner sent back: the drafts and the decisions log (with each comment answered) as one stage Save on the
+  // Stage's own branch, which updates its open Pull Request. It asks for nothing and writes nothing to the Pull Request; the Stage goes back to awaiting approval.
+  async function saveRevision() {
+    setSaving({ phase: 'saving', revision: true })
+    const keys = Object.keys(drafts)
+    const before = Array.isArray(committedLog?.status) && committedLog.status.length ? committedLog.status[committedLog.status.length - 1] : null
+    const decisions =
+      sessionRef.current?.decisionsDelta({ runState: 'awaiting-approval', saving: true, target: before?.target ?? instance.stage.id, stages: { ...(before?.stages ?? {}), [instance.stage.id]: 'awaiting-approval' } }) ?? null
+    let result
+    try {
+      result = await onSaveDrafts(drafts, { artefactId, decisions, settleClashes: (conflicts) => sessionRef.current.settleClashes(conflicts) })
+    } catch (err) {
+      result = { ok: false, message: err.message }
+    }
+    if (!result.ok) {
+      if (result.settledIds?.length) sessionRef.current?.discardEntries(result.settledIds)
+      setSaving({ phase: 'error', revision: true, message: result.message || 'The Save did not go through.' })
+      return false
+    }
+    if (keys.length) sessionRef.current?.markSaved(keys)
+    if (decisions) {
+      sessionRef.current?.commitDecisions(result.decisions ?? decisions)
+      const fresh = await decisionsStore?.read(instance.stage.id).catch(() => null)
+      if (fresh) {
+        setCommittedLog(fresh)
+        setStageLogs((logs) => ({ ...logs, [instance.stage.id]: fresh }))
+        sessionRef.current?.loadDecisions(fresh)
+      }
+    }
+    workingCopies.clear(sessionKey)
+    const returned = (decisions?.entries ?? []).filter((e) => e.kind === 'returned-to-draft')
+    setSaving({ phase: 'saved', revision: true, check: result.check ?? null, fields: keys.length, answers: (decisions?.entries ?? []).filter((e) => e.kind === 'pr-comment-answered').length, returned })
+    return true
+  }
+
+  // Drafting ahead is paused (#299): whatever the AI drafted ahead on this Stage is kept, as a head start saved on its branch, before the session
+  // goes back to revise the Stage the Owner sent back, or stops.
+  async function keepDraftedAhead() {
+    if (!ahead || Object.keys(drafts).length === 0) return true
+    return runSave({ action: 'head-start' })
+  }
+  async function reviseSentBack() {
+    if (!sentBack || !onReviseStage) return
+    if (!(await keepDraftedAhead())) return
+    onReviseStage(sentBack.stageId)
+  }
+  async function stopSession() {
+    if (!(await keepDraftedAhead())) return
+    updateRun(instance.slug, { phase: 'paused', at: instance.stage.id })
+    setSentBack((was) => (was ? { ...was, stopped: true } : was))
+  }
+
   const [reopening, setReopening] = useState({ stageId: null, message: '' })
+  // #299: the architect chose the AI's offer to re-open a signed-off Stage. The re-opened Stage joins the run, and the page for it starts by itself;
+  // its decisions log carries on in the same file. This tab's old session for that Stage is dropped, since the Stage is open again.
+  const reopenHandled = useRef(null)
+  async function reopenForRun(stageId) {
+    setReopening({ stageId, message: '' })
+    sessions.delete(`${instance.slug}|${stageId}`)
+    workingCopies.clear(`${instance.slug}|${stageId}`)
+    if (run) updateRun(instance.slug, { carryOn: stageId, phase: 'running', providerId: providerInUse, at: stageId, startStageId: stageId, reopened: stageId })
+    else beginRun(instance.slug, { target, startStageId: stageId, providerId: providerInUse, at: stageId, carryOn: stageId, reopened: stageId })
+    let result
+    try {
+      result = await onReopenStage(stageId)
+    } catch (err) {
+      result = { ok: false, message: err.message }
+    }
+    if (!result?.ok) updateRun(instance.slug, { carryOn: null })
+    setReopening({ stageId: null, message: result?.ok ? '' : result?.message || 'The Stage could not be re-opened.' })
+  }
+  useEffect(() => {
+    const request = snap?.reopenRequest
+    if (!request || !onReopenStage || reopenHandled.current === request.stageId) return
+    reopenHandled.current = request.stageId
+    reopenForRun(request.stageId)
+  }, [snap?.reopenRequest?.stageId])
   async function reopen(stageId) {
     setReopening({ stageId, message: '' })
     let result
@@ -1029,6 +1177,10 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     } catch (err) {
       result = { ok: false, merged: false, message: err.message }
     }
+    // #299: the Owner sent the Stage back (changes requested) or rejected it. Drafting ahead pauses: a turn the AI is in the middle of is stopped, and
+    // one card asks to revise the Stage with the AI or to stop the session. Whatever was drafted ahead is kept either way.
+    setSentBack(result.sentBack ?? null)
+    if (result.sentBack && ahead && sessionRef.current && snap?.phase === 'working') sessionRef.current.cancel()
     if (!result.merged) {
       if (carries) updateRun(instance.slug, { carryOn: null })
       setApproval({ phase: 'idle', message: result.message || '' })
@@ -1223,6 +1375,16 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
               <strong>Review comments.</strong> Reviewers commented on a Word document Gantry rendered. You get one card for each comment thread, and for each reviewer's tracked changes in a Field.
               Nothing is applied automatically, and nothing is saved until you save the round.
             </p>`
+          : revise
+          ? html`<p class="kick-intro" data-testid="interview-revise-intro">
+              <strong>Revise ${instance.stage.title}.</strong> The Owner sent it back from its Pull Request. Gantry reads every comment on it, resolved ones included, lists them here and asks you one card for each,
+              before the AI is called. The AI only redrafts what you choose to change, and saved content changes only through keep / use the AI's version / merge. Nothing is written to the Pull Request.
+            </p>
+            ${prComments.status === 'loading'
+              ? html`<p class="kick-note" data-testid="interview-revise-loading">Reading the comments on the Pull Request…</p>`
+              : prComments.status === 'error'
+                ? html`<p class="inline-error" role="alert" data-testid="interview-revise-error">${prComments.message}</p>`
+                : html`<p class="kick-note" data-testid="interview-revise-count">${prComments.list.length ? `${prComments.list.length} comment${prComments.list.length === 1 ? '' : 's'} on Pull Request #${prComments.pullRequestId}.` : `Pull Request #${prComments.pullRequestId} has no comment to read. The AI asks you what the Owner wants changed.`}</p>`}`
           : update
           ? html`<p class="kick-intro" data-testid="interview-update-intro">
               <strong>Bring up to date.</strong> Some Fields drew on a Source document that has since changed. You get one card for each of them, ${instance.stage.title} first
@@ -1233,19 +1395,19 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
               until you confirm the Stage, and it never passes a Gate that needs approval or review.
             </p>`}
         ${review ? reviewKickoffExtras() : null}
-        ${!update && !review && reviewPlan?.items.length
+        ${!update && !review && !revise && reviewPlan?.items.length
           ? html`<label class="kick-note kick-review-join" data-testid="interview-kickoff-review-note">
               <input type="checkbox" data-testid="interview-review-with-interview" checked=${joinWanted} onChange=${(e) => toggleJoinWanted(e.currentTarget.checked)} />
               Also ask the <strong>${reviewPlan.items.length} review ${reviewPlan.items.length === 1 ? 'question' : 'questions'}</strong> in the first round. Nothing is applied until you answer.
             </label>`
           : null}
-        ${!update && !review && updatePlan?.items.length
+        ${!update && !review && !revise && updatePlan?.items.length
           ? html`<p class="kick-note" data-testid="interview-kickoff-update-note">
               <strong>${updatePlan.items.length} Field${updatePlan.items.length === 1 ? ' is' : 's are'} Out of date.</strong>
               ${` The interview starts with a round of cards about ${updatePlan.items.length === 1 ? 'it' : 'them'}, then carries on.`}
             </p>`
           : null}
-        ${!update && !review && newSince.length
+        ${!update && !review && !revise && newSince.length
           ? html`<p class="kick-note" data-testid="interview-kickoff-new-since">
               <strong>${newSince.length} Source document${newSince.length === 1 ? ' is' : 's are'} New since the last interview.</strong>
               ${` The AI reads ${newSince.length === 1 ? 'it' : 'them'} against what is saved, and asks a card only where ${newSince.length === 1 ? 'it adds' : 'they add'} to or ${newSince.length === 1 ? 'contradicts' : 'contradict'} something.`}
@@ -1295,7 +1457,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           : null}
         ${provider ? html`<${CardModeNote} provider=${provider} />` : null}
 
-        ${!update && !review && choices.candidates.length > 1
+        ${!update && !review && !revise && choices.candidates.length > 1
           ? html`<label for="interview-artefact">Artefact to aim for</label>
             <select id="interview-artefact" data-testid="interview-artefact" onChange=${(e) => setPickedArtefact(e.currentTarget.value)}>
               ${choices.candidates.map((a) => html`<option key=${a.id} value=${a.id} selected=${a.id === artefactId}>${a.title ?? a.id}${a.id === choices.lightest?.id ? ' (lightest)' : ''}</option>`)}
@@ -1303,7 +1465,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
             <p class="kick-note">More than one Artefact can pass this Stage's Gate. The lightest is pre-selected; the AI drafts what the one you choose requires.</p>`
           : null}
 
-        ${!update && !review && targets.length > 1
+        ${!update && !review && !revise && targets.length > 1
           ? html`<label for="interview-run-until">Run until</label>
             <select id="interview-run-until" data-testid="interview-run-until" onChange=${(e) => setPickedTarget(e.currentTarget.value)}>
               ${targets.map((t) => html`<option key=${t.id} value=${t.id} selected=${t.id === target}>${t.title}${t.id === instance.stage.id ? ' (this Stage only)' : ''} (gate: ${t.gate})</option>`)}
@@ -1345,10 +1507,10 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           type="button"
           class="btn primary"
           data-testid="interview-start"
-          disabled=${!providerId || phase === 'testing' || sources === null || Boolean(blockedReason) || !snap || Boolean(snap?.sessionWarning) || (update && !updatePlan?.items.length) || (review && !reviewPlan?.items.length) || (!flagsReady && !flagsWaited)}
+          disabled=${!providerId || phase === 'testing' || sources === null || Boolean(blockedReason) || !snap || Boolean(snap?.sessionWarning) || (update && !updatePlan?.items.length) || (review && !reviewPlan?.items.length) || (revise && prComments.status !== 'ready') || (!revise && !flagsReady && !flagsWaited)}
           onClick=${() => startInterview()}
         >
-          ${phase === 'testing' ? PROGRESS_LABELS[snap?.testStep] ?? 'Testing the AI Provider…' : review ? 'Work through review comments' : update ? 'Bring up to date' : resuming ? 'Resume interview' : 'Start interview'}
+          ${phase === 'testing' ? PROGRESS_LABELS[snap?.testStep] ?? 'Testing the AI Provider…' : review ? 'Work through review comments' : revise ? 'Start the revision' : update ? 'Bring up to date' : resuming ? 'Resume interview' : 'Start interview'}
         </button>
       </div>
     `
@@ -1429,9 +1591,10 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     const last = page === total - 1
     return html`<div class="round" data-testid="interview-round" data-round=${round.id} data-final=${round.final ? 'true' : 'false'} data-page=${page + 1} data-pages=${total}>
       <div class="round-head" data-testid="round-head">
-        ${round.update ? 'Bring up to date' : round.review ? 'Review comments' : round.final ? 'Last round' : `Round ${round.id}`} · ${round.cards.length} ${round.update ? 'Field' : round.review ? 'comment' : 'question'}${round.cards.length === 1 ? '' : 's'}
+        ${round.update ? 'Bring up to date' : round.review ? 'Review comments' : round.revise ? "The Owner's comments" : round.final ? 'Last round' : `Round ${round.id}`} · ${round.cards.length} ${round.update ? 'Field' : round.review || round.revise ? 'comment' : 'question'}${round.cards.length === 1 ? '' : 's'}
         ${total > 1 ? ` · cards ${page * PAGE_SIZE + 1}–${page * PAGE_SIZE + shown.length} of ${round.cards.length}` : ''}
       </div>
+      ${round.revise ? html`<p class="round-note" data-testid="revise-round-note">One card for each comment on the Pull Request, resolved ones included. Nothing is written to the Pull Request; your answers go in the decisions log.</p>` : null}
       ${round.update ? html`<p class="round-note" data-testid="update-round-note">One card for each Field that is Out of date. Only your answer clears a flag.</p>` : null}
       ${round.review ? html`<p class="round-note" data-testid="review-round-note">One card for each comment thread, and for each reviewer's tracked changes in a Field. Nothing is applied until you answer, and the AI sees reviewers only as Reviewer 1, Reviewer 2.</p>` : null}
       ${round.update ? updateDeferredNote() : null}
@@ -1520,6 +1683,101 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       </div>
       ${saving?.advanceError ? html`<p class="inline-error" role="alert" data-testid="interview-advance-error">${saving.advanceError}</p>` : null}
       ${approval.message ? html`<p class="kick-note" data-testid="interview-approval-message" role="status">${approval.message}</p>` : null}
+    </div>`
+  }
+
+  // #299: the Owner sent the Stage back (changes requested) or rejected it. One card: revise the Stage with the AI, or stop the session here.
+  // Drafting ahead is paused; what was drafted ahead is kept either way. The AI never writes to the Pull Request.
+  const sentBackCard = () => {
+    const title = stageTitleOf(sentBack.stageId)
+    const rejected = sentBack.kind === 'rejected'
+    const checking = approval.phase === 'checking'
+    const saving_ = saving?.phase === 'saving'
+    return html`<div class="qcard stage-end sent-back" data-testid="interview-sent-back" data-kind=${sentBack.kind} role="status">
+      <div class="qchip">${rejected ? 'Rejected' : 'Changes requested'}</div>
+      <p class="qhead">${rejected ? `${title} was rejected` : `${title} was sent back`}${sentBack.pullRequestId ? html` · <a href=${pullRequestLink(instance, sentBack.pullRequestId)} target="_blank" rel="noopener noreferrer" data-testid="sent-back-pr-link">Pull Request #${sentBack.pullRequestId}</a>` : null}</p>
+      <p data-testid="sent-back-note">
+        ${rejected ? `The Owner rejected ${title}.` : `The Owner asked for changes to ${title}.`}
+        ${ahead ? ' Drafting ahead is paused, and what the AI drafted ahead is kept. ' : ' '}
+        Revising reads every comment on the Pull Request, resolved ones included, and asks you one card for each. The AI never writes to the Pull Request.
+      </p>
+      ${sentBack.stopped ? html`<p class="kick-note" data-testid="sent-back-stopped">The session stopped here.${ahead ? ' What was drafted ahead is saved on its Stage.' : ''} Open the Interview page again, or press Revise, whenever you are ready.</p>` : null}
+      ${saving?.phase === 'error' && !saving.pause ? html`<p class="inline-error" role="alert" data-testid="interview-save-error">${saving.message}</p>` : null}
+      <div class="round-actions">
+        <button type="button" class="btn primary" data-testid="interview-revise" disabled=${saving_ || checking || !onReviseStage || Boolean(blockedReason && !ahead)} onClick=${reviseSentBack}>
+          ${SENT_BACK_CHOICES.revise(title)}
+          <span class="rec">RECOMMENDED</span>
+        </button>
+        ${sentBack.stopped
+          ? null
+          : html`<button type="button" class="btn ghost" data-testid="interview-stop-session" disabled=${saving_ || checking} onClick=${stopSession}>${SENT_BACK_CHOICES.stop}</button>`}
+        <button type="button" class="btn ghost" data-testid="interview-check-status" disabled=${checking} onClick=${() => checkApproval()}>${checking ? 'Checking…' : 'Check status again'}</button>
+      </div>
+      ${approval.message ? html`<p class="kick-note" data-testid="interview-approval-message" role="status">${approval.message}</p>` : null}
+    </div>`
+  }
+
+  // The later Stages' Fields drafted from content this revision changed (by fingerprint), which are asked about before the run carries on.
+  const staleAfterRevision =
+    revise && saving?.phase === 'saved' && saving.revision && setup.status === 'ready'
+      ? staleLaterFields({
+          stages: stagesList,
+          revisedStageId: instance.stage.id,
+          logs: { ...setup.logs, ...stageLogs, [instance.stage.id]: committedLog },
+          modules: [...instance.modules, ...otherSaved],
+          stageModules: Object.fromEntries((setup.definition.stages ?? []).map((st) => [st.id, st.modules ?? []])),
+        })
+      : []
+
+  // The end of a revision (#299): the comments are answered and the drafts are ready to save, or the revision has been saved.
+  const reviseEnd = () => {
+    if (!started) return null
+    const prId = prComments.pullRequestId ?? awaiting?.id ?? null
+    const prUrl = pullRequestLink(instance, prId)
+    if (saving?.phase === 'saved' && saving.revision) {
+      const stageIds = [...new Set(staleAfterRevision.flatMap((f) => f.stages))].sort((a, b) => stagesList.findIndex((x) => x.id === a) - stagesList.findIndex((x) => x.id === b))
+      const reviewStage = stageIds[0] ?? null
+      return html`<div class="qcard stage-end saved" data-testid="revise-saved" role="status">
+        <div class="qchip">Revision saved</div>
+        <p class="qhead">${stage?.title ?? instance.stage.title} is back to awaiting approval</p>
+        <p data-testid="revise-saved-summary">
+          ${saving.answers} comment${saving.answers === 1 ? '' : 's'} answered${saving.fields ? `, ${saving.fields} Field${saving.fields === 1 ? '' : 's'} changed` : ', no Field text changed'}, saved as one Stage Save on ${stage?.title ?? instance.stage.title}'s branch.
+          ${prId && awaiting ? html`The open ${prUrl ? html`<a href=${prUrl} target="_blank" rel="noopener noreferrer" data-testid="revise-pr-link">Pull Request #${prId}</a>` : `Pull Request #${prId}`} now includes it.` : ''}
+          The Modules stay <strong>draft</strong>: a person marks them agreed.
+        </p>
+        ${returnedList(saving.returned)}
+        ${prId && !awaiting
+          ? html`<p class="kick-note" data-testid="revise-pr-closed">${prUrl ? html`<a href=${prUrl} target="_blank" rel="noopener noreferrer" data-testid="revise-pr-link">Pull Request #${prId}</a>` : `Pull Request #${prId}`} is closed, so it does not carry the revision: the revision is on ${stage?.title ?? instance.stage.title}'s branch. A new Pull Request for it is opened on the Provider.</p>`
+          : null}
+        <p class="kick-note" data-testid="revise-tell-owner">Nothing was written to the Pull Request: no comments, no replies, no resolved threads. Tell the Owner it is ready for another look.</p>
+        ${staleAfterRevision.length
+          ? html`<div data-testid="revise-stale">
+              <p class="kick-note" data-testid="revise-stale-note">
+                ${staleAfterRevision.length} Field${staleAfterRevision.length === 1 ? '' : 's'} on ${stageIds.map(stageTitleOf).join(', ')} ${staleAfterRevision.length === 1 ? 'was' : 'were'} drafted from content this revision changed: ${staleAfterRevision.map((f) => fieldTitle(f.field)).join(', ')}. You are asked to keep or redraft each before the run carries on.
+              </p>
+            </div>`
+          : null}
+        <div class="round-actions">
+          ${reviewStage && onUpdateStage
+            ? html`<button type="button" class="btn primary" data-testid="revise-review-later" onClick=${() => onUpdateStage(reviewStage)}>Review ${staleAfterRevision.length === 1 ? 'it' : 'them'} on ${stageTitleOf(reviewStage)}</button>`
+            : null}
+          <button type="button" class=${'btn' + (reviewStage ? ' ghost' : ' primary')} data-testid="revise-done" disabled=${!onLeaveRevision} onClick=${() => onLeaveRevision?.()}>Back to the run</button>
+        </div>
+      </div>`
+    }
+    if (snap?.round || snap?.clash || phase !== 'waiting') return null
+    if (snap?.revise && !snap.revise.answered) return null
+    const pending = snap?.decisions?.pending ?? 0
+    return html`<div class="qcard stage-end" data-testid="revise-ready">
+      <div class="qchip">Revision</div>
+      <p class="qhead">${snap?.revise ? `${snap.revise.total} comment${snap.revise.total === 1 ? '' : 's'} answered. ` : ''}Save the revision?</p>
+      <p>${draftKeys.length ? `${draftKeys.length} Field${draftKeys.length === 1 ? ' is' : 's are'} changed in the preview. ` : 'No Field text changes. '}${pending} answer${pending === 1 ? ' is' : 's are'} waiting in the decisions log. Saving is one Stage Save on ${stage?.title ?? instance.stage.title}'s branch, which updates its open Pull Request. It asks for nothing, and nothing is written to the Pull Request.</p>
+      ${saving?.phase === 'error' ? html`<p class="inline-error" role="alert" data-testid="revise-save-error">${saving.message}</p>` : null}
+      <div class="round-actions">
+        <button type="button" class="btn primary" data-testid="revise-save" disabled=${saving?.phase === 'saving' || Boolean(blockedReason) || handEditing !== null} onClick=${saveRevision}>
+          ${saving?.phase === 'saving' ? 'Saving…' : 'Save the revision'}
+        </button>
+      </div>
     </div>`
   }
 
@@ -1690,13 +1948,16 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const stageEnd = () => {
     if (review) return reviewEnd()
     if (update) return updateEnd()
+    if (revise) return reviseEnd()
+    // #299: the Owner sent the Instance's current Stage back or rejected it: that comes before anything else this page would offer.
+    if (sentBack && sentBack.stageId === instance.currentStageId) return sentBackCard()
     if (saving?.phase === 'drafting-ahead') {
       return html`<div class="qcard stage-end saved" data-testid="interview-drafting-ahead" role="status">
         <p class="qhead">Saved. Drafting ahead on ${followingStage?.title ?? 'the next Stage'}…</p>
       </div>`
     }
     if (waitingNow || (headStart?.stopped && ahead && held.length > 0)) return waitingCard()
-    if (remote && awaiting) return awaitingCard()
+    if (remote && awaiting && !revise) return awaitingCard()
     if (saving?.phase === 'saved' && remote) {
       // A remote Save that is not (yet) awaiting a Pull Request: queued behind an earlier Stage, refused by the Provider, or "Save and stop here".
       return html`<div class="qcard stage-end saved" data-testid="interview-saved" role="status">
@@ -1903,7 +2164,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           <div class="inner">
             ${setup.status === 'loading' ? html`<p class="loading">Loading…</p>` : null}
             ${setup.status === 'error' ? html`<p class="inline-error" role="alert">${setup.message}</p>` : null}
-            ${setup.status === 'ready' && !started && !(remote && awaiting) && !(waitingNow && phase === 'kickoff') ? kickoff() : null}
+            ${setup.status === 'ready' && !started && !(remote && awaiting && !revise) && !(waitingNow && phase === 'kickoff') && !(sentBack && sentBack.stageId === instance.currentStageId && !revise) ? kickoff() : null}
             ${setup.status === 'ready' && started ? thread() : null}
             ${setup.status === 'ready' && started ? roundView() : null}
             ${setup.status === 'ready' && started ? clashView() : null}
@@ -1938,11 +2199,13 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
               : null}
             ${busy && started && snap?.preparing ? html`<p class="msg sys" data-testid="interview-preparing">Preparing questions<span class="caret"></span></p>` : null}
             ${busy && started && !snap?.drafting && !snap?.preparing && !(snap.thread[snap.thread.length - 1]?.streaming) ? html`<p class="msg sys" data-testid="interview-working">Working<span class="caret"></span></p>` : null}
+            ${reopening.message && !update ? html`<p class="inline-error" role="alert" data-testid="interview-reopen-error">${reopening.message}</p>` : null}
+            ${reopening.stageId && !update ? html`<p class="msg sys" data-testid="interview-reopening" role="status">Re-opening ${stageTitleOf(reopening.stageId)}…</p>` : null}
             ${stageEnd()}
           </div>
         </div>
         <div class="interview-composer">
-          ${started && phase !== 'paused' && !update && !review
+          ${started && phase !== 'paused' && !update && !review && !revise
             ? html`<div class="inner composer-actions">
                 <button type="button" class="btn small ghost" data-testid="interview-pause" disabled=${busy || phase === 'kickoff' || saving?.phase === 'saving' || Boolean(blockedReason) || Boolean(snap?.clash)} title="Save the decisions log and the drafts so far, then carry on later in this browser or any other. The Modules stay draft." onClick=${pauseInterview}>
                   ${saving?.phase === 'saving' && saving.pause ? 'Pausing…' : 'Pause'}

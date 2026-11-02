@@ -81,6 +81,7 @@ import { InterviewPage, clearInterviewSessions, unsavedDraftModules } from './li
 import { createLocalSourceStore } from './lib/localSourceDocuments.js'
 import { createLocalDecisionsStore, createServerDecisionsStore, planLocalDecisions } from './lib/decisionsStore.js'
 import { approvalStatusLine } from './lib/interviewApproval.js'
+import { sentBackOf } from './lib/prRevision.js'
 import { DecisionsLogPanel } from './lib/decisionsLogPanel.js'
 import { flagsForField, outOfDateBannerLines, outOfDateCountByStage, outOfDateFieldNote } from './lib/outOfDate.js'
 import { loadOutOfDate, outOfDateState, sourceListTick } from './lib/outOfDateState.js'
@@ -5260,7 +5261,7 @@ function OutOfDatePanel({ instance }) {
 }
 
 // #286 (map #238): the Interview page for a local or server workspace Instance, handed what only this file can reach: the Instance's Source document store, the Definition it follows, the other Stages' saved content (the AI is told what is already settled) and the stage Save.
-function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequestApproval, onReRenderEarlier, onCheckApproval, onDraftAhead, update = false, review = false, onReopenStage, onOpenStage }) {
+function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequestApproval, onReRenderEarlier, onCheckApproval, onDraftAhead, update = false, review = false, revise = false, onReopenStage, onOpenStage, onReviseStage, onLeaveRevision, onUpdateStage }) {
   const store = useSourceStore(instance)
   const location = useLocation()
   // #303: the kept Reviewed copies, read and placed on Fields, for the review round; read again after one is brought in.
@@ -5313,6 +5314,17 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequ
   }, [instance.slug, instance.currentStageId, hasFlags])
   if (!store || !decisionsStore) return html`<p class="loading">Loading…</p>`
   const loadStructure = () => loadDefinitionStructure(instance)
+  // #299: every comment on the Stage's Pull Request, resolved ones included. Read-only: nothing is ever written to a Pull Request. Never throws.
+  async function loadPrComments(stageId) {
+    try {
+      const res = await apiFetchForInstance(instance.slug, `/api/instance/pull-request-comments?slug=${encodeURIComponent(instance.slug)}&stage=${encodeURIComponent(stageId)}`)
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) return { ok: false, message: `The comments on the Pull Request could not be read: ${body.error ?? body.message ?? res.status}` }
+      return { ok: true, comments: body.comments ?? [], pullRequestId: body.pullRequestId ?? null }
+    } catch (err) {
+      return { ok: false, message: `The comments on the Pull Request could not be read: ${err.message}` }
+    }
+  }
   async function loadOtherSaved() {
     const modules = []
     if (instance.isLocalWorkspace) {
@@ -5334,7 +5346,7 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequ
   // record of the current Stage is the report (the page does that).
   // `key`: a run (#293) moves the Instance on to its next Stage, and the page for that Stage starts afresh.
   return html`<${OutOfDateWatcher} instance=${instance} />${reviewDialog ? html`<${ReviewImportDialog} instance=${instance} onClose=${() => setReviewDialog(false)} />` : null}<${InterviewPage}
-    key=${`${instance.stage.id}${update ? '|update' : ''}${review ? '|review' : ''}`}
+    key=${`${instance.stage.id}${update ? '|update' : ''}${review ? '|review' : ''}${revise ? '|revise' : ''}`}
     review=${review}
     reviewCopies=${reviewCopies}
     onBringInReview=${() => setReviewDialog(true)}
@@ -5348,8 +5360,13 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequ
     store=${store}
     actor=${instance.assignee ?? ''}
     editorHref=${editorHref}
-    blockedReason=${interviewUnavailableReason(instance, { update: update || review })}
+    blockedReason=${interviewUnavailableReason(instance, { update: update || review, revise })}
     update=${update}
+    revise=${revise}
+    loadPrComments=${loadPrComments}
+    onReviseStage=${onReviseStage}
+    onLeaveRevision=${onLeaveRevision}
+    onUpdateStage=${onUpdateStage}
     onReopenStage=${onReopenStage}
     onOpenStage=${onOpenStage}
     loadStructure=${loadStructure}
@@ -5799,12 +5816,19 @@ function GantryBrandIcon() {
 // still visible, just no longer the primary label.
 // #286/#295: the AI interview works on the current Stage of a local, server, Azure DevOps or GitHub workspace Instance (GitLab and Atlassian take it when their module Save lands, as Source documents do). '' when it can be opened, else the reason it can't.
 // #298: Bring up to date (`update`) is let in on a Stage other than the current one, because the link that opens it goes to the Stage that has something to bring up to date (a local or server workspace edits any Stage; a remote one is taken to its current Stage).
-function interviewUnavailableReason(instance, { update = false } = {}) {
+function interviewUnavailableReason(instance, { update = false, revise = false } = {}) {
   if (instance.workspaceBacked && !offersSourceDocuments(instance)) return 'The AI interview is not available on GitLab or Atlassian workspaces yet.'
   if (instance.archived) return 'This Instance is archived. Restore it to use the AI interview.'
   if (isWriteAccessBlocked()) return 'The AI interview needs write access to this Instance.'
-  if (update) {
-    if (instance.workspaceBacked && instance.stage.id !== instance.currentStageId) return 'Bring up to date works on the current Stage of a remote workspace. Open the current Stage to use it.'
+  if (revise) {
+    // #299: a Stage the Owner sent back is the Instance's current Stage, with its Pull Request open.
+    if (!instance.workspaceBacked) return 'Only a Stage awaiting approval on an Azure DevOps or GitHub workspace can be revised.'
+    if (instance.stage.id !== instance.currentStageId) return 'A revision works on the current Stage. Open the current Stage to use it.'
+  } else if (update) {
+    // A remote workspace brings up its current Stage and (#299, for Fields drafted from content a revision changed) one drafted ahead of it; a Stage the Instance has moved past is closed.
+    const order = (instance.stages ?? []).map((s) => s.id)
+    const ahead = order.indexOf(instance.stage.id) > order.indexOf(instance.currentStageId)
+    if (instance.workspaceBacked && instance.stage.id !== instance.currentStageId && !ahead) return 'Bring up to date works on the current Stage of a remote workspace. Open the current Stage to use it.'
   } else if (instance.stage.id !== instance.currentStageId) {
     // #296 (docs/adr/0063): on an Azure DevOps or GitHub workspace the AI drafts ahead on a Stage after the current one while the Owner
     // reviews the earlier one. A Stage the Instance has moved past is complete and stays closed to it.
@@ -6458,11 +6482,14 @@ function ModuleEditorPage({ slug: routeRef }) {
   const updateOpen = interviewOpen && interviewUrl.searchParams.get('update') === '1'
   // #303: `?interview=1&review=1` is the review round, the Interview page on just the comments of the Reviewed copies kept with the Instance.
   const reviewRoundOpen = interviewOpen && !updateOpen && interviewUrl.searchParams.get('review') === '1'
+  // #299: `?interview=1&revise=1` is the revision of a Stage the Owner sent back, the Interview page on the current Stage of an Azure DevOps or GitHub workspace.
+  const reviseOpen = interviewOpen && interviewUrl.searchParams.get('revise') === '1'
   const editorHref = (() => {
     const params = new URLSearchParams(interviewUrl.search)
     params.delete('interview')
     params.delete('update')
     params.delete('review')
+    params.delete('revise')
     return interviewUrl.pathname + (params.size ? `?${params}` : '')
   })()
 
@@ -6577,6 +6604,39 @@ function ModuleEditorPage({ slug: routeRef }) {
     viewedStage.value = stageId
   }
 
+  // #299: the Owner sent the Instance's current Stage back. The revision is the Interview page on that Stage with `revise=1`; from a Stage drafted
+  // ahead of it the page first goes back to the current Stage (`viewedStage` reset), as Check status does.
+  function interviewRoute(extra) {
+    const params = new URLSearchParams(interviewUrl.search)
+    params.set('interview', '1')
+    params.delete('update')
+    params.delete('revise')
+    for (const [name, value] of Object.entries(extra)) params.set(name, value)
+    return `${interviewUrl.pathname}?${params}`
+  }
+  // The Instance is loaded for the Stage first and the route changes with it in the same step, so the page of the Stage being left never runs again in the
+  // new mode (it would, for one, run a Check status that loads the Stage it was on over the one this is going to).
+  async function goToInterview(stageId, extra = {}) {
+    const inst = instanceData.peek()
+    if (!inst?.stage) return
+    let data = null
+    try {
+      data = await loadInstance(inst.slug, stageId)
+    } catch {
+      data = null
+    }
+    batch(() => {
+      viewedStage.value = stageId
+      if (data) instanceData.value = data
+    })
+    locationRef.current.route(interviewRoute(extra))
+  }
+  const reviseInterviewStage = () => goToInterview(null, { revise: '1' })
+  // "Back to the run": the Interview page of the current Stage, which is awaiting approval again.
+  const leaveRevision = () => goToInterview(null)
+  // After a revision: the Interview page on a later Stage, in Bring up to date, for the Fields drafted from content the revision changed (keep or redraft each).
+  const updateInterviewStage = (stageId) => goToInterview(stageId, { update: '1' })
+
   // #293: "Save, advance, carry on" moves the Instance on to its next Stage once the Save has worked. The Gate is checked again here,
   // on what was just saved, by the same code as the editor's "Advance to next stage".
   async function advanceInterviewStage() {
@@ -6645,6 +6705,7 @@ function ModuleEditorPage({ slug: routeRef }) {
       // Check status is always about the Instance's current Stage, which is not the one on the page when the AI is drafting ahead (#296).
       const checkedTitle = inst.stages?.find((s) => s.id === inst.currentStageId)?.title ?? inst.stage.title
       const message = approvalStatusLine(body, checkedTitle)
+      const sentBack = sentBackOf(body) // #299: the Owner asked for changes or rejected the Stage
       const order = (inst.stages ?? []).map((s) => s.id)
       // A page that is on a Stage ahead of the one that merged stays where it is: the Instance has moved on, the page's Stage has not, and its held
       // Modules are open now (#296). Only a page on the Stage that merged (or an earlier one) goes to the Instance's new current Stage.
@@ -6657,7 +6718,7 @@ function ModuleEditorPage({ slug: routeRef }) {
         return { ok: true, merged: true, message }
       }
       instanceData.value = await loadInstance(inst.slug, inst.stage.id !== inst.currentStageId ? inst.stage.id : null)
-      return { ok: true, merged: Boolean(body.merged), message }
+      return { ok: true, merged: Boolean(body.merged), message, sentBack }
     } catch (err) {
       return { ok: false, merged: false, message: `Check status failed: ${err.message}` }
     }
@@ -6752,6 +6813,10 @@ function ModuleEditorPage({ slug: routeRef }) {
         instance=${instance}
         update=${updateOpen}
         review=${reviewRoundOpen}
+        revise=${reviseOpen}
+        onReviseStage=${reviseInterviewStage}
+        onLeaveRevision=${leaveRevision}
+        onUpdateStage=${updateInterviewStage}
         onReopenStage=${reopenInterviewStage}
         onOpenStage=${openInterviewStage}
         editorHref=${editorHref}

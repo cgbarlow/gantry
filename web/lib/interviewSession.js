@@ -44,6 +44,13 @@
 //     made without guessing, and sits in the preview like any draft; a revision meets the keep / use the AI's version / merge card. Each answered
 //     thread is a `review-answered` entry (real names, the comment word for word); the AI is only told "Reviewer 1", "Reviewer 2".
 //
+//   * (#299) opens with a **revision** when the context carries `revise` (the Owner sent the Stage back from its Pull Request): Gantry lists every
+//     comment on it, resolved ones included, in the conversation and asks one card per comment before the AI is called. Each answer is a
+//     `pr-comment-answered` entry in the decisions log (who wrote the comment, where, a link, an excerpt and the entries that answered it); the AI
+//     redrafts only what the architect chose to change, and saved content still changes only through keep / use the AI's version / merge. Nothing
+//     is ever written to the Pull Request. The AI may also **offer to re-open** a signed-off Stage with a card of `kind: "reopen"`: Gantry makes
+//     that card only when it would allow the re-open right then (`context.reopen`), and otherwise logs an open question naming the blocker.
+//
 // Nothing here saves. Drafts are an unsaved preview until the architect confirms the stage-end card.
 import { runTurn, runWithRecovery, ensureTested, EMPTY_USAGE } from './aiClient.js'
 import { ASK_TOOL_NAME, FALLBACK_FENCE } from './aiCards.js'
@@ -78,6 +85,7 @@ import { conflictKey, conflictText, conflictValueFromText } from './stageVersion
 import { reapprovalNames, reapprovalOf } from './interviewReapproval.js'
 import { UPDATE_OPENING, needsAi, newSinceNote, reciteValue, removedSourcesOf, resolveUpdateCard, returnedToDraftNote, updateAnswersText, updateCards } from './bringUpToDate.js'
 import { REVIEW_OPENING, editsToAccept, applyTrackedEdits, reviewAnswersText, reviewCards, reviewEntriesFor, reviewNeedsAi, reviewNeedsInput, reviewOpenQuestion, resolveReviewCard } from './reviewRound.js'
+import { REVISION_NO_COMMENTS, REVISION_OPENING, commentAnswersText, commentCards, commentNeedsAi, commentsMessage, reopenBlockedQuestion, reopenCard, resolveCommentCard } from './prRevision.js'
 import { CLASH_OPTIONS, CHANGE_OPTIONS, acceptRecommendation, answersText, changeCard, choose, chooseOther, clashCard, followsRecommendation, isAnswered, isAutoId, otherWords, releaseHeld, shapeCard, sortRound, splitReady, termChoice, withMerged } from './interviewRounds.js'
 
 export { fieldsInScope }
@@ -264,6 +272,8 @@ export function createInterviewSession(config = {}) {
     resumed: null, // the recap line when this run carries on from the decisions log (#290)
     review: null, // Review comments (#303): { mode: 'only'|'join', total, answered, reopen, deferred, elsewhere } while this session has such cards
     update: null, // Bring up to date (#298): { mode: 'only'|'first', total, answered, reopen, deferred, elsewhere } while this session has such a round
+    revise: null, // Revising a Stage the Owner sent back (#299): { total, answered, pullRequestId } while this session has its round of comment cards
+    reopenRequest: null, // the architect chose the AI's offer to re-open a signed-off Stage (#299): { stageId, stageTitle }; the page carries it out
   }
   let queuedReview = [] // review cards waiting to join the next round of a session that is going (#303)
   let updateOpening = '' // the opening a normal session gives the AI once its Bring up to date round is answered (#298)
@@ -309,6 +319,8 @@ export function createInterviewSession(config = {}) {
     sessionWarning: state.sessionWarning ? { others: state.sessionWarning.others.map((o) => ({ ...o })) } : null,
     review: state.review ? { ...state.review, reopen: [...state.review.reopen], deferred: state.review.deferred.map((d) => ({ ...d })), elsewhere: state.review.elsewhere.map((d) => ({ ...d })) } : null,
     queuedReview: queuedReview.length,
+    revise: state.revise ? { ...state.revise } : null,
+    reopenRequest: state.reopenRequest ? { ...state.reopenRequest } : null,
     update: state.update ? { ...state.update, reopen: [...state.update.reopen], deferred: state.update.deferred.map((d) => ({ ...d })), elsewhere: state.update.elsewhere.map((d) => ({ ...d })) } : null,
     openFields: openFields(),
     decisions: { ...logSummary(log.entries()), pending: log.pending().length, session: log.sessionId },
@@ -535,6 +547,43 @@ export function createInterviewSession(config = {}) {
   // ---------- rounds of cards ----------
 
   /**
+   * #299: the AI offered to re-open signed-off Stages. For each, Gantry looks at what the page says it would allow right now
+   * (`context.reopen`, `[{ id, title, allowed, blocker }]`): a Stage it would allow becomes a card (re-open, or not now); any other becomes an
+   * open question in the decisions log naming the blocker, and no card. Returns the cards.
+   */
+  function handleReopenOffers(offers) {
+    const cards = []
+    const known = getContext().reopen ?? []
+    for (const offer of offers) {
+      const info = known.find((k) => k.id === offer.stage)
+      const title = info?.title ?? offer.stage
+      if (info?.allowed) {
+        cards.push(reopenCard({ id: offer.id, stageId: info.id, stageTitle: title, question: offer.question, why: offer.why }))
+        continue
+      }
+      const blocker = info ? info.blocker : `${title} is not a signed-off Stage that can be re-opened.`
+      const asked = reopenBlockedQuestion({ stageTitle: title, blocker, why: offer.question })
+      log.addOpenQuestion(asked)
+      say('sys', `${title} cannot be re-opened right now: ${blocker} Logged as an open question.`, { reopenBlocked: offer.stage })
+    }
+    return cards
+  }
+
+  /** The architect's choice on a re-open card: re-open asks the page to do it (it replaces this page), "Not now" logs an open question so it is not forgotten. */
+  function applyReopenDecisions(cards) {
+    for (const card of cards) {
+      if (card.type !== 'reopen') continue
+      if (card.selected[0] === card.options[0].label) {
+        state.reopenRequest = { stageId: card.reopen.stageId, stageTitle: card.reopen.stageTitle }
+        say('sys', `Re-opening ${card.reopen.stageTitle}`)
+      } else {
+        log.addOpenQuestion({ question: `${card.reopen.stageTitle} may need to be re-opened: ${String(card.question).trim()}`, why: 'The architect chose not to re-open it now.' })
+        say('sys', `${card.reopen.stageTitle} stays signed off; logged as an open question`)
+      }
+    }
+  }
+
+  /**
    * Takes the cards the AI just asked: gives each a unique id, shapes it (select Fields, "Other"), puts cards that wait on an
    * unanswered one aside, and returns those ready to show.
    */
@@ -558,7 +607,9 @@ export function createInterviewSession(config = {}) {
     }
     const sources = new Map((context.sources ?? []).map((s) => [s.id, s.title || s.filename || s.id]))
     const roles = standardRoles(context.definition, context.stageId)
-    const shaped = batch.map((raw) => {
+    // #299: an offer to re-open a signed-off Stage becomes a card only if Gantry would allow it right now; otherwise it becomes an open question.
+    const reopenCards = handleReopenOffers(batch.filter((c) => c.kind === 'reopen'))
+    const shaped = batch.filter((c) => c.kind !== 'reopen').map((raw) => {
       // #291: a Key decision is offered only where the module is mounted and the card shows all three parts of the test; any other
       // "decision" is a routine question. A term or decision card feeds the module it settles, so that Field waits for the answer.
       let card = raw
@@ -573,6 +624,7 @@ export function createInterviewSession(config = {}) {
       const entry = card.field ? scope.get(card.field) : null
       return shapeCard({ ...withSource, after, type: 'question' }, entry)
     })
+    shaped.push(...reopenCards)
     // A card the AI sends again under the id of one held back replaces it.
     state.held = state.held.filter((h) => !shaped.some((c) => c.id === h.id))
     const { ready, held: waiting } = splitReady(shaped, answeredIds(), state.held.map((h) => h.id))
@@ -765,6 +817,59 @@ export function createInterviewSession(config = {}) {
     }
     const opening = mode === 'only' ? UPDATE_OPENING : updateOpening || openingFor(context)
     messages = [{ role: 'user', text: `${opening}\n\nThe architect's answers to the round that brings the Out of date Fields up to date:\n${updateAnswersText(results, { fieldTitle })}` }]
+    await runLoop()
+    return { ok: true }
+  }
+
+  // ---------- Revising a Stage the Owner sent back (#299) ----------
+
+  /** Lists every comment on the Pull Request in the conversation and opens the round of cards about them. Nothing is sent to the AI yet. */
+  function openReviseRound(revise) {
+    const cards = commentCards({ comments: revise.comments, pullRequestId: revise.pullRequestId, pullRequestUrl: revise.pullRequestUrl, stageTitle: revise.stageTitle })
+    state.revise = { total: cards.length, answered: false, pullRequestId: revise.pullRequestId ?? null }
+    say('sys', commentsMessage(revise.comments, { pullRequestId: revise.pullRequestId, stageTitle: revise.stageTitle }), { reviseComments: true })
+    state.round = { id: ++state.roundNo, cards, page: 0, final: false, revise: true }
+    state.phase = 'asking'
+  }
+
+  /**
+   * The architect's answers to the comment cards: a `pr-comment-answered` entry for each (with the answer entry and any open question it
+   * logged), then the AI is told which comments to act on. Nothing is written to the Pull Request.
+   */
+  async function answerRevise({ finish }) {
+    const round = state.round
+    const cards = finish ? round.cards.map(acceptRecommendation) : round.cards
+    const open = cards.filter((c) => !isAnswered(c))
+    if (open.length) return { ok: false, message: `${open.length} card${open.length === 1 ? ' is' : 's are'} not answered yet.`, firstOpen: open[0].id }
+    const results = cards.map((card) => resolveCommentCard(card, otherWords(card)))
+    for (const r of results) {
+      const card = r.card
+      const own = otherWords(card)
+      if (own) otherTexts.push(own)
+      // The answer entry is read back to the AI in the brief, so it carries the comment without its author's name (ADR-0066); the PR comment answered entry keeps the name.
+      const neutral = { ...card, header: `Pull Request${card.comment.pullRequestId ? ` #${card.comment.pullRequestId}` : ''} comment`, question: `A reviewer commented: “${card.comment.excerpt}” What should the Stage do about it?` }
+      const answerEntry = log.addAnswer(neutral, { round: state.roundNo, words: own, answers: [...card.selected], followed: followsRecommendation(card) })
+      const entries = [answerEntry.id]
+      if (r.outcome === 'open-question') {
+        const c = card.comment
+        const asked = log.addOpenQuestion({
+          question: `${c.author || 'The Owner'} commented on Pull Request${c.pullRequestId ? ` #${c.pullRequestId}` : ''}: “${c.excerpt}” How should it be settled?`,
+          why: 'Raised when the Stage was sent back; the architect chose to log it rather than change the content now.',
+        })
+        if (asked) entries.push(asked.id)
+      }
+      log.addPrCommentAnswered({ comment: card.comment, outcome: r.outcome, words: own, entries })
+      state.answered.push({ id: card.id, header: card.header, question: card.question, field: null, labels: [...card.selected], other: own, followed: followsRecommendation(card) })
+    }
+    say('you', cards.map((c) => `${c.comment.author || 'Owner'}: ${[...c.selected, ...(otherWords(c) ? [`“${otherWords(c)}”`] : [])].join(', ')}`).join('\n'), { answered: cards.length })
+    state.round = null
+    state.revise = { ...state.revise, answered: true }
+    if (!results.some(commentNeedsAi)) {
+      state.phase = 'waiting'
+      emit()
+      return { ok: true }
+    }
+    messages = [{ role: 'user', text: `${REVISION_OPENING}\n\nThe Owner's comments, and what the architect decided for each:\n${commentAnswersText(results)}` }]
     await runLoop()
     return { ok: true }
   }
@@ -981,6 +1086,7 @@ export function createInterviewSession(config = {}) {
       readerTool: true,
       sourceAccess: accessForBrief(plan),
       approvedPrinted: context.approvedPrinted ?? {},
+      reopenable: context.reopen ?? [],
     })
     // The catalogue is only offered with a way to read it.
     const reader = brief.sources.mode === 'catalogue'
@@ -1258,6 +1364,7 @@ export function createInterviewSession(config = {}) {
   async function answer({ finish }) {
     if (state.phase !== 'asking' || !state.round) return { ok: false, message: 'There is no round to answer.' }
     if (state.round.update) return answerUpdate({ finish })
+    if (state.round.revise) return answerRevise({ finish })
     const round = state.round
     const cards = finish ? round.cards.map(acceptRecommendation) : round.cards
     const open = cards.filter((c) => !isAnswered(c))
@@ -1293,6 +1400,7 @@ ${reviewAnswers.text}`
     }
 
     applyChangeDecisions(others)
+    applyReopenDecisions(others)
     if (others.length) recordAnswers(others)
     state.round = null
     const last = round.final || state.finish === 'final'
@@ -1399,6 +1507,21 @@ ${reviewAnswers.text}` : '',
         queuedReview = [...queuedReview, ...cards]
         state.review = reviewStateFor(rev, cards.length, 'join')
       }
+      const revise = getContext().revise
+      if (revise) {
+        // #299: the Owner sent this Stage back. Gantry lists the comments and asks a card for each before the AI is called; with no readable comment
+        // the AI asks the architect what the Owner wants changed.
+        recordArtefact()
+        if (revise.comments?.length) {
+          messages = []
+          openReviseRound(revise)
+          emit()
+          return
+        }
+        messages = [{ role: 'user', text: REVISION_NO_COMMENTS }]
+        await runLoop()
+        return
+      }
       const upd = getContext().update
       const updating = Boolean(upd?.items?.length)
       const updateOnly = updating && upd.mode === 'only'
@@ -1440,6 +1563,12 @@ ${reviewAnswers.text}` : '',
       if (state.round?.review) {
         // The review comments come first: chat would put them away, and the AI has not been told about them yet (#303).
         say('sys', 'Answer the review comment cards first, then chat.')
+        emit()
+        return
+      }
+      if (state.round?.revise) {
+        // The comment cards come first: chat would put them away, and the AI has not been told about them yet (#299).
+        say('sys', "Answer the Owner's comment cards first, then chat.")
         emit()
         return
       }
@@ -1529,7 +1658,7 @@ ${reviewAnswers.text}` : '',
       if (cards.length === 0) return { ok: true, added: 0, where: 'none' }
       state.review = state.review ? { ...state.review, total: state.review.total + cards.length, answered: false } : reviewStateFor(review, cards.length, 'join')
       let where = 'next-round'
-      if (state.phase === 'asking' && state.round && !state.round.update && !state.round.review && !state.clash) {
+      if (state.phase === 'asking' && state.round && !state.round.update && !state.round.revise && !state.round.review && !state.clash) {
         state.round = { ...state.round, cards: [...state.round.cards, ...cards] }
         where = 'round'
       } else if (state.phase === 'waiting' && !state.round && !state.clash) {
@@ -1707,6 +1836,7 @@ ${reviewAnswers.text}` : '',
           resumed: state.resumed,
           update: state.update,
           review: state.review,
+          revise: state.revise,
           error: state.error,
           phase: state.phase,
         },
@@ -1746,6 +1876,7 @@ ${reviewAnswers.text}` : '',
         resumed: s.resumed ?? null,
         update: s.update ?? null,
         review: s.review ?? null,
+        revise: s.revise ?? null,
         error: s.error ?? null,
         kickoffError: null,
         drafting: null,
@@ -1844,6 +1975,8 @@ ${reviewAnswers.text}` : '',
       state.update = null
       state.review = null
       queuedReview = []
+      state.revise = null
+      state.reopenRequest = null
       updateOpening = ''
       updateCauses.clear()
       state.phase = 'kickoff'

@@ -208,6 +208,8 @@ function logEntryLine(entry) {
   if (entry.kind === 'returned-to-draft' && entry.note) bits.push(entry.note)
   // #303: a review comment answered is shown to the AI by its outcome alone. The commenters' real names stay in the repo (ADR-0066).
   if (entry.kind === 'review-answered') bits.push(`a reviewer's comment was answered: ${entry.outcome ?? 'answered'}`)
+  // #299: the commenter's real name stays in the repo, as for a Reviewed copy (ADR-0066); the AI is told the outcome.
+  if (entry.kind === 'pr-comment-answered') bits.push(`a reviewer's comment on Pull Request #${entry.pullRequest ?? '?'} was answered: ${entry.outcome ?? 'answered'}`)
   if (entry.answer) bits.push(`answer: ${asArray(entry.answer).join('; ')}`)
   if (entry.words && entry.kind !== 'review-answered') bits.push(`the architect's words: "${entry.words}"`)
   if (asArray(entry.sources).length) bits.push(`sources: ${asArray(entry.sources).join(', ')}`)
@@ -341,7 +343,7 @@ function sourcesPart({ sources, contextWindow, readerTool, access }) {
  * @param {boolean} [input.readerTool]   whether a catalogue can be read from (the `read_source_document` tool of #292)
  * @param {object} [input.sourceAccess]  `{ [id]: { how: 'text'|'attach'|'unreadable', kind, reason?, note? } }` from `planSourceAccess` (#292); without it a document with no text is simply listed
  */
-export function buildInterviewBrief({ definition, stageId, artefactId, size, saved, decisions, earlierDecisions = [], sources, skills, contextWindow, readerTool = false, sourceAccess, approvedPrinted = {} }) {
+export function buildInterviewBrief({ definition, stageId, artefactId, size, saved, decisions, earlierDecisions = [], sources, skills, contextWindow, readerTool = false, sourceAccess, approvedPrinted = {}, reopenable = [] }) {
   const stage = (definition?.stages ?? []).find((s) => s.id === stageId)
   if (!stage) throw new Error(`The Definition has no Stage "${stageId}" to interview for`)
   if (!skills?.skills?.length) throw new Error('The interview skills are not loaded')
@@ -417,6 +419,11 @@ export function buildInterviewBrief({ definition, stageId, artefactId, size, sav
   const roles = standardRoles(definition, stageId)
   const earlierLogs = (earlierDecisions ?? []).map((l) => ({ stageId: l.stageId, entries: currentLogEntries(l.entries ?? l) }))
   stageLines.push('', '**Standard modules on this Stage** (what the interview settles, and where it lands):', ...standardRolesLines(roles, { savedDecisions: asText(content[roles.keyDecisions.module?.id]?.fields?.[roles.keyDecisions.module?.fields?.[0]?.id]) }))
+  // #299: the signed-off Stages the AI may offer to re-open, and those Gantry would refuse right now (with what stops it).
+  if (reopenable.length) {
+    stageLines.push('', '**Signed-off Stages** (a Stage you may offer to re-open is listed as allowed; one that is not is listed with what stops it, and you do not ask about it):')
+    for (const item of reopenable) stageLines.push(item.allowed ? `- ${item.title} (\`${item.id}\`): Gantry would allow it to be re-opened now.` : `- ${item.title} (\`${item.id}\`): cannot be re-opened now. ${item.blocker}`)
+  }
   parts.set('stage', stageLines.join('\n'))
 
   // --- 5. Fields in scope ---
