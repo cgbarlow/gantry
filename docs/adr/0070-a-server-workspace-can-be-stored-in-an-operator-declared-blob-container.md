@@ -54,6 +54,25 @@ is conditional on the ETag it read. ADR-0068's stage version is a fingerprint
 of the stage's content, the same on disk and in blob. The saver supplies the
 base for the three-way merge, as it does on disk.
 
+**How a Save is all-or-nothing (#271).** The ETag conditions guard each file and
+the lease keeps savers apart, but neither stops a server that dies between two
+files leaving a mix. So a Save first writes one small record under
+`.gantry/journal/` (one blob, so it lands whole): for each file it will change,
+the text it holds now and a fingerprint of the text the Save writes. It then
+writes the files, each conditional on the ETag it just read and each preceded by
+a lease renewal, and removes the record. A write that fails is undone from the
+record on the spot. A record left by a dead server is settled by whoever next
+takes the Instance's lease, a Save or (without waiting) a read: if every file
+already holds the Save's text it had finished and the record is removed,
+otherwise the files it changed go back to what they held, except any someone
+else has changed since. The stage is therefore entirely as before or entirely
+as after. It rolls back rather than forward because the saver was never told it
+succeeded, so a retry then meets the usual stage-version check. A Save waits for
+the lease for as long as a dead server's lease can last (30 seconds), so two
+simultaneous Saves reach the Field-by-Field check instead of an error, and a Save
+after a crash goes ahead once the lease runs out. A create-only write that finds
+the file already there is a conflict whether Azure answers 409 or 412.
+
 **No history.** Like a server workspace on disk, a blob-stored one has no
 commits, and renders cite what they cite today. Blob versioning and soft delete
 are recommended to operators as a backup, but Gantry doesn't rely on them.
