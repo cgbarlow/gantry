@@ -748,6 +748,15 @@ If a draft has a problem, Gantry sends it back to the AI **once**, saying what t
 
 An outside agent writing through the MCP server is held to the same three checks on **every** content write, whether or not it is running an interview. When `update_instance_modules` saves a Field with a select value that isn't exactly one of the options, a word count over the budget, or a figure with no source, the save still succeeds and the response carries a note for each problem under `fieldNotes`, naming the Field and saying how to fix it. A clean write returns an empty list. The checks are the same code the draft step uses, so the two never disagree. An outside agent can't tell which figures you typed yourself, so it may be noted for one; tell it where the figure came from and mark it **(target assumption)** or cite the Source document.
 
+#### An outside agent reads your Source documents, decisions logs and Reviewed copies
+
+An outside agent such as Claude Code, working through the Gantry MCP server, can do with your Source documents, decisions logs and Reviewed copies what you can do in the web app, so it drafts from the same evidence and doesn't make figures up. Who can reach an Instance over MCP doesn't change: these are files in the same repository, read with the same Workspace PAT.
+
+- **Reading.** The agent can list your Source documents (with which are replaced or removed) and read any of them: the extracted text Gantry kept, a page at a time (a PDF by its own page numbers, anything else in sections of about 20,000 characters), or a picture as a picture. It can read each Stage's decisions log, and each Reviewed copy's comment threads and tracked changes, grouped by the Field they sit on, the way the editor's **Review comments** panel shows them.
+- **Uploading.** The agent can add a Source document or bring in a Reviewed copy under exactly your rules: 25 MB, the same file types, one commit on the current Stage's branch on an Azure DevOps or GitHub workspace, an optional "this replaces" link, and the same manifest entry. A document that carries no `gantry-*` properties is refused as a Reviewed copy with the same message you get in the browser. An agent has no browser to read a document in, so **Gantry's server reads the text** with the same reader your browser uses (for a Word document's comments, Gantry's own reader), and the text and manifest entry come out the same as if you had uploaded the file. Nothing is sent to the server that was meant to stay on your computer, because the MCP server can't reach a Local workspace.
+- **Out of date Fields.** `get_instance` lists the Fields that are Out of date, with the reason for each, so the agent can tell you what changed and keep or redraft them on your word.
+- **Decisions logs over MCP** can be read on Server-hosted, Azure DevOps and GitHub workspaces. A GitLab or Atlassian workspace answers that its log is not kept yet.
+
 ### How the AI reads your Source documents
 
 Gantry decides how each Source document reaches the AI, for the AI Provider you are using. You never have to choose, except to mark a PDF **Read visually**.

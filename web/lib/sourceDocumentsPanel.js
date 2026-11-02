@@ -15,15 +15,9 @@ import {
   sourceFileTypeProblem,
   sourceSizeProblem,
 } from './sourceDocuments.js'
-import { extractSourceText } from './sourceExtract.js'
+import { extractSourceText, noTextNote } from './sourceExtract.js'
 import { sourceCitationFor } from './sourceCitations.js'
 import { sourceListTick } from './outOfDateState.js'
-
-const NO_TEXT_REASON = {
-  image: 'A picture has no text to read. An AI Provider that reads images is sent the picture itself; others list it as unreadable.',
-  scanned: 'This PDF looks scanned, so there is no text layer to read. An AI Provider that takes PDFs is sent the PDF itself; others list it as unreadable.',
-  empty: 'No text was found in it.',
-}
 
 function formatWhen(iso) {
   if (!iso) return ''
@@ -77,11 +71,6 @@ export async function openSourceDocument(store, entry) {
   link.click()
   link.remove()
   setTimeout(() => URL.revokeObjectURL(url), 60_000)
-}
-
-function noTextNote(extraction) {
-  if (extraction.problem) return extraction.problem
-  return NO_TEXT_REASON[extraction.reason] ?? 'No text was read from it.'
 }
 
 /**

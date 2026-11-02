@@ -204,6 +204,45 @@ export function sourceFilePath(storedFilename) {
   return `${SOURCES_FOLDER}/${storedFilename}`
 }
 
+// --- reading a document's text by page (#305) -------------------------------------------------------------------------
+
+/** About how much extracted text one "page" holds when a document has no pages of its own (Word, slides, spreadsheets, text): small enough for an outside agent to read in one go. */
+export const SOURCE_READ_PAGE_CHARS = 20_000
+
+/**
+ * Splits a document's extracted text into the pages an outside agent reads it by (ADR-0067). A PDF's text already has a `## Page N`
+ * heading per page (web/lib/sourceExtract.js), so its pages are the PDF's own and "page 4" is page 4. Anything else is cut into runs of
+ * about SOURCE_READ_PAGE_CHARS at paragraph breaks. Returns `{ by: 'pdf-page' | 'section', pages: string[] }` with at least one page.
+ */
+export function paginateSourceText(text, filename) {
+  const source = String(text ?? '')
+  if (sourceFileKind(filename) === 'pdf') {
+    const parts = source.split(/^## Page (\d+)[ \t]*$/m)
+    if (parts.length >= 3) {
+      const pages = []
+      for (let i = 1; i < parts.length; i += 2) pages[Number(parts[i]) - 1] = (parts[i + 1] ?? '').trim()
+      return { by: 'pdf-page', pages: Array.from(pages, (page) => page ?? '') }
+    }
+  }
+  const pages = []
+  let current = ''
+  const push = () => {
+    if (current !== '') pages.push(current)
+    current = ''
+  }
+  for (const paragraph of source.split(/\n{2,}/)) {
+    if (paragraph.length > SOURCE_READ_PAGE_CHARS) {
+      push()
+      for (let i = 0; i < paragraph.length; i += SOURCE_READ_PAGE_CHARS) pages.push(paragraph.slice(i, i + SOURCE_READ_PAGE_CHARS))
+      continue
+    }
+    if (current !== '' && current.length + paragraph.length + 2 > SOURCE_READ_PAGE_CHARS) push()
+    current = current === '' ? paragraph : `${current}\n\n${paragraph}`
+  }
+  push()
+  return { by: 'section', pages: pages.length ? pages : [''] }
+}
+
 // --- the manifest ---------------------------------------------------------------------------------------------------
 
 // #297: `replaces` (on the NEW document) is the id of the older one it supersedes, and `textChangedAt` the time the text read from the document last became different from what it was. Both are kept only when set, so a manifest that never used them is unchanged byte for byte.

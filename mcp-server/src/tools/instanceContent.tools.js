@@ -55,7 +55,23 @@ async function getInstance(args, { gantryClient }) {
   })
   if (res.credentialError) return credentialErrorResult(res.credentialError)
   if (!res.ok) return upstreamErrorResult(res)
-  return okResult(res.body)
+  // #305 (ADR-0067): the Fields that drew on a Source document that has since changed. The instance itself is the answer, so a failure
+  // working this out is reported beside it ("outOfDateError") and never fails the read.
+  let outOfDate
+  try {
+    outOfDate = await gantryClient.request({
+      workspaceId: resolved.workspaceId,
+      path: '/api/instance/out-of-date',
+      query: { slug, scope: scope ?? resolved.scope, ref },
+    })
+  } catch (err) {
+    return okResult({ ...res.body, outOfDateError: err.message })
+  }
+  if (outOfDate.ok && outOfDate.body && typeof outOfDate.body === 'object') {
+    return okResult({ ...res.body, outOfDate: outOfDate.body })
+  }
+  const reason = outOfDate.credentialError?.message ?? outOfDate.body?.error ?? `gantry serve responded ${outOfDate.status}`
+  return okResult({ ...res.body, outOfDateError: reason })
 }
 
 async function updateInstanceModules(args, { gantryClient }) {
@@ -135,7 +151,8 @@ export const tools = [
       '6. When the instance\'s definition sets word budgets, the response carries the instance\'s Target size as "size" (small, medium or large; the definition\'s default size, else medium, when none was chosen) and each budgeted field carries "targetWords" — about how many words to write in that field for this instance. Write to that length: it is a target, not a limit, and the size is the instance owner\'s choice of how much detail reviewers want. ' +
       '7. When the instance\'s definition declares Instance settings, the response carries "instanceSettings": one entry per setting (id "size" or "classification") with its "choices", "default" and this instance\'s "value". The "classification" value is the marking printed on every document\'s cover and page header ("" for none); treat the content you write as handled at that marking. ' +
       '8. When the instance\'s definition has a logo in its documents\' page header, the response carries "instanceLogo": { own, source } — "own" is true when the instance has uploaded its own logo, which its rendered documents show ("source": "instance"); otherwise they show the definition\'s logo ("source": "definition"). A logo is uploaded in the web app\'s wizard or Instance Settings, not over MCP. ' +
-      '9. The response carries "stageVersion", a fingerprint of the stage\'s Field content as read now. Pass it back to update_instance_modules as "stageVersion" so a save is refused, naming the Fields that differ, if a colleague changed the stage after you read it.',
+      '9. The response carries "stageVersion", a fingerprint of the stage\'s Field content as read now. Pass it back to update_instance_modules as "stageVersion" so a save is refused, naming the Fields that differ, if a colleague changed the stage after you read it. ' +
+      '10. The response carries "outOfDate": the Fields (across every stage) that drew on a Source document that has since been removed, replaced or read again with different text, that cite one with source:<id>, or that were drafted from another Field that has changed. "outOfDate.fields" has one entry per Field ({ field: "moduleId.fieldId", title, note, flags }), "summary" the one-line reasons, and "newSinceLastInterview" the documents added since the last interview that replace nothing. A Field listed there is not wrong, only unchecked: read the changed document (read_source_document), tell the architect what differs, and keep the Field or redraft it on their word. Nothing is stored for the flag; it clears once the Field is redrafted after the change. If it could not be worked out the response carries "outOfDateError" instead; a GitLab or Atlassian workspace keeps no Source documents and reports "supported": false.',
     inputSchema: {
       ...slugRefShape,
       stage: z.string().optional().describe('A stage id to browse instead of the instance\'s current stage.'),

@@ -90,6 +90,36 @@ checks what changed since the writer read it (`docs/adr/0068`).
 
 The comparison itself lives in gantry serve, so it is the same in every workspace kind.
 
+## Source documents, decisions logs and Reviewed copies
+
+The AI interview adds three kinds of file to an Instance. Following `docs/adr/0043` (the MCP server does everything the web
+UI does) and `docs/adr/0067`, an outside agent can read all of them and upload two of them. Read what the architect gave Gantry
+before drafting, so figures and names come from a document and not from the agent.
+
+| Tool | What it does |
+| --- | --- |
+| `list_source_documents` | The Instance's Source documents: id, title, filename, size, whether text was read, and which are `replacedBy` a newer upload or `removed`. |
+| `read_source_document` | One document's committed extracted text, a `page` at a time (a PDF by its own page numbers; anything else in sections of about 20,000 characters). A picture comes back as an image block. A document with no text says why. |
+| `upload_source_document` | Adds a document under the browser's rules: the same file types, 25 MB, one commit on the current stage's branch on an Azure DevOps or GitHub workspace, an optional `replaces` link, the same manifest entry. |
+| `read_decisions_log` | A stage's decisions log (or `allStages`). Server, Azure DevOps and GitHub workspaces; GitLab and Atlassian answer 400 until their module Save lands. |
+| `list_reviewed_copies` | The Reviewed copies brought in to the Instance. |
+| `read_reviewed_copy` | One copy's comment threads and tracked changes, grouped by the Field each traces to (with `mode` and `notice` when they were placed by matching text). |
+| `upload_reviewed_copy` | Brings in one or more `.docx` Reviewed copies. A document with no `gantry-*` properties is refused with the same message the browser shows. |
+
+`get_instance` also returns `outOfDate`: the Fields that drew on a Source document that has since been removed, replaced or read
+again with different text (or that cite one with `source:<id>`), with a reason for each. It is worked out by gantry serve from the
+manifest, the decisions logs and the saved content each time, so it is the same in every workspace kind. If it can't be worked out
+the response carries `outOfDateError` and the instance is still returned.
+
+**Uploads are read on the server.** In the browser the text is read out of a document before it is sent. There is no browser here, so
+`upload_source_document` sends the file with `extractText: true` and `gantry serve` runs the same extractors (officeparser, with
+Gantry's own Word-comment reader for a Reviewed copy), so a document uploaded here and in the browser gives the same text. The
+response says whether any text was read and why not (a picture, a scanned PDF, an unreadable file). The document is kept either way.
+
+**Access control is unchanged.** These are files in the same repository an agent could already read with the workspace's PAT;
+no new credential, route or permission is involved. A Local workspace's files are on the architect's computer and are not reachable
+from here, so none of these tools can reach one. ADR-0048 stays proposed.
+
 ## Adding a tool
 
 Add a new `src/tools/<cluster>.tools.js` file exporting a `tools` array:

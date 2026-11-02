@@ -18,6 +18,18 @@ export const SPREADSHEET_ROW_CAP = 1000
 /** A PDF with fewer readable characters per page than this is taken for a scan and gets no text file. A scanned page measured 2 to 181 characters in all (#240). */
 export const SCANNED_PDF_CHARS_PER_PAGE = 25
 
+const NO_TEXT_REASON = {
+  image: 'A picture has no text to read. An AI Provider that reads images is sent the picture itself; others list it as unreadable.',
+  scanned: 'This PDF looks scanned, so there is no text layer to read. An AI Provider that takes PDFs is sent the PDF itself; others list it as unreadable.',
+  empty: 'No text was found in it.',
+}
+
+/** The sentence that says why a document came out with no text, from what `extractSourceText` returned (shared by the Source documents panel and the server's own reading for an MCP upload, #305). */
+export function noTextNote(extraction) {
+  if (extraction.problem) return extraction.problem
+  return NO_TEXT_REASON[extraction.reason] ?? 'No text was read from it.'
+}
+
 /** The parse options every read uses. */
 export function officeParserConfig(extra = {}) {
   return { allowRemoteAssets: false, ...PDFJS_ASSET_URLS, ...extra }
