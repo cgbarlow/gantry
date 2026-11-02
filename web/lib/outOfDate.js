@@ -18,7 +18,9 @@
 // content each time, so it is the same in every workspace kind and nothing can drift. A flag clears when
 //   * the Field is drafted again after the change (its record's `drafted` is at or after the change), or
 //   * the architect answered for it: a decisions-log entry of kind `source-update` naming the document and the Field, made at or
-//     after the change (#298 writes these when a card is answered; only the architect clears a flag).
+//     after the change (#298 writes these when a card is answered; only the architect clears a flag). A Field flagged because an
+//     earlier Field it drew on has changed is answered the same way: the entry names that earlier Field (`inputField`) and the
+//     fingerprint of its text when the architect answered (`inputFingerprint`), so a later change to it flags the Field again.
 //
 // Pure (no DOM, no network), shared by the editor, the Interview page and, later, MCP. tests/outOfDate.test.js drives it.
 import { normalizeSavedContent } from './interviewBrief.js'
@@ -76,7 +78,7 @@ export function findOutOfDateFields({ sources = [], logs = {}, modules = {}, sta
 
   // Which Fields each log drafted, when, from what; and the architect's answers.
   const records = new Map() // field key -> [{ stage, drafted, inputs }]
-  const updates = [] // { source, fields, at }
+  const updates = [] // { source, fields, at, inputField, inputFingerprint }
   for (const [stageId, log] of pairs) {
     for (const [key, record] of Object.entries(log.fields ?? {})) {
       const list = records.get(key) ?? []
@@ -84,7 +86,9 @@ export function findOutOfDateFields({ sources = [], logs = {}, modules = {}, sta
       records.set(key, list)
     }
     for (const entry of asList(log.entries)) {
-      if (entry?.kind === SOURCE_UPDATE_KIND) updates.push({ source: entry.source, fields: asList(entry.fields), at: time(entry.at) })
+      if (entry?.kind === SOURCE_UPDATE_KIND) {
+        updates.push({ source: entry.source, fields: asList(entry.fields), at: time(entry.at), inputField: entry.inputField, inputFingerprint: entry.inputFingerprint })
+      }
     }
   }
 
@@ -148,7 +152,10 @@ export function findOutOfDateFields({ sources = [], logs = {}, modules = {}, sta
     for (const record of list) {
       for (const input of record.inputs) {
         if (typeof input?.field !== 'string' || !hasValue(input.field) || input.fingerprint === null || input.fingerprint === undefined) continue
-        if (fingerprintText(asText(valueOf(input.field))) === input.fingerprint) continue
+        const now = fingerprintText(asText(valueOf(input.field)))
+        if (now === input.fingerprint) continue
+        // The architect said keep / redraft for this Field while that earlier Field read as it does now (#298).
+        if (updates.some((u) => u.inputField === input.field && u.fields.includes(key) && u.inputFingerprint === now)) continue
         if (found.some((f) => f.field === key && f.cause === 'field' && f.inputField === input.field)) continue
         found.push({ field: key, cause: 'field', inputField: input.field, change: 'changed', via: ['drafted'], stages: [record.stage].filter(Boolean) })
       }

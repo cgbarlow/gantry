@@ -84,6 +84,7 @@ import { approvalStatusLine } from './lib/interviewApproval.js'
 import { DecisionsLogPanel } from './lib/decisionsLogPanel.js'
 import { flagsForField, outOfDateBannerLines, outOfDateCountByStage, outOfDateFieldNote } from './lib/outOfDate.js'
 import { loadOutOfDate, outOfDateState, sourceListTick } from './lib/outOfDateState.js'
+import { firstFlaggedStage } from './lib/bringUpToDate.js'
 import { createServerSourceClient } from './lib/serverSourceDocuments.js'
 import { assetReference, repoAssetReference, isLocalAssetSource, resolveAssetRefs, resolveRepoAssetRefs } from './lib/assetRefs.js'
 import { IdentityPicker } from './lib/identityPicker.js'
@@ -5080,11 +5081,28 @@ function useOutOfDate(instance) {
 // The editor's banner: one line per changed document, such as "4 Fields drew on Client brief, now replaced", with the way to bring them up to date (the Interview page, which works on the current Stage of a local or server workspace).
 function OutOfDatePanel({ instance }) {
   const { flags } = useOutOfDate(instance)
+  const location = useLocation()
   const lines = outOfDateBannerLines(flags)
   if (lines.length === 0) return null
-  const reason = interviewUnavailableReason(instance)
+  // #298: "Bring up to date" opens the Interview page on just the flagged Fields, stage by stage in order. A local or server workspace begins at
+  // the first Stage that has any; a remote one can only write its current Stage, so it goes there.
+  const stageIds = (instance.stages ?? []).map((s) => s.id)
+  const startStage = instance.workspaceBacked ? instance.currentStageId : firstFlaggedStage(flags, stageIds) ?? instance.stage.id
+  const reason = interviewUnavailableReason({ ...instance, stage: { ...instance.stage, id: startStage }, currentStageId: instance.currentStageId }, { update: true })
   const here = new URL(window.location.href)
   here.searchParams.set('interview', '1')
+  here.searchParams.set('update', '1')
+  function bringUpToDate(event) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    event.preventDefault()
+    // The Instance loads again for that Stage when it differs from the one on screen; the Interview page for it replaces this one.
+    if (instance.workspaceBacked) {
+      if (instance.stage.id !== instance.currentStageId) viewedStage.value = null
+    } else if (startStage !== instance.stage.id) {
+      viewedStage.value = startStage
+    }
+    location.route(`${here.pathname}${here.search}`)
+  }
   const fieldName = (key) => {
     const [moduleId, ...rest] = String(key).split('.')
     const mod = instance.modules.find((m) => m.id === moduleId)
@@ -5100,7 +5118,7 @@ function OutOfDatePanel({ instance }) {
             <span data-testid="out-of-date-line">${line.text}:</span>
             ${reason
               ? html`<span class="ood-fields" title=${reason}>Bring up to date from the Interview page (${reason})</span>`
-              : html`<a class="btn small" href=${`${here.pathname}${here.search}`} data-testid="bring-up-to-date">Bring up to date</a>`}
+              : html`<a class="btn small" href=${`${here.pathname}${here.search}`} data-testid="bring-up-to-date" onClick=${bringUpToDate}>Bring up to date</a>`}
             <span class="ood-fields">${line.fields.map(fieldName).join(', ')}</span>
           </li>`
         )}
@@ -5110,10 +5128,25 @@ function OutOfDatePanel({ instance }) {
 }
 
 // #286 (map #238): the Interview page for a local or server workspace Instance, handed what only this file can reach: the Instance's Source document store, the Definition it follows, the other Stages' saved content (the AI is told what is already settled) and the stage Save.
-function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequestApproval, onReRenderEarlier, onCheckApproval, onDraftAhead }) {
+function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequestApproval, onReRenderEarlier, onCheckApproval, onDraftAhead, update = false, onReopenStage, onOpenStage }) {
   const store = useSourceStore(instance)
   const outOfDate = useOutOfDate(instance)
   const decisionsStore = useDecisionsStore(instance)
+  // #298: on an Azure DevOps or GitHub workspace a re-open (ADR-0026) is refused while the current Stage has a branch, and uploading a Source
+  // document starts that branch. The Instance in the editor may have been read before that, so when Fields are flagged it is read once more here,
+  // and the cards are built from the answer. `undefined` until known.
+  const hasFlags = outOfDate.flags.length > 0
+  const [stageStarted, setStageStarted] = useState(undefined)
+  useEffect(() => {
+    if (!instance.workspaceBacked || !hasFlags) return undefined
+    let live = true
+    loadInstance(instance.slug, null)
+      .then((fresh) => live && setStageStarted(Boolean(fresh.stageBranchExists)))
+      .catch(() => live && setStageStarted(Boolean(instance.stageBranchExists)))
+    return () => {
+      live = false
+    }
+  }, [instance.slug, instance.currentStageId, hasFlags])
   if (!store || !decisionsStore) return html`<p class="loading">Loading…</p>`
   async function loadStructure() {
     if (instance.localDefinitionStructure) return instance.localDefinitionStructure
@@ -5143,14 +5176,19 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequ
   // record of the current Stage is the report (the page does that).
   // `key`: a run (#293) moves the Instance on to its next Stage, and the page for that Stage starts afresh.
   return html`<${OutOfDateWatcher} instance=${instance} /><${InterviewPage}
-    key=${instance.stage.id}
+    key=${`${instance.stage.id}${update ? '|update' : ''}`}
     outOfDate=${outOfDate.flags}
     newSince=${outOfDate.newSince}
+    flagsReady=${outOfDate.key !== '' && (!instance.workspaceBacked || !hasFlags || stageStarted !== undefined)}
+    stageStarted=${stageStarted}
     instance=${instance}
     store=${store}
     actor=${instance.assignee ?? ''}
     editorHref=${editorHref}
-    blockedReason=${interviewUnavailableReason(instance)}
+    blockedReason=${interviewUnavailableReason(instance, { update })}
+    update=${update}
+    onReopenStage=${onReopenStage}
+    onOpenStage=${onOpenStage}
     loadStructure=${loadStructure}
     loadOtherSaved=${loadOtherSaved}
     decisionsStore=${decisionsStore}
@@ -5597,11 +5635,14 @@ function GantryBrandIcon() {
 // set. Once a name is shown, the slug moves to its own small badge beside `.instance-ref` so it's
 // still visible, just no longer the primary label.
 // #286/#295: the AI interview works on the current Stage of a local, server, Azure DevOps or GitHub workspace Instance (GitLab and Atlassian take it when their module Save lands, as Source documents do). '' when it can be opened, else the reason it can't.
-function interviewUnavailableReason(instance) {
+// #298: Bring up to date (`update`) is let in on a Stage other than the current one, because the link that opens it goes to the Stage that has something to bring up to date (a local or server workspace edits any Stage; a remote one is taken to its current Stage).
+function interviewUnavailableReason(instance, { update = false } = {}) {
   if (instance.workspaceBacked && !offersSourceDocuments(instance)) return 'The AI interview is not available on GitLab or Atlassian workspaces yet.'
   if (instance.archived) return 'This Instance is archived. Restore it to use the AI interview.'
   if (isWriteAccessBlocked()) return 'The AI interview needs write access to this Instance.'
-  if (instance.stage.id !== instance.currentStageId) {
+  if (update) {
+    if (instance.workspaceBacked && instance.stage.id !== instance.currentStageId) return 'Bring up to date works on the current Stage of a remote workspace. Open the current Stage to use it.'
+  } else if (instance.stage.id !== instance.currentStageId) {
     // #296 (docs/adr/0063): on an Azure DevOps or GitHub workspace the AI drafts ahead on a Stage after the current one while the Owner
     // reviews the earlier one. A Stage the Instance has moved past is complete and stays closed to it.
     const order = (instance.stages ?? []).map((s) => s.id)
@@ -6250,9 +6291,12 @@ function ModuleEditorPage({ slug: routeRef }) {
   // The Interview page is this same route with `?interview=1`, so the Save, the Save check and its dialogs below are the editor's own.
   const interviewUrl = new URL(locationRef.current.url, window.location.origin)
   const interviewOpen = interviewUrl.searchParams.get('interview') === '1'
+  // #298: `?interview=1&update=1` is Bring up to date, the Interview page on just the Fields flagged Out of date.
+  const updateOpen = interviewOpen && interviewUrl.searchParams.get('update') === '1'
   const editorHref = (() => {
     const params = new URLSearchParams(interviewUrl.search)
     params.delete('interview')
+    params.delete('update')
     return interviewUrl.pathname + (params.size ? `?${params}` : '')
   })()
 
@@ -6336,6 +6380,35 @@ function ModuleEditorPage({ slug: routeRef }) {
       // The Gate check is a confirmation, not part of the Save: a Save that worked is reported either way.
     }
     return { ok: true, check, decisions: sentDecisions }
+  }
+
+  // #298: Bring up to date re-opens a signed-off Stage (ADR-0026) when only that Stage can change a Field, if the architect chooses it. The server
+  // refuses it when a later Stage is already in progress, and says why. Resolves `{ ok, message? }`; when it worked the Instance is loaded again
+  // on that Stage (now its current one) and the Interview page for it replaces this one.
+  async function reopenInterviewStage(stageId) {
+    const inst = instanceData.peek()
+    if (!inst?.stage || isEditingBlocked()) return { ok: false, message: 'This Instance cannot be written to right now.' }
+    try {
+      const params = new URLSearchParams({ slug: inst.slug, stage: stageId })
+      const res = await apiFetchForInstance(inst.slug, `/api/instance/stage/reopen?${params}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage: stageId }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) return { ok: false, message: `Re-open failed: ${body.message ?? body.error ?? res.status}` }
+      const effectWillReload = viewedStage.value !== null
+      viewedStage.value = null
+      if (!effectWillReload) instanceData.value = await loadInstance(inst.slug, null)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, message: `Re-open failed: ${err.message}` }
+    }
+  }
+
+  // #298: a local or server workspace brings its Stages up to date one at a time, in order; this shows the Interview page on another one.
+  function openInterviewStage(stageId) {
+    viewedStage.value = stageId
   }
 
   // #293: "Save, advance, carry on" moves the Instance on to its next Stage once the Save has worked. The Gate is checked again here,
@@ -6511,6 +6584,9 @@ function ModuleEditorPage({ slug: routeRef }) {
   if (interviewOpen && (!instance.workspaceBacked || offersSourceDocuments(instance))) {
     return html`<${InterviewScreen}
         instance=${instance}
+        update=${updateOpen}
+        onReopenStage=${reopenInterviewStage}
+        onOpenStage=${openInterviewStage}
         editorHref=${editorHref}
         onSaveDrafts=${saveInterviewDrafts}
         onAdvance=${advanceInterviewStage}

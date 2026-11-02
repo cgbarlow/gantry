@@ -82,6 +82,15 @@ export function sourceCitationFor(entry) {
   return `[${title}](source:${entry.id})`
 }
 
+/**
+ * `markdown` with every citation of document `fromId` pointing at `to` instead (#298, "re-cite"): `[Old brief, p. 4](source:old)` becomes
+ * `[New brief](source:new)`. The page or slide is dropped, because it belonged to the old document; the title is the new document's.
+ * Citations of other documents, code spans and fenced code are left as they are. Returns the text unchanged where it cites nothing of `fromId`.
+ */
+export function recitedMarkdown(markdown, fromId, to) {
+  return replaceCitations(markdown, ({ match, id }) => (id === fromId ? sourceCitationFor(to) : match))
+}
+
 // --- The Definition's `source-appendix` switch ----------------------------------------------------------------------
 
 /**

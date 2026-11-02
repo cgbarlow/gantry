@@ -30,6 +30,14 @@
 //     version / merge card. Asking for a change in free chat (the AI logs the request as a fact) or choosing the AI's version on a card
 //     hands the Field back. A Field the AI is drafting at that moment (`draftingFields`) cannot be edited.
 //
+//   * (#298) opens with **Bring up to date** when the context carries `update` (the Fields flagged Out of date that this Stage can act on,
+//     web/lib/bringUpToDate.js): a round of cards, one per Field, shown before the AI is called. A session that is only bringing Fields up to
+//     date (`update.mode` is `only`) ends there and has nothing else to ask; a normal session goes on to its usual opening afterwards. Each
+//     answer is a `source-update` entry in the decisions log (only answering clears a flag); a re-cite is done by Gantry; a redraft is the
+//     AI's, and meets the keep / use the AI's version / merge card like any change to saved content. A Module marked `agreed` that a saved
+//     draft changes goes back to `draft`, and the log keeps a `returned-to-draft` note saying why. A normal session also tells the AI which
+//     Source documents are New since last interview, to read against what is saved.
+//
 // Nothing here saves. Drafts are an unsaved preview until the architect confirms the stage-end card.
 import { runTurn, runWithRecovery, ensureTested, EMPTY_USAGE } from './aiClient.js'
 import { ASK_TOOL_NAME, FALLBACK_FENCE } from './aiCards.js'
@@ -62,6 +70,7 @@ import { tokensOfModels } from './tokenUsage.js'
 import { resumeOpening } from './interviewResume.js'
 import { conflictKey, conflictText, conflictValueFromText } from './stageVersion.js'
 import { reapprovalNames, reapprovalOf } from './interviewReapproval.js'
+import { UPDATE_OPENING, needsAi, newSinceNote, reciteValue, removedSourcesOf, resolveUpdateCard, returnedToDraftNote, updateAnswersText, updateCards } from './bringUpToDate.js'
 import { CLASH_OPTIONS, CHANGE_OPTIONS, acceptRecommendation, answersText, changeCard, choose, chooseOther, clashCard, followsRecommendation, isAnswered, isAutoId, otherWords, releaseHeld, shapeCard, sortRound, splitReady, termChoice, withMerged } from './interviewRounds.js'
 
 export { fieldsInScope }
@@ -78,6 +87,9 @@ export const CARD_FAILURES_BEFORE_CHAT = 2
 const OPENING =
   'Begin the interview. Read the Source documents, open with a short summary of what you found in them, then draft every Field they support. ' +
   'Then ask your first round of question cards: every question whose prerequisites are settled.'
+
+/** The opening message of a normal session, with the note about documents that are New since the last interview. */
+const openingFor = (context, base = OPENING) => [base, newSinceNote(context?.newSince)].filter(Boolean).join('\n\n')
 
 const FINISH_NOTE =
   'The architect chose "Finish with your recommendations". Accept your own recommendations for everything still open: redraft every Field you can responsibly propose, ' +
@@ -243,7 +255,10 @@ export function createInterviewSession(config = {}) {
     sessionWarning: null, // { others }: another session on this Stage is not Done; Start waits for Carry on alongside or Cancel (#290)
     clash: null, // { cards, merging, mergeNote }: a Save found Fields both sides changed; a round of cards settles them (#290)
     resumed: null, // the recap line when this run carries on from the decisions log (#290)
+    update: null, // Bring up to date (#298): { mode: 'only'|'first', total, answered, reopen, deferred, elsewhere } while this session has such a round
   }
+  let updateOpening = '' // the opening a normal session gives the AI once its Bring up to date round is answered (#298)
+  const updateCauses = new Map() // module.field -> why it was Out of date, for the note when an agreed Module goes back to draft (#298)
   let clashWaiter = null // { resolve, conflicts, entryIds }: the Save waiting on the clash cards
   let messages = []
   let nextId = 1
@@ -283,6 +298,7 @@ export function createInterviewSession(config = {}) {
     round: state.round ? { ...state.round, cards: state.round.cards.map((c) => ({ ...c, selected: [...c.selected] })) } : null,
     clash: state.clash ? { ...state.clash, cards: state.clash.cards.map((c) => ({ ...c, selected: [...c.selected] })) } : null,
     sessionWarning: state.sessionWarning ? { others: state.sessionWarning.others.map((o) => ({ ...o })) } : null,
+    update: state.update ? { ...state.update, reopen: [...state.update.reopen], deferred: state.update.deferred.map((d) => ({ ...d })), elsewhere: state.update.elsewhere.map((d) => ({ ...d })) } : null,
     openFields: openFields(),
     decisions: { ...logSummary(log.entries()), pending: log.pending().length, session: log.sessionId },
     // #294: this session's tokens on this Stage, as the status block of the log will record them (all the AI Providers it used).
@@ -298,7 +314,13 @@ export function createInterviewSession(config = {}) {
   const fieldTitle = (key) => {
     const context = getContext()
     const entry = fieldsInScope(context.definition, context.stageId).get(key)
-    return entry ? `${entry.module.title ?? entry.module.id} · ${entry.field.title ?? entry.field.id}` : key
+    if (entry) return `${entry.module.title ?? entry.module.id} · ${entry.field.title ?? entry.field.id}`
+    // A Field of a Module this Stage can't edit (a Bring up to date card can be about one) is named from the Definition.
+    const parsed = splitRef(key)
+    const modules = context.definition?.modules instanceof Map ? [...context.definition.modules.values()] : context.definition?.modules ?? []
+    const mod = parsed ? modules.find((m) => m.id === parsed.moduleId) : null
+    const field = mod?.fields?.find((f) => f.id === parsed.fieldId)
+    return mod && field ? `${mod.title ?? mod.id} · ${field.title ?? field.id}` : key
   }
 
   // ---------- drafting ----------
@@ -613,6 +635,139 @@ export function createInterviewSession(config = {}) {
         log.addSavedContent(key, 'merge', { handEdit: mine, reapproves })
         say('sys', `Merging ${fieldTitle(key)}`)
       }
+    }
+  }
+
+  // ---------- Bring up to date (#298) ----------
+
+  /** What the Stages' decisions logs recorded a Field as drawn from (the latest record), so a re-cite keeps what else the Field drew on. */
+  function recordedInputs(key) {
+    let best = null
+    for (const log of Object.values(getContext().update?.logs ?? {})) {
+      const record = log?.fields?.[key]
+      if (record && Array.isArray(record.inputs) && (!best || String(record.drafted ?? '') > String(best.drafted ?? ''))) best = record
+    }
+    return best ? best.inputs.map((i) => ({ ...i })) : []
+  }
+
+  /** Opens the round of cards about the Fields flagged Out of date that this Stage can act on. Nothing is sent to the AI yet. */
+  function openUpdateRound() {
+    const context = getContext()
+    const upd = context.update
+    const cards = updateCards({
+      items: upd.items,
+      sources: context.sources ?? [],
+      logs: upd.logs ?? {},
+      fieldTitle,
+      stageTitle: upd.stageTitle ?? ((id) => id),
+      pageStageTitle: upd.pageStageTitle ?? '',
+    })
+    state.update = { mode: upd.mode === 'only' ? 'only' : 'first', total: cards.length, answered: false, reopen: [], deferred: (upd.deferred ?? []).map((d) => ({ ...d })), elsewhere: (upd.elsewhere ?? []).map((d) => ({ ...d })) }
+    state.round = { id: ++state.roundNo, cards, page: 0, final: false, update: true }
+    state.phase = 'asking'
+    say('sys', `${cards.length} Field${cards.length === 1 ? ' is' : 's are'} Out of date because a Source document changed. Answer ${cards.length === 1 ? 'its card' : 'each card'} to bring ${cards.length === 1 ? 'it' : 'them'} up to date; only an answer clears a flag.`, { updateRound: true })
+  }
+
+  /**
+   * Carries out what the architect answered on the round's cards: a `source-update` entry for every flag answered (this is what clears it,
+   * once saved), Fields kept so the AI proposes nothing for them, a re-cite done here as a draft, an open question recorded.
+   */
+  function applyUpdateResults(results, context) {
+    const content = normalizeSavedContent(context.saved)
+    const valueOf = (key) => {
+      const ref = splitRef(key)
+      return ref ? content[ref.moduleId]?.fields?.[ref.fieldId] : undefined
+    }
+    for (const r of results) {
+      const key = r.key
+      const title = fieldTitle(key)
+      const update = r.card.update ?? {}
+      const stage = update.landing?.kind === 'carry-forward' ? update.landing.stageId : undefined
+      const trigger = (f) =>
+        f.cause === 'source'
+          ? { source: f.source, sourceTitle: f.sourceTitle, change: f.change, replacedBy: f.replacedBy ?? undefined }
+          : { inputField: f.inputField, change: f.change, inputFingerprint: fingerprintText(asText(valueOf(f.inputField))) }
+      const write = (outcome, extra = {}) => {
+        for (const f of update.flags ?? []) log.addSourceUpdate({ field: key, outcome, trigger: trigger(f), stage, ...extra })
+      }
+      updateCauses.set(key, `because ${(update.reasons ?? []).join('; ')}`)
+      if (r.outcome === 'leave') {
+        say('sys', `Left ${title} flagged`)
+      } else if (r.outcome === 'reopen') {
+        if (r.stageId && !state.update.reopen.includes(r.stageId)) state.update.reopen = [...state.update.reopen, r.stageId]
+        say('sys', `${title} stays flagged until ${r.stageId} is re-opened`)
+      } else if (r.outcome === 'keep') {
+        keptFields.add(key)
+        write('keep')
+        say('sys', `Kept ${title} as it is`)
+      } else if (r.outcome === 'redraft' || r.outcome === 'redraft-without') {
+        write(r.outcome)
+        say('sys', r.outcome === 'redraft' ? `${title} will be redrafted` : `${title} will be redrafted without the removed document`)
+      } else if (r.outcome === 'open-question') {
+        const why = update.landing?.blocker || `${title} cannot be edited on this Stage.`
+        log.addOpenQuestion({ question: `${title} is Out of date (${(update.reasons ?? []).join('; ')}) and cannot be brought up to date here. What should happen?`, why, fields: [key] })
+        write('open-question')
+        say('sys', `Logged an open question about ${title}`)
+      } else if (r.outcome === 're-cite') {
+        const saved = valueOf(key)
+        const gone = removedSourcesOf(r.card)
+        let value = saved
+        for (const id of gone) value = reciteValue(value, id, r.reciteTo)
+        write('re-cite', { reciteTo: r.reciteTo.title })
+        const ref = splitRef(key)
+        if (ref && saved !== undefined && asText(value) !== asText(saved)) {
+          const kept = recordedInputs(key).filter((i) => !(i.source && gone.includes(i.source)))
+          const inputs = mergeInputs(kept, inputsForDraft({ reads: [], value, sources: context.sources }))
+          state.drafts[key] = { value, words: countWords(value), warnings: [], uncovered: [], inputs, moduleId: ref.moduleId, fieldId: ref.fieldId }
+          state.fieldInputs[key] = inputs
+          say('sys', `Re-cited ${title} to ${r.reciteTo.title}`, { drafted: key })
+        } else {
+          say('sys', `${title} does not cite ${gone.length === 1 ? 'the removed document' : 'the removed documents'} in its text, so only the log changes`)
+        }
+      }
+    }
+  }
+
+  /** The architect's answers to the Bring up to date round. */
+  async function answerUpdate({ finish }) {
+    const round = state.round
+    const cards = finish ? round.cards.map(acceptRecommendation) : round.cards
+    const open = cards.filter((c) => !isAnswered(c))
+    if (open.length) return { ok: false, message: `${open.length} card${open.length === 1 ? ' is' : 's are'} not answered yet.`, firstOpen: open[0].id }
+    const context = getContext()
+    const results = cards.map(resolveUpdateCard)
+    applyUpdateResults(results, context)
+    for (const card of cards) state.answered.push({ id: card.id, header: card.header, question: card.question, field: card.field, labels: [...card.selected], other: '', followed: followsRecommendation(card) })
+    say('you', cards.map((c) => `${fieldTitle(c.field)}: ${c.selected.join(', ')}`).join('\n'), { answered: cards.length })
+    state.round = null
+    state.update = { ...state.update, answered: true }
+    const mode = state.update.mode
+    if (mode === 'only' && !results.some(needsAi)) {
+      state.phase = 'waiting'
+      emit()
+      return { ok: true }
+    }
+    const opening = mode === 'only' ? UPDATE_OPENING : updateOpening || openingFor(context)
+    messages = [{ role: 'user', text: `${opening}\n\nThe architect's answers to the round that brings the Out of date Fields up to date:\n${updateAnswersText(results, { fieldTitle })}` }]
+    await runLoop()
+    return { ok: true }
+  }
+
+  /** Modules marked `agreed` that the drafts about to be saved change go back to `draft`; the log keeps a note saying why (#298). */
+  function noteReturnedToDraft() {
+    const context = getContext()
+    const content = normalizeSavedContent(context.saved)
+    log.discard(log.pending().filter((e) => e.kind === 'returned-to-draft').map((e) => e.id))
+    const byModule = new Map()
+    for (const [key, draft] of Object.entries(state.drafts)) {
+      if (content[draft.moduleId]?.status !== 'agreed') continue
+      byModule.set(draft.moduleId, [...(byModule.get(draft.moduleId) ?? []), key])
+    }
+    const modules = context.definition?.modules instanceof Map ? [...context.definition.modules.values()] : context.definition?.modules ?? []
+    for (const [moduleId, keys] of byModule) {
+      const moduleTitle = modules.find((m) => m.id === moduleId)?.title ?? moduleId
+      const causes = [...new Set(keys.map((k) => updateCauses.get(k)).filter(Boolean))]
+      log.addReturnedToDraft({ module: moduleId, fields: keys, note: returnedToDraftNote({ moduleTitle, fieldTitles: keys.map(fieldTitle), cause: causes.join('; ') }) })
     }
   }
 
@@ -970,6 +1125,7 @@ export function createInterviewSession(config = {}) {
 
   async function answer({ finish }) {
     if (state.phase !== 'asking' || !state.round) return { ok: false, message: 'There is no round to answer.' }
+    if (state.round.update) return answerUpdate({ finish })
     const round = state.round
     const cards = finish ? round.cards.map(acceptRecommendation) : round.cards
     const open = cards.filter((c) => !isAnswered(c))
@@ -1065,16 +1221,29 @@ export function createInterviewSession(config = {}) {
       } else if (state.cardMode === 'chat') {
         say('sys', 'This model cannot produce question cards, so it asks in plain chat. That works, but is less reliable.')
       }
-      if (resume?.resuming) {
+      const upd = getContext().update
+      const updating = Boolean(upd?.items?.length)
+      const updateOnly = updating && upd.mode === 'only'
+      if (resume?.resuming && !updateOnly) {
         // #290: carrying on from the decisions log. The AI is given the log and the saved content (both are in its brief), not the old
         // conversation, and opens with the recap Gantry worked out.
         if (resume.adopt) log.adopt(resume.adopt)
         for (const entry of currentLogEntries(getContext().decisions)) if (entry.kind === 'saved-content' && entry.choice === 'keep' && entry.field) keptFields.add(entry.field)
         state.resumed = resume.recap
         say('sys', resume.recap, { resumed: true })
-        messages = [{ role: 'user', text: resumeOpening(resume) }]
+        messages = [{ role: 'user', text: openingFor(getContext(), resumeOpening(resume)) }]
       } else {
-        messages = [{ role: 'user', text: OPENING }]
+        messages = [{ role: 'user', text: openingFor(getContext()) }]
+      }
+      if (updating) {
+        // #298: the round about the Out of date Fields comes first, before the AI is called. A session that is only bringing them up to date
+        // has nothing else to do; a normal one gives the AI its usual opening once the round is answered.
+        updateOpening = updateOnly ? '' : messages[0].text
+        messages = []
+        if (!updateOnly) recordArtefact()
+        openUpdateRound()
+        emit()
+        return
       }
       recordArtefact()
       await runLoop()
@@ -1090,6 +1259,12 @@ export function createInterviewSession(config = {}) {
     async send(text) {
       const body = String(text ?? '').trim()
       if (!body || state.phase === 'working' || state.phase === 'kickoff' || state.phase === 'testing' || state.phase === 'paused') return
+      if (state.round?.update) {
+        // The Bring up to date cards come first: chat would put them away, and the AI has not been told about them yet (#298).
+        say('sys', 'Answer the Bring up to date cards first, then chat.')
+        emit()
+        return
+      }
       say('you', body)
       if (state.round) {
         for (const card of state.round.cards) if (card.type === 'change' && pendingChanges.has(card.field)) pendingChanges.get(card.field).shown = false
@@ -1308,10 +1483,13 @@ export function createInterviewSession(config = {}) {
           answered: state.answered,
           finish: state.finish,
           resumed: state.resumed,
+          update: state.update,
           error: state.error,
           phase: state.phase,
         },
         pendingChanges: [...pendingChanges],
+        updateOpening,
+        updateCauses: [...updateCauses],
         kept: [...keptFields],
         authorised: [...authorised],
         otherTexts: [...otherTexts],
@@ -1342,6 +1520,7 @@ export function createInterviewSession(config = {}) {
         answered: s.answered ?? [],
         finish: s.finish ?? null,
         resumed: s.resumed ?? null,
+        update: s.update ?? null,
         error: s.error ?? null,
         kickoffError: null,
         drafting: null,
@@ -1351,6 +1530,9 @@ export function createInterviewSession(config = {}) {
       nextId = saved.nextId ?? nextId
       pendingChanges.clear()
       for (const [k, v] of saved.pendingChanges ?? []) pendingChanges.set(k, v)
+      updateOpening = saved.updateOpening ?? ''
+      updateCauses.clear()
+      for (const [k, v] of saved.updateCauses ?? []) updateCauses.set(k, v)
       keptFields.clear()
       for (const k of saved.kept ?? []) keptFields.add(k)
       authorised.clear()
@@ -1391,6 +1573,7 @@ export function createInterviewSession(config = {}) {
      */
     decisionsDelta({ runState = 'in-progress', saving = false, target, stages } = {}) {
       const context = getContext()
+      noteReturnedToDraft()
       const keys = [...new Set([...Object.keys(state.drafts), ...state.savedKeys])]
       return log.delta({
         fieldInputs: state.fieldInputs,
@@ -1432,6 +1615,9 @@ export function createInterviewSession(config = {}) {
       state.answered = []
       state.finish = null
       state.error = null
+      state.update = null
+      updateOpening = ''
+      updateCauses.clear()
       state.phase = 'kickoff'
       pendingChanges.clear()
       keptFields.clear()

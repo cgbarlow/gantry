@@ -23,7 +23,8 @@ import { citationSegments, isBlankValue } from './interviewDraft.js'
 import { describeInput, planSourceAccess } from './interviewSources.js'
 import { effectiveTargetSize, fieldTargetWords, targetSizeLabel } from './targetSize.js'
 import { logSummary } from './decisionsLog.js'
-import { outOfDateCountByStage } from './outOfDate.js'
+import { outOfDateCountByStage, flagsForField } from './outOfDate.js'
+import { planUpdateRound, stagesToUpdate } from './bringUpToDate.js'
 import { beginRun, clearRun, interviewRuns, nextStage, planRows, resumableRun, runStartStage, runTargets, saveOutcome, updateRun } from './interviewRun.js'
 import { EMPTY_TOKENS, addTokens, formatTokens, hasTokens, tokenBreakdown, tokensOfLog, totalTokens } from './tokenUsage.js'
 import { describeSaved, resumeInfo } from './interviewResume.js'
@@ -110,6 +111,12 @@ function HandEditor({ field, value, error, onDone, onCancel }) {
   </div>`
 }
 
+/** Whether a Stage's decisions log shows the Stage was worked on and saved (a branch exists for it on a remote workspace). */
+function logHasSaved(log) {
+  if (!log) return false
+  return Object.keys(log.fields ?? {}).length > 0 || (Array.isArray(log.status) && log.status.some((s) => s?.lastAiSave))
+}
+
 const MODE_LABELS = { native: 'native', text: 'text fallback', chat: 'plain chat' }
 
 /** One question card: header chip, the Field it feeds, the question, option tiles, "Why I recommend it" with its citation, and Other where it applies. */
@@ -118,7 +125,7 @@ function QuestionCard({ card, fieldTitle, session }) {
   const recommended = new Set(card.recommended)
   return html`<div class="qcard" data-testid="interview-card" data-card-id=${card.id} data-card-type=${card.type ?? 'question'} data-card-kind=${card.kind ?? ''}>
     <div class="qchip">
-      ${card.header || (card.type === 'change' ? 'Saved content' : card.kind === 'term' ? 'Preferred term' : card.kind === 'decision' ? 'Key decision' : 'Question')}${card.multiSelect ? ' · choose any' : ''}
+      ${card.header || (card.type === 'update' ? 'Out of date' : card.type === 'change' ? 'Saved content' : card.kind === 'term' ? 'Preferred term' : card.kind === 'decision' ? 'Key decision' : 'Question')}${card.multiSelect ? ' · choose any' : ''}
       ${card.field ? html` · feeds <span data-testid="card-feeds">${fieldTitle(card.field)}</span>` : null}
     </div>
     <p class="qhead" data-testid="card-question">${card.question}</p>
@@ -132,6 +139,12 @@ function QuestionCard({ card, fieldTitle, session }) {
       : null}
     ${card.change?.reapproves?.length
       ? html`<p class="kick-note reapproval-note" data-testid="change-reapproval" role="note">Approved by ${card.change.reapproves.map((s) => s.title).join(', ')}. Changing this Field changes approved content, so ${card.change.reapproves.map((s) => s.title).join(', ')} is re-approved with this Stage: its documents are re-rendered and its approver must approve too.</p>`
+      : null}
+    ${card.update
+      ? html`<div class="update-current" data-testid="update-current">
+          ${card.update.saved ? html`<div><span class="qchip">Saved</span><div class="value" data-testid="update-card-saved"><${ValueView} value=${card.update.saved} /></div></div>` : null}
+          ${card.update.note ? html`<p class="kick-note" data-testid="update-landing">${card.update.note}</p>` : null}
+        </div>`
       : null}
     ${card.change
       ? html`<div class="change-compare" data-testid="change-compare">
@@ -248,10 +261,17 @@ function providerLabel(p) {
  *                      Request approval would refuse over, before it asks. `item` is one entry of the refusal's `reRenderRequired` (`{ artefactId, artefactTitle, stageTitle, ... }`)
  *   onCheckApproval    () => { ok, merged, message }  Check status (#295); when the Pull Request has merged the Instance has moved on and the page of the next Stage replaces this one
  *   onDraftAhead       (stageId) => { ok, message? }  moves the page on to a later Stage while the earlier one awaits approval (#296, docs/adr/0063): the Instance stays where it is and the page for that Stage replaces this one
+ *   flagsReady         false until the Out of date check for this Stage has run once, so an interview that starts by itself waits to know whether a round of cards comes first (it waits no more than a few seconds)
+ *   stageStarted       whether the current Stage has a branch, read fresh for this page (the Instance in the editor may predate a Source document upload); undefined when not known
+ *   update             true when the page was opened with "Bring up to date" (#298): a round of cards about exactly the Fields flagged Out of date on this Stage, and nothing else
+ *   onReopenStage      (stageId) => { ok, message? }  re-opens a signed-off Stage (ADR-0026) for a Field only that Stage can change (a remote workspace), when the architect chooses it instead of saving
+ *   onOpenStage        (stageId) => void  shows the Interview page on another Stage (a local or server workspace): "Bring up to date" works through the Stages in order
  */
 // #297: `outOfDate` is the Fields flagged Out of date (web/lib/outOfDate.js) and `newSince` the documents marked New since last interview; the run plan marks each Stage that has flagged Fields and the Source documents rail marks the new documents.
-export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance, checkStatus = null, onRequestApproval, onReRenderEarlier = null, onCheckApproval, onDraftAhead, outOfDate = [], newSince = [] }) {
+export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance, checkStatus = null, onRequestApproval, onReRenderEarlier = null, onCheckApproval, onDraftAhead, outOfDate = [], newSince = [], flagsReady = true, stageStarted, update = false, onReopenStage, onOpenStage }) {
   const key = `${instance.slug}|${instance.stage.id}`
+  // #298: Bring up to date has its own session and working copy, so it never takes over an interview that is part-way.
+  const sessionKey = update ? `${key}|update` : key
   // #295: on an Azure DevOps or GitHub workspace a Stage moves on only when its Pull Request merges, so the stage-end card asks for approval instead of advancing.
   const remote = isRemoteInstance(instance)
   const awaiting = openApproval(instance) // the Pull Request the Provider says is open for this Stage, else null: it overrides what the log says
@@ -280,6 +300,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const [confirmRestart, setConfirmRestart] = useState(false)
   const [handEditing, setHandEditing] = useState(null) // { key, error? }: the drafted Field open for a hand edit (#289)
   const [generation, setGeneration] = useState(0) // bumped to open the page afresh after a Pause (#290)
+  const [flagsWaited, setFlagsWaited] = useState(false) // the wait for the Out of date check ran out (#298)
   const [asideNotice, setAsideNotice] = useState(null) // a working copy that was set aside because the committed log moved on (#290)
   const [copyRestored, setCopyRestored] = useState(false)
   const sessionRef = useRef(null)
@@ -404,6 +425,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           // #290: whether this run carries on from the decisions log, the earlier session of this architect it takes over, and the other
           // sessions still going on this Stage. Worked out when Start is pressed, from the logs as they are then.
           get resume() {
+            if (update) return null // Bring up to date is never a resumed interview (#298)
             return resumeInfo({
               logs: { ...setup.logs, [instance.stage.id]: committedLog },
               stageId: instance.stage.id,
@@ -415,6 +437,22 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
             })
           },
           actor,
+          // #298: the documents New since last interview (a normal session's AI reads them against what is saved) and the Out of date Fields
+          // this Stage can act on (the session opens with a round of cards about them). Worked out when Start is pressed.
+          newSince: update ? [] : newSince,
+          get update() {
+            return updatePlan && updatePlan.items.length
+              ? {
+                  mode: update ? 'only' : 'first',
+                  items: updatePlan.items,
+                  deferred: updatePlan.deferred,
+                  elsewhere: updatePlan.elsewhere,
+                  logs: { ...setup.logs, [instance.stage.id]: committedLog },
+                  stageTitle: stageTitleOf,
+                  pageStageTitle: instance.stage.title,
+                }
+              : undefined
+          },
           targetStageId: target,
           instructionsVersion: `${setup.definition.id ?? instance.definition}@${instance.definitionVersion ?? setup.structure.version ?? 1}`,
           // #292: a picture, or a scanned or "Read visually" PDF, is sent as the original; the session reads it when it builds a request.
@@ -428,11 +466,11 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   }
   useEffect(() => {
     if (setup.status !== 'ready') return undefined
-    let session = sessions.get(key)
+    let session = sessions.get(sessionKey)
     const fresh = !session
     if (fresh) {
       session = createInterviewSession({ providerId })
-      sessions.set(key, session)
+      sessions.set(sessionKey, session)
     }
     sessionRef.current = session
     // #290: every stable moment, the browser keeps a working copy of the unsaved session, so closing the tab loses nothing.
@@ -440,26 +478,26 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       setSnap(snapshot)
       if (session.canKeepCopy) {
         const known = session.knownLog()
-        workingCopies.save(key, makeWorkingCopy({ state: session.exportState(), committedIds: known.committedIds, lastAiSave: known.lastAiSave }))
+        workingCopies.save(sessionKey, makeWorkingCopy({ state: session.exportState(), committedIds: known.committedIds, lastAiSave: known.lastAiSave }))
       }
     }
     session.bind({ getContext: () => ctxRef.current, handlers: { askForKey: ask('key'), askToRetry: ask('retry') }, onChange: keepCopy })
     if (fresh) {
       // The same browser resumes exactly where it stopped, unless the committed log has moved on since the copy began: then the
       // committed log wins and the copy is set aside, with a notice.
-      const copy = workingCopies.load(key)
+      const copy = workingCopies.load(sessionKey)
       if (copy) {
         const standing = copyStanding(copy, setup.logs?.[instance.stage.id] ?? null)
         if (standing === 'fresh') session.loadDecisions(setup.logs?.[instance.stage.id] ?? null)
         if (standing === 'fresh' && session.importState(copy.state)) setCopyRestored(true)
         else {
-          workingCopies.setAside(key, copy, standing)
+          workingCopies.setAside(sessionKey, copy, standing)
           setAsideNotice({ savedAt: copy.savedAt })
         }
       }
     }
     return () => session.bind({ onChange: null })
-  }, [key, setup.status])
+  }, [sessionKey, setup.status])
 
   // The Stage's committed decisions log is what the rail counts and what the AI is told is settled (#288).
   useEffect(() => {
@@ -514,7 +552,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const providerInUse = snap?.providerId ?? providerId
   const runStart = run?.startStageId ?? instance.stage.id // the Stage this run began on
   const multiStage = stagesList.findIndex((st) => st.id === target) > stagesList.findIndex((st) => st.id === runStart) // more than one Stage in the run
-  const stageEndReady = phase === 'waiting' && draftKeys.length > 0 && Boolean(readiness?.ready) && !snap?.round && !finishing
+  const stageEndReady = !update && phase === 'waiting' && draftKeys.length > 0 && Boolean(readiness?.ready) && !snap?.round && !finishing
   // #296: nothing draftable is left on a Stage drafted ahead, but Modules an earlier Stage also mounts are still held: the Waiting card offers
   // Check approval now or Stop here. Either saves the head start. A Stage whose every Module is held has nothing to draft at all, so the card
   // comes before the AI would start.
@@ -541,6 +579,30 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   // #300 (ADR-0069): the earlier documents the stage-end Save re-renders before it asks for approval, so the card says so.
   const earlierToRender = remote && setup.status === 'ready' ? earlierDocumentsToRender({ definition: setup.definition, instance, approved: approvedPrinted, draftKeys }) : []
   const newSinceIds = new Set(newSince.map((s) => s.id))
+  // #298: the Out of date Fields this page can bring up to date, and where each change would land. A Stage counts as started (a branch exists, so
+  // a Stage before it cannot be re-opened, ADR-0026) when it is the current Stage or later and has a Pull Request open or a decisions log that has saved.
+  const startedStages = stagesList
+    .filter(
+      (st, at) =>
+        at >= stagesList.findIndex((s) => s.id === instance.currentStageId) &&
+        (remoteRows?.pullRequests?.[st.id] || (st.id === instance.currentStageId && (stageStarted ?? instance.stageBranchExists)) || logHasSaved(st.id === instance.stage.id ? committedLog : stageLogs[st.id]))
+    )
+    .map((st) => st.id)
+  const updatePlan =
+    setup.status === 'ready' && outOfDate.length && !ahead // a drafted-ahead branch is never changed (ADR-0063): its flagged Fields wait until it is the current Stage
+      ? planUpdateRound({
+          flags: outOfDate,
+          definition: definitionNow,
+          pageStageId: instance.stage.id,
+          currentStageId: instance.currentStageId,
+          remote,
+          awaiting: Object.keys(remoteRows?.pullRequests ?? {}),
+          inProgress: startedStages,
+          saved: [...instance.modules, ...otherSaved],
+        })
+      : null
+  // The Stages that have something to bring up to date, in order, other than this one (a local or server workspace goes through them one by one).
+  const otherUpdateStages = setup.status === 'ready' && outOfDate.length ? stagesToUpdate({ flags: outOfDate, definition: setup.definition, remote, currentStageId: instance.currentStageId }).filter((st) => st.stageId !== instance.stage.id) : []
   // #294: tokens, from what each AI Provider reported. A Stage's total is every session's status line in its committed log, except this
   // session's own (it is counted in full from memory, so its older committed line is not added twice). The session total is this run:
   // the Stages it went through before this one (from their logs) and what this session has used on this one.
@@ -550,10 +612,15 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const runStartAt = Math.max(0, Math.min(currentAt, stagesList.findIndex((st) => st.id === runStart)))
   const sessionTokens = stagesList.slice(runStartAt, currentAt).reduce((sum, st) => addTokens(sum, tokensOfLog(stageLogs[st.id])), mineHere)
   const thisStageTokens = stageTokens(instance.stage.id)
-  const resume = resumeLogs && !carryingOn && phase === 'kickoff' ? resumableRun({ stages: stagesList, currentStageId: instance.stage.id, logs: resumeLogs, openPullRequests: remoteRows?.pullRequests ?? {} }) : null
+  const resume = resumeLogs && !carryingOn && !update && phase === 'kickoff' ? resumableRun({ stages: stagesList, currentStageId: instance.stage.id, logs: resumeLogs, openPullRequests: remoteRows?.pullRequests ?? {} }) : null
   const stageTitleOf = (id) => stagesList.find((s) => s.id === id)?.title ?? id
 
   async function startInterview(options) {
+    // Bring up to date is not a run: it has no target Stage and never moves the Instance on (#298).
+    if (update) {
+      await sessionRef.current?.start(options)
+      return
+    }
     // A run of one Stage is still a run: its plan and its status block say where it stands. A Stage the run carried on into carries on the same run.
     const sameRun = run && run.phase === 'running' && run.target === target
     if (carryingOn) updateRun(instance.slug, { carryOn: null, at: instance.stage.id })
@@ -581,9 +648,17 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       return
     }
     if (autoStarted.current || setup.status !== 'ready' || sources === null || !snap || !providerId || blockedReason) return
+    if (!flagsReady && !flagsWaited) return // a round about Out of date Fields may come first
     autoStarted.current = true
     startInterview()
-  }, [carryingOn, setup.status, sources, snap?.phase, providerId])
+  }, [carryingOn, setup.status, sources, snap?.phase, providerId, flagsReady, flagsWaited])
+
+  // Start waits for the Out of date check, which is quick, but never for long: it is only there to know whether a round of cards opens the interview (#298).
+  useEffect(() => {
+    if (flagsReady) return undefined
+    const timer = setTimeout(() => setFlagsWaited(true), 4000)
+    return () => clearTimeout(timer)
+  }, [flagsReady])
 
   // #296: the earlier Stage this one was drafted ahead of has merged (Check approval now found it): the Modules it held are open, so the AI is told.
   useEffect(() => {
@@ -720,11 +795,13 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           sessionRef.current?.loadDecisions(fresh)
         }
       }
-      workingCopies.clear(key) // everything the working copy held is saved
+      workingCopies.clear(sessionKey) // everything the working copy held is saved
+      // #298: a Module marked agreed that this Save changed is back to draft; the log kept why, and the card says so.
+      const returned = (decisions?.entries ?? []).filter((e) => e.kind === 'returned-to-draft')
       if (pause) {
         sessionRef.current?.markPaused()
         updateRun(instance.slug, { phase: 'paused', at: instance.stage.id })
-        setSaving({ phase: 'paused', fields: keys.length })
+        setSaving({ phase: 'paused', fields: keys.length, returned })
         return true
       }
       if (action === 'head-start') {
@@ -735,7 +812,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         return true
       }
       updateRun(instance.slug, { phase: outcome.finished ? 'done' : outcome.advances || outcome.requestsApproval ? 'running' : 'paused', at: instance.stage.id })
-      const saved = { phase: 'saved', check: result.check ?? null, finished: outcome.finished, approval: outcome.requestsApproval ? (queued ? 'queued' : 'requested') : null, willReRender }
+      const saved = { phase: 'saved', check: result.check ?? null, finished: outcome.finished, approval: outcome.requestsApproval ? (queued ? 'queued' : 'requested') : null, willReRender, returned }
       setSaving(saved)
       if (outcome.advances) await carryOn(saved)
       else if (outcome.requestsApproval && !queued) {
@@ -756,10 +833,64 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const saveStage = (action = 'stop') => runSave({ action })
   const pauseInterview = () => runSave({ pause: true })
 
+  // Saves what Bring up to date settled (#298): the answers in the decisions log, with any re-cited or redrafted Fields, as one stage Save through
+  // the Save check. It is not the end of a Stage: no run, no advance, no request for approval. The session's status line is written only when the
+  // AI was used (its tokens are kept there); an answer that needed no AI leaves the Stage's status exactly as it was.
+  async function saveUpdate() {
+    setSaving({ phase: 'saving' })
+    const keys = Object.keys(drafts)
+    const usedAi = hasTokens(snap?.tokens ?? EMPTY_TOKENS)
+    const delta = sessionRef.current?.decisionsDelta({ runState: 'done', saving: usedAi, target: instance.stage.id, stages: { [instance.stage.id]: 'done' } }) ?? null
+    const decisions = delta && !usedAi ? { ...delta, status: undefined } : delta
+    // Every Field was left flagged: nothing was answered, so there is nothing to write (and no empty log file or commit to make).
+    if (keys.length === 0 && (decisions?.entries ?? []).length === 0) {
+      setSaving({ phase: 'saved', update: true, fields: 0, answers: 0, returned: [] })
+      return true
+    }
+    let result
+    try {
+      result = await onSaveDrafts(drafts, { artefactId, decisions, settleClashes: (conflicts) => sessionRef.current.settleClashes(conflicts) })
+    } catch (err) {
+      result = { ok: false, message: err.message }
+    }
+    if (!result.ok) {
+      if (result.settledIds?.length) sessionRef.current?.discardEntries(result.settledIds)
+      setSaving({ phase: 'error', message: result.message || 'The Save did not go through.' })
+      return false
+    }
+    if (keys.length) sessionRef.current?.markSaved(keys)
+    if (decisions) {
+      sessionRef.current?.commitDecisions(result.decisions ?? decisions)
+      const fresh = await decisionsStore?.read(instance.stage.id).catch(() => null)
+      if (fresh) {
+        setCommittedLog(fresh)
+        setStageLogs((logs) => ({ ...logs, [instance.stage.id]: fresh }))
+        sessionRef.current?.loadDecisions(fresh)
+      }
+    }
+    workingCopies.clear(sessionKey)
+    const returned = (decisions?.entries ?? []).filter((e) => e.kind === 'returned-to-draft')
+    setSaving({ phase: 'saved', update: true, fields: keys.length, answers: (decisions?.entries ?? []).filter((e) => e.kind === 'source-update').length, returned })
+    return true
+  }
+
+  const [reopening, setReopening] = useState({ stageId: null, message: '' })
+  async function reopen(stageId) {
+    setReopening({ stageId, message: '' })
+    let result
+    try {
+      result = await onReopenStage(stageId)
+    } catch (err) {
+      result = { ok: false, message: err.message }
+    }
+    // A re-open that worked replaces this page with the one for the re-opened Stage.
+    setReopening({ stageId: null, message: result?.ok ? '' : result?.message || 'The Stage could not be re-opened.' })
+  }
+
   // Opens the page afresh from the saved log and content, as it would be in any browser (#290).
   function resumeAfterPause() {
-    sessions.delete(key)
-    workingCopies.clear(key)
+    sessions.delete(sessionKey)
+    workingCopies.clear(sessionKey)
     sessionRef.current = null
     setSnap(null)
     setSaving(null)
@@ -906,6 +1037,35 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     </div>`
   }
 
+  // Bring up to date (#298): what this Stage has, what waits for another Stage, and what is left flagged on purpose.
+  const updateKickoffExtras = () => {
+    if (setup.status !== 'ready') return null
+    const here = updatePlan?.items.length ?? 0
+    const next = otherUpdateStages[0] ?? null
+    return html`<div data-testid="interview-update-plan">
+      ${here
+        ? html`<p class="kick-note" data-testid="interview-update-count"><strong>${here} Field${here === 1 ? '' : 's'}</strong> on ${instance.stage.title} ${here === 1 ? 'is' : 'are'} Out of date.</p>`
+        : html`<p class="kick-note" data-testid="interview-update-none">Nothing on ${instance.stage.title} is Out of date.</p>`}
+      ${updateDeferredNote()}
+      ${next && !remote
+        ? html`<p class="kick-note" data-testid="interview-update-next">
+            ${next.count} Field${next.count === 1 ? '' : 's'} on ${stageTitleOf(next.stageId)} ${next.count === 1 ? 'is' : 'are'} Out of date too.
+            <button type="button" class="btn small ghost" data-testid="interview-update-goto" disabled=${!onOpenStage} onClick=${() => onOpenStage?.(next.stageId)}>${here ? `Go to ${stageTitleOf(next.stageId)} first` : `Go to ${stageTitleOf(next.stageId)}`}</button>
+          </p>`
+        : null}
+    </div>`
+  }
+
+  // Fields of a drafted-ahead Stage are left flagged and never written (ADR-0063).
+  const updateDeferredNote = () => {
+    const deferred = snap?.update?.deferred ?? updatePlan?.deferred ?? []
+    if (!deferred.length) return null
+    const stageIds = [...new Set(deferred.map((d) => d.stageId))]
+    return html`<p class="kick-note" data-testid="interview-update-deferred">
+      ${deferred.length} Field${deferred.length === 1 ? '' : 's'} on ${stageIds.map(stageTitleOf).join(', ')} stay${deferred.length === 1 ? 's' : ''} flagged: ${stageIds.length === 1 ? 'that Stage is' : 'those Stages are'} drafted ahead, and a drafted-ahead branch is never changed. Bring ${deferred.length === 1 ? 'it' : 'them'} up to date once ${stageIds.length === 1 ? 'it is' : 'they are'} the current Stage.
+    </p>`
+  }
+
   const kickoff = () => {
     const status = provider?.test?.status
     const sourceCount = (sources ?? []).filter((s) => !s.removedAt).length
@@ -917,10 +1077,28 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     }
     return html`
       <div class="kick" data-testid="interview-kickoff">
-        <p class="kick-intro">
-          The AI reads this Instance's Source documents, drafts the Fields they support, then talks them through with you. Nothing is saved
-          until you confirm the Stage, and it never passes a Gate that needs approval or review.
-        </p>
+        ${update
+          ? html`<p class="kick-intro" data-testid="interview-update-intro">
+              <strong>Bring up to date.</strong> Some Fields drew on a Source document that has since changed. You get one card for each of them, ${instance.stage.title} first
+              and the other Stages in order. Only answering a card clears its flag, and nothing is saved until you save the round.
+            </p>`
+          : html`<p class="kick-intro">
+              The AI reads this Instance's Source documents, drafts the Fields they support, then talks them through with you. Nothing is saved
+              until you confirm the Stage, and it never passes a Gate that needs approval or review.
+            </p>`}
+        ${!update && updatePlan?.items.length
+          ? html`<p class="kick-note" data-testid="interview-kickoff-update-note">
+              <strong>${updatePlan.items.length} Field${updatePlan.items.length === 1 ? ' is' : 's are'} Out of date.</strong>
+              ${` The interview starts with a round of cards about ${updatePlan.items.length === 1 ? 'it' : 'them'}, then carries on.`}
+            </p>`
+          : null}
+        ${!update && newSince.length
+          ? html`<p class="kick-note" data-testid="interview-kickoff-new-since">
+              <strong>${newSince.length} Source document${newSince.length === 1 ? ' is' : 's are'} New since the last interview.</strong>
+              ${` The AI reads ${newSince.length === 1 ? 'it' : 'them'} against what is saved, and asks a card only where ${newSince.length === 1 ? 'it adds' : 'they add'} to or ${newSince.length === 1 ? 'contradicts' : 'contradict'} something.`}
+            </p>`
+          : null}
+        ${update ? updateKickoffExtras() : null}
         ${blockedReason ? html`<p class="inline-error" role="alert" data-testid="interview-blocked">${blockedReason}</p>` : null}
         ${held.length
           ? html`<p class="kick-note" data-testid="interview-head-start-note">This Stage is drafted ahead of ${pendingTitles.join(' and ')}, which awaits approval, so the AI gets a head start only: it drafts the Modules no pending Stage mounts. Held until then: ${held.map((h) => setup.definition.modules.find((m) => m.id === h.id)?.title ?? h.id).join(', ')}.</p>`
@@ -928,7 +1106,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         ${asideNotice
           ? html`<div class="warn" role="status" data-testid="interview-copy-aside">
               A copy of unsaved work kept in this browser${asideNotice.savedAt ? ` (${new Date(asideNotice.savedAt).toLocaleString()})` : ''} was set aside, because this Stage's decisions log has been saved since it began. The saved log and content are what this interview carries on from.
-              <button type="button" class="btn small ghost" data-testid="interview-copy-aside-dismiss" onClick=${() => { workingCopies.clearAside(key); setAsideNotice(null) }}>Dismiss</button>
+              <button type="button" class="btn small ghost" data-testid="interview-copy-aside-dismiss" onClick=${() => { workingCopies.clearAside(sessionKey); setAsideNotice(null) }}>Dismiss</button>
             </div>`
           : null}
         ${resuming
@@ -964,7 +1142,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           : null}
         ${provider ? html`<${CardModeNote} provider=${provider} />` : null}
 
-        ${choices.candidates.length > 1
+        ${!update && choices.candidates.length > 1
           ? html`<label for="interview-artefact">Artefact to aim for</label>
             <select id="interview-artefact" data-testid="interview-artefact" onChange=${(e) => setPickedArtefact(e.currentTarget.value)}>
               ${choices.candidates.map((a) => html`<option key=${a.id} value=${a.id} selected=${a.id === artefactId}>${a.title ?? a.id}${a.id === choices.lightest?.id ? ' (lightest)' : ''}</option>`)}
@@ -972,7 +1150,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
             <p class="kick-note">More than one Artefact can pass this Stage's Gate. The lightest is pre-selected; the AI drafts what the one you choose requires.</p>`
           : null}
 
-        ${targets.length > 1
+        ${!update && targets.length > 1
           ? html`<label for="interview-run-until">Run until</label>
             <select id="interview-run-until" data-testid="interview-run-until" onChange=${(e) => setPickedTarget(e.currentTarget.value)}>
               ${targets.map((t) => html`<option key=${t.id} value=${t.id} selected=${t.id === target}>${t.title}${t.id === instance.stage.id ? ' (this Stage only)' : ''} (gate: ${t.gate})</option>`)}
@@ -1014,10 +1192,10 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           type="button"
           class="btn primary"
           data-testid="interview-start"
-          disabled=${!providerId || phase === 'testing' || sources === null || Boolean(blockedReason) || !snap || Boolean(snap?.sessionWarning)}
+          disabled=${!providerId || phase === 'testing' || sources === null || Boolean(blockedReason) || !snap || Boolean(snap?.sessionWarning) || (update && !updatePlan?.items.length) || (!flagsReady && !flagsWaited)}
           onClick=${() => startInterview()}
         >
-          ${phase === 'testing' ? PROGRESS_LABELS[snap?.testStep] ?? 'Testing the AI Provider…' : resuming ? 'Resume interview' : 'Start interview'}
+          ${phase === 'testing' ? PROGRESS_LABELS[snap?.testStep] ?? 'Testing the AI Provider…' : update ? 'Bring up to date' : resuming ? 'Resume interview' : 'Start interview'}
         </button>
       </div>
     `
@@ -1098,9 +1276,11 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     const last = page === total - 1
     return html`<div class="round" data-testid="interview-round" data-round=${round.id} data-final=${round.final ? 'true' : 'false'} data-page=${page + 1} data-pages=${total}>
       <div class="round-head" data-testid="round-head">
-        ${round.final ? 'Last round' : `Round ${round.id}`} · ${round.cards.length} question${round.cards.length === 1 ? '' : 's'}
+        ${round.update ? 'Bring up to date' : round.final ? 'Last round' : `Round ${round.id}`} · ${round.cards.length} ${round.update ? 'Field' : 'question'}${round.cards.length === 1 ? '' : 's'}
         ${total > 1 ? ` · cards ${page * PAGE_SIZE + 1}–${page * PAGE_SIZE + shown.length} of ${round.cards.length}` : ''}
       </div>
+      ${round.update ? html`<p class="round-note" data-testid="update-round-note">One card for each Field that is Out of date. Only your answer clears a flag.</p>` : null}
+      ${round.update ? updateDeferredNote() : null}
       ${round.final ? html`<p class="round-note">You chose to finish with the AI's recommendations. This is the one last round: only what the AI can't responsibly propose.</p>` : null}
       ${snap.held > 0 ? html`<p class="round-note" data-testid="round-held">${snap.held} more question${snap.held === 1 ? '' : 's'} will follow once these are answered.</p>` : null}
       ${shown.map((card) => html`<${QuestionCard} key=${card.id} card=${card} fieldTitle=${fieldTitle} session=${sessionRef.current} />`)}
@@ -1136,6 +1316,14 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     </div>`
   }
 
+  // Modules marked agreed that a Save took back to draft, with the note the decisions log keeps (#298).
+  const returnedList = (list) =>
+    list?.length
+      ? html`<ul class="update-returned" data-testid="interview-returned-to-draft">
+          ${list.map((e) => html`<li key=${e.id} data-module=${e.module}>${e.note}</li>`)}
+        </ul>`
+      : null
+
   // Pause saved the decisions log and the drafts so far (#290): this run stops here, and carries on from them in any browser.
   const pausedView = () => {
     if (phase !== 'paused') return null
@@ -1145,6 +1333,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         ${saving?.fields ? `${saving.fields} Field${saving.fields === 1 ? '' : 's'} and the decisions log are saved as one Save. ` : 'The decisions log is saved. '}The Modules stay <strong>draft</strong>.
         Open the Interview page on this Instance again, in this browser or any other, and the AI recaps from the log and carries on. The earlier conversation is not kept.
       </p>
+      ${returnedList(saving?.returned)}
       <div class="round-actions">
         <button type="button" class="btn primary" data-testid="interview-resume" onClick=${resumeAfterPause}>Resume now</button>
         <a class="btn ghost" href=${editorHref} data-testid="interview-paused-editor">Back to the editor</a>
@@ -1218,7 +1407,67 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     if (asked.ok) setSaving((was) => (was ? { ...was, approval: 'requested' } : was))
   }
 
+  // Bring up to date (#298): the answers are ready to save, or have been. Nothing here advances the Instance or asks for approval.
+  const updateEnd = () => {
+    const u = snap?.update
+    if (!u?.answered || snap?.round || snap?.clash) return null
+    const pending = snap?.decisions?.pending ?? 0
+    if (saving?.phase === 'saved' && saving.update) {
+      const next = otherUpdateStages[0] ?? null
+      return html`<div class="qcard stage-end saved" data-testid="update-saved" role="status">
+        <p class="qhead">${saving.answers || saving.fields ? 'Brought up to date and saved' : 'Nothing to save'}</p>
+        <p data-testid="update-saved-summary">
+          ${saving.answers || saving.fields
+            ? html`${saving.answers} answer${saving.answers === 1 ? '' : 's'} logged${saving.fields ? `, ${saving.fields} Field${saving.fields === 1 ? '' : 's'} changed` : ''}. The Modules stay <strong>draft</strong>: a person marks them agreed.`
+            : 'Every Field was left flagged, so nothing was written and the flags stay.'}
+        </p>
+        ${saving.returned.length
+          ? html`<ul class="update-returned" data-testid="update-returned">
+              ${saving.returned.map((e) => html`<li key=${e.id} data-module=${e.module}>${e.note}</li>`)}
+            </ul>`
+          : null}
+        ${next && !remote
+          ? html`<p class="kick-note" data-testid="update-next">
+              ${next.count} Field${next.count === 1 ? '' : 's'} on ${stageTitleOf(next.stageId)} ${next.count === 1 ? 'is' : 'are'} still Out of date.
+              <button type="button" class="btn small primary" data-testid="update-next-button" disabled=${!onOpenStage} onClick=${() => onOpenStage?.(next.stageId)}>Next: ${stageTitleOf(next.stageId)}</button>
+            </p>`
+          : null}
+        <div class="round-actions"><a class="btn ghost" href=${editorHref} data-testid="update-back-to-editor">Back to the editor</a></div>
+      </div>`
+    }
+    if (phase === 'working' || phase === 'testing' || phase === 'asking') return null
+    const kept = u.total
+    return html`<div class="qcard stage-end" data-testid="update-ready">
+      <div class="qchip">Bring up to date</div>
+      <p class="qhead">${kept} Field${kept === 1 ? '' : 's'} answered. Save the round?</p>
+      <p>${draftKeys.length ? `${draftKeys.length} Field${draftKeys.length === 1 ? ' is' : 's are'} changed in the preview. ` : 'No Field text changes. '}${pending} answer${pending === 1 ? ' is' : 's are'} waiting in the decisions log. Saving is one Stage Save, and a flag clears only for a Field you answered.</p>
+      ${u.reopen.length
+        ? html`<div data-testid="update-reopen">
+            <p class="kick-note" data-testid="update-reopen-note">
+              You chose to re-open ${u.reopen.map(stageTitleOf).join(', ')}, because ${u.reopen.length === 1 ? 'a Field' : 'Fields'} there can't be changed from ${instance.stage.title}. Saving this round starts ${instance.stage.title} (it gets a branch),
+              and while ${instance.stage.title} is in progress ${u.reopen.map(stageTitleOf).join(', ')} cannot be re-opened (ADR-0026). So either re-open now, and the other answers in this round are not saved: bring the Stage up to date again from there, and it asks about all of them. Or save the other answers, and the Fields that need ${u.reopen.map(stageTitleOf).join(', ')} stay flagged.
+            </p>
+            <div class="round-actions">
+              ${u.reopen.map(
+                (id) => html`<button key=${id} type="button" class="btn primary" data-testid="update-reopen-button" data-stage-id=${id} disabled=${reopening.stageId !== null || saving?.phase === 'saving' || !onReopenStage} onClick=${() => reopen(id)}>
+                  ${reopening.stageId === id ? 'Re-opening…' : `Re-open ${stageTitleOf(id)}`}
+                </button>`
+              )}
+            </div>
+            ${reopening.message ? html`<p class="inline-error" role="alert" data-testid="update-reopen-error">${reopening.message}</p>` : null}
+          </div>`
+        : null}
+      ${saving?.phase === 'error' ? html`<p class="inline-error" role="alert" data-testid="update-save-error">${saving.message}</p>` : null}
+      <div class="round-actions">
+        <button type="button" class=${'btn' + (u.reopen.length ? '' : ' primary')} data-testid="update-save" disabled=${saving?.phase === 'saving' || Boolean(blockedReason) || handEditing !== null} onClick=${saveUpdate}>
+          ${saving?.phase === 'saving' ? 'Saving…' : u.reopen.length ? 'Save the other answers instead' : 'Save the round'}
+        </button>
+      </div>
+    </div>`
+  }
+
   const stageEnd = () => {
+    if (update) return updateEnd()
     if (saving?.phase === 'drafting-ahead') {
       return html`<div class="qcard stage-end saved" data-testid="interview-drafting-ahead" role="status">
         <p class="qhead">Saved. Drafting ahead on ${followingStage?.title ?? 'the next Stage'}…</p>
@@ -1231,6 +1480,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       return html`<div class="qcard stage-end saved" data-testid="interview-saved" role="status">
         <p class="qhead">${approval.phase === 'requesting' ? 'Saved. Asking for approval…' : 'Saved'}</p>
         <p>${stage?.title ?? instance.stage.title} is saved as one Stage Save. The Modules stay <strong>draft</strong>: a person marks them agreed.</p>
+        ${returnedList(saving.returned)}
         ${saving.check ? html`<p class="gate-ok" data-testid="interview-saved-gate">${saving.check.pass ? `The ${instance.stage.gate} Gate check passes.` : `The Gate check still reports: ${saving.check.outstanding?.join(', ') || 'see the editor'}.`}</p>` : null}
         ${saving.reRendered?.length ? html`<p data-testid="interview-rerendered">Re-rendered ${saving.reRendered.join(', ')} onto this Stage's branch before asking, with the approved ${saving.reRendered.length === 1 ? 'copy' : 'copies'} kept in out/approved/.</p>` : null}
         ${saving.approval === 'queued'
@@ -1252,6 +1502,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       return html`<div class="qcard stage-end saved" data-testid="interview-saved" role="status">
         <p class="qhead">${saving.finished && multiStage ? 'Saved. The run is done.' : 'Saved'}</p>
         <p>${stage?.title ?? instance.stage.title} is saved as one Stage Save. The Modules stay <strong>draft</strong>: a person marks them agreed.</p>
+        ${returnedList(saving.returned)}
         ${saving.check ? html`<p class="gate-ok" data-testid="interview-saved-gate">${saving.check.pass ? `The ${instance.stage.gate} Gate check passes.` : `The Gate check still reports: ${saving.check.outstanding?.join(', ') || 'see the editor'}.`}</p>` : null}
         ${saving.finished && multiStage ? html`<p data-testid="interview-run-done">${stageTitleOf(target)} was the target, so the run is done.</p>` : null}
         ${!saving.finished && followingStage
@@ -1328,6 +1579,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
               <span class="field-label">${field.title ?? field.id}
                 ${draft && !draft.handEdited ? html`<span class="ai-mark" data-testid="interview-ai-mark">AI draft · unsaved</span>` : null}
                 ${draft?.handEdited ? html`<span class="ai-mark hand-mark" data-testid="interview-hand-mark">Your edit · unsaved</span>` : null}
+                ${flagsForField(outOfDate, fieldKey).length ? html`<span class="ai-mark ood-mark" data-testid="interview-field-out-of-date">Out of date</span>` : null}
                 ${drafting ? html`<span class="ai-mark drafting-mark" data-testid="interview-field-drafting">drafting…</span>` : null}
                 ${draft && budget !== null ? html`<span class="field-words" title=${`${targetSizeLabel(size)} target`}>${draft.words} / ~${budget} words</span>` : null}
                 ${editable ? html`<button type="button" class="btn small ghost hand-edit-open" data-testid="interview-field-edit" onClick=${() => openHandEdit(fieldKey)}>Edit</button>` : null}
@@ -1467,7 +1719,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           </div>
         </div>
         <div class="interview-composer">
-          ${started && phase !== 'paused'
+          ${started && phase !== 'paused' && !update
             ? html`<div class="inner composer-actions">
                 <button type="button" class="btn small ghost" data-testid="interview-pause" disabled=${busy || phase === 'kickoff' || saving?.phase === 'saving' || Boolean(blockedReason) || Boolean(snap?.clash)} title="Save the decisions log and the drafts so far, then carry on later in this browser or any other. The Modules stay draft." onClick=${pauseInterview}>
                   ${saving?.phase === 'saving' && saving.pause ? 'Pausing…' : 'Pause'}

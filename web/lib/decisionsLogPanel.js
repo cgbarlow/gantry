@@ -11,6 +11,30 @@ const day = (iso) => String(iso ?? '').slice(0, 10)
 const CHOICES = { keep: 'kept what was saved', replace: "replaced it with the AI's version", merge: 'merged the two' }
 const HAND_CHOICES = { keep: 'kept their own edit', replace: "took the AI's version in place of their edit", merge: 'merged their edit and the AI’s version' }
 
+const CHANGE_WORDS = { removed: 'removed', replaced: 'replaced', 're-extracted': 'read again with different text', changed: 'changed' }
+
+/** A `source-update` entry (#298) as a sentence: what the architect decided for a Field that was Out of date, naming what triggered it. */
+function describeSourceUpdate(entry, fieldTitle) {
+  const field = asList(entry.fields).map(fieldTitle).join(', ') || 'a Field'
+  const trigger = entry.inputField
+    ? `${fieldTitle(entry.inputField)} changed`
+    : `${entry.sourceTitle || entry.source} was ${CHANGE_WORDS[entry.change] ?? 'changed'}${entry.replacedBy ? ` by ${entry.replacedBy}` : ''}`
+  switch (entry.outcome) {
+    case 'keep':
+      return `${field} kept as it is: ${trigger}`
+    case 'redraft':
+      return `${field} to be redrafted: ${trigger}`
+    case 'redraft-without':
+      return `${field} to be redrafted without ${entry.sourceTitle || entry.source}: ${trigger}`
+    case 're-cite':
+      return `${field} re-cited to ${entry.reciteTo || 'another document'}: ${trigger}`
+    case 'open-question':
+      return `${field} could not be changed here and is an open question: ${trigger}`
+    default:
+      return `${field}: ${trigger}`
+  }
+}
+
 /** One entry as a sentence for a reader: the question and the answer, or what the architect said, or what was chosen. */
 export function describeEntry(entry, { fieldTitle = (key) => key } = {}) {
   const fields = asList(entry.fields).map(fieldTitle)
@@ -41,6 +65,10 @@ export function describeEntry(entry, { fieldTitle = (key) => key } = {}) {
       return `Saved content in ${fieldTitle(entry.field)}: ${CHOICES[entry.choice] ?? entry.choice}`
     case 'open-question':
       return `${entry.question}${entry.why ? ` — ${entry.why}` : ''}${feeds}`
+    case 'source-update':
+      return describeSourceUpdate(entry, fieldTitle)
+    case 'returned-to-draft':
+      return entry.note ?? `${entry.module ?? 'A Module'} returned to draft`
     case 'artefact':
       return `Aimed for the ${entry.title ?? entry.artefact} Artefact`
     case 'restart':
@@ -52,7 +80,7 @@ export function describeEntry(entry, { fieldTitle = (key) => key } = {}) {
   }
 }
 
-const KIND_LABELS = { term: 'Term', answer: 'Answer', fact: 'Architect', 'saved-content': 'Saved content', 'hand-edit': 'Hand edit', 'open-question': 'Open question', artefact: 'Artefact', restart: 'Restart', 'model-change': 'Model' }
+const KIND_LABELS = { term: 'Term', answer: 'Answer', fact: 'Architect', 'saved-content': 'Saved content', 'hand-edit': 'Hand edit', 'open-question': 'Open question', artefact: 'Artefact', restart: 'Restart', 'model-change': 'Model', 'source-update': 'Brought up to date', 'returned-to-draft': 'Returned to draft' }
 
 function EntryRow({ entry, fieldTitle, state }) {
   return html`<li class=${'dl-entry' + (entry.kind === 'open-question' && state !== 'old' ? ' open' : '') + (state === 'old' ? ' old' : '')} data-testid="decisions-entry" data-entry-id=${entry.id} data-kind=${entry.kind} data-state=${state ?? 'current'}>

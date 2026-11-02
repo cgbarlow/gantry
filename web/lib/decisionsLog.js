@@ -19,9 +19,12 @@ export const DECISIONS_LOG_VERSION = 1
 /**
  * The entry kinds built by #288, `term` (#291): a **term choice**, the preferred term and the names to avoid, which binds every later Stage,
  * and `hand-edit` (#289): the architect's own edit of a drafted Field in the Interview page's preview, kept as the text they typed.
+ * `source-update` (#298) is the architect's answer to a "Bring up to date" card about a Field that was Out of date: it names the Source
+ * document that changed (or the earlier Field), the Field, and what was decided (keep, redraft, re-cite, redraft without it, open question).
+ * `returned-to-draft` (#298) records that a Module marked `agreed` went back to `draft` because a change to it was saved, and why.
  * The log adds more by their own tickets, and shows any kind it does not know as it is.
  */
-export const ENTRY_KINDS = Object.freeze(['answer', 'fact', 'saved-content', 'hand-edit', 'open-question', 'artefact', 'restart', 'model-change', 'term', 'save-clash'])
+export const ENTRY_KINDS = Object.freeze(['answer', 'fact', 'saved-content', 'hand-edit', 'open-question', 'artefact', 'restart', 'model-change', 'term', 'save-clash', 'source-update', 'returned-to-draft'])
 
 /** Where a Stage's log lives, relative to the Instance's folder. */
 export const decisionsLogPath = (stageId) => `interview/${stageId}.yaml`

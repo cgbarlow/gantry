@@ -204,6 +204,8 @@ function logEntryLine(entry) {
   if (entry.question) bits.push(entry.question)
   if (entry.kind === 'term') bits.push(`prefer "${entry.preferred ?? entry.term}"${asArray(entry.avoid).length ? `, avoid ${asArray(entry.avoid).map((a) => `"${a}"`).join(', ')}` : ''}`)
   if (entry.recommendation) bits.push(`recommended: ${entry.recommendation}`)
+  if (entry.kind === 'source-update') bits.push(`${entry.outcome ?? 'answered'}${entry.sourceTitle || entry.source ? ` (${entry.sourceTitle || entry.source} ${entry.change ?? 'changed'})` : entry.inputField ? ` (${entry.inputField} changed)` : ''}`)
+  if (entry.kind === 'returned-to-draft' && entry.note) bits.push(entry.note)
   if (entry.answer) bits.push(`answer: ${asArray(entry.answer).join('; ')}`)
   if (entry.words) bits.push(`the architect's words: "${entry.words}"`)
   if (asArray(entry.sources).length) bits.push(`sources: ${asArray(entry.sources).join(', ')}`)

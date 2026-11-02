@@ -265,6 +265,39 @@ export function createSessionLog(config = {}) {
       return add(clean({ kind: 'save-clash', field, choice, fields: feeds ? [field] : [], ...links([], replaced) }))
     },
 
+    /**
+     * #298: the architect's answer to a "Bring up to date" card about a Field that was Out of date. `trigger` names what changed: the Source
+     * document (`source`, `sourceTitle`, the `change` and, for a replacement, `replacedBy`), or the earlier Field it drew on (`inputField`
+     * with `inputFingerprint`, the fingerprint of that Field's text when the architect answered). `outcome` is `keep`, `redraft`,
+     * `redraft-without`, `re-cite` (with `reciteTo`, the document it now cites) or `open-question`. A flag clears when this entry is saved:
+     * only answering a card clears one (web/lib/outOfDate.js reads these). `stage` is the Stage the Field belongs to when that is not this one.
+     */
+    addSourceUpdate({ field, outcome, trigger = {}, reciteTo, stage }) {
+      return add({
+        kind: 'source-update',
+        ...clean({
+          source: trigger.source,
+          sourceTitle: trigger.sourceTitle,
+          change: trigger.change,
+          replacedBy: trigger.replacedBy,
+          inputField: trigger.inputField,
+          inputFingerprint: trigger.inputFingerprint,
+          outcome,
+          reciteTo,
+          stage,
+          fields: [field],
+        }),
+      })
+    },
+
+    /**
+     * #298: a Module marked `agreed` goes back to `draft` because a change to it is being saved. Only a person marks a Module agreed, so
+     * the log keeps why it was taken back: the Module, the Fields that changed and a note in plain words.
+     */
+    addReturnedToDraft({ module, fields = [], note }) {
+      return add({ kind: 'returned-to-draft', ...clean({ module, fields, note }) })
+    },
+
     /** Takes back entries that were never sent (a Save that was cancelled after its clash cards were answered). */
     discard(ids) {
       const drop = new Set(ids)
