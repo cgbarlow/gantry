@@ -1,0 +1,53 @@
+id: advertising
+title: Advertising
+purpose: >
+  Record how the role reached the market: where it was advertised, for how long, and what came
+  back.
+
+  Advertising is the second of the two steps in this process with no documented detail behind
+  it. As with role evaluation, what you write here is currently the only record that exists, so
+  describe what was done rather than pointing at a process that has not been written down.
+
+fields:
+  - id: channels
+    title: Channels
+    type: select
+    multiple: true
+    required-at:
+      - candidate-selected
+    options:
+      - Job boards
+      - Careers site
+      - Agencies
+      - Internal channels
+      - Professional networks
+    guidance: >
+      Every place the role was advertised. Name the agency in `notes` below where one was used.
+
+  - id: period
+    title: Advertising period
+    type: markdown
+    required-at:
+      - candidate-selected
+    guidance: >
+      Open and close dates. If the period was extended or the advertisement re-run, record each
+      extension and why it was needed — a re-run is usually the first sign the role or the
+      market was misjudged.
+
+  - id: response
+    title: Response
+    type: markdown
+    required-at:
+      - candidate-selected
+    guidance: >
+      How many applications were received and an honest assessment of their fit. Numbers alone
+      are not useful; a shortlist of two from forty applications and a shortlist of two from
+      three are very different situations.
+
+  - id: notes
+    title: Notes
+    type: markdown
+    required: false
+    guidance: >
+      Name the agency where one was used. Anything else about how the role was taken to market
+      that would be worth knowing next time.

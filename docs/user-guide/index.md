@@ -178,6 +178,8 @@ In `definition.yaml` the key is `interview:` on the Definition and on each Stage
 
 The worked example throughout this guide remains the `design` definition, illustrated by the bundled **Examples** workspace: `kiwi-cover-mutual`, a fictitious insurer's design with content for every stage, and `gantry`, Gantry's own hosting proposal written as a complete Full SOAP. Both run on `design` version 3, a draft where the next round of design changes is being made, so their documents can differ from version 2's. New `design` instances still start on version 2, the latest published version, unless you pick version 3 in the wizard. The "Populate example text" button on a version 3 stage fills from `kiwi-cover-mutual`.
 
+The bundled `platform-engineer` example is a worked hire on the `recruitment-onboarding` definition, and it runs on version 4. Version 4 is published and is the default for new `recruitment-onboarding` instances. It is version 3 with the **Glossary** and **Open questions** standard modules mounted on every stage, and with its own Interview instructions, so the AI interviews about HR personal data with care. Open questions are now a table (question, who resolves, by when, status) instead of a list, and *Process gaps* has moved to a Module of its own. The Hire Record ends with a Glossary. Versions 1 to 3 are unchanged, so an instance on one of them keeps rendering exactly as it did. Moving an instance from version 3 to version 4 is a per-instance step: convert its open questions to the table, move its process gaps into the new Module, and add a Glossary.
+
 ## Stages & Gates
 
 A **Stage** is an ordered phase of a Definition. It makes the relevant modules available for authoring and ends at one **Gate**.

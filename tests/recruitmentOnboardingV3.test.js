@@ -14,8 +14,7 @@ import { readOnlyModuleAt, readOnlyWriteRefusal } from '../web/lib/readOnlyModul
 // recruitment-onboarding/3` starts as a draft copy of v2, and tests/fixtures/recruitment-
 // onboarding-v3/platform-engineer is a copy of the platform-engineer worked hire
 // migrated to v3 and pinned to v3. Once v3 was published (#186) the example itself,
-// workspaces/examples/platform-engineer, moved to v3 as the same copy (a test below keeps them
-// identical); its v2 form is kept at tests/fixtures/recruitment-onboarding-v2 for the tests that
+// workspaces/examples/platform-engineer, moved to v3 as the same copy (until #309 moved it to v4); its v2 form is kept at tests/fixtures/recruitment-onboarding-v2 for the tests that
 // exercise v2.
 //
 // The harness runs the gate check at every Gate and dry-run renders every Artefact against that
@@ -328,15 +327,12 @@ test('recruitment-onboarding/3 is published, and v2 stays published', () => {
   assert.equal(loadDefinition('recruitment-onboarding', { version: 2 }).status, 'published')
 })
 
-// #186: the bundled example is the harness's worked hire, pinned to published v3, and passes every
-// v3 Gate as shipped.
-test('the bundled platform-engineer example is on v3, identical to the harness fixture, and passes every Gate', () => {
-  const EXAMPLES = 'workspaces/examples'
-  assert.equal(readInstance(SLUG, { instancesDir: EXAMPLES }).definitionVersion, 3)
-  for (const file of ['instance.yaml', ...readdirSync(join(FIXTURE, SLUG, 'modules')).map((m) => join('modules', m))]) {
-    assert.equal(readFileSync(join(EXAMPLES, SLUG, file), 'utf8'), readFileSync(join(FIXTURE, SLUG, file), 'utf8'), file)
-  }
-  for (const { gate } of GATES) assert.equal(checkGate(SLUG, { instancesDir: EXAMPLES, gate }).pass, true, gate)
+// #186: the bundled example was the harness's worked hire, pinned to published v3. #309 moved the
+// example on to v4 (tests/recruitmentOnboardingV4.test.js keeps it identical to the v4 fixture), so
+// this file keeps the v3 fixture: the worked hire as it stood on v3, which still passes every v3 Gate.
+test('the v3 fixture is the worked hire pinned to v3, and passes every Gate', () => {
+  assert.equal(readInstance(SLUG, { instancesDir: FIXTURE }).definitionVersion, 3)
+  for (const { gate } of GATES) assert.equal(checkGate(SLUG, { instancesDir: FIXTURE, gate }).pass, true, gate)
 })
 
 test('findDefinitionProblems reports zero problems for recruitment-onboarding/3', () => {
