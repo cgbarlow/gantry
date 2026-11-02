@@ -1,6 +1,7 @@
 import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { withFlatSystem } from './helpers/aiRequest.js'
 
 // #289 (parent #238): the architect hand-edits an AI draft in the Interview page's preview. Built on the session harness of tests/interviewLog.test.js.
 // (#288 was: the decisions log an AI interview session collects.) A fake `fetch` plays the AI Provider with scripted
@@ -91,7 +92,7 @@ function fakeAi(handler) {
   const calls = []
   const fetchImpl = async (url, init = {}) => {
     const envelope = JSON.parse(init.body)
-    const request = { url: envelope.url, headers: envelope.headers, body: envelope.body ? JSON.parse(envelope.body) : null, raw: envelope.body }
+    const request = { url: envelope.url, headers: envelope.headers, body: envelope.body ? withFlatSystem(JSON.parse(envelope.body)) : null, raw: envelope.body }
     calls.push(request)
     return handler(request, calls.length - 1)
   }

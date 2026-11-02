@@ -1,6 +1,7 @@
 import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { withFlatSystem } from './helpers/aiRequest.js'
 
 // #292 (parent #238): the AI interview session reading large Source document packs, scanned PDFs and pictures. A fake `fetch`
 // plays the AI Provider and the tests look at what it was sent and how the session records what the AI read.
@@ -70,7 +71,7 @@ function fakeAi(handler) {
   const calls = []
   const fetchImpl = async (url, init = {}) => {
     const envelope = JSON.parse(init.body)
-    calls.push({ url: envelope.url, body: envelope.body ? JSON.parse(envelope.body) : null, raw: envelope.body })
+    calls.push({ url: envelope.url, body: envelope.body ? withFlatSystem(JSON.parse(envelope.body)) : null, raw: envelope.body })
     return handler(calls.at(-1), calls.length - 1)
   }
   return { fetchImpl, calls }

@@ -48,7 +48,7 @@ for (const chunkSize of [Infinity, 7, 1]) {
   test(`Anthropic: text and token usage from a recorded stream (${split})`, () => {
     const events = parse('anthropic', fixture('anthropic-text.sse'), chunkSize)
     assert.equal(text(events), 'Hello, architect.')
-    assert.deepEqual(events.find((e) => e.type === 'usage'), { type: 'usage', inputTokens: 25, outputTokens: 15, cacheReadTokens: 10, cacheWriteTokens: 5 })
+    assert.deepEqual(events.find((e) => e.type === 'usage'), { type: 'usage', inputTokens: 40, outputTokens: 15, cacheReadTokens: 10, cacheWriteTokens: 5 }) // #294: all the input, 25 uncached + 10 read + 5 written
     assert.deepEqual(events.at(-1), { type: 'done', stopReason: 'end_turn' })
     assert.equal(events.filter((e) => e.type === 'tool-call').length, 0)
   })
@@ -254,4 +254,60 @@ test('an OpenAI reasoning model is not sent a temperature', () => {
   const req = buildChatRequest(provider, { messages: [{ role: 'user', text: 'x' }] })
   assert.equal(req.body.temperature, undefined)
   assert.equal(req.body.reasoning_effort, 'medium')
+})
+
+// ---------- #294: prompt caching is always on, for one hour ----------
+
+const STABLE = '## 1. Rules\n\nStable brief. Source documents follow here.'
+const SYSTEM = `${STABLE}\n\n## 9. Decisions log so far\n\nNothing yet.`
+
+test('#294 Anthropic request: a one-hour cache point sits after the stable part of the system text, which holds the Source documents', () => {
+  const provider = normaliseAiProvider({ type: 'anthropic', address: 'https://api.anthropic.com', key: 'k', model: 'claude-x' })
+  const req = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: [{ role: 'user', text: 'x' }] })
+  assert.deepEqual(req.body.system, [
+    { type: 'text', text: STABLE, cache_control: { type: 'ephemeral', ttl: '1h' } },
+    { type: 'text', text: '\n\n## 9. Decisions log so far\n\nNothing yet.' },
+  ])
+  assert.equal(req.body.system.map((b) => b.text).join(''), SYSTEM, 'nothing is lost or reordered by the split')
+})
+
+test('#294 Anthropic request: no stable part means a plain system string, and a system that is all stable has one block', () => {
+  const provider = normaliseAiProvider({ type: 'anthropic', address: 'https://api.anthropic.com', key: 'k', model: 'claude-x' })
+  assert.equal(buildChatRequest(provider, { system: 'Be brief.', messages: [{ role: 'user', text: 'x' }] }).body.system, 'Be brief.')
+  assert.equal(buildChatRequest(provider, { system: 'Be brief.', cachePrefix: 'Something else', messages: [{ role: 'user', text: 'x' }] }).body.system, 'Be brief.')
+  assert.deepEqual(buildChatRequest(provider, { system: STABLE, cachePrefix: STABLE, messages: [{ role: 'user', text: 'x' }] }).body.system, [{ type: 'text', text: STABLE, cache_control: { type: 'ephemeral', ttl: '1h' } }])
+})
+
+test('#294 Anthropic request: originals attached to the first message are behind a cache point too', () => {
+  const provider = normaliseAiProvider({ type: 'anthropic', address: 'https://api.anthropic.com', key: 'k', model: 'claude-x' })
+  const withPdf = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: [{ role: 'user', text: 'Start', documents: [{ mediaType: 'application/pdf', filename: 'a.pdf', data: 'AAAA' }] }, { role: 'assistant', text: 'ok' }, { role: 'user', text: 'More' }] })
+  const first = withPdf.body.messages[0].content
+  assert.deepEqual(first.at(-1).cache_control, { type: 'ephemeral', ttl: '1h' })
+  assert.equal(first.filter((b) => b.cache_control).length, 1)
+  assert.equal(withPdf.body.messages[2].content, 'More', 'later turns carry no cache point of their own')
+  const plain = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: [{ role: 'user', text: 'Start' }] })
+  assert.equal(plain.body.messages[0].content, 'Start', 'nothing attached, nothing marked')
+})
+
+test('#294 OpenAI-style requests are left as they are: the order of the prompt is what lets the AI Provider cache it', () => {
+  for (const type of ['openai', 'ollama', 'lmstudio', 'custom']) {
+    const provider = normaliseAiProvider({ type, address: 'http://localhost:1234', key: 'k', model: 'm' })
+    const req = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: [{ role: 'user', text: 'x' }] })
+    assert.deepEqual(req.body.messages[0], { role: 'system', content: SYSTEM }, type)
+    assert.ok(!JSON.stringify(req.body).includes('cache_control'), type)
+  }
+})
+
+test('#294 OpenRouter: a cache point for the Anthropic models it routes to, nothing for the others', () => {
+  const claude = normaliseAiProvider({ type: 'openrouter', address: 'https://openrouter.ai/api/v1', key: 'k', model: 'anthropic/claude-x' })
+  const req = buildChatRequest(claude, { system: SYSTEM, cachePrefix: STABLE, messages: [{ role: 'user', text: 'x' }] })
+  assert.deepEqual(req.body.messages[0].content[0], { type: 'text', text: STABLE, cache_control: { type: 'ephemeral', ttl: '1h' } })
+  const other = normaliseAiProvider({ type: 'openrouter', address: 'https://openrouter.ai/api/v1', key: 'k', model: 'meta/llama' })
+  assert.equal(buildChatRequest(other, { system: SYSTEM, cachePrefix: STABLE, messages: [{ role: 'user', text: 'x' }] }).body.messages[0].content, SYSTEM)
+})
+
+test('#294 a complete (non-streamed) Anthropic answer counts all the input, cached or not', () => {
+  const provider = normaliseAiProvider({ type: 'anthropic', address: 'https://api.anthropic.com', key: 'k', model: 'm' })
+  const events = eventsFromCompleteResponse(provider, { content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn', usage: { input_tokens: 7, cache_read_input_tokens: 90, cache_creation_input_tokens: 3, output_tokens: 4 } })
+  assert.deepEqual(events.find((e) => e.type === 'usage'), { type: 'usage', inputTokens: 100, outputTokens: 4, cacheReadTokens: 90, cacheWriteTokens: 3 })
 })

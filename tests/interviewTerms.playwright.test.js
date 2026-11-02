@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { createInstance } from '../lib/instance.js'
+import { withFlatSystem } from './helpers/aiRequest.js'
 
 // #291 (parent #238): term cards, Key decision cards and open questions on the Interview page. A real server and relay, a real
 // Chromium page, and a stand-in for Anthropic that plays a scripted interview (as in tests/interviewCards.playwright.test.js).
@@ -65,7 +66,7 @@ function withFakeAnthropic(script, fn) {
         res.end(JSON.stringify({ data: [{ id: 'claude-small', max_input_tokens: 200000 }] }))
         return
       }
-      posts.push({ raw, body: JSON.parse(raw) })
+      posts.push({ raw, body: withFlatSystem(JSON.parse(raw)) })
       res.writeHead(200, { 'Content-Type': 'text/event-stream' })
       res.end(anthropicReply(script(JSON.parse(raw), posts.length - 1)))
     })

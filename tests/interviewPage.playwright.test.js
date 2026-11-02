@@ -10,6 +10,7 @@ import { createInstance, readModule } from '../lib/instance.js'
 import { loadDefinition } from '../lib/definition.js'
 import { parse as parseYAML } from 'yaml'
 import { pngImage, scannedPdf, textPdf } from './helpers/sourceFixtures.js'
+import { systemText } from './helpers/aiRequest.js'
 
 // #286 (parent #238): the Interview page, end to end, on a server workspace and on a Local workspace. A real server and
 // relay, a real Chromium page, and a stand-in for Anthropic that plays a scripted interview: it opens with a summary, drafts
@@ -452,8 +453,8 @@ test('server workspace: a large pack is read through the catalogue, a scan and a
           // The pack is over half the model's window, so the AI got a catalogue and the reader, not the text.
           const first = posts[0].body
           assert.deepEqual(first.tools.map((t) => t.name), ['ask_architect', 'draft_field', 'log_decision', 'read_source_document'])
-          assert.match(first.system, /only a catalogue is shown/)
-          assert.doesNotMatch(first.system, /alpha alpha alpha/)
+          assert.match(systemText(first), /only a catalogue is shown/)
+          assert.doesNotMatch(systemText(first), /alpha alpha alpha/)
 
           // The scan and the visual PDF went as PDFs, the picture as an image, on the first message.
           assert.deepEqual(first.messages[0].content.map((b) => b.type), ['image', 'document', 'document', 'text'])

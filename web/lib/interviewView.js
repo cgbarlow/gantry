@@ -23,7 +23,8 @@ import { citationSegments, isBlankValue } from './interviewDraft.js'
 import { describeInput, planSourceAccess } from './interviewSources.js'
 import { effectiveTargetSize, fieldTargetWords, targetSizeLabel } from './targetSize.js'
 import { logSummary } from './decisionsLog.js'
-import { beginRun, clearRun, interviewRuns, nextStage, planRows, resumableRun, runTargets, saveOutcome, updateRun } from './interviewRun.js'
+import { beginRun, clearRun, interviewRuns, nextStage, planRows, resumableRun, runStartStage, runTargets, saveOutcome, updateRun } from './interviewRun.js'
+import { EMPTY_TOKENS, addTokens, formatTokens, hasTokens, tokenBreakdown, tokensOfLog, totalTokens } from './tokenUsage.js'
 
 // One session per Instance Stage while the editor page is open, so going to the editor and back keeps the conversation and the drafts.
 const sessions = new Map()
@@ -214,6 +215,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const [chat, setChat] = useState('')
   const [saving, setSaving] = useState(null)
   const [committedLog, setCommittedLog] = useState(null) // the Stage's decisions log as committed (#288)
+  const [stageLogs, setStageLogs] = useState({}) // every Stage's committed log, by Stage id: the tokens each Stage has used (#294)
   const [confirmRestart, setConfirmRestart] = useState(false)
   const [handEditing, setHandEditing] = useState(null) // { key, error? }: the drafted Field open for a hand edit (#289)
   const sessionRef = useRef(null)
@@ -230,14 +232,16 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     setSetup({ status: 'loading' })
     const stageAt = (instance.stages ?? []).findIndex((st) => st.id === instance.stage.id)
     const previousId = stageAt > 0 ? instance.stages[stageAt - 1].id : null
+    // #294: every Stage's log, not only this one's and the one before, because the run plan shows what each Stage has used.
+    const otherIds = (instance.stages ?? []).map((st) => st.id).filter((id) => id !== instance.stage.id)
     Promise.all([
       loadStructure(),
       loadSkills(),
       loadOtherSaved().catch(() => []),
       decisionsStore?.read(instance.stage.id).catch(() => null) ?? null,
-      previousId ? decisionsStore?.read(previousId).catch(() => null) ?? null : null,
+      Promise.all(otherIds.map((id) => decisionsStore?.read(id).catch(() => null) ?? null)),
     ])
-      .then(async ([structure, skills, otherSaved, committedLog, previousLog]) => {
+      .then(async ([structure, skills, otherSaved, committedLog, others]) => {
         // #291: a term choice made at an earlier Stage binds this one, and an open question left there is carried to the Open questions
         // module, so the earlier Stages' logs are read too. A log that can't be read is left out: the interview carries on without it.
         const stages = structure.stages ?? []
@@ -247,9 +251,11 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           : []
         if (cancelled) return
         const definition = { ...structure, modules: modulesWithStandard(structure.modules, structure.standardModules) }
+        const logs = { ...Object.fromEntries(otherIds.map((id, at) => [id, others[at]])), [instance.stage.id]: committedLog }
         setSetup({ status: 'ready', structure, definition, skills, otherSaved, earlierDecisions })
         setCommittedLog(committedLog)
-        setResumeLogs({ [instance.stage.id]: committedLog, ...(previousId ? { [previousId]: previousLog } : {}) })
+        setStageLogs(logs)
+        setResumeLogs({ [instance.stage.id]: committedLog, ...(previousId ? { [previousId]: logs[previousId] } : {}) })
       })
       .catch((err) => !cancelled && setSetup({ status: 'error', message: err.message }))
     return () => {
@@ -385,6 +391,15 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   else if (settled && draftKeys.length === 0) planCurrent = settled
   else if (started || phase === 'testing') planCurrent = 'drafting'
   const planRowsNow = planRows({ stages: stagesList, currentStageId: instance.stage.id, targetStageId: target, current: planCurrent })
+  // #294: tokens, from what each AI Provider reported. A Stage's total is every session's status line in its committed log, except this
+  // session's own (it is counted in full from memory, so its older committed line is not added twice). The session total is this run:
+  // the Stages it went through before this one (from their logs) and what this session has used on this one.
+  const mineHere = snap?.tokens ?? EMPTY_TOKENS
+  const stageTokens = (id) => (id === instance.stage.id ? addTokens(tokensOfLog(stageLogs[id], { exceptSession: snap?.decisions?.session }), mineHere) : tokensOfLog(stageLogs[id]))
+  const currentAt = stagesList.findIndex((st) => st.id === instance.stage.id)
+  const runStartAt = Math.max(0, Math.min(currentAt, stagesList.findIndex((st) => st.id === runStart)))
+  const sessionTokens = stagesList.slice(runStartAt, currentAt).reduce((sum, st) => addTokens(sum, tokensOfLog(stageLogs[st.id])), mineHere)
+  const thisStageTokens = stageTokens(instance.stage.id)
   const resume = resumeLogs && !carryingOn && phase === 'kickoff' ? resumableRun({ stages: stagesList, currentStageId: instance.stage.id, logs: resumeLogs }) : null
   const stageTitleOf = (id) => stagesList.find((s) => s.id === id)?.title ?? id
 
@@ -422,7 +437,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       setResumeMessage('There is no next Stage to carry on with.')
       return
     }
-    beginRun(instance.slug, { target: resume.targetStageId, startStageId: resume.fromStageId, providerId, at: instance.stage.id, carryOn: follow ? follow.id : instance.stage.id })
+    const startStageId = runStartStage(stagesList, resumeLogs?.[resume.fromStageId], resume.fromStageId)
+    beginRun(instance.slug, { target: resume.targetStageId, startStageId, providerId, at: instance.stage.id, carryOn: follow ? follow.id : instance.stage.id })
     if (follow) {
       const result = await onAdvance()
       if (!result.ok) {
@@ -502,6 +518,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         const fresh = await decisionsStore?.read(instance.stage.id).catch(() => null)
         if (fresh) {
           setCommittedLog(fresh)
+          setStageLogs((logs) => ({ ...logs, [instance.stage.id]: fresh }))
           sessionRef.current?.loadDecisions(fresh)
         }
       }
@@ -644,6 +661,27 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           </li>`
         )}
       </ul>
+    </div>`
+  }
+
+  // Tokens (#294), never money: what each AI Provider reported, with no budgets or limits. Hovering shows input, cached and output tokens
+  // and the share of input read from cache. Nothing per round, and nothing in AI Provider settings.
+  const rowTokens = (stageId) => {
+    const at = stagesList.findIndex((st) => st.id === stageId)
+    const used = at !== -1 && at <= currentAt ? stageTokens(stageId) : null
+    if (!used || !hasTokens(used)) return null
+    return html`<span class="rp-tokens" data-testid="run-plan-tokens" title=${tokenBreakdown(used)} tabindex="0">${formatTokens(totalTokens(used))}</span>`
+  }
+  const tokensRail = () => {
+    if (!hasTokens(sessionTokens) && !hasTokens(thisStageTokens)) return null
+    return html`<div class="rail-tokens" data-testid="interview-tokens">
+      <h3 class="side">Tokens</h3>
+      <dl>
+        <dt>This session</dt>
+        <dd data-testid="interview-tokens-session" title=${tokenBreakdown(sessionTokens)} tabindex="0">${formatTokens(totalTokens(sessionTokens))}</dd>
+        <dt>This stage</dt>
+        <dd data-testid="interview-tokens-stage" title=${tokenBreakdown(thisStageTokens)} tabindex="0">${formatTokens(totalTokens(thisStageTokens))}</dd>
+      </dl>
     </div>`
   }
 
@@ -816,11 +854,14 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           <ol class="runplan">
             ${planRowsNow.map(
               (row) => html`<li key=${row.id} class=${`rp-${row.state}${row.target ? ' rp-target' : ''}`} data-testid="run-plan-row" data-stage-id=${row.id} data-state=${row.state} data-target=${row.target ? 'true' : 'false'}>
-                <span class="dot"></span><span class="rp-title">${row.title}</span><span class="rp-note">${row.note}</span>
+                <span class="dot"></span><span class="rp-title">${row.title}</span>
+                ${rowTokens(row.id)}
+                <span class="rp-note">${row.note}</span>
               </li>`
             )}
           </ol>
         </div>
+        ${tokensRail()}
         <h3 class="side">Source documents</h3>
         <${SourceDocumentsPanel} store=${store} actor=${actor} readOnly=${Boolean(blockedReason)} compact=${true} onList=${onSourceList} />
         ${decisionsRail()}

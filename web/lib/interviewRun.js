@@ -122,6 +122,18 @@ export function resumableRun({ stages, currentStageId, logs = {} }) {
   return null
 }
 
+/**
+ * The Stage a run began on, from the `stages` map the run's last Save wrote into its status block (#293): the earliest of the Stages it
+ * names. `fallback` when the log names none. A run resumed in another browser takes its start from here, so its session total (#294)
+ * still adds up the Stages it already went through.
+ */
+export function runStartStage(stages, log, fallback) {
+  const named = Object.keys(latestStatus(log)?.stages ?? {})
+    .map((id) => indexOf(stages, id))
+    .filter((at) => at !== -1)
+  return named.length ? stages[Math.min(...named)].id : fallback
+}
+
 // ---------- the run held in this tab ----------
 
 /**

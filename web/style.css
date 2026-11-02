@@ -2313,6 +2313,11 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .interview-rail .runplan .rp-done .dot { background: var(--stamp-agreed-bg); border-color: var(--stamp-agreed-bg); }
 .interview-rail .runplan .rp-beyond { color: var(--text-muted); text-decoration: line-through; }
 .interview-rail .runplan .rp-target .rp-title { font-weight: 600; }
+.interview-rail .runplan li:has(.rp-tokens) { flex-wrap: wrap; }
+.interview-rail .runplan .rp-tokens { order: 3; flex-basis: 100%; margin-left: 18px; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); cursor: help; }
+.interview-rail .rail-tokens dl { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; margin: 0; font-size: 13px; }
+.interview-rail .rail-tokens dt { color: var(--text-muted); }
+.interview-rail .rail-tokens dd { margin: 0; font-family: var(--font-mono); font-size: 12px; text-align: right; cursor: help; }
 .interview-rail .runplan .rp-note { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); text-align: right; }
 .interview-page .qcard .btn .rec { background: transparent; color: inherit; border: var(--hairline) solid currentColor; }
 .interview-page .kick-resume { padding: 10px 12px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); margin: 0 0 12px; }

@@ -58,6 +58,7 @@ import { fieldsInScope } from './interviewScope.js'
 import { openQuestionsToCarry, standardDraftProblems, standardRoles, termChoices } from './interviewStandard.js'
 import { LOG_TOOL, LOG_TOOL_NAME, LOG_FENCE, LOG_TEXT_FALLBACK_INSTRUCTIONS, createSessionLog, extractLogBlocks, stripLogBlocks } from './interviewLog.js'
 import { findArchitectMessage, logSummary } from './decisionsLog.js'
+import { tokensOfModels } from './tokenUsage.js'
 import { CHANGE_OPTIONS, acceptRecommendation, answersText, changeCard, choose, chooseOther, followsRecommendation, isAnswered, isAutoId, otherWords, releaseHeld, shapeCard, sortRound, splitReady, termChoice } from './interviewRounds.js'
 
 export { fieldsInScope }
@@ -270,6 +271,8 @@ export function createInterviewSession(config = {}) {
     round: state.round ? { ...state.round, cards: state.round.cards.map((c) => ({ ...c, selected: [...c.selected] })) } : null,
     openFields: openFields(),
     decisions: { ...logSummary(log.entries()), pending: log.pending().length, session: log.sessionId },
+    // #294: this session's tokens on this Stage, as the status block of the log will record them (all the AI Providers it used).
+    tokens: tokensOfModels(log.usage()),
   })
   const say = (who, text, extra = {}) => {
     const item = { id: nextId++, who, text, ...extra }
@@ -688,6 +691,8 @@ export function createInterviewSession(config = {}) {
     const handEdits = [...handOwned].map(([key, edit]) => ({ key, text: edit.text }))
     return {
       system: `${brief.text}\n\n${sessionNote({ cardMode: state.cardMode, textDrafts, reader, handEdits })}`,
+      // #294: the part that is the same on every turn, up to and including the Source documents. The cache point goes after it.
+      cachePrefix: brief.stableText,
       tools: textDrafts ? [] : [DRAFT_TOOL, LOG_TOOL, ...(reader ? [READ_TOOL] : [])],
       withAttachments,
       knownSources: (context.sources ?? []).filter((s) => !s.removedAt).map((s) => ({ id: s.id, title: s.title })),
@@ -736,9 +741,9 @@ export function createInterviewSession(config = {}) {
           const provider = getAiProvider(state.providerId)
           if (!provider) throw new Error('This AI Provider no longer exists. Choose another.')
           const { textDrafts } = capabilities(provider)
-          const { system, tools, withAttachments, knownSources } = await prepare(provider)
+          const { system, cachePrefix, tools, withAttachments, knownSources } = await prepare(provider)
           const history = withAttachments(textDrafts ? flattenToolHistory(messages) : messages)
-          return runTurn(provider, { system, messages: history, tools, knownSources, askCards: state.cardMode !== 'chat' }, { fetchImpl, origin, signal: controller.signal, onEvent, toolProgress: true })
+          return runTurn(provider, { system, cachePrefix, messages: history, tools, knownSources, askCards: state.cardMode !== 'chat' }, { fetchImpl, origin, signal: controller.signal, onEvent, toolProgress: true })
         }, handlers)
         state.usage = {
           inputTokens: state.usage.inputTokens + result.usage.inputTokens,

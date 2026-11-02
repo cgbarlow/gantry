@@ -1,6 +1,7 @@
 import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { withFlatSystem } from './helpers/aiRequest.js'
 
 // #287 (parent #238): rounds of question cards in an AI interview session. A fake `fetch` plays the AI Provider with scripted
 // streams, as in tests/interviewSession.test.js; the AI Providers list is the real one, kept in a fake localStorage.
@@ -85,7 +86,7 @@ function fakeAi(handler) {
   const calls = []
   const fetchImpl = async (url, init = {}) => {
     const envelope = JSON.parse(init.body)
-    const request = { url: envelope.url, headers: envelope.headers, body: envelope.body ? JSON.parse(envelope.body) : null, raw: envelope.body }
+    const request = { url: envelope.url, headers: envelope.headers, body: envelope.body ? withFlatSystem(JSON.parse(envelope.body)) : null, raw: envelope.body }
     calls.push(request)
     return handler(request, calls.length - 1)
   }

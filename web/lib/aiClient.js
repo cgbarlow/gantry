@@ -27,7 +27,7 @@ import { ASK_TOOL, ASK_TOOL_NAME, TEXT_FALLBACK_INSTRUCTIONS, interpretTurn, sta
 
 /**
  * One streamed call. An async generator of the internal events (text, tool-start, tool-call, usage, done).
- * `params` is `{ system, messages, tools, maxTokens }`; `options` is `{ fetchImpl, origin, signal }`.
+ * `params` is `{ system, cachePrefix, messages, tools, maxTokens }` (`cachePrefix`: the start of `system` that stays the same from turn to turn, #294); `options` is `{ fetchImpl, origin, signal }`.
  * Throws an `AiProviderError` for a call that failed, whose `code` says what to do about it.
  */
 export async function* streamChat(provider, params, options = {}) {
@@ -117,7 +117,7 @@ export function questionCardMode(provider) {
  * to continue from: it includes the failed attempt and its error result when a card was sent back).
  * A card is shown only when its tool call is complete; an invalid one goes back to the model once.
  */
-export async function runTurn(provider, { system = '', messages = [], tools = [], knownSources, askCards = true } = {}, options = {}) {
+export async function runTurn(provider, { system = '', cachePrefix = '', messages = [], tools = [], knownSources, askCards = true } = {}, options = {}) {
   const mode = questionCardMode(provider)
   // #286: `askCards: false` offers no question cards at all (the Interview page drafts and chats before the cards of #287 arrive).
   const fullSystem = mode === 'text' && askCards ? [system, TEXT_FALLBACK_INSTRUCTIONS].filter(Boolean).join('\n\n') : system
@@ -129,7 +129,7 @@ export async function runTurn(provider, { system = '', messages = [], tools = []
     let text = ''
     let announced = false
     const toolCalls = []
-    for await (const event of streamChat(provider, { system: fullSystem, messages: history, tools: offered }, options)) {
+    for await (const event of streamChat(provider, { system: fullSystem, cachePrefix, messages: history, tools: offered }, options)) {
       if (event.type === 'text') {
         text += event.text
         if (!announced && startsQuestionBlock(text)) {

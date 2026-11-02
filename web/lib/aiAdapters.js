@@ -16,6 +16,10 @@
 //   { type: 'tool-call', id, name, input }        a tool call is complete; `input` is null and `invalid` says why
 //                                                 when the arguments were not valid JSON
 //   { type: 'usage', inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }
+//                                                 #294: `inputTokens` is always ALL the input of the request, cached or not
+//                                                 (OpenAI reports it that way; Anthropic reports the uncached part apart, so the
+//                                                 parser adds the cache reads and writes back), so the share read from cache is
+//                                                 `cacheReadTokens / inputTokens` whichever AI Provider answered
 //   { type: 'done', stopReason }
 import { classifyFailure } from './aiProviders.js'
 
@@ -82,6 +86,15 @@ function anthropicMessages(messages) {
   return wire
 }
 
+// The originals attached to the first message (pictures and PDFs, #292) are as stable as the system text, so a second cache point sits
+// after them: the one-hour cache then covers the documents however they reach the model.
+function markAttachmentsCacheable(wire) {
+  const first = wire[0]
+  if (!first || first.role !== 'user' || !Array.isArray(first.content)) return
+  if (!first.content.some((b) => b.type === 'image' || b.type === 'document')) return
+  first.content[first.content.length - 1].cache_control = { ...CACHE_CONTROL }
+}
+
 function openAiMessages(system, messages) {
   const wire = []
   if (system) wire.push({ role: 'system', content: system })
@@ -112,19 +125,48 @@ function openAiMessages(system, messages) {
   return wire
 }
 
+// #294: prompt caching is always on, for one hour, wherever the AI Provider takes a cache point. The interview brief's stable part
+// (Gantry's rules, the skills, the Stage, the saved content and the Source documents) is the start of the system text and does not
+// change from turn to turn, so the cache point goes right after it; everything that changes (the decisions log, the session note)
+// follows. OpenAI caches a repeated prefix by itself, so for it (and the others) the order alone is the work.
+export const CACHE_CONTROL = Object.freeze({ type: 'ephemeral', ttl: '1h' })
+
+/** Splits `system` after `cachePrefix`: `[prefix, rest]` (`rest` may be ''), or null when the text does not start with it. */
+function splitAtCachePoint(system, cachePrefix) {
+  if (!cachePrefix || !system.startsWith(cachePrefix)) return null
+  return [cachePrefix, system.slice(cachePrefix.length)]
+}
+
+/** A system message's text blocks, with the cache point on the first one. */
+function cachedSystemBlocks(system, cachePrefix) {
+  const [prefix, rest] = splitAtCachePoint(system, cachePrefix)
+  const blocks = [{ type: 'text', text: prefix, cache_control: { ...CACHE_CONTROL } }]
+  if (rest.trim()) blocks.push({ type: 'text', text: rest })
+  return blocks
+}
+
+/** The Anthropic `system` value: the text, or its blocks with the cache point when there is a stable prefix. */
+const anthropicSystem = (system, cachePrefix) => (splitAtCachePoint(system, cachePrefix) ? cachedSystemBlocks(system, cachePrefix) : system)
+
+/** OpenRouter forwards `cache_control` on content parts to the Anthropic models it routes to. */
+const cachesViaOpenRouter = (provider) => provider.type === 'openrouter' && /^anthropic\//i.test(provider.model ?? '')
+
 /**
  * The streaming chat request for `provider`. `params`: `{ system, messages, tools, maxTokens }` (see the header
  * for the message shape; a tool is `{ name, description, parameters }`). The AI Provider's own settings
- * (temperature, max tokens, the Advanced set) are applied here. Returns `{ url, method, headers, body }`.
+ * (temperature, max tokens, the Advanced set) are applied here. `cachePrefix` (#294) is the start of `system` that stays the same from turn
+ * to turn; Anthropic gets a one-hour cache point after it (and after the originals attached to the first message, which are as stable).
+ * Returns `{ url, method, headers, body }`.
  */
-export function buildChatRequest(provider, { system = '', messages = [], tools = [], maxTokens } = {}) {
+export function buildChatRequest(provider, { system = '', cachePrefix = '', messages = [], tools = [], maxTokens } = {}) {
   const key = provider.key?.trim()
   const adv = provider.advanced ?? {}
   const address = provider.address.trim()
   const outputLimit = maxTokens ?? provider.maxTokens
   if (provider.type === 'anthropic') {
     const body = { model: provider.model, max_tokens: outputLimit ?? DEFAULT_MAX_TOKENS, messages: anthropicMessages(messages), stream: true }
-    set(body, 'system', system)
+    set(body, 'system', anthropicSystem(system, cachePrefix))
+    if (cachePrefix) markAttachmentsCacheable(body.messages)
     if (tools.length) {
       body.tools = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters }))
       body.tool_choice = { type: 'auto' }
@@ -142,6 +184,7 @@ export function buildChatRequest(provider, { system = '', messages = [], tools =
   }
   // OpenAI Chat Completions, and everything that speaks it.
   const body = { model: provider.model, messages: openAiMessages(system, messages), stream: true, stream_options: { include_usage: true } }
+  if (cachesViaOpenRouter(provider) && splitAtCachePoint(system, cachePrefix)) body.messages[0] = { role: 'system', content: cachedSystemBlocks(system, cachePrefix) }
   if (tools.length) {
     body.tools = tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }))
     body.tool_choice = 'auto'
@@ -239,7 +282,7 @@ const ANTHROPIC_ERROR_STATUS = { authentication_error: 401, permission_error: 40
  */
 export function createAnthropicParser(provider) {
   const blocks = new Map() // content block index -> { id, name, json }
-  const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
+  const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } // inputTokens here: the uncached part only
   let stopReason = null
   let finished = false
   return {
@@ -307,7 +350,8 @@ export function createAnthropicParser(provider) {
       if (finished) return []
       finished = true
       // A tool call cut off before its block closed is not complete: it is dropped, never half-used.
-      return [{ type: 'usage', ...usage }, { type: 'done', stopReason }]
+      // #294: Anthropic reports the input it did not read from or write to the cache on its own; all of it is the input.
+      return [{ type: 'usage', ...usage, inputTokens: usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens }, { type: 'done', stopReason }]
     },
   }
 }
@@ -353,6 +397,7 @@ export function createOpenAiParser(provider) {
         usage.inputTokens = obj.usage.prompt_tokens ?? obj.usage.input_tokens ?? usage.inputTokens
         usage.outputTokens = obj.usage.completion_tokens ?? obj.usage.output_tokens ?? usage.outputTokens
         usage.cacheReadTokens = obj.usage.prompt_tokens_details?.cached_tokens ?? usage.cacheReadTokens
+        usage.cacheWriteTokens = obj.usage.prompt_tokens_details?.cache_write_tokens ?? usage.cacheWriteTokens
       }
       const choice = obj.choices?.[0]
       if (!choice) return out
@@ -411,10 +456,10 @@ export function eventsFromCompleteResponse(provider, body) {
         out.push({ type: 'tool-start', id: block.id, name: block.name }, { type: 'tool-call', id: block.id, name: block.name, input: block.input ?? {} })
       }
     }
-    usage.inputTokens = body?.usage?.input_tokens ?? 0
     usage.outputTokens = body?.usage?.output_tokens ?? 0
     usage.cacheReadTokens = body?.usage?.cache_read_input_tokens ?? 0
     usage.cacheWriteTokens = body?.usage?.cache_creation_input_tokens ?? 0
+    usage.inputTokens = (body?.usage?.input_tokens ?? 0) + usage.cacheReadTokens + usage.cacheWriteTokens
     stopReason = body?.stop_reason ?? null
   } else {
     const choice = body?.choices?.[0]
@@ -428,6 +473,7 @@ export function eventsFromCompleteResponse(provider, body) {
     usage.inputTokens = body?.usage?.prompt_tokens ?? 0
     usage.outputTokens = body?.usage?.completion_tokens ?? 0
     usage.cacheReadTokens = body?.usage?.prompt_tokens_details?.cached_tokens ?? 0
+    usage.cacheWriteTokens = body?.usage?.prompt_tokens_details?.cache_write_tokens ?? 0
     stopReason = choice?.finish_reason ?? null
   }
   out.push({ type: 'usage', ...usage }, { type: 'done', stopReason })

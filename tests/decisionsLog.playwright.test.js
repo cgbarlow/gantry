@@ -8,6 +8,7 @@ import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { createInstance } from '../lib/instance.js'
 import { parse as parseYAML } from 'yaml'
+import { systemText } from './helpers/aiRequest.js'
 
 // #288 (parent #238, docs/adr/0064): the decisions log on the Interview page and in the editor, end to end. A real server and relay, a real Chromium
 // page, and a stand-in for Anthropic that plays a scripted interview (see tests/interviewPage.playwright.test.js for the
@@ -264,7 +265,7 @@ test('server workspace: the committed log is what the AI is told is settled, and
             await page.waitForFunction(() => document.querySelector('[data-testid="interview-decisions-count"]')?.textContent.trim() === '1')
             await page.click('[data-testid="interview-start"]')
             await page.waitForSelector('[data-testid="interview-msg"][data-who="ai"]')
-            assert.match(posts[0].body.system, /Who pays for it\?/, 'the AI is told what is settled')
+            assert.match(systemText(posts[0].body), /Who pays for it\?/, 'the AI is told what is settled')
 
             await page.click('[data-testid="interview-restart"]')
             await page.click('[data-testid="interview-restart-yes"]')
@@ -272,8 +273,8 @@ test('server workspace: the committed log is what the AI is told is settled, and
             assert.equal((await page.textContent('[data-testid="interview-decisions-count"]')).trim(), '0', 'nothing before the marker holds any more')
             await page.click('[data-testid="interview-start"]')
             await page.waitForSelector('[data-testid="interview-msg"][data-who="ai"]')
-            assert.ok(!posts.at(-1).body.system.includes('Who pays for it?') || /fresh start/.test(posts.at(-1).body.system), 'the AI ignores earlier answers after a restart')
-            assert.match(posts.at(-1).body.system, /Nothing is logged for this Stage yet/)
+            assert.ok(!systemText(posts.at(-1).body).includes('Who pays for it?') || /fresh start/.test(systemText(posts.at(-1).body)), 'the AI ignores earlier answers after a restart')
+            assert.match(systemText(posts.at(-1).body), /Nothing is logged for this Stage yet/)
           })
         )
     )

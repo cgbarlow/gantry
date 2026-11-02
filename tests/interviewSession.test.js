@@ -1,6 +1,7 @@
 import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { withFlatSystem } from './helpers/aiRequest.js'
 
 // #286 (parent #238): an AI interview session — the conversation, the drafts, the checks on them. A fake `fetch` plays the
 // AI Provider (through the relay, as the app calls it), answering with scripted streams; the AI Providers list is the real
@@ -99,7 +100,7 @@ function fakeAi(handler) {
   const calls = []
   const fetchImpl = async (url, init = {}) => {
     const envelope = JSON.parse(init.body)
-    const request = { url: envelope.url, headers: envelope.headers, body: envelope.body ? JSON.parse(envelope.body) : null, raw: envelope.body }
+    const request = { url: envelope.url, headers: envelope.headers, body: envelope.body ? withFlatSystem(JSON.parse(envelope.body)) : null, raw: envelope.body }
     calls.push(request)
     return handler(request, calls.length - 1)
   }
@@ -352,4 +353,45 @@ test('the Gate check runs over saved content with the drafts laid on top', () =>
   const full = draftGateCheck({ structure, stageId: 'shape', artefactId: 'full', modules, drafts: { 'details.summary': { value: 'x' } } })
   assert.equal(full.pass, false)
   assert.deepEqual(full.outstanding, ['details.notes', 'details.risk'])
+})
+
+// ---------- #294: tokens, and prompt caching that is always on ----------
+
+test('#294 an Anthropic request carries a one-hour cache point right after the Source documents, and the decisions log follows it', async () => {
+  const ai = fakeAi(() => anthropicReply({ text: 'Nothing to draft yet.' }))
+  const { session } = sessionWith(ai)
+  await session.start()
+  await session.send('Please look again.')
+  assert.ok(ai.calls.length >= 2)
+  for (const call of ai.calls) {
+    const blocks = call.body.systemBlocks
+    assert.equal(blocks.length, 2, 'the stable brief, then what changes')
+    assert.deepEqual(blocks[0].cache_control, { type: 'ephemeral', ttl: '1h' })
+    assert.equal(blocks[1].cache_control, undefined, 'one cache point, none after the part that changes')
+    assert.match(blocks[0].text, /## 8\. Source documents/)
+    assert.match(blocks[0].text, /The insurer wants faster claims\./, 'the Source documents are in front of the cache point')
+    assert.doesNotMatch(blocks[0].text, /## 9\. Decisions log so far/)
+    assert.match(blocks[1].text, /## 9\. Decisions log so far/)
+  }
+  assert.equal(ai.calls[0].body.systemBlocks[0].text, ai.calls[1].body.systemBlocks[0].text, 'the same bytes on every turn, so the cache can be read')
+})
+
+test("#294 the snapshot carries this session's tokens: all the input, how much was read from the cache, and the output", async () => {
+  const ai = fakeAi(() =>
+    sse([
+      ['message_start', { type: 'message_start', message: { id: 'm', type: 'message', role: 'assistant', content: [], usage: { input_tokens: 20, cache_read_input_tokens: 700, cache_creation_input_tokens: 80, output_tokens: 1 } } }],
+      ['content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }],
+      ['content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hello.' } }],
+      ['content_block_stop', { type: 'content_block_stop', index: 0 }],
+      ['message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 30 } }],
+      ['message_stop', { type: 'message_stop' }],
+    ])
+  )
+  const { session } = sessionWith(ai)
+  await session.start()
+  assert.deepEqual(session.snapshot().tokens, { input: 800, cached: 700, output: 30 })
+  await session.send('Again.')
+  assert.deepEqual(session.snapshot().tokens, { input: 1600, cached: 1400, output: 60 })
+  const delta = session.decisionsDelta({ runState: 'in-progress' })
+  assert.deepEqual(delta.status.models, [{ type: 'anthropic', model: 'claude-x', inputTokens: 1600, cachedTokens: 1400, outputTokens: 60 }])
 })

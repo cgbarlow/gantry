@@ -1,6 +1,7 @@
 import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { withFlatSystem } from './helpers/aiRequest.js'
 
 // #291 (parent #238, docs/adr/0065): the interview settles preferred terms, offers Key decisions and records open questions. A fake
 // `fetch` plays the AI Provider with scripted streams, as in tests/interviewLog.test.js; the Definition mounts the three standard
@@ -91,7 +92,7 @@ function fakeAi(handler) {
   const calls = []
   const fetchImpl = async (url, init = {}) => {
     const envelope = JSON.parse(init.body)
-    const request = { url: envelope.url, headers: envelope.headers, body: envelope.body ? JSON.parse(envelope.body) : null, raw: envelope.body }
+    const request = { url: envelope.url, headers: envelope.headers, body: envelope.body ? withFlatSystem(JSON.parse(envelope.body)) : null, raw: envelope.body }
     calls.push(request)
     return handler(request, calls.length - 1)
   }
