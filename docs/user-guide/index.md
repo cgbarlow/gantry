@@ -242,6 +242,8 @@ Two people can have the same stage open, and a Save never silently overwrites th
 
 So two people editing different Fields (even in the same module) both save and neither loses anything. After a merge the Save button reads *Saved — merged with changes saved meanwhile*. Uploading an image or other file in the meantime never causes this: only a change to a Field's content does. This works the same on a local workspace, a server workspace, GitHub and Azure DevOps.
 
+An AI agent saving through the MCP server gets the same protection. `get_instance` returns the stage's `stageVersion`, and the agent hands it back to `update_instance_modules`. If you (or anyone) saved the stage after the agent read it, nothing is saved: the agent is told which of the Fields in its call are saved differently now, and is expected to read the stage again and settle the difference with you before saving. An agent that sends no version, as agents written before this check do, still saves as it always did, but the response lists every Field the save overwrote, so you can see what it replaced. Writing the version is strongly preferred, and it will be required once an agent runs a whole interview session.
+
 ### Visual, Split and Markdown views
 
 - **Visual** (the default) shows each field the way it will read — headings, bold and italic, code, quotes, links, images and Mermaid diagrams — and you edit it in place. The markdown markers under your caret stay visible on the line you are editing, so you can always see and correct them.

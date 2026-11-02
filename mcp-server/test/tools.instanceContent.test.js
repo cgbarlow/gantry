@@ -368,6 +368,100 @@ test('update_instance_modules surfaces a validation 400 for an unknown module id
   }
 })
 
+// #272 (ADR-0068): get_instance returns the stage's version and update_instance_modules takes it. A
+// mismatch is refused naming the Fields that differ; with no version the save goes through unchanged.
+function stageVersionFetch(onPut) {
+  return stubFetch(({ url, method, body }) => {
+    if (url.pathname === '/api/instance/workspace') return { status: 200, body: { workspaceId: null, scope: null } }
+    if (url.pathname === '/api/instance/modules' && method === 'PUT') return onPut(JSON.parse(body))
+    return undefined
+  })
+}
+
+test('update_instance_modules sends the stage version it was given as baseVersion, and returns the new one', async () => {
+  let sent
+  const fetch = stageVersionFetch((parsed) => {
+    sent = parsed
+    return { status: 200, body: { saved: ['discovery'], stageVersion: 'bbbbbbbbbbbbbbbb' } }
+  })
+  try {
+    const gantryClient = createGantryClient({ baseUrl: BASE_URL, workspacePats: {} })
+    const result = await updateInstanceModulesTool.handler(
+      { slug: 'my-instance', stageVersion: 'aaaaaaaaaaaaaaaa', modules: { discovery: { fields: { summary: 'Updated' } } } },
+      { gantryClient }
+    )
+    assert.equal(result.isError, undefined)
+    assert.deepEqual(sent, { modules: { discovery: { fields: { summary: 'Updated' } } }, baseVersion: 'aaaaaaaaaaaaaaaa' })
+    assert.equal(JSON.parse(result.content[0].text).stageVersion, 'bbbbbbbbbbbbbbbb')
+  } finally {
+    fetch.restore()
+  }
+})
+
+test('update_instance_modules refuses a stale stage version, naming the Fields that differ and leaving the saved stage out', async () => {
+  const fetch = stageVersionFetch(() => ({
+    status: 409,
+    body: {
+      error: 'This stage was changed after you read it — settle the differences Field by Field, then save again.',
+      code: 'stage_changed',
+      stageVersion: 'cccccccccccccccc',
+      differingFields: ['discovery.summary', 'discovery."Open points"'],
+      current: { discovery: { fields: { summary: 'Theirs' } } },
+    },
+  }))
+  try {
+    const gantryClient = createGantryClient({ baseUrl: BASE_URL, workspacePats: {} })
+    const result = await updateInstanceModulesTool.handler(
+      { slug: 'my-instance', stageVersion: 'aaaaaaaaaaaaaaaa', modules: { discovery: { fields: { summary: 'Mine' } } } },
+      { gantryClient }
+    )
+    assert.equal(result.isError, true)
+    const payload = JSON.parse(result.content[0].text)
+    assert.match(payload.error, /nothing was saved/)
+    assert.match(payload.error, /discovery\.summary, discovery\."Open points"/)
+    assert.deepEqual(payload.detail, { code: 'stage_changed', stageVersion: 'cccccccccccccccc', differingFields: ['discovery.summary', 'discovery."Open points"'] })
+    assert.equal(JSON.stringify(payload).includes('Theirs'), false, 'the saved stage is re-read through get_instance, not echoed')
+  } finally {
+    fetch.restore()
+  }
+})
+
+test('update_instance_modules says so when a stale version clashes with none of the Fields in the call', async () => {
+  const fetch = stageVersionFetch(() => ({ status: 409, body: { code: 'stage_changed', stageVersion: 'cccccccccccccccc', differingFields: [], current: {} } }))
+  try {
+    const gantryClient = createGantryClient({ baseUrl: BASE_URL, workspacePats: {} })
+    const result = await updateInstanceModulesTool.handler({ slug: 'my-instance', stageVersion: 'stale', modules: { discovery: { fields: { goals: 'x' } } } }, { gantryClient })
+    assert.equal(result.isError, true)
+    assert.match(JSON.parse(result.content[0].text).error, /None of the Fields in your call differ/)
+  } finally {
+    fetch.restore()
+  }
+})
+
+test('update_instance_modules with no stage version still saves, sends no baseVersion, and returns the Fields it overwrote', async () => {
+  let sent
+  const fetch = stageVersionFetch((parsed) => {
+    sent = parsed
+    return { status: 200, body: { saved: ['discovery'], stageVersion: 'bbbbbbbbbbbbbbbb', overwrittenFields: ['discovery.summary'] } }
+  })
+  try {
+    const gantryClient = createGantryClient({ baseUrl: BASE_URL, workspacePats: {} })
+    const result = await updateInstanceModulesTool.handler({ slug: 'my-instance', modules: { discovery: { fields: { summary: 'Updated' } } } }, { gantryClient })
+    assert.equal(result.isError, undefined)
+    assert.equal('baseVersion' in sent, false)
+    assert.deepEqual(JSON.parse(result.content[0].text).overwrittenFields, ['discovery.summary'])
+  } finally {
+    fetch.restore()
+  }
+})
+
+test('the descriptions of get_instance and update_instance_modules explain the stage version', () => {
+  assert.match(getInstanceTool.description, /stageVersion/)
+  assert.match(updateInstanceModulesTool.description, /"stageVersion"[^]*stage_changed[^]*differingFields/)
+  assert.match(updateInstanceModulesTool.description, /overwrittenFields/)
+  assert.ok(updateInstanceModulesTool.inputSchema.stageVersion, 'stageVersion is an input')
+})
+
 // ---------------------------------------------------------------------------
 // render_artefact
 // ---------------------------------------------------------------------------

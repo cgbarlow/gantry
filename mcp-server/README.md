@@ -70,6 +70,26 @@ Two independent auth layers, matching `docs/adr/0043`:
 No PAT is ever accepted as a tool argument for an *existing* workspace, and none is ever included in
 a tool's response.
 
+## Saving content safely: the stage version
+
+Two writers can be on one stage at once: an architect in the editor, a colleague, another agent. So a save
+checks what changed since the writer read it (`docs/adr/0068`).
+
+- `get_instance` returns `stageVersion`, a fingerprint of every Field's content on the stage. It follows
+  Field content only, so an uploaded Asset or a render leaves it unchanged.
+- `update_instance_modules` takes it as `stageVersion` and passes it to gantry serve as `baseVersion`. When it
+  still matches, the call saves and returns the stage's new `stageVersion`.
+- When the stage has changed since, **nothing is saved** and the call fails with `code: "stage_changed"`, the
+  stage's new `stageVersion` and `differingFields`: the Fields in the call that are saved differently now, as
+  `moduleId.fieldId` (a custom section is `moduleId."Its title"`). The agent re-reads with `get_instance`,
+  settles any difference with the architect, and saves again with the new version. The saved stage itself is
+  not echoed in the failure; `get_instance` is the one place to read it.
+- With no `stageVersion` the call saves as it did before the check, so existing agents keep working, and the
+  response carries `overwrittenFields`: every Field the call overwrote (it held content and now holds something
+  else). Requiring the version comes with outside agent sessions (ADR-0067).
+
+The comparison itself lives in gantry serve, so it is the same in every workspace kind.
+
 ## Adding a tool
 
 Add a new `src/tools/<cluster>.tools.js` file exporting a `tools` array:

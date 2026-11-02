@@ -59,7 +59,7 @@ async function getInstance(args, { gantryClient }) {
 }
 
 async function updateInstanceModules(args, { gantryClient }) {
-  const { slug, scope, ref, stage, modules } = args
+  const { slug, scope, ref, stage, modules, stageVersion } = args
   if (!modules || Object.keys(modules).length === 0) {
     return errorResult('Provide at least one entry in "modules" to save.')
   }
@@ -71,9 +71,23 @@ async function updateInstanceModules(args, { gantryClient }) {
     path: '/api/instance/modules',
     method: 'PUT',
     query: { slug, scope: scope ?? resolved.scope, ref, stage },
-    body: { modules },
+    body: stageVersion ? { modules, baseVersion: stageVersion } : { modules },
   })
   if (res.credentialError) return credentialErrorResult(res.credentialError)
+  // ADR-0068 (#272): the stage moved on since get_instance returned this version. Nothing was written.
+  // gantry serve's refusal also carries the whole saved stage ("current"), which an agent re-reads
+  // through get_instance rather than from here, so it is left out and the Fields that differ are named.
+  if (res.status === 409 && res.body?.code === 'stage_changed') {
+    const differingFields = Array.isArray(res.body.differingFields) ? res.body.differingFields : []
+    return errorResult(
+      'The stage was changed after you read it, so nothing was saved. ' +
+        (differingFields.length
+          ? `These Fields in your call are saved differently now: ${differingFields.join(', ')}. `
+          : 'None of the Fields in your call differ from what is saved, but others on the stage changed. ') +
+        'Call get_instance again, read what changed with the architect, settle any difference with them, then save again with the new "stageVersion".',
+      { code: 'stage_changed', stageVersion: res.body.stageVersion, differingFields }
+    )
+  }
   if (!res.ok) return upstreamErrorResult(res)
   return okResult(res.body)
 }
@@ -120,7 +134,8 @@ export const tools = [
       '5. Use the response\'s "artefacts" list to find valid artefactId values for render_artefact. ' +
       '6. When the instance\'s definition sets word budgets, the response carries the instance\'s Target size as "size" (small, medium or large; the definition\'s default size, else medium, when none was chosen) and each budgeted field carries "targetWords" — about how many words to write in that field for this instance. Write to that length: it is a target, not a limit, and the size is the instance owner\'s choice of how much detail reviewers want. ' +
       '7. When the instance\'s definition declares Instance settings, the response carries "instanceSettings": one entry per setting (id "size" or "classification") with its "choices", "default" and this instance\'s "value". The "classification" value is the marking printed on every document\'s cover and page header ("" for none); treat the content you write as handled at that marking. ' +
-      '8. When the instance\'s definition has a logo in its documents\' page header, the response carries "instanceLogo": { own, source } — "own" is true when the instance has uploaded its own logo, which its rendered documents show ("source": "instance"); otherwise they show the definition\'s logo ("source": "definition"). A logo is uploaded in the web app\'s wizard or Instance Settings, not over MCP.',
+      '8. When the instance\'s definition has a logo in its documents\' page header, the response carries "instanceLogo": { own, source } — "own" is true when the instance has uploaded its own logo, which its rendered documents show ("source": "instance"); otherwise they show the definition\'s logo ("source": "definition"). A logo is uploaded in the web app\'s wizard or Instance Settings, not over MCP. ' +
+      '9. The response carries "stageVersion", a fingerprint of the stage\'s Field content as read now. Pass it back to update_instance_modules as "stageVersion" so a save is refused, naming the Fields that differ, if a colleague changed the stage after you read it.',
     inputSchema: {
       ...slugRefShape,
       stage: z.string().optional().describe('A stage id to browse instead of the instance\'s current stage.'),
@@ -138,10 +153,13 @@ export const tools = [
       '4a. A module the stage mounts read-only (its "read-only-modules" in the definition; get_instance marks it "readOnly" with its "homeStage") is carried forward from an earlier stage: gantry serve rejects the whole call with a 400 naming that home stage — write it there instead. ' +
       '5. This never renders an artefact — call render_artefact separately once content is saved. ' +
       '6. The written content is reflected on the very next get_instance call for the same instance/stage. ' +
-      '7. When a field you wrote is over its word target (get_instance\'s "targetWords"), the save still succeeds and the response carries "targetWordNotes", one per such field (e.g. "nfrs.performance: 420 words, Medium target ~150") — tighten that field and save again.',
+      '7. When a field you wrote is over its word target (get_instance\'s "targetWords"), the save still succeeds and the response carries "targetWordNotes", one per such field (e.g. "nfrs.performance: 420 words, Medium target ~150") — tighten that field and save again. ' +
+      '8. Pass "stageVersion", the value get_instance returned for this stage, to make sure you do not overwrite a colleague\'s changes. If the stage has changed since (the architect saved in the editor, or another session did), nothing is saved and the call fails with code "stage_changed", the stage\'s new "stageVersion" and "differingFields": the Fields in your call that are saved differently now, as "moduleId.fieldId". Call get_instance again, read what changed, settle any difference with the architect, then save again with the new version. A saved call returns the stage\'s new "stageVersion" to use next. ' +
+      '9. Without "stageVersion" the call still saves, as it always did, but the response carries "overwrittenFields": every Field it overwrote, as "moduleId.fieldId" — those that held content and now hold something else. Tell the architect about any you were not meant to change. Passing the version is strongly preferred.',
     inputSchema: {
       ...slugRefShape,
       stage: z.string().optional().describe('The stage id these modules belong to; omitted defaults to the instance\'s current stage.'),
+      stageVersion: z.string().optional().describe('The "stageVersion" get_instance returned for this stage. When the stage has changed since, the save is refused and the Fields that differ are named. Omit it only if you accept overwriting whatever is saved.'),
       modules: z
         .record(z.string(), z.any())
         .describe('Object keyed by moduleId, each value a partial module record: { status?, owner?, fields?, layout? }.'),

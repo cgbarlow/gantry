@@ -69,6 +69,8 @@ async function scenario({ base, headers, uploadAsset, savedRole }) {
   assert.equal(clashBody.code, 'stage_changed')
   assert.equal(clashBody.stageVersion, v1)
   assert.equal(clashBody.current.role.fields.summary, 'A wrote this summary.', 'the refusal carries what is saved now')
+  // #272: and names the Fields in this Save that are saved differently now (B's payload still has the old summary).
+  assert.deepEqual(clashBody.differingFields.filter((f) => ['role.summary', 'role.team'].includes(f)).sort(), ['role.summary', 'role.team'])
   assert.doesNotMatch(await savedRole(), /B wrote this team/, 'nothing was written')
 
   // Settling the clash Field by Field keeps both; the retry carries the new version.
@@ -106,6 +108,16 @@ async function scenario({ base, headers, uploadAsset, savedRole }) {
   const unversioned = await api.put({ role: edited(await api.read(), 'role', { justification: 'No version sent.' }) })
   assert.equal(unversioned.status, 200)
   assert.match(await savedRole(), /No version sent\./)
+  const firstBody = await unversioned.json()
+  assert.deepEqual(firstBody.overwrittenFields, [], 'a Field that held nothing is not an overwrite')
+
+  // #272: with no version the response names every Field the call overwrote; with one, it is not needed.
+  const overwrite = await api.put({ role: edited(await api.read(), 'role', { justification: 'Overwritten without a version.' }) })
+  assert.equal(overwrite.status, 200)
+  assert.deepEqual((await overwrite.json()).overwrittenFields, ['role.justification'])
+  const checked = await api.put({ role: edited(await api.read(), 'role', { justification: 'Checked.' }) }, (await api.read()).stageVersion)
+  assert.equal(checked.status, 200)
+  assert.equal('overwrittenFields' in (await checked.json()), false, 'a Save that sent its version overwrote nothing unseen')
 }
 
 test('server workspace: two editors on different Fields both save; the same Field is a clash; an Asset upload is not', async () => {
