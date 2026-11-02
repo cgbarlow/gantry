@@ -20,11 +20,13 @@ an Owner can still read it in the Pull Request diff.
 
 The file has three parts:
 
-- **Status**: the run's target stage, this stage's state, the Artefact aimed
-  for, the last AI save, and the Interview instructions version. It also
-  lists each model used on this stage, by AI Provider type and model (never a
-  key, address or custom name), with that model's input, cached and output
-  tokens (#255), so a switch between turns shows and a session resumed in
+- **Status**: one entry per session on this stage (#256, ADR-0068). Each
+  entry holds the session's id, who saved it (the commit author on remote
+  workspaces), the run's target stage, this stage's state, the Artefact aimed
+  for, the last AI save and the Interview instructions version. It also lists
+  each model the session used, by AI Provider type and model (never a key,
+  address or custom name), with that model's input, cached and output tokens
+  (#255). That way a switch between turns shows, and a session resumed in
   another browser keeps its totals. There's no money figure. Updated in
   place. On resume Gantry runs Check status once, and whatever the Provider
   reports overrides the file.
@@ -48,7 +50,10 @@ transcript.
 **Committed with each Save.** That covers the stage Save, the Waiting-card
 save and a new **Pause**, which saves the log and drafts so far. The browser
 keeps a working copy in between. If the committed log has moved on since that
-copy began, the committed log wins and the copy is set aside with a notice.
+copy began because of the same person's other browser, the committed log
+wins and the copy is set aside with a notice. If another session moved it,
+the two logs merge, and both sets of entries are kept in time order
+(ADR-0068).
 
 ## Consequences
 
