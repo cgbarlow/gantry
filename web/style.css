@@ -2324,6 +2324,14 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .interview-rail .rail-tokens dt { color: var(--text-muted); }
 .interview-rail .rail-tokens dd { margin: 0; font-family: var(--font-mono); font-size: 12px; text-align: right; cursor: help; }
 .interview-rail .runplan .rp-note { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); text-align: right; }
+/* Remote workspaces (#295): a Stage waiting for its Pull Request to be approved, or queued behind an earlier one, and the row you click to Check status. */
+.interview-rail .runplan li { flex-wrap: wrap; }
+.interview-rail .runplan .rp-awaiting-approval .dot { background: var(--stamp-review-bg); border-color: var(--stamp-review-bg); }
+.interview-rail .runplan .rp-approval-queued .dot { background: transparent; border-style: dashed; border-color: var(--stamp-review-bg); }
+.interview-rail .runplan .rp-checkable { cursor: pointer; }
+.interview-rail .runplan .rp-checkable:hover, .interview-rail .runplan .rp-checkable:focus-visible { background: var(--surface-hover, rgba(127, 127, 127, 0.12)); outline: none; }
+.interview-rail .runplan .rp-pr { flex-basis: 100%; padding-left: 18px; font-size: 11px; }
+.interview-page .stage-end.awaiting { border-color: var(--stamp-review-bg); }
 .interview-page .qcard .btn .rec { background: transparent; color: inherit; border: var(--hairline) solid currentColor; }
 .interview-page .kick-resume { padding: 10px 12px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); margin: 0 0 12px; }
 

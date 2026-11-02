@@ -1,4 +1,5 @@
-// #293 (parent #238, docs/adr/0063 for the remote case; this is the local and server case, which has no approvals): a **run**
+// #293 (parent #238, docs/adr/0063 for the remote case; this is the local and server case, which has no approvals; #295 adds the remote
+// case below: Azure DevOps and GitHub workspaces, where a Stage moves on only when its Pull Request merges): a **run**
 // carries one AI interview across Stages. The architect picks a target Stage at the kickoff ("Run until"); the AI drafts each
 // Stage in order, the architect confirms each stage-end card, and the run Saves, advances and starts the next Stage until the
 // target Stage's card is confirmed. This file is the run's rules and its record, with no DOM:
@@ -11,12 +12,14 @@
 import { signal } from '@preact/signals'
 
 /** The states a row of the run plan can be in. `beyond` is a Stage after the target, which the run never reaches. */
-export const PLAN_STATES = Object.freeze(['done', 'drafting', 'awaiting-confirmation', 'waiting', 'paused', 'beyond'])
+export const PLAN_STATES = Object.freeze(['done', 'drafting', 'awaiting-confirmation', 'awaiting-approval', 'approval-queued', 'waiting', 'paused', 'beyond'])
 
 const WORDS = Object.freeze({
   done: 'done',
   drafting: 'drafting',
   'awaiting-confirmation': 'awaiting confirmation',
+  'awaiting-approval': 'awaiting approval',
+  'approval-queued': 'approval queued',
   waiting: 'waiting',
   paused: 'paused',
   beyond: 'beyond target',
@@ -47,19 +50,33 @@ export function nextStage(stages, stageId) {
  * @param {string} input.currentStageId                   the Stage the interview is on
  * @param {string} input.targetStageId                    the run's target (the current Stage when the run is one Stage)
  * @param {'idle'|'drafting'|'awaiting-confirmation'|'paused'|'done'} input.current  where the current Stage stands
- * @returns {{id: string, title: string, state: string, target: boolean, note: string}[]}
+ * @param {{pullRequests?: Record<string, {id: number|string, url?: string|null}>, queued?: Record<string, boolean>}} [input.remote]
+ *   a Provider workspace's record (#295): the Pull Requests open for approval, by Stage, and the Stages queued for it. The Provider's word
+ *   overrides the log's: a Stage with a Pull Request open is awaiting approval, and a later Stage that is queued shows Approval queued.
+ * @returns {{id: string, title: string, state: string, target: boolean, note: string, pullRequest: {id: number|string, url: string|null}|null, checkable: boolean}[]}
  */
-export function planRows({ stages, currentStageId, targetStageId, current = 'idle' }) {
+export function planRows({ stages, currentStageId, targetStageId, current = 'idle', remote = null }) {
   const currentAt = indexOf(stages, currentStageId)
   const targetAt = Math.max(indexOf(stages, targetStageId), currentAt)
   return (stages ?? []).map((stage, at) => {
+    const open = remote?.pullRequests?.[stage.id] ?? null
     let state
     if (at > targetAt) state = 'beyond'
     else if (at < currentAt) state = 'done'
-    else if (at === currentAt) state = current === 'idle' ? 'waiting' : current
-    else state = 'waiting'
+    else if (at === currentAt) state = open ? 'awaiting-approval' : current === 'idle' ? 'waiting' : current
+    else state = open ? 'awaiting-approval' : remote?.queued?.[stage.id] ? 'approval-queued' : 'waiting'
     const target = at === targetAt
-    return { id: stage.id, title: stage.title, state, target, note: target && state !== 'beyond' ? `${planStateWords(state)} · target` : planStateWords(state) }
+    const pullRequest = state === 'awaiting-approval' && open ? { id: open.id, url: open.url ?? null } : null
+    return {
+      id: stage.id,
+      title: stage.title,
+      state,
+      target,
+      note: target && state !== 'beyond' ? `${planStateWords(state)} · target` : planStateWords(state),
+      pullRequest,
+      // Clicking an "awaiting approval" row runs Check status (ADR-0063); nothing else on the plan is a button.
+      checkable: state === 'awaiting-approval',
+    }
   })
 }
 
@@ -71,24 +88,36 @@ export function planRows({ stages, currentStageId, targetStageId, current = 'idl
  * @param {string} input.currentStageId
  * @param {string} input.targetStageId
  * @param {string} input.startStageId  the Stage the run began on
- * @param {'advance'|'stop'} input.action  "Save, advance, carry on" or "Save and stop here"
- * @returns {{state: 'saved'|'paused'|'done', finished: boolean, advances: boolean, nextStageId: string|null, stages: Record<string, string>}}
+ * @param {'advance'|'stop'|'approval'} input.action  "Save, advance, carry on" (a local or server workspace), "Save and stop here", or
+ *   "Save, request approval, draft ahead" (a remote workspace, #295)
+ * @param {boolean} [input.queued]  the Stage is not the Instance's current one, so its approval can't be asked for yet and is queued (#295)
+ * @returns {{state: string, finished: boolean, advances: boolean, requestsApproval: boolean, nextStageId: string|null, stages: Record<string, string>}}
  *   `state` is the Stage's state in the status block; `stages` is each Stage of the run and its state, which the same Save records.
+ *   A remote Stage never advances by itself: `requestsApproval` says the Save is followed by a request for approval (or, queued, by a wait),
+ *   and the Stage is `awaiting-approval` (`approval-queued`) until a Check status sees its Pull Request merge. At the target Stage the run is
+ *   done, whatever the Owner's answer: the session has nothing more to draft.
  */
-export function saveOutcome({ stages, currentStageId, targetStageId, startStageId, action }) {
+export function saveOutcome({ stages, currentStageId, targetStageId, startStageId, action, queued = false }) {
   const currentAt = indexOf(stages, currentStageId)
   const targetAt = Math.max(indexOf(stages, targetStageId), currentAt)
   const startAt = Math.min(indexOf(stages, startStageId) === -1 ? currentAt : indexOf(stages, startStageId), currentAt)
   const finished = currentAt >= targetAt
+  const approval = action === 'approval'
   const advances = !finished && action === 'advance'
-  const state = finished ? 'done' : action === 'advance' ? 'saved' : 'paused'
+  const waitWord = queued ? 'approval-queued' : 'awaiting-approval'
+  const state = finished ? 'done' : approval ? waitWord : action === 'advance' ? 'saved' : 'paused'
   const map = {}
   for (let at = startAt; at <= targetAt; at++) {
     const id = stages[at].id
-    map[id] = at < currentAt ? 'done' : at === currentAt ? (finished || advances ? 'done' : 'paused') : 'waiting'
+    if (at < currentAt) map[id] = 'done'
+    else if (at === currentAt) map[id] = approval ? waitWord : finished || advances ? 'done' : 'paused'
+    else map[id] = 'waiting'
   }
-  return { state, finished, advances, nextStageId: advances ? stages[currentAt + 1]?.id ?? null : null, stages: map }
+  return { state, finished, advances, requestsApproval: approval, nextStageId: advances ? stages[currentAt + 1]?.id ?? null : null, stages: map }
 }
+
+// The states a Stage's last Save can leave a run in with more of it to do: saved and meant to advance, paused, or (remote) waiting for approval.
+const HALF_WAY = new Set(['paused', 'saved', 'awaiting-approval', 'approval-queued'])
 
 // The newest status entry of a decisions log (the last session to Save), or null.
 const latestStatus = (log) => (Array.isArray(log?.status) && log.status.length ? log.status[log.status.length - 1] : null)
@@ -103,18 +132,22 @@ const latestStatus = (log) => (Array.isArray(log?.status) && log.status.length ?
  *
  * A run whose target is the Stage it was on, or one that finished (`done`), is not left part-way.
  *
- * @param {{stages: {id: string, title: string}[], currentStageId: string, logs: Record<string, object|null>}} input
+ * On a remote workspace (#295) a Stage waiting for approval (`awaiting-approval`) counts as saved: once the Owner's approval has been seen
+ * the Instance is on the next Stage, whose log is empty, and the run `continue`s there. `advance` there means "ask for approval, then wait",
+ * and is offered only when no Pull Request is open for the Stage: the Provider's word (`openPullRequests`, by Stage id) overrides the log.
+ *
+ * @param {{stages: {id: string, title: string}[], currentStageId: string, logs: Record<string, object|null>, openPullRequests?: Record<string, unknown>}} input
  *   `logs` maps a Stage id to its committed decisions log (only the current and the previous Stage are looked at).
  * @returns {{mode: 'advance'|'continue', targetStageId: string, fromStageId: string}|null}
  */
-export function resumableRun({ stages, currentStageId, logs = {} }) {
+export function resumableRun({ stages, currentStageId, logs = {}, openPullRequests = {} }) {
   const currentAt = indexOf(stages, currentStageId)
   if (currentAt === -1) return null
   const here = latestStatus(logs[currentStageId])
   // A Pause (#290) also writes `paused`, but leaves this Stage "in-progress" in the run's map: that Stage is not finished, so there is
   // nothing to advance past, and the Interview page resumes it as a paused session instead.
-  const stopped = (status, stageId) => (status?.state === 'paused' || status?.state === 'saved') && status.stages?.[stageId] !== 'in-progress'
-  if (stopped(here, currentStageId) && indexOf(stages, here.target) > currentAt) {
+  const stopped = (status, stageId) => HALF_WAY.has(status?.state) && status.stages?.[stageId] !== 'in-progress'
+  if (stopped(here, currentStageId) && indexOf(stages, here.target) > currentAt && !openPullRequests[currentStageId]) {
     return { mode: 'advance', targetStageId: here.target, fromStageId: currentStageId }
   }
   const before = currentAt > 0 ? stages[currentAt - 1].id : null

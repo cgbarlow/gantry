@@ -10,6 +10,7 @@
 // Local workspace, `decisions` in the body of PUT /api/instance/modules otherwise), so the log and the content are one Save.
 import { DecisionsLogError, applyDecisionsDelta, decisionsLogPath, parseDecisionsLog, serializeDecisionsLog } from './decisionsLog.js'
 import { readTextFile, writeTextFile } from './localWorkspace.js'
+import { withLastSaved } from './interviewApproval.js'
 
 const isMissing = (err) => err?.name === 'NotFoundError' || err?.name === 'TypeMismatchError'
 const localPath = (slug, stageId) => `gantry-workspace/${slug}/${decisionsLogPath(stageId)}`
@@ -47,7 +48,8 @@ export function createServerDecisionsStore(slug, fetchForInstance) {
   async function parse(res, failure) {
     const body = await res.json().catch(() => ({}))
     if (!res.ok) throw new DecisionsLogError(body.error ?? body.message ?? `${failure} (${res.status})`, { code: body.code, status: res.status })
-    return body.log
+    // #295: on an Azure DevOps or GitHub workspace the server also says who last saved the Stage (the commit author); it rides on the log without being part of it.
+    return withLastSaved(body.log, body.lastSaved)
   }
   return {
     read: async (stageId) => parse(await fetchForInstance(path(stageId)), 'Failed to read the decisions log'),

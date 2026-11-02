@@ -80,6 +80,7 @@ import { citedSourceIds } from './lib/sourceCitations.js'
 import { InterviewPage, clearInterviewSessions, unsavedDraftModules } from './lib/interviewView.js'
 import { createLocalSourceStore } from './lib/localSourceDocuments.js'
 import { createLocalDecisionsStore, createServerDecisionsStore, planLocalDecisions } from './lib/decisionsStore.js'
+import { approvalStatusLine } from './lib/interviewApproval.js'
 import { DecisionsLogPanel } from './lib/decisionsLogPanel.js'
 import { flagsForField, outOfDateBannerLines, outOfDateCountByStage, outOfDateFieldNote } from './lib/outOfDate.js'
 import { loadOutOfDate, outOfDateState, sourceListTick } from './lib/outOfDateState.js'
@@ -4990,12 +4991,12 @@ function useSourceStore(instance) {
   }, [slug, instance.isLocalWorkspace, handle])
 }
 
-// #288 (map #238, docs/adr/0064): the Instance's decisions log store: its own folder for a Local workspace, /api/instance/decisions otherwise.
+// #288 (map #238, docs/adr/0064): the Instance's decisions log store: its own folder for a Local workspace, /api/instance/decisions otherwise (on an Azure DevOps or GitHub workspace the server keeps the file on the Stage's own branch, #295).
 function useDecisionsStore(instance) {
   const handle = localDirHandle.value
   const slug = instance.slug
   return useMemo(() => {
-    if (instance.workspaceBacked) return null // a Provider workspace takes the decisions log with the remote-session tickets
+    if (instance.workspaceBacked && !offersSourceDocuments(instance)) return null // GitLab and Atlassian take the decisions log when their module Save lands (#295 covers Azure DevOps and GitHub)
     if (instance.isLocalWorkspace) return handle ? createLocalDecisionsStore(handle, slug) : null
     return createServerDecisionsStore(slug, (url, init) => apiFetchForInstance(slug, url, init))
   }, [slug, instance.isLocalWorkspace, instance.workspaceBacked, handle])
@@ -5109,7 +5110,7 @@ function OutOfDatePanel({ instance }) {
 }
 
 // #286 (map #238): the Interview page for a local or server workspace Instance, handed what only this file can reach: the Instance's Source document store, the Definition it follows, the other Stages' saved content (the AI is told what is already settled) and the stage Save.
-function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance }) {
+function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequestApproval, onCheckApproval }) {
   const store = useSourceStore(instance)
   const outOfDate = useOutOfDate(instance)
   const decisionsStore = useDecisionsStore(instance)
@@ -5136,18 +5137,10 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance }) {
     }
     return modules
   }
-  // #290 (ADR-0064): opening the Interview page runs Check status once, and what the Provider reports overrides the log's status block. A
-  // workspace with no Provider to ask (local, server) reports from its own record of the current Stage instead (the page does that).
-  async function checkStatus() {
-    if (!instance.workspaceBacked) return {}
-    const res = await apiFetchForInstance(instance.slug, `/api/instance/check-status?slug=${encodeURIComponent(instance.slug)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    })
-    const body = await res.json().catch(() => ({}))
-    return res.ok && body.merged ? { [instance.stage.id]: 'approved' } : {}
-  }
+  // #290 (ADR-0064) / #295: opening the Interview page on an Azure DevOps or GitHub workspace runs Check status once, and what the Provider
+  // reports overrides the log's status block. The page does that itself (it shows the answer, and a merge replaces the page), and only when
+  // the Stage has a Pull Request on file: with none there is nothing to ask. A local or server workspace has no Provider to ask; its own
+  // record of the current Stage is the report (the page does that).
   // `key`: a run (#293) moves the Instance on to its next Stage, and the page for that Stage starts afresh.
   return html`<${OutOfDateWatcher} instance=${instance} /><${InterviewPage}
     key=${instance.stage.id}
@@ -5163,7 +5156,8 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance }) {
     decisionsStore=${decisionsStore}
     onSaveDrafts=${onSaveDrafts}
     onAdvance=${onAdvance}
-    checkStatus=${checkStatus}
+    onRequestApproval=${onRequestApproval}
+    onCheckApproval=${onCheckApproval}
   />`
 }
 
@@ -5600,9 +5594,9 @@ function GantryBrandIcon() {
 // instance.yaml) rather than only the slug — falling back to the slug, unchanged, when no name is
 // set. Once a name is shown, the slug moves to its own small badge beside `.instance-ref` so it's
 // still visible, just no longer the primary label.
-// #286: the AI interview works on the current Stage of a local or server workspace Instance (a Provider's workspace takes it with the later remote-session tickets). '' when it can be opened, else the reason it can't.
+// #286/#295: the AI interview works on the current Stage of a local, server, Azure DevOps or GitHub workspace Instance (GitLab and Atlassian take it when their module Save lands, as Source documents do). '' when it can be opened, else the reason it can't.
 function interviewUnavailableReason(instance) {
-  if (instance.workspaceBacked) return 'The AI interview is not available on GitHub, Azure DevOps or GitLab workspaces yet.'
+  if (instance.workspaceBacked && !offersSourceDocuments(instance)) return 'The AI interview is not available on GitLab or Atlassian workspaces yet.'
   if (instance.archived) return 'This Instance is archived. Restore it to use the AI interview.'
   if (isWriteAccessBlocked()) return 'The AI interview needs write access to this Instance.'
   if (instance.stage.id !== instance.currentStageId) return 'The AI interview works on the current Stage. Open the current Stage to use it.'
@@ -5637,7 +5631,7 @@ function AppHeader({ instance, onOpenInterview }) {
           open=${openMenu === 'settings'}
           onOpenChange=${(next) => setOpenMenu(next ? 'settings' : null)}
         />
-        ${onOpenInterview && !instance.workspaceBacked
+        ${onOpenInterview && (!instance.workspaceBacked || offersSourceDocuments(instance))
           ? html`<button
               type="button"
               class="btn small"
@@ -6342,6 +6336,61 @@ function ModuleEditorPage({ slug: routeRef }) {
     return advanceCurrentStage(inst)
   }
 
+  // #295 (docs/adr/0063): on an Azure DevOps or GitHub workspace a Stage moves on only when its Pull Request merges. "Save, request
+  // approval" opens that Pull Request once the Save has worked; the server re-checks the Gate itself and refuses a Stage that isn't the
+  // Instance's current one. Never throws: resolves `{ ok: true, pullRequestId, webUrl }` or `{ ok: false, message }`. The Instance is
+  // loaded again afterwards so the page knows the Stage now has a Pull Request open.
+  async function requestInterviewApproval() {
+    const inst = instanceData.peek()
+    if (!inst?.stage || isEditingBlocked()) return { ok: false, message: 'This Instance cannot be written to right now.' }
+    try {
+      const res = await apiFetchForInstance(inst.slug, `/api/instance/request-approval?slug=${encodeURIComponent(inst.slug)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        if (Array.isArray(body.reRenderRequired) && body.reRenderRequired.length > 0) return { ok: false, message: reRenderRefusalLine(body.reRenderRequired) }
+        return { ok: false, message: `Request approval failed: ${body.message ?? body.error ?? res.status}` }
+      }
+      instanceData.value = await loadInstance(inst.slug, null)
+      return { ok: true, pullRequestId: body.pullRequestId, webUrl: body.webUrl ?? null }
+    } catch (err) {
+      return { ok: false, message: `Request approval failed: ${err.message}` }
+    }
+  }
+
+  // Check status for the Interview page (#295): the same server action as the editor's Check status, run only when the architect asks
+  // (a click on an "awaiting approval" row or the Check status button), at a stage-end confirm and once when a session resumes, never
+  // on a timer (ADR-0014). Resolves `{ ok, merged, message }`; when the Pull Request has merged the Instance has moved on and has been
+  // loaded again, which replaces the page of the Stage that was approved.
+  async function checkInterviewApproval() {
+    const inst = instanceData.peek()
+    if (!inst?.stage) return { ok: false, merged: false, message: 'This Instance is not loaded.' }
+    try {
+      const res = await apiFetchForInstance(inst.slug, `/api/instance/check-status?slug=${encodeURIComponent(inst.slug)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) return { ok: false, merged: false, message: `Check status failed: ${body.message ?? body.error ?? res.status}` }
+      const message = approvalStatusLine(body, inst.stage.title)
+      if (body.merged) {
+        // Reset to no explicit Stage so the page shows the Instance's new current Stage (see `advanceCurrentStage`).
+        const effectWillReload = viewedStage.value !== null
+        viewedStage.value = null
+        if (!effectWillReload) instanceData.value = await loadInstance(inst.slug, null)
+        return { ok: true, merged: true, message }
+      }
+      instanceData.value = await loadInstance(inst.slug, null)
+      return { ok: true, merged: false, message }
+    } catch (err) {
+      return { ok: false, merged: false, message: `Check status failed: ${err.message}` }
+    }
+  }
+
   async function handleSyncFromMain() {
     if (!instance || syncing) return
     setSyncing(true)
@@ -6411,8 +6460,15 @@ function ModuleEditorPage({ slug: routeRef }) {
         />`
       : null}
   `
-  if (interviewOpen && !instance.workspaceBacked) {
-    return html`<${InterviewScreen} instance=${instance} editorHref=${editorHref} onSaveDrafts=${saveInterviewDrafts} onAdvance=${advanceInterviewStage} />${dialogs}`
+  if (interviewOpen && (!instance.workspaceBacked || offersSourceDocuments(instance))) {
+    return html`<${InterviewScreen}
+        instance=${instance}
+        editorHref=${editorHref}
+        onSaveDrafts=${saveInterviewDrafts}
+        onAdvance=${advanceInterviewStage}
+        onRequestApproval=${requestInterviewApproval}
+        onCheckApproval=${checkInterviewApproval}
+      />${dialogs}`
   }
 
   const selectedArtefact = instance.artefacts.find((artefact) => artefact.id === selectedArtefactId) ??

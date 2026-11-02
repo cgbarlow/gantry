@@ -311,7 +311,7 @@ export function createFakeGitHubServer({
     if (req.method === 'GET' && commitMatch) {
       const commit = commits.get(commitMatch[1])
       if (!commit) return json(404, { message: `No fake commit "${commitMatch[1]}"` })
-      return json(200, { sha: commitMatch[1], tree: { sha: commit.treeSha } })
+      return json(200, { sha: commitMatch[1], tree: { sha: commit.treeSha }, author: commit.author, committer: commit.committer })
     }
 
     // POST /repos/:owner/:repo/git/blobs — stores one file's content, keyed by a fake blob sha.

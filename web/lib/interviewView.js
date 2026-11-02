@@ -27,6 +27,7 @@ import { outOfDateCountByStage } from './outOfDate.js'
 import { beginRun, clearRun, interviewRuns, nextStage, planRows, resumableRun, runStartStage, runTargets, saveOutcome, updateRun } from './interviewRun.js'
 import { EMPTY_TOKENS, addTokens, formatTokens, hasTokens, tokenBreakdown, tokensOfLog, totalTokens } from './tokenUsage.js'
 import { describeSaved, resumeInfo } from './interviewResume.js'
+import { isRemoteInstance, lastSavedBy, openApproval, remoteRecord } from './interviewApproval.js'
 import { copyStanding, createWorkingCopyStore, makeWorkingCopy } from './interviewWorkingCopy.js'
 
 // One session per Instance Stage while the editor page is open, so going to the editor and back keeps the conversation and the drafts.
@@ -233,11 +234,18 @@ function providerLabel(p) {
  *   onSaveDrafts    (drafts, { artefactId, decisions, settleClashes }) => { ok, message?, check?, decisions?, settledIds? }  puts the drafts in the Modules and does the stage Save, writing the
  *                   decisions log in the same Save. A Field both sides changed goes to `settleClashes` (a round of cards, #290) instead of the editor's dialog
  *   onAdvance       () => { ok, message? }  moves the Instance on to its next Stage, for a run's "Save, advance, carry on" (#293); the page for that Stage then replaces this one
- *   checkStatus     () => { [stageId]: state }  Check status, run once when the page opens on a workspace that has a Provider to ask (#290); what it reports overrides the file
+ *   checkStatus     () => { [stageId]: state }  Check status, run once when the page opens (#290); what it reports overrides the file. The app leaves it out on an Azure DevOps or GitHub workspace,
+ *                   where the page runs Check status itself (once, when it opens on a Stage with a Pull Request on file, #295) so it can show the answer
+ *   onRequestApproval  () => { ok, pullRequestId?, webUrl?, message? }  an Azure DevOps or GitHub workspace's "request approval" (#295): opens the Stage's Pull Request and loads the Instance again
+ *   onCheckApproval    () => { ok, merged, message }  Check status (#295); when the Pull Request has merged the Instance has moved on and the page of the next Stage replaces this one
  */
 // #297: `outOfDate` is the Fields flagged Out of date (web/lib/outOfDate.js) and `newSince` the documents marked New since last interview; the run plan marks each Stage that has flagged Fields and the Source documents rail marks the new documents.
-export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance, checkStatus = null, outOfDate = [], newSince = [] }) {
+export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance, checkStatus = null, onRequestApproval, onCheckApproval, outOfDate = [], newSince = [] }) {
   const key = `${instance.slug}|${instance.stage.id}`
+  // #295: on an Azure DevOps or GitHub workspace a Stage moves on only when its Pull Request merges, so the stage-end card asks for approval instead of advancing.
+  const remote = isRemoteInstance(instance)
+  const awaiting = openApproval(instance) // the Pull Request the Provider says is open for this Stage, else null: it overrides what the log says
+  const [approval, setApproval] = useState({ phase: 'idle', message: '' })
   const [setup, setSetup] = useState({ status: 'loading' })
   const [sources, setSources] = useState(null)
   const [snap, setSnap] = useState(null)
@@ -344,7 +352,10 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   // #293: the run's target Stage ("Run until"). The current Stage when no other is picked, which is a run of one Stage.
   const stagesList = instance.stages ?? []
   const targets = runTargets(stagesList, instance.stage.id)
-  const target = targets.some((t) => t.id === pickedTarget) ? pickedTarget : instance.stage.id
+  // #295: a session that opens on a Stage already awaiting approval has no picker to read, so its run target is the one the log recorded.
+  const loggedTarget = awaiting && Array.isArray(committedLog?.status) && committedLog.status.length ? committedLog.status[committedLog.status.length - 1].target : null
+  const wantedTarget = pickedTarget ?? (targets.some((t) => t.id === loggedTarget) ? loggedTarget : null)
+  const target = targets.some((t) => t.id === wantedTarget) ? wantedTarget : instance.stage.id
   const followingStage = nextStage(stagesList, instance.stage.id)
 
   const otherSaved = setup.status === 'ready' ? setup.otherSaved.filter((m) => !instance.modules.some((own) => own.id === m.id)) : []
@@ -479,11 +490,14 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const settled = run && run.at === instance.stage.id && (run.phase === 'paused' || run.phase === 'done') ? run.phase : null
   let planCurrent = 'idle'
   if (saving?.phase === 'advancing') planCurrent = 'done'
+  else if (saving?.phase === 'saved' && saving.approval) planCurrent = saving.approval === 'queued' ? 'approval-queued' : 'awaiting-approval'
   else if (stageEndReady) planCurrent = 'awaiting-confirmation'
   else if (settled && draftKeys.length === 0) planCurrent = settled
   else if (started || phase === 'testing') planCurrent = 'drafting'
   const outOfDateByStage = outOfDateCountByStage(outOfDate)
-  const planRowsNow = planRows({ stages: stagesList, currentStageId: instance.stage.id, targetStageId: target, current: planCurrent }).map((row) => ({ ...row, outOfDate: outOfDateByStage[row.id] ?? 0 }))
+  // #295: the Provider's word about the Pull Requests, which overrides the log's (a Stage with one open is awaiting approval; a later Stage the log queued shows Approval queued).
+  const remoteRows = remote ? remoteRecord({ instance, stages: stagesList, logs: { ...stageLogs, [instance.stage.id]: committedLog } }) : null
+  const planRowsNow = planRows({ stages: stagesList, currentStageId: instance.stage.id, targetStageId: target, current: planCurrent, remote: remoteRows }).map((row) => ({ ...row, outOfDate: outOfDateByStage[row.id] ?? 0 }))
   const newSinceIds = new Set(newSince.map((s) => s.id))
   // #294: tokens, from what each AI Provider reported. A Stage's total is every session's status line in its committed log, except this
   // session's own (it is counted in full from memory, so its older committed line is not added twice). The session total is this run:
@@ -494,7 +508,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const runStartAt = Math.max(0, Math.min(currentAt, stagesList.findIndex((st) => st.id === runStart)))
   const sessionTokens = stagesList.slice(runStartAt, currentAt).reduce((sum, st) => addTokens(sum, tokensOfLog(stageLogs[st.id])), mineHere)
   const thisStageTokens = stageTokens(instance.stage.id)
-  const resume = resumeLogs && !carryingOn && phase === 'kickoff' ? resumableRun({ stages: stagesList, currentStageId: instance.stage.id, logs: resumeLogs }) : null
+  const resume = resumeLogs && !carryingOn && phase === 'kickoff' ? resumableRun({ stages: stagesList, currentStageId: instance.stage.id, logs: resumeLogs, openPullRequests: remoteRows?.pullRequests ?? {} }) : null
   const stageTitleOf = (id) => stagesList.find((s) => s.id === id)?.title ?? id
 
   async function startInterview(options) {
@@ -505,11 +519,23 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     await sessionRef.current?.start(options)
   }
 
+  // #295: a session that opens on a Stage with a Pull Request already open runs Check status once, so what the Provider says (merged,
+  // still waiting, sent back) overrides what the log last recorded. A page that was open when the request was made does not: it knows.
+  const openedAwaiting = useRef(awaiting !== null)
+  useEffect(() => {
+    if (remote && openedAwaiting.current && !carryingOn && onCheckApproval) checkApproval({ carry: false })
+  }, [])
+
   // The Stage before this one carried on into it: start the interview by itself, with the AI Provider the run was using.
   useEffect(() => {
     if (!carryingOn) return
     if (snap && snap.phase !== 'kickoff') {
       updateRun(instance.slug, { carryOn: null })
+      return
+    }
+    // #295: the Stage was queued for approval, so its Pull Request opened as the one before it merged: it is already drafted and waiting for the Owner.
+    if (remote && awaiting) {
+      updateRun(instance.slug, { carryOn: null, at: instance.stage.id })
       return
     }
     if (autoStarted.current || setup.status !== 'ready' || sources === null || !snap || !providerId || blockedReason) return
@@ -526,6 +552,14 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       return
     }
     setPickedTarget(resume.targetStageId)
+    if (resume.mode === 'advance' && remote) {
+      // #295: a remote Stage was saved but its approval never asked for (Save and stop here, or the request failed): resuming asks for it, then the session waits for the Owner.
+      const startStageId = runStartStage(stagesList, resumeLogs?.[resume.fromStageId], resume.fromStageId)
+      beginRun(instance.slug, { target: resume.targetStageId, startStageId, providerId, at: instance.stage.id })
+      const asked = await requestApproval()
+      if (!asked.ok) setResumeMessage(asked.message)
+      return
+    }
     const follow = resume.mode === 'advance' ? followingStage : null
     if (resume.mode === 'advance' && !follow) {
       setResumeMessage('There is no next Stage to carry on with.')
@@ -599,7 +633,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   async function runSave({ action = 'stop', pause = false } = {}) {
     setSaving({ phase: 'saving', pause })
     const keys = Object.keys(drafts)
-    const outcome = saveOutcome({ stages: stagesList, currentStageId: instance.stage.id, targetStageId: target, startStageId: runStart, action })
+    // #295: a Stage that isn't the Instance's current one can't ask for approval yet (Request approval refuses it), so it is queued.
+    const queued = remote && action === 'approval' && instance.stage.id !== instance.currentStageId
+    const outcome = saveOutcome({ stages: stagesList, currentStageId: instance.stage.id, targetStageId: target, startStageId: runStart, action, queued })
     // #288: the decisions log goes in the same Save as the content.
     // A Pause is not the end of the Stage: the status line says `paused` and the Stage stays "in-progress" in the run's map, so a paused
     // session is not mistaken for a run that stopped after finishing the Stage (web/lib/interviewRun.js `resumableRun`).
@@ -630,10 +666,15 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         setSaving({ phase: 'paused', fields: keys.length })
         return true
       }
-      updateRun(instance.slug, { phase: outcome.finished ? 'done' : outcome.advances ? 'running' : 'paused', at: instance.stage.id })
-      const saved = { phase: 'saved', check: result.check ?? null, finished: outcome.finished }
+      updateRun(instance.slug, { phase: outcome.finished ? 'done' : outcome.advances || outcome.requestsApproval ? 'running' : 'paused', at: instance.stage.id })
+      const saved = { phase: 'saved', check: result.check ?? null, finished: outcome.finished, approval: outcome.requestsApproval ? (queued ? 'queued' : 'requested') : null }
       setSaving(saved)
       if (outcome.advances) await carryOn(saved)
+      else if (outcome.requestsApproval && !queued) {
+        // The content and its log are saved; now the Pull Request. A refusal leaves the Save as it is and says why, with a button to ask again.
+        const asked = await requestApproval()
+        if (!asked.ok) setSaving({ ...saved, approvalError: asked.message })
+      }
       return true
     }
     // The Save did not happen, so the choices made on clash cards for it are taken back.
@@ -653,6 +694,53 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     setSaving(null)
     setSubmitMessage('')
     setGeneration((n) => n + 1)
+  }
+
+  // #295: asks for the Stage's approval (a Pull Request into main) and waits for it. The AI never passes a gate and has no part in Request
+  // Review: only this click, after a Save, asks; only a person's approval on the Provider lets the Stage move on. Resolves the result.
+  async function requestApproval() {
+    setApproval({ phase: 'requesting', message: '' })
+    let result
+    try {
+      result = await onRequestApproval()
+    } catch (err) {
+      result = { ok: false, message: err.message }
+    }
+    if (result.ok) {
+      setSaving((was) => (was ? { ...was, approvalError: '' } : was))
+      setApproval({ phase: 'idle', message: `Approval requested: Pull Request #${result.pullRequestId}.` })
+    } else {
+      setApproval({ phase: 'idle', message: '' })
+      setSaving((was) => (was?.phase === 'saved' ? { ...was, approvalError: result.message || 'Approval could not be requested.' } : was))
+    }
+    return result
+  }
+
+  // Check status (#295): the one way the session learns the Owner has approved. It runs when the architect clicks an "awaiting approval"
+  // row or the Check status button, and once when a session opens on a Stage that has a Pull Request. When the Pull Request has merged the
+  // Instance moves on and, if this run goes on, the page of the next Stage starts by itself (the same carry-on as a local run); otherwise
+  // it says what the Owner has done.
+  async function checkApproval({ carry = true } = {}) {
+    if (approval.phase === 'checking') return
+    setApproval({ phase: 'checking', message: '' })
+    // Asking is consent to carry on: if the Owner has approved, the next Stage starts by itself. The Check status that runs as a session
+    // opens (`carry: false`) only finds out; it does not spend the AI's time until the architect resumes.
+    const carries = carry && target !== instance.stage.id && Boolean(followingStage) && Boolean(providerInUse)
+    if (carries) {
+      if (run) updateRun(instance.slug, { carryOn: followingStage.id, phase: 'running', providerId: providerInUse })
+      else beginRun(instance.slug, { target, startStageId: instance.stage.id, providerId: providerInUse, at: instance.stage.id, carryOn: followingStage.id })
+    }
+    let result
+    try {
+      result = await onCheckApproval()
+    } catch (err) {
+      result = { ok: false, merged: false, message: err.message }
+    }
+    if (!result.merged) {
+      if (carries) updateRun(instance.slug, { carryOn: null })
+      setApproval({ phase: 'idle', message: result.message || '' })
+    }
+    return result
   }
 
   // Moves the run on to the next Stage, which has been saved. The page for that Stage replaces this one and starts by itself;
@@ -776,6 +864,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
                   </li>`
                 )}
               </ul>
+              ${remote && lastSavedBy(committedLog)?.by
+                ? html`<p class="kick-note" data-testid="interview-last-saved-by-note">Last saved by <strong data-testid="interview-last-saved-by">${lastSavedBy(committedLog).by}</strong> (the commit author).</p>`
+                : null}
               <p class="kick-note">If you carry on alongside it, each Save is checked Field by Field against the other's, and the two decisions logs merge in time order.</p>
               <div class="round-actions">
                 <button type="button" class="btn primary" data-testid="interview-warning-carry-on" onClick=${() => startInterview({ alongside: true })}>Carry on alongside</button>
@@ -925,7 +1016,57 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     </div>`
   }
 
+  // #295: the Pull Request is open and the Owner has not approved it yet. The session waits here: nothing checks on its own, so the card
+  // and the Stage's row in the run plan both offer Check status. The Provider's word puts this card up, so it is the same after a reload.
+  const awaitingCard = () => {
+    const checking = approval.phase === 'checking'
+    const goesOn = target !== instance.stage.id && Boolean(followingStage)
+    return html`<div class="qcard stage-end awaiting" data-testid="interview-awaiting-approval" role="status">
+      <div class="qchip">Awaiting approval</div>
+      <p class="qhead">${stage?.title ?? instance.stage.title} is waiting for approval</p>
+      <p>
+        ${saving?.phase === 'saved' ? 'It is saved as one Stage Save and its Pull Request is open: ' : 'Its Pull Request is open: '}
+        ${awaiting.url ? html`<a href=${awaiting.url} target="_blank" rel="noopener noreferrer" data-testid="interview-pr-link">Pull Request #${awaiting.id}</a>` : html`<span data-testid="interview-pr-link">Pull Request #${awaiting.id}</span>`}.
+        The AI never approves it, and a Stage moves on only when a person does. The session waits here; nothing checks on its own, so press Check status once the Owner has reviewed it.
+      </p>
+      ${goesOn
+        ? html`<p class="kick-note" data-testid="interview-awaiting-next">Once it is approved, the run goes on to ${followingStage.title}${target === followingStage.id ? ', its target' : `, then to ${stageTitleOf(target)}`}.</p>`
+        : html`<p class="kick-note" data-testid="interview-awaiting-last">This is the last Stage of the run. Once it is approved, the Instance moves on.</p>`}
+      <div class="round-actions">
+        <button type="button" class="btn primary" data-testid="interview-check-status" disabled=${checking} onClick=${() => checkApproval()}>${checking ? 'Checking…' : 'Check status'}</button>
+      </div>
+      ${approval.message ? html`<p class="kick-note" data-testid="interview-approval-message" role="status">${approval.message}</p>` : null}
+    </div>`
+  }
+
+  const askAgain = async () => {
+    const asked = await requestApproval()
+    if (asked.ok) setSaving((was) => (was ? { ...was, approval: 'requested' } : was))
+  }
+
   const stageEnd = () => {
+    if (remote && awaiting) return awaitingCard()
+    if (saving?.phase === 'saved' && remote) {
+      // A remote Save that is not (yet) awaiting a Pull Request: queued behind an earlier Stage, refused by the Provider, or "Save and stop here".
+      return html`<div class="qcard stage-end saved" data-testid="interview-saved" role="status">
+        <p class="qhead">${approval.phase === 'requesting' ? 'Saved. Asking for approval…' : 'Saved'}</p>
+        <p>${stage?.title ?? instance.stage.title} is saved as one Stage Save. The Modules stay <strong>draft</strong>: a person marks them agreed.</p>
+        ${saving.check ? html`<p class="gate-ok" data-testid="interview-saved-gate">${saving.check.pass ? `The ${instance.stage.gate} Gate check passes.` : `The Gate check still reports: ${saving.check.outstanding?.join(', ') || 'see the editor'}.`}</p>` : null}
+        ${saving.approval === 'queued'
+          ? html`<p data-testid="interview-approval-queued">Approval is queued. ${stage?.title ?? instance.stage.title} is not the Instance's current Stage, so its Pull Request opens by itself once Check status sees the earlier Stage merge.</p>`
+          : null}
+        ${saving.approvalError
+          ? html`<p class="inline-error" role="alert" data-testid="interview-approval-error">${saving.approvalError}</p>
+              <div class="round-actions"><button type="button" class="btn primary" data-testid="interview-request-approval" disabled=${approval.phase === 'requesting'} onClick=${askAgain}>Request approval</button></div>`
+          : null}
+        ${saving.finished && multiStage ? html`<p data-testid="interview-run-done">${stageTitleOf(target)} was the target, so the run is done.</p>` : null}
+        ${!saving.approval
+          ? html`<p data-testid="interview-run-paused">${saving.finished ? 'The run is done, but approval has not been asked for.' : `The run is paused here${followingStage ? `, before ${followingStage.title}` : ''}.`} A Stage moves on only when its Pull Request is approved, so ${saving.finished ? 'press Request approval to ask for approval of' : 'resuming asks for approval of'} ${stage?.title ?? instance.stage.title}${saving.finished ? '.' : ' and then waits for the Owner. You can also come back to this page later and resume from the kickoff.'}</p>
+              <div class="round-actions"><button type="button" class="btn primary" data-testid="interview-request-approval" disabled=${approval.phase === 'requesting'} onClick=${askAgain}>Request approval</button></div>`
+          : null}
+        ${approval.message ? html`<p class="kick-note" data-testid="interview-approval-message" role="status">${approval.message}</p>` : null}
+      </div>`
+    }
     if (saving?.phase === 'saved') {
       return html`<div class="qcard stage-end saved" data-testid="interview-saved" role="status">
         <p class="qhead">${saving.finished && multiStage ? 'Saved. The run is done.' : 'Saved'}</p>
@@ -952,21 +1093,29 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     const busySaving = saving?.phase === 'saving' || Boolean(blockedReason) || handEditing !== null // a hand edit that is still open waits for Done (#289)
     return html`<div class="qcard stage-end" data-testid="interview-stage-end" data-run-more=${more ? 'true' : 'false'}>
       <div class="qchip">Stage</div>
-      <p class="qhead">${stage?.title ?? instance.stage.title} is ready. ${more ? 'Save and carry on?' : 'Save it?'}</p>
+      <p class="qhead">${stage?.title ?? instance.stage.title} is ready. ${remote ? 'Save and ask for approval?' : more ? 'Save and carry on?' : 'Save it?'}</p>
       <p>${draftKeys.length} Field${draftKeys.length === 1 ? '' : 's'} drafted; all ${readiness.total} Field${readiness.total === 1 ? '' : 's'} in scope are done. The ${instance.stage.gate} Gate check passes for ${readiness.gate.artefact?.title ?? 'the Artefact'}. One Save writes them; the Modules stay <strong>draft</strong>.</p>
       ${saving?.phase === 'error' ? html`<p class="inline-error" role="alert" data-testid="interview-save-error">${saving.message}</p>` : null}
       ${more
-        ? html`<p class="kick-note" data-testid="interview-run-next">This run goes on to ${followingStage.title}${target === followingStage.id ? ', its target' : `, then to ${stageTitleOf(target)}`}.</p>`
+        ? html`<p class="kick-note" data-testid="interview-run-next">This run goes on to ${followingStage.title}${target === followingStage.id ? ', its target' : `, then to ${stageTitleOf(target)}`}${remote ? ' once this Stage is approved' : ''}.</p>`
+        : null}
+      ${remote
+        ? html`<p class="kick-note" data-testid="interview-approval-note">A Stage moves on only when its Pull Request is approved by a person. Saving asks for that approval, then the session waits for the Owner: the AI never passes a gate.</p>`
         : null}
       <div class="round-actions">
-        ${more
-          ? html`<button type="button" class="btn primary" data-testid="interview-save-advance" disabled=${busySaving} onClick=${() => saveStage('advance')}>
-              ${saving?.phase === 'saving' ? 'Saving…' : 'Save, advance, carry on'}
+        ${remote
+          ? html`<button type="button" class="btn primary" data-testid="interview-save-approval" disabled=${busySaving} onClick=${() => saveStage('approval')}>
+              ${saving?.phase === 'saving' ? 'Saving…' : more ? 'Save, request approval, draft ahead' : 'Save and request approval'}
               <span class="rec">RECOMMENDED</span>
             </button>`
-          : null}
-        <button type="button" class=${'btn' + (more ? ' ghost' : ' primary')} data-testid="interview-save" disabled=${busySaving} onClick=${() => saveStage('stop')}>
-          ${saving?.phase === 'saving' && !more ? 'Saving…' : more ? 'Save and stop here' : multiStage ? 'Save and finish the run' : 'Save and stop here'}
+          : more
+            ? html`<button type="button" class="btn primary" data-testid="interview-save-advance" disabled=${busySaving} onClick=${() => saveStage('advance')}>
+                ${saving?.phase === 'saving' ? 'Saving…' : 'Save, advance, carry on'}
+                <span class="rec">RECOMMENDED</span>
+              </button>`
+            : null}
+        <button type="button" class=${'btn' + (more || remote ? ' ghost' : ' primary')} data-testid="interview-save" disabled=${busySaving} onClick=${() => saveStage('stop')}>
+          ${saving?.phase === 'saving' && !more && !remote ? 'Saving…' : more || remote ? 'Save and stop here' : multiStage ? 'Save and finish the run' : 'Save and stop here'}
         </button>
       </div>
     </div>`
@@ -1042,13 +1191,30 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           <h3 class="side">Run plan</h3>
           <ol class="runplan">
             ${planRowsNow.map(
-              (row) => html`<li key=${row.id} class=${`rp-${row.state}${row.target ? ' rp-target' : ''}`} data-testid="run-plan-row" data-stage-id=${row.id} data-state=${row.state} data-target=${row.target ? 'true' : 'false'}>
+              (row) => html`<li
+                key=${row.id}
+                class=${`rp-${row.state}${row.target ? ' rp-target' : ''}${row.checkable ? ' rp-checkable' : ''}`}
+                data-testid="run-plan-row"
+                data-stage-id=${row.id}
+                data-state=${row.state}
+                data-target=${row.target ? 'true' : 'false'}
+                role=${row.checkable ? 'button' : undefined}
+                tabindex=${row.checkable ? 0 : undefined}
+                title=${row.checkable ? 'Check status: has the Owner approved this Stage?' : undefined}
+                onClick=${row.checkable ? () => checkApproval() : undefined}
+                onKeyDown=${row.checkable ? (e) => (e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget && (e.preventDefault(), checkApproval()) : undefined}
+              >
                 <span class="dot"></span><span class="rp-title">${row.title}</span>
                 ${row.outOfDate
                   ? html`<span class="rp-ood" data-testid="run-plan-out-of-date" title="Fields on this Stage drew on a Source document that has since changed">${row.outOfDate} Out of date</span>`
                   : null}
                 ${rowTokens(row.id)}
                 <span class="rp-note">${row.note}</span>
+                ${row.pullRequest
+                  ? row.pullRequest.url
+                    ? html`<a class="rp-pr" href=${row.pullRequest.url} target="_blank" rel="noopener noreferrer" data-testid="run-plan-pr-link" onClick=${(e) => e.stopPropagation()}>Pull Request #${row.pullRequest.id}</a>`
+                    : html`<span class="rp-pr" data-testid="run-plan-pr-link">Pull Request #${row.pullRequest.id}</span>`
+                  : null}
               </li>`
             )}
           </ol>
@@ -1075,7 +1241,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           <div class="inner">
             ${setup.status === 'loading' ? html`<p class="loading">Loading…</p>` : null}
             ${setup.status === 'error' ? html`<p class="inline-error" role="alert">${setup.message}</p>` : null}
-            ${setup.status === 'ready' && !started ? kickoff() : null}
+            ${setup.status === 'ready' && !started && !(remote && awaiting) ? kickoff() : null}
             ${setup.status === 'ready' && started ? thread() : null}
             ${setup.status === 'ready' && started ? roundView() : null}
             ${setup.status === 'ready' && started ? clashView() : null}
