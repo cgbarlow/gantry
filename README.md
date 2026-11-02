@@ -199,6 +199,8 @@ gantry/
 │           │   ├── context.md
 │           │   └── solution-definition.md
 │           ├── assets/           # (WI260) local asset store — for a Workspace-backed instance the same dir lives as gantry-workspace/<slug>/assets/ in the repo on its Provider, sibling of modules/ and out/
+│           ├── reviews/          # (#302) Reviewed copies — Word documents that came back with comments, one <id>.docx each,
+│           │                     # listed in reviews/manifest.yaml; never cited, never edited by Gantry (docs/adr/0066)
 │           └── out/              # rendered artefacts (gitignored by default)
 ├── lib/                          # the engine: definition/instance loading, render, status, the web server
 │   ├── server.js                 # HTTP routes, incl. the work-item, workspace, stage-advancement/approval,

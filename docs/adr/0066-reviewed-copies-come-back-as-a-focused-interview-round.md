@@ -87,3 +87,30 @@ the architect can download as Word, and a nudge to re-render (ADR-0034).
   commenter's thread couldn't be answered on its own.
 - **Write replies or resolutions into the Reviewed copy.** Rejected, matching
   "the AI never writes to the PR".
+
+## Amendment (#302): how a Reviewed copy is brought in and listed
+
+Ticket #302 built the part of this decision that needs no AI: bringing a Reviewed copy in and listing
+its threads by Field. Where the ticket left a detail open:
+
+- **One upload is up to 25 MB in all**, not 25 MB a file. Several copies of the same render come in
+  together and are one commit (remote) or one write per file plus the manifest (local and server).
+- **A server refuses the whole upload if any file in it is refused**, so a commit never holds only some
+  of what the architect chose. The browser checks each file first and sends only the accepted ones,
+  so the architect can still bring in the good copies and leave the refused one out.
+- **A document from another Instance** is one whose `gantry-instance` is not this Instance's slug or
+  whose `gantry-definition` names a different Definition (two workspaces can both have an Instance
+  with the same slug). **From another Artefact** is one whose `gantry-artefact` this Instance's
+  Definition does not have. A different Definition *version* is accepted.
+- **Placing by text compares each comment with the wording of the Fields**, as they were at
+  `gantry-commit` (read from the Provider at that commit) or, with no commit (a server or Local
+  workspace keeps no history), as they are today. It does not recompile the whole render. A comment
+  is matched on the text it covers as rendered (tracked insertions left out, deletions kept), then on
+  its paragraph; text a commenter inserted as a whole new paragraph goes with the paragraph above. A
+  match that two Fields share, or that is only loose, is shown as a best guess. The notice above the
+  copy says text matching was used and against what.
+- **The reader runs in the browser for every kind of Instance**, and the server runs the same code to
+  check an upload, so a Local workspace needs no server round trip. The Local workspace writes the
+  same `reviews/` files itself.
+- **The manifest's `commentsAnswered` starts at 0** and is only raised when the comments are worked
+  through (#303).

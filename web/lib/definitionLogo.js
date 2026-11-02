@@ -361,6 +361,29 @@ function contentTypeFor(contentTypesXml, partName) {
   return 'application/octet-stream'
 }
 
+function* packageTextSteps(docx, wanted, maxBytes) {
+  const found = new Map()
+  for (const entry of readZip(docx)) {
+    if (!wanted(entry.name)) continue
+    // The size a zip declares is not trusted on its own: a part that is bigger than `maxBytes` once read is refused too.
+    if (entry.size > maxBytes) throw new Error(`${entry.name} is larger than ${maxBytes} bytes`)
+    const text = yield* entryText(entry)
+    if (text.length > maxBytes) throw new Error(`${entry.name} is larger than ${maxBytes} bytes`)
+    found.set(entry.name, text)
+  }
+  return found
+}
+
+/**
+ * The text of the parts of a .docx (or any zip) that `wanted(name)` accepts, as a Map of part name to
+ * text (#302: the Reviewed-copy reader asks for `word/document.xml`, the comments parts and the custom
+ * properties). Throws when `docx` is not a readable zip, or when a wanted part is bigger than
+ * `maxBytes` (default 200 MB) once unpacked.
+ */
+export async function readPackageTexts(docx, wanted, maxBytes = 200 * 1024 * 1024) {
+  return runAsync(packageTextSteps(docx, wanted, maxBytes))
+}
+
 /**
  * The logo a reference document's page header shows: `{ bytes, contentType, extension }` for the
  * first header picture, or `null` when no header has one (or `docx` isn't a readable package).

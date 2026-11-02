@@ -93,6 +93,20 @@ import {
   buildLocalModuleEntry,
 } from './lib/localInstanceFiles.js'
 import { getLocalStatus, checkLocalGate } from './lib/localStatus.js'
+import {
+  REVIEW_FILE_ACCEPT,
+  addReviewedCopiesLocally,
+  analyseReviewFiles,
+  expectedFromInstance,
+  loadReviewedCopies,
+  localReviewIo,
+  remoteReviewIo,
+  reviewDay,
+  threadByline,
+  uploadReviewedCopies,
+} from './lib/reviewedCopies.js'
+import { REVIEWED_COPY_MAX_BYTES } from './lib/reviewedCopy.js'
+import { describeReview } from './lib/reviewManifest.js'
 import { modulesWithStandard } from './lib/standardModules.js'
 import {
   parseKeyDecisions,
@@ -4533,6 +4547,258 @@ function ChangedSinceApprovalPanel({ instance }) {
   `
 }
 
+// ---------- Reviewed copies (#302, ADR-0066) ----------
+// A Reviewed copy is a Word document Gantry rendered that has come back with someone's comments and tracked
+// changes. "Bring in review comments" (in the header) reads the chosen files with Gantry's own reader, refuses
+// any that are not one of this Instance's renders, and keeps the rest with the Instance under `reviews/`;
+// the panel below lists each kept copy's threads by Field, read-only. Gantry never writes into a Reviewed
+// copy or replies to its commenters.
+
+// Bumped after a copy is brought in, so the panel reads the list again.
+const reviewTick = signal(0)
+
+// Today's content of every Field of a Local workspace's Definition (a folder keeps no history to rebuild a
+// render from), for placing comments by text; `texts: false` gives the Fields alone.
+async function localReviewBasis(inst, { texts }) {
+  const handle = localDirHandle.peek()
+  const structure = inst.localDefinitionStructure
+  const fields = []
+  for (const spec of modulesWithStandard(structure.modules, structure.standardModules)) {
+    let values = {}
+    if (texts) {
+      try {
+        values = parseLocalModuleFile(await readLocalTextFile(handle, localModuleFilesPath(inst.slug, spec.id)), spec).fields ?? {}
+      } catch {
+        // No saved data yet for this module: its Fields are empty.
+      }
+    }
+    for (const field of spec.fields) {
+      const value = values[field.id]
+      fields.push({
+        moduleId: spec.id,
+        moduleTitle: spec.title,
+        fieldId: field.id,
+        fieldTitle: field.title,
+        ...(texts ? { text: Array.isArray(value) ? value.join('\n') : value ?? '' } : {}),
+      })
+    }
+  }
+  return { basis: 'today', fields }
+}
+
+function reviewIoFor(inst) {
+  if (inst.isLocalWorkspace) {
+    const handle = localDirHandle.peek()
+    return localReviewIo(inst.slug, {
+      readText: (path) => readLocalTextFile(handle, path),
+      readBinary: (path) => readLocalBinaryFile(handle, path),
+      localBasis: (options) => localReviewBasis(inst, options),
+    })
+  }
+  return remoteReviewIo(inst.slug, apiFetchForInstance)
+}
+
+function ReviewImportDialog({ instance, onClose }) {
+  const [analysis, setAnalysis] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [added, setAdded] = useState(null)
+  const accepted = analysis ? analysis.items.filter((item) => item.ok) : []
+  const tooBig = Boolean(analysis?.tooBig)
+
+  async function choose(event) {
+    const files = [...event.currentTarget.files]
+    setAnalysis(null)
+    setAdded(null)
+    setError('')
+    if (files.length === 0) return
+    setBusy(true)
+    try {
+      setAnalysis(await analyseReviewFiles(files, expectedFromInstance(instance)))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function bringIn() {
+    setBusy(true)
+    setError('')
+    try {
+      let entries
+      if (instance.isLocalWorkspace) {
+        const handle = localDirHandle.peek()
+        if (!handle) throw new Error('Local workspace folder is not open.')
+        entries = await addReviewedCopiesLocally(instance.slug, accepted, {
+          readText: (path) => readLocalTextFile(handle, path),
+          writeText: (path, text) => writeLocalTextFile(handle, path, text),
+          writeBinary: (path, bytes) => writeLocalBinaryFile(handle, path, bytes),
+        })
+      } else {
+        entries = await uploadReviewedCopies(instance.slug, accepted, apiFetchForInstance)
+      }
+      reviewTick.value = reviewTick.value + 1
+      setAdded(entries)
+      setAnalysis(null)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return html`
+    <${Modal} ariaLabel="Bring in review comments" onClose=${onClose}>
+      <h3>Bring in review comments</h3>
+      <p class="guidance">
+        Choose the Word documents Gantry rendered that came back with comments. Only Gantry's own renders are accepted; a document from anywhere else
+        belongs among the Source documents. Gantry keeps each one with this Instance as the record of what came back. It never changes the document
+        or replies to the people who commented.
+      </p>
+      <div class="upload-field">
+        <label class="field-label" for="review-files">Reviewed copies (.docx)</label>
+        <input id="review-files" data-testid="review-file-input" type="file" multiple accept=${REVIEW_FILE_ACCEPT} disabled=${busy} onChange=${choose} />
+      </div>
+      ${analysis
+        ? html`<ul class="review-import-list" data-testid="review-import-list">
+            ${analysis.items.map(
+              (item) => html`<li key=${item.name} class=${item.ok ? 'review-import-ok' : 'review-import-refused'} data-ok=${item.ok ? 'true' : 'false'} data-code=${item.code ?? ''}>
+                <strong>${item.name}</strong>
+                <span>${item.ok ? `Accepted: ${item.summary}` : `Refused. ${item.message}`}</span>
+              </li>`
+            )}
+          </ul>`
+        : null}
+      ${tooBig
+        ? html`<p class="load-error" role="alert">These come to ${(analysis.total / 1024 / 1024).toFixed(1)} MB. One upload can hold up to ${REVIEWED_COPY_MAX_BYTES / 1024 / 1024} MB.</p>`
+        : null}
+      ${error ? html`<p class="load-error" role="alert" data-testid="review-import-error">${error}</p>` : null}
+      ${added
+        ? html`<p class="review-import-done" data-testid="review-import-done" role="status">
+            Brought in ${added.length} Reviewed ${added.length === 1 ? 'copy' : 'copies'}. ${instance.isLocalWorkspace ? 'Saved in the workspace folder.' : 'Saved with this Instance.'}
+          </p>`
+        : null}
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" onClick=${onClose}>${added ? 'Close' : 'Cancel'}</button>
+        <button type="button" class="btn primary" data-testid="review-bring-in" disabled=${busy || accepted.length === 0 || tooBig} onClick=${bringIn}>
+          ${busy ? 'Working…' : accepted.length > 1 ? `Bring in ${accepted.length} copies` : 'Bring in'}
+        </button>
+      </div>
+    <//>
+  `
+}
+
+function ReviewThreadView({ thread }) {
+  const { placement } = thread
+  return html`
+    <div class="review-thread" data-testid="review-thread" data-resolved=${thread.resolved ? 'true' : 'false'}>
+      ${thread.anchor.text ? html`<blockquote class="review-anchor">${thread.anchor.text}</blockquote>` : null}
+      <p class="review-comment">
+        <strong>${thread.author || 'Unknown'}</strong>
+        <span class="review-date">${reviewDay(thread.date)}</span>
+        ${thread.resolved ? html`<span class="review-badge">Resolved</span>` : null}
+        ${placement.confidence === 'low' ? html`<span class="review-badge" title="Matched by text, to more than one Field or only loosely">Best guess</span>` : null}
+      </p>
+      <p class="review-text">${thread.text}</p>
+      ${thread.replies.length
+        ? html`<ul class="review-replies">
+            ${thread.replies.map(
+              (reply) => html`<li key=${reply.id}><strong>${reply.author || 'Unknown'}</strong> <span class="review-date">${reviewDay(reply.date)}</span><br />${reply.text}</li>`
+            )}
+          </ul>`
+        : null}
+      ${placement.alsoFields?.length
+        ? html`<p class="review-also">Also runs into ${placement.alsoFields.map((f) => f.fieldTitle).join(', ')}.</p>`
+        : null}
+      ${placement.method === 'heading' ? html`<p class="review-also">On the heading above this Field.</p>` : null}
+    </div>
+  `
+}
+
+function ReviewChangeView({ change }) {
+  return html`
+    <div class="review-change" data-testid="review-change" data-kind=${change.kind}>
+      <strong>${change.kind === 'insertion' ? 'Inserted' : 'Deleted'}</strong> by ${change.author || 'Unknown'}
+      <span class="review-date">${reviewDay(change.date)}</span>
+      ${change.placement?.confidence === 'low' ? html`<span class="review-badge">Best guess</span>` : null}
+      <blockquote class="review-anchor">${change.text}</blockquote>
+    </div>
+  `
+}
+
+function ReviewGroupView({ group }) {
+  const title =
+    group.kind === 'field'
+      ? `${group.field.moduleTitle} › ${group.field.fieldTitle}`
+      : group.kind === 'document'
+        ? 'About the document'
+        : "Couldn't be placed"
+  const note =
+    group.kind === 'document'
+      ? 'Comments on the cover, Document Control and table of contents, which Gantry supplies rather than the architect.'
+      : group.kind === 'unplaced'
+        ? 'These could not be matched to a Field.'
+        : null
+  return html`
+    <section class="review-group" data-testid="review-group" data-kind=${group.kind} data-field=${group.kind === 'field' ? `${group.field.moduleId}.${group.field.fieldId}` : undefined}>
+      <h4>${title}</h4>
+      ${note ? html`<p class="review-note">${note}</p>` : null}
+      ${group.threads.map((thread, i) => html`<${ReviewThreadView} key=${`${thread.id}-${i}`} thread=${thread} />`)}
+      ${group.changes.map((change, i) => html`<${ReviewChangeView} key=${`${change.id}-${i}`} change=${change} />`)}
+    </section>
+  `
+}
+
+// The copies read last, so switching Stage (which remounts the panel) doesn't read every one again.
+let reviewCopiesCache = { key: null, copies: [] }
+
+function ReviewCommentsPanel({ instance }) {
+  const tick = reviewTick.value
+  const key = `${instance.slug}#${tick}`
+  const [state, setState] = useState(() =>
+    reviewCopiesCache.key === key ? { phase: 'ready', copies: reviewCopiesCache.copies, error: '' } : { phase: 'loading', copies: [], error: '' }
+  )
+  useEffect(() => {
+    if (reviewCopiesCache.key === key) {
+      setState({ phase: 'ready', copies: reviewCopiesCache.copies, error: '' })
+      return undefined
+    }
+    let live = true
+    loadReviewedCopies(reviewIoFor(instance))
+      .then((copies) => {
+        reviewCopiesCache = { key, copies }
+        if (live) setState({ phase: 'ready', copies, error: '' })
+      })
+      .catch((err) => live && setState({ phase: 'error', copies: [], error: err.message }))
+    return () => {
+      live = false
+    }
+  }, [key])
+
+  if (state.phase === 'error') return html`<p class="review-note" data-testid="review-copies-error">Couldn't list the Reviewed copies: ${state.error}</p>`
+  if (state.copies.length === 0) return null
+  const artefactTitles = new Map((instance.localDefinitionStructure?.artefacts ?? instance.artefacts ?? []).map((a) => [a.id, a.title]))
+  const stageTitles = new Map(instance.stages.map((s) => [s.id, s.title]))
+  return html`
+    <section class="review-copies-panel" data-testid="review-copies-panel" aria-label="Review comments">
+      <h2>Review comments</h2>
+      ${state.copies.map(
+        ({ entry, read, placed, error }) => html`
+          <article class="review-copy" key=${entry.id} data-review-id=${entry.id} data-testid="review-copy">
+            <h3>${entry.name}</h3>
+            <p class="review-meta">${describeReview(entry, { artefactTitle: artefactTitles.get(entry.artefact), stageTitle: stageTitles.get(entry.stage) })} · brought in ${reviewDay(entry.date)}</p>
+            ${error ? html`<p class="load-error">Couldn't read this Reviewed copy: ${error}</p>` : null}
+            ${placed?.notice ? html`<p class="review-notice" role="note" data-testid="review-notice">${placed.notice}</p>` : null}
+            ${read && placed.groups.length === 0 ? html`<p class="review-note">No comments or tracked changes in this copy.</p>` : null}
+            ${placed ? placed.groups.map((group, i) => html`<${ReviewGroupView} key=${`${group.kind}-${i}`} group=${group} />`) : null}
+          </article>
+        `
+      )}
+    </section>
+  `
+}
+
 function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
   const [topSectionOpen, setTopSectionOpen] = useState(false)
   const [topListOpen, setTopListOpen] = useState(false)
@@ -4597,6 +4863,7 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
     <main id="modules" data-view-mode=${viewMode.value}>
       <${ReopenStagePanel} instance=${instance} />
       <${ChangedSinceApprovalPanel} instance=${instance} />
+      <${ReviewCommentsPanel} instance=${instance} />
       ${advancedMode.value
         ? html`<${SyncedFieldsPanel} key=${instance.workItem ? 'linked' : 'unlinked'} instance=${instance} />`
         : null}
@@ -5029,6 +5296,8 @@ function GantryBrandIcon() {
 // still visible, just no longer the primary label.
 function AppHeader({ instance }) {
   const [openMenu, setOpenMenu] = useState(null)
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const reviewBlocked = isArchived() || isWriteAccessBlocked()
 
   return html`
     <header class="app-header">
@@ -5052,6 +5321,17 @@ function AppHeader({ instance }) {
           open=${openMenu === 'settings'}
           onOpenChange=${(next) => setOpenMenu(next ? 'settings' : null)}
         />
+        <button
+          type="button"
+          class="btn small"
+          data-testid="bring-in-review-comments"
+          disabled=${reviewBlocked}
+          title=${reviewBlocked ? 'Editing is not available here, so a Reviewed copy cannot be brought in.' : 'Bring in a Word document of this Instance that came back with comments'}
+          onClick=${() => setReviewOpen(true)}
+        >
+          Bring in review comments
+        </button>
+        ${reviewOpen ? html`<${ReviewImportDialog} instance=${instance} onClose=${() => setReviewOpen(false)} />` : null}
       </div>
       <p id="stage-line">${instance.stage.title} (gate: ${instance.stage.gate})</p>
       ${instance.changedSinceApproval?.length

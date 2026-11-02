@@ -222,6 +222,29 @@ header {
 .rerender-earlier-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
 .rerender-earlier-list li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; font-size: 13px; }
 
+/* #302: Reviewed copies — the dialog that brings them in, and the panel that lists their threads by Field. */
+.review-import-list { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 8px; }
+.review-import-list li { display: grid; gap: 2px; padding: 8px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); font-size: 13px; }
+.review-import-list li[data-ok='false'] { border-color: var(--stamp-error-bg); }
+.review-import-list li[data-ok='true'] { border-color: var(--stamp-agreed-bg); }
+.review-import-done { margin: 12px 0; font-size: 13px; font-weight: 600; }
+.review-copies-panel { margin: 0 0 16px; padding: 12px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.review-copies-panel h2 { margin: 0 0 8px; font-size: 16px; }
+.review-copy { margin: 0 0 16px; }
+.review-copy h3 { margin: 0; font-size: 14px; }
+.review-meta, .review-note { margin: 2px 0 8px; font-size: 13px; color: var(--text-muted); }
+.review-notice { margin: 0 0 8px; padding: 8px; font-size: 13px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.review-group { margin: 0 0 12px; padding-left: 10px; border-left: 3px solid var(--line); }
+.review-group h4 { margin: 0 0 6px; font-size: 13px; }
+.review-thread, .review-change { margin: 0 0 10px; font-size: 13px; }
+.review-anchor { margin: 0 0 4px; padding: 2px 8px; border-left: 2px solid var(--line-strong); color: var(--text-muted); white-space: pre-wrap; }
+.review-comment { margin: 0; }
+.review-text { margin: 2px 0 4px; white-space: pre-wrap; }
+.review-date { color: var(--text-muted); font-size: 12px; }
+.review-badge { display: inline-block; margin-left: 6px; padding: 0 6px; font-size: 11px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.review-replies { margin: 0 0 4px; padding-left: 18px; }
+.review-also { margin: 0; font-size: 12px; color: var(--text-muted); }
+
 /*
  * View-mode toolbar (#79) — a toolbar segmented control (Markdown / Split / Rendered) for the whole module-editor screen, ported from Variant A of web/prototypes/module-editor.prototype.html (#72).
  *
