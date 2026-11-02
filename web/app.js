@@ -3451,7 +3451,9 @@ function SyncedFieldsPanel({ instance }) {
             const current = instanceData.value
             if (current?.stage.id === stageId) instanceData.value = { ...current, pullRequest: body.pullRequest }
           }
-          if (body.review?.state === 'approved-then-invalidated') {
+          if (body.waitingForStage) {
+            messages.push(body.message ?? `Waiting for the earlier stage "${body.waitingForStage.title}" to be approved first.`)
+          } else if (body.review?.state === 'approved-then-invalidated') {
             messages.push(
               `Approval invalidated — commit(s) landed after ${body.review.approver?.displayName ?? 'the Owner'} approved Pull Request #${body.pullRequestId}. Request Sign-off again for a fresh review.`
             )

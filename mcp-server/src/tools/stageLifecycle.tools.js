@@ -211,7 +211,7 @@ export const tools = [
     description:
       '1. The Assignee\'s "Request approval" action for a *Workspace-backed* instance — opens the actual approval gate, a Pull Request from the current stage\'s own branch into main, re-checking the gate server-side first. ' +
       '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref". ' +
-      '3. Pass "gate" (a gate id) to target a specific gate instead of the stage\'s own default. ' +
+      '3. Pass "gate" (a gate id) to target a specific gate instead of the stage\'s own default. Approvals go in stage order (ADR-0063): a gate for a stage that is not the instance\'s current stage is refused with a 400 naming the current stage. ' +
       '4. Rejected with a 400 for a local instance — it has no Pull Request to open; call advance_stage instead. ' +
       '5. Requires a PAT for the instance\'s workspace; a missing/rejected one is reported as "missing_workspace_pat"/"authentication_required". ' +
       '6. Follow up with check_status once a reviewer has had a chance to approve.',
@@ -229,7 +229,8 @@ export const tools = [
       '3. Pass "gate" (a gate id) if request_approval targeted a specific gate. ' +
       '4. Rejected with a 400 for a local instance — it has no Pull Request to check. ' +
       '5. Requires a PAT for the instance\'s workspace, for the same reason request_approval does. ' +
-      '6. An explicit rejection/changes-requested vote is reported distinctly from a merely-still-pending review — read the response\'s own fields rather than inferring from success/failure alone.',
+      '6. An explicit rejection/changes-requested vote is reported distinctly from a merely-still-pending review — read the response\'s own fields rather than inferring from success/failure alone. ' +
+      '7. An approved Pull Request for a stage that is not the instance\'s current stage is not merged or advanced (ADR-0063): the response has merged=false and a "waitingForStage" field naming the earlier stage it waits for.',
     inputSchema: {
       ...slugRefShape,
       gate: z.string().optional().describe('A specific gate id to check status for, instead of the stage\'s own default.'),
