@@ -92,3 +92,44 @@ export function readOnlyWriteRefusal(stages, stage, moduleIds, moduleTitle = (id
   }
   return refusals.length ? refusals.join(' ') : null
 }
+
+/**
+ * #171: a Stage with `readOnlyModules` brought back in line with its `modules` — entries naming a
+ * Module the Stage no longer mounts are dropped, and the key goes once nothing is left, so a Stage
+ * nobody marks read-only stays exactly as it was before the key existed (opt-in). Returns the same
+ * object when there is nothing to drop, so callers can tell whether anything changed. For editors that
+ * take a Stage's modules from free text: run it when the author has finished typing (blur, Save,
+ * Publish), never per keystroke, or a half-typed id would drop its entry.
+ *
+ * @template {{ modules?: string[], readOnlyModules?: unknown }} S
+ * @param {S} stage
+ * @returns {S}
+ */
+export function pruneStageReadOnlyModules(stage) {
+  const listed = stage.readOnlyModules
+  if (!Array.isArray(listed)) return stage
+  const mounted = new Set(stage.modules ?? [])
+  const kept = listed.filter((id) => mounted.has(id))
+  if (kept.length === listed.length) return stage
+  const { readOnlyModules: _dropped, ...rest } = stage
+  return kept.length ? { ...rest, readOnlyModules: kept } : rest
+}
+
+/**
+ * #171: `stage` with `moduleId` marked (or unmarked) read-only, keeping `readOnlyModules` in the
+ * Stage's own module order and dropping the key once it is empty. Returns a new Stage.
+ *
+ * @template {{ modules?: string[], readOnlyModules?: string[] }} S
+ * @param {S} stage
+ * @param {string} moduleId
+ * @param {boolean} readOnly
+ * @returns {S}
+ */
+export function withModuleReadOnly(stage, moduleId, readOnly) {
+  const listed = new Set(stage.readOnlyModules ?? [])
+  if (readOnly) listed.add(moduleId)
+  else listed.delete(moduleId)
+  const { readOnlyModules: _dropped, ...rest } = stage
+  const next = (stage.modules ?? []).filter((id) => listed.has(id))
+  return next.length ? { ...rest, readOnlyModules: next } : rest
+}

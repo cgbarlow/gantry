@@ -21,6 +21,7 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { useLocation } from 'preact-iso'
 import { reorder } from '../lib/reorder.js'
+import { pruneStageReadOnlyModules, withModuleReadOnly } from '../lib/readOnlyModules.js'
 import { TARGET_SIZES, targetSizeLabel, withFieldTargetWords } from '../lib/targetSize.js'
 import { definitionInstanceSettings } from '../lib/instanceSettings.js'
 import { InstanceSettingsSummary, InstanceSettingsEditor } from '../lib/instanceSettingsView.js'
@@ -96,6 +97,13 @@ function splitIds(text) {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
+}
+
+// #171: every Stage's read-only-modules brought back in line with its modules; the same object back
+// when nothing needed dropping.
+function pruneStructureReadOnly(structure) {
+  const stages = structure.stages.map(pruneStageReadOnlyModules)
+  return stages.some((s, i) => s !== structure.stages[i]) ? { ...structure, stages } : structure
 }
 
 async function knownLibraryIds() {
@@ -330,7 +338,33 @@ function StageEditor({ stage, readOnly, onChange, onRemove }) {
         value=${(stage.modules ?? []).join(', ')}
         readOnly=${readOnly}
         onInput=${(e) => onChange({ ...stage, modules: splitIds(e.currentTarget.value) })}
+        onBlur=${() => {
+          // #171: drop read-only entries for Modules taken off the Stage — on blur, not per keystroke,
+          // so a half-typed id doesn't lose its entry.
+          const pruned = pruneStageReadOnlyModules(stage)
+          if (pruned !== stage) onChange(pruned)
+        }}
       />
+      ${(stage.modules ?? []).length
+        ? html`
+            <div class="local-def-read-only-modules">
+              ${stage.modules.map(
+                (moduleId) => html`
+                  <label key=${moduleId} class="defn-read-only-toggle" title="Mounted so this stage's documents and gate can use it, but edited at an earlier stage">
+                    <input
+                      type="checkbox"
+                      aria-label=${`Read-only at this stage: ${moduleId}`}
+                      checked=${(stage.readOnlyModules ?? []).includes(moduleId)}
+                      disabled=${readOnly}
+                      onChange=${(e) => onChange(withModuleReadOnly(stage, moduleId, e.currentTarget.checked))}
+                    />
+                    ${moduleId} read-only
+                  </label>
+                `
+              )}
+            </div>
+          `
+        : null}
     </div>
   `
 }
@@ -599,7 +633,9 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
     setSaveStatus('saving')
     setSaveError(null)
     try {
-      await writeLocalDefinitionStructure(handle, definitionId, version, structure)
+      const tidy = pruneStructureReadOnly(structure)
+      if (tidy !== structure) setStructure(tidy)
+      await writeLocalDefinitionStructure(handle, definitionId, version, tidy)
       setSaveStatus('saved')
     } catch (err) {
       setSaveStatus('error')
@@ -611,13 +647,15 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
     setPublishBusy(true)
     setPublishError(null)
     try {
-      const result = await validateStructure(structure)
+      // #171: a read-only entry left behind by a Module taken off a Stage would block Publish.
+      const tidy = pruneStructureReadOnly(structure)
+      const result = await validateStructure(tidy)
       if ((result.problems ?? []).length > 0) {
         setProblems(result.problems)
         setPublishError('This definition still has unresolved problems — fix them before publishing.')
         return
       }
-      const published = { ...structure, status: 'published' }
+      const published = { ...tidy, status: 'published' }
       await writeLocalDefinitionStructure(handle, definitionId, version, published)
       setStructure(published)
     } catch (err) {
