@@ -21,6 +21,7 @@ import { apiFetch, apiFetchForInstance, cachedWorkspaceIdForSlug } from '../lib/
 import { ensureWriteAccessChecked } from '../lib/writeAccess.js'
 import { resetWorkspaceDiscovery } from '../lib/workspaceDiscovery.js'
 import { IdentityPicker } from '../lib/identityPicker.js'
+import { AiProvidersSection } from '../lib/aiProvidersView.js'
 
 // #126 (parent #109, docs/adr/0047): the Settings-screen twin of web/app.js's own
 // `isWriteAccessBlocked`/`writeAccessBlockedReason` — same rule (a shared instance's write-affecting
@@ -560,6 +561,7 @@ export function GlobalSettingsPage({ query }) {
     <main class="settings-page">
       <${AdvancedModeSection} />
       <${RenderEngineSection} />
+      <${AiProvidersSection} />
       ${advancedMode.value ? html`<${LibraryReposSection} />` : null}
       <${ServerVersionFooter} />
     </main>

@@ -2011,3 +2011,27 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .local-def-template-source { font: 13px/1.5 var(--font-mono); min-height: 160px; }
 .local-def-validation { margin: 20px 0; }
 .local-def-problems { padding-left: 20px; color: var(--text-error, #b3261e); }
+
+/*
+ * ---------- AI Providers (#277, ADR-0061) ----------
+ * The table and add/edit dialog on Global Settings. Reuses `.wizard-input`, `.field-label`, `.btn`, `.stamp`
+ * and `.modal` wholesale; only the table and the dialog's two-column rows are new.
+ */
+.ai-provider-table { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 13px; }
+.ai-provider-table th { text-align: left; font-family: var(--font-display); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); padding: 6px 10px 6px 0; border-bottom: var(--border-strong) solid var(--line-strong); }
+.ai-provider-table td { padding: 9px 10px 9px 0; border-bottom: var(--hairline) solid var(--line); vertical-align: middle; }
+.ai-provider-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }
+.ai-provider-none, .ai-provider-runs-on-label { color: var(--text-muted); }
+.ai-provider-default-stamp { margin-left: 4px; }
+.ai-provider-test-row td { border-bottom: var(--hairline) solid var(--line); padding-top: 0; font-size: 12px; }
+.ai-provider-test-ok { color: var(--text-muted); }
+.ai-provider-dialog { width: 600px; }
+.ai-provider-form { display: flex; flex-direction: column; gap: 4px; }
+.ai-provider-form .field-label { margin-top: 10px; }
+.ai-provider-form .workspace-field-hint { margin: 4px 0 0; font-size: 12px; color: var(--text-muted); }
+.ai-provider-row { display: flex; gap: 12px; }
+.ai-provider-row > div { flex: 1; min-width: 0; }
+.ai-provider-runs-on { border: 0; padding: 0; margin: 10px 0 0; }
+.ai-provider-advanced { margin-top: 12px; }
+.ai-provider-advanced > summary { cursor: pointer; font-family: var(--font-display); font-weight: 600; font-size: 12px; }
+.ai-provider-default { margin-top: 14px; }

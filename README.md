@@ -867,6 +867,12 @@ If that egress goes through a TLS-intercepting proxy, mount the corporate CA and
 #   - /etc/ssl/certs/ca-certificates.crt:/certs/corporate-ca.pem:ro
 ```
 
+### AI Providers and the AI relay
+
+An architect's **AI Providers** (Anthropic, OpenAI, OpenRouter, Ollama, LM Studio, or any OpenAI-compatible service) are set up in their own browser, under Global Settings, and their keys stay there: the browser sends the key with each request, and `gantry serve` never stores or logs it (`docs/adr/0061-ai-providers-belong-to-the-browser.md`). Every AI call except a local model running on the architect's own computer goes through the server's relay, `POST /api/ai/relay`, which forwards it to the AI Provider's address and streams the answer back. It follows no redirects, forwards only `GET` and `POST` and a short list of headers, and needs no configuration, but it does need outbound HTTPS to whichever AI Providers your architects use (see **Outbound network**).
+
+**`GANTRY_AI_ALLOW_PRIVATE_URLS`** (off by default; set it to `1`, `true`, `yes` or `on`): by default the relay **refuses private and loopback addresses**, both an address written that way (`localhost`, `127.0.0.1`, `10.x.x.x`, `172.16-31.x.x`, `192.168.x.x`, `169.254.x.x`, `::1` and the like, plus names ending `.local`, `.internal` or `.lan`) and a public name that *resolves* to one. Otherwise a hosted Gantry could be pointed at its own internal network or a cloud metadata service. Set it only when an AI Provider genuinely lives on the server's own network, such as an Ollama or LM Studio the architects have registered as running on **The Gantry server**, and only on a deployment you trust every visitor to. It has no effect on an Ollama or LM Studio registered as running on **This computer**: the browser calls those directly, and the architect allows the Gantry page in `OLLAMA_ORIGINS` (Ollama) or the CORS setting (LM Studio).
+
 ### Health and restart
 
 The `runtime` stage declares a `HEALTHCHECK`:

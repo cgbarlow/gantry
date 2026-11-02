@@ -449,13 +449,42 @@ Use **Show commit history** in the card header to open a dialog listing the comm
 
 Gantry's Settings are split by scope:
 
-- **Global Settings** holds the **Advanced mode** toggle, off by default — with it off, a browser only ever sees the Local workspace flow (see **Local workspaces** above), with no Provider, work-item or sign-off UI anywhere in the app. It also holds a **default ticketing system** choice, which only ever affects a *new* Azure DevOps Workspace's own ticketing-system override (Jira is listed but disabled). There is no global Personal Access Token here, or anywhere else: every Server-hosted Workspace holds its own **Workspace PAT** (see **Choosing a Provider** above), so this screen has nothing credential-related to set.
+- **Global Settings** holds the **Advanced mode** toggle, off by default — with it off, a browser only ever sees the Local workspace flow (see **Local workspaces** above), with no Provider, work-item or sign-off UI anywhere in the app. It also holds a **default ticketing system** choice, which only ever affects a *new* Azure DevOps Workspace's own ticketing-system override (Jira is listed but disabled). There is no global Personal Access Token here, or anywhere else: every Server-hosted Workspace holds its own **Workspace PAT** (see **Choosing a Provider** above), so there is no credential to set for a Workspace here. It also holds your **AI Providers** (see **AI Providers** below), which do have keys, but those belong to your browser rather than to any Workspace.
 - **Workspace Settings** controls the Owner and the Workspace's own PAT — set it, replace it, or clear it, entirely independently of every other workspace's own token — plus, for an Azure DevOps workspace only, a ticketing-system override (Jira is listed but disabled; a GitHub or GitLab workspace has no such choice, since its tracker is fixed by its Provider — GitHub Issues or GitLab Issues respectively). This screen also shows the Workspace's Provider and, at a glance, whether its PAT is set, missing or was rejected on the last request that used it. These settings apply to the Workspace and can be opened from an Instance that belongs to it. The same screen also holds **Archive workspace** / **Restore workspace**.
 - **Instance Settings** controls the Instance's Assignee (and, for a Workspace-backed Instance, its Required reviewer) and, under an **Instance settings** heading, whatever Instance settings its Definition offers, such as **Size** when it sets word targets, **Classification** when it lists markings and the instance's own **Logo** (see **Instance settings**, **Classification**, **Your instance's own logo** and **Target size and word targets** above), and shows read-only information about the Instance and its linked work item. The same screen also holds **Archive instance** / **Restore instance**. An archived instance is hidden from the dashboard but still opens at its direct URL.
 
 An override narrows the scope of a setting: a workspace's own PAT and ticketing-system choice apply only to that Workspace, while an Instance's own settings affect only that one run of the Definition — nothing here falls back to a shared default any more.
 
 For example, an architect can give a GitHub `design` Workspace its own PAT while a separate Azure DevOps `design` Workspace keeps its own, entirely unrelated token, and assign one `design` Instance without changing its Workspace or sibling Instances.
+
+### AI Providers
+
+An **AI Provider** is the outside AI service that reads an Instance's source material and interviews you to draft it: Anthropic, OpenAI, OpenRouter, Ollama, LM Studio, or any other OpenAI-compatible service. (It has nothing to do with a **Provider**, the place a Workspace's repo and work items live.) AI Providers are set up under **AI Providers** on **Global Settings**, once, and then used in every Workspace.
+
+They belong to your **browser**, not to a Workspace or to the Gantry server. Like a Workspace PAT, the key is kept in this browser and sent with each request that needs it. Gantry's server passes the request on to the AI Provider and never stores or logs the key. This also means you set your AI Providers up again in another browser.
+
+The table lists each AI Provider's **Name**, **Type**, **Model**, **Question cards** and **Status**, with **Test**, **Edit** and **Delete** beside it. There is no on/off switch: delete an AI Provider you no longer want. One AI Provider is marked **Default**, and exactly one always is: the first one you add, until you use **Make Default** on another. Deleting the Default hands it to the next AI Provider in the list.
+
+**Add AI Provider** opens a dialog:
+
+- **Name** and **Type**. Choosing a Type fills in the usual **Address**, which you can change (for a proxy, or a self-hosted service).
+- **Key**. Needed for every Type except Ollama and LM Studio, where it is optional.
+- **Model**. Once the address and key are entered, Gantry asks the AI Provider which models it has and offers them as you type. You can always type a model name of your own, such as one the list leaves out.
+- **Temperature** and **Max tokens**.
+- **Advanced**: top_p, top_k, min_p, frequency and presence penalties, stop sequences, reasoning effort, and **Context window**. The context window is how much the model can read at once, and Gantry uses it to choose between putting the whole document pack in the prompt and giving the AI a catalogue to look things up in. Gantry fills it in where the AI Provider says (Anthropic, OpenRouter, Ollama and LM Studio) and uses a default otherwise. You can always change it, and once you have, Gantry leaves your number alone.
+
+Changing an AI Provider's **Type**, **Address** or **Model** marks it **Untested**. **Test** checks that the AI Provider can be reached, that the key is accepted and that the model exists.
+
+#### Models that run on your own computer
+
+For Ollama and LM Studio, say where the model **runs**:
+
+- **This computer** (the default): your browser calls the model directly, so it can reach a model on your laptop even when Gantry is hosted somewhere else. The model's server has to allow requests from the Gantry page. For Ollama, set `OLLAMA_ORIGINS` to include the address you open Gantry at, and restart Ollama. For LM Studio, turn on CORS in its server settings. If a request is blocked, the dialog and **Test** tell you this and name the address to allow.
+- **The Gantry server**: the Gantry server calls the model, so it has to be able to reach the address.
+
+#### Private addresses (for whoever runs Gantry)
+
+Every call except a local model on *this computer* goes through the Gantry server. So that a hosted Gantry can't be pointed at its own internal network, the server **refuses private and loopback addresses** (such as `localhost`, `10.x.x.x`, `192.168.x.x` or a cloud metadata address), even when a public name points at one. A person who needs it, for example a model on the Gantry server's own network, asks the operator to set the environment variable `GANTRY_AI_ALLOW_PRIVATE_URLS=1` on the server and restart it.
 
 ## Definition Reference Guide
 
