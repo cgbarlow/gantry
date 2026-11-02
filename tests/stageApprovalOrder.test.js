@@ -5,13 +5,21 @@ import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { createAzureDevOpsPullRequestsClient } from '../lib/azureDevOpsPullRequestsClient.js'
 import { createGitHubClient } from '../lib/githubClient.js'
 import { createGitHubPullRequestsClient } from '../lib/githubPullRequestsClient.js'
-import { resolveStageBranch, stageBranchName } from '../lib/stageBranch.js'
+import { resolveStageBranch, stageBranchName, nearestEarlierStageBranch } from '../lib/stageBranch.js'
+import { createGitLabClient } from '../lib/gitlabClient.js'
+import { createGitLabPullRequestsClient } from '../lib/gitlabPullRequestsClient.js'
+import { resolveGitLabStageBranch } from '../lib/gitlabStageBranch.js'
+import { createBitbucketClient } from '../lib/bitbucketClient.js'
+import { createBitbucketPullRequestsClient } from '../lib/bitbucketPullRequestsClient.js'
+import { resolveBitbucketStageBranch } from '../lib/bitbucketStageBranch.js'
 import { resolveGitHubStageBranch } from '../lib/githubStageBranch.js'
 import { readInstance, recordInstancePullRequest } from '../lib/instance.js'
 import { requestStageApproval } from '../lib/stageApproval.js'
 import { checkStageApprovalStatus } from '../lib/stageStatus.js'
 import { assertStageIsCurrentForApproval, waitingForEarlierStageResult } from '../lib/stageOrder.js'
 import { withFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
+import { withFakeGitLabServer, GITLAB_NAMESPACE, GITLAB_REPOSITORY, GITLAB_VALID_PAT } from './helpers/fakeGitLabServer.js'
+import { withFakeBitbucketServer, BITBUCKET_OWNER, BITBUCKET_REPOSITORY, BITBUCKET_VALID_PAT } from './helpers/fakeBitbucketServer.js'
 import { withFakeGitHubServer, GITHUB_OWNER, GITHUB_REPOSITORY, GITHUB_VALID_PAT } from './helpers/fakeGitHubServer.js'
 import { basicAuthHeader, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT } from './helpers/lifecycle.js'
 import { exampleModuleText } from './helpers/fixtureModules.js'
@@ -63,6 +71,36 @@ test('waitingForEarlierStageResult reports nothing merged or advanced and names 
   assert.equal(result.workItemSync, null)
   assert.deepEqual(result.waitingForStage, { id: SHAPE.id, title: SHAPE.title, gate: SHAPE.gate })
   assert.match(result.message, /waits for the earlier stage "shape"/)
+})
+
+// The provider-neutral branch picker every provider's resolve*StageBranch calls. A stub client is enough: branch
+// existence is its only input.
+function stubBranchClient(existing) {
+  return { branchExists: async (name) => existing.includes(name) }
+}
+
+test('nearestEarlierStageBranch returns the closest earlier stage branch that exists, and main when none does', async () => {
+  const branch = (stage) => stageBranchName(SLUG, stage.id)
+  const indexOf = (stage) => definition.stages.findIndex((s) => s.id === stage.id)
+
+  // Nothing earlier exists: fork from main (the first stage always does).
+  assert.equal(await nearestEarlierStageBranch(stubBranchClient([]), definition, SLUG, indexOf(SHAPE)), 'main')
+  assert.equal(await nearestEarlierStageBranch(stubBranchClient([]), definition, SLUG, indexOf(DETAILED_DESIGN)), 'main')
+  // The immediate predecessor wins when it exists.
+  assert.equal(
+    await nearestEarlierStageBranch(stubBranchClient([branch(SHAPE), branch(HLD_DEFINE)]), definition, SLUG, indexOf(DETAILED_DESIGN)),
+    branch(HLD_DEFINE)
+  )
+  // A gap is skipped, not treated as "fork from main".
+  assert.equal(
+    await nearestEarlierStageBranch(stubBranchClient([branch(SHAPE)]), definition, SLUG, indexOf(DETAILED_DESIGN)),
+    branch(SHAPE)
+  )
+  // Only earlier stages count: a branch for the stage itself or a later one is ignored.
+  assert.equal(
+    await nearestEarlierStageBranch(stubBranchClient([branch(DETAILED_DESIGN), branch(HLD_DEFINE)]), definition, SLUG, indexOf(SHAPE)),
+    'main'
+  )
 })
 
 // ---- Azure DevOps -----------------------------------------------------------------------
@@ -240,6 +278,152 @@ test('resolveGitHubStageBranch stacks on the nearest earlier stage branch that e
 
     assert.equal(await client.branchExists(stageBranchName(SLUG, HLD_DEFINE.id)), false)
     const branch = await resolveGitHubStageBranch(github, definition, SLUG, DETAILED_DESIGN.id)
+    assert.equal(await client.getFileContent(`gantry-workspace/${SLUG}/modules/background.md`, { branch }), 'unapproved shape draft')
+  })
+})
+
+// ---- GitLab -----------------------------------------------------------------------------
+
+function gitlabLocation(baseUrl) {
+  return { namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, pat: GITLAB_VALID_PAT, baseUrl }
+}
+
+function withGitLab(stage, fn) {
+  return withFakeGitLabServer(
+    { namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, validPat: GITLAB_VALID_PAT, files: instanceYaml(stage) },
+    fn
+  )
+}
+
+test('requestStageApproval (GitLab) refuses a stage that is not current, naming the current stage, and opens nothing', async () => {
+  await withGitLab(SHAPE, async (baseUrl) => {
+    const gitlab = gitlabLocation(baseUrl)
+    await resolveGitLabStageBranch(gitlab, definition, SLUG, SHAPE.id)
+    const hldBranch = await resolveGitLabStageBranch(gitlab, definition, SLUG, HLD_DEFINE.id)
+
+    await assert.rejects(
+      () => requestStageApproval(SLUG, { gitlab, gate: HLD_DEFINE.gate }),
+      new RegExp(`current stage is "${SHAPE.title}" \\(stage "shape"\\)`)
+    )
+    const instance = await readInstance(SLUG, { gitlab: { ...gitlab, branch: hldBranch } })
+    assert.equal(instance.pullRequests?.[HLD_DEFINE.id], undefined)
+  })
+})
+
+test('checkStageApprovalStatus (GitLab) does not merge or advance an approved Merge Request for a stage that is not current', async () => {
+  await withGitLab(SHAPE, async (baseUrl) => {
+    const gitlab = gitlabLocation(baseUrl)
+    const client = createGitLabClient(gitlab)
+    const shapeBranch = await resolveGitLabStageBranch(gitlab, definition, SLUG, SHAPE.id)
+    for (const moduleId of SHAPE_MODULES) {
+      await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, exampleModuleText(moduleId), { branch: shapeBranch })
+    }
+    const hldBranch = await resolveGitLabStageBranch(gitlab, definition, SLUG, HLD_DEFINE.id)
+    const prClient = createGitLabPullRequestsClient(gitlab)
+    const pr = await prClient.createPullRequest({ sourceBranch: hldBranch, targetBranch: 'main', title: 'hld', description: '' })
+    await recordInstancePullRequest(SLUG, HLD_DEFINE.id, pr.pullRequestId, {
+      gitlab: { ...gitlab, branch: hldBranch },
+      pullRequestStatus: pr.status,
+    })
+    await fetch(`${baseUrl}/projects/${encodeURIComponent(`${GITLAB_NAMESPACE}/${GITLAB_REPOSITORY}`)}/merge_requests/${pr.pullRequestId}/approve`, {
+      method: 'POST',
+      headers: { 'PRIVATE-TOKEN': GITLAB_VALID_PAT },
+    })
+
+    const result = await checkStageApprovalStatus(SLUG, { gitlab, gate: HLD_DEFINE.gate })
+    assert.equal(result.review.state, 'approved')
+    assert.equal(result.merged, false)
+    assert.equal(result.advancedTo, null)
+    assert.equal(result.waitingForStage.id, SHAPE.id)
+    assert.match(result.message, /waits for the earlier stage "shape"/)
+
+    assert.equal((await readInstance(SLUG, { gitlab })).stage, SHAPE.id)
+    assert.equal(await client.fileExists(`gantry-workspace/${SLUG}/modules/background.md`), false, 'shape content must not have reached main')
+  })
+})
+
+test('resolveGitLabStageBranch stacks on the nearest earlier stage branch that exists, skipping a stage with no branch', async () => {
+  await withGitLab(SHAPE, async (baseUrl) => {
+    const gitlab = gitlabLocation(baseUrl)
+    const client = createGitLabClient(gitlab)
+    const shapeBranch = await resolveGitLabStageBranch(gitlab, definition, SLUG, SHAPE.id)
+    await client.writeFile(`gantry-workspace/${SLUG}/modules/background.md`, 'unapproved shape draft', { branch: shapeBranch })
+
+    assert.equal(await client.branchExists(stageBranchName(SLUG, HLD_DEFINE.id)), false)
+    const branch = await resolveGitLabStageBranch(gitlab, definition, SLUG, DETAILED_DESIGN.id)
+    assert.equal(await client.getFileContent(`gantry-workspace/${SLUG}/modules/background.md`, { branch }), 'unapproved shape draft')
+  })
+})
+
+// ---- Bitbucket --------------------------------------------------------------------------
+
+function bitbucketLocation(baseUrl) {
+  return { owner: BITBUCKET_OWNER, repository: BITBUCKET_REPOSITORY, pat: BITBUCKET_VALID_PAT, baseUrl }
+}
+
+function withBitbucket(stage, fn) {
+  return withFakeBitbucketServer(
+    { owner: BITBUCKET_OWNER, repository: BITBUCKET_REPOSITORY, validPat: BITBUCKET_VALID_PAT, files: instanceYaml(stage) },
+    fn
+  )
+}
+
+test('requestStageApproval (Atlassian) refuses a stage that is not current, naming the current stage, and opens nothing', async () => {
+  await withBitbucket(SHAPE, async (baseUrl) => {
+    const atlassian = bitbucketLocation(baseUrl)
+    await resolveBitbucketStageBranch(atlassian, definition, SLUG, SHAPE.id)
+    const hldBranch = await resolveBitbucketStageBranch(atlassian, definition, SLUG, HLD_DEFINE.id)
+
+    await assert.rejects(
+      () => requestStageApproval(SLUG, { atlassian, gate: HLD_DEFINE.gate }),
+      new RegExp(`current stage is "${SHAPE.title}" \\(stage "shape"\\)`)
+    )
+    const instance = await readInstance(SLUG, { atlassian: { ...atlassian, branch: hldBranch } })
+    assert.equal(instance.pullRequests?.[HLD_DEFINE.id], undefined)
+  })
+})
+
+test('checkStageApprovalStatus (Atlassian) does not merge or advance an approved pull request for a stage that is not current', async () => {
+  await withBitbucket(SHAPE, async (baseUrl) => {
+    const atlassian = bitbucketLocation(baseUrl)
+    const client = createBitbucketClient(atlassian)
+    const shapeBranch = await resolveBitbucketStageBranch(atlassian, definition, SLUG, SHAPE.id)
+    for (const moduleId of SHAPE_MODULES) {
+      await client.writeFile(`gantry-workspace/${SLUG}/modules/${moduleId}.md`, exampleModuleText(moduleId), { branch: shapeBranch })
+    }
+    const hldBranch = await resolveBitbucketStageBranch(atlassian, definition, SLUG, HLD_DEFINE.id)
+    const prClient = createBitbucketPullRequestsClient(atlassian)
+    const pr = await prClient.createPullRequest({ sourceBranch: hldBranch, targetBranch: 'main', title: 'hld', description: '' })
+    await recordInstancePullRequest(SLUG, HLD_DEFINE.id, pr.pullRequestId, {
+      atlassian: { ...atlassian, branch: hldBranch },
+      pullRequestStatus: pr.status,
+    })
+    await fetch(
+      `${baseUrl}/repositories/${encodeURIComponent(BITBUCKET_OWNER)}/${encodeURIComponent(BITBUCKET_REPOSITORY)}/pullrequests/${pr.pullRequestId}/approve`,
+      { method: 'POST', headers: { Authorization: `Bearer ${BITBUCKET_VALID_PAT}` } }
+    )
+
+    const result = await checkStageApprovalStatus(SLUG, { atlassian, gate: HLD_DEFINE.gate })
+    assert.equal(result.review.state, 'approved')
+    assert.equal(result.merged, false)
+    assert.equal(result.advancedTo, null)
+    assert.equal(result.waitingForStage.id, SHAPE.id)
+    assert.match(result.message, /waits for the earlier stage "shape"/)
+
+    assert.equal((await readInstance(SLUG, { atlassian })).stage, SHAPE.id)
+    assert.equal(await client.fileExists(`gantry-workspace/${SLUG}/modules/background.md`), false, 'shape content must not have reached main')
+  })
+})
+
+test('resolveBitbucketStageBranch stacks on the nearest earlier stage branch that exists, skipping a stage with no branch', async () => {
+  await withBitbucket(SHAPE, async (baseUrl) => {
+    const atlassian = bitbucketLocation(baseUrl)
+    const client = createBitbucketClient(atlassian)
+    const shapeBranch = await resolveBitbucketStageBranch(atlassian, definition, SLUG, SHAPE.id)
+    await client.writeFile(`gantry-workspace/${SLUG}/modules/background.md`, 'unapproved shape draft', { branch: shapeBranch })
+
+    assert.equal(await client.branchExists(stageBranchName(SLUG, HLD_DEFINE.id)), false)
+    const branch = await resolveBitbucketStageBranch(atlassian, definition, SLUG, DETAILED_DESIGN.id)
     assert.equal(await client.getFileContent(`gantry-workspace/${SLUG}/modules/background.md`, { branch }), 'unapproved shape draft')
   })
 })

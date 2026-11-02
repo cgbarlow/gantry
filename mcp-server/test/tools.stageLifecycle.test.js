@@ -187,6 +187,65 @@ test('request_approval opens a stage Pull Request for a Workspace-backed instanc
   }
 })
 
+// #266, ADR-0063: approvals go in stage order. gantry serve answers a 400 for a gate that is not the current
+// stage's; the tool must pass "gate" through and hand that refusal back as an error, not swallow it.
+test('request_approval forwards "gate" and returns the 400 refusal for a stage that is not current as an error result', async () => {
+  const refusal =
+    'Cannot request approval for stage "hld-define" (gate "hld-complete") of instance "ado-instance": the instance\'s current stage is "Shape" (stage "shape"), and stages are approved in order — approve it first'
+  const fetch = stubFetch(
+    providerWorkspaceStub('ws-1', ({ url, method, body }) => {
+      if (url.pathname === '/api/instance/request-approval' && method === 'POST') {
+        assert.deepEqual(JSON.parse(body), { gate: 'hld-complete' })
+        return { status: 400, body: { error: refusal } }
+      }
+      return undefined
+    })
+  )
+  try {
+    const gantryClient = createGantryClient({ baseUrl: BASE_URL, workspacePats: { 'ws-1': 'secret-pat' } })
+    const result = await requestApprovalTool.handler({ slug: 'ado-instance', gate: 'hld-complete' }, { gantryClient })
+    assert.equal(result.isError, true)
+    const payload = JSON.parse(result.content[0].text)
+    assert.equal(payload.detail.error, refusal)
+    assert.match(payload.detail.error, /current stage is "Shape"/)
+  } finally {
+    fetch.restore()
+  }
+})
+
+test('request_approval\'s description tells a model approvals go in stage order and that a later stage is refused with a 400', () => {
+  assert.match(requestApprovalTool.description, /in stage order/)
+  assert.match(requestApprovalTool.description, /refused with a 400 naming the current stage/)
+})
+
+test('check_status hands back a waitingForStage response (merged=false) untouched, and its description explains the field', async () => {
+  const waiting = {
+    merged: false,
+    advancedTo: null,
+    waitingForStage: { id: 'shape', title: 'Shape', gate: 'shape-complete' },
+    message: 'Stage "hld-define" is approved but waits for the earlier stage "shape", the instance\'s current stage. Nothing was merged or advanced.',
+  }
+  const fetch = stubFetch(
+    providerWorkspaceStub('ws-1', ({ url, method, body }) => {
+      if (url.pathname === '/api/instance/check-status' && method === 'POST') {
+        assert.deepEqual(JSON.parse(body), { gate: 'hld-complete' })
+        return { status: 200, body: waiting }
+      }
+      return undefined
+    })
+  )
+  try {
+    const gantryClient = createGantryClient({ baseUrl: BASE_URL, workspacePats: { 'ws-1': 'secret-pat' } })
+    const result = await checkStatusTool.handler({ slug: 'ado-instance', gate: 'hld-complete' }, { gantryClient })
+    assert.equal(result.isError, undefined)
+    assert.deepEqual(JSON.parse(result.content[0].text), waiting)
+  } finally {
+    fetch.restore()
+  }
+  assert.match(checkStatusTool.description, /waitingForStage/)
+  assert.match(checkStatusTool.description, /merged=false/)
+})
+
 test('request_approval is rejected for a local instance', async () => {
   const fetch = stubFetch(
     localWorkspaceStub(({ url, method }) => {
