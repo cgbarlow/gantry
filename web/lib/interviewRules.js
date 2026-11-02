@@ -11,7 +11,7 @@
 // Pure and dependency-free, like web/lib/interviewSkills.js.
 
 /** Bumped when a rule changes, so a decisions log can say which rules an interview ran under. */
-export const INTERVIEW_RULES_VERSION = 1
+export const INTERVIEW_RULES_VERSION = 2
 
 export const INTERVIEW_RULES = Object.freeze([
   {
@@ -65,6 +65,43 @@ export const INTERVIEW_RULES = Object.freeze([
       'The Stage is ready when Gantry\'s real Gate check passes for the Artefact aimed for and every Field in scope is done. Only then does the stage-end card appear. You never pass a Gate: a Gate that needs approval or review stops you.',
       'Where more than one Artefact can pass the Gate, ask which one is aimed for, with the lightest pre-selected.',
       'Fields you write stay `draft`; only a person marks a Module `agreed`.',
+    ].join(' '),
+  },
+  {
+    id: 'terms',
+    title: 'Settle the words',
+    text: [
+      'When Source documents name one thing differently, or the architect\'s own wording (a card\'s "Other" text or free chat) is fuzzy or clashes with a name already settled or in the Glossary, ask which to prefer on a term card: set `kind` to "term", make each name an option, and say in `meaning` what the thing is.',
+      'The answer is a term choice: the option chosen is the preferred term and the other names are to be avoided. Gantry logs it, and it binds this Stage and every later one, so use the preferred term everywhere and never ask again.',
+      'Where the Glossary standard module is mounted on this Stage, draft it from the term choices, one row each, rather than writing terms into it as they come up. Where it is not, the choice stays in the decisions log only.',
+    ].join(' '),
+  },
+  {
+    id: 'key-decisions',
+    title: 'Offer Key decisions sparingly',
+    text: [
+      'Offer a Key decision only when the Key decisions module is mounted on this Stage and the decision is all three of: hard to reverse, surprising without its context, and the result of a real trade-off.',
+      'Ask it as a card with `kind` "decision" and say in `decision` why each of the three is true. If any one is missing it is a routine choice: ask it as an ordinary card, or do not ask.',
+      'Draft a decision the architect confirms into the Key decisions module as the next numbered decision, in the module\'s prefix and style, and keep every saved decision\'s number.',
+      'The decisions log records every answer whether or not it becomes a Key decision.',
+    ].join(' '),
+  },
+  {
+    id: 'open-questions',
+    title: 'Record what stays open',
+    text: [
+      'A question the architect cannot yet answer, or a select Field where none of the options fits, is logged as an open question and not guessed.',
+      'Where the Open questions module is mounted on this Stage, draft every open question in the decisions log into it, one row each. Where it is not, the question stays in the decisions log only.',
+      'Never invent who resolves a question or by when: leave those cells for the architect.',
+    ].join(' '),
+  },
+  {
+    id: 'scenarios',
+    title: 'Stress-test relationships with scenarios',
+    text: [
+      'While the relationships between things are being discussed, test them with a concrete scenario that probes an edge case and forces the boundary between two concepts to be precise, asked as a card whose options are the possible outcomes.',
+      'Build the scenario from what the Source documents and the architect have said; mark it as hypothetical, and put no figure, date or name in it that neither supplied.',
+      'What the architect decides is logged like any answer.',
     ].join(' '),
   },
   {

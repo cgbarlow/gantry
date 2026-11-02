@@ -24,10 +24,13 @@ export const CHANGE_OPTIONS = Object.freeze({
 
 const same = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase()
 
-/** The sort key of a card: 0 a Field this Gate requires, 1 Source documents that disagree, 2 a missing fact, 3 anything else (optional Fields). */
+/**
+ * The sort key of a card: 0 a Field this Gate requires, 1 Source documents that disagree (a term card is one of these: the
+ * names differ, #291), 2 a missing fact, 3 anything else (optional Fields).
+ */
 export function cardPriority(card, requiredKeys = new Set()) {
   if (card.field && requiredKeys.has(card.field)) return 0
-  if (card.kind === 'disagreement') return 1
+  if (card.kind === 'disagreement' || card.kind === 'term') return 1
   if (card.kind === 'missing') return 2
   return 3
 }
@@ -171,6 +174,20 @@ export function followsRecommendation(card) {
   return a === b
 }
 
+// ---------- term cards (#291) ----------
+
+/**
+ * What a term card's answer settles: the **preferred term** (the option chosen, or the architect's own wording if they typed
+ * "Other") and the names to **avoid** (every other option). Only for a card with `kind: 'term'`; otherwise null.
+ */
+export function termChoice(card) {
+  if (card.kind !== 'term' || card.type === 'change') return null
+  const own = otherWords(card)
+  const preferred = own || card.selected[0]
+  if (!preferred) return null
+  return { preferred, avoid: card.options.map((o) => o.label).filter((label) => !same(label, preferred)), own: Boolean(own), meaning: card.meaning ?? '' }
+}
+
 // ---------- the answers, for the AI ----------
 
 /**
@@ -190,6 +207,13 @@ export function answersText(cards, { fieldTitle = (key) => key } = {}) {
     for (const label of card.selected) {
       const draft = card.options.find((o) => o.label === label)?.draft
       if (draft) lines.push(`  Text for "${label}": ${draft}`)
+    }
+    const term = termChoice(card)
+    if (term) {
+      lines.push(`  Term choice, logged: prefer "${term.preferred}"${term.avoid.length ? `, avoid ${term.avoid.map((a) => `"${a}"`).join(', ')}` : ''}. Use "${term.preferred}" in every Field, heading, table and diagram from now on, and in every later Stage; draft it into the Glossary where one is mounted.`)
+    }
+    if (card.kind === 'decision' && card.type !== 'change') {
+      lines.push('  Key decision, logged. Draft it into the Key decisions Field as the next numbered decision, in the style and prefix that module uses.')
     }
     if (card.type === 'change') {
       const what = card.selected[0]

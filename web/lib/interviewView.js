@@ -51,12 +51,20 @@ const MODE_LABELS = { native: 'native', text: 'text fallback', chat: 'plain chat
 function QuestionCard({ card, fieldTitle, session }) {
   const type = card.multiSelect ? 'checkbox' : 'radio'
   const recommended = new Set(card.recommended)
-  return html`<div class="qcard" data-testid="interview-card" data-card-id=${card.id} data-card-type=${card.type ?? 'question'}>
+  return html`<div class="qcard" data-testid="interview-card" data-card-id=${card.id} data-card-type=${card.type ?? 'question'} data-card-kind=${card.kind ?? ''}>
     <div class="qchip">
-      ${card.header || (card.type === 'change' ? 'Saved content' : 'Question')}${card.multiSelect ? ' · choose any' : ''}
+      ${card.header || (card.type === 'change' ? 'Saved content' : card.kind === 'term' ? 'Preferred term' : card.kind === 'decision' ? 'Key decision' : 'Question')}${card.multiSelect ? ' · choose any' : ''}
       ${card.field ? html` · feeds <span data-testid="card-feeds">${fieldTitle(card.field)}</span>` : null}
     </div>
     <p class="qhead" data-testid="card-question">${card.question}</p>
+    ${card.kind === 'term' && card.meaning ? html`<p class="qmeaning" data-testid="card-meaning"><strong>What it is:</strong> ${card.meaning}</p>` : null}
+    ${card.kind === 'decision' && card.decision
+      ? html`<ul class="qsignificance" data-testid="card-significance" aria-label="Why this is a Key decision">
+          <li><strong>Hard to reverse:</strong> ${card.decision.hardToReverse}</li>
+          <li><strong>Surprising without context:</strong> ${card.decision.surprising}</li>
+          <li><strong>A real trade-off:</strong> ${card.decision.tradeOff}</li>
+        </ul>`
+      : null}
     ${card.change
       ? html`<div class="change-compare" data-testid="change-compare">
           <div><span class="qchip">Saved</span><div class="value" data-testid="change-saved"><${ValueView} value=${card.change.saved} /></div></div>
@@ -174,10 +182,17 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       decisionsStore?.read(instance.stage.id).catch(() => null) ?? null,
       previousId ? decisionsStore?.read(previousId).catch(() => null) ?? null : null,
     ])
-      .then(([structure, skills, otherSaved, committedLog, previousLog]) => {
+      .then(async ([structure, skills, otherSaved, committedLog, previousLog]) => {
+        // #291: a term choice made at an earlier Stage binds this one, and an open question left there is carried to the Open questions
+        // module, so the earlier Stages' logs are read too. A log that can't be read is left out: the interview carries on without it.
+        const stages = structure.stages ?? []
+        const earlierStages = stages.slice(0, Math.max(0, stages.findIndex((st) => st.id === instance.stage.id)))
+        const earlierDecisions = decisionsStore
+          ? (await Promise.all(earlierStages.map(async (st) => ({ stageId: st.id, stageTitle: st.title ?? st.id, entries: (await decisionsStore.read(st.id).catch(() => null))?.entries ?? [] })))).filter((l) => l.entries.length)
+          : []
         if (cancelled) return
         const definition = { ...structure, modules: modulesWithStandard(structure.modules, structure.standardModules) }
-        setSetup({ status: 'ready', structure, definition, skills, otherSaved })
+        setSetup({ status: 'ready', structure, definition, skills, otherSaved, earlierDecisions })
         setCommittedLog(committedLog)
         setResumeLogs({ [instance.stage.id]: committedLog, ...(previousId ? { [previousId]: previousLog } : {}) })
       })
@@ -231,6 +246,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           skills: setup.skills,
           // #288: what the decisions log already holds, who is interviewing, and the Interview instructions version the status block records.
           decisions: committedLog,
+          earlierDecisions: setup.earlierDecisions ?? [],
           actor,
           targetStageId: target,
           instructionsVersion: `${setup.definition.id ?? instance.definition}@${instance.definitionVersion ?? setup.structure.version ?? 1}`,

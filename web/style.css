@@ -2218,6 +2218,9 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .interview-page .warn { font-size: 12px; padding: 6px 10px; margin-top: 6px; border-left: 3px solid var(--stamp-error-bg); background: var(--bg-raised); }
 .interview-page .qcard { border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius); background: var(--bg-raised); padding: 14px 16px; margin: 12px 0; }
 .interview-page .qcard .qchip { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
+.interview-page .qcard .qmeaning, .interview-page .qcard .qsignificance { font-size: 12px; color: var(--text-muted); margin: 0 0 8px; }
+.interview-page .qcard .qsignificance { padding-left: 18px; }
+.interview-page .qcard[data-card-kind="term"] .qchip, .interview-page .qcard[data-card-kind="decision"] .qchip { color: var(--text); font-weight: 600; }
 .interview-page .qcard .qhead { font-family: var(--font-display); font-weight: 600; font-size: 14px; margin: 0 0 6px; }
 .interview-page .round-actions { display: flex; gap: 8px; align-items: center; }
 /* #287: rounds of question cards, option tiles, "Other", the saved-content card and Finish with your recommendations. */

@@ -11,6 +11,9 @@ export const FALLBACK_FENCE = 'gantry-questions'
 export const MIN_OPTIONS = 2
 export const MAX_OPTIONS = 4
 
+/** What a card can be about, beyond an ordinary question (#287, #291). Gantry orders a round by it and logs a `term` and a `decision` answer for what it is. */
+export const CARD_KINDS = Object.freeze(['disagreement', 'missing', 'term', 'decision'])
+
 /** The JSON Schema of the `ask_architect` tool's input. A round holds any number of questions (ADR-0065). */
 export const ASK_TOOL_SCHEMA = {
   type: 'object',
@@ -63,8 +66,23 @@ export const ASK_TOOL_SCHEMA = {
           },
           kind: {
             type: 'string',
-            enum: ['disagreement', 'missing'],
-            description: '"disagreement" when Source documents disagree, "missing" when a fact the Stage needs is in none of them. Leave out for any other question. Gantry uses it to order the cards in a round.',
+            enum: ['disagreement', 'missing', 'term', 'decision'],
+            description:
+              '"disagreement" when Source documents disagree, "missing" when a fact the Stage needs is in none of them, ' +
+              '"term" to settle which name to prefer for one thing (the options ARE the names; the one chosen is the preferred term and the others become names to avoid), ' +
+              '"decision" for a Key decision (see "decision"). Leave out for any other question. Gantry uses it to order the cards in a round.',
+          },
+          meaning: { type: 'string', description: 'For a "term" card: one line saying what the thing is, which becomes its definition in the Glossary.' },
+          decision: {
+            type: 'object',
+            description:
+              'For a "decision" card only: why this is a Key decision. All three must be true, each given as one line. A routine choice is not a Key decision: ask it as an ordinary card.',
+            properties: {
+              hardToReverse: { type: 'string', description: 'Why changing your mind later would be costly.' },
+              surprising: { type: 'string', description: 'Why a future reader would wonder why it was done this way without the context.' },
+              tradeOff: { type: 'string', description: 'The real alternative(s) weighed, and why this one.' },
+            },
+            required: ['hardToReverse', 'surprising', 'tradeOff'],
           },
         },
         required: ['question', 'options', 'recommended'],
@@ -91,6 +109,7 @@ export const TEXT_FALLBACK_INSTRUCTIONS =
   `"recommended":"<one option label>","why":"...","source":{"document":"<id>","location":"p. 3"}}]}. ` +
   `Each question has ${MIN_OPTIONS} to ${MAX_OPTIONS} options and its recommendation is one of them. ` +
   `"source" is optional, and its document must be one of the listed Source documents. Do not add an "Other" option. ` +
+  `Add "kind":"term" (with "meaning") to settle which name to prefer, or "kind":"decision" (with "decision":{"hardToReverse":"...","surprising":"...","tradeOff":"..."}) for a Key decision. ` +
   'Write nothing after the block: the architect answers on the cards.'
 
 function str(value) {
@@ -122,8 +141,9 @@ function resolveSource(document, knownSources) {
  * document must be one of them.
  *
  * A card in `cards` is normalised: `{ id, header, question, options: [{label, description, draft}],
- * multiSelect, recommended: [label], why, source: {document, location} | null, field, after?, kind? }`
- * (`after` and `kind` are present only when the model sent them; #287).
+ * multiSelect, recommended: [label], why, source: {document, location} | null, field, after?, kind?, meaning?, decision? }`
+ * (`after` and `kind` are present only when the model sent them, #287; `meaning` is a term card's one-line definition and
+ * `decision` a decision card's three-part test, present only when complete, #291).
  */
 export function validateCards(input, { knownSources } = {}) {
   const errors = []
@@ -156,7 +176,7 @@ export function validateCards(input, { knownSources } = {}) {
     const labels = options.map((o) => o.label.toLowerCase()).filter(Boolean)
     if (new Set(labels).size !== labels.length) errors.push(`${at}.options: the labels must be different from each other.`)
 
-    const multiSelect = q.multiSelect === true
+    const multiSelect = q.multiSelect === true && str(q.kind).toLowerCase() !== 'term'
     let recommended = Array.isArray(q.recommended) ? q.recommended.map(str) : [str(q.recommended)]
     recommended = recommended.filter(Boolean)
     if (recommended.length === 0) {
@@ -174,7 +194,12 @@ export function validateCards(input, { knownSources } = {}) {
     }
 
     const after = (Array.isArray(q.after) ? q.after : q.after ? [q.after] : []).map(str).filter(Boolean)
-    const kind = ['disagreement', 'missing'].includes(str(q.kind).toLowerCase()) ? str(q.kind).toLowerCase() : ''
+    const kind = CARD_KINDS.includes(str(q.kind).toLowerCase()) ? str(q.kind).toLowerCase() : ''
+    // #291: a term card settles one name, so it takes one choice. A decision card carries the three-part test it passed;
+    // without all three the AI has not shown it is significant, and the session asks it as an ordinary card (it is routine).
+    const meaning = kind === 'term' ? str(q.meaning) : ''
+    const test = kind === 'decision' && q.decision && typeof q.decision === 'object' ? { hardToReverse: str(q.decision.hardToReverse), surprising: str(q.decision.surprising), tradeOff: str(q.decision.tradeOff) } : null
+    const decision = test && test.hardToReverse && test.surprising && test.tradeOff ? test : null
 
     let source = null
     if (q.source !== undefined && q.source !== null && q.source !== '') {
@@ -204,6 +229,8 @@ export function validateCards(input, { knownSources } = {}) {
         field: str(q.field) || null,
         ...(after.length ? { after } : {}),
         ...(kind ? { kind } : {}),
+        ...(meaning ? { meaning } : {}),
+        ...(decision ? { decision } : {}),
       })
     }
   })

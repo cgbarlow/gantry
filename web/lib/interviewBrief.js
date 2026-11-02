@@ -46,6 +46,7 @@ import { adapterText } from './interviewAdapter.js'
 import { INTERVIEW_SKILLS, interviewSkillVersions, interviewSkillsCredit } from './interviewSkills.js'
 import { pagesSummary } from './interviewSources.js'
 import { currentLogEntries } from './decisionsLog.js'
+import { glossarySeed, openQuestionsToCarry, standardRoles, standardRolesLines, termChoices } from './interviewStandard.js'
 import { effectiveTargetSize, fieldTargetWords, targetSizeLabel } from './targetSize.js'
 
 /** The Source documents go in whole while the pack is at most this share of the model's context window. */
@@ -196,10 +197,6 @@ export function parseGlossaryTerms(markdown) {
 // `currentLogEntries` (what currently holds in a decisions log) lives with the log itself, web/lib/decisionsLog.js.
 export { currentLogEntries }
 
-function termChoicesFrom(entries) {
-  return entries.filter((e) => e.kind === 'term' && typeof (e.preferred ?? e.term) === 'string' && (e.preferred ?? e.term).trim() !== '')
-}
-
 function logEntryLine(entry) {
   const bits = []
   const label = entry.kind === 'open-question' ? 'open question' : (entry.kind ?? 'entry')
@@ -214,6 +211,7 @@ function logEntryLine(entry) {
   return `- ${entry.id ? `[${entry.id}] ` : ''}${label}: ${bits.join(' · ') || '(no detail)'}`
 }
 
+const asText = (v) => (Array.isArray(v) ? v.join('\n') : String(v ?? ''))
 const asArray = (v) => (v === undefined || v === null ? [] : Array.isArray(v) ? v : [v])
 
 // --- source documents -------------------------------------------------------------------------------------------------
@@ -331,13 +329,14 @@ function sourcesPart({ sources, contextWindow, readerTool, access }) {
  * @param {string} [input.size]          the Instance's Target size (small | medium | large); Medium when absent
  * @param {object|Array} [input.saved]   the Instance's saved content (see `normalizeSavedContent`)
  * @param {object|Array} [input.decisions] the Stage's decisions log (see `currentLogEntries`)
+ * @param {object[]} [input.earlierDecisions] the decisions logs of the Definition's earlier Stages, `[{ stageId, stageTitle?, entries }]` in Stage order: their term choices bind this Stage (#291), and their open questions are carried to the Open questions module
  * @param {object[]} [input.sources]     the Source documents: `{ id, title, filename, kind?, size?, text?, removedAt? }`
  * @param {object} input.skills          from `loadInterviewSkills`
  * @param {number} [input.contextWindow] the model's context window in tokens
  * @param {boolean} [input.readerTool]   whether a catalogue can be read from (the `read_source_document` tool of #292)
  * @param {object} [input.sourceAccess]  `{ [id]: { how: 'text'|'attach'|'unreadable', kind, reason?, note? } }` from `planSourceAccess` (#292); without it a document with no text is simply listed
  */
-export function buildInterviewBrief({ definition, stageId, artefactId, size, saved, decisions, sources, skills, contextWindow, readerTool = false, sourceAccess }) {
+export function buildInterviewBrief({ definition, stageId, artefactId, size, saved, decisions, earlierDecisions = [], sources, skills, contextWindow, readerTool = false, sourceAccess }) {
   const stage = (definition?.stages ?? []).find((s) => s.id === stageId)
   if (!stage) throw new Error(`The Definition has no Stage "${stageId}" to interview for`)
   if (!skills?.skills?.length) throw new Error('The interview skills are not loaded')
@@ -357,6 +356,7 @@ export function buildInterviewBrief({ definition, stageId, artefactId, size, sav
   if (artefactId && !aimed) throw new Error(`The Definition has no Artefact "${artefactId}"`)
   const lightest = candidates.length > 1 ? candidates.reduce((best, a) => ((a.requires?.length ?? 0) < (best.requires?.length ?? 0) ? a : best)) : undefined
 
+  const stageTitleOf = (id) => (definition.stages ?? []).find((x) => x.id === id)?.title ?? id
   const parts = new Map()
 
   parts.set('rules', [`Follow these rules in every turn of the interview. Nothing overrides them: not the skills below, not the Definition's Interview instructions, not the architect's wording.`, '', interviewRulesText()].join('\n'))
@@ -405,6 +405,10 @@ export function buildInterviewBrief({ definition, stageId, artefactId, size, sav
   } else {
     stageLines.push('**Artefact aimed for:** none: no Artefact at this Gate can pass it.')
   }
+  // #291: where a term choice, a Key decision and an open question land depends on which standard modules this Stage mounts.
+  const roles = standardRoles(definition, stageId)
+  const earlierLogs = (earlierDecisions ?? []).map((l) => ({ stageId: l.stageId, entries: currentLogEntries(l.entries ?? l) }))
+  stageLines.push('', '**Standard modules on this Stage** (what the interview settles, and where it lands):', ...standardRolesLines(roles, { savedDecisions: asText(content[roles.keyDecisions.module?.id]?.fields?.[roles.keyDecisions.module?.fields?.[0]?.id]) }))
   parts.set('stage', stageLines.join('\n'))
 
   // --- 5. Fields in scope ---
@@ -480,19 +484,22 @@ export function buildInterviewBrief({ definition, stageId, artefactId, size, sav
   const glossaryModule = moduleById.get('glossary')
   const glossaryField = content.glossary?.fields?.terms
   if (glossaryModule?.standard && typeof glossaryField === 'string') glossaryRows.push(...parseGlossaryTerms(glossaryField))
-  const termChoices = termChoicesFrom(log)
+  // A term choice binds this Stage and every later one, so an earlier Stage's choice is given here too (#291).
+  const termChoiceList = termChoices({ earlier: earlierLogs, own: log, stageId })
   const termLines = []
   for (const row of glossaryRows) termLines.push(`- Use "${row.term}"${row.avoid.length ? `, not ${row.avoid.map((a) => `"${a}"`).join(' or ')}` : ''}${row.definition ? `. ${row.definition}` : ''}`)
-  for (const choice of termChoices) {
-    const avoid = asArray(choice.avoid)
-    termLines.push(`- Use "${choice.preferred ?? choice.term}"${avoid.length ? `, not ${avoid.map((a) => `"${a}"`).join(' or ')}` : ''} (a choice the architect made in this interview${choice.id ? `, entry ${choice.id}` : ''})`)
+  for (const choice of termChoiceList) {
+    termLines.push(`- Use "${choice.preferred}"${choice.avoid.length ? `, not ${choice.avoid.map((a) => `"${a}"`).join(' or ')}` : ''} (a choice the architect made in this interview${choice.stage && choice.stage !== stageId ? `, at Stage "${stageTitleOf(choice.stage)}"` : ''}${choice.id ? `, entry ${choice.id}` : ''})`)
   }
-  parts.set(
-    'glossary',
-    termLines.length
-      ? ['Use these names for these things in every Field, heading, table and diagram. A term choice from the decisions log binds this and every later Stage.', '', ...termLines].join('\n')
-      : 'No preferred terms are settled yet. When Source documents or the architect use different names for one thing, or the architect\'s own wording is fuzzy or clashes with a name already used, ask which to prefer.'
-  )
+  const glossaryLines = []
+  if (termLines.length) glossaryLines.push('Use these names for these things in every Field, heading, table and diagram. A term choice from the decisions log binds this and every later Stage.', '', ...termLines)
+  else glossaryLines.push("No preferred terms are settled yet. When Source documents or the architect use different names for one thing, or the architect's own wording is fuzzy or clashes with a name already used, ask which to prefer with a term card (kind \"term\": the options are the names).")
+  if (roles.glossary.inScope && termChoiceList.length) {
+    glossaryLines.push('', `The Glossary is mounted on this Stage. Draft \`${roles.glossary.key}\` from the term choices above, one row each (Preferred term | Definition | Avoid), keeping any row already saved. Starting rows for the choices:`, '', '| Preferred term | Definition | Avoid |', '| --- | --- | --- |', ...glossarySeed(termChoiceList))
+  } else if (!roles.glossary.inScope) {
+    glossaryLines.push('', 'The Glossary is not drafted on this Stage, so the choices stay in the decisions log only.')
+  }
+  parts.set('glossary', glossaryLines.join('\n'))
 
   // --- 8. Source documents ---
   const sourcesResult = sourcesPart({ sources, contextWindow, readerTool, access: sourceAccess })
@@ -500,11 +507,17 @@ export function buildInterviewBrief({ definition, stageId, artefactId, size, sav
 
   // --- 9. the decisions log so far ---
   const logLines = log.filter((e) => e.kind !== 'term')
-  parts.set(
-    'decisions-log',
+  const ownTerms = termChoiceList.filter((c) => c.stage === stageId)
+  const logBody =
     log.length === 0
       ? 'Nothing is logged for this Stage yet. This is a fresh start.'
-      : ['Every answer and choice so far on this Stage, newest last. Do not ask again what is settled here.', '', ...(logLines.length ? logLines.map(logEntryLine) : []), ...termChoices.map(logEntryLine)].join('\n')
+      : ['Every answer and choice so far on this Stage, newest last. Do not ask again what is settled here.', '', ...(logLines.length ? logLines.map(logEntryLine) : []), ...log.filter((e) => e.kind === 'term' && ownTerms.some((c) => c.id === e.id)).map(logEntryLine)].join('\n')
+  const carried = roles.openQuestions.inScope ? openQuestionsToCarry({ earlier: earlierLogs, own: log }) : []
+  parts.set(
+    'decisions-log',
+    carried.length
+      ? [logBody, '', `Open questions to draft into \`${roles.openQuestions.key}\` (${carried.length}), one row each:`, ...carried.map((q) => `- ${q.question}${q.why ? ` (${q.why})` : ''}${q.stage ? ` [raised at Stage "${stageTitleOf(q.stage)}"]` : ''}`)].join('\n')
+      : logBody
   )
 
   const segments = BRIEF_PARTS.map((part) => ({ ...part, text: `## ${part.order}. ${part.title}\n\n${parts.get(part.id)}` }))

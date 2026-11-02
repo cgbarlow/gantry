@@ -146,6 +146,38 @@ export function createSessionLog(config = {}) {
           answer: answers,
           words,
           followed,
+          keyDecision: card.kind === 'decision' && card.decision ? true : undefined,
+          significance: card.kind === 'decision' && card.decision ? card.decision : undefined,
+          fields,
+          ...links(fields, replaced),
+        }),
+      })
+    },
+
+    /**
+     * A term card the architect answered (#291): the **term choice**. `preferred` is the option chosen (or their own wording) and
+     * `avoid` the other names; it replaces an earlier choice about the same thing (one that shares a name), and it feeds the
+     * Glossary Field where one is mounted (`fields`). It binds this and every later Stage.
+     */
+    addTerm(card, { round, words, choice, followed, fields = [] }) {
+      const names = new Set([choice.preferred, ...choice.avoid].map(squash))
+      const replaced = currentFor('term', (e) => [e.preferred, ...asList(e.avoid)].some((n) => names.has(squash(n))))
+      return add({
+        kind: 'term',
+        ...clean({
+          round,
+          card: card.id,
+          header: card.header,
+          question: card.question,
+          options: card.options.map((o) => o.label),
+          recommendation: card.recommended,
+          why: card.why,
+          sources: card.source ? [sourceRef(card.source)] : [],
+          preferred: choice.preferred,
+          avoid: choice.avoid,
+          meaning: choice.meaning,
+          words,
+          followed,
           fields,
           ...links(fields, replaced),
         }),

@@ -16,8 +16,11 @@ import { parse as parseYAML, stringify as stringifyYAML } from 'yaml'
 
 export const DECISIONS_LOG_VERSION = 1
 
-/** The entry kinds built by #288. The log adds more by their own tickets, and shows any kind it does not know as it is. */
-export const ENTRY_KINDS = Object.freeze(['answer', 'fact', 'saved-content', 'open-question', 'artefact', 'restart', 'model-change'])
+/**
+ * The entry kinds built by #288, and `term` (#291): a **term choice**, the preferred term and the names to avoid, which binds every
+ * later Stage. The log adds more by their own tickets, and shows any kind it does not know as it is.
+ */
+export const ENTRY_KINDS = Object.freeze(['answer', 'fact', 'saved-content', 'open-question', 'artefact', 'restart', 'model-change', 'term'])
 
 /** Where a Stage's log lives, relative to the Instance's folder. */
 export const decisionsLogPath = (stageId) => `interview/${stageId}.yaml`

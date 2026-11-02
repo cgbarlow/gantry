@@ -18,7 +18,12 @@ export function describeEntry(entry, { fieldTitle = (key) => key } = {}) {
     case 'answer': {
       const answer = asList(entry.answer).join(', ')
       const own = entry.words ? `${answer ? ' + ' : ''}in their own words: “${entry.words}”` : ''
-      return `${entry.question ?? 'A question'} → ${answer}${own}${feeds}`
+      return `${entry.keyDecision ? 'Key decision: ' : ''}${entry.question ?? 'A question'} → ${answer}${own}${feeds}`
+    }
+    case 'term': {
+      const avoid = asList(entry.avoid)
+      const own = entry.words ? ' (their own wording)' : ''
+      return `Prefer “${entry.preferred}”${own}${avoid.length ? `, avoid ${avoid.map((a) => `“${a}”`).join(', ')}` : ''}${feeds}`
     }
     case 'fact':
       return `The architect said: “${entry.words}”${feeds}`
@@ -37,7 +42,7 @@ export function describeEntry(entry, { fieldTitle = (key) => key } = {}) {
   }
 }
 
-const KIND_LABELS = { answer: 'Answer', fact: 'Architect', 'saved-content': 'Saved content', 'open-question': 'Open question', artefact: 'Artefact', restart: 'Restart', 'model-change': 'Model' }
+const KIND_LABELS = { term: 'Term', answer: 'Answer', fact: 'Architect', 'saved-content': 'Saved content', 'open-question': 'Open question', artefact: 'Artefact', restart: 'Restart', 'model-change': 'Model' }
 
 function EntryRow({ entry, fieldTitle, state }) {
   return html`<li class=${'dl-entry' + (entry.kind === 'open-question' && state !== 'old' ? ' open' : '') + (state === 'old' ? ' old' : '')} data-testid="decisions-entry" data-entry-id=${entry.id} data-kind=${entry.kind} data-state=${state ?? 'current'}>

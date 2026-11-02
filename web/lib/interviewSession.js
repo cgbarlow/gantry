@@ -48,9 +48,10 @@ import {
   stripReadBlocks,
 } from './interviewSources.js'
 import { fieldsInScope } from './interviewScope.js'
+import { openQuestionsToCarry, standardDraftProblems, standardRoles, termChoices } from './interviewStandard.js'
 import { LOG_TOOL, LOG_TOOL_NAME, LOG_FENCE, LOG_TEXT_FALLBACK_INSTRUCTIONS, createSessionLog, extractLogBlocks, stripLogBlocks } from './interviewLog.js'
 import { findArchitectMessage, logSummary } from './decisionsLog.js'
-import { CHANGE_OPTIONS, acceptRecommendation, answersText, changeCard, choose, chooseOther, followsRecommendation, isAnswered, isAutoId, otherWords, releaseHeld, shapeCard, sortRound, splitReady } from './interviewRounds.js'
+import { CHANGE_OPTIONS, acceptRecommendation, answersText, changeCard, choose, chooseOther, followsRecommendation, isAnswered, isAutoId, otherWords, releaseHeld, shapeCard, sortRound, splitReady, termChoice } from './interviewRounds.js'
 
 export { fieldsInScope }
 
@@ -86,7 +87,8 @@ function sessionNote({ cardMode, textDrafts, reader }) {
       'A round is every question whose prerequisites are settled, asked together. Give a card an `id` when another card waits on it, and put the ids it waits on in that card\'s `after`: Gantry holds it back and shows it once they are answered. Do not put a card in a round if its answer depends on another card of the same round: hold it with `after`.',
       'Set `field` to the Field a card feeds, as `module.field`. Set `kind` to `disagreement` when Source documents disagree and `missing` for a fact none of them has. Gantry orders a round itself (Fields this Gate requires, then disagreements, then missing facts, then optional Fields).',
       'A select Field\'s card shows exactly the Definition\'s options and Gantry adds no "Other" to it; every other card gets an "Other" from Gantry, so never add one. Pre-select your recommendation, give a one-line why, and cite the Source document when there is one.',
-      'The architect\'s answers come back to you; redraft the Fields they feed. An answer of "Other" is in the architect\'s own words: write it as plain fact and log it as theirs.'
+      'The architect\'s answers come back to you; redraft the Fields they feed. An answer of "Other" is in the architect\'s own words: write it as plain fact and log it as theirs.',
+      'To settle which name to prefer for one thing, ask a card with `kind` "term": each name is an option and `meaning` says what the thing is. Gantry logs the choice, the others become names to avoid, and it binds every later Stage. To offer a Key decision (only where the brief says the module is mounted, and only when it is hard to reverse, surprising and a real trade-off), ask a card with `kind` "decision" and `decision` giving the one-line reason for each of the three.'
     )
   }
   lines.push(
@@ -182,7 +184,7 @@ const asText = (value) => (Array.isArray(value) ? value.join('\n') : String(valu
  *
  * @param {object} config
  * @param {string} config.providerId        the AI Provider to use first (any stored one; read afresh on every call)
- * @param {() => object} config.getContext  `{ definition, stageId, artefactId?, size?, saved, sources, skills }`, as for `buildInterviewBrief`
+ * @param {() => object} config.getContext  `{ definition, stageId, artefactId?, size?, saved, sources, skills, earlierDecisions? }`, as for `buildInterviewBrief`
  * @param {object} [config.handlers]        `{ askForKey, askToRetry }` for `runWithRecovery`
  * @param {Function} [config.fetchImpl]
  * @param {string} [config.origin]
@@ -276,6 +278,8 @@ export function createInterviewSession(config = {}) {
     const holdsSaved = saved !== undefined && !isBlankValue(saved)
     const knownSourceIds = (context.sources ?? []).filter((s) => s && !s.removedAt).map((s) => s.id)
     const check = checkDraft(entry.field, rawValue, { size: context.size, architectText: architectText(), knownSourceIds, markAssumptions: state.finish !== null })
+    // #291: a draft of the Glossary, Key decisions or Open questions is also checked against what the interview settled.
+    check.problems.push(...standardProblems(key, check.value, context))
     const uncovered = extra.uncovered ?? []
     // The inputs are what the AI read before this draft plus what it cites. A draft sent back keeps the ones it had, because the reads are cleared once a round of drafts has landed.
     const named = namedInputs(extra.inputs, context)
@@ -314,6 +318,22 @@ export function createInterviewSession(config = {}) {
         ? `${key} is in the preview, with a warning for the architect: ${check.problems.map((p) => p.message).join(' ')}${inputNote}`
         : `${key} is in the preview (${check.words} words).${inputNote}`,
     }
+  }
+
+  /** The earlier Stages' logs and this Stage's, as the standard-module checks and the brief read them. */
+  const logsFor = (context) => ({ earlier: (context.earlierDecisions ?? []).map((l) => ({ stageId: l.stageId, entries: l.entries ?? [] })), own: log.entries() })
+
+  function standardProblems(key, value, context) {
+    const roles = standardRoles(context.definition, context.stageId)
+    if (!roles.glossary.inScope && !roles.keyDecisions.inScope && !roles.openQuestions.inScope) return []
+    const logs = logsFor(context)
+    return standardDraftProblems({
+      roles,
+      key,
+      value,
+      terms: termChoices({ ...logs, stageId: context.stageId }),
+      openCount: openQuestionsToCarry(logs).length,
+    })
   }
 
   const mergeInputs = (earlier = [], later = []) => {
@@ -438,7 +458,17 @@ export function createInterviewSession(config = {}) {
       batch.push({ ...card, id })
     }
     const sources = new Map((context.sources ?? []).map((s) => [s.id, s.title || s.filename || s.id]))
-    const shaped = batch.map((card) => {
+    const roles = standardRoles(context.definition, context.stageId)
+    const shaped = batch.map((raw) => {
+      // #291: a Key decision is offered only where the module is mounted and the card shows all three parts of the test; any other
+      // "decision" is a routine question. A term or decision card feeds the module it settles, so that Field waits for the answer.
+      let card = raw
+      if (card.kind === 'decision' && (!roles.keyDecisions.inScope || !card.decision)) {
+        const { kind, decision, ...rest } = card
+        card = rest
+      }
+      if (!card.field && card.kind === 'decision') card = { ...card, field: roles.keyDecisions.key }
+      if (!card.field && card.kind === 'term' && roles.glossary.inScope) card = { ...card, field: roles.glossary.key }
       const after = (card.after ?? []).map((a) => idMap.get(a) ?? a)
       const withSource = card.source ? { ...card, source: { ...card.source, title: sources.get(card.source.document) ?? card.source.document } } : card
       const entry = card.field ? scope.get(card.field) : null
@@ -478,7 +508,12 @@ export function createInterviewSession(config = {}) {
     for (const card of cards) {
       const own = otherWords(card)
       if (own) otherTexts.push(own)
-      if (card.type !== 'change') log.addAnswer(card, { round: state.roundNo, words: own, answers: [...card.selected], followed: followsRecommendation(card) })
+      const term = termChoice(card)
+      if (term) {
+        // #291: a term card's answer is a term choice. It feeds the Glossary Field where one is mounted on this Stage.
+        const glossary = standardRoles(getContext().definition, getContext().stageId).glossary
+        log.addTerm(card, { round: state.roundNo, words: own, choice: term, followed: followsRecommendation(card), fields: glossary.inScope && glossary.key ? [glossary.key] : card.field ? [card.field] : [] })
+      } else if (card.type !== 'change') log.addAnswer(card, { round: state.roundNo, words: own, answers: [...card.selected], followed: followsRecommendation(card) })
       state.answered.push({ id: card.id, header: card.header, question: card.question, field: card.field, labels: [...card.selected], other: own, followed: followsRecommendation(card) })
     }
     const lines = cards.map((c) => `${c.header || c.question}: ${[...c.selected, ...(otherWords(c) ? [`“${otherWords(c)}”`] : [])].join(', ')}`)
@@ -552,6 +587,7 @@ export function createInterviewSession(config = {}) {
       size: context.size,
       saved: context.saved,
       decisions: log.entries(),
+      earlierDecisions: context.earlierDecisions ?? [],
       sources: sourcesForBrief(context.sources, plan),
       skills: context.skills,
       contextWindow: provider.contextWindow,
