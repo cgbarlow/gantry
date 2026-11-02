@@ -6075,7 +6075,8 @@ async function loadWorkspaces() {
 // adds rows, so a failure here is swallowed rather than failing the dashboard.
 async function loadServerWorkspaces() {
   try {
-    const res = await apiFetch('/api/server-workspaces', {}, { silent: true })
+    // `include=blob` (#269) adds the workspaces kept in the operator's Blob containers, each with whether its container can be reached.
+    const res = await apiFetch('/api/server-workspaces?include=blob', {}, { silent: true })
     return res.ok ? await res.json() : []
   } catch {
     return []
@@ -6317,6 +6318,8 @@ function groupSummaryText(group) {
   if (group.kind === 'placeholder') {
     // #187: 'blank' — every instance here is archived; it reads like any other empty workspace.
     if (group.state === 'blank') return 'No instances'
+    // #269: a workspace in a Blob container that can't be reached right now.
+    if (group.state === 'unavailable') return 'Unavailable'
     return group.state === 'unreadable' ? "Can't read this workspace" : 'Nothing registered yet'
   }
   const definitions = [...new Set(group.instances.map((inst) => inst.definition))]
@@ -6327,7 +6330,7 @@ function groupSummaryText(group) {
 // A group's dot in the list pane reflects every one of its instances being complete, not just the first — a multi-instance workspace with even one outstanding instance is "in progress" as a whole. A local-workspace group has no per-instance `status` at all (ADR-0029) — its dot instead reflects whether its folder permission is currently granted. #122: a placeholder group's dot reflects its own `state` instead — `unreadable` gets the same red the Gate Ledger's `.stamp.error` already uses (`.dot.unreadable`, web/style.css), visually distinct from the neutral `draft` amber `empty` shares with "in progress" — deliberately, since "can't read this" and "still in progress" are different situations, but "nothing registered yet" and "in progress" are close enough in urgency to share a color.
 function groupStatusClass(group) {
   if (group.kind === 'local') return group.state === 'granted' ? 'agreed' : 'draft'
-  if (group.kind === 'placeholder') return group.state === 'unreadable' ? 'unreadable' : 'draft'
+  if (group.kind === 'placeholder') return group.state === 'unreadable' || group.state === 'unavailable' ? 'unreadable' : 'draft'
   return group.instances.every((inst) => inst.status === 'complete') ? 'agreed' : 'draft'
 }
 
@@ -6825,6 +6828,18 @@ function MasterDetailView({ instances, localGroups, workspaceGroups = [] }) {
                     `
                   : null}
               `
+            : selectedGroup.kind === 'placeholder' && selectedGroup.state === 'unavailable'
+              ? html`
+                  <${WorkspaceDetailHead} group=${selectedGroup} />
+                  <div class="local-workspace-recovery workspace-placeholder-unavailable" data-testid="workspace-unavailable">
+                    <p>
+                      This workspace is unavailable${selectedGroup.reason ? `: ${selectedGroup.reason}` : ''}. It is kept in
+                      ${selectedGroup.container ? html`the Blob container <code>${selectedGroup.container}</code>` : 'a Blob container'}, which
+                      this server can't reach right now. Nothing in it has been lost; it will come back when the container does.
+                      Gantry's other workspaces are not affected.
+                    </p>
+                  </div>
+                `
             : selectedGroup.kind === 'placeholder' && selectedGroup.state === 'blank'
               ? html`
                   <${WorkspaceDetailHead} group=${selectedGroup} />

@@ -187,7 +187,15 @@ const serverWorkspaceList = signal(null)
 // "New server workspace": a name and where to store it. Server disk is the only place today; Blob
 // containers arrive in a later ticket, so "Store in" has the one choice.
 const serverWsName = signal('')
-const serverWsStore = signal('disk') // 'disk'
+// Where the new workspace is kept (#269): 'disk' (the server's disk, Advanced mode only) or 'blob:<container>', one of
+// the Blob containers the operator declared (GET /api/blob-containers).
+const serverWsStore = signal('disk')
+// The Blob containers the operator declared, with whether each can be reached right now. Empty when none are declared,
+// which is when the wizard behaves exactly as it did before they existed.
+const blobContainerList = signal([])
+// With Advanced mode off the wizard asks only where to keep a new workspace: 'local' (a folder on the architect's
+// computer) or 'blob:<container>'.
+const simpleStoreIn = signal('local')
 const serverWsStatus = signal('idle') // idle | creating | failed
 const serverWsError = signal('')
 const workspacesLoadError = signal('')
@@ -549,6 +557,7 @@ function resetWizard() {
   serverWorkspaceList.value = null
   serverWsName.value = ''
   serverWsStore.value = 'disk'
+  simpleStoreIn.value = 'local'
   serverWsStatus.value = 'idle'
   serverWsError.value = ''
   workspacesLoadError.value = ''
@@ -605,12 +614,24 @@ function resetWizard() {
   linkMode.value = 'create'
 }
 
+// The Blob containers the operator declared (#269), so "Store in" can offer them. Failing to read them only
+// leaves the choice out: the wizard then offers what it always has.
+async function loadBlobContainers() {
+  try {
+    const res = await apiFetch('/api/blob-containers', {}, { silent: true })
+    const body = res.ok ? await res.json() : { containers: [] }
+    blobContainerList.value = Array.isArray(body.containers) ? body.containers : []
+  } catch {
+    blobContainerList.value = []
+  }
+}
+
 async function loadWorkspaces() {
   workspacesLoadError.value = ''
   try {
     // The server workspaces ride along (#268) for a `?workspace=<id>` shortcut to resolve against; they only
     // add a way in, so failing to read them never fails the Provider list.
-    const serverListRequest = apiFetch('/api/server-workspaces', {}, { silent: true })
+    const serverListRequest = apiFetch('/api/server-workspaces?include=blob', {}, { silent: true })
       .then((r) => (r.ok ? r.json() : []))
       .catch(() => [])
     const res = await apiFetch('/api/workspaces')
@@ -628,6 +649,12 @@ async function loadWorkspaces() {
   }
 }
 
+// The POST body for the chosen "Store in": the server's disk, or a Blob container (#269).
+function serverWorkspaceRequestBody(name) {
+  const store = serverWsStore.value
+  return store.startsWith('blob:') ? { name, storage: 'blob', container: store.slice('blob:'.length) } : { name, storage: 'disk' }
+}
+
 // "New server workspace" (#268): creates the workspace on the server's disk, then carries on to the Instance
 // step inside it - the same hand-off registering a remote workspace makes.
 async function createServerWorkspaceFromWizard() {
@@ -638,7 +665,7 @@ async function createServerWorkspaceFromWizard() {
   try {
     const res = await apiFetch(
       '/api/server-workspaces',
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, storage: serverWsStore.value }) },
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(serverWorkspaceRequestBody(name)) },
       { silent: true }
     )
     const body = await res.json().catch(() => ({}))
@@ -2306,11 +2333,21 @@ function ServerWorkspacePanel() {
         value=${serverWsStore.value}
         onChange=${(e) => (serverWsStore.value = e.currentTarget.value)}
       >
-        <option value="disk">Server disk</option>
+        ${advancedMode.value ? html`<option value="disk">Server disk</option>` : null}
+        ${blobContainerList.value.map(
+          (container) => html`
+            <option value=${`blob:${container.name}`} disabled=${container.reachable === false}>
+              Blob container: ${container.name}${container.reachable === false ? ` (not reachable now${container.reason ? `: ${container.reason}` : ''})` : ''}
+            </option>
+          `
+        )}
       </select>
-      <p class="wizard-field-hint">
-        Kept in a folder on the machine running Gantry. A server workspace has no branches, Pull Requests or
-        approvals: an Instance in it advances the way one in a Local workspace does, once its Stage passes the gate.
+      <p class="wizard-field-hint" id="server-ws-store-hint">
+        ${serverWsStore.value.startsWith('blob:')
+          ? 'Kept in a folder of that Blob container, so it survives a redeploy and every Gantry server sharing the container sees it. '
+          : 'Kept in a folder on the machine running Gantry. '}
+        A server workspace has no branches, Pull Requests or approvals: an Instance in it advances the way one in a Local
+        workspace does, once its Stage passes the gate.
       </p>
     </div>
     <div class="wizard-field">
@@ -2328,7 +2365,43 @@ function ServerWorkspacePanel() {
   `
 }
 
+// With Advanced mode off and a Blob container declared (#269): where to keep a new workspace - a folder on the
+// architect's computer (Local) or a Blob container. Choosing a container hands the step to the server-workspace
+// panel; Local leaves the step as it has always been.
+function SimpleStoreInChoice() {
+  return html`
+    <div class="wizard-field">
+      <label for="simple-store-in">Store in</label>
+      <select
+        class="wizard-input"
+        id="simple-store-in"
+        value=${simpleStoreIn.value}
+        onChange=${(e) => {
+          simpleStoreIn.value = e.currentTarget.value
+          if (e.currentTarget.value !== 'local') serverWsStore.value = e.currentTarget.value
+        }}
+      >
+        <option value="local">A folder on my computer (Local)</option>
+        ${blobContainerList.value.map(
+          (container) => html`
+            <option value=${`blob:${container.name}`} disabled=${container.reachable === false}>
+              Blob container: ${container.name}${container.reachable === false ? ` (not reachable now${container.reason ? `: ${container.reason}` : ''})` : ''}
+            </option>
+          `
+        )}
+      </select>
+    </div>
+  `
+}
+
 function WorkspaceStep() {
+  useEffect(() => {
+    loadBlobContainers()
+  }, [])
+
+  // Advanced mode off, a Blob container declared and chosen: the panel for a new server workspace stands in for the Local one.
+  const blobChosenSimply = !advancedMode.value && blobContainerList.value.length > 0 && simpleStoreIn.value !== 'local'
+
   useEffect(() => {
     if (
       workspaceLocation.value === 'server' &&
@@ -2340,8 +2413,10 @@ function WorkspaceStep() {
 
   return html`
     ${advancedMode.value ? html`<${WorkspaceLocationToggle} />` : null}
+    ${!advancedMode.value && blobContainerList.value.length > 0 ? html`<${SimpleStoreInChoice} />` : null}
+    ${blobChosenSimply ? html`<${ServerWorkspacePanel} />` : null}
 
-    <div class="wizard-field">
+    ${blobChosenSimply ? null : html`<div class="wizard-field">
       <div class="wizard-mode-toggle" role="group" aria-label="Workspace source">
         ${(() => {
           const isLocal = workspaceLocation.value === 'local'
@@ -2382,9 +2457,9 @@ function WorkspaceStep() {
           return isLocal ? html`${registerButton}${pickButton}` : html`${pickButton}${registerButton}${serverButton}`
         })()}
       </div>
-    </div>
+    </div>`}
 
-    ${workspaceLocation.value === 'local' ? html`<${LocalWorkspacePanel} />` : null}
+    ${workspaceLocation.value === 'local' && !blobChosenSimply ? html`<${LocalWorkspacePanel} />` : null}
 
     ${workspaceLocation.value === 'server' && workspaceMode.value === 'pick'
       ? html`

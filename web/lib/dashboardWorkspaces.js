@@ -151,7 +151,7 @@ export function describeInstanceRowWorkspace(workspace) {
     case 'atlassian':
       return { title: location.repository ?? workspace.id, subtitle: location.owner ?? 'Atlassian' }
     case 'directory':
-      return { title: workspace.name, subtitle: workspace.description || 'Server workspace' }
+      return { title: workspace.name, subtitle: workspace.description || serverWorkspaceLabel(workspace) }
     default:
       return {
         title: workspace.name ?? location.repository ?? workspace.id,
@@ -166,6 +166,11 @@ export function describeInstanceRowWorkspace(workspace) {
 // these becomes an empty placeholder group, "No instances in this workspace yet" with a "+ New
 // Instance" button. The reserved `default` workspace is left out while empty: gantry creates it on
 // every start and nobody chose it, so a blank row for it would be noise.
+//
+// #269: a workspace kept in a Blob container whose container cannot be reached right now (`available: false`
+// on `GET /api/server-workspaces?include=blob`) gets a placeholder in the `unavailable` state even when it holds
+// Instances - they cannot be read - carrying the `reason` the server gave, so the dashboard says why rather than
+// showing nothing. Gantry's other workspaces are untouched.
 export function unrepresentedServerWorkspaceGroups(instances, serverWorkspaces) {
   const representedIds = new Set((instances ?? []).map((inst) => inst.workspace?.id).filter(Boolean))
   return (serverWorkspaces ?? [])
@@ -173,14 +178,21 @@ export function unrepresentedServerWorkspaceGroups(instances, serverWorkspaces) 
     .map((workspace) => ({
       key: `workspace:${workspace.id}`,
       kind: 'placeholder',
-      state: 'blank',
+      state: workspace.available === false ? 'unavailable' : 'blank',
+      ...(workspace.available === false ? { reason: workspace.reason ?? null } : {}),
       title: workspace.name ?? workspace.id,
-      subtitle: workspace.description || 'Server workspace',
+      subtitle: workspace.description || serverWorkspaceLabel(workspace),
       workspaceId: workspace.id,
       isAzureDevOps: false,
       isServerWorkspace: true,
+      ...(workspace.storage === 'blob' ? { storage: 'blob', container: workspace.container } : {}),
       instances: [],
     }))
+}
+
+// What a server workspace is called when it has no description of its own: where it is kept.
+function serverWorkspaceLabel(workspace) {
+  return workspace?.storage === 'blob' && workspace.container ? `Blob container: ${workspace.container}` : 'Server workspace'
 }
 
 // The bundled Examples workspace ships with Gantry and is for reading, not for adding to.
@@ -202,6 +214,8 @@ export function workspaceNewInstanceHref(group) {
     return group.state === 'granted' ? `/new-instance?local=${encodeURIComponent(group.entry.id)}` : null
   }
   if (group.kind === 'placeholder') {
+    // An unavailable workspace (#269) can't take a new Instance until its container is back.
+    if (group.state === 'unavailable') return null
     return group.isServerWorkspace && isBundledServerWorkspace(group.workspaceId) ? null : `/new-instance?workspace=${encodeURIComponent(group.workspaceId)}`
   }
   const workspace = group.instances.find((inst) => inst.workspace)?.workspace

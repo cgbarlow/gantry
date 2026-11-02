@@ -315,3 +315,32 @@ test('unrepresentedServerWorkspaceGroups: skips a workspace with a row and an em
   assert.equal(groups[0].subtitle, 'Ledger team')
   assert.deepEqual(unrepresentedServerWorkspaceGroups(undefined, undefined), [])
 })
+
+// #269: a server workspace kept in a Blob container says where it is kept, and one whose container can't be reached
+// becomes an unavailable placeholder carrying the reason - with no New Instance link, since nothing can be created in it.
+test('unrepresentedServerWorkspaceGroups: a workspace in a Blob container is labelled with its container', () => {
+  const groups = unrepresentedServerWorkspaceGroups([], [{ id: 'blob-1', name: 'Cloud Team', description: null, storage: 'blob', container: 'main', available: true }])
+  assert.equal(groups[0].state, 'blank')
+  assert.equal(groups[0].subtitle, 'Blob container: main')
+  assert.equal(groups[0].container, 'main')
+  assert.equal(workspaceNewInstanceHref(groups[0]), '/new-instance?workspace=blob-1')
+})
+
+test('unrepresentedServerWorkspaceGroups: an unavailable workspace carries the reason and offers no New Instance', () => {
+  const groups = unrepresentedServerWorkspaceGroups([], [
+    { id: 'blob-2', name: 'Fragile', description: null, storage: 'blob', container: 'main', available: false, reason: 'the credential was rejected (401)' },
+    { id: 'plain', name: 'Plain', storage: 'disk' },
+  ])
+  assert.equal(groups[0].state, 'unavailable')
+  assert.equal(groups[0].reason, 'the credential was rejected (401)')
+  assert.equal(workspaceNewInstanceHref(groups[0]), null)
+  assert.equal(groups[1].state, 'blank', 'a disk workspace is unaffected')
+  assert.equal(groups[1].reason, undefined)
+})
+
+test('describeInstanceRowWorkspace: a directory row from a Blob container names the container when it has no description', () => {
+  const blob = { kind: 'directory', id: 'blob-1', name: 'Cloud Team', storage: 'blob', container: 'main' }
+  assert.deepEqual(describeInstanceRowWorkspace(blob), { title: 'Cloud Team', subtitle: 'Blob container: main' })
+  assert.deepEqual(describeInstanceRowWorkspace({ ...blob, description: 'Quarterly' }), { title: 'Cloud Team', subtitle: 'Quarterly' })
+  assert.deepEqual(describeInstanceRowWorkspace({ kind: 'directory', id: 'p', name: 'P' }), { title: 'P', subtitle: 'Server workspace' })
+})
