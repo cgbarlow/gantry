@@ -134,6 +134,51 @@ export function changeCard({ key, fieldTitle, saved, proposed, handEdit = false 
   }
 }
 
+/** The choices on a card about a Field the architect and someone else both changed since the session read the Stage (ADR-0068, #290). */
+export const CLASH_OPTIONS = Object.freeze({
+  mine: 'Keep mine',
+  theirs: 'Keep theirs',
+  merged: "The AI's merged wording",
+})
+
+/**
+ * A card for one Field a Save found changed on both sides. Nothing is pre-selected: it is the architect's call, so the Save waits for
+ * a choice on every card. `mine` and `theirs` are the two wordings as text (`''` for a section one side removed); the AI's merged
+ * wording is added later with `withMerged`, once it has been written. `mergeable` is false for a status or an owner.
+ */
+export function clashCard({ id, label, field, mine, theirs, mergeable = true }) {
+  return {
+    id,
+    type: 'clash',
+    header: 'Both changed',
+    question: `${label} was changed here and saved by someone else meanwhile. Which wording should this Save keep?`,
+    options: [
+      { label: CLASH_OPTIONS.mine, description: 'Your wording goes in; theirs is replaced.', draft: mine },
+      { label: CLASH_OPTIONS.theirs, description: 'Their saved wording stays; yours is dropped.', draft: theirs },
+    ],
+    multiSelect: false,
+    recommended: [],
+    why: '',
+    source: null,
+    field,
+    allowOther: false,
+    selected: [],
+    otherOn: false,
+    otherText: '',
+    clash: { mine, theirs, merged: null, mergeable },
+  }
+}
+
+/** The clash card with the AI's merged wording offered as a third choice. */
+export function withMerged(card, merged) {
+  if (!card.clash || typeof merged !== 'string' || merged.trim() === '' || card.options.some((o) => o.label === CLASH_OPTIONS.merged)) return card
+  return {
+    ...card,
+    options: [...card.options, { label: CLASH_OPTIONS.merged, description: 'One wording that keeps what is good in both. You can read it below.', draft: merged }],
+    clash: { ...card.clash, merged },
+  }
+}
+
 /** Whether the architect has given an answer to a card. */
 export function isAnswered(card) {
   return card.selected.length > 0 || (card.otherOn && card.otherText.trim() !== '')

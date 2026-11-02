@@ -668,7 +668,7 @@ Use **Show commit history** in the card header to open a dialog listing the comm
 
 The **AI interview** is a way to draft a Stage with an AI. You give an Instance its **Source documents** (a client brief, requirements, meeting notes), connect an **AI Provider**, and open the **Interview page**. The AI reads the documents, drafts every Field they support into a live preview, and talks it through with you. Nothing is saved until you confirm the Stage, and the AI never marks a Module `agreed` or passes a Gate that needs approval or review: those stay with people.
 
-This release covers a **Local** or **Server-hosted** workspace, starting from its **current Stage**. Azure DevOps, GitHub and GitLab workspaces don't have it yet, and neither does a Stage other than the current one; **✦ AI interview** is greyed out there and its tooltip says why. The AI asks you **question cards** in rounds (see below). Every Save also commits the Stage's **decisions log** (see below). One interview can carry on across several Stages with **Run until** (see **Running until a later Stage**). Resuming a paused session in another browser arrives in a later release.
+This release covers a **Local** or **Server-hosted** workspace, starting from its **current Stage**. Azure DevOps, GitHub and GitLab workspaces don't have it yet, and neither does a Stage other than the current one; **✦ AI interview** is greyed out there and its tooltip says why. The AI asks you **question cards** in rounds (see below). Every Save also commits the Stage's **decisions log** (see below). One interview can carry on across several Stages with **Run until** (see **Running until a later Stage**). **Pause** saves your place so you can carry on later, in any browser (see **Pausing and resuming**).
 
 ### Before you start
 
@@ -683,7 +683,7 @@ Choose **✦ AI interview** in the Instance editor's header. If the editor has c
 - **Centre.** The conversation. The **chat box is pinned at the bottom**; it is greyed out until the interview starts.
 - **Right.** The **live draft** of the Stage's Modules. Saved content is shown as it is; the AI's drafts are marked **AI draft · unsaved**.
 
-**← Editor** takes you back to the editor, and **✦ AI interview** brings you back to the same conversation and drafts for as long as the Instance stays open. Closing or reloading the tab loses the unsaved drafts, and Gantry warns you first.
+**← Editor** takes you back to the editor, and **✦ AI interview** brings you back to the same conversation and drafts for as long as the Instance stays open. Closing or reloading the tab doesn't lose them either: Gantry keeps a working copy in this browser (see **Pausing and resuming**), and warns you first if you have unsaved drafts.
 
 ### Kickoff
 
@@ -830,9 +830,11 @@ A Stage is often drafted straight after the one before it. **Run until** at the 
 
 **Save and stop here** on a Stage before the target pauses the run. The Stage is saved, the Instance stays on it, and the card says the run is paused and offers **Resume the run**, which advances to the next Stage and carries on to the target. You do not have to resume straight away. The decisions log records the pause: the status line it commits in that Save holds the **run target** and the **state of each Stage of the run**. When you open the Interview page on the Stage later (after closing the tab, say) its kickoff says *"A run to Ship was paused after Shape was saved"* and offers **Resume the run**, which continues from there. The same note appears if the run had moved on to a Stage but you closed the page before that Stage was saved. Resuming never skips a Stage and never repeats a Save.
 
+If a colleague (or another browser of yours) saved a Field of the Stage while you were interviewing, and you changed that Field too, the Save doesn't open the editor's dialog. It becomes a **round of cards**, one per Field: your wording and theirs side by side, with **Keep mine**, **Keep theirs** and **The AI's merged wording** (the AI writes one version that keeps what is good in both; if it can't, the card has two choices). Nothing is pre-selected, and the Save waits until you've chosen for every Field. A Field only one of you changed is never asked about: your change, or theirs, is taken. **Cancel the Save** writes nothing. Each choice you make is recorded in the decisions log (which side you chose, not the AI's merged wording).
+
 ### The decisions log
 
-Every Stage keeps a **decisions log**: the record of what was decided in the interview. It is a file, `interview/<stage>.yaml`, kept next to the Instance's `modules/`, `sources/` and `assets/` folders, in the same place for every kind of workspace. **It is committed in the same Save as the Stage's content**, so the Save from the Interview page writes the Modules and the log together (on a Local workspace both go into your folder; on a server workspace they are one request, and in a Blob container one all-or-nothing write). Closing the tab before you save loses the answers you gave since the last Save, as it loses the drafts.
+Every Stage keeps a **decisions log**: the record of what was decided in the interview. It is a file, `interview/<stage>.yaml`, kept next to the Instance's `modules/`, `sources/` and `assets/` folders, in the same place for every kind of workspace. **It is committed in the same Save as the Stage's content**, so the Save from the Interview page writes the Modules and the log together (on a Local workspace both go into your folder; on a server workspace they are one request, and in a Blob container one all-or-nothing write). Between Saves your browser keeps a working copy of the answers and drafts not yet saved, so closing the tab loses nothing in the same browser; another browser sees what was saved at the last Save or **Pause**.
 
 What the log holds:
 
@@ -854,6 +856,18 @@ You see the log in two places, and neither lets you edit it:
 - **The Decisions log panel** in the Instance editor, above the Stage's Modules, for each Stage that has one. It shows the **latest answers**, the **open questions** highlighted with **Resume to answer** (which opens the Interview page on the current Stage), and **Show history** for every entry including the replaced ones. The log is never printed in a rendered Artefact.
 
 When you open the Interview page on a Stage that has a log, the AI is told what the log already settles and does not ask it again.
+
+### Pausing and resuming
+
+**Pause**, above the chat box, saves the decisions log and the drafts so far as one Save, through the same Save check as any other. It happens only because you pressed it: Gantry still never saves on its own. The Modules the AI wrote into stay `draft`. The page then says **Paused**, and the interview stops; nothing is lost.
+
+To carry on, open the Interview page on the Instance again, **in this browser or any other**. Because an AI Provider belongs to a browser, in a new browser you pick one first. The page shows a recap (for example *Resuming Shape: 14 decisions, 2 open questions, last asked about hosting*) and **Start interview** becomes **Resume interview**. The AI is given the decisions log and the saved content, **not the old conversation** (that was never kept). It opens with the same recap and then asks the next round of questions. The session you paused is the one that carries on, so the log keeps one status line for it and its token totals.
+
+When the page opens, it reads the decisions log of every Stage of the Instance. On a workspace with a Provider, it runs **Check status** once first, and what the Provider reports overrides what the log's status block says (for example a Stage that has since been approved has no session still going).
+
+**If you close the tab without pausing**, nothing is lost in the same browser. Between Saves, the browser keeps a **working copy** of what isn't saved yet: the drafts, the answers and the open round of cards, and what the AI needs to carry on. Open the Interview page in that browser again and it resumes exactly where it stopped, with no recap needed. Another browser doesn't see the working copy, only what was saved. The working copy is never the truth: if the decisions log has been saved since the copy began (you saved or paused from another browser, or someone else's session did), the **saved log wins**. The copy is **set aside** and the page says so, and the interview carries on from the saved log and content.
+
+**Two sessions on one Stage.** There is no lock. If you start (or resume) while another session on the same Stage isn't done, a card tells you when it last saved (and who, on a remote workspace) and offers **Carry on alongside** or **Cancel**. Alongside, each Save is checked Field by Field against the other's, and the two decisions logs **merge in time order**: both sets of entries are kept, a later answer to a question the other session also answered replaces the earlier one, and the log's record of what each Field was drafted from is rebuilt. A session you paused yourself isn't "another session": resuming takes it over.
 
 ## Settings
 

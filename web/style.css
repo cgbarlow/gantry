@@ -2241,6 +2241,11 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .interview-page .change-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin: 0 0 10px; }
 .interview-page .change-compare .value { padding: 8px 10px; background: var(--bg); border: var(--hairline) solid var(--line); border-radius: var(--radius); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .interview-page .change-compare .value.ai { box-shadow: inset 3px 0 0 var(--stamp-draft-bg); }
+/* #290: resume recap, the two-sessions card, the clash cards of a Save and the Paused card. */
+.interview-page .resume-recap { font-size: 13px; margin: 8px 0; padding: 8px 12px; border-left: var(--border-strong) solid var(--line-strong); background: var(--bg-raised); }
+.interview-page .session-others { margin: 6px 0; padding-left: 18px; font-size: 13px; }
+.interview-page .clash-text { margin: 0; font: inherit; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.interview-page .clash-round .qcard { border-color: var(--stamp-error-bg); }
 .interview-page .round-actions .round-page { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
 .interview-page .composer-actions { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; flex-wrap: wrap; }
 .interview-page .mode-chip { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; padding: 1px 6px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); color: var(--text-muted); }

@@ -57,9 +57,11 @@ import {
 import { fieldsInScope } from './interviewScope.js'
 import { openQuestionsToCarry, standardDraftProblems, standardRoles, termChoices } from './interviewStandard.js'
 import { LOG_TOOL, LOG_TOOL_NAME, LOG_FENCE, LOG_TEXT_FALLBACK_INSTRUCTIONS, createSessionLog, extractLogBlocks, stripLogBlocks } from './interviewLog.js'
-import { findArchitectMessage, logSummary } from './decisionsLog.js'
+import { currentLogEntries, findArchitectMessage, logSummary } from './decisionsLog.js'
 import { tokensOfModels } from './tokenUsage.js'
-import { CHANGE_OPTIONS, acceptRecommendation, answersText, changeCard, choose, chooseOther, followsRecommendation, isAnswered, isAutoId, otherWords, releaseHeld, shapeCard, sortRound, splitReady, termChoice } from './interviewRounds.js'
+import { resumeOpening } from './interviewResume.js'
+import { conflictKey, conflictText, conflictValueFromText } from './stageVersion.js'
+import { CLASH_OPTIONS, CHANGE_OPTIONS, acceptRecommendation, answersText, changeCard, choose, chooseOther, clashCard, followsRecommendation, isAnswered, isAutoId, otherWords, releaseHeld, shapeCard, sortRound, splitReady, termChoice, withMerged } from './interviewRounds.js'
 
 export { fieldsInScope }
 
@@ -232,7 +234,11 @@ export function createInterviewSession(config = {}) {
     held: [], // cards waiting on a card that isn't answered yet
     answered: [], // every card answered so far: { id, header, question, field, labels, other, followed }
     finish: null, // null | accepting | final | done: "Finish with your recommendations"
+    sessionWarning: null, // { others }: another session on this Stage is not Done; Start waits for Carry on alongside or Cancel (#290)
+    clash: null, // { cards, merging, mergeNote }: a Save found Fields both sides changed; a round of cards settles them (#290)
+    resumed: null, // the recap line when this run carries on from the decisions log (#290)
   }
+  let clashWaiter = null // { resolve, conflicts, entryIds }: the Save waiting on the clash cards
   let messages = []
   let nextId = 1
   let live = null // the thread item the AI is streaming into
@@ -269,6 +275,8 @@ export function createInterviewSession(config = {}) {
     held: state.held.length,
     answered: state.answered.map((a) => ({ ...a })),
     round: state.round ? { ...state.round, cards: state.round.cards.map((c) => ({ ...c, selected: [...c.selected] })) } : null,
+    clash: state.clash ? { ...state.clash, cards: state.clash.cards.map((c) => ({ ...c, selected: [...c.selected] })) } : null,
+    sessionWarning: state.sessionWarning ? { others: state.sessionWarning.others.map((o) => ({ ...o })) } : null,
     openFields: openFields(),
     decisions: { ...logSummary(log.entries()), pending: log.pending().length, session: log.sessionId },
     // #294: this session's tokens on this Stage, as the status block of the log will record them (all the AI Providers it used).
@@ -877,6 +885,59 @@ export function createInterviewSession(config = {}) {
     log.addArtefact({ artefact: chosen.id, title: chosen.title ?? chosen.id, candidates: candidates.map((a) => a.id) })
   }
 
+  // ---------- a Save's clash cards (#290) ----------
+
+  const MERGE_SYSTEM =
+    'You merge two versions of one Field of a document, for an architect who has to settle a clash at Save. You are given the Field as it was when the architect began (base), ' +
+    'the architect\'s version (mine) and the version saved meanwhile (theirs). Write ONE wording that keeps what is good in both. Add no fact, figure or citation that is in neither. ' +
+    'Where the two disagree about a fact, keep the architect\'s (mine) and say nothing about the disagreement. A list Field is one item per line. ' +
+    'Reply with JSON only, no code fence and no commentary: {"merges":[{"id":"<the id given>","text":"<the merged wording>"}]}.'
+
+  function parseMerges(text) {
+    const body = String(text ?? '').replace(/^\s*```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim()
+    try {
+      const parsed = JSON.parse(body)
+      const list = Array.isArray(parsed?.merges) ? parsed.merges : Array.isArray(parsed) ? parsed : []
+      return new Map(list.filter((m) => m && typeof m.id === 'string' && typeof m.text === 'string' && m.text.trim()).map((m) => [m.id, m.text]))
+    } catch {
+      return new Map()
+    }
+  }
+
+  /** Asks the AI for one merged wording per Field it can merge. Never blocks the Save: without it the card has two choices. */
+  async function proposeMerges(conflicts, cards) {
+    const mergeable = cards.filter((c) => c.clash.mergeable)
+    const stillOpen = () => state.clash && clashWaiter && cards.every((c) => state.clash.cards.some((s) => s.id === c.id))
+    const finishMerging = (note = '') => {
+      if (stillOpen()) {
+        state.clash = { ...state.clash, merging: false, mergeNote: note }
+        emit()
+      }
+    }
+    const provider = getAiProvider(state.providerId)
+    if (mergeable.length === 0 || !provider) return finishMerging()
+    const request = mergeable.map((card) => {
+      const conflict = conflicts[cards.indexOf(card)]
+      return { id: card.id, field: card.field, base: conflict.base === undefined ? '' : conflictText(conflict.base.value), mine: card.clash.mine, theirs: card.clash.theirs }
+    })
+    try {
+      const result = await runTurn(provider, { system: MERGE_SYSTEM, messages: [{ role: 'user', text: JSON.stringify(request, null, 2) }], tools: [], askCards: false }, { fetchImpl, origin, signal: controller?.signal })
+      state.usage = {
+        inputTokens: state.usage.inputTokens + result.usage.inputTokens,
+        outputTokens: state.usage.outputTokens + result.usage.outputTokens,
+        cacheReadTokens: state.usage.cacheReadTokens + result.usage.cacheReadTokens,
+        cacheWriteTokens: state.usage.cacheWriteTokens + result.usage.cacheWriteTokens,
+      }
+      log.addUsage(provider, result.usage)
+      const merges = parseMerges(result.text)
+      if (!stillOpen()) return
+      state.clash = { ...state.clash, cards: state.clash.cards.map((c) => (merges.has(c.id) ? withMerged(c, merges.get(c.id)) : c)) }
+      finishMerging(merges.size < mergeable.length ? "The AI couldn't write a merged wording for every Field." : '')
+    } catch (err) {
+      finishMerging(`The AI couldn't write a merged wording (${err?.message || 'it did not answer'}). Choose mine or theirs.`)
+    }
+  }
+
   // ---------- the session's methods ----------
 
   function setCard(cardId, change) {
@@ -936,9 +997,18 @@ export function createInterviewSession(config = {}) {
     },
 
     /** Tests the chosen AI Provider if it has not been, then opens the interview. Resolves once the first turn has finished. */
-    async start() {
+    async start({ alongside = false } = {}) {
       if (state.phase !== 'kickoff') return
       state.kickoffError = null
+      // #290 (ADR-0068): another session on this Stage that is not Done gets a card naming when it last saved. Carry on alongside
+      // starts anyway (the Field-by-Field Save check keeps both safe); Cancel leaves the kickoff as it was.
+      const resume = getContext?.()?.resume ?? null
+      if (!alongside && resume?.others?.length) {
+        state.sessionWarning = { others: resume.others }
+        emit()
+        return
+      }
+      state.sessionWarning = null
       const provider = getAiProvider(state.providerId)
       if (!provider) {
         state.kickoffError = 'Choose an AI Provider, or connect one.'
@@ -980,15 +1050,31 @@ export function createInterviewSession(config = {}) {
       } else if (state.cardMode === 'chat') {
         say('sys', 'This model cannot produce question cards, so it asks in plain chat. That works, but is less reliable.')
       }
-      messages = [{ role: 'user', text: OPENING }]
+      if (resume?.resuming) {
+        // #290: carrying on from the decisions log. The AI is given the log and the saved content (both are in its brief), not the old
+        // conversation, and opens with the recap Gantry worked out.
+        if (resume.adopt) log.adopt(resume.adopt)
+        for (const entry of currentLogEntries(getContext().decisions)) if (entry.kind === 'saved-content' && entry.choice === 'keep' && entry.field) keptFields.add(entry.field)
+        state.resumed = resume.recap
+        say('sys', resume.recap, { resumed: true })
+        messages = [{ role: 'user', text: resumeOpening(resume) }]
+      } else {
+        messages = [{ role: 'user', text: OPENING }]
+      }
       recordArtefact()
       await runLoop()
+    },
+
+    /** The two-sessions card's Cancel: nothing starts and the kickoff stays as it was. */
+    dismissSessionWarning() {
+      state.sessionWarning = null
+      emit()
     },
 
     /** Free chat: what the architect types goes to the AI as it is. Cards still open are put away and can be asked again. */
     async send(text) {
       const body = String(text ?? '').trim()
-      if (!body || state.phase === 'working' || state.phase === 'kickoff' || state.phase === 'testing') return
+      if (!body || state.phase === 'working' || state.phase === 'kickoff' || state.phase === 'testing' || state.phase === 'paused') return
       say('you', body)
       if (state.round) {
         for (const card of state.round.cards) if (card.type === 'change' && pendingChanges.has(card.field)) pendingChanges.get(card.field).shown = false
@@ -1073,6 +1159,191 @@ export function createInterviewSession(config = {}) {
       return { ok: true }
     },
 
+    /**
+     * Pause (#290, ADR-0064) saved the log and the drafts so far: the run stops here and carries on, in this browser or any other,
+     * from the decisions log and the saved content. Nothing about the conversation is kept.
+     */
+    markPaused() {
+      controller?.abort()
+      state.phase = 'paused'
+      state.round = null
+      say('sys', 'Paused. The decisions log and the drafts so far are saved. Open the Interview page again, in any browser, to carry on.')
+      emit()
+    },
+
+    // ---- a Save that found Fields both sides changed (#290, ADR-0068) ----
+    /**
+     * The Save check found Fields that you and someone else both changed. They are settled here, as a round of cards (keep mine,
+     * keep theirs, or a merged wording from the AI), and each choice is logged. `conflicts` are `mergeStage`'s, each given a
+     * `label`. Resolves `{ resolutions, entries }` (what `mergeStage` takes, and the log entries to save with this Save), or null
+     * when the architect cancels the Save.
+     */
+    settleClashes(conflicts) {
+      if (clashWaiter) return Promise.resolve(null)
+      const cards = conflicts.map((c) => {
+        const id = `clash:${c.moduleId}:${c.key}`
+        const mergeable = c.kind === 'field' || c.kind === 'custom'
+        const field = `${c.moduleId}.${c.kind === 'field' ? c.key.slice('field:'.length) : c.key}`
+        return clashCard({ id, label: c.label ?? field, field, mine: c.mine === undefined ? '' : conflictText(c.mine.value), theirs: c.theirs === undefined ? '' : conflictText(c.theirs.value), mergeable })
+      })
+      state.clash = { cards, merging: cards.some((c) => c.clash.mergeable), mergeNote: '' }
+      emit()
+      const done = new Promise((resolve) => {
+        clashWaiter = { resolve, conflicts }
+      })
+      void proposeMerges(conflicts, cards)
+      return done
+    },
+
+    chooseClash(cardId, label) {
+      if (!state.clash) return
+      state.clash = { ...state.clash, cards: state.clash.cards.map((c) => (c.id === cardId ? choose(c, label) : c)) }
+      emit()
+    },
+
+    /** Settles the clash cards: logs each choice and hands the Save its resolutions. A card without a choice is not settled. */
+    submitClash() {
+      if (!state.clash || !clashWaiter) return { ok: false, message: 'There is nothing to settle.' }
+      const open = state.clash.cards.filter((c) => !isAnswered(c))
+      if (open.length) return { ok: false, message: `${open.length} Field${open.length === 1 ? ' is' : 's are'} not settled yet.` }
+      const resolutions = {}
+      const entries = []
+      for (const card of state.clash.cards) {
+        const index = state.clash.cards.indexOf(card)
+        const conflict = clashWaiter.conflicts[index]
+        const choice = card.selected[0]
+        const side = choice === CLASH_OPTIONS.mine ? conflict.mine : choice === CLASH_OPTIONS.theirs ? conflict.theirs : null
+        if (choice === CLASH_OPTIONS.merged) resolutions[conflictKey(conflict.moduleId, conflict.key)] = { value: conflictValueFromText(card.clash.merged, (conflict.mine ?? conflict.theirs)?.value) }
+        else resolutions[conflictKey(conflict.moduleId, conflict.key)] = side === undefined ? { remove: true } : { value: side.value }
+        const word = choice === CLASH_OPTIONS.mine ? 'mine' : choice === CLASH_OPTIONS.theirs ? 'theirs' : 'merged'
+        const entry = log.addSaveClash(card.field, word, { feeds: conflict.kind === 'field' })
+        if (entry) entries.push(entry)
+        say('sys', `Settled ${card.field}: ${word === 'merged' ? "the AI's merged wording" : `kept ${word}`}`)
+      }
+      const waiter = clashWaiter
+      clashWaiter = null
+      state.clash = null
+      emit()
+      waiter.resolve({ resolutions, entries: entries.map((e) => ({ ...e })) })
+      return { ok: true }
+    },
+
+    /** Cancel the Save: nothing is written and the choices made so far are forgotten. */
+    cancelClash() {
+      if (!clashWaiter) return
+      const waiter = clashWaiter
+      clashWaiter = null
+      state.clash = null
+      emit()
+      waiter.resolve(null)
+    },
+
+    /** Entries of this session that were never sent are taken back (a Save that was cancelled or failed after the clash cards). */
+    discardEntries(ids) {
+      log.discard(ids)
+      emit()
+    },
+
+    // ---- the working copy (#290, ADR-0064) ----
+    /**
+     * True when the session is somewhere a copy can be taken: not mid-turn, under way, and holding something a Save has not taken: a draft
+     * not yet saved, an answer not yet in the committed log, or a round of cards waiting. Straight after a Save there is nothing to keep, so
+     * a reload shows the Interview page afresh (and, for a run paused by Save and stop, its Resume) rather than a copy of a finished Stage.
+     */
+    get canKeepCopy() {
+      if (['kickoff', 'testing', 'working', 'paused'].includes(state.phase)) return false
+      return Object.keys(state.drafts).length > 0 || log.pending().length > 0 || Boolean(state.round)
+    },
+
+    /** What the session knows of the committed log, for the working copy to tell later whether the log has moved on. */
+    knownLog() {
+      return { committedIds: log.committed().map((e) => e.id), lastAiSave: log.lastAiSave() }
+    },
+
+    /** The unsaved part of the session and the AI's history, as plain data for the browser's working copy. */
+    exportState() {
+      const keep = ({ ...rest }) => ({ ...rest })
+      return {
+        sessionId: log.sessionId,
+        nextId,
+        messages: messages.map(keep),
+        state: {
+          providerId: state.providerId,
+          thread: state.thread.map((t) => ({ ...t, streaming: false })),
+          drafts: state.drafts,
+          fieldInputs: state.fieldInputs,
+          savedKeys: state.savedKeys,
+          cardMode: state.cardMode,
+          usage: state.usage,
+          round: state.round,
+          roundNo: state.roundNo,
+          held: state.held,
+          answered: state.answered,
+          finish: state.finish,
+          resumed: state.resumed,
+          error: state.error,
+          phase: state.phase,
+        },
+        pendingChanges: [...pendingChanges],
+        kept: [...keptFields],
+        authorised: [...authorised],
+        otherTexts: [...otherTexts],
+        bounced: [...bounced],
+        heldDrafts: [...held],
+        readsSinceDraft,
+        pendingAsk,
+        cardFailures,
+        log: log.exportState(),
+      }
+    },
+
+    /** Picks up from a working copy: the same drafts, open round, answers and history. Only a session that has not started can. */
+    importState(saved) {
+      if (!saved || state.phase !== 'kickoff' || !saved.state) return false
+      const s = saved.state
+      Object.assign(state, {
+        providerId: s.providerId ?? state.providerId,
+        thread: s.thread ?? [],
+        drafts: s.drafts ?? {},
+        fieldInputs: s.fieldInputs ?? {},
+        savedKeys: s.savedKeys ?? [],
+        cardMode: s.cardMode ?? 'native',
+        usage: s.usage ?? EMPTY_USAGE,
+        round: s.round ?? null,
+        roundNo: s.roundNo ?? 0,
+        held: s.held ?? [],
+        answered: s.answered ?? [],
+        finish: s.finish ?? null,
+        resumed: s.resumed ?? null,
+        error: s.error ?? null,
+        kickoffError: null,
+        drafting: null,
+        preparing: false,
+      })
+      messages = saved.messages ?? []
+      nextId = saved.nextId ?? nextId
+      pendingChanges.clear()
+      for (const [k, v] of saved.pendingChanges ?? []) pendingChanges.set(k, v)
+      keptFields.clear()
+      for (const k of saved.kept ?? []) keptFields.add(k)
+      authorised.clear()
+      for (const k of saved.authorised ?? []) authorised.add(k)
+      otherTexts.length = 0
+      otherTexts.push(...(saved.otherTexts ?? []))
+      bounced.clear()
+      for (const k of saved.bounced ?? []) bounced.add(k)
+      held.clear()
+      for (const [k, v] of saved.heldDrafts ?? []) held.set(k, v)
+      readsSinceDraft = saved.readsSinceDraft ?? []
+      pendingAsk = saved.pendingAsk ?? null
+      cardFailures = saved.cardFailures ?? 0
+      log.importState(saved.log)
+      state.phase = s.phase === 'error' ? 'error' : state.round ? 'asking' : 'waiting'
+      say('sys', 'Picked up where you left off in this browser.')
+      emit()
+      return true
+    },
+
     /** The drafts were saved: they are no longer an unsaved preview, and the Fields now hold saved content again. */
     markSaved(keys) {
       for (const key of keys) {
@@ -1123,6 +1394,7 @@ export function createInterviewSession(config = {}) {
       if (state.phase === 'working' || state.phase === 'testing') return { ok: false, message: 'Wait for the AI to finish its turn first.' }
       controller?.abort()
       log.addRestart()
+      state.resumed = null
       messages = []
       state.thread = []
       state.drafts = {}

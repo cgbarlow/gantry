@@ -108,6 +108,11 @@ test('a run left paused is found from the Stage logs: advance first when the Sta
   assert.equal(resumableRun({ stages: STAGES, currentStageId: 'two', logs: { one: log('paused', 'three') } }).mode, 'continue')
 })
 
+test('a Pause part-way through a Stage (#290) is not a run to resume: that Stage is still in progress', () => {
+  const paused = { status: [{ session: 's', state: 'paused', target: 'three', stages: { one: 'in-progress', two: 'waiting', three: 'waiting' } }] }
+  assert.equal(resumableRun({ stages: STAGES, currentStageId: 'one', logs: { one: paused } }), null)
+})
+
 test('a finished run, a run of one Stage and a run already under way are not offered for resuming', () => {
   const log = (state, target) => ({ status: [{ session: 's', state, target }] })
   assert.equal(resumableRun({ stages: STAGES, currentStageId: 'three', logs: { three: log('done', 'three'), two: log('saved', 'three') } }), null, 'the target was confirmed')

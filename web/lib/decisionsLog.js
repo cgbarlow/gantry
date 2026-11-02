@@ -21,7 +21,7 @@ export const DECISIONS_LOG_VERSION = 1
  * and `hand-edit` (#289): the architect's own edit of a drafted Field in the Interview page's preview, kept as the text they typed.
  * The log adds more by their own tickets, and shows any kind it does not know as it is.
  */
-export const ENTRY_KINDS = Object.freeze(['answer', 'fact', 'saved-content', 'hand-edit', 'open-question', 'artefact', 'restart', 'model-change', 'term'])
+export const ENTRY_KINDS = Object.freeze(['answer', 'fact', 'saved-content', 'hand-edit', 'open-question', 'artefact', 'restart', 'model-change', 'term', 'save-clash'])
 
 /** Where a Stage's log lives, relative to the Instance's folder. */
 export const decisionsLogPath = (stageId) => `interview/${stageId}.yaml`
@@ -88,6 +88,14 @@ export function sessionStatus(input = {}) {
 
 const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 
+// #290 (ADR-0068): merging two sessions' logs may add `replaces` / `replacedBy` to an entry that is still only being written, so
+// an entry sent again after such a merge is the same entry whatever those two say.
+const withoutMergeLinks = (entry) => {
+  const { replaces, replacedBy, ...rest } = entry ?? {}
+  return rest
+}
+const sameEntry = (a, b) => sameJson(withoutMergeLinks(a), withoutMergeLinks(b))
+
 function cleanEntry(entry) {
   if (!isObject(entry)) throw new DecisionsLogError('A decisions log entry must be an object.')
   if (typeof entry.id !== 'string' || entry.id.trim() === '') throw new DecisionsLogError('Every decisions log entry needs an id.')
@@ -96,41 +104,91 @@ function cleanEntry(entry) {
 }
 
 /**
- * Throws if `after` is not `before` with entries added at the end: every entry already there must still be there, in the same place,
- * with the same content. This is the append-only rule (ADR-0064) as a check anything that writes a log can run on its result.
+ * Throws if `after` is not `before` with entries added: every entry already there must still be there, with the same content and
+ * in the same order relative to the others. This is the append-only rule (ADR-0064) as a check anything that writes a log can run
+ * on its result. Entries from another session may sit between them (the logs merge in time order, ADR-0068).
  */
 export function assertAppendOnly(before, after) {
   const was = before?.entries ?? []
   const now = after?.entries ?? []
   if (now.length < was.length) throw new DecisionsLogError('A decisions log entry cannot be removed.', { code: 'append-only', status: 409 })
+  let at = 0
   for (let i = 0; i < was.length; i++) {
-    if (!sameJson(was[i], now[i])) throw new DecisionsLogError(`Decisions log entry ${was[i]?.id ?? i + 1} cannot be changed. Add an entry that replaces it.`, { code: 'append-only', status: 409 })
+    let found = -1
+    for (let j = at; j < now.length; j++) {
+      if (sameJson(was[i], now[j])) {
+        found = j
+        break
+      }
+    }
+    if (found === -1) {
+      const changed = now.some((e) => e?.id === was[i]?.id)
+      throw new DecisionsLogError(changed ? `Decisions log entry ${was[i]?.id ?? i + 1} cannot be changed. Add an entry that replaces it.` : 'A decisions log entry cannot be removed.', { code: 'append-only', status: 409 })
+    }
+    at = found + 1
   }
 }
 
+const squashQuestion = (text) => String(text ?? '').toLowerCase().replace(/\s+/g, ' ').trim()
+
+/** What an answer is an answer to: the Field it feeds and the question, so two sessions' answers to one question find each other. */
+const questionKey = (entry) => (entry?.kind === 'answer' && asArray(entry.fields)[0] && entry.question ? `${asArray(entry.fields)[0]}\u0000${squashQuestion(entry.question)}` : null)
+
 /**
- * The log with `entries` added to the end, oldest first (by `at`). An entry whose id is already in the log and is identical is
- * skipped (a Save sent twice adds nothing); one whose id is there with different content is refused, because that would change
- * an entry. Returns `{ log, added }`; `log` is a new object and the one passed in is not touched.
+ * Two sessions that answered the same question: the later answer replaces the earlier (ADR-0068). The entry being added is the only
+ * one that can be given a link (an entry already in the log is never changed), so a later new entry gets `replaces` and an earlier
+ * new entry, written after a later answer of another session, gets `replacedBy`.
+ */
+function reconcileAnswer(entry, standing) {
+  const key = questionKey(entry)
+  if (!key) return entry
+  let next = entry
+  for (const other of standing) {
+    if (other.session === entry.session || questionKey(other) !== key) continue
+    if (String(other.at ?? '') <= String(entry.at ?? '')) next = { ...next, replaces: [...new Set([...asArray(next.replaces), other.id])] }
+    else next = { ...next, replacedBy: other.id }
+  }
+  return next
+}
+
+/**
+ * The log with `entries` added, in time order (by `at`). An entry whose id is already in the log and is identical is skipped (a
+ * Save sent twice adds nothing); one whose id is there with different content is refused, because that would change an entry.
+ * When another session has written meanwhile, the new entries go in among its entries by time, and a later answer to a question
+ * the other session also answered replaces the earlier one. Returns `{ log, added, merged }`; `log` is a new object, the one passed in
+ * is not touched, and `merged` is true when the entries did not simply go on the end.
  */
 export function appendEntries(log, entries) {
   const base = log ?? emptyDecisionsLog()
   const existing = new Map(base.entries.map((e) => [e.id, e]))
+  const standing = currentLogEntries(base.entries)
   const fresh = []
   for (const raw of asArray(entries)) {
     const entry = cleanEntry(raw)
     const there = existing.get(entry.id)
     if (there) {
-      if (!sameJson(there, entry)) throw new DecisionsLogError(`Decisions log entry ${entry.id} already exists with different content. Entries are append-only: add an entry that replaces it.`, { code: 'append-only', status: 409 })
+      if (!sameEntry(there, entry)) throw new DecisionsLogError(`Decisions log entry ${entry.id} already exists with different content. Entries are append-only: add an entry that replaces it.`, { code: 'append-only', status: 409 })
       continue
     }
     if (fresh.some((e) => e.id === entry.id)) continue
     fresh.push(entry)
   }
   fresh.sort((a, b) => String(a.at ?? '').localeCompare(String(b.at ?? '')))
-  const next = { ...base, entries: [...base.entries, ...fresh] }
+  const list = [...base.entries]
+  let merged = false
+  const added = []
+  for (const raw of fresh) {
+    const entry = reconcileAnswer(raw, standing)
+    if (entry !== raw) merged = true
+    let place = list.length
+    while (place > 0 && String(list[place - 1].at ?? '') > String(entry.at ?? '')) place--
+    if (place < list.length) merged = true
+    list.splice(place, 0, entry)
+    added.push(entry)
+  }
+  const next = { ...base, entries: list }
   assertAppendOnly(base, next)
-  return { log: next, added: fresh }
+  return { log: next, added, merged }
 }
 
 /**
@@ -159,9 +217,25 @@ export function applyDecisionsDelta(log, delta, stageId = '') {
     }
     next = { ...next, fields }
   }
-  if (delta?.entries !== undefined) next = appendEntries(next, delta.entries).log
+  if (delta?.entries !== undefined) {
+    const appended = appendEntries(next, delta.entries)
+    next = appended.log
+    if (appended.merged) next = rebuildFieldEntries(next)
+  }
   assertAppendOnly(base, next)
   return next
+}
+
+/**
+ * The `fields` section after two sessions' logs merged: for each drafted Field, the entries that currently feed it, so a Field
+ * drafted by one session lists the other session's later answer too (ADR-0068: "the `fields` section is rebuilt").
+ */
+export function rebuildFieldEntries(log) {
+  const standing = currentLogEntries(log.entries)
+  const fields = Object.fromEntries(
+    Object.entries(log.fields ?? {}).map(([key, record]) => [key, { ...record, entries: standing.filter((e) => asArray(e.fields).includes(key)).map((e) => e.id) }])
+  )
+  return { ...log, fields }
 }
 
 function cleanInput(input) {
@@ -221,7 +295,7 @@ export function currentLogEntries(decisions) {
   const all = (Array.isArray(decisions) ? decisions : decisions?.entries ?? []).filter((e) => e && typeof e === 'object')
   const lastRestart = all.map((e) => e.kind).lastIndexOf('restart')
   const entries = lastRestart === -1 ? all : all.slice(lastRestart + 1)
-  const replaced = new Set(entries.map((e) => e.replaces).filter(Boolean).flat())
+  const replaced = new Set([...entries.map((e) => e.replaces).filter(Boolean).flat(), ...entries.filter((e) => e.replacedBy).map((e) => e.id)])
   const resolved = new Set(entries.map((e) => e.resolves).filter(Boolean).flat())
   return entries.filter((e) => e.kind !== 'restart' && !replaced.has(e.id) && !(e.kind === 'open-question' && resolved.has(e.id)))
 }

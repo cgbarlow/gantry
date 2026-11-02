@@ -5045,6 +5045,18 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance }) {
     }
     return modules
   }
+  // #290 (ADR-0064): opening the Interview page runs Check status once, and what the Provider reports overrides the log's status block. A
+  // workspace with no Provider to ask (local, server) reports from its own record of the current Stage instead (the page does that).
+  async function checkStatus() {
+    if (!instance.workspaceBacked) return {}
+    const res = await apiFetchForInstance(instance.slug, `/api/instance/check-status?slug=${encodeURIComponent(instance.slug)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    const body = await res.json().catch(() => ({}))
+    return res.ok && body.merged ? { [instance.stage.id]: 'approved' } : {}
+  }
   // `key`: a run (#293) moves the Instance on to its next Stage, and the page for that Stage starts afresh.
   return html`<${InterviewPage}
     key=${instance.stage.id}
@@ -5058,6 +5070,7 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance }) {
     decisionsStore=${decisionsStore}
     onSaveDrafts=${onSaveDrafts}
     onAdvance=${onAdvance}
+    checkStatus=${checkStatus}
   />`
 }
 
@@ -5690,6 +5703,8 @@ function ModuleEditorPage({ slug: routeRef }) {
   const savedRef = useRef({ key: null, payloads: new Map(), keys: new Map(), version: null })
   // #288: the decisions log the next stage Save is to write with the Modules (set by the Interview page's Save, taken by `writeStage`).
   const pendingDecisionsRef = useRef(null)
+  // #290: the log entries a Save's clash cards added (how the architect settled each Field), kept so the Interview page can commit them too.
+  const settledEntriesRef = useRef([])
   const [leavePrompt, setLeavePrompt] = useState(null)
   // The Field-by-Field dialog (ADR-0068, #270): `{ inst, conflicts, resolve }` while a Save waits on the author.
   const [clashPrompt, setClashPrompt] = useState(null)
@@ -5837,7 +5852,9 @@ function ModuleEditorPage({ slug: routeRef }) {
   // author started from, what is saved now and what the author has — only they changed it, theirs
   // is kept; only the other side did, theirs is taken; both did, the author picks or edits — and
   // the result is saved against the version just seen. Resolves true when the save worked.
-  async function saveStage() {
+  async function saveStage(options) {
+    // #290: an AI session settles a clash as a round of cards (`options.settleClashes`); the editor asks with its dialog.
+    const settleClashes = typeof options?.settleClashes === 'function' ? options.settleClashes : null
     refreshDirty()
     const inst = instanceData.peek()
     const { dirtyModuleIds, phase } = stageSave.peek()
@@ -5862,7 +5879,18 @@ function ModuleEditorPage({ slug: routeRef }) {
         const mineAll = { ...base, ...payloads }
         let merge = mergeStage({ base, mine: mineAll, theirs })
         if (merge.conflicts.length > 0) {
-          const resolutions = await askClashes(inst, merge.conflicts)
+          let resolutions
+          if (settleClashes) {
+            const settled = await settleClashes(merge.conflicts.map((conflict) => ({ ...conflict, label: clashLabel(inst, conflict) })))
+            resolutions = settled?.resolutions ?? null
+            if (settled?.entries?.length) {
+              settledEntriesRef.current = [...settledEntriesRef.current, ...settled.entries]
+              const pending = pendingDecisionsRef.current ?? { entries: [] }
+              pendingDecisionsRef.current = { ...pending, entries: [...(pending.entries ?? []), ...settled.entries] }
+            }
+          } else {
+            resolutions = await askClashes(inst, merge.conflicts)
+          }
           if (!resolutions) {
             // Cancelled: nothing was written and the author's edits stay as they are.
             stageSave.value = { ...stageSave.peek(), phase: 'idle', message: '' }
@@ -6142,12 +6170,13 @@ function ModuleEditorPage({ slug: routeRef }) {
   // Puts the AI's drafts into the Modules' Fields, leaves those Modules `draft`, and does the ordinary stage Save (one Save, through the
   // Save check). On a failure or a cancelled clash the Fields go back to what was saved. `check` is Gantry's real Gate check on what
   // was just saved, for the Artefact aimed for.
-  async function saveInterviewDrafts(drafts, { artefactId, decisions = null } = {}) {
+  async function saveInterviewDrafts(drafts, { artefactId, decisions = null, settleClashes = null } = {}) {
     const inst = instanceData.peek()
     if (!inst?.stage || isEditingBlocked()) return { ok: false, message: 'This Instance cannot be written to right now.' }
     // No editor is mounted on the Interview page. Any still registered are left over from a visit to the editor (the unsaved-drafts banner
     // sends people back and forth, #289) and hold stale values that would hide the drafts from the Save.
     registryRef.current = { stageKey: stageKey(inst), entries: [] }
+    settledEntriesRef.current = []
     // #288: the decisions log is part of this Save. `writeStage` takes it with the Modules; if the Save has no Module to write
     // (the drafts equal what is saved), it is written on its own below.
     pendingDecisionsRef.current = decisions
@@ -6167,7 +6196,9 @@ function ModuleEditorPage({ slug: routeRef }) {
           : mod
       ),
     }
-    const saved = await saveStage()
+    const saved = await saveStage({ settleClashes })
+    // What was actually sent for the log: the session's delta and the entries the clash cards added.
+    const sentDecisions = decisions ? { ...decisions, entries: [...(decisions.entries ?? []), ...settledEntriesRef.current] } : null
     if (saved && pendingDecisionsRef.current) {
       try {
         const store = inst.isLocalWorkspace ? createLocalDecisionsStore(localDirHandle.peek(), inst.slug) : createServerDecisionsStore(inst.slug, (url, init) => apiFetchForInstance(inst.slug, url, init))
@@ -6175,7 +6206,7 @@ function ModuleEditorPage({ slug: routeRef }) {
         decisionsLogTick.value += 1
       } catch (err) {
         pendingDecisionsRef.current = null
-        return { ok: false, message: `The Stage was saved, but its decisions log was not: ${err.message}` }
+        return { ok: false, message: `The Stage was saved, but its decisions log was not: ${err.message}`, settledIds: settledEntriesRef.current.map((e) => e.id) }
       }
       pendingDecisionsRef.current = null
     }
@@ -6185,7 +6216,7 @@ function ModuleEditorPage({ slug: routeRef }) {
       if (latest && stageKey(latest) === stageKey(inst)) {
         instanceData.value = { ...latest, modules: latest.modules.map((mod) => (touched.has(mod.id) ? inst.modules.find((m) => m.id === mod.id) ?? mod : mod)) }
       }
-      return { ok: false, message: stageSave.peek().message || 'The Save was cancelled, so nothing was saved.' }
+      return { ok: false, message: stageSave.peek().message || 'The Save was cancelled, so nothing was saved.', settledIds: settledEntriesRef.current.map((e) => e.id) }
     }
     let check = null
     try {
@@ -6204,7 +6235,7 @@ function ModuleEditorPage({ slug: routeRef }) {
     } catch {
       // The Gate check is a confirmation, not part of the Save: a Save that worked is reported either way.
     }
-    return { ok: true, check }
+    return { ok: true, check, decisions: sentDecisions }
   }
 
   // #293: "Save, advance, carry on" moves the Instance on to its next Stage once the Save has worked. The Gate is checked again here,

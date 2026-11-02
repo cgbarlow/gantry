@@ -111,12 +111,15 @@ export function resumableRun({ stages, currentStageId, logs = {} }) {
   const currentAt = indexOf(stages, currentStageId)
   if (currentAt === -1) return null
   const here = latestStatus(logs[currentStageId])
-  if ((here?.state === 'paused' || here?.state === 'saved') && indexOf(stages, here.target) > currentAt) {
+  // A Pause (#290) also writes `paused`, but leaves this Stage "in-progress" in the run's map: that Stage is not finished, so there is
+  // nothing to advance past, and the Interview page resumes it as a paused session instead.
+  const stopped = (status, stageId) => (status?.state === 'paused' || status?.state === 'saved') && status.stages?.[stageId] !== 'in-progress'
+  if (stopped(here, currentStageId) && indexOf(stages, here.target) > currentAt) {
     return { mode: 'advance', targetStageId: here.target, fromStageId: currentStageId }
   }
   const before = currentAt > 0 ? stages[currentAt - 1].id : null
   const was = before ? latestStatus(logs[before]) : null
-  if (was && (was.state === 'saved' || was.state === 'paused') && indexOf(stages, was.target) >= currentAt && !here) {
+  if (was && stopped(was, before) && indexOf(stages, was.target) >= currentAt && !here) {
     return { mode: 'continue', targetStageId: was.target, fromStageId: before }
   }
   return null

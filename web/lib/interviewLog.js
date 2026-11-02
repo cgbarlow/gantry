@@ -91,7 +91,7 @@ const sourceRef = (source) => (source?.document ? `${source.document}${source.lo
  */
 export function createSessionLog(config = {}) {
   const now = config.now ?? (() => new Date().toISOString())
-  const sessionId = (config.newSessionId ?? (() => `s-${Math.random().toString(36).slice(2, 8)}`))()
+  let sessionId = (config.newSessionId ?? (() => `s-${Math.random().toString(36).slice(2, 8)}`))()
   const who = () => String(config.who?.() ?? '')
   let committed = []
   let pending = []
@@ -113,14 +113,43 @@ export function createSessionLog(config = {}) {
   const asList = (v) => (v === undefined || v === null ? [] : Array.isArray(v) ? v : [v])
   const links = (fields, replaced = []) => clean({ replaces: replaced.map((e) => e.id), resolves: opensFor(fields).map((e) => e.id) })
 
+  // Ids are `<session>-<n>`; a session taking over an earlier one carries on after the highest n already in the log.
+  const raiseCounter = (entries) => {
+    for (const e of entries) {
+      const match = String(e.id).match(/-(\d+)$/)
+      if (e.session === sessionId && match) counter = Math.max(counter, Number(match[1]))
+    }
+  }
+
   return {
-    sessionId,
+    get sessionId() {
+      return sessionId
+    },
+
+    /**
+     * Takes over an earlier session of this architect (a paused one resumed, #290): its id, so the log keeps one status line for the run,
+     * and its token totals, so a session resumed in another browser keeps them (#255). Entries not yet sent keep the id they have.
+     */
+    adopt(status) {
+      if (!status?.session || status.session === sessionId) return
+      const mine = pending
+      sessionId = status.session
+      counter = 0
+      raiseCounter([...committed, ...mine])
+      for (const m of status.models ?? []) {
+        if (m?.type && m?.model && typeof m.inputTokens === 'number') {
+          usage.set(`${m.type}|${m.model}`, { type: m.type, model: m.model, inputTokens: m.inputTokens ?? 0, cachedTokens: m.cachedTokens ?? 0, outputTokens: m.outputTokens ?? 0 })
+        }
+      }
+      lastAiSave = status.lastAiSave ?? lastAiSave
+    },
 
     /** The log file's entries as committed; entries of this session that the file already holds are no longer pending. */
     load(log) {
       committed = [...(log?.entries ?? [])]
       const have = new Set(committed.map((e) => e.id))
       pending = pending.filter((e) => !have.has(e.id))
+      raiseCounter(committed)
     },
 
     /** Every entry that stands now, committed and pending (oldest first). */
@@ -220,6 +249,21 @@ export function createSessionLog(config = {}) {
       return add({ kind: 'restart', note: 'Start this stage over' })
     },
 
+    /**
+     * How the architect settled a Field both they and someone else changed, at a Save (#290, ADR-0068). `choice` is 'mine', 'theirs' or
+     * 'merged'; the merged wording is the AI's and is never kept here, only that it was chosen.
+     */
+    addSaveClash(field, choice, { feeds = true } = {}) {
+      const replaced = currentFor('save-clash', (e) => e.field === field)
+      return add(clean({ kind: 'save-clash', field, choice, fields: feeds ? [field] : [], ...links([], replaced) }))
+    },
+
+    /** Takes back entries that were never sent (a Save that was cancelled after its clash cards were answered). */
+    discard(ids) {
+      const drop = new Set(ids)
+      pending = pending.filter((e) => !drop.has(e.id))
+    },
+
     addModelChange(from, to) {
       return add({ kind: 'model-change', from: { type: from.type, model: from.model }, to: { type: to.type, model: to.model } })
     },
@@ -235,6 +279,20 @@ export function createSessionLog(config = {}) {
       usage.set(key, line)
     },
     usage: () => [...usage.values()].map((u) => ({ ...u })),
+    lastAiSave: () => lastAiSave,
+
+    /** What a working copy keeps of the log (#290): the entries not yet committed, the tokens used and the counters. */
+    exportState: () => ({ sessionId, pending: pending.map((e) => ({ ...e })), counter, usage: [...usage.values()].map((u) => ({ ...u })), lastAiSave }),
+    importState(saved) {
+      if (!saved) return
+      sessionId = saved.sessionId ?? sessionId
+      pending = (saved.pending ?? []).map((e) => ({ ...e }))
+      counter = saved.counter ?? counter
+      usage.clear()
+      for (const u of saved.usage ?? []) usage.set(`${u.type}|${u.model}`, { ...u })
+      lastAiSave = saved.lastAiSave ?? null
+      raiseCounter([...committed, ...pending])
+    },
 
     /**
      * What the stage Save sends for the log. `fieldInputs` is the session's `module.field -> inputs` and `fieldKeys` the Fields in

@@ -25,6 +25,8 @@ import { effectiveTargetSize, fieldTargetWords, targetSizeLabel } from './target
 import { logSummary } from './decisionsLog.js'
 import { beginRun, clearRun, interviewRuns, nextStage, planRows, resumableRun, runStartStage, runTargets, saveOutcome, updateRun } from './interviewRun.js'
 import { EMPTY_TOKENS, addTokens, formatTokens, hasTokens, tokenBreakdown, tokensOfLog, totalTokens } from './tokenUsage.js'
+import { describeSaved, resumeInfo } from './interviewResume.js'
+import { copyStanding, createWorkingCopyStore, makeWorkingCopy } from './interviewWorkingCopy.js'
 
 // One session per Instance Stage while the editor page is open, so going to the editor and back keeps the conversation and the drafts.
 const sessions = new Map()
@@ -44,6 +46,8 @@ export function unsavedDraftModules(slug, stageId) {
   return [...modules].map(([moduleId, fields]) => ({ moduleId, fields }))
 }
 
+// #290: the browser's working copy of an unsaved session (web/lib/interviewWorkingCopy.js).
+const workingCopies = createWorkingCopyStore()
 let skillsPromise = null
 const loadSkills = () => (skillsPromise ??= loadInterviewSkillsInBrowser().catch((err) => {
   skillsPromise = null
@@ -158,6 +162,31 @@ function QuestionCard({ card, fieldTitle, session }) {
   </div>`
 }
 
+/** A Field both you and someone else changed (#290, ADR-0068): the wordings side by side and a choice, nothing pre-selected. */
+function ClashCard({ card, session }) {
+  const shown = [
+    ['mine', 'Yours', card.clash.mine],
+    ['theirs', 'Theirs, saved meanwhile', card.clash.theirs],
+    ...(card.clash.merged !== null ? [['merged', "The AI's merged wording", card.clash.merged]] : []),
+  ]
+  return html`<div class="qcard" data-testid="clash-card" data-card-id=${card.id} data-field=${card.field}>
+    <div class="qchip">${card.header} · <span data-testid="clash-field">${card.field}</span></div>
+    <p class="qhead">${card.question}</p>
+    <div class="change-compare" data-testid="clash-compare">
+      ${shown.map(([side, label, text]) => html`<div key=${side}><span class="qchip">${label}</span><pre class="clash-text value" data-testid=${`clash-${side}`}>${text === '' ? '(removed)' : text}</pre></div>`)}
+    </div>
+    <div class="opts-tiles" role="radiogroup" aria-label=${card.question}>
+      ${card.options.map((option) => {
+        const chosen = card.selected.includes(option.label)
+        return html`<label key=${option.label} class=${'opt' + (chosen ? ' chosen' : '')} data-testid="clash-option" data-option=${option.label} data-chosen=${chosen ? 'true' : 'false'}>
+          <input type="radio" name=${card.id} checked=${chosen} onChange=${() => session.chooseClash(card.id, option.label)} />
+          <span><span class="olabel">${option.label}</span><span class="odesc">${option.description}</span></span>
+        </label>`
+      })}
+    </div>
+  </div>`
+}
+
 /** What the kickoff says about how this AI Provider will ask its questions: native, then text, then plain chat. */
 function CardModeNote({ provider }) {
   const found = provider.test?.questionCards
@@ -178,6 +207,14 @@ function CardModeNote({ provider }) {
   </div>`
 }
 
+/** `module.field` as "Module · Field" from a Definition, or the key as it is. */
+function fieldLabel(definition, key) {
+  const [moduleId, ...rest] = String(key).split('.')
+  const mod = definition?.modules?.find((m) => m.id === moduleId)
+  const field = mod?.fields?.find((f) => f.id === rest.join('.'))
+  return mod && field ? `${mod.title ?? mod.id} · ${field.title ?? field.id}` : String(key)
+}
+
 function providerLabel(p) {
   return `${p.name || p.type}${p.model ? ` · ${p.model}` : ''}${p.isDefault ? ' (Default)' : ''}`
 }
@@ -192,10 +229,12 @@ function providerLabel(p) {
  *   loadStructure   () => the Definition version projection
  *   loadOtherSaved  () => the other Stages' Modules (same shape as `instance.modules`), for the brief
  *   decisionsStore  { read(stageId) } the Stage's decisions log (#288, web/lib/decisionsStore.js)
- *   onSaveDrafts    (drafts, { artefactId, decisions }) => { ok, message?, check? }  puts the drafts in the Modules and does the stage Save, writing the decisions log in the same Save
+ *   onSaveDrafts    (drafts, { artefactId, decisions, settleClashes }) => { ok, message?, check?, decisions?, settledIds? }  puts the drafts in the Modules and does the stage Save, writing the
+ *                   decisions log in the same Save. A Field both sides changed goes to `settleClashes` (a round of cards, #290) instead of the editor's dialog
  *   onAdvance       () => { ok, message? }  moves the Instance on to its next Stage, for a run's "Save, advance, carry on" (#293); the page for that Stage then replaces this one
+ *   checkStatus     () => { [stageId]: state }  Check status, run once when the page opens on a workspace that has a Provider to ask (#290); what it reports overrides the file
  */
-export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance }) {
+export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance, checkStatus = null }) {
   const key = `${instance.slug}|${instance.stage.id}`
   const [setup, setSetup] = useState({ status: 'loading' })
   const [sources, setSources] = useState(null)
@@ -218,6 +257,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const [stageLogs, setStageLogs] = useState({}) // every Stage's committed log, by Stage id: the tokens each Stage has used (#294)
   const [confirmRestart, setConfirmRestart] = useState(false)
   const [handEditing, setHandEditing] = useState(null) // { key, error? }: the drafted Field open for a hand edit (#289)
+  const [generation, setGeneration] = useState(0) // bumped to open the page afresh after a Pause (#290)
+  const [asideNotice, setAsideNotice] = useState(null) // a working copy that was set aside because the committed log moved on (#290)
+  const [copyRestored, setCopyRestored] = useState(false)
   const sessionRef = useRef(null)
   const ctxRef = useRef(null)
   const threadRef = useRef(null)
@@ -230,38 +272,47 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   useEffect(() => {
     let cancelled = false
     setSetup({ status: 'loading' })
-    const stageAt = (instance.stages ?? []).findIndex((st) => st.id === instance.stage.id)
-    const previousId = stageAt > 0 ? instance.stages[stageAt - 1].id : null
-    // #294: every Stage's log, not only this one's and the one before, because the run plan shows what each Stage has used.
-    const otherIds = (instance.stages ?? []).map((st) => st.id).filter((id) => id !== instance.stage.id)
-    Promise.all([
-      loadStructure(),
-      loadSkills(),
-      loadOtherSaved().catch(() => []),
-      decisionsStore?.read(instance.stage.id).catch(() => null) ?? null,
-      Promise.all(otherIds.map((id) => decisionsStore?.read(id).catch(() => null) ?? null)),
-    ])
-      .then(async ([structure, skills, otherSaved, committedLog, others]) => {
-        // #291: a term choice made at an earlier Stage binds this one, and an open question left there is carried to the Open questions
-        // module, so the earlier Stages' logs are read too. A log that can't be read is left out: the interview carries on without it.
+    // #290: opening the page on an Instance with logs runs Check status once, then reads each Stage's status block and log. What the
+    // Provider reports overrides the file. A local or server workspace has no Provider to ask: its own record of which Stage is current is
+    // the report, and every Stage before it has moved on.
+    loadStructure()
+      .then(async (structure) => {
         const stages = structure.stages ?? []
-        const earlierStages = stages.slice(0, Math.max(0, stages.findIndex((st) => st.id === instance.stage.id)))
-        const earlierDecisions = decisionsStore
-          ? (await Promise.all(earlierStages.map(async (st) => ({ stageId: st.id, stageTitle: st.title ?? st.id, entries: (await decisionsStore.read(st.id).catch(() => null))?.entries ?? [] })))).filter((l) => l.entries.length)
-          : []
+        const [skills, otherSaved, logList, asked] = await Promise.all([
+          loadSkills(),
+          loadOtherSaved().catch(() => []),
+          Promise.all(stages.map((st) => (decisionsStore?.read(st.id) ?? Promise.resolve(null)).catch(() => null))),
+          Promise.resolve(checkStatus?.() ?? {}).catch(() => ({})),
+        ])
+        return { structure, skills, otherSaved, logs: Object.fromEntries(stages.map((st, i) => [st.id, logList[i]])), asked: asked ?? {} }
+      })
+      .then(({ structure, skills, otherSaved, logs, asked }) => {
         if (cancelled) return
         const definition = { ...structure, modules: modulesWithStandard(structure.modules, structure.standardModules) }
-        const logs = { ...Object.fromEntries(otherIds.map((id, at) => [id, others[at]])), [instance.stage.id]: committedLog }
-        setSetup({ status: 'ready', structure, definition, skills, otherSaved, earlierDecisions })
-        setCommittedLog(committedLog)
-        setStageLogs(logs)
-        setResumeLogs({ [instance.stage.id]: committedLog, ...(previousId ? { [previousId]: logs[previousId] } : {}) })
+        const providerStates = { ...asked }
+        const order = (structure.stages ?? []).map((st) => st.id)
+        const current = order.indexOf(instance.currentStageId)
+        if (current > 0) for (const id of order.slice(0, current)) providerStates[id] ??= 'advanced'
+        // #291: a term choice made at an earlier Stage binds this one, and an open question left there is carried to the Open questions
+        // module, so the earlier Stages' logs are read too. A log that can't be read is left out: the interview carries on without it.
+        const stageAt = order.indexOf(instance.stage.id)
+        const earlierDecisions = (structure.stages ?? [])
+          .slice(0, Math.max(0, stageAt))
+          .map((st) => ({ stageId: st.id, stageTitle: st.title ?? st.id, entries: logs[st.id]?.entries ?? [] }))
+          .filter((l) => l.entries.length)
+        setSetup({ status: 'ready', structure, definition, skills, otherSaved, logs, providerStates, earlierDecisions })
+        setCommittedLog(logs[instance.stage.id] ?? null)
+        setStageLogs(logs) // #294: what each Stage has used, for the run plan
+        // #293: the committed logs of this Stage and the one before it say whether a run was left part-way.
+        const instStageAt = (instance.stages ?? []).findIndex((st) => st.id === instance.stage.id)
+        const previousId = instStageAt > 0 ? instance.stages[instStageAt - 1].id : null
+        setResumeLogs({ [instance.stage.id]: logs[instance.stage.id] ?? null, ...(previousId ? { [previousId]: logs[previousId] ?? null } : {}) })
       })
       .catch((err) => !cancelled && setSetup({ status: 'error', message: err.message }))
     return () => {
       cancelled = true
     }
-  }, [key])
+  }, [key, generation])
 
   // ---- the Source documents, with the text read out of each, whenever the list changes ----
   // Stable between renders: the panel reloads its list whenever this changes, and every list it reads sets state here (#292).
@@ -308,6 +359,19 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           // #288: what the decisions log already holds, who is interviewing, and the Interview instructions version the status block records.
           decisions: committedLog,
           earlierDecisions: setup.earlierDecisions ?? [],
+          // #290: whether this run carries on from the decisions log, the earlier session of this architect it takes over, and the other
+          // sessions still going on this Stage. Worked out when Start is pressed, from the logs as they are then.
+          get resume() {
+            return resumeInfo({
+              logs: { ...setup.logs, [instance.stage.id]: committedLog },
+              stageId: instance.stage.id,
+              stageTitle: instance.stage.title,
+              actor,
+              providerStates: setup.providerStates,
+              stages: setup.structure.stages ?? [],
+              fieldTitle: (fieldKey) => fieldLabel(setup.definition, fieldKey),
+            })
+          },
           actor,
           targetStageId: target,
           instructionsVersion: `${setup.definition.id ?? instance.definition}@${instance.definitionVersion ?? setup.structure.version ?? 1}`,
@@ -323,12 +387,35 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   useEffect(() => {
     if (setup.status !== 'ready') return undefined
     let session = sessions.get(key)
-    if (!session) {
+    const fresh = !session
+    if (fresh) {
       session = createInterviewSession({ providerId })
       sessions.set(key, session)
     }
     sessionRef.current = session
-    session.bind({ getContext: () => ctxRef.current, handlers: { askForKey: ask('key'), askToRetry: ask('retry') }, onChange: setSnap })
+    // #290: every stable moment, the browser keeps a working copy of the unsaved session, so closing the tab loses nothing.
+    const keepCopy = (snapshot) => {
+      setSnap(snapshot)
+      if (session.canKeepCopy) {
+        const known = session.knownLog()
+        workingCopies.save(key, makeWorkingCopy({ state: session.exportState(), committedIds: known.committedIds, lastAiSave: known.lastAiSave }))
+      }
+    }
+    session.bind({ getContext: () => ctxRef.current, handlers: { askForKey: ask('key'), askToRetry: ask('retry') }, onChange: keepCopy })
+    if (fresh) {
+      // The same browser resumes exactly where it stopped, unless the committed log has moved on since the copy began: then the
+      // committed log wins and the copy is set aside, with a notice.
+      const copy = workingCopies.load(key)
+      if (copy) {
+        const standing = copyStanding(copy, setup.logs?.[instance.stage.id] ?? null)
+        if (standing === 'fresh') session.loadDecisions(setup.logs?.[instance.stage.id] ?? null)
+        if (standing === 'fresh' && session.importState(copy.state)) setCopyRestored(true)
+        else {
+          workingCopies.setAside(key, copy, standing)
+          setAsideNotice({ savedAt: copy.savedAt })
+        }
+      }
+    }
     return () => session.bind({ onChange: null })
   }, [key, setup.status])
 
@@ -371,6 +458,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const gate = draftKeys.length ? readiness?.gate ?? null : null
 
   const phase = snap?.phase ?? 'kickoff'
+  // #290: opening the page on a Stage whose decisions log has entries is a resume: Start becomes Resume and the recap shows before it.
+  const resumeNow = setup.status === 'ready' && phase === 'kickoff' ? ctxRef.current?.resume : null
+  const resuming = resumeNow?.resuming ? resumeNow : null
   const started = phase !== 'kickoff' && phase !== 'testing'
   const busy = phase === 'working' || phase === 'testing'
   const finishing = snap?.finish === 'accepting' || snap?.finish === 'final'
@@ -403,12 +493,12 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const resume = resumeLogs && !carryingOn && phase === 'kickoff' ? resumableRun({ stages: stagesList, currentStageId: instance.stage.id, logs: resumeLogs }) : null
   const stageTitleOf = (id) => stagesList.find((s) => s.id === id)?.title ?? id
 
-  async function startInterview() {
+  async function startInterview(options) {
     // A run of one Stage is still a run: its plan and its status block say where it stands. A Stage the run carried on into carries on the same run.
     const sameRun = run && run.phase === 'running' && run.target === target
     if (carryingOn) updateRun(instance.slug, { carryOn: null, at: instance.stage.id })
     else beginRun(instance.slug, { target, startStageId: sameRun ? run.startStageId : instance.stage.id, providerId: providerInUse, at: instance.stage.id })
-    await sessionRef.current?.start()
+    await sessionRef.current?.start(options)
   }
 
   // The Stage before this one carried on into it: start the interview by itself, with the AI Provider the run was using.
@@ -496,25 +586,32 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     return mod && field ? `${mod.title ?? mod.id} · ${field.title ?? field.id}` : key
   }
 
-  // The stage-end card's two buttons (#293). `action` is "advance" (Save, advance, carry on) or "stop" (Save and stop here): both make
-  // the one stage Save; "advance" then moves the Instance on and the next Stage's interview starts by itself. The status block of the
-  // decisions log, written in the same Save, records the run's target and each Stage's state, so a paused run can be resumed.
-  async function saveStage(action = 'stop') {
-    setSaving({ phase: 'saving' })
+  // One Save of the session: the drafts and the decisions log in a single stage Save, through the Save check (ADR-0068). A Field both
+  // sides changed comes back here as a round of clash cards (#290). `action` is the stage-end card's "advance" (Save, advance, carry on) or
+  // "stop" (Save and stop here, #293); both make the one stage Save, and "advance" then moves the Instance on so the next Stage's interview
+  // starts by itself. `pause` is Pause (#290): the same Save, asked for by the architect mid-Stage, which leaves the session to be resumed.
+  // The status block of the decisions log, written in the same Save, records the run's target and each Stage's state. Resolves true when
+  // the Save worked.
+  async function runSave({ action = 'stop', pause = false } = {}) {
+    setSaving({ phase: 'saving', pause })
     const keys = Object.keys(drafts)
     const outcome = saveOutcome({ stages: stagesList, currentStageId: instance.stage.id, targetStageId: target, startStageId: runStart, action })
     // #288: the decisions log goes in the same Save as the content.
-    const decisions = sessionRef.current?.decisionsDelta({ runState: outcome.state, saving: true, target, stages: outcome.stages }) ?? null
+    // A Pause is not the end of the Stage: the status line says `paused` and the Stage stays "in-progress" in the run's map, so a paused
+    // session is not mistaken for a run that stopped after finishing the Stage (web/lib/interviewRun.js `resumableRun`).
+    const runState = pause ? 'paused' : outcome.state
+    const runStages = pause ? { ...outcome.stages, [instance.stage.id]: 'in-progress' } : outcome.stages
+    const decisions = sessionRef.current?.decisionsDelta({ runState, saving: true, target, stages: runStages }) ?? null
     let result
     try {
-      result = await onSaveDrafts(drafts, { artefactId, decisions })
+      result = await onSaveDrafts(drafts, { artefactId, decisions, settleClashes: (conflicts) => sessionRef.current.settleClashes(conflicts) })
     } catch (err) {
       result = { ok: false, message: err.message }
     }
     if (result.ok) {
-      sessionRef.current?.markSaved(keys)
+      if (keys.length) sessionRef.current?.markSaved(keys)
       if (decisions) {
-        sessionRef.current?.commitDecisions(decisions)
+        sessionRef.current?.commitDecisions(result.decisions ?? decisions)
         const fresh = await decisionsStore?.read(instance.stage.id).catch(() => null)
         if (fresh) {
           setCommittedLog(fresh)
@@ -522,13 +619,36 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           sessionRef.current?.loadDecisions(fresh)
         }
       }
+      workingCopies.clear(key) // everything the working copy held is saved
+      if (pause) {
+        sessionRef.current?.markPaused()
+        updateRun(instance.slug, { phase: 'paused', at: instance.stage.id })
+        setSaving({ phase: 'paused', fields: keys.length })
+        return true
+      }
       updateRun(instance.slug, { phase: outcome.finished ? 'done' : outcome.advances ? 'running' : 'paused', at: instance.stage.id })
       const saved = { phase: 'saved', check: result.check ?? null, finished: outcome.finished }
       setSaving(saved)
       if (outcome.advances) await carryOn(saved)
-    } else {
-      setSaving({ phase: 'error', message: result.message || 'The Save did not go through.' })
+      return true
     }
+    // The Save did not happen, so the choices made on clash cards for it are taken back.
+    if (result.settledIds?.length) sessionRef.current?.discardEntries(result.settledIds)
+    setSaving({ phase: 'error', message: result.message || 'The Save did not go through.', pause: runState === 'paused' })
+    return false
+  }
+  const saveStage = (action = 'stop') => runSave({ action })
+  const pauseInterview = () => runSave({ pause: true })
+
+  // Opens the page afresh from the saved log and content, as it would be in any browser (#290).
+  function resumeAfterPause() {
+    sessions.delete(key)
+    workingCopies.clear(key)
+    sessionRef.current = null
+    setSnap(null)
+    setSaving(null)
+    setSubmitMessage('')
+    setGeneration((n) => n + 1)
   }
 
   // Moves the run on to the next Stage, which has been saved. The page for that Stage replaces this one and starts by itself;
@@ -577,6 +697,18 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           until you confirm the Stage, and it never passes a Gate that needs approval or review.
         </p>
         ${blockedReason ? html`<p class="inline-error" role="alert" data-testid="interview-blocked">${blockedReason}</p>` : null}
+        ${asideNotice
+          ? html`<div class="warn" role="status" data-testid="interview-copy-aside">
+              A copy of unsaved work kept in this browser${asideNotice.savedAt ? ` (${new Date(asideNotice.savedAt).toLocaleString()})` : ''} was set aside, because this Stage's decisions log has been saved since it began. The saved log and content are what this interview carries on from.
+              <button type="button" class="btn small ghost" data-testid="interview-copy-aside-dismiss" onClick=${() => { workingCopies.clearAside(key); setAsideNotice(null) }}>Dismiss</button>
+            </div>`
+          : null}
+        ${resuming
+          ? html`<div class="resume-recap" role="status" data-testid="interview-resume-recap">
+              <strong>${resuming.recap}</strong>
+              <span>. Pick an AI Provider and carry on: the AI is given the decisions log and the saved content, not the earlier conversation.</span>
+            </div>`
+          : null}
         ${resume
           ? html`<div class="kick-resume" data-testid="interview-resume-note" role="status">
               <p class="kick-note">
@@ -629,14 +761,32 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           ${sources === null ? 'Reading the Source documents…' : sourceCount === 0 ? 'No Source documents yet. Add some in the left rail so the AI has something to read.' : `${sourceCount} Source document${sourceCount === 1 ? '' : 's'} for the AI to read.`}
         </p>
         ${snap?.kickoffError ? html`<p class="inline-error" role="alert" data-testid="interview-kickoff-error">${snap.kickoffError}</p>` : null}
+        ${snap?.sessionWarning
+          ? html`<div class="qcard session-warning" role="alert" data-testid="interview-session-warning">
+              <div class="qchip">Another session</div>
+              <p class="qhead">Another session on ${instance.stage.title} isn't done.</p>
+              <ul class="session-others">
+                ${snap.sessionWarning.others.map(
+                  (other) => html`<li key=${other.session} data-testid="interview-other-session" data-session=${other.session}>
+                    A session${instance.workspaceBacked && other.who ? ` by ${other.who}` : ''} (${other.state}) ${describeSaved(other.lastAiSave)}.
+                  </li>`
+                )}
+              </ul>
+              <p class="kick-note">If you carry on alongside it, each Save is checked Field by Field against the other's, and the two decisions logs merge in time order.</p>
+              <div class="round-actions">
+                <button type="button" class="btn primary" data-testid="interview-warning-carry-on" onClick=${() => startInterview({ alongside: true })}>Carry on alongside</button>
+                <button type="button" class="btn ghost" data-testid="interview-warning-cancel" onClick=${() => sessionRef.current?.dismissSessionWarning()}>Cancel</button>
+              </div>
+            </div>`
+          : null}
         <button
           type="button"
           class="btn primary"
           data-testid="interview-start"
-          disabled=${!providerId || phase === 'testing' || sources === null || Boolean(blockedReason) || !snap}
-          onClick=${startInterview}
+          disabled=${!providerId || phase === 'testing' || sources === null || Boolean(blockedReason) || !snap || Boolean(snap?.sessionWarning)}
+          onClick=${() => startInterview()}
         >
-          ${phase === 'testing' ? PROGRESS_LABELS[snap?.testStep] ?? 'Testing the AI Provider…' : 'Start interview'}
+          ${phase === 'testing' ? PROGRESS_LABELS[snap?.testStep] ?? 'Testing the AI Provider…' : resuming ? 'Resume interview' : 'Start interview'}
         </button>
       </div>
     `
@@ -733,6 +883,41 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         ${unanswered > 0 ? html`<span class="round-page" data-testid="round-unanswered">${unanswered} still to answer</span>` : null}
       </div>
       ${submitMessage ? html`<p class="inline-error" role="alert" data-testid="round-error">${submitMessage}</p>` : null}
+    </div>`
+  }
+
+  // The Save check found Fields you and someone else both changed (#290, ADR-0068): a round of cards, one per Field.
+  const clashView = () => {
+    const clash = snap?.clash
+    if (!clash) return null
+    const unsettled = clash.cards.filter((c) => !isAnswered(c)).length
+    return html`<div class="round clash-round" data-testid="interview-clash" role="alert">
+      <div class="round-head">Settle before saving · ${clash.cards.length} Field${clash.cards.length === 1 ? '' : 's'} changed on both sides</div>
+      <p class="round-note">Someone saved ${clash.cards.length === 1 ? 'this Field' : 'these Fields'} after you began, and you changed ${clash.cards.length === 1 ? 'it' : 'them'} too. Nothing is overwritten without your say. Your choice is logged.</p>
+      ${clash.merging ? html`<p class="round-note" data-testid="clash-merging">The AI is writing a merged wording<span class="caret"></span></p>` : null}
+      ${clash.mergeNote ? html`<p class="round-note" data-testid="clash-merge-note">${clash.mergeNote}</p>` : null}
+      ${clash.cards.map((card) => html`<${ClashCard} key=${card.id} card=${card} session=${sessionRef.current} />`)}
+      <div class="round-actions">
+        <button type="button" class="btn primary" data-testid="clash-submit" disabled=${unsettled > 0} onClick=${() => sessionRef.current?.submitClash()}>Settle and save</button>
+        <button type="button" class="btn ghost" data-testid="clash-cancel" onClick=${() => sessionRef.current?.cancelClash()}>Cancel the Save</button>
+        ${unsettled > 0 ? html`<span class="round-page" data-testid="clash-unsettled">${unsettled} still to settle</span>` : null}
+      </div>
+    </div>`
+  }
+
+  // Pause saved the decisions log and the drafts so far (#290): this run stops here, and carries on from them in any browser.
+  const pausedView = () => {
+    if (phase !== 'paused') return null
+    return html`<div class="qcard stage-end saved" data-testid="interview-paused" role="status">
+      <p class="qhead">Paused</p>
+      <p>
+        ${saving?.fields ? `${saving.fields} Field${saving.fields === 1 ? '' : 's'} and the decisions log are saved as one Save. ` : 'The decisions log is saved. '}The Modules stay <strong>draft</strong>.
+        Open the Interview page on this Instance again, in this browser or any other, and the AI recaps from the log and carries on. The earlier conversation is not kept.
+      </p>
+      <div class="round-actions">
+        <button type="button" class="btn primary" data-testid="interview-resume" onClick=${resumeAfterPause}>Resume now</button>
+        <a class="btn ghost" href=${editorHref} data-testid="interview-paused-editor">Back to the editor</a>
+      </div>
     </div>`
   }
 
@@ -886,6 +1071,10 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
             ${setup.status === 'ready' && !started ? kickoff() : null}
             ${setup.status === 'ready' && started ? thread() : null}
             ${setup.status === 'ready' && started ? roundView() : null}
+            ${setup.status === 'ready' && started ? clashView() : null}
+            ${setup.status === 'ready' ? pausedView() : null}
+            ${saving?.phase === 'error' && saving.pause ? html`<p class="inline-error" role="alert" data-testid="interview-pause-error">${saving.message}</p>` : null}
+            ${copyRestored && phase !== 'kickoff' ? html`<p class="kick-note" data-testid="interview-copy-restored">Picked up from the working copy this browser kept.</p>` : null}
             ${recovery
               ? html`<${AiRecoveryPrompt}
                   kind=${recovery.kind}
@@ -918,8 +1107,11 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           </div>
         </div>
         <div class="interview-composer">
-          ${started
+          ${started && phase !== 'paused'
             ? html`<div class="inner composer-actions">
+                <button type="button" class="btn small ghost" data-testid="interview-pause" disabled=${busy || phase === 'kickoff' || saving?.phase === 'saving' || Boolean(blockedReason) || Boolean(snap?.clash)} title="Save the decisions log and the drafts so far, then carry on later in this browser or any other. The Modules stay draft." onClick=${pauseInterview}>
+                  ${saving?.phase === 'saving' && saving.pause ? 'Pausing…' : 'Pause'}
+                </button>
                 <button type="button" class="btn small ghost" data-testid="interview-finish" disabled=${busy || phase === 'kickoff'} title="Accept every recommendation, then answer one last round about only what the AI can't responsibly propose." onClick=${finishNow}>
                   Finish with your recommendations
                 </button>
@@ -930,7 +1122,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
               data-testid="interview-chat"
               aria-label="Tell the AI anything"
               placeholder=${started ? 'Tell the AI anything — "the budget is capped at $1.2M", "leave out Finance"…' : 'Start the interview to chat with the AI.'}
-              disabled=${!started || busy}
+              disabled=${!started || busy || phase === 'paused'}
               value=${chat}
               onInput=${(e) => setChat(e.currentTarget.value)}
               onKeyDown=${(e) => {
@@ -940,7 +1132,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
                 }
               }}
             ></textarea>
-            <button type="button" class="btn small" data-testid="interview-send" disabled=${!started || busy || !chat.trim()} onClick=${sendChat}>Send</button>
+            <button type="button" class="btn small" data-testid="interview-send" disabled=${!started || busy || phase === 'paused' || !chat.trim()} onClick=${sendChat}>Send</button>
           </div>
         </div>
       </section>
