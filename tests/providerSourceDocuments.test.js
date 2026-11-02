@@ -133,6 +133,17 @@ for (const spec of PROVIDERS) {
         assert.equal(renameCommits, 1)
         assert.equal((await (await sources()).json()).entries[0].title, 'Client brief v3')
 
+        // Read visually (#292): the manifest alone, one commit; only a PDF may have it.
+        await sources('', json('POST', { filename: 'Plan.pdf', dataBase64: b64('%PDF-1.4'), text: '## Page 1\n\nlabels' }))
+        let visual
+        const visualCommits = await countingCommits(spec.commitRequest, async () => {
+          visual = await sources('/plan', json('PATCH', { readVisually: true }))
+        })
+        assert.equal(visual.status, 200, await visual.clone().text())
+        assert.equal(visualCommits, 1)
+        assert.equal((await (await sources()).json()).entries.find((e) => e.id === 'plan').readVisually, true)
+        assert.equal((await sources('/client-brief', json('PATCH', { readVisually: true }))).status, 400, 'a Word file cannot be read visually')
+
         // Extract text again: the text and the manifest, one commit.
         let retext
         const textCommits = await countingCommits(spec.commitRequest, async () => {

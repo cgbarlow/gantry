@@ -334,3 +334,42 @@ test('local workspace: Source documents are kept in the folder, and a render req
     })
   )
 })
+
+test('server workspace: Read visually is set on a PDF from the list, shown, kept and turned off again (#292)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-292-e2e-'))
+  try {
+    createInstance('design', 'my-initiative', { instancesDir })
+    const manifestPath = join(instancesDir, 'default', 'my-initiative', 'sources', 'manifest.yaml')
+    await withRunningServer({ slug: 'my-initiative', instancesDir }, (base) =>
+      withPage(async (page, pageErrors) => {
+        await page.goto(`${base}/instance/my-initiative`)
+        await page.waitForSelector('.module', { timeout: 15_000 })
+        const panel = await openPanel(page)
+        const input = panel.locator('[data-testid="source-documents-input"]')
+        await input.setInputFiles([{ name: 'Requirements.pdf', mimeType: 'application/pdf', buffer: Buffer.from(textPdf([['Requirement one.']])) }, docxFile()])
+        await rowFor(panel, 'Requirements').waitFor()
+        await rowFor(panel, 'Client brief').waitFor()
+
+        // Offered on a PDF, not on a Word file.
+        assert.equal(await rowFor(panel, 'Client brief').locator('[data-testid="source-read-visually"]').count(), 0)
+        const pdfRow = rowFor(panel, 'Requirements')
+        await pdfRow.locator('[data-testid="source-read-visually"]').click()
+        await pdfRow.locator('[data-testid="source-visual-stamp"]').waitFor()
+        assert.match(await message(panel).textContent(), /will be read visually/)
+        assert.equal(parseYAML(readFileSync(manifestPath, 'utf8')).find((e) => e.id === 'requirements').readVisually, true)
+        assert.match(await pdfRow.locator('[data-testid="source-read-visually"]').textContent(), /Read as text/)
+
+        // Still there after a reload, and off again with a click.
+        await page.reload()
+        const again = await openPanel(page)
+        await rowFor(again, 'Requirements').locator('[data-testid="source-visual-stamp"]').waitFor()
+        await rowFor(again, 'Requirements').locator('[data-testid="source-read-visually"]').click()
+        await page.waitForFunction(() => !document.querySelector('[data-testid="source-visual-stamp"]'))
+        assert.equal('readVisually' in parseYAML(readFileSync(manifestPath, 'utf8')).find((e) => e.id === 'requirements'), false)
+        assert.deepEqual(pageErrors, [])
+      })
+    )
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
+})

@@ -34,6 +34,10 @@ export function createServerSourceClient(slug, fetchForInstance) {
     async rename(id, title) {
       return (await parse(await fetchForInstance(path(`/${encodeURIComponent(id)}`), { method: 'PATCH', ...json({ title }) }), 'Failed to rename')).entry
     },
+    /** #292: **Read visually** on or off for a PDF. */
+    async setReadVisually(id, on) {
+      return (await parse(await fetchForInstance(path(`/${encodeURIComponent(id)}`), { method: 'PATCH', ...json({ readVisually: on === true }) }), 'Failed to change how the AI reads it')).entry
+    },
     async remove(id, { removedBy } = {}) {
       return (await parse(await fetchForInstance(path(`/${encodeURIComponent(id)}`), { method: 'DELETE', ...json({ removedBy }) }), 'Failed to remove')).entry
     },

@@ -206,7 +206,7 @@ export function sourceFilePath(storedFilename) {
 
 // --- the manifest ---------------------------------------------------------------------------------------------------
 
-const ENTRY_KEYS = ['id', 'filename', 'title', 'uploadedBy', 'uploadedAt', 'size', 'text', 'removedBy', 'removedAt']
+const ENTRY_KEYS = ['id', 'filename', 'title', 'uploadedBy', 'uploadedAt', 'size', 'text', 'readVisually', 'removedBy', 'removedAt']
 
 /** One manifest entry with its keys in a fixed order and only the ones that have a value, so two writers produce the same bytes. */
 export function normalizeSourceEntry(entry) {
@@ -215,6 +215,8 @@ export function normalizeSourceEntry(entry) {
     const value = key === 'uploadedBy' ? (entry?.uploadedBy ?? '') : entry?.[key]
     if (value === undefined || value === null) continue
     if (value === '' && key !== 'uploadedBy') continue
+    // #292: `readVisually` is kept only while it is on, so a manifest that never used it is unchanged byte for byte.
+    if (key === 'readVisually' && value !== true) continue
     out[key] = value
   }
   return out
@@ -413,6 +415,22 @@ export function createSourceStore(io, options = {}) {
         const { text: _text, ...rest } = live
         updated = normalizeSourceEntry({ ...rest, text: textRef })
         return { entries: current.map((e) => (e.id === id ? updated : e)) }
+      })
+      return updated
+    },
+
+    /**
+     * #292: marks (or, with false, unmarks) a document **Read visually**: the AI is sent the PDF itself instead of its text, where its AI Provider takes PDFs. Only a PDF can be marked. Returns the entry.
+     */
+    async setReadVisually(id, on) {
+      let updated
+      await mutateManifest((entries) => {
+        const entry = liveEntry(entries, id)
+        if (sourceFileKind(entry.filename) !== 'pdf') {
+          throw new SourceDocumentError('Only a PDF can be read visually.', { code: 'not-a-pdf', status: 400 })
+        }
+        updated = normalizeSourceEntry({ ...entry, readVisually: on === true })
+        return { entries: entries.map((e) => (e.id === id ? updated : e)) }
       })
       return updated
     },

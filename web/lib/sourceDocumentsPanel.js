@@ -10,6 +10,7 @@ import {
   canUseSourceAsImage,
   isRemovedSource,
   sourceFileExtension,
+  sourceFileKind,
   sourceFileTypeProblem,
   sourceSizeProblem,
 } from './sourceDocuments.js'
@@ -17,8 +18,8 @@ import { extractSourceText } from './sourceExtract.js'
 import { sourceCitationFor } from './sourceCitations.js'
 
 const NO_TEXT_REASON = {
-  image: 'A picture has no text to read. The AI looks at the original.',
-  scanned: 'This PDF looks scanned, so there is no text layer to read. The AI looks at the original.',
+  image: 'A picture has no text to read. An AI Provider that reads images is sent the picture itself; others list it as unreadable.',
+  scanned: 'This PDF looks scanned, so there is no text layer to read. An AI Provider that takes PDFs is sent the PDF itself; others list it as unreadable.',
   empty: 'No text was found in it.',
 }
 
@@ -181,6 +182,20 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
       )
     })
 
+  // #292: a PDF sent as the PDF itself, for an AI Provider that takes PDFs, instead of as its text.
+  const toggleReadVisually = (entry) =>
+    run(async () => {
+      const on = !entry.readVisually
+      await store.setReadVisually(entry.id, on)
+      await reload()
+      setMessage({
+        kind: 'ok',
+        text: on
+          ? `"${entry.title}" will be read visually: an AI Provider that takes PDFs is sent the PDF itself, which suits diagrams and layouts. One that doesn't still gets its text.`
+          : `"${entry.title}" will be read as text again.`,
+      })
+    })
+
   const downloadOriginal = (entry) =>
     run(async () => {
       const { bytes } = await store.readOriginal(entry.id)
@@ -229,6 +244,12 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
                 (entry) => html`<li key=${entry.id} data-source-id=${entry.id}>
                   <span class="srcdoc-title" title=${entry.filename}>${entry.title}</span>
                   <span class="meta">${formatBytes(entry.size)}${entry.text ? '' : ' · no text'}</span>
+                  ${sourceFileKind(entry.filename) === 'pdf' && store.setReadVisually
+                    ? html`<label class="srcdoc-visual" title="Send the PDF itself to an AI Provider that takes PDFs, instead of its text">
+                        <input type="checkbox" data-testid="source-read-visually" checked=${entry.readVisually === true} disabled=${busy || readOnly} onChange=${() => toggleReadVisually(entry)} />
+                        Read visually
+                      </label>`
+                    : null}
                 </li>`
               )}
             </ul>`
@@ -313,6 +334,7 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
                       ${entry.text
                         ? html`<span class="stamp agreed" title="The text read from this document is kept with it">TEXT READ</span>`
                         : html`<span class="stamp review" title="No text was kept: the AI looks at the original">NO TEXT</span>`}
+                      ${entry.readVisually ? html` <span class="stamp review" data-testid="source-visual-stamp" title="An AI Provider that takes PDFs is sent the PDF itself">READ VISUALLY</span>` : null}
                     </td>
                     <td>
                       ${confirmRemove === entry.id
@@ -331,6 +353,9 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
                               ? null
                               : html`<button type="button" class="btn small ghost" disabled=${busy} onClick=${() => setRenaming({ id: entry.id, title: entry.title })}>Rename</button>
                                   <button type="button" class="btn small ghost" disabled=${busy} onClick=${() => extractAgain(entry)}>Extract text again</button>
+                                  ${sourceFileKind(entry.filename) === 'pdf' && store.setReadVisually
+                                    ? html`<button type="button" class="btn small ghost" disabled=${busy} data-testid="source-read-visually" aria-pressed=${entry.readVisually === true} onClick=${() => toggleReadVisually(entry)} title="Send the PDF itself to an AI Provider that takes PDFs, instead of its text. Suits diagrams and layouts.">${entry.readVisually ? 'Read as text' : 'Read visually'}</button>`
+                                    : null}
                                   <button type="button" class="btn small ghost" disabled=${busy} onClick=${() => setConfirmRemove(entry.id)}>Remove</button>`}
                           </div>`}
                     </td>

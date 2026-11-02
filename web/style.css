@@ -2184,7 +2184,13 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .interview-instance { font-family: var(--font-display); font-weight: 600; margin-top: 10px; }
 .interview-rail .srcdocs { list-style: none; padding: 0; margin: 0; font-size: 12px; }
 .interview-rail .srcdocs li { padding: 4px 0; border-bottom: var(--hairline) solid var(--line); display: flex; justify-content: space-between; gap: 8px; }
+.interview-rail .srcdocs li { flex-wrap: wrap; }
 .interview-rail .srcdocs .srcdoc-title { overflow: hidden; text-overflow: ellipsis; }
+.interview-rail .srcdocs .srcdoc-visual { flex-basis: 100%; font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.interview-rail .inputs-log { list-style: none; padding: 0; margin: 0; font-size: 11px; }
+.interview-rail .inputs-log li { padding: 4px 0; border-bottom: var(--hairline) solid var(--line); }
+.interview-rail .inputs-log .inputs-field { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); display: block; }
+.interview-rail .inputs-log .inputs-read { display: block; overflow-wrap: anywhere; }
 .interview-rail .srcdocs .meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); white-space: nowrap; }
 .interview-rail .dropzone { display: block; border: 2px dashed var(--line-strong); border-radius: var(--radius); padding: 12px; text-align: center; font-size: 12px; color: var(--text-muted); margin-top: 8px; cursor: pointer; }
 .interview-rail .dropzone.disabled { opacity: .5; cursor: progress; }
@@ -2219,6 +2225,7 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .interview-preview .preview-chip { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
 .interview-preview h4 { font-family: var(--font-display); font-size: 13px; margin: 14px 0 6px; }
 .interview-preview .field-proto { margin: 0 0 14px; }
+.interview-preview .field-inputs { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); margin: 4px 0 0; overflow-wrap: anywhere; }
 .interview-preview .field-label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 4px; }
 .interview-preview .field-words { font-family: var(--font-mono); font-size: 10px; font-weight: 400; color: var(--text-muted); margin-left: 6px; }
 .interview-preview .value { min-height: 30px; padding: 10px 12px; background: var(--bg); border: var(--hairline) solid var(--line); border-radius: var(--radius); white-space: pre-wrap; font-size: 12px; overflow-wrap: anywhere; }

@@ -8,7 +8,7 @@
 // web/lib/interviewBrief.js. Saving is the editor's own stage Save (the Save check of ADR-0068 and all), handed in as
 // `onSaveDrafts`, so a Save from here is the same Save, one commit, with the Modules left `draft`.
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { aiProviders, defaultAiProvider, updateAiProvider } from './aiProviders.js'
 import { AiProviderDialog, AiRecoveryPrompt } from './aiProvidersView.js'
 import { SourceDocumentsPanel } from './sourceDocumentsPanel.js'
@@ -17,6 +17,7 @@ import { draftGateCheck } from './interviewGate.js'
 import { loadInterviewSkillsInBrowser } from './interviewSkills.js'
 import { modulesWithStandard } from './standardModules.js'
 import { citationSegments, isBlankValue } from './interviewDraft.js'
+import { describeInput, planSourceAccess } from './interviewSources.js'
 import { effectiveTargetSize, fieldTargetWords, targetSizeLabel } from './targetSize.js'
 
 // One session per Instance Stage while the editor page is open, so going to the editor and back keeps the conversation and the drafts.
@@ -92,7 +93,10 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   }, [key])
 
   // ---- the Source documents, with the text read out of each, whenever the list changes ----
-  async function onSourceList(list) {
+  // Stable between renders: the panel reloads its list whenever this changes, and every list it reads sets state here (#292).
+  const storeRef = useRef(store)
+  storeRef.current = store
+  const onSourceList = useCallback(async (list) => {
     const entries = []
     for (const entry of list.entries) {
       if (entry.removedAt || !entry.text) {
@@ -101,14 +105,14 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       }
       let text = null
       try {
-        text = await store.readText(entry.id)
+        text = await storeRef.current.readText(entry.id)
       } catch {
         // an unreadable text is left out; the brief lists the document as having none
       }
       entries.push(text ? { ...entry, text } : { ...entry, text: undefined })
     }
     setSources(entries)
-  }
+  }, [])
 
   const choices = useMemo(() => (setup.status === 'ready' ? artefactChoices(setup.definition, instance.stage.id) : { candidates: [], lightest: null }), [setup, instance.stage.id])
   const artefactId = pickedArtefact ?? choices.lightest?.id ?? null
@@ -116,7 +120,17 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const otherSaved = setup.status === 'ready' ? setup.otherSaved.filter((m) => !instance.modules.some((own) => own.id === m.id)) : []
   ctxRef.current =
     setup.status === 'ready'
-      ? { definition: setup.definition, stageId: instance.stage.id, artefactId, size: instance.size, saved: [...instance.modules, ...otherSaved], sources: sources ?? [], skills: setup.skills }
+      ? {
+          definition: setup.definition,
+          stageId: instance.stage.id,
+          artefactId,
+          size: instance.size,
+          saved: [...instance.modules, ...otherSaved],
+          sources: sources ?? [],
+          skills: setup.skills,
+          // #292: a picture, or a scanned or "Read visually" PDF, is sent as the original; the session reads it when it builds a request.
+          readOriginal: async (id) => (await store.readOriginal(id)).bytes ?? null,
+        }
       : null
 
   // ---- the session ----
@@ -210,6 +224,17 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   }
 
   // ---------- pieces ----------
+  // Before Start: which Source documents this AI Provider can't read, so the architect can choose another (#292).
+  const unreadableNote = () => {
+    if (!provider?.test || !sources) return null // an untested AI Provider is tested on Start, and only then is it known what it reads
+    const plan = planSourceAccess({ sources, provider })
+    const lost = (sources ?? []).filter((s) => !s.removedAt && plan.get(s.id)?.how === 'unreadable')
+    if (lost.length === 0) return null
+    return html`<div class="warn" role="status" data-testid="interview-kickoff-unreadable">
+      ${provider.model || 'This model'} can't read ${lost.length === 1 ? 'one Source document' : `${lost.length} Source documents`}: ${lost.map((s) => `${s.title} (${plan.get(s.id).reason})`).join('; ')}. The AI is told so and won't rely on ${lost.length === 1 ? 'it' : 'them'}. Choose an AI Provider that can, or carry on without.
+    </div>`
+  }
+
   const kickoff = () => {
     const status = provider?.test?.status
     const sourceCount = (sources ?? []).filter((s) => !s.removedAt).length
@@ -249,6 +274,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
             <p class="kick-note">More than one Artefact can pass this Stage's Gate. The lightest is pre-selected; the AI drafts what the one you choose requires.</p>`
           : null}
 
+        ${unreadableNote()}
         <p class="kick-sources" data-testid="interview-source-count">
           ${sources === null ? 'Reading the Source documents…' : sourceCount === 0 ? 'No Source documents yet. Add some in the left rail so the AI has something to read.' : `${sourceCount} Source document${sourceCount === 1 ? '' : 's'} for the AI to read.`}
         </p>
@@ -270,6 +296,23 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     (snap?.thread ?? []).map(
       (m) => html`<div key=${m.id} class=${`msg ${m.who}${m.streaming ? ' streaming caret' : ''}`} data-testid="interview-msg" data-who=${m.who}>${m.text}</div>`
     )
+
+  // The `fields` part of the decisions log (ADR-0064): what each drafted Field was drafted from, including every read the AI made (#292).
+  const inputsLog = () => {
+    const entries = Object.entries(snap?.fieldInputs ?? {}).filter(([, inputs]) => inputs.length)
+    if (entries.length === 0) return null
+    return html`<div data-testid="interview-inputs">
+      <h3 class="side">Decisions log · inputs</h3>
+      <ul class="inputs-log">
+        ${entries.map(
+          ([fieldKey, inputs]) => html`<li key=${fieldKey} data-field-key=${fieldKey}>
+            <span class="inputs-field">${fieldKey}</span>
+            ${inputs.map((input, i) => html`<span key=${i} class="inputs-read" data-source-id=${input.source} data-testid="interview-input">${describeInput(input)}</span>`)}
+          </li>`
+        )}
+      </ul>
+    </div>`
+  }
 
   const stageEnd = () => {
     if (saving?.phase === 'saved') {
@@ -316,6 +359,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
               <div class=${'value' + (draft ? ' ai' : isBlankValue(savedValue) ? ' empty' : '')}>
                 ${draft ? html`<${ValueView} value=${draft.value} />` : isBlankValue(savedValue) ? 'Empty' : html`<${ValueView} value=${savedValue} />`}
               </div>
+              ${draft?.inputs?.length
+                ? html`<p class="field-inputs" data-testid="interview-field-inputs">Drew on: ${draft.inputs.map(describeInput).join('; ')}</p>`
+                : null}
               ${draft?.warnings?.length
                 ? html`<ul class="interview-warnings" data-testid="interview-warning">${draft.warnings.map((w, i) => html`<li key=${i} class="warn">${w}</li>`)}</ul>`
                 : null}
@@ -339,6 +385,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         <div class="cite">${instance.stage.title} (gate: ${instance.stage.gate})</div>
         <h3 class="side">Source documents</h3>
         <${SourceDocumentsPanel} store=${store} actor=${actor} readOnly=${Boolean(blockedReason)} compact=${true} onList=${onSourceList} />
+        ${inputsLog()}
       </aside>
 
       <section class="interview-convo">

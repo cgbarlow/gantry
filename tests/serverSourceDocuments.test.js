@@ -93,6 +93,25 @@ test('upload, list, download, rename, new text and remove on a server workspace'
   })
 })
 
+test('Read visually is set on a PDF over PATCH, kept in the manifest, and refused for anything else (#292)', async () => {
+  await withInstance(async (base, instancesDir) => {
+    await post(base, { filename: 'plan.pdf', dataBase64: b64('%PDF'), text: '## Page 1\n\nlabels' })
+    await post(base, { filename: 'notes.docx', dataBase64: b64('word'), text: 'x' })
+    const on = await send(base, 'PATCH', '/api/instance/sources/plan', { readVisually: true })
+    assert.equal(on.status, 200)
+    assert.equal((await on.json()).entry.readVisually, true)
+    const manifest = readFileSync(join(instancesDir, 'default', 'my-initiative', 'sources', 'manifest.yaml'), 'utf8')
+    assert.match(manifest, /readVisually: true/)
+    assert.equal((await (await fetch(`${base}/api/instance/sources`)).json()).entries.find((e) => e.id === 'plan').readVisually, true)
+    const off = await send(base, 'PATCH', '/api/instance/sources/plan', { readVisually: false })
+    assert.equal('readVisually' in (await off.json()).entry, false)
+    const word = await send(base, 'PATCH', '/api/instance/sources/notes', { readVisually: true })
+    assert.equal(word.status, 400)
+    assert.equal((await word.json()).code, 'not-a-pdf')
+    assert.equal((await send(base, 'PATCH', '/api/instance/sources/nope', { readVisually: true })).status, 404)
+  })
+})
+
 test('an upload named like an existing document is a new document with its own id', async () => {
   await withInstance(async (base) => {
     await post(base, { filename: 'brief.pdf', dataBase64: b64('one') })

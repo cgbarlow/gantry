@@ -26,9 +26,11 @@
 // **Source documents, whole or catalogue.** When the pack (the extracted text of every live document)
 // comes to no more than about half the model's context window (`SOURCES_WHOLE_PACK_SHARE`), every
 // document goes in whole. Otherwise the brief carries a catalogue: each document's id, title, kind,
-// size and outline, and nothing of its text. The tool that reads a catalogued document is a later
-// ticket (#292); until a caller says one exists (`readerTool: true`) the brief tells the AI not to cite
-// what it has not been shown.
+// size and outline, and nothing of its text. The tool that reads a catalogued document is
+// `read_source_document` (web/lib/interviewSources.js, #292); until a caller says one exists
+// (`readerTool: true`) the brief tells the AI not to cite what it has not been shown. A picture or a
+// scanned PDF is not text at all: `sourceAccess` says whether it is attached to the first message or
+// unreadable by this model, and the brief says so.
 //
 // **Never sent: the example Instance.** A Stage's `example` is for a person to populate a form from;
 // the brief neither reads it nor accepts a Field's `example` text, so there is nothing for the AI to
@@ -42,6 +44,7 @@ import { stackedInterviewInstructions } from './interviewInstructions.js'
 import { INTERVIEW_RULES_VERSION, INTERVIEW_RULES, interviewRulesText } from './interviewRules.js'
 import { adapterText } from './interviewAdapter.js'
 import { INTERVIEW_SKILLS, interviewSkillVersions, interviewSkillsCredit } from './interviewSkills.js'
+import { pagesSummary } from './interviewSources.js'
 import { effectiveTargetSize, fieldTargetWords, targetSizeLabel } from './targetSize.js'
 
 /** The Source documents go in whole while the pack is at most this share of the model's context window. */
@@ -224,15 +227,27 @@ export function sourceOutline(text, limit = 12) {
 
 const sourceTitle = (s) => attr(s.title || s.filename || s.id)
 
-function sourcesPart({ sources, contextWindow, readerTool }) {
+function sourcesPart({ sources, contextWindow, readerTool, access }) {
   const live = liveSources(sources)
-  const withText = live.filter((s) => typeof s.text === 'string' && s.text.trim() !== '')
-  const withoutText = live.filter((s) => !(typeof s.text === 'string' && s.text.trim() !== ''))
+  // #292: a document `access` says is unreadable has no text to count even if it holds some (it cannot be read at all).
+  const readable = (s) => typeof s.text === 'string' && s.text.trim() !== '' && access?.[s.id]?.how !== 'unreadable'
+  const withText = live.filter(readable)
+  const withoutText = live.filter((s) => !readable(s))
   const packTokens = withText.reduce((sum, s) => sum + estimateTokens(s.text), 0)
   const windowTokens = Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : FALLBACK_CONTEXT_WINDOW
   const budgetTokens = Math.floor(windowTokens * SOURCES_WHOLE_PACK_SHARE)
   const mode = live.length === 0 ? 'none' : packTokens <= budgetTokens ? 'whole' : 'catalogue'
-  const summary = { mode, packTokens, windowTokens, budgetTokens, included: [], catalogued: [], withoutText: withoutText.map((s) => s.id) }
+  const summary = {
+    mode,
+    packTokens,
+    windowTokens,
+    budgetTokens,
+    included: [],
+    catalogued: [],
+    withoutText: withoutText.map((s) => s.id),
+    attached: withoutText.filter((s) => access?.[s.id]?.how === 'attach').map((s) => s.id),
+    unreadable: withoutText.filter((s) => access ? access[s.id]?.how !== 'attach' : true).map((s) => s.id),
+  }
 
   if (mode === 'none') return { text: 'This Instance has no Source documents. Draft nothing from evidence; ask for the facts you need, and cite nothing.', summary }
 
@@ -241,7 +256,9 @@ function sourcesPart({ sources, contextWindow, readerTool }) {
     'Cite a fact from one as `[title, p. 4](source:<id>)` using its id.',
     '',
   ]
-  if (mode === 'whole') {
+  if (mode === 'whole' && withText.length === 0) {
+    lines.push('None of the documents has text to show here.', '')
+  } else if (mode === 'whole') {
     lines.push(`All ${withText.length} document${withText.length === 1 ? '' : 's'} with readable text follow in whole (about ${packTokens.toLocaleString('en-US')} tokens, within the ${budgetTokens.toLocaleString('en-US')} that is half this model's window).`, '')
     for (const s of withText) {
       lines.push(`<source-document id="${attr(s.id)}" title="${sourceTitle(s)}" file="${attr(s.filename)}">`, String(s.text).trim(), '</source-document>', '')
@@ -251,22 +268,41 @@ function sourcesPart({ sources, contextWindow, readerTool }) {
     lines.push(
       `The documents' text (about ${packTokens.toLocaleString('en-US')} tokens) is more than half this model's window (${windowTokens.toLocaleString('en-US')} tokens), so only a catalogue is shown: each document's id, title, kind, size and outline.`,
       readerTool
-        ? 'Read a document, or part of one, with `read_source_document(id, range)` before relying on or citing it.'
+        ? 'Read a document, or part of one, with `read_source_document(id, range)` before relying on or citing it. A range is `pages 3-5` (a PDF), `section: Heading text` (one of the outline headings below) or `start-end` character offsets. Whatever you read is recorded as an input of the Fields you draft from it.'
         : 'You cannot open these documents here. Do not cite or rely on anything beyond what this catalogue shows; where a fact would need a document, ask the architect for it.',
       ''
     )
     for (const s of withText) {
       const outline = sourceOutline(s.text)
+      const pages = pagesSummary(s.text)
       lines.push(
-        `- **${sourceTitle(s)}** (id \`${attr(s.id)}\`, ${attr(s.filename)}${s.kind ? `, ${attr(s.kind)}` : ''}${Number.isFinite(s.size) ? `, ${s.size} bytes` : ''}, about ${estimateTokens(s.text).toLocaleString('en-US')} tokens)${outline.length ? `. Outline: ${outline.join(' / ')}` : ''}`
+        `- **${sourceTitle(s)}** (id \`${attr(s.id)}\`, ${attr(s.filename)}${s.kind ? `, ${attr(s.kind)}` : ''}${Number.isFinite(s.size) ? `, ${s.size} bytes` : ''}, ${String(s.text).length.toLocaleString('en-US')} characters${pages ? `, ${pages}` : ''}, about ${estimateTokens(s.text).toLocaleString('en-US')} tokens)${outline.length ? `. Outline: ${outline.join(' / ')}` : ''}`
       )
       summary.catalogued.push(s.id)
     }
     lines.push('')
   }
-  if (withoutText.length) {
+  if (withoutText.length && !access) {
     lines.push('No text was read from these (images, or scans with no text layer), so their content is not shown here:')
     for (const s of withoutText) lines.push(`- ${sourceTitle(s)} (id \`${attr(s.id)}\`, ${attr(s.filename)})`)
+    lines.push('')
+  } else if (withoutText.length) {
+    // #292: each document with no text in this brief is either sent to the AI itself or cannot be read by it.
+    lines.push('No text of these is shown here:')
+    for (const s of withoutText) {
+      const a = access[s.id]
+      const what = `${sourceTitle(s)} (id \`${attr(s.id)}\`, ${attr(s.filename)})`
+      if (a?.how === 'attach') {
+        lines.push(`- ${what}: attached to the first message as ${a.kind === 'pdf' ? 'the PDF itself' : 'a picture'}. Look at the attachment, and cite it by its id.`)
+      } else {
+        lines.push(`- ${what}: UNREADABLE (${a?.reason ?? 'no text could be read from it'}). Do not rely on or cite it; where it would matter, ask the architect what it shows.`)
+      }
+    }
+    lines.push('')
+  }
+  const noted = live.filter((s) => access?.[s.id]?.note)
+  if (noted.length) {
+    for (const s of noted) lines.push(`Note: ${sourceTitle(s)} (id \`${attr(s.id)}\`) is ${access[s.id].note}.`)
     lines.push('')
   }
   return { text: lines.join('\n').trimEnd(), summary }
@@ -287,9 +323,10 @@ function sourcesPart({ sources, contextWindow, readerTool }) {
  * @param {object[]} [input.sources]     the Source documents: `{ id, title, filename, kind?, size?, text?, removedAt? }`
  * @param {object} input.skills          from `loadInterviewSkills`
  * @param {number} [input.contextWindow] the model's context window in tokens
- * @param {boolean} [input.readerTool]   whether a catalogue can be read from (a later ticket)
+ * @param {boolean} [input.readerTool]   whether a catalogue can be read from (the `read_source_document` tool of #292)
+ * @param {object} [input.sourceAccess]  `{ [id]: { how: 'text'|'attach'|'unreadable', kind, reason?, note? } }` from `planSourceAccess` (#292); without it a document with no text is simply listed
  */
-export function buildInterviewBrief({ definition, stageId, artefactId, size, saved, decisions, sources, skills, contextWindow, readerTool = false }) {
+export function buildInterviewBrief({ definition, stageId, artefactId, size, saved, decisions, sources, skills, contextWindow, readerTool = false, sourceAccess }) {
   const stage = (definition?.stages ?? []).find((s) => s.id === stageId)
   if (!stage) throw new Error(`The Definition has no Stage "${stageId}" to interview for`)
   if (!skills?.skills?.length) throw new Error('The interview skills are not loaded')
@@ -447,7 +484,7 @@ export function buildInterviewBrief({ definition, stageId, artefactId, size, sav
   )
 
   // --- 8. Source documents ---
-  const sourcesResult = sourcesPart({ sources, contextWindow, readerTool })
+  const sourcesResult = sourcesPart({ sources, contextWindow, readerTool, access: sourceAccess })
   parts.set('sources', sourcesResult.text)
 
   // --- 9. the decisions log so far ---

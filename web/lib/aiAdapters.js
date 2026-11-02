@@ -6,7 +6,8 @@
 // stream parser per format. The unit tests run them against recorded streams, split at awkward places.
 //
 // The internal conversation, whichever AI Provider it goes to:
-//   { role: 'user', text, images?: [{ mediaType, data }] }                 `data` is base64
+//   { role: 'user', text, images?: [{ mediaType, data }], documents?: [{ mediaType, filename, data }] }
+//                                                                          `data` is base64; a document is a PDF (#292)
 //   { role: 'assistant', text?, toolCalls?: [{ id, name, input }] }
 //   { role: 'tool', toolCallId, name?, content, isError? }                 the result of one tool call
 // The internal stream the parsers produce:
@@ -54,7 +55,11 @@ function anthropicMessages(messages) {
   }
   for (const m of messages) {
     if (m.role === 'user') {
-      const blocks = [...(m.images ?? []).map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.mediaType, data: i.data } })), { type: 'text', text: m.text ?? '' }]
+      const blocks = [
+        ...(m.images ?? []).map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.mediaType, data: i.data } })),
+        ...(m.documents ?? []).map((d) => ({ type: 'document', title: d.filename, source: { type: 'base64', media_type: d.mediaType, data: d.data } })),
+        { type: 'text', text: m.text ?? '' },
+      ]
       const content = blocks.length === 1 ? m.text ?? '' : blocks
       if (lastIsToolResults()) {
         // Tool results and the next thing the architect says are one user turn on this wire format.
@@ -82,12 +87,13 @@ function openAiMessages(system, messages) {
   if (system) wire.push({ role: 'system', content: system })
   for (const m of messages) {
     if (m.role === 'user') {
-      if (m.images?.length) {
+      if (m.images?.length || m.documents?.length) {
         wire.push({
           role: 'user',
           content: [
             { type: 'text', text: m.text ?? '' },
-            ...m.images.map((i) => ({ type: 'image_url', image_url: { url: `data:${i.mediaType};base64,${i.data}` } })),
+            ...(m.images ?? []).map((i) => ({ type: 'image_url', image_url: { url: `data:${i.mediaType};base64,${i.data}` } })),
+            ...(m.documents ?? []).map((d) => ({ type: 'file', file: { filename: d.filename, file_data: `data:${d.mediaType};base64,${d.data}` } })),
           ],
         })
       } else {
@@ -142,6 +148,9 @@ export function buildChatRequest(provider, { system = '', messages = [], tools =
     // OpenRouter routes to whichever endpoint it likes; without this it can pick one that silently drops the tools.
     if (provider.type === 'openrouter') body.provider = { require_parameters: true }
   }
+  // #292: a PDF through OpenRouter is read by whichever engine it picks unless told. `native` hands the PDF to the model itself,
+  // so there is never a surprise OCR charge on the architect's OpenRouter account (the default fallback, mistral-ocr, is billed).
+  if (provider.type === 'openrouter' && messages.some((m) => m.documents?.length)) body.plugins = [{ id: 'file-parser', pdf: { engine: 'native' } }]
   const isOpenAi = provider.type === 'openai'
   // OpenAI's reasoning models only accept their default temperature.
   if (!(isOpenAi && adv.reasoningEffort)) set(body, 'temperature', provider.temperature)

@@ -8,6 +8,8 @@ import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { createInstance, readModule } from '../lib/instance.js'
 import { loadDefinition } from '../lib/definition.js'
+import { parse as parseYAML } from 'yaml'
+import { pngImage, scannedPdf, textPdf } from './helpers/sourceFixtures.js'
 
 // #286 (parent #238): the Interview page, end to end, on a server workspace and on a Local workspace. A real server and
 // relay, a real Chromium page, and a stand-in for Anthropic that plays a scripted interview: it opens with a summary, drafts
@@ -44,7 +46,7 @@ function anthropicReply({ text, tools = [] }) {
     index++
   }
   for (const tool of tools) {
-    events.push(['content_block_start', { type: 'content_block_start', index, content_block: { type: 'tool_use', id: tool.id, name: 'draft_field', input: {} } }])
+    events.push(['content_block_start', { type: 'content_block_start', index, content_block: { type: 'tool_use', id: tool.id, name: tool.name ?? 'draft_field', input: {} } }])
     const json = JSON.stringify(tool.input)
     events.push(['content_block_delta', { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: json.slice(0, 11) } }])
     events.push(['content_block_delta', { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: json.slice(11) } }])
@@ -370,4 +372,91 @@ test('local workspace: the same interview reads and saves through the folder, an
         })
       )
   )
+})
+
+// ---------- #292: large packs, scanned PDFs, pictures ----------
+
+test('server workspace: a large pack is read through the catalogue, a scan and a picture are sent as originals, and the reads are inputs (#292)', async () => {
+  const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-292-'))
+  try {
+    createInstance('design', SLUG, { instancesDir, definitionVersion: 3 })
+    const script = (body, n) => {
+      if (n === 0) return { text: 'Reading the brief.', tools: [{ id: 'r1', name: 'read_source_document', input: { id: 'brief', range: 'section: Scope' } }] }
+      if (n === 1) return { tools: [draft('t1', 'background.problem', 'Claims take too long to settle [Client brief, p. 1](source:brief).')] }
+      return { text: 'Drafted the problem.' }
+    }
+    const big = (heading, word) => `# ${heading}\n\n## Scope\n\nClaims take too long to settle. ${`${word} `.repeat(1800)}\n\n## Budget\n\nThe budget is capped.`
+    await withFakeAnthropic(script, (aiBase, posts) =>
+      withRunningServer({ slug: SLUG, instancesDir, allowPrivateAiUrls: true }, (base) =>
+        withPage(async (page) => {
+          const passed = (readsImages) => ({ status: 'passed', testedAt: '2026-11-02T00:00:00Z', questionCards: 'native', readsImages, steps: [], message: 'ok' })
+          const list = [
+            { id: 'seer', name: 'Seeing AI', type: 'anthropic', address: aiBase, key: 'key-seer', model: 'claude-small', isDefault: true, contextWindow: 3000, test: passed(true) },
+            { id: 'blind', name: 'Text-only AI', type: 'anthropic', address: aiBase, key: 'key-blind', model: 'claude-text', isDefault: false, contextWindow: 3000, test: passed(false) },
+          ]
+          await page.addInitScript((value) => localStorage.setItem('gantry:ai-providers', value), JSON.stringify(list))
+
+          const upload = async (filename, bytes, text, title) => {
+            const res = await fetch(`${base}/api/instance/sources?slug=${SLUG}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ filename, dataBase64: Buffer.from(bytes).toString('base64'), text, title }),
+            })
+            assert.equal(res.status, 201, await res.clone().text())
+          }
+          await upload('brief.md', 'brief', big('Client brief', 'alpha'), 'Client brief')
+          await upload('costs.md', 'costs', big('Costs', 'beta'))
+          await upload('plan.pdf', textPdf([['Plan page one.']]), '## Page 1\n\nPlan page one.')
+          await upload('scan.pdf', scannedPdf(), undefined)
+          await upload('whiteboard.png', pngImage(), undefined, 'Whiteboard')
+
+                    await page.goto(`${base}/instance/${SLUG}?interview=1`)
+          await page.waitForSelector('[data-testid="interview-start"]:not([disabled])')
+          await page.waitForSelector('[data-testid="source-documents-list"] [data-source-id="whiteboard"]')
+
+          // A text-only model can't read the picture: the kickoff says so before anything starts.
+          await page.selectOption('[data-testid="interview-provider"]', 'blind')
+          await page.waitForSelector('[data-testid="interview-kickoff-unreadable"]')
+          assert.match(await page.textContent('[data-testid="interview-kickoff-unreadable"]'), /Whiteboard \(it is a picture and this model can't read images\)/)
+          await page.selectOption('[data-testid="interview-provider"]', 'seer')
+          await page.waitForSelector('[data-testid="interview-kickoff-unreadable"]', { state: 'detached' })
+
+          // "Read visually" is set on a PDF from the Source documents list (here the Interview page's rail) and kept in the manifest.
+          await page.locator('[data-source-id="plan"] [data-testid="source-read-visually"]').click()
+          await page.waitForFunction(() => /read visually/i.test(document.querySelector('[data-testid="source-documents-message"]')?.textContent ?? ''))
+          const manifestPath = join(instancesDir, 'default', SLUG, 'sources', 'manifest.yaml')
+          assert.equal(parseYAML(readFileSync(manifestPath, 'utf8')).find((e) => e.id === 'plan').readVisually, true)
+          assert.equal(await page.locator('[data-source-id="scan"] [data-testid="source-read-visually"]').count(), 1, 'offered on every PDF')
+          assert.equal(await page.locator('[data-source-id="brief"] [data-testid="source-read-visually"]').count(), 0, 'and only on a PDF')
+
+          await page.click('[data-testid="interview-start"]')
+          await field(page, 'background.problem').locator('[data-testid="interview-field-inputs"]').waitFor()
+
+          // The pack is over half the model's window, so the AI got a catalogue and the reader, not the text.
+          const first = posts[0].body
+          assert.deepEqual(first.tools.map((t) => t.name), ['draft_field', 'read_source_document'])
+          assert.match(first.system, /only a catalogue is shown/)
+          assert.doesNotMatch(first.system, /alpha alpha alpha/)
+
+          // The scan and the visual PDF went as PDFs, the picture as an image, on the first message.
+          assert.deepEqual(first.messages[0].content.map((b) => b.type), ['image', 'document', 'document', 'text'])
+          assert.match(first.messages[0].content.at(-1).text, /image 1 is Source document `whiteboard`/)
+
+          // The section it asked for came back, and only that section.
+          const result = posts[1].body.messages.at(-1).content.find((b) => b.type === 'tool_result')
+          assert.match(result.content, /^\[Client brief · section "Scope"/)
+          assert.doesNotMatch(result.content, /The budget is capped/)
+
+          // The read shows in the thread, and as an input of the Field it fed (in the preview, and in the decisions log in the rail).
+          assert.match(await page.textContent('[data-testid="interview-thread"]'), /Read Client brief \(section "Scope"\)/)
+          assert.match(await field(page, 'background.problem').locator('[data-testid="interview-field-inputs"]').textContent(), /Drew on: Client brief \(section "Scope"\)/)
+          const log = page.locator('[data-testid="interview-inputs"] [data-field-key="background.problem"]')
+          assert.match(await log.textContent(), /Client brief \(section "Scope"\)/)
+          assert.equal(await log.locator('[data-testid="interview-input"]').count(), 1)
+        })
+      )
+    )
+  } finally {
+    rmSync(instancesDir, { recursive: true, force: true })
+  }
 })

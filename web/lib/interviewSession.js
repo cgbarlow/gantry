@@ -11,22 +11,46 @@
 //   * checks each draft on arrival. A draft with problems goes back to the AI once; whatever is left is a warning in the
 //     preview, never a block. A Field that already holds saved content is refused: this release leaves it alone, and
 //     changing it through a card comes with question cards (#287);
-//   * lets the architect switch AI Provider between any two turns. The history is provider-neutral.
+//   * lets the architect switch AI Provider between any two turns. The history is provider-neutral;
+//   * (#292) decides, for the AI Provider in use, how each Source document reaches the AI (web/lib/interviewSources.js): its
+//     text in the brief, the original attached to the first message (a picture, a scanned or "Read visually" PDF), or not at
+//     all. When the pack is over about half the model's window the brief carries a catalogue and the AI is handed one more
+//     tool, `read_source_document(id, range)`. Every read is recorded, and a draft carries the reads made since the last
+//     drafts, and the documents it cites, as its inputs (the `fields` part of the decisions log, ADR-0064).
 //
 // Nothing here saves. Drafts are an unsaved preview until the architect confirms the stage-end card.
 import { runTurn, runWithRecovery, questionCardMode, ensureTested, EMPTY_USAGE } from './aiClient.js'
 import { getAiProvider } from './aiProviders.js'
 import { buildInterviewBrief, normalizeSavedContent } from './interviewBrief.js'
 import { DRAFT_TOOL, DRAFT_TOOL_NAME, DRAFT_FENCE, DRAFT_TEXT_FALLBACK_INSTRUCTIONS, checkDraft, extractDraftBlocks, isBlankValue, stripDraftBlocks } from './interviewDraft.js'
+import {
+  READ_TOOL,
+  READ_TOOL_NAME,
+  READ_FENCE,
+  READ_TEXT_FALLBACK_INSTRUCTIONS,
+  accessForBrief,
+  attachmentNote,
+  describeInput,
+  extractReadBlocks,
+  inputsForDraft,
+  loadAttachments,
+  planSourceAccess,
+  runReadCall,
+  sourcesForBrief,
+  stripReadBlocks,
+} from './interviewSources.js'
 
-/** The turns one send may run (each draft tool round is a turn), so a model that never stops can't loop for ever. */
-export const MAX_ROUNDS = 12
+/** The turns one send may run (each draft or read tool round is a turn), so a model that never stops can't loop for ever. */
+export const MAX_ROUNDS = 24
+
+// What the architect sees of the AI's text: neither the draft blocks nor the read requests a text-only model writes.
+const shownText = (text) => stripReadBlocks(stripDraftBlocks(text))
 
 const OPENING =
   'Begin the interview. Read the Source documents, open with a short summary of what you found in them, then draft every Field they support. ' +
   'Leave out any Field they do not support.'
 
-function sessionNote(textMode) {
+function sessionNote(textMode, reader) {
   return [
     '## Note for this session',
     '',
@@ -35,6 +59,13 @@ function sessionNote(textMode) {
       ? `Write each Field in a fenced \`${DRAFT_FENCE}\` block. ${DRAFT_TEXT_FALLBACK_INSTRUCTIONS}`
       : `Write each Field by calling the \`${DRAFT_TOOL_NAME}\` tool, never as chat. You may call it for several Fields in one reply.`,
     'A Field that already holds saved content is refused by Gantry: leave it alone.',
+    ...(reader
+      ? [
+          textMode
+            ? `The Source documents are a catalogue. ${READ_TEXT_FALLBACK_INSTRUCTIONS}`
+            : `The Source documents are a catalogue. Read the parts you need with the \`${READ_TOOL_NAME}\` tool before you draft from them; you may call it several times in one reply.`,
+        ]
+      : []),
   ].join('\n')
 }
 
@@ -75,7 +106,7 @@ function flattenToolHistory(messages) {
   const out = []
   const push = (message) => {
     const last = out[out.length - 1]
-    if (last && last.role === 'user' && message.role === 'user' && !last.images && !message.images) last.text = `${last.text}\n\n${message.text}`
+    if (last && last.role === 'user' && message.role === 'user' && !last.images && !message.images && !last.documents && !message.documents) last.text = `${last.text}\n\n${message.text}`
     else out.push({ ...message })
   }
   let results = []
@@ -90,7 +121,13 @@ function flattenToolHistory(messages) {
     }
     flush()
     if (m.role === 'assistant' && m.toolCalls?.length) {
-      const blocks = m.toolCalls.filter((c) => c.name === DRAFT_TOOL_NAME).map((c) => '```' + DRAFT_FENCE + '\n' + JSON.stringify({ field: c.input?.field, value: c.input?.value }) + '\n```')
+      const blocks = m.toolCalls
+        .filter((c) => c.name === DRAFT_TOOL_NAME || c.name === READ_TOOL_NAME)
+        .map((c) =>
+          c.name === READ_TOOL_NAME
+            ? '```' + READ_FENCE + '\n' + JSON.stringify({ id: c.input?.id, range: c.input?.range }) + '\n```'
+            : '```' + DRAFT_FENCE + '\n' + JSON.stringify({ field: c.input?.field, value: c.input?.value }) + '\n```'
+        )
       push({ role: 'assistant', text: [m.text, ...blocks].filter(Boolean).join('\n\n') || '…' })
     } else {
       push(m)
@@ -124,6 +161,7 @@ export function createInterviewSession(config = {}) {
     testStep: null,
     usage: EMPTY_USAGE,
     savedKeys: [],
+    fieldInputs: {}, // `module.field` -> the inputs it was drafted from (#292), kept after a Save: it is the log's `fields` part
   }
   let messages = []
   let nextId = 1
@@ -132,9 +170,13 @@ export function createInterviewSession(config = {}) {
   const held = new Map() // a bounced draft that has not been answered yet: shown with its warnings if the AI never answers
   const handled = new Map() // tool call id -> the result, so a draft shown as it arrived is not checked twice
   let controller = null
+  let readsSinceDraft = [] // the reads made since the last drafts landed (#292)
+  let plan = new Map() // how each Source document reaches the AI Provider in use (#292)
+  let announced = '' // what the thread last said about unreadable documents, so a repeat is not said twice
+  const attachmentCache = new Map()
 
   const emit = () => onChange?.(snapshot())
-  const snapshot = () => ({ ...state, thread: state.thread.map((t) => ({ ...t })), drafts: { ...state.drafts }, savedKeys: [...state.savedKeys] })
+  const snapshot = () => ({ ...state, thread: state.thread.map((t) => ({ ...t })), drafts: { ...state.drafts }, savedKeys: [...state.savedKeys], fieldInputs: { ...state.fieldInputs } })
   const say = (who, text, extra = {}) => {
     const item = { id: nextId++, who, text, ...extra }
     state.thread.push(item)
@@ -162,9 +204,11 @@ export function createInterviewSession(config = {}) {
 
     const knownSourceIds = (context.sources ?? []).filter((s) => s && !s.removedAt).map((s) => s.id)
     const check = checkDraft(entry.field, rawValue, { size: context.size, architectText: architectText(), knownSourceIds })
+    // The inputs are what the AI read before this draft plus what it cites. A draft sent back keeps the ones it had, because the reads are cleared once a round of drafts has landed.
+    const inputs = mergeInputs(held.get(key)?.inputs, inputsForDraft({ reads: readsSinceDraft, value: check.value, sources: context.sources }))
     if (check.problems.length && !bounced.has(key)) {
       bounced.add(key)
-      held.set(key, { value: check.value, words: check.words, warnings: check.problems.map((p) => p.message) })
+      held.set(key, { value: check.value, words: check.words, inputs, warnings: check.problems.map((p) => p.message) })
       return {
         ok: false,
         content: `${key} was not shown yet. Fix this and call ${DRAFT_TOOL_NAME} for ${key} once more:\n- ${check.problems.map((p) => p.message).join('\n- ')}`,
@@ -172,7 +216,8 @@ export function createInterviewSession(config = {}) {
     }
     bounced.delete(key)
     held.delete(key)
-    state.drafts[key] = { value: check.value, words: check.words, warnings: check.problems.map((p) => p.message), moduleId: parsed.moduleId, fieldId: parsed.fieldId }
+    state.drafts[key] = { value: check.value, words: check.words, warnings: check.problems.map((p) => p.message), inputs, moduleId: parsed.moduleId, fieldId: parsed.fieldId }
+    state.fieldInputs[key] = inputs
     say('sys', `Drafted ${entry.module.title ?? entry.module.id} · ${entry.field.title ?? entry.field.id}${check.problems.length ? ' (with a warning)' : ''}`, { drafted: key })
     return {
       ok: true,
@@ -180,6 +225,27 @@ export function createInterviewSession(config = {}) {
         ? `${key} is in the preview, with a warning for the architect: ${check.problems.map((p) => p.message).join(' ')}`
         : `${key} is in the preview (${check.words} words).`,
     }
+  }
+
+  const mergeInputs = (earlier = [], later = []) => {
+    const out = [...earlier]
+    for (const input of later) if (!out.some((i) => i.source === input.source && (i.range ?? null) === (input.range ?? null))) out.push(input)
+    return out
+  }
+
+  // ---------- reading (#292) ----------
+
+  /** One `read_source_document` call: the text back to the AI, and the read recorded as an input of whatever it drafts next. */
+  function runRead(input) {
+    const context = getContext()
+    const live = (context.sources ?? []).filter((s) => s && !s.removedAt)
+    const id = String(input?.id ?? '')
+    const result = runReadCall({ id, range: input?.range }, { lookup: (wanted) => live.find((s) => s.id === wanted), access: plan.get(id) })
+    if (result.ok) {
+      readsSinceDraft.push(result.read)
+      say('sys', `Read ${describeInput(result.read)}`, { read: result.read.source })
+    }
+    return result
   }
 
   // Drafts the AI was asked to fix and never sent again reach the preview with their problems as warnings.
@@ -191,6 +257,7 @@ export function createInterviewSession(config = {}) {
       const parsed = splitRef(key)
       if (!entry || !parsed) continue
       state.drafts[key] = { ...draft, moduleId: parsed.moduleId, fieldId: parsed.fieldId }
+      state.fieldInputs[key] = draft.inputs ?? []
       say('sys', `Drafted ${entry.module.title ?? entry.module.id} · ${entry.field.title ?? entry.field.id} (with a warning)`, { drafted: key })
     }
     held.clear()
@@ -199,8 +266,10 @@ export function createInterviewSession(config = {}) {
   function resultFor(call) {
     if (handled.has(call.id)) return handled.get(call.id)
     let result
-    if (call.name !== DRAFT_TOOL_NAME) result = { ok: false, content: `There is no tool called ${call.name}.` }
-    else if (call.invalid || call.input === null || call.input === undefined) result = { ok: false, content: `The arguments were not valid JSON: ${call.invalid ?? 'send {"field": "module.field", "value": ...}'}.` }
+    if (call.name !== DRAFT_TOOL_NAME && call.name !== READ_TOOL_NAME) result = { ok: false, content: `There is no tool called ${call.name}.` }
+    else if (call.invalid || call.input === null || call.input === undefined) {
+      result = { ok: false, content: `The arguments were not valid JSON: ${call.invalid ?? (call.name === READ_TOOL_NAME ? 'send {"id": "document-id", "range": "pages 3-5"}' : 'send {"field": "module.field", "value": ...}')}.` }
+    } else if (call.name === READ_TOOL_NAME) result = runRead(call.input)
     else result = acceptDraft(call.input.field, call.input.value)
     handled.set(call.id, result)
     return result
@@ -210,7 +279,7 @@ export function createInterviewSession(config = {}) {
 
   function onEvent(event) {
     if (event.type === 'text') {
-      const shown = stripDraftBlocks(event.text)
+      const shown = shownText(event.text)
       if (!shown) return
       if (!live) live = say('ai', '', { streaming: true })
       live.text = shown
@@ -227,8 +296,16 @@ export function createInterviewSession(config = {}) {
     }
   }
 
-  function systemFor(provider) {
+  /**
+   * Works out how every Source document reaches `provider`, loads the originals that are to be attached, and builds the brief.
+   * Returns what one request needs: the system text, the tools, and a function that puts the attachments on the first message.
+   */
+  async function prepare(provider) {
     const context = getContext()
+    plan = planSourceAccess({ sources: context.sources, provider })
+    const attachments = await loadAttachments({ sources: context.sources, plan, loadBytes: context.readOriginal, cache: attachmentCache })
+    for (const [id, reason] of Object.entries(attachments.problems)) plan.set(id, { how: 'unreadable', kind: plan.get(id)?.kind, reason })
+    announceAccess(context, provider)
     const brief = buildInterviewBrief({
       definition: context.definition,
       stageId: context.stageId,
@@ -236,12 +313,49 @@ export function createInterviewSession(config = {}) {
       size: context.size,
       saved: context.saved,
       decisions: [],
-      sources: context.sources,
+      sources: sourcesForBrief(context.sources, plan),
       skills: context.skills,
       contextWindow: provider.contextWindow,
-      readerTool: false,
+      readerTool: true,
+      sourceAccess: accessForBrief(plan),
     })
-    return { system: `${brief.text}\n\n${sessionNote(questionCardMode(provider) === 'text')}`, knownSources: (context.sources ?? []).filter((s) => !s.removedAt).map((s) => ({ id: s.id, title: s.title })) }
+    // The catalogue is only offered with a way to read it.
+    const reader = brief.sources.mode === 'catalogue'
+    const textMode = questionCardMode(provider) === 'text'
+    const withAttachments = (list) => {
+      if (!attachments.images.length && !attachments.documents.length) return list
+      const [first, ...rest] = list
+      return [
+        {
+          ...first,
+          text: `${first.text}${attachmentNote(attachments)}`,
+          images: attachments.images.map(({ mediaType, data }) => ({ mediaType, data })),
+          documents: attachments.documents.map(({ filename, mediaType, data }) => ({ filename, mediaType, data })),
+        },
+        ...rest,
+      ]
+    }
+    return {
+      system: `${brief.text}\n\n${sessionNote(textMode, reader)}`,
+      tools: textMode ? [] : [DRAFT_TOOL, ...(reader ? [READ_TOOL] : [])],
+      withAttachments,
+      knownSources: (context.sources ?? []).filter((s) => !s.removedAt).map((s) => ({ id: s.id, title: s.title })),
+    }
+  }
+
+  // Says, once in the thread, which Source documents this AI Provider cannot read and which it is sent as the original.
+  function announceAccess(context, provider) {
+    const titleOf = (id) => (context.sources ?? []).find((s) => s.id === id)?.title ?? id
+    const unreadable = [...plan].filter(([, a]) => a.how === 'unreadable')
+    const sent = [...plan].filter(([, a]) => a.how === 'attach')
+    const notes = [...plan].filter(([, a]) => a.note)
+    const signature = JSON.stringify([provider.id, unreadable.map(([id, a]) => [id, a.reason]), sent.map(([id]) => id), notes.map(([id]) => id)])
+    if (signature === announced) return
+    announced = signature
+    const model = provider.model ? ` (${provider.model})` : ''
+    if (sent.length) say('sys', `Sent to the AI as the original: ${sent.map(([id, a]) => `${titleOf(id)} (${a.kind === 'pdf' ? 'PDF' : 'picture'})`).join(', ')}.`, { sentOriginals: sent.map(([id]) => id) })
+    for (const [id, a] of unreadable) say('sys', `Can't be read${model}: ${titleOf(id)}, because ${a.reason}. The AI is told so and won't rely on it.`, { unreadable: id })
+    for (const [id, a] of notes) say('sys', `${titleOf(id)} is ${a.note}.`)
   }
 
   async function runLoop() {
@@ -252,16 +366,13 @@ export function createInterviewSession(config = {}) {
     try {
       for (let round = 0; round < MAX_ROUNDS; round++) {
         live = null
-        const result = await runWithRecovery(() => {
+        const result = await runWithRecovery(async () => {
           const provider = getAiProvider(state.providerId)
           if (!provider) throw new Error('This AI Provider no longer exists. Choose another.')
           const text = questionCardMode(provider) === 'text'
-          const { system, knownSources } = systemFor(provider)
-          return runTurn(
-            provider,
-            { system, messages: text ? flattenToolHistory(messages) : messages, tools: text ? [] : [DRAFT_TOOL], knownSources, askCards: false },
-            { fetchImpl, origin, signal: controller.signal, onEvent }
-          )
+          const { system, tools, withAttachments, knownSources } = await prepare(provider)
+          const history = withAttachments(text ? flattenToolHistory(messages) : messages)
+          return runTurn(provider, { system, messages: history, tools, knownSources, askCards: false }, { fetchImpl, origin, signal: controller.signal, onEvent })
         }, handlers)
         state.usage = {
           inputTokens: state.usage.inputTokens + result.usage.inputTokens,
@@ -271,7 +382,8 @@ export function createInterviewSession(config = {}) {
         }
         const provider = getAiProvider(state.providerId)
         const textMode = provider ? questionCardMode(provider) === 'text' : false
-        const base = result.messages ?? messages
+        // The attachments go on the first message of each request and are not kept in the history, so a switch of AI Provider can decide them afresh.
+        const base = (result.messages ?? messages).map((m, i) => (i === 0 ? messages[0] : m))
 
         if (result.kind === 'tools' && !textMode) {
           if (live) live.streaming = false
@@ -280,13 +392,15 @@ export function createInterviewSession(config = {}) {
             const outcome = resultFor(call)
             messages.push({ role: 'tool', toolCallId: call.id, name: call.name, isError: !outcome.ok, content: outcome.content })
           }
+          // Once a round of drafts has landed, the reads before it are spent: they are inputs of those drafts, not of later ones.
+          if (result.otherToolCalls.some((c) => c.name === DRAFT_TOOL_NAME)) readsSinceDraft = []
           state.drafting = false
           emit()
           continue
         }
 
-        // A reply with no more tool calls. Text-fallback drafts are read from it.
-        const shown = stripDraftBlocks(result.text)
+        // A reply with no more tool calls. Text-fallback drafts and reads are taken from it.
+        const shown = shownText(result.text)
         if (live) {
           live.text = shown
           live.streaming = false
@@ -297,10 +411,16 @@ export function createInterviewSession(config = {}) {
         messages = [...base, { role: 'assistant', text: result.text }]
         if (textMode) {
           const { drafts, errors } = extractDraftBlocks(result.text)
+          const requested = extractReadBlocks(result.text)
+          // Reads are answered first, so a draft in the same reply is checked with them already recorded as its inputs.
+          const answers = requested.reads.map((r) => runRead(r))
           const outcomes = drafts.map((d) => ({ d, ...acceptDraft(d.field, d.value) }))
-          const notes = [...errors, ...outcomes.filter((o) => !o.ok).map((o) => o.content)]
-          if (notes.length && round < MAX_ROUNDS - 1 && outcomes.some((o) => !o.ok && held.size)) {
-            messages.push({ role: 'user', fromGantry: true, text: `Gantry's check of your drafts:\n- ${notes.join('\n- ')}` })
+          if (drafts.length) readsSinceDraft = []
+          const notes = [...errors, ...requested.errors, ...outcomes.filter((o) => !o.ok).map((o) => o.content)]
+          if (round < MAX_ROUNDS - 1 && (answers.length || (notes.length && outcomes.some((o) => !o.ok) && held.size))) {
+            const check = notes.length ? `Gantry's check of your drafts:\n- ${notes.join('\n- ')}` : ''
+            const reads = answers.length ? `Gantry's reply to your read requests:\n\n${answers.map((a) => a.content).join('\n\n')}` : ''
+            messages.push({ role: 'user', fromGantry: true, text: [reads, check].filter(Boolean).join('\n\n') })
             emit()
             continue
           }
