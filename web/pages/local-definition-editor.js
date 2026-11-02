@@ -26,6 +26,8 @@ import { TARGET_SIZES, targetSizeLabel, withFieldTargetWords } from '../lib/targ
 import { definitionInstanceSettings } from '../lib/instanceSettings.js'
 import { InstanceSettingsSummary, InstanceSettingsEditor } from '../lib/instanceSettingsView.js'
 import { listStandardModules } from '../lib/standardModules.js'
+import { InterviewInstructions } from '../lib/interviewInstructionsView.js'
+import { interviewText } from '../lib/interviewInstructions.js'
 import {
   getWorkspaceHandle,
   ensurePermission,
@@ -313,10 +315,17 @@ function ModuleEditor({ mod, readOnly, onChange, onRemove }) {
         ${readOnly ? null : html`<button type="button" class="btn small ghost" onClick=${onRemove}>Remove module</button>`}
       </div>
       <input class="wizard-input" type="text" value=${mod.purpose ?? ''} placeholder="Purpose" readOnly=${readOnly} onInput=${(e) => onChange({ ...mod, purpose: e.currentTarget.value })} />
+      <${InterviewInstructions} level="Module" editable=${!readOnly} value=${mod.interview} onChange=${(text) => onChange(withInterview(mod, text))} />
       ${mod.fields.map((field, i) => html`<${FieldRow} key=${i} field=${field} readOnly=${readOnly} onChange=${(f) => updateField(i, f)} onRemove=${() => removeField(i)} />`)}
       ${readOnly ? null : html`<button type="button" class="btn small ghost" onClick=${addField}>+ Add field</button>`}
     </div>
   `
+}
+
+// #282 (ADR-0062): `element` with its Interview instructions set to `text` — cleared text drops the key.
+function withInterview(element, text) {
+  const { interview: _dropped, ...rest } = element
+  return text === '' ? rest : { ...rest, interview: text }
 }
 
 function StageEditor({ stage, readOnly, onChange, onRemove }) {
@@ -332,6 +341,7 @@ function StageEditor({ stage, readOnly, onChange, onRemove }) {
         ${readOnly ? null : html`<button type="button" class="btn small ghost" onClick=${onRemove}>Remove stage</button>`}
       </div>
       <input class="wizard-input" type="text" value=${stage.purpose ?? ''} placeholder="Purpose" readOnly=${readOnly} onInput=${(e) => onChange({ ...stage, purpose: e.currentTarget.value })} />
+      <${InterviewInstructions} level="Stage" editable=${!readOnly} value=${stage.interview} onChange=${(text) => onChange(withInterview(stage, text))} />
       <label class="field-label">Modules (comma-separated ids)</label>
       <input
         class="wizard-input"
@@ -883,6 +893,24 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
               ${readOnly
                 ? html`<${InstanceSettingsSummary} settings=${instanceSettings} />`
                 : html`<${InstanceSettingsEditor} definition=${structure} onChange=${(next) => update({ instanceSettings: next })} />`}
+            </section>
+          `
+        : null}
+
+      ${interviewText(structure.interview) || !readOnly || problems.some((p) => p.type === 'invalid-interview' && /^Interview instructions on the Definition/.test(p.message))
+        ? html`
+            <section class="local-def-interview">
+              <h2>Interview instructions</h2>
+              <p class="guidance">
+                How the AI should run the interview for every Instance of this Definition. Stages and Modules can add their own.
+              </p>
+              <${InterviewInstructions}
+                level="Definition"
+                editable=${!readOnly}
+                value=${structure.interview}
+                problems=${problems.filter((p) => p.type === 'invalid-interview' && /^Interview instructions on the Definition/.test(p.message))}
+                onChange=${(text) => update(text === '' ? { interview: undefined } : { interview: text })}
+              />
             </section>
           `
         : null}

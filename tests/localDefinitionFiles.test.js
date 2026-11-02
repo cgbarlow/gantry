@@ -236,6 +236,36 @@ describe('writeLocalDefinitionStructure / readLocalDefinitionStructure', () => {
     })
   })
 
+  // #282 (ADR-0062): Interview instructions at the Definition, a Stage and a Module go through the
+  // browser-side writer and reader exactly as through the server's, and cleared text writes no key.
+  test('Interview instructions round-trip like the server\'s, and cleared text leaves no key', async () => {
+    const withInterview = {
+      ...FIXTURE_STRUCTURE,
+      interview: 'Ask who the sponsor is first.',
+      stages: [{ ...FIXTURE_STRUCTURE.stages[0], interview: 'Probe integrations.' }],
+      modules: [{ ...FIXTURE_STRUCTURE.modules[0], interview: 'Spell authorisation with an s.' }],
+    }
+    await withScratchInstances(async (definitionsDir) => {
+      createBlankDefinition('wi384-fixture', { definitionsDir })
+      writeDefinitionVersion('wi384-fixture', 1, withInterview, { definitionsDir })
+      const diskProjection = definitionVersionProjection(loadDefinition('wi384-fixture', { definitionsDir, version: 1 }))
+
+      const handle = new MemDirHandle()
+      await writeLocalDefinitionStructure(handle, 'wi384-fixture', 1, withInterview)
+      const localStructure = await readLocalDefinitionStructure(handle, 'wi384-fixture', 1)
+      assert.deepEqual(localStructure, diskProjection)
+      assert.equal(localStructure.interview, 'Ask who the sponsor is first.')
+      assert.equal(localStructure.stages[0].interview, 'Probe integrations.')
+      assert.equal(localStructure.modules[0].interview, 'Spell authorisation with an s.')
+    })
+
+    const cleared = { ...withInterview, interview: '', stages: [{ ...withInterview.stages[0], interview: ' ' }], modules: [{ ...withInterview.modules[0], interview: undefined }] }
+    assert.doesNotMatch(renderDefinitionYaml(cleared), /interview/)
+    assert.doesNotMatch(renderModuleYaml(cleared.modules[0]), /interview/)
+    assert.deepEqual(parseYAML(renderModuleYaml(withInterview.modules[0])), buildModuleYamlObject(withInterview.modules[0]))
+    assert.deepEqual(parseYAML(renderDefinitionYaml(withInterview)), buildDefinitionYamlObject('wi384-fixture', 1, 'draft', withInterview, {}))
+  })
+
   test('deletes a stale module file whose id was removed from the structure', async () => {
     const handle = new MemDirHandle()
     await writeLocalDefinitionStructure(handle, 'wi384-fixture', 1, FIXTURE_STRUCTURE)

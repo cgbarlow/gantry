@@ -541,6 +541,9 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .instance-setting-add-marking { margin-bottom: 10px; }
 .instance-setting-default-select { max-width: 22em; }
 .defn-map-col-instance-settings { border-style: dashed; }
+.defn-map-col-interview { border-style: dashed; }
+.defn-interview-text { width: 100%; box-sizing: border-box; resize: vertical; }
+.defn-interview-readonly { margin: 0; white-space: pre-wrap; }
 /* #224: an Instance's own Logo, in the wizard and Instance Settings. */
 .instance-logo-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 4px 0 8px; }
 .instance-logo-preview { max-height: 40px; max-width: 200px; object-fit: contain; background: #fff; border: var(--hairline) solid var(--line); border-radius: var(--radius); padding: 2px; }

@@ -26,6 +26,7 @@
 
 import { parse as parseYAML, stringify as stringifyYAML } from 'yaml'
 import { readTextFile, writeTextFile, readBinaryFile, writeBinaryFile, listDir } from './localWorkspace.js'
+import { hasInterviewText } from './interviewInstructions.js'
 import { sortReferenceDocxNames, summariseDefinitionLogo, applyDefinitionLogo } from './definitionLogo.js'
 
 // Verbatim copy of lib/slug.js's isValidSlug — a single path segment, never
@@ -114,10 +115,13 @@ export function renderDefinitionYaml(structure) {
   if (structure.instanceSettings !== undefined && !isEmptyMap(structure.instanceSettings)) obj['instance-settings'] = structure.instanceSettings
   // #283 (ADR-0065): the standard modules mounted, written back as they are; none mounted leaves the key out.
   if (Array.isArray(structure.standardModules) && structure.standardModules.length > 0) obj['standard-modules'] = structure.standardModules
+  // #282 (ADR-0062): the Definition's Interview instructions, written whenever set and not blank.
+  if (hasInterviewText(structure.interview)) obj.interview = structure.interview
   obj.stages = (structure.stages ?? []).map((s) => {
     const entry = { id: s.id, title: s.title, purpose: s.purpose, gate: s.gate, modules: s.modules ?? [] }
     if (s.readOnlyModules !== undefined) entry['read-only-modules'] = s.readOnlyModules
     if (s.example !== undefined) entry.example = s.example
+    if (hasInterviewText(s.interview)) entry.interview = s.interview
     if (s.copiedFrom !== undefined) entry['copied-from'] = s.copiedFrom
     return entry
   })
@@ -145,6 +149,7 @@ export function parseDefinitionYaml(text) {
 /** Port of `lib/definition.js`'s `buildModuleYamlObject`, minus its `keyOf` kebab-case input form (#148): this takes only the camelCase module, so a raw parsed module YAML loses `required-at` and `copied-from` here. */
 export function renderModuleYaml(mod) {
   const obj = { id: mod.id, title: mod.title, purpose: mod.purpose }
+  if (hasInterviewText(mod.interview)) obj.interview = mod.interview
   obj.fields = (mod.fields ?? []).map((f) => {
     const field = { id: f.id, title: f.title, type: f.type }
     if (f.required === true) field.required = true
@@ -212,7 +217,8 @@ function moduleFromRaw(raw) {
       }
     )
   })
-  return withOptional({ id: raw.id, title: raw.title, purpose: raw.purpose, fields }, { copiedFrom: raw['copied-from'] })
+  // #282 (ADR-0062): `interview` is kept as it is, so findLocalDefinitionProblems sees a malformed one.
+  return withOptional({ id: raw.id, title: raw.title, purpose: raw.purpose, fields }, { copiedFrom: raw['copied-from'], interview: raw.interview })
 }
 
 /**
@@ -301,10 +307,12 @@ export async function readLocalDefinitionStructure(handle, definitionId, version
     ...(raw['instance-settings'] !== undefined ? { instanceSettings: raw['instance-settings'] } : {}),
     // #283 (ADR-0065): projected only when declared, as lib/definition.js's definitionVersionProjection does.
     ...(raw['standard-modules'] !== undefined ? { standardModules: raw['standard-modules'] } : {}),
+    // #282 (ADR-0062): and the Definition's Interview instructions, as lib/definition.js's projection does.
+    ...(raw.interview !== undefined ? { interview: raw.interview } : {}),
     stages: (raw.stages ?? []).map((s) =>
       withOptional(
         { id: s.id, title: s.title, purpose: s.purpose, gate: s.gate, modules: s.modules ?? [] },
-        { readOnlyModules: s['read-only-modules'], example: s.example, copiedFrom: s['copied-from'] }
+        { readOnlyModules: s['read-only-modules'], example: s.example, interview: s.interview, copiedFrom: s['copied-from'] }
       )
     ),
     artefacts: (raw.artefacts ?? []).map((a) =>

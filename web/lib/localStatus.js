@@ -40,6 +40,7 @@ import { artefactFrontMatterProblems } from './artefactFrontMatter.js'
 import { targetWordsProblem } from './targetSize.js'
 import { instanceSettingsDeclarationProblems } from './instanceSettings.js'
 import { modulesWithStandard, standardModuleProblems } from './standardModules.js'
+import { interviewInstructionsProblems } from './interviewInstructions.js'
 
 // ---------------------------------------------------------------------------
 // definition/module lookup — the projection's `modules` is a plain array;
@@ -606,6 +607,8 @@ export function findLocalDefinitionProblems(structure) {
   problems.push(...readOnlyModuleProblems(stages))
   // #220: shared with lib/definition.js rather than ported — see web/lib/instanceSettings.js.
   problems.push(...instanceSettingsDeclarationProblems(structure.instanceSettings))
+  // #282: shared with lib/definition.js rather than ported — see web/lib/interviewInstructions.js.
+  problems.push(...interviewInstructionsProblems({ interview: structure.interview, stages, modules: [...modulesById.values()] }))
 
   return problems
 }

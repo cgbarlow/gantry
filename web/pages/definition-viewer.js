@@ -14,6 +14,8 @@ import { definitionInstanceSettings, instanceSettingName } from '../lib/instance
 import { InstanceSettingsSummary, InstanceSettingsEditor } from '../lib/instanceSettingsView.js'
 import { DefinitionLogoControl } from '../lib/definitionLogoControl.js'
 import { listStandardModules, modulesWithStandard, standardModuleVersions, STANDARD_MODULES } from '../lib/standardModules.js'
+import { InterviewInstructions } from '../lib/interviewInstructionsView.js'
+import { interviewText } from '../lib/interviewInstructions.js'
 
 // The rebuilt Definitions page (WI #381, Feature #380's grilling session). Primary source:
 // web/prototypes/definition-editor.prototype.html — variant A (Outline) and C (Map) both wanted,
@@ -92,6 +94,8 @@ function editableStructure(def) {
     instanceSettings,
     // #283 (ADR-0065): the standard modules mounted, an empty list the same as none (Save writes neither).
     standardModules: Array.isArray(def.standardModules) && def.standardModules.length === 0 ? undefined : def.standardModules,
+    // #282: the Definition's Interview instructions; cleared text is the same as none (Save writes neither).
+    interview: interviewText(def.interview) ? def.interview : undefined,
     stages: def.stages,
     artefacts: def.artefacts,
     modules: def.modules,
@@ -150,6 +154,8 @@ function problemTarget(problem) {
   // #283 (ADR-0065): a standard module is a Module on the page, so its problems anchor on it.
   const standard = /^Standard module "([^"]+)"/.exec(problem?.message ?? '')
   if (standard) return { type: 'module', id: standard[1] }
+  // #282 (docs/adr/0062): a problem with the Definition's own Interview instructions anchors on them.
+  if (/^Interview instructions on the Definition/.test(problem?.message ?? '')) return { type: 'interview', id: 'definition' }
   const m = /^(Stage|Artefact|Module) "([^"]+)"/.exec(problem?.message ?? '')
   if (!m) return null
   return { type: m[1].toLowerCase(), id: m[2] }
@@ -1901,6 +1907,7 @@ export function DefinitionViewerPage() {
         </div>
         ${renderStandardModulesOutlineGroup(d)}
         ${renderInstanceSettingsOutlineGroup(d)}
+        ${renderInterviewOutlineGroup(d)}
       </nav>
     `
   }
@@ -1951,6 +1958,57 @@ export function DefinitionViewerPage() {
       if (!nav.some((entry) => entry.id === target.id)) nav.push({ id: target.id, name: instanceSettingName(target.id) })
     }
     return nav
+  }
+
+  // #282 (docs/adr/0062): the Definition's own Interview instructions — one node, on a draft always
+  // (so an author can start writing them), on a published version only when there are some.
+  function showsInterviewNode(d) {
+    return isEditable || Boolean(interviewText(d.interview)) || hasProblem('interview', 'definition')
+  }
+
+  function renderInterviewOutlineGroup(d) {
+    if (!showsInterviewNode(d)) return null
+    return html`
+      <div class="defn-outline-group defn-outline-interview">
+        <div class="defn-outline-group-head">
+          <span class="kicker">Interview</span>
+        </div>
+        <div>${outlineNode({ type: 'interview', id: 'definition', label: 'Interview instructions' })}</div>
+      </div>
+    `
+  }
+
+  function renderInterviewMapColumn(d) {
+    if (!showsInterviewNode(d)) return null
+    return html`
+      <div class="defn-map-col defn-map-col-interview">
+        <div class="defn-map-col-head"><span class="t">Interview</span></div>
+        <div class=${'defn-map-chip' + (selection.type === 'interview' ? ' selected' : '')} role="button" tabindex="0" onClick=${() => select('interview', 'definition')}>
+          Interview instructions
+        </div>
+      </div>
+    `
+  }
+
+  function renderInterviewFocus(d) {
+    if (!showsInterviewNode(d)) return html`<p class="loading">Select an element.</p>`
+    return html`
+      <div class="defn-focus defn-definition-interview">
+        <span class="kicker">Definition</span>
+        <h2>Interview instructions</h2>
+        <p class="guidance">
+          How the AI should run the interview for every Instance of this Definition. Stages and Modules can add their own;
+          they stack broad to narrow, and only ever add to Gantry's own rules.
+        </p>
+        <${InterviewInstructions}
+          level="Definition"
+          editable=${isEditable}
+          value=${d.interview}
+          problems=${validationProblems.filter((p) => problemTarget(p)?.type === 'interview')}
+          onChange=${(text) => updateDraft((dd) => { dd.interview = text })}
+        />
+      </div>
+    `
   }
 
   function renderInstanceSettingsOutlineGroup(d) {
@@ -2048,6 +2106,7 @@ export function DefinitionViewerPage() {
           ` : null}
         </div>
         ${renderInstanceSettingsMapColumn(d)}
+        ${renderInterviewMapColumn(d)}
       </div>
     `
   }
@@ -2246,6 +2305,7 @@ export function DefinitionViewerPage() {
     if (selection.type === 'module' && (d.standardModules ?? []).some((m) => m.id === selection.id)) return renderStandardModuleFocus(d)
     if (selection.type === 'module') return renderModuleFocus(d)
     if (selection.type === 'instance-setting') return renderInstanceSettingsFocus(d)
+    if (selection.type === 'interview') return renderInterviewFocus(d)
     return html`<p class="loading">Select an element.</p>`
   }
 
@@ -2346,6 +2406,13 @@ export function DefinitionViewerPage() {
             ${gateArtefacts.length === 0 ? html`<span class="muted">none</span>` : null}
           </div>
         </div>
+        <${InterviewInstructions}
+          level="Stage"
+          editable=${isEditable}
+          value=${s.interview}
+          problems=${validationProblems.filter((p) => p.type === 'invalid-interview' && problemTarget(p)?.type === 'stage' && problemTarget(p)?.id === s.id)}
+          onChange=${(text) => updateDraft((dd) => { if (text === '') delete dd.stages[si].interview; else dd.stages[si].interview = text })}
+        />
         ${isEditable ? html`<button class="btn small ghost" onClick=${() => updateDraft((dd) => { dd.stages.splice(si, 1) })}>Remove stage ✕</button>` : null}
       </div>
     `
@@ -2598,6 +2665,13 @@ export function DefinitionViewerPage() {
             </div>
           ` : null}
         </div>
+        <${InterviewInstructions}
+          level="Module"
+          editable=${isEditable}
+          value=${m.interview}
+          problems=${validationProblems.filter((p) => p.type === 'invalid-interview' && problemTarget(p)?.type === 'module' && problemTarget(p)?.id === m.id)}
+          onChange=${(text) => updateDraft((dd) => { if (text === '') delete dd.modules[mi].interview; else dd.modules[mi].interview = text })}
+        />
         ${isEditable ? html`<button class="btn small ghost" onClick=${() => updateDraft((dd) => { dd.modules.splice(mi, 1) })}>Remove module ✕</button>` : null}
       </div>
     `
