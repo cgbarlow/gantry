@@ -24,7 +24,7 @@
 // route change and back, not just component-local state that'd reset on
 // remount.
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useRef } from 'preact/hooks'
 import { signal, effect } from '@preact/signals'
 import { apiFetch, apiFetchForInstance } from '../lib/apiFetch.js'
 import { basicAuthHeaderForValue, setPatForWorkspace } from '../lib/credential.js'
@@ -3118,6 +3118,21 @@ function ImportForgetPrompt() {
   `
 }
 
+// Does this visit inherit a shortcut jump (`?workspace=`/`?local=`) left over from an
+// earlier, unrelated one (#76)? True only when the *previous* visit was itself a shortcut
+// (a genuine step-by-step flow never sets `instanceStepIsShortcut`, and a mid-flow revisit
+// — #137, Home then the browser's Back — must resume where the architect left off) AND this
+// visit is not that same shortcut again: either no shortcut query param at all (a plain
+// "+ New Workspace"), or a shortcut aimed at a *different* workspace — which would otherwise
+// be swallowed, since both preselect effects ignore a new id while `selectedWorkspace` is
+// still holding the old one.
+function isStaleShortcutVisit(query) {
+  if (!instanceStepIsShortcut.value) return false
+  if (query?.workspace) return query.workspace !== preselectedWorkspaceId.value
+  if (query?.local) return query.local !== preselectedLocalWorkspaceId.value
+  return true
+}
+
 // `query` arrives as a route prop — `preact-iso` hands a matched route's
 // query string straight through this way (see web/pages/settings.js's own
 // doc comment on the same convention) — rather than this page re-parsing
@@ -3127,28 +3142,42 @@ function ImportForgetPrompt() {
 // Switcher's own "+ New Instance" link) reach this exact same component and
 // this is the one place that tells them apart.
 export function NewWorkspaceWizardPage({ query }) {
+  // Undo a stale shortcut BEFORE this visit renders anything (#76). It used to run inside the
+  // mount `useEffect` below — i.e. after the first paint — so the first frame of an unrelated
+  // "+ New Workspace" visit briefly rendered the stale "New Instance" step, and anything
+  // observing the page in that window (a user, or a test reading the heading the moment it
+  // appeared) saw it before the correction landed. Resetting synchronously, ahead of the
+  // `step`/`instanceStepIsShortcut` reads further down this render, means no frame ever shows
+  // it. Done once per visit (a ref, not state: re-renders from signal changes must not re-run
+  // it).
+  //
+  // Every wizard signal above is module-scoped, not component-scoped —
+  // `preact-iso`'s client-side routing never remounts this module between
+  // visits. That's deliberate and correct for a genuine mid-flow revisit
+  // (#137: Home then the browser's own Back button must resume exactly
+  // where the architect left off) — so this must NOT reset unconditionally
+  // on every mount, only undo a *shortcut* jump (`?workspace=`/`?local=`)
+  // that a later, unrelated visit inherited. Without this: open an
+  // instance, use the Instance Switcher's own "+ New Instance" shortcut
+  // (setting `instanceStepIsShortcut.value = true` and `step.value =
+  // 'instance'` above), then navigate Home and click the dashboard's plain
+  // "+ New Workspace" link (no query params) — that visit would still be
+  // sitting on the stale shortcut's `'instance'` step, skipping straight
+  // into creating an instance under whichever workspace the shortcut had
+  // preselected instead of actually offering to create/pick one. Reported
+  // directly by the user.
+  //
+  // Keyed on the shortcut query params rather than on mount alone: `preact-iso` re-renders the
+  // same component in place (no remount) when only the query string changes, e.g. the Switcher's
+  // "+ New Instance" from one workspace's instance and then another's.
+  const visitKey = `${query?.workspace ?? ''}|${query?.local ?? ''}`
+  const lastVisitKey = useRef(null)
+  if (lastVisitKey.current !== visitKey) {
+    lastVisitKey.current = visitKey
+    if (isStaleShortcutVisit(query)) resetWizard()
+  }
+
   useEffect(() => {
-    // Every wizard signal above is module-scoped, not component-scoped —
-    // `preact-iso`'s client-side routing never remounts this module between
-    // visits. That's deliberate and correct for a genuine mid-flow revisit
-    // (#137: Home then the browser's own Back button must resume exactly
-    // where the architect left off) — so this must NOT reset unconditionally
-    // on every mount, only undo a *shortcut* jump (`?workspace=`/`?local=`,
-    // below) that a later, unrelated, non-shortcut visit inherited. Without
-    // this: open an instance, use the Instance Switcher's own "+ New
-    // Instance" shortcut (setting `instanceStepIsShortcut.value = true` and
-    // `step.value = 'instance'` below), then navigate Home and click the
-    // dashboard's plain "+ New Workspace" link (no query params) — that
-    // visit would still be sitting on the stale shortcut's `'instance'`
-    // step, skipping straight into creating an instance under whichever
-    // workspace the shortcut had preselected instead of actually offering to
-    // create/pick one. Scoped to exactly that: only when arriving with no
-    // shortcut query param at all, and only when the *previous* visit was
-    // itself a shortcut (never a genuine step-by-step flow, which never sets
-    // this flag) — reported directly by the user.
-    if (!query?.workspace && !query?.local && instanceStepIsShortcut.value) {
-      resetWizard()
-    }
     const ws = query?.workspace
     if (ws) {
       preselectedWorkspaceId.value = ws
@@ -3158,6 +3187,9 @@ export function NewWorkspaceWizardPage({ query }) {
     if (local) {
       preselectedLocalWorkspaceId.value = local
     }
+  }, [query?.workspace, query?.local])
+
+  useEffect(() => {
     // WI #383 (ADR-0036): `includeWorkspaces=1` unions the library with every server workspace's own
     // definitions (no credential needed — a server workspace's `definitions/` folder is plain local
     // disk) — this is what makes the reserved "default" server workspace's own definitions available
