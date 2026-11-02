@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { loadDefinitionChangelog } from '../lib/definition.js'
 import { createInstance } from '../lib/instance.js'
 import { renderArtefact } from '../lib/render.js'
+import { stripFieldTags } from '../lib/wordFieldTags.js'
 import { bodyParagraphs, docxPart } from './helpers/wordDocx.js'
 import { classificationField, coverClassificationStyle, headerVisibleText, paragraphStyleFormat, sectionHeaders } from './helpers/wordHeaders.js'
 
@@ -118,7 +119,7 @@ describe('design v3 prints the classification in the page header of every page (
       createInstance('design', 'claims-portal', { instancesDir, version: 3 })
       const { markdown, docxMarkdown } = renderArtefact('claims-portal', 'soap', { instancesDir, dryRun: true })
       assert.doesNotMatch(markdown, /Cover Classification/, 'the .md keeps the classification off the cover')
-      assert.ok(docxMarkdown.startsWith('::: {custom-style="Cover Classification"}\n\\ \n:::\n\n::: {custom-style="Title"}'), docxMarkdown.slice(0, 200))
+      assert.ok(stripFieldTags(docxMarkdown).startsWith('::: {custom-style="Cover Classification"}\n\\ \n:::\n\n::: {custom-style="Title"}'), docxMarkdown.slice(0, 200))
 
       const { docxBytes } = renderArtefact('claims-portal', 'soap', { instancesDir, deliverToClient: true })
       const [first, second] = bodyParagraphs(docxPart(docxBytes, 'word/document.xml'))
@@ -135,7 +136,7 @@ describe('design v3 prints the classification in the page header of every page (
       createInstance('design', 'claims-portal', { instancesDir, version: 2 })
       const { markdown, docxMarkdown } = renderArtefact('claims-portal', 'soap', { instancesDir, dryRun: true })
       assert.doesNotMatch(docxMarkdown, /Cover Classification/, 'design v2 has no cover')
-      assert.equal(docxMarkdown, markdown)
+      assert.equal(stripFieldTags(docxMarkdown), markdown)
     })
 
     // A scratch copy of design v3 that drops one of the two at a time.

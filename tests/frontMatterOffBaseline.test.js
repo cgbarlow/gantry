@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { renderArtefact } from '../lib/render.js'
 import { loadDefinition } from '../lib/definition.js'
 import { writeModule } from '../lib/instance.js'
+import { stripFieldTags } from '../lib/wordFieldTags.js'
 
 // #194 (spec #192, ADR-0052): `cover-page` and `table-of-contents` are opt-in, so a Definition that
 // sets neither must compile every Artefact to exactly the Markdown it compiled to before the keys
@@ -83,7 +84,8 @@ function compileEveryArtefact(definitionId, version, kind) {
     for (const artefact of definition.artefacts) {
       const { markdown, docxMarkdown } = renderArtefact(slug, artefact.id, { dryRun: true, instancesDir, definitionsDir: 'definitions', commit: COMMIT })
       const key = kind === 'plain' ? `${definitionId}/${version}/${artefact.id}` : `${definitionId}/${version}/${artefact.id} (${kind})`
-      compiled[key] = { markdown, docxMarkdown }
+      // #301: the Word text now also carries the Field bookmarks and gantry-* properties; with those taken out it is the text it always was.
+      compiled[key] = { markdown, docxMarkdown: stripFieldTags(docxMarkdown) }
     }
     return compiled
   } finally {

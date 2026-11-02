@@ -9,6 +9,7 @@ import { runLocalWorkspaceCompute } from '../lib/localWorkspace.js'
 import { findDefinitionProblemsInStructure, loadDefinition } from '../lib/definition.js'
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
 import { numberDiagrams } from '../web/lib/diagramCaptions.js'
+import { stripFieldTags } from '../lib/wordFieldTags.js'
 
 // #195 (spec #192, ADR-0053): a Diagram caption. An author captions a Mermaid block on its fence
 // (```mermaid {caption="…"}) or an image with its alt text (![…](asset:id)), and the Word document
@@ -180,8 +181,8 @@ test('an Artefact that does not opt in converts exactly as before: alt-texted im
   await withExample(
     { 'solution-definition': withUncaptionedDiagramAfterImages },
     ({ instancesDir, definitionsDir }) => {
-      const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir })
-      assert.equal(result.docxMarkdown, result.markdown, 'the Word document is converted from the markdown as compiled')
+      const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir, wordTags: false })
+      assert.equal(stripFieldTags(result.docxMarkdown), result.markdown, 'the Word document is converted from the markdown as compiled')
       const documentXml = unzip(result.docxPath, 'word/document.xml')
       assert.equal(documentXml, convertDirectly(result))
       assert.deepEqual(
@@ -198,8 +199,8 @@ test('the unmodified example SAD, with eight alt-texted images, converts exactly
   await withExample(
     {},
     ({ instancesDir, definitionsDir }) => {
-      const result = renderArtefact(SLUG, 'sad', { instancesDir, definitionsDir })
-      assert.equal(result.docxMarkdown, result.markdown)
+      const result = renderArtefact(SLUG, 'sad', { instancesDir, definitionsDir, wordTags: false })
+      assert.equal(stripFieldTags(result.docxMarkdown), result.markdown)
       const documentXml = unzip(result.docxPath, 'word/document.xml')
       assert.equal(documentXml, convertDirectly(result))
       assert.doesNotMatch(documentXml, /Diagram \d/)
@@ -216,7 +217,7 @@ test('an opted-in document with no captioned diagram renders exactly as before: 
         text.replace('![Take out insurance process](', '![](').replace('![Claims handling introductory view](', '!['),
     },
     ({ instancesDir, definitionsDir }) => {
-      const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir })
+      const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir, wordTags: false })
       const documentXml = unzip(result.docxPath, 'word/document.xml')
       assert.equal(documentXml, convertDirectly(result))
       assert.deepEqual(captionedFigures(documentXml), [])
@@ -260,7 +261,7 @@ test('a local workspace compile hands the browser the numbered markdown for the 
 
 test('a local workspace compile of an Artefact that does not opt in hands the browser the markdown as compiled', async () => {
   const compiled = await compileLocally(NOT_OPTED_IN)
-  assert.equal(compiled.docxMarkdown, compiled.markdown)
+  assert.equal(stripFieldTags(compiled.docxMarkdown), compiled.markdown)
 })
 
 test('a diagram-captions value that is not true or false is reported, by the server and in a Local Workspace', () => {

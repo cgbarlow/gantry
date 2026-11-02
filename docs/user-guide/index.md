@@ -400,6 +400,15 @@ When the gate hasn't passed, the message you see (from **Check**, **Advance to n
 
 If every artefact at a stage's gate is set not to count, the gate can never pass. That is a problem: `gantry validate` and a Local Workspace report it, the Definitions page marks the stage, and it blocks Save and Publish. A Definition an existing instance already uses keeps loading even if it has one. A stage with no artefacts at all isn't flagged.
 
+### What a Word document remembers about where it came from
+
+Every Word document Gantry renders is quietly labelled, so that comments someone makes on it can later be traced back to the right place. You will not see anything in the document itself: it looks exactly as it did before.
+
+- **Custom properties.** In Word, open **File > Info > Properties > Advanced Properties > Custom**. The `gantry-*` entries name the instance, the artefact, the stage, the Definition version (for example `design@3`), the commit the content was at and a render id. The render id is different every time you render. Renders of a server workspace have no commit, so they have no `gantry-commit` entry.
+- **Bookmarks.** Each field that is printed in the document is wrapped in a Word bookmark named `gf_` and eight letters and digits. Word hides bookmarks unless you turn on **File > Options > Advanced > Show bookmarks**. A field printed twice gets `_2` on its second copy.
+
+Nothing in your Definition or its templates has to change, and the exported Markdown (`.md`) file is not labelled. Word's Document Inspector, copying the text into a new document, or printing to PDF removes the labels.
+
 ### How a rendered document gets its name
 
 By default a rendered document is named `<Instance name> - <Artefact title>` — for example `Senior Platform Engineer - Offer Pack.docx`. That's fine while the document stays inside its instance folder, but once it's downloaded, emailed or filed alongside documents from other systems, a name built only from the instance and the artefact stops telling anyone what's actually in it.
