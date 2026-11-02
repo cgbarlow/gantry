@@ -476,6 +476,16 @@ The flag shows in five places:
 
 Local and server workspaces never show it: they have no Pull Request approval to have changed since.
 
+#### Restore approved text
+
+When you are on the current Stage, a **Changed since approval** panel at the top of the editor lists every flagged Field, grouped by the Stage it was approved on. Each Field shows its **Approved text** and its **Current text** side by side, so you can see exactly what changed. A list Field shows its items one per line.
+
+Click **Restore approved text** on a Field to put the approved wording back. Gantry fills the Field in your editor and saves it, as an ordinary Save on the current Stage's branch, so it goes through the same Save check as any other Save: if a colleague saved meanwhile, your changes are merged Field by Field, and a dialog asks only when you both changed this same Field. Restoring replaces whatever the Field says now, and any other changes you have not saved are saved along with it.
+
+The flag clears as soon as no flagged Field differs from its approved text; the Stage tab, the status line, the Request approval line and the dashboard badge all update. If you would rather keep the change, leave the Field alone: the current Stage's approval then re-approves the earlier Stage.
+
+If the current Stage does not show the Module a flagged Field belongs to, or shows it read-only, the panel still shows both texts but cannot restore from here.
+
 ### Review and sign-off status
 
 Each review and sign-off item carries a Gantry status — Requested, In review, Changes requested, Approved or Rejected. On Azure DevOps this is kept separate from the native work item state, which continues to drive the board — if a project has not been set up with the custom status field, Gantry falls back to reading the native state instead, so the card still shows a sensible status. On GitHub and GitLab alike, the same five-value status is what the `gantry:review/<status>` label above carries, read straight from the issue.

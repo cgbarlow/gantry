@@ -30,6 +30,14 @@ function backgroundWithProblem(text, problem) {
   return `${text.slice(0, start)}\n${problem}\n${text.slice(next)}`
 }
 
+// The Problem statement Field's body in a background module file.
+function problemTextOf(text) {
+  const marker = '## Problem statement\n'
+  const start = text.indexOf(marker) + marker.length
+  const next = text.indexOf('\n## ', start)
+  return text.slice(start, next).trim()
+}
+
 async function approveSoap(base, adoBaseUrl) {
   const azureDevOps = { organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl }
   const client = createAzureDevOpsClient(azureDevOps)
@@ -136,6 +144,81 @@ test('an approved stage whose printed Field a later stage changed is flagged on 
             const badge = page.locator('.instance-card [data-testid="changed-since-approval-badge"]')
             assert.equal(await badge.textContent(), 'CHANGED SINCE APPROVAL')
             assert.equal(await badge.getAttribute('title'), 'SOAP: 1 Field')
+
+            assert.deepEqual(pageErrors, [])
+          } finally {
+            await browser.close()
+          }
+        })
+      } finally {
+        rmSync(instancesDir, { recursive: true, force: true })
+      }
+    }
+  )
+})
+
+test('Restore approved text shows the approved and current wording side by side, saves the approved wording on the later stage\'s branch, and clears the flag', async () => {
+  await withFakeAzureDevOpsServer(
+    {
+      organization: ORGANIZATION,
+      project: PROJECT,
+      repository: REPOSITORY,
+      validPat: VALID_PAT,
+      files: { [`/gantry-workspace/${SLUG}/instance.yaml`]: `definition: design\nslug: ${SLUG}\nstage: shape\ndefinitionVersion: 2\n` },
+    },
+    async (adoBaseUrl) => {
+      const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-restore-approved-'))
+      try {
+        registerInstance(SLUG, { kind: 'azureDevOps', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, baseUrl: adoBaseUrl }, { instancesDir })
+        await withRunningServer({ instancesDir, allowAzureDevOpsBaseUrlOverride: true, allowedAzureDevOpsBaseUrls: [adoBaseUrl] }, async (base) => {
+          const rewordAtHld = await approveSoap(base, adoBaseUrl)
+          const approvedProblem = problemTextOf(exampleModuleText('background'))
+          assert.notEqual(approvedProblem, '')
+
+          const browser = await launchBrowser()
+          try {
+            const page = await browser.newPage()
+            page.setDefaultTimeout(DEFAULT_TIMEOUT)
+            const pageErrors = []
+            page.on('pageerror', (err) => pageErrors.push(err.message))
+            page.on('console', (msg) => {
+              if (msg.type() === 'error') pageErrors.push(msg.text())
+            })
+            await page.addInitScript((pat) => {
+              localStorage.setItem('gantry:ado-pat', pat)
+            }, VALID_PAT)
+
+            // Nothing changed: no panel.
+            await page.goto(`${base}/instance/${SLUG}`)
+            await page.waitForSelector('#stage-nav button', { timeout: 30_000 })
+            await page.waitForSelector('#modules .module', { timeout: 30_000 })
+            assert.equal(await page.locator('[data-testid="changed-since-approval-panel"]').count(), 0)
+
+            // HLD rewords a Field SOAP prints.
+            await rewordAtHld('Reworded during the HLD review.')
+            await page.reload()
+            await page.waitForSelector('[data-testid="changed-since-approval-panel"]', { timeout: 30_000 })
+
+            const field = page.locator('[data-testid="changed-since-approval-panel"] [data-field="background.problem"]')
+            assert.match(await field.locator('h4').textContent(), /Background.*Problem statement/)
+            assert.equal((await field.locator('[data-side="approved"]').textContent()).trim(), approvedProblem)
+            assert.equal((await field.locator('[data-side="current"]').textContent()).trim(), 'Reworded during the HLD review.')
+
+            // Restore approved text: the approved wording is saved on HLD's branch and the flag goes.
+            await field.locator('[data-testid="restore-approved-text"]').click()
+            await page.waitForSelector('[data-testid="changed-since-approval-panel"]', { state: 'detached', timeout: 30_000 })
+            assert.equal(await page.locator('[data-testid="changed-since-approval-notice"]').count(), 0)
+            assert.equal(await page.locator('#stage-nav [data-changed-since-approval]').count(), 0)
+
+            const saved = await (await fetch(`${base}/api/instance?slug=${SLUG}`, { headers })).json()
+            assert.deepEqual(saved.changedSinceApproval, [])
+            const background = saved.modules.find((m) => m.id === 'background')
+            assert.equal(background.fields.find((f) => f.id === 'problem').value.trim(), approvedProblem)
+
+            // And it stays that way after a reload.
+            await page.reload()
+            await page.waitForSelector('#modules .module', { timeout: 30_000 })
+            assert.equal(await page.locator('[data-testid="changed-since-approval-panel"]').count(), 0)
 
             assert.deepEqual(pageErrors, [])
           } finally {

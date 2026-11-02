@@ -93,7 +93,7 @@ import {
   buildLocalModuleEntry,
 } from './lib/localInstanceFiles.js'
 import { getLocalStatus, checkLocalGate } from './lib/localStatus.js'
-import { changedEntryFor, changedEntryLabel, alsoReapprovesLine, dashboardBadgeText, dashboardBadgeTitle } from './lib/changedSinceApproval.js'
+import { changedEntryFor, changedEntryLabel, alsoReapprovesLine, dashboardBadgeText, dashboardBadgeTitle, wordingText, canRestoreChange, changeLabel, restorePanelHeading } from './lib/changedSinceApproval.js'
 import {
   resolveDefinitionStructure,
   localDefinitionExists,
@@ -1532,7 +1532,7 @@ const IDLE_STAGE_SAVE = { dirtyModuleIds: [], phase: 'idle', message: '' }
 const stageSave = signal(IDLE_STAGE_SAVE)
 // Each module card's "Saved — …" line, by module id.
 const moduleSaveStatus = signal({})
-const NO_STAGE_SAVE = { save: async () => true, confirmLeave: async () => true }
+const NO_STAGE_SAVE = { save: async () => true, confirmLeave: async () => true, restoreApprovedText: async () => false }
 let stageSaveActions = NO_STAGE_SAVE
 // Browser back/forward fires popstate on the window itself, where listeners run
 // in the order they were added — so this one is added now, before the router
@@ -4217,6 +4217,65 @@ function ReopenStagePanel({ instance }) {
 
 // ---------- The viewed stage's whole screen: modules + work-item panel ----------
 // Keyed by stage id from the parent (see ModuleEditorPage) so switching stages remounts this wholesale — fresh CodeMirror instances, matching the old full-DOM-rebuild behaviour. "Clear all fields" and "Render" now live in the view-toggle bar (see ViewModeToolbar, ModuleEditorPage) rather than here, so the field registry they depend on is owned by ModuleEditorPage instead — `onFieldRegistered` is threaded straight through. StageNavigation now lives in ViewModeToolbar to the right of the artefact selector, not as a standalone block here.
+// "Changed since approval" in the editor (#274, ADR-0069): on the current stage, each Field an earlier approved
+// stage prints that a later stage has changed shows its approved wording beside its current wording, with
+// **Restore approved text**. Restoring is an ordinary Save on this stage's branch (so it goes through the Save
+// check), and the flag clears once no flagged Field differs from its approved wording.
+function ChangedSinceApprovalPanel({ instance }) {
+  const [restoring, setRestoring] = useState(null)
+  const flagged = (instance.changedSinceApproval ?? []).filter((entry) => entry.changes?.length)
+  if (flagged.length === 0 || instance.stage.id !== instance.currentStageId || instance.isLocalWorkspace) return null
+  async function restore(change) {
+    setRestoring(change.ref)
+    try {
+      await stageSaveActions.restoreApprovedText(change)
+    } finally {
+      setRestoring(null)
+    }
+  }
+  return html`
+    <section class="changed-since-approval-panel" data-testid="changed-since-approval-panel" aria-label="Changed since approval">
+      <h2>Changed since approval</h2>
+      ${flagged.map(
+        (entry) => html`
+          <div class="changed-approval-stage" key=${entry.stageId} data-stage=${entry.stageId}>
+            <h3>${restorePanelHeading(entry)}</h3>
+            ${entry.changes.map((change) => {
+              const restorable = canRestoreChange(change, instance.modules)
+              return html`
+                <div class="changed-approval-field" key=${change.ref} data-field=${change.ref}>
+                  <h4>${changeLabel(change)}</h4>
+                  <div class="changed-approval-versions">
+                    <div class="changed-approval-version">
+                      <h5>Approved text</h5>
+                      <pre class="changed-approval-text" data-side="approved">${wordingText(change.approved) || '(empty)'}</pre>
+                    </div>
+                    <div class="changed-approval-version">
+                      <h5>Current text</h5>
+                      <pre class="changed-approval-text" data-side="current">${wordingText(change.current) || '(empty)'}</pre>
+                    </div>
+                  </div>
+                  ${restorable
+                    ? html`<button
+                        type="button"
+                        class="btn small"
+                        data-testid="restore-approved-text"
+                        disabled=${isEditingBlocked() || restoring !== null}
+                        onClick=${() => restore(change)}
+                      >
+                        ${restoring === change.ref ? 'Restoring…' : 'Restore approved text'}
+                      </button>`
+                    : html`<p class="changed-approval-note">This stage does not show ${change.moduleTitle} for editing, so its approved text cannot be restored from here.</p>`}
+                </div>
+              `
+            })}
+          </div>
+        `
+      )}
+    </section>
+  `
+}
+
 function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
   const [topSectionOpen, setTopSectionOpen] = useState(false)
   const [topListOpen, setTopListOpen] = useState(false)
@@ -4280,6 +4339,7 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
   return html`
     <main id="modules" data-view-mode=${viewMode.value}>
       <${ReopenStagePanel} instance=${instance} />
+      <${ChangedSinceApprovalPanel} instance=${instance} />
       ${advancedMode.value
         ? html`<${SyncedFieldsPanel} key=${instance.workItem ? 'linked' : 'unlinked'} instance=${instance} />`
         : null}
@@ -5065,6 +5125,8 @@ function ModuleEditorPage({ slug: routeRef }) {
         stageSave.value = { ...stageSave.peek(), phase: 'saved', message: settled ? 'Saved — merged with changes saved meanwhile' : '' }
       })
       refreshDirty()
+      // #274: a Save can clear (or raise) the "changed since approval" flag, so look at it again while it is showing.
+      if (inst.changedSinceApproval?.length) void refreshChangedSinceApproval(inst)
       setTimeout(() => {
         if (stageSave.peek().phase === 'saved') stageSave.value = { ...stageSave.peek(), phase: 'idle' }
       }, 2500)
@@ -5073,6 +5135,44 @@ function ModuleEditorPage({ slug: routeRef }) {
       stageSave.value = { ...stageSave.peek(), phase: 'error', message: `Save failed: ${err.message}` }
       return false
     }
+  }
+
+  // Re-reads which earlier approved stages are flagged "changed since approval" (ADR-0069, #274) and swaps
+  // only that into the page, so nothing the author is typing is disturbed. The flag is advisory: a failed
+  // read leaves what is showing.
+  async function refreshChangedSinceApproval(inst) {
+    try {
+      const fresh = await loadInstance(inst.slug, inst.stage.id)
+      const latest = instanceData.peek()
+      if (!latest || stageKey(latest) !== stageKey(inst)) return
+      instanceData.value = { ...latest, changedSinceApproval: fresh.changedSinceApproval ?? [] }
+    } catch {
+      // keep the flag as it was
+    }
+  }
+
+  // Restore approved text (#274, ADR-0069): puts one flagged Field's approved wording into the editor and
+  // saves it on this stage's branch. It is the ordinary stage Save, so it is checked against what a
+  // colleague saved meanwhile (ADR-0068) and asks only when you both changed the same Field. Resolves true
+  // when the wording was saved.
+  async function restoreApprovedText(change) {
+    const inst = instanceData.peek()
+    if (!inst?.stage || isEditingBlocked() || !canRestoreChange(change, inst.modules)) return false
+    const entry = registryRef.current.stageKey === stageKey(inst)
+      ? registryRef.current.entries.findLast((e) => e.moduleId === change.moduleId && e.field.id === change.fieldId)
+      : null
+    if (entry) {
+      entry.control.setValue(change.approved)
+    } else {
+      // The Field's editor is not on screen (another Artefact is selected): put the wording where the Save reads it from.
+      instanceData.value = {
+        ...inst,
+        modules: inst.modules.map((mod) =>
+          mod.id === change.moduleId ? { ...mod, fields: mod.fields.map((field) => (field.id === change.fieldId ? { ...field, value: change.approved } : field)) } : mod
+        ),
+      }
+    }
+    return saveStage()
   }
 
   // Puts every unsaved module back to what's saved: editor text, list rows,
@@ -5123,7 +5223,7 @@ function ModuleEditorPage({ slug: routeRef }) {
     }
   }
 
-  stageSaveActions = { save: saveStage, confirmLeave }
+  stageSaveActions = { save: saveStage, confirmLeave, restoreApprovedText }
 
   useEffect(() => {
     editorUrlRef.current = window.location.pathname + window.location.search

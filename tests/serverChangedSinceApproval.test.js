@@ -155,6 +155,16 @@ for (const providerId of Object.keys(PROVIDERS)) {
       )
       assert.equal(typeof instance.changedSinceApproval[0].pullRequestId, 'number')
 
+      // The editor's Restore approved text shows the approved and current wording of each flagged Field (#274).
+      const [change] = instance.changedSinceApproval[0].changes
+      assert.equal(change.ref, 'background.problem')
+      assert.equal(change.moduleId, 'background')
+      assert.equal(change.fieldId, 'problem')
+      assert.ok(soapTexts.background.includes(change.approved.trim()), 'the approved wording is what the SOAP was approved with')
+      assert.match(change.approved, /\S/)
+      assert.notEqual(change.approved, 'Reworded during HLD review.')
+      assert.equal(change.current, 'Reworded during HLD review.')
+
       // The flag is about the Instance, so the earlier stage's own tab reports it too.
       const soapView = await get(`/api/instance?slug=${SLUG}&stage=shape`)
       assert.deepEqual(soapView.changedSinceApproval.map((e) => e.stageId), ['shape'])
@@ -203,7 +213,7 @@ for (const providerId of Object.keys(PROVIDERS)) {
       assert.deepEqual((await row()).changedSinceApproval, [])
 
       await writeOnHld('background', withFieldText(soapTexts.background, 'Problem statement', 'Changed at HLD.'))
-      assert.deepEqual((await row()).changedSinceApproval, [{ stageId: 'shape', title: SHAPE.title, count: 1 }])
+      assert.deepEqual((await row()).changedSinceApproval, [{ stageId: 'shape', title: SHAPE.title, count: 1 }])    // a row is a summary: the wording is for the editor
       assert.equal((await get(`/api/instance?slug=${SLUG}`)).stage.id, HLD.id)
     })
   })
@@ -234,6 +244,7 @@ for (const providerId of Object.keys(PROVIDERS)) {
       await writeOnHld('background', withFieldText(soapTexts.background, 'Problem statement', 'Changed at HLD.'))
       const after = await post(`/api/instance/check-status?slug=${SLUG}`)
       assert.deepEqual(after.changedSinceApproval.map((e) => [e.stageId, e.count]), [['shape', 3]])
+      assert.equal(after.changedSinceApproval[0].changes, undefined, 'a status answer carries no wording')
     })
   })
 }

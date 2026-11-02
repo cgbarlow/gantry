@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { loadDefinition } from '../lib/definition.js'
-import { printedFields, changedPrintedFields, findChangedSinceApproval } from '../lib/changedSinceApproval.js'
-import { alsoReapprovesLine, changedEntryFor, changedEntryLabel, dashboardBadgeText, dashboardBadgeTitle, fieldCountLabel } from '../web/lib/changedSinceApproval.js'
+import { printedFields, changedPrintedFields, describeChangedFields, withoutWording, findChangedSinceApproval } from '../lib/changedSinceApproval.js'
+import { canRestoreChange, changeLabel, restorePanelHeading, wordingText, alsoReapprovesLine, changedEntryFor, changedEntryLabel, dashboardBadgeText, dashboardBadgeTitle, fieldCountLabel } from '../web/lib/changedSinceApproval.js'
 
 // #273, ADR-0069 — the parts of "changed since approval" that need no Provider: which Fields an earlier
 // stage's Artefacts print, what counts as a change to one, and how the flag is worded on screen. The
@@ -82,4 +82,57 @@ test('the screens word the flag the same way everywhere', () => {
   assert.equal(dashboardBadgeText(changed), 'CHANGED SINCE APPROVAL')
   assert.equal(dashboardBadgeText([]), null)
   assert.equal(dashboardBadgeTitle(changed), 'SOAP: 2 Fields; High-level Design: 1 Field')
+})
+
+// #274 — Restore approved text: the wording behind each flagged Field.
+
+test('describeChangedFields gives each flagged Field its Module, title and wording at approval and now, shaped as the editor holds it', () => {
+  const approved = new Map([
+    ['background', { problem: 'Original wording.\r\nSecond line.' }],
+    ['team-and-estimates', { 'teams-required': ['Platform', ' Security '] }],
+  ])
+  const current = new Map([
+    ['background', { problem: 'Reworded.' }],
+    ['team-and-estimates', {}],
+  ])
+  const [problem, teams] = describeChangedFields(definition, ['background.problem', 'team-and-estimates.teams-required'], approved, current)
+  assert.equal(problem.ref, 'background.problem')
+  assert.equal(problem.moduleId, 'background')
+  assert.equal(problem.fieldId, 'problem')
+  assert.equal(problem.title, definition.modules.get('background').fields.find((f) => f.id === 'problem').title)
+  assert.equal(problem.approved, 'Original wording.\nSecond line.')
+  assert.equal(problem.current, 'Reworded.')
+  assert.deepEqual(teams.approved, ['Platform', 'Security'])
+  assert.deepEqual(teams.current, [], 'a list Field with nothing saved is an empty list')
+})
+
+test('describeChangedFields reads a Module with no file at approval as empty wording', () => {
+  const [problem] = describeChangedFields(definition, ['background.problem'], new Map(), new Map([['background', { problem: 'Now written' }]]))
+  assert.equal(problem.approved, '')
+  assert.equal(problem.current, 'Now written')
+})
+
+test('withoutWording keeps the summary and drops each Field\'s wording', () => {
+  const flagged = [{ stageId: 'shape', title: 'SOAP', fields: ['background.problem'], count: 1, changes: [{ ref: 'background.problem' }] }]
+  assert.deepEqual(withoutWording(flagged), [{ stageId: 'shape', title: 'SOAP', fields: ['background.problem'], count: 1 }])
+})
+
+test('the restore panel words a flagged Field, a list Field and an empty one', () => {
+  const change = { ref: 'background.problem', moduleId: 'background', moduleTitle: 'Background', fieldId: 'problem', title: 'Problem statement' }
+  assert.equal(changeLabel(change), 'Background \u203a Problem statement')
+  assert.equal(restorePanelHeading({ title: 'SOAP', count: 2 }), 'SOAP was approved with different wording in 2 Fields')
+  assert.equal(wordingText('Some text'), 'Some text')
+  assert.equal(wordingText(['One', 'Two']), '- One\n- Two')
+  assert.equal(wordingText([]), '')
+  assert.equal(wordingText(undefined), '')
+})
+
+test('canRestoreChange needs the Field\'s Module mounted on the viewed stage and not read-only', () => {
+  const change = { moduleId: 'background', fieldId: 'problem' }
+  const mounted = [{ id: 'background', fields: [{ id: 'problem' }] }]
+  assert.equal(canRestoreChange(change, mounted), true)
+  assert.equal(canRestoreChange(change, [{ ...mounted[0], readOnly: { homeStage: null } }]), false, 'read-only here')
+  assert.equal(canRestoreChange(change, [{ id: 'other', fields: [] }]), false, 'Module not on this stage')
+  assert.equal(canRestoreChange(change, [{ id: 'background', fields: [{ id: 'x' }] }]), false, 'Field not in the Module')
+  assert.equal(canRestoreChange(change, undefined), false)
 })
