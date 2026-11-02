@@ -227,6 +227,85 @@ function RenderEngineSection() {
   `
 }
 
+// #267 (docs/adr/0070) — the Blob containers the operator declared in `GANTRY_BLOB_CONTAINERS`, read-only:
+// each one's name, URL and credential type, and whether this server can reach it right now (with the
+// reason when it can't). The server never sends a credential, so there is nothing here to hide; and an
+// architect can't add, edit or remove a container from this page, because the container belongs to the
+// deployment, not to anyone's browser. Not behind Advanced mode: a container is offered by the "+ New
+// Workspace" wizard even with it off. With nothing declared (the default) this renders nothing at all,
+// so a deployment that never set the variable looks exactly as it did.
+const BLOB_CREDENTIAL_LABELS = {
+  'connection-string': 'Connection string',
+  sas: 'SAS token',
+  'managed-identity': 'Managed identity',
+  'service-principal': 'Service principal',
+}
+
+export function BlobContainersSection() {
+  const [containers, setContainers] = useState(null) // null = loading · array = known
+  const [loadError, setLoadError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/blob-containers')
+      .then(async (res) => {
+        const body = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(body.error ?? `Failed to load Blob containers (${res.status})`)
+        return body
+      })
+      .then((body) => {
+        if (!cancelled) setContainers(Array.isArray(body.containers) ? body.containers : [])
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadError(err.message)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  if (loadError) {
+    return html`
+      <section class="settings-section" id="blob-containers">
+        <h2>Blob containers</h2>
+        <p class="error" role="alert">${loadError}</p>
+      </section>
+    `
+  }
+  if (!containers?.length) return null
+
+  return html`
+    <section class="settings-section" id="blob-containers">
+      <h2>Blob containers</h2>
+      <p class="guidance">
+        Azure Blob containers this server's operator declared in <code>GANTRY_BLOB_CONTAINERS</code>. A new
+        server workspace can be stored in one instead of on the server's disk. This list is read-only, and a
+        credential is never shown.
+      </p>
+      <div class="result-card">
+        ${containers.map(
+          (container) => html`
+            <div class="result-row blob-container" data-container=${container.name} key=${container.name}>
+              <span class="k">
+                <strong>${container.name}</strong>
+                <br />
+                <code>${container.url}</code>
+                <br />
+                ${BLOB_CREDENTIAL_LABELS[container.credentialType] ?? container.credentialType}
+              </span>
+              <span class="v">
+                ${container.reachable
+                  ? html`<span class="stamp agreed">Reachable</span>`
+                  : html`<span class="stamp error">Not reachable</span> ${container.reason ?? ''}`}
+              </span>
+            </div>
+          `
+        )}
+      </div>
+    </section>
+  `
+}
+
 // WI #386 (Feature #380 phase 6, ADR-0036) — the server library's list of library repos: any
 // number of Azure DevOps repos, read (with the server's own PAT — `GANTRY_LIBRARY_PAT`, never this
 // browser's own) and cached, unioned into the server library the Definitions page shows. Adding one
@@ -562,6 +641,7 @@ export function GlobalSettingsPage({ query }) {
       <${AdvancedModeSection} />
       <${RenderEngineSection} />
       <${AiProvidersSection} />
+      <${BlobContainersSection} />
       ${advancedMode.value ? html`<${LibraryReposSection} />` : null}
       <${ServerVersionFooter} />
     </main>

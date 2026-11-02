@@ -835,6 +835,31 @@ A malformed `GANTRY_SHARED_WORKSPACE_PATS` — invalid JSON, not a JSON object, 
 
 **Upgrading an existing deployment:** this env var name changed (see `CHANGELOG.md`) — rename it in your deployment config, or it will simply be ignored and that workspace stays unshared (an unset value is a no-op, not an error, so a stale old name fails silently rather than loudly).
 
+### Blob containers
+
+**Optionally, let server workspaces be stored in Azure Blob Storage instead of on the server's disk.** Set `GANTRY_BLOB_CONTAINERS` (`docs/adr/0070-a-server-workspace-can-be-stored-in-an-operator-declared-blob-container.md`) to a JSON array with one entry per container. Each entry gives the container's `name`, its `url` (the container itself, with no query string), and the `credentialType` Gantry uses to reach it. Any secret goes in a *separate* environment variable, and the entry names that variable in `secretEnv`:
+
+| `credentialType` | Other fields | What `secretEnv` holds | What Gantry builds |
+| --- | --- | --- | --- |
+| `connection-string` | `secretEnv` | the storage account's connection string | the account's shared key |
+| `sas` | `secretEnv` | a SAS token for the container (needs read, add, create, write, delete and list) | that token, nothing else |
+| `managed-identity` | optional `clientId` for a user-assigned identity | (no secret) | `ManagedIdentityCredential` |
+| `service-principal` | `tenantId`, `clientId`, `secretEnv` | the service principal's client secret | `ClientSecretCredential` |
+
+Gantry builds exactly the declared credential type and never `DefaultAzureCredential`, so what authenticates a request never depends on whatever else is present in the process. Render has no managed identity, so there use a service principal, a connection string or a SAS; Azure App Service and Container Apps can use managed identity (grant it **Storage Blob Data Contributor** on the container).
+
+```bash
+docker run -d \
+  --name gantry \
+  -p 3000:3000 \
+  -e GANTRY_BLOB_CONTAINERS='[{"name":"main","url":"https://myaccount.blob.core.windows.net/gantry","credentialType":"service-principal","tenantId":"<tenant-id>","clientId":"<client-id>","secretEnv":"GANTRY_BLOB_MAIN_SECRET"}]' \
+  -e GANTRY_BLOB_MAIN_SECRET='<client-secret>' \
+  --restart unless-stopped \
+  gantry
+```
+
+Unset, nothing changes. A malformed declaration, or a `secretEnv` variable that isn't set, fails startup with a single line naming the problem (the variable's name, never its value). Global Settings then lists each declared container read-only, with whether the server can reach it right now and why not if it can't; no credential is ever returned by an API response or shown on the page. This is a third server-held credential, after library repos (`GANTRY_LIBRARY_PAT_*`) and shared workspaces (`GANTRY_SHARED_WORKSPACE_PATS`): no architect holds it. The tests run against the Azurite emulator, and `@azure/storage-blob` stays at 12.32.x until Azurite accepts the newer service API versions.
+
 ### Port
 
 Inside the container Gantry always listens on `3000` (`EXPOSE 3000`, `CMD ["serve", "--port", "3000"]`). Map it to any host port with `-p`:
