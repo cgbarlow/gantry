@@ -42,9 +42,9 @@ function noTextNote(extraction) {
 }
 
 /**
- * `store` is described above. `actor` is the name stamped on uploads and removals ('' when unknown). `readOnly` hides every control that changes the list (an archived Instance). `extract(filename, bytes)` is the text reader; tests and the app use the default.
+ * `store` is described above. `actor` is the name stamped on uploads and removals ('' when unknown). `readOnly` hides every control that changes the list (an archived Instance). `commitNote` is shown under the introduction when each change is committed to a repository as it is made (an Azure DevOps or GitHub workspace, #280). `extract(filename, bytes)` is the text reader; tests and the app use the default.
  */
-export function SourceDocumentsPanel({ store, actor = '', readOnly = false, extract = extractSourceText }) {
+export function SourceDocumentsPanel({ store, actor = '', readOnly = false, commitNote = '', extract = extractSourceText }) {
   const [list, setList] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [message, setMessage] = useState(null)
@@ -165,6 +165,7 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, extr
         <p class="guidance source-documents-intro">
           Evidence this Instance's content is drawn from: briefs, requirements, meeting notes, spreadsheets, screenshots. They are kept with the Instance, separate from its images, and Gantry reads the text out of each one when you add it. Word, PowerPoint, spreadsheets, PDFs, Markdown, text and images, up to ${formatBytes(MAX_SOURCE_BYTES)} each.
         </p>
+        ${commitNote ? html`<p class="guidance source-documents-commit-note" data-testid="source-documents-commit-note">${commitNote}</p>` : null}
         ${loadError ? html`<p class="inline-error" role="alert" data-testid="source-documents-load-error">${loadError}</p>` : null}
         ${list?.warning ? html`<p class="source-documents-warning" role="status" data-testid="source-documents-warning">${list.warning}</p>` : null}
         ${readOnly

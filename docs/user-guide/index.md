@@ -143,7 +143,7 @@ The logo is stored with the instance, in its `assets/` folder as `instance-logo.
 
 A **Source document** is a file you add to an Instance as the evidence its content is drawn from: a client brief, requirements, meeting notes, an existing architecture, a spreadsheet, a screenshot. It is kept with the Instance and cited by name wherever a figure or decision came from it. You can add them before you connect any AI Provider. They are not images: the images you put into a field (see **Adding images** below) are things the content *displays*, a Source document is material it is *drawn from*, and the two are stored and managed separately. Removing one never affects the other.
 
-In the Instance editor, under the toolbar, open **Source documents** to see the list and add to it. This is available on **Local** workspaces and on **Server-hosted** workspaces that live on the Gantry server itself; the same panel for Azure DevOps and GitHub workspaces comes in a later release.
+In the Instance editor, under the toolbar, open **Source documents** to see the list and add to it. This is available on **Local** workspaces, on **Server-hosted** workspaces (whether they live on the Gantry server's disk or in a Blob container) and on **Azure DevOps** and **GitHub** workspaces. GitLab and Atlassian workspaces will have it when saving their modules is supported.
 
 - **Upload documents.** Choose one or more files. Gantry takes Word (`.docx`), PowerPoint (`.pptx`), spreadsheets (`.xlsx`, `.csv`, `.tsv`), PDFs, Markdown and text files, and images (`.png`, `.jpg`, `.gif`, `.webp`). The older `.doc`, `.ppt` and `.xls` formats aren't read: save them in the newer format first. An upload is always a new document with its own place in the list, even if it is named like one already there, so "Client brief v3" sits alongside "Client brief v2" until someone removes the older one.
 - **A document can be at most 25 MB.** A bigger file is refused with a message naming the limit, both in the browser and again on the server. Once an Instance's documents add up to more than about 100 MB, the panel shows a warning (it is a warning, not a refusal): remove the ones you no longer need.
@@ -153,6 +153,16 @@ In the Instance editor, under the toolbar, open **Source documents** to see the 
 - **Remove** deletes the file and its text. The document stays in the list under **Removed**, with who removed it and when, so anything that mentions it still shows its title.
 
 Behind the panel, each Instance keeps a `sources/` folder next to `modules/` and `assets/`, with a `sources/manifest.yaml` that records for every document its id (made from the filename, unique, and fixed for good), stored filename, title, who added it and when, its size, its text file if it has one, and who removed it and when. Filenames are cleaned to be safe as a path, with `-2` added if the name is taken. In a Local workspace this is all inside the folder you picked, so it is yours to back up like the rest; on a Server-hosted workspace it is in the Instance's folder on the server. A Local workspace sends none of it to the Gantry server, not even when you render a document.
+
+#### Source documents on Azure DevOps and GitHub workspaces
+
+On an Azure DevOps or GitHub workspace the documents are committed to the repository, with these differences from the other kinds:
+
+- **Every change is one commit, made straight away.** Adding a document (the original, its extracted text and the manifest), renaming one, **Extract text again** and **Remove** each make exactly one commit, as soon as you do them. They are not held back for the stage **Save**, and **Save** never includes them. You need write access to the repository, as for any save; without it the panel is read-only.
+- **The commit goes on the current Stage's branch**, as images (Assets) do, and the branch is started if it hasn't begun. A refused upload (too big, empty, the wrong type) makes no commit and starts no branch. A later Stage's branch is cut from the earlier Stage's branch, so it carries the documents added on the earlier Stage; they reach `main` when that Stage's Pull Request is merged.
+- **Later reads use what was committed.** The list, the download and the stored text come from the branch, so the text Gantry read when you added a document is what the AI will use; it is not read out of the original again.
+- **Two people at once are both kept.** If a colleague commits to the same branch between your reading the list and your commit landing, Gantry applies your change again on top of theirs rather than overwriting it.
+- **The size limits are the same** (25 MB a document, a warning past about 100 MB in all). The Provider's own limit for a file is 100 MB, so the 25 MB limit is Gantry's. A 25 MB upload is sent as one request, so a slow connection to your Provider can make it take a while.
 
 ### Definition versions and the Definitions page
 

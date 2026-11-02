@@ -4908,7 +4908,12 @@ const VIEW_MODE_HOTKEY = { ctrlKey: true, shiftKey: true, key: 'v' }
 // folded the old standalone Review/Sign-off panel's review and sign-off
 // functionality into that card, so this shortcut now targets it directly)
 // and briefly highlights it so the author's eye is drawn down.
-// #279 (map #238): the Source documents panel under the toolbar of a local-workspace or server-workspace Instance — the evidence an architect uploads before connecting any AI Provider. A local Instance reads and writes its own folder through the handle; a server one goes through /api/instance/sources. Azure DevOps and GitHub Instances don't have it yet (#280). The person's name stamped on an upload is the Instance's assignee, the nearest thing to an identity a local or server workspace has.
+// #279/#280 (map #238): the Source documents panel under the toolbar of a local, server, Azure DevOps or GitHub Instance — the evidence an architect uploads before connecting any AI Provider. A local Instance reads and writes its own folder through the handle; every other one goes through /api/instance/sources, which keeps them in the server's storage or, for a Provider's Instance, commits each change (one upload, rename, Extract text again or removal is one commit) to the current Stage's branch. GitLab Instances don't have it yet: they take it when their module Save lands. The person's name stamped on an upload is the Instance's assignee, the nearest thing to an identity the Instance has.
+function offersSourceDocuments(instance) {
+  if (!instance.workspaceBacked) return true
+  return Boolean(instance.workspace?.owner || instance.workspace?.organization)
+}
+
 function SourceDocumentsSection({ instance }) {
   const handle = localDirHandle.value
   const slug = instance.slug
@@ -4917,7 +4922,7 @@ function SourceDocumentsSection({ instance }) {
     return createServerSourceClient(slug, (url, init) => apiFetchForInstance(slug, url, init))
   }, [slug, instance.isLocalWorkspace, handle])
   if (!store) return null
-  return html`<div class="source-documents-wrap"><${SourceDocumentsPanel} store=${store} actor=${instance.assignee ?? ''} readOnly=${Boolean(instance.archived)} /></div>`
+  return html`<div class="source-documents-wrap"><${SourceDocumentsPanel} store=${store} actor=${instance.assignee ?? ''} readOnly=${Boolean(instance.archived) || isWriteAccessBlocked()} commitNote=${instance.workspaceBacked ? "Each upload, rename, new text read and removal is saved straight away as its own commit on this Stage's branch. It does not wait for Save." : ''} /></div>`
 }
 
 function ViewModeToolbar({
@@ -6006,7 +6011,7 @@ function ModuleEditorPage({ slug: routeRef }) {
       onClearAllFields=${clearAllFields}
       requestApprovalSlug=${advancedMode.value && instance.workspaceBacked ? instance.slug : null}
     />
-    ${instance.workspaceBacked ? null : html`<${SourceDocumentsSection} instance=${instance} />`}
+    ${offersSourceDocuments(instance) ? html`<${SourceDocumentsSection} instance=${instance} />` : null}
     <${StageScreen}
       key=${instance.stage.id}
       instance=${instance}
