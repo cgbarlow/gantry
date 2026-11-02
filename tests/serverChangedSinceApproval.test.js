@@ -1,9 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { registerInstance } from '../lib/instanceRegistry.js'
+import { createInstance } from '../lib/instance.js'
+import { writeWorkspaceJson } from '../lib/workspaceDirectory.js'
 import { loadDefinition } from '../lib/definition.js'
 import { createGitHubClient } from '../lib/githubClient.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
@@ -12,6 +14,8 @@ import { resolveStageBranch } from '../lib/stageBranch.js'
 import {
   withRunningServerForProvider,
   withRunningExamplesServer,
+  withRunningServer,
+  withScratchInstances,
   basicAuthHeader,
   GITHUB_OWNER,
   GITHUB_REPOSITORY,
@@ -256,5 +260,34 @@ test('a local workspace never shows the flag', async () => {
     assert.deepEqual(instance.changedSinceApproval, [])
     const rows = await (await fetch(`${base}/api/instances`)).json()
     for (const row of rows) assert.equal(row.changedSinceApproval, undefined, `local row "${row.slug}" has no flag`)
+  })
+})
+
+// A server workspace (a directory under the serve box's workspaces root, with its own workspace.json) is
+// neither a local workspace nor a remote one: it has no Pull Requests, so no approval to have changed
+// since. This one sits at HLD with content in a Field both SOAP and HLD print, so a flag would be
+// plausible if the rule leaked in.
+test('a server workspace never shows the flag, on the Instance or on its dashboard row', async () => {
+  await withScratchInstances(async (instancesDir) => {
+    writeWorkspaceJson(instancesDir, 'team-ws', { name: 'Team workspace', kind: 'local', createdAt: new Date().toISOString() })
+    const workspaceDir = join(instancesDir, 'team-ws')
+    createInstance('design', 'server-ws-initiative', { instancesDir: workspaceDir })
+    const instanceYaml = join(workspaceDir, 'server-ws-initiative', 'instance.yaml')
+    writeFileSync(instanceYaml, readFileSync(instanceYaml, 'utf8').replace(/^stage: .*$/m, 'stage: hld-define'))
+    writeFileSync(join(workspaceDir, 'server-ws-initiative', 'modules', 'background.md'), exampleModuleText('background'))
+
+    await withRunningServer({ instancesDir }, async (base) => {
+      const instance = await (await fetch(`${base}/api/instance?slug=server-ws-initiative`)).json()
+      assert.equal(instance.stage.id, 'hld-define')
+      assert.equal(instance.workspaceBacked, false)
+      assert.deepEqual(instance.changedSinceApproval, [])
+
+      const rows = await (await fetch(`${base}/api/instances`)).json()
+      const row = rows.find((r) => r.slug === 'server-ws-initiative')
+      assert.ok(row, 'the server workspace Instance is listed')
+      assert.equal(row.workspace.kind, 'directory', 'the row is a server workspace row, not a remote one')
+      assert.equal(row.workspace.id, 'team-ws')
+      assert.equal(row.changedSinceApproval, undefined)
+    })
   })
 })

@@ -287,27 +287,41 @@ test('check_status merges the Pull Request and advances the stage once approved'
   }
 })
 
-test('check_status hands the changedSinceApproval list through, and says what it is', async () => {
-  const changedSinceApproval = [
-    { stageId: 'shape', title: 'SOAP', pullRequestId: 3, approvalCommit: 'abc123', fields: ['background.problem'], count: 1 },
-  ]
-  const fetch = stubFetch(
-    providerWorkspaceStub('ws-1', ({ url, method }) => {
-      if (url.pathname === '/api/instance/check-status' && method === 'POST') {
-        return { status: 200, body: { merged: false, review: { state: 'pending' }, changedSinceApproval } }
+// #273: the handler adds nothing and drops nothing, whichever Provider the workspace is on, so each Provider's
+// workspace is exercised with the entry shape the route returns (stage, approving Pull Request and commit,
+// the module.field references, the count), plus the empty list a local or server workspace's route returns.
+for (const provider of ['azure-devops', 'github']) {
+  for (const [label, changedSinceApproval] of [
+    [
+      'carries every flagged stage and Field',
+      [
+        { stageId: 'shape', title: 'SOAP', pullRequestId: 3, approvalCommit: 'abc123', fields: ['background.problem'], count: 1 },
+        { stageId: 'hld-define', title: 'HLD', pullRequestId: 9, approvalCommit: 'def456', fields: ['dependencies.dependencies-overview', 'open-questions.questions'], count: 2 },
+      ],
+    ],
+    ['carries an empty list when nothing is flagged', []],
+  ]) {
+    test(`check_status on a ${provider} workspace ${label}, and says what it is`, async () => {
+      const fetch = stubFetch(({ url, method, body }) => {
+        if (url.pathname === '/api/instance/workspace') return { status: 200, body: { workspaceId: 'ws-1', scope: 'ws-1' } }
+        if (url.pathname === '/api/workspaces') return { status: 200, body: [{ id: 'ws-1', provider }] }
+        if (url.pathname === '/api/server-workspaces') return { status: 200, body: [] }
+        if (url.pathname === '/api/instance/check-status' && method === 'POST') {
+          return { status: 200, body: { merged: false, review: { state: 'pending' }, changedSinceApproval } }
+        }
+        return undefined
+      })
+      try {
+        const gantryClient = createGantryClient({ baseUrl: BASE_URL, workspacePats: { 'ws-1': 'secret-pat' } })
+        const result = await checkStatusTool.handler({ slug: 'provider-instance' }, { gantryClient })
+        assert.deepEqual(JSON.parse(result.content[0].text).changedSinceApproval, changedSinceApproval)
+        assert.match(checkStatusTool.description, /changedSinceApproval/)
+      } finally {
+        fetch.restore()
       }
-      return undefined
     })
-  )
-  try {
-    const gantryClient = createGantryClient({ baseUrl: BASE_URL, workspacePats: { 'ws-1': 'secret-pat' } })
-    const result = await checkStatusTool.handler({ slug: 'ado-instance' }, { gantryClient })
-    assert.deepEqual(JSON.parse(result.content[0].text).changedSinceApproval, changedSinceApproval)
-    assert.match(checkStatusTool.description, /changedSinceApproval/)
-  } finally {
-    fetch.restore()
   }
-})
+}
 
 test('check_status reports a still-pending review without merging', async () => {
   const fetch = stubFetch(
