@@ -2046,6 +2046,13 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .ai-provider-default-stamp { margin-left: 4px; }
 .ai-provider-test-row td { border-bottom: var(--hairline) solid var(--line); padding-top: 0; font-size: 12px; }
 .ai-provider-test-ok { color: var(--text-muted); }
+.ai-provider-test-summary { margin: 4px 0; }
+.ai-provider-test-steps { margin: 2px 0 6px; padding-left: 18px; }
+.ai-provider-test-steps li[data-ok="false"] { color: var(--stamp-error-bg); }
+.ai-recovery-prompt { margin: 4px 0 8px; }
+.ai-recovery-prompt p { margin: 0 0 6px; }
+.ai-recovery-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ai-recovery-key { max-width: 280px; }
 .ai-provider-dialog { width: 600px; }
 .ai-provider-form { display: flex; flex-direction: column; gap: 4px; }
 .ai-provider-form .field-label { margin-top: 10px; }

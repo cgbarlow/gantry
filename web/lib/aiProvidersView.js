@@ -1,6 +1,9 @@
 // #277 (parent #238, docs/adr/0061): the Preact pieces for AI Providers on Global Settings: the table
-// (Name, Type, Model, Question cards, Status; Test, Edit, Delete) and the add/edit dialog. The list itself
-// and every rule about it live in web/lib/aiProviders.js; this file only draws them.
+// (Name, Type, Model, Question cards, Reads images, Status; Test, Edit, Delete) and the add/edit dialog. The list
+// itself and every rule about it live in web/lib/aiProviders.js; this file only draws them.
+// #278: Test runs the full Test connection (web/lib/aiClient.js) and keeps the result with the AI Provider. A
+// rejected key shows an inline key prompt and the test is resent once a key is entered; a rate limit or no
+// credit shows Retry. `AiRecoveryPrompt` is the same prompt the Interview page puts in the chat.
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import {
@@ -11,6 +14,7 @@ import {
   aiProviderType,
   aiProviderStatusLabel,
   aiProviderQuestionCardsLabel,
+  aiProviderReadsImagesLabel,
   addAiProvider,
   updateAiProvider,
   deleteAiProvider,
@@ -22,6 +26,7 @@ import {
   fetchOllamaContextWindow,
   contextWindowSource,
 } from './aiProviders.js'
+import { testAndStore } from './aiClient.js'
 
 const MODEL_FETCH_DEBOUNCE_MS = 500
 
@@ -314,35 +319,84 @@ export function AiProviderDialog({ provider, onClose }) {
   `
 }
 
+const PROGRESS_LABELS = {
+  key: 'Checking the key…',
+  model: 'Checking the model…',
+  cards: 'Checking question cards…',
+  images: 'Checking whether it reads images…',
+}
+
+/**
+ * The inline prompt for a call that failed in a way a person can fix (#244 item 7): a rejected key shows a key
+ * field and resends once it is entered; a rate limit or no credit shows Retry. Nothing is lost while it waits.
+ */
+export function AiRecoveryPrompt({ kind, message, onKey, onRetry, onCancel }) {
+  const [key, setKey] = useState('')
+  return html`
+    <div class="ai-recovery-prompt" role="alert" data-kind=${kind}>
+      <p class="inline-error">${message}</p>
+      ${kind === 'key'
+        ? html`
+            <div class="ai-recovery-row">
+              <input
+                type="password"
+                class="wizard-input ai-recovery-key"
+                autocomplete="off"
+                aria-label="New key"
+                placeholder="Enter a key"
+                value=${key}
+                onInput=${(e) => setKey(e.currentTarget.value)}
+                onKeyDown=${(e) => e.key === 'Enter' && key.trim() && onKey(key.trim())}
+              />
+              <button type="button" class="btn small primary ai-recovery-submit" disabled=${!key.trim()} onClick=${() => onKey(key.trim())}>Use this key and resend</button>
+              <button type="button" class="btn small ghost" onClick=${onCancel}>Cancel</button>
+            </div>
+          `
+        : html`
+            <div class="ai-recovery-row">
+              <button type="button" class="btn small primary ai-recovery-retry" onClick=${onRetry}>Retry</button>
+              <button type="button" class="btn small ghost" onClick=${onCancel}>Cancel</button>
+            </div>
+          `}
+    </div>
+  `
+}
+
 /** The AI Providers section of Global Settings: the table, with Add, Test, Edit and Delete. */
 export function AiProvidersSection() {
   const [dialog, setDialog] = useState(null) // null | { provider: AiProvider | null }
   const [confirmDelete, setConfirmDelete] = useState(null)
-  const [testing, setTesting] = useState(null)
-  const [testMessages, setTestMessages] = useState({}) // { [id]: { ok, text } }
+  const [testing, setTesting] = useState(null) // { id, step } while a test runs
+  const [prompt, setPrompt] = useState(null) // { id, kind, message, resolve } while a test waits for a person
+  const [testMessages, setTestMessages] = useState({}) // { [id]: { ok, text, steps } }
   const list = aiProviders.value
 
   async function runTest(provider) {
-    setTesting(provider.id)
+    const id = provider.id
+    setTestMessages((m) => ({ ...m, [id]: undefined }))
+    setTesting({ id, step: 'key' })
+    const ask = (kind) => (err) =>
+      new Promise((resolve) => {
+        setPrompt({ id, kind, message: err.message, resolve })
+      })
     try {
-      const models = await fetchModels(provider)
-      const found = provider.model && models.some((m) => m.id === provider.model)
-      setTestMessages((m) => ({
-        ...m,
-        [provider.id]: {
-          ok: !provider.model || found,
-          text: !provider.model
-            ? `Reached ${provider.name}: ${models.length} model${models.length === 1 ? '' : 's'} listed. Choose a model.`
-            : found
-              ? `Reached ${provider.name}; the key was accepted and ${provider.model} exists.`
-              : `Reached ${provider.name}, but it doesn’t list a model called ${provider.model}.`,
-        },
-      }))
+      const result = await testAndStore(id, {
+        onProgress: (step) => setTesting({ id, step }),
+        handlers: { askForKey: ask('key'), askToRetry: ask('retry') },
+      })
+      setTestMessages((m) => ({ ...m, [id]: { ok: result.status === 'passed', text: result.message, steps: result.steps } }))
     } catch (e) {
-      setTestMessages((m) => ({ ...m, [provider.id]: { ok: false, text: e.message } }))
+      setTestMessages((m) => ({ ...m, [id]: { ok: false, text: e.message, steps: [] } }))
     } finally {
       setTesting(null)
+      setPrompt(null)
     }
+  }
+
+  function answerPrompt(value) {
+    const waiting = prompt
+    setPrompt(null)
+    waiting?.resolve(value)
   }
 
   return html`
@@ -358,13 +412,15 @@ export function AiProvidersSection() {
         : html`
             <table class="ai-provider-table">
               <thead>
-                <tr><th>Name</th><th>Type</th><th>Model</th><th>Question cards</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr>
+                <tr><th>Name</th><th>Type</th><th>Model</th><th>Question cards</th><th>Reads images</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr>
               </thead>
               <tbody>
                 ${list.map((p) => {
                   const status = aiProviderStatusLabel(p)
                   const typeInfo = aiProviderType(p.type)
                   const message = testMessages[p.id]
+                  const running = testing?.id === p.id
+                  const waiting = prompt?.id === p.id ? prompt : null
                   return html`
                     <tr key=${p.id} data-ai-provider=${p.name}>
                       <td>
@@ -374,6 +430,7 @@ export function AiProvidersSection() {
                       <td>${typeInfo?.label ?? p.type}${p.runsOn ? html` <span class="ai-provider-runs-on-label">(${RUNS_ON[p.runsOn].toLowerCase()})</span>` : null}</td>
                       <td>${p.model || html`<span class="ai-provider-none">Not chosen</span>`}</td>
                       <td>${aiProviderQuestionCardsLabel(p)}</td>
+                      <td>${aiProviderReadsImagesLabel(p)}</td>
                       <td><span class=${'stamp ' + status.tone}>${status.label}</span></td>
                       <td>
                        <div class="ai-provider-actions">
@@ -384,7 +441,7 @@ export function AiProvidersSection() {
                               <button type="button" class="btn small ghost" onClick=${() => setConfirmDelete(null)}>Keep</button>
                             `
                           : html`
-                              <button type="button" class="btn small ghost" disabled=${testing === p.id} onClick=${() => runTest(p)}>${testing === p.id ? 'Testing…' : 'Test'}</button>
+                              <button type="button" class="btn small ghost" disabled=${Boolean(testing)} onClick=${() => runTest(p)}>${running ? 'Testing…' : 'Test'}</button>
                               <button type="button" class="btn small ghost" onClick=${() => setDialog({ provider: p })}>Edit</button>
                               ${p.isDefault ? null : html`<button type="button" class="btn small ghost" onClick=${() => setDefaultAiProvider(p.id)}>Make Default</button>`}
                               <button type="button" class="btn small ghost" onClick=${() => setConfirmDelete(p.id)}>Delete</button>
@@ -392,9 +449,39 @@ export function AiProvidersSection() {
                       </div>
                       </td>
                     </tr>
-                    ${message
-                      ? html`<tr key=${p.id + '-test'} class="ai-provider-test-row"><td colspan="6" role="status" class=${message.ok ? 'ai-provider-test-ok' : 'inline-error'}>${message.text}</td></tr>`
-                      : null}
+                    ${waiting
+                      ? html`
+                          <tr key=${p.id + '-prompt'} class="ai-provider-test-row ai-provider-prompt-row">
+                            <td colspan="7">
+                              <${AiRecoveryPrompt}
+                                kind=${waiting.kind}
+                                message=${waiting.message}
+                                onKey=${(key) => {
+                                  updateAiProvider(p.id, { key })
+                                  answerPrompt(true)
+                                }}
+                                onRetry=${() => answerPrompt(true)}
+                                onCancel=${() => answerPrompt(false)}
+                              />
+                            </td>
+                          </tr>
+                        `
+                      : running
+                        ? html`<tr key=${p.id + '-progress'} class="ai-provider-test-row"><td colspan="7" role="status" class="ai-provider-test-ok">${PROGRESS_LABELS[testing.step] ?? 'Testing…'}</td></tr>`
+                        : message
+                          ? html`
+                              <tr key=${p.id + '-test'} class="ai-provider-test-row">
+                                <td colspan="7" role="status" class=${message.ok ? 'ai-provider-test-ok' : 'inline-error'}>
+                                  <p class="ai-provider-test-summary">${message.text}</p>
+                                  ${message.steps?.length
+                                    ? html`<ul class="ai-provider-test-steps">
+                                        ${message.steps.map((step) => html`<li key=${step.id} data-step=${step.id} data-ok=${String(step.ok)}><strong>${step.label}.</strong> ${step.detail}</li>`)}
+                                      </ul>`
+                                    : null}
+                                </td>
+                              </tr>
+                            `
+                          : null}
                   `
                 })}
               </tbody>

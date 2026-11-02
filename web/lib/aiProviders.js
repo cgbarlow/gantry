@@ -97,7 +97,7 @@ export function normaliseAiProvider(raw) {
       reasoningEffort: REASONING_EFFORTS.includes(advanced.reasoningEffort) ? advanced.reasoningEffort : '',
     },
     isDefault: raw?.isDefault === true,
-    // The result of the last Test connection (the next ticket writes it); null means untested.
+    // The result of the last Test connection (web/lib/aiClient.js writes it); null means untested.
     test: raw?.test && typeof raw.test === 'object' ? raw.test : null,
   }
 }
@@ -191,12 +191,33 @@ export function deleteAiProvider(id) {
   commit(aiProviders.value.filter((p) => p.id !== id))
 }
 
-/** What the table's Status column says. The next ticket's Test connection stores the result. */
+/** What the table's Status column says. Test connection stores the result. */
 export function aiProviderStatusLabel(provider) {
   const status = provider.test?.status
   if (status === 'passed') return { label: 'Ready', tone: 'agreed' }
   if (status === 'failed') return { label: 'Failed', tone: 'error' }
   return { label: 'Untested', tone: 'draft' }
+}
+
+/**
+ * Stores a Test connection result with its AI Provider (#278). Written only if the Type, Address and Model are
+ * still what they were when the test began, so a result for an AI Provider the architect has since edited is
+ * dropped rather than shown against the wrong settings. Returns the updated AI Provider, or null.
+ */
+export function setAiProviderTest(id, result, tested) {
+  const current = getAiProvider(id)
+  if (!current) return null
+  if (tested && changeMarksUntested(tested, current)) return null
+  commit(aiProviders.value.map((p) => (p.id === id ? { ...p, test: result } : p)))
+  return getAiProvider(id)
+}
+
+/** What the table's Reads images column says. */
+export function aiProviderReadsImagesLabel(provider) {
+  const reads = provider.test?.readsImages
+  if (reads === true) return 'Yes'
+  if (reads === false) return 'No'
+  return '—'
 }
 
 /** What the table's Question cards column says. */
@@ -264,12 +285,16 @@ export function validateAiProviderDraft(draft, others = []) {
 
 /** Thrown for a call that failed in a way the architect can act on. `code` is stable; `message` is for people. */
 export class AiProviderError extends Error {
-  constructor(code, message, status) {
+  constructor(code, message, status, { retryAfter = null } = {}) {
     super(message)
     this.code = code
     this.status = status
+    this.retryAfter = retryAfter
   }
 }
+
+/** The codes a person can fix mid-call: a rejected key (enter another), no credit left or a rate limit (retry). */
+export const RECOVERABLE_CODES = ['key-rejected', 'rate-limited', 'out-of-credit']
 
 /** True when the browser calls this AI Provider itself: a local model that runs on this computer. */
 export function callsFromBrowser(provider) {
@@ -387,12 +412,13 @@ export function blockedLocalMessage(provider, origin) {
  * relay, which forwards it and never stores the key. The relay answers its own refusals as JSON with a
  * `message`, which `readJsonOrThrow` surfaces.
  */
-export async function callAiProvider(provider, request, { fetchImpl = globalThis.fetch, origin = globalThis.location?.origin } = {}) {
+export async function callAiProvider(provider, request, { fetchImpl = globalThis.fetch, origin = globalThis.location?.origin, signal } = {}) {
   const wireBody = request.body === undefined ? undefined : typeof request.body === 'string' ? request.body : JSON.stringify(request.body)
   if (callsFromBrowser(provider)) {
     try {
-      return await fetchImpl(request.url, { method: request.method, headers: request.headers, body: wireBody })
-    } catch {
+      return await fetchImpl(request.url, { method: request.method, headers: request.headers, body: wireBody, signal })
+    } catch (err) {
+      if (signal?.aborted) throw err
       throw new AiProviderError('blocked', blockedLocalMessage(provider, origin))
     }
   }
@@ -402,22 +428,76 @@ export async function callAiProvider(provider, request, { fetchImpl = globalThis
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: request.url, method: request.method, headers: request.headers, body: wireBody }),
+      signal,
     })
-  } catch {
+  } catch (err) {
+    if (signal?.aborted) throw err
     throw new AiProviderError('relay-unreachable', 'Could not reach the Gantry server to make this call.')
   }
   return res
 }
 
-async function readJsonOrThrow(res, provider) {
-  const body = await res.json().catch(() => null)
-  if (res.ok) return body
+const OUT_OF_CREDIT = /credit balance|insufficient[ _](funds|credit|quota|balance)|out of credits?|payment required|billing|exceeded your current quota|add (more )?credits?/i
+
+function errorCodeFromBody(body) {
+  if (!body || typeof body !== 'object') return ''
+  const e = body.error
+  if (e && typeof e === 'object') return String(e.code ?? e.type ?? '')
+  return typeof e === 'string' ? e : ''
+}
+
+/**
+ * Turns a failed answer from an AI Provider into the `AiProviderError` that says what to do (#278):
+ *   key-rejected  401/403, or an `authentication_error`           -> ask for a key and resend
+ *   out-of-credit 402, or a credit/quota message on 400/402/429  -> offer Retry
+ *   rate-limited  429, 503, 529 and "overloaded"                  -> offer Retry
+ *   address-refused  the relay's own refusal of a private address
+ *   model-not-found  404 or a "model ... not found" message
+ *   failed        anything else
+ * `status` may be 0 when the failure arrived inside a stream, where only the body's error type is known.
+ */
+export function classifyFailure(status, body, provider, { retryAfter = null } = {}) {
   const detail = errorMessageFromBody(body)
-  if (res.status === 401 || res.status === 403) {
-    throw new AiProviderError('key-rejected', `${provider.name || provider.type} rejected the key${detail ? `: ${detail}` : '.'}`, res.status)
+  const code = errorCodeFromBody(body)
+  const name = provider?.name || provider?.type || 'The AI Provider'
+  const creditSaid = OUT_OF_CREDIT.test(`${detail ?? ''} ${code}`)
+  if (code === 'ai_address_refused') return new AiProviderError('address-refused', detail, status)
+  if (status === 401 || status === 403 || /authentication_error|permission_error|invalid_api_key/.test(code)) {
+    return new AiProviderError('key-rejected', `${name} rejected the key${detail ? `: ${detail}` : '.'}`, status)
   }
-  if (body?.error === 'ai_address_refused') throw new AiProviderError('address-refused', detail, res.status)
-  throw new AiProviderError('failed', detail ?? `The AI Provider answered ${res.status}.`, res.status)
+  if (status === 402 || ((status === 400 || status === 429 || status === 0) && creditSaid)) {
+    return new AiProviderError('out-of-credit', `${name} says there is no credit left${detail ? `: ${detail}` : '.'} Add credit with them, then retry.`, status)
+  }
+  if (status === 429 || status === 503 || status === 529 || /rate_limit|overloaded/.test(code)) {
+    const wait = retryAfter ? ` Try again in about ${retryAfter} second${retryAfter === 1 ? '' : 's'}.` : ''
+    return new AiProviderError('rate-limited', `${name} is limiting requests right now${detail ? `: ${detail}` : '.'}${wait}`, status, { retryAfter })
+  }
+  if (status === 404 || code === 'model_not_found' || (/model/i.test(detail ?? '') && /not found|does not exist|no such/i.test(detail ?? ''))) {
+    return new AiProviderError('model-not-found', detail ?? `${name} doesn’t have that model.`, status)
+  }
+  return new AiProviderError('failed', detail ?? `The AI Provider answered ${status}.`, status)
+}
+
+function retryAfterSeconds(res) {
+  const raw = res?.headers?.get?.('retry-after')
+  const n = raw === null || raw === undefined ? NaN : Number(raw)
+  return Number.isFinite(n) && n >= 0 ? Math.ceil(n) : null
+}
+
+/** Reads a non-OK `fetch` Response into the `AiProviderError` it stands for. */
+export async function failureFromResponse(res, provider) {
+  let body = null
+  try {
+    body = typeof res.text === 'function' ? JSON.parse(await res.text()) : await res.json()
+  } catch {
+    // a non-JSON error page: classified from the status alone
+  }
+  return classifyFailure(res.status, body, provider, { retryAfter: retryAfterSeconds(res) })
+}
+
+async function readJsonOrThrow(res, provider) {
+  if (res.ok) return res.json().catch(() => null)
+  throw await failureFromResponse(res, provider)
 }
 
 /**
@@ -425,13 +505,20 @@ async function readJsonOrThrow(res, provider) {
  * type wants one) to be filled in. Throws an `AiProviderError` whose message says what to do.
  */
 export async function fetchModels(provider, options = {}) {
+  return (await fetchModelsRaw(provider, options)).models
+}
+
+/** Like `fetchModels`, but also returns the AI Provider's own answer (`body`), which Test connection reads hints from. */
+export async function fetchModelsRaw(provider, options = {}) {
   const res = await callAiProvider(provider, modelsRequest(provider), options)
   if (!res.ok && provider.type === 'lmstudio' && (res.status === 404 || res.status === 405)) {
     // An older LM Studio without the native listing: fall back to the OpenAI-style one (no context windows).
     const fallback = await callAiProvider(provider, { url: `${stripTrailing(provider.address)}/models`, method: 'GET', headers: authHeaders(provider) }, options)
-    return parseModels('custom', await readJsonOrThrow(fallback, provider))
+    const body = await readJsonOrThrow(fallback, provider)
+    return { models: parseModels('custom', body), body, parsedAs: 'custom' }
   }
-  return parseModels(provider.type, await readJsonOrThrow(res, provider))
+  const body = await readJsonOrThrow(res, provider)
+  return { models: parseModels(provider.type, body), body, parsedAs: provider.type }
 }
 
 /** The context window Ollama states for one model, or null when it doesn't say. */

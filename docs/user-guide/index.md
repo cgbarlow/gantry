@@ -503,7 +503,7 @@ An **AI Provider** is the outside AI service that reads an Instance's source mat
 
 They belong to your **browser**, not to a Workspace or to the Gantry server. Like a Workspace PAT, the key is kept in this browser and sent with each request that needs it. Gantry's server passes the request on to the AI Provider and never stores or logs the key. This also means you set your AI Providers up again in another browser.
 
-The table lists each AI Provider's **Name**, **Type**, **Model**, **Question cards** and **Status**, with **Test**, **Edit** and **Delete** beside it. There is no on/off switch: delete an AI Provider you no longer want. One AI Provider is marked **Default**, and exactly one always is: the first one you add, until you use **Make Default** on another. Deleting the Default hands it to the next AI Provider in the list.
+The table lists each AI Provider's **Name**, **Type**, **Model**, **Question cards**, **Reads images** and **Status**, with **Test**, **Edit** and **Delete** beside it. There is no on/off switch: delete an AI Provider you no longer want. One AI Provider is marked **Default**, and exactly one always is: the first one you add, until you use **Make Default** on another. Deleting the Default hands it to the next AI Provider in the list.
 
 **Add AI Provider** opens a dialog:
 
@@ -513,7 +513,33 @@ The table lists each AI Provider's **Name**, **Type**, **Model**, **Question car
 - **Temperature** and **Max tokens**.
 - **Advanced**: top_p, top_k, min_p, frequency and presence penalties, stop sequences, reasoning effort, and **Context window**. The context window is how much the model can read at once, and Gantry uses it to choose between putting the whole document pack in the prompt and giving the AI a catalogue to look things up in. Gantry fills it in where the AI Provider says (Anthropic, OpenRouter, Ollama and LM Studio) and uses a default otherwise. You can always change it, and once you have, Gantry leaves your number alone.
 
-Changing an AI Provider's **Type**, **Address** or **Model** marks it **Untested**. **Test** checks that the AI Provider can be reached, that the key is accepted and that the model exists.
+Changing an AI Provider's **Type**, **Address** or **Model** marks it **Untested**. Changing only its name, key or settings such as temperature leaves the last result alone.
+
+#### Test connection
+
+**Test** runs four checks, in order, and lists what each found under the AI Provider's row:
+
+1. **Key accepted.** The AI Provider answered and did not reject the key.
+2. **Model exists.** The model you chose is one the AI Provider lists. (Some custom services don't list their models; for those Gantry checks the model with the calls below.)
+3. **Question cards.** Whether the model can ask you questions as cards. See below.
+4. **Reads images.** Whether the model can read a picture, so Source documents that are images can be sent to it. Where the AI Provider says so itself (Anthropic, OpenRouter, Ollama and LM Studio) Gantry believes it; otherwise it shows the model a small picture and asks what colour it is. A model that can't read images still passes: pictures are simply left out when you use it.
+
+The results are kept with the AI Provider and shown in the table as **Question cards**, **Reads images** and **Status** (**Ready**, **Failed** or **Untested**). You don't have to press Test before using an AI Provider: an untested one is tested automatically when an AI interview session starts.
+
+**Question cards** are how the AI asks you questions in the AI interview: each has two to four choices, the AI's recommendation (one of them) and often the Source document it is based on. There are two ways a model can produce them, and Test shows which one yours uses:
+
+- **Native.** The model asks for a card through a tool call, the reliable way. Gantry checks every card itself. If the AI sends one that isn't valid (too few or too many choices, a recommendation that isn't one of them, or a Source document that doesn't exist) Gantry sends it back to the AI once to correct, and shows the corrected card.
+- **Text fallback.** For a model that doesn't use tools, Gantry asks it to write its questions in a fixed format in the reply, and reads them from there into the same cards. If a reply can't be read that way, it is shown as ordinary chat and you answer in your own words. Gantry never refuses a model for this.
+
+A card appears only when it is complete; until then you see "preparing questions…".
+
+#### When a call fails part-way
+
+Nothing is lost when an AI call fails, because only a stage summary you have confirmed is ever saved.
+
+- **The key is rejected.** Gantry stops and shows an inline prompt with a key field. Enter a key and the same request is sent again. The new key becomes the AI Provider's key.
+- **You've run out of credit, or the AI Provider is limiting requests.** Gantry shows the AI Provider's message and a **Retry** button. Add credit or wait a moment, then press Retry.
+- **Anything else** (an unreachable address, an unknown model) is shown with the reason, and the AI Provider's Status shows **Failed** after a Test.
 
 #### Models that run on your own computer
 

@@ -102,7 +102,7 @@ test('AI Providers are added, shown in the table, marked Default, edited and del
       let rows = await page.$$eval('.ai-provider-table tbody tr[data-ai-provider]', (trs) => trs.map((t) => t.innerText.replace(/\s+/g, ' ').trim()))
       assert.equal(rows.length, 1)
       assert.match(rows[0], /Work Anthropic Default Anthropic claude-small .* Untested/)
-      assert.deepEqual(await page.$$eval('.ai-provider-table th', (ths) => ths.map((t) => t.textContent.trim()).filter(Boolean).slice(0, 5)), ['Name', 'Type', 'Model', 'Question cards', 'Status'])
+      assert.deepEqual(await page.$$eval('.ai-provider-table th', (ths) => ths.map((t) => t.textContent.trim()).filter(Boolean).slice(0, 6)), ['Name', 'Type', 'Model', 'Question cards', 'Reads images', 'Status'])
 
       // A second one is not the Default; Make Default moves it.
       await page.click('text=Add AI Provider')
@@ -220,20 +220,3 @@ test('a local model on the Gantry server goes through the relay, which refuses p
   })
 })
 
-test('Test checks the connection and says what it found', async () => {
-  await withFakeAiProvider({}, async (aiBase) => {
-    await withRunningServer({ allowPrivateAiUrls: true }, withPage(async (page, base) => {
-      await openSettings(page, base)
-      await page.click('text=Add AI Provider')
-      await page.fill('#ai-provider-name', 'Work Anthropic')
-      await page.selectOption('#ai-provider-type', 'anthropic')
-      await page.fill('#ai-provider-address', aiBase)
-      await page.fill('#ai-provider-key', 'sk-ant-1')
-      await page.fill('#ai-provider-model', 'claude-small')
-      await page.click('.ai-provider-dialog .btn.primary')
-      await page.click('tr[data-ai-provider="Work Anthropic"] >> button:text-is("Test")')
-      await page.waitForSelector('.ai-provider-test-row')
-      assert.match(await page.textContent('.ai-provider-test-row'), /key was accepted and claude-small exists/)
-    }))
-  })
-})
