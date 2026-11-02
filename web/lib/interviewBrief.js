@@ -48,6 +48,7 @@ import { pagesSummary } from './interviewSources.js'
 import { currentLogEntries } from './decisionsLog.js'
 import { glossarySeed, openQuestionsToCarry, standardRoles, standardRolesLines, termChoices } from './interviewStandard.js'
 import { effectiveTargetSize, fieldTargetWords, targetSizeLabel } from './targetSize.js'
+import { reapprovalNames, reapprovalOf } from './interviewReapproval.js'
 
 /** The Source documents go in whole while the pack is at most this share of the model's context window. */
 export const SOURCES_WHOLE_PACK_SHARE = 0.5
@@ -336,7 +337,7 @@ function sourcesPart({ sources, contextWindow, readerTool, access }) {
  * @param {boolean} [input.readerTool]   whether a catalogue can be read from (the `read_source_document` tool of #292)
  * @param {object} [input.sourceAccess]  `{ [id]: { how: 'text'|'attach'|'unreadable', kind, reason?, note? } }` from `planSourceAccess` (#292); without it a document with no text is simply listed
  */
-export function buildInterviewBrief({ definition, stageId, artefactId, size, saved, decisions, earlierDecisions = [], sources, skills, contextWindow, readerTool = false, sourceAccess }) {
+export function buildInterviewBrief({ definition, stageId, artefactId, size, saved, decisions, earlierDecisions = [], sources, skills, contextWindow, readerTool = false, sourceAccess, approvedPrinted = {} }) {
   const stage = (definition?.stages ?? []).find((s) => s.id === stageId)
   if (!stage) throw new Error(`The Definition has no Stage "${stageId}" to interview for`)
   if (!skills?.skills?.length) throw new Error('The interview skills are not loaded')
@@ -435,6 +436,11 @@ export function buildInterviewBrief({ definition, stageId, artefactId, size, sav
         fieldLines.push(`  - Options (offer only these${field.multiple ? '; more than one may be chosen' : ''}): ${field.options.map((o) => `"${o}"`).join(', ')}${field.default !== undefined ? `. Default: "${field.default}"` : ''}`)
       }
       if (field.guidance) fieldLines.push(`  - Guidance: ${String(field.guidance).trim().replace(/\n+/g, '\n    ')}`)
+      // #300 (ADR-0069): approved content. Gantry holds a draft of it behind a card that names the re-approval; the AI is told so it does not rewrite it lightly.
+      const approvedBy = reapprovalOf(approvedPrinted, `${mod.id}.${field.id}`)
+      if (approvedBy.length) {
+        fieldLines.push(`  - Approved content: ${reapprovalNames(approvedBy)} is approved and prints this Field. Change it only if the architect's answers or Source documents truly require it: Gantry then asks the architect on a card that says ${reapprovalNames(approvedBy)} needs re-approval with this Stage, and the Field stays as approved unless they choose the change.`)
+      }
       fieldIndex.push({ module: mod.id, field: field.id, type: field.type ?? 'markdown', required, wordBudget: words })
     }
     fieldLines.push('')

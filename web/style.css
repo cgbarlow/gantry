@@ -2348,5 +2348,7 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .out-of-date-banner li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 3px 0; }
 .out-of-date-banner .ood-fields { color: var(--text-muted); font-size: 12px; }
 .out-of-date-mark { margin: 12px 0 2px; padding: 3px 8px; font-size: 12px; border-left: 3px solid var(--warning, #b06a00); background: transparent; color: var(--text); }
+.interview-page .reapproval-note { border-left: 3px solid var(--warning, #b06a00); padding-left: 8px; }
+.interview-rail .runplan .rp-changed { text-transform: uppercase; letter-spacing: 0.02em; }
 .interview-rail .runplan .rp-ood { font-family: var(--font-mono); font-size: 10px; padding: 0 5px; border: var(--hairline) solid var(--warning, #b06a00); border-radius: var(--radius); white-space: nowrap; }
 .interview-preview .field-out-of-date { font-size: 11px; color: var(--text); border-left: 3px solid var(--warning, #b06a00); padding-left: 6px; margin: 2px 0; }

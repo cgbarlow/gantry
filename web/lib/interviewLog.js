@@ -220,10 +220,15 @@ export function createSessionLog(config = {}) {
       return add({ kind: 'fact', words, fields, ...links(fields) })
     },
 
-    /** The architect's keep / use / merge choice on saved content. `choice` is 'keep' | 'replace' | 'merge'. */
-    addSavedContent(field, choice, { handEdit = false } = {}) {
+    /**
+     * The architect's keep / use / merge choice on saved content. `choice` is 'keep' | 'replace' | 'merge'. `reapproves` (#300, ADR-0069) is
+     * the approved earlier Stages that print the Field (`[{ stageId, title }]`): the card said that changing it needs their re-approval with
+     * this Stage, and the entry keeps who that was.
+     */
+    addSavedContent(field, choice, { handEdit = false, reapproves = [] } = {}) {
       const replaced = currentFor('saved-content', (e) => asList(e.fields)[0] === field)
-      return add({ kind: 'saved-content', field, choice, ...(handEdit ? { handEdit: true } : {}), fields: [field], ...links([field], replaced) })
+      const stages = reapproves.map((s) => ({ stageId: s.stageId, title: s.title }))
+      return add({ kind: 'saved-content', field, choice, ...(handEdit ? { handEdit: true } : {}), ...(stages.length ? { reapproves: stages } : {}), fields: [field], ...links([field], replaced) })
     },
 
     /**

@@ -28,6 +28,8 @@ import { beginRun, clearRun, interviewRuns, nextStage, planRows, resumableRun, r
 import { EMPTY_TOKENS, addTokens, formatTokens, hasTokens, tokenBreakdown, tokensOfLog, totalTokens } from './tokenUsage.js'
 import { describeSaved, resumeInfo } from './interviewResume.js'
 import { isRemoteInstance, lastSavedBy, openApproval, remoteRecord } from './interviewApproval.js'
+import { approvedPrintedFields, changedMark, earlierDocumentsToRender, reRenderCardLine } from './interviewReapproval.js'
+import { fieldCountLabel } from './changedSinceApproval.js'
 import { copyStanding, createWorkingCopyStore, makeWorkingCopy } from './interviewWorkingCopy.js'
 
 // One session per Instance Stage while the editor page is open, so going to the editor and back keeps the conversation and the drafts.
@@ -126,9 +128,12 @@ function QuestionCard({ card, fieldTitle, session }) {
           <li><strong>A real trade-off:</strong> ${card.decision.tradeOff}</li>
         </ul>`
       : null}
+    ${card.change?.reapproves?.length
+      ? html`<p class="kick-note reapproval-note" data-testid="change-reapproval" role="note">Approved by ${card.change.reapproves.map((s) => s.title).join(', ')}. Changing this Field changes approved content, so ${card.change.reapproves.map((s) => s.title).join(', ')} is re-approved with this Stage: its documents are re-rendered and its approver must approve too.</p>`
+      : null}
     ${card.change
       ? html`<div class="change-compare" data-testid="change-compare">
-          <div><span class="qchip">Saved</span><div class="value" data-testid="change-saved"><${ValueView} value=${card.change.saved} /></div></div>
+          <div><span class="qchip">${card.change.reapproves?.length ? 'Approved' : 'Saved'}</span><div class="value" data-testid="change-saved">${isBlankValue(card.change.saved) ? 'Empty' : html`<${ValueView} value=${card.change.saved} />`}</div></div>
           <div><span class="qchip">The AI's version</span><div class="value ai" data-testid="change-proposed"><${ValueView} value=${card.change.proposed} /></div></div>
         </div>`
       : null}
@@ -237,10 +242,12 @@ function providerLabel(p) {
  *   checkStatus     () => { [stageId]: state }  Check status, run once when the page opens (#290); what it reports overrides the file. The app leaves it out on an Azure DevOps or GitHub workspace,
  *                   where the page runs Check status itself (once, when it opens on a Stage with a Pull Request on file, #295) so it can show the answer
  *   onRequestApproval  () => { ok, pullRequestId?, webUrl?, message? }  an Azure DevOps or GitHub workspace's "request approval" (#295): opens the Stage's Pull Request and loads the Instance again
+ *   onReRenderEarlier  (item) => { ok, message? }  renders one earlier approved Stage's document onto this Stage's branch (#300, ADR-0069); the stage-end Save does it, for the documents
+ *                      Request approval would refuse over, before it asks. `item` is one entry of the refusal's `reRenderRequired` (`{ artefactId, artefactTitle, stageTitle, ... }`)
  *   onCheckApproval    () => { ok, merged, message }  Check status (#295); when the Pull Request has merged the Instance has moved on and the page of the next Stage replaces this one
  */
 // #297: `outOfDate` is the Fields flagged Out of date (web/lib/outOfDate.js) and `newSince` the documents marked New since last interview; the run plan marks each Stage that has flagged Fields and the Source documents rail marks the new documents.
-export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance, checkStatus = null, onRequestApproval, onCheckApproval, outOfDate = [], newSince = [] }) {
+export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance, checkStatus = null, onRequestApproval, onReRenderEarlier = null, onCheckApproval, outOfDate = [], newSince = [] }) {
   const key = `${instance.slug}|${instance.stage.id}`
   // #295: on an Azure DevOps or GitHub workspace a Stage moves on only when its Pull Request merges, so the stage-end card asks for approval instead of advancing.
   const remote = isRemoteInstance(instance)
@@ -359,10 +366,16 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const followingStage = nextStage(stagesList, instance.stage.id)
 
   const otherSaved = setup.status === 'ready' ? setup.otherSaved.filter((m) => !instance.modules.some((own) => own.id === m.id)) : []
+  // #300 (ADR-0069): on an Azure DevOps or GitHub workspace, the Fields an approved earlier Stage prints are approved content, which the AI changes only through a card that names the re-approval.
+  const approvedPrinted = useMemo(
+    () => (setup.status === 'ready' ? approvedPrintedFields({ definition: setup.definition, instance }) : {}),
+    [setup, instance.stages, instance.pullRequests, instance.currentStageId, instance.stage.id, instance.changedSinceApproval, instance.workspaceBacked]
+  )
   ctxRef.current =
     setup.status === 'ready'
       ? {
           definition: setup.definition,
+          approvedPrinted,
           stageId: instance.stage.id,
           artefactId,
           size: instance.size,
@@ -497,7 +510,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const outOfDateByStage = outOfDateCountByStage(outOfDate)
   // #295: the Provider's word about the Pull Requests, which overrides the log's (a Stage with one open is awaiting approval; a later Stage the log queued shows Approval queued).
   const remoteRows = remote ? remoteRecord({ instance, stages: stagesList, logs: { ...stageLogs, [instance.stage.id]: committedLog } }) : null
-  const planRowsNow = planRows({ stages: stagesList, currentStageId: instance.stage.id, targetStageId: target, current: planCurrent, remote: remoteRows }).map((row) => ({ ...row, outOfDate: outOfDateByStage[row.id] ?? 0 }))
+  const planRowsNow = planRows({ stages: stagesList, currentStageId: instance.stage.id, targetStageId: target, current: planCurrent, remote: remoteRows }).map((row) => ({ ...row, outOfDate: outOfDateByStage[row.id] ?? 0, changedSinceApproval: remote ? changedMark(instance, row.id) : null }))
+  // #300 (ADR-0069): the earlier documents the stage-end Save re-renders before it asks for approval, so the card says so.
+  const earlierToRender = remote && setup.status === 'ready' ? earlierDocumentsToRender({ definition: setup.definition, instance, approved: approvedPrinted, draftKeys }) : []
   const newSinceIds = new Set(newSince.map((s) => s.id))
   // #294: tokens, from what each AI Provider reported. A Stage's total is every session's status line in its committed log, except this
   // session's own (it is counted in full from memory, so its older committed line is not added twice). The session total is this run:
@@ -633,6 +648,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   async function runSave({ action = 'stop', pause = false } = {}) {
     setSaving({ phase: 'saving', pause })
     const keys = Object.keys(drafts)
+    // #300: what the card said the Save would re-render; once the drafts are saved the page can no longer work it out from them.
+    const willReRender = action === 'approval' && !pause && earlierToRender.length > 0
     // #295: a Stage that isn't the Instance's current one can't ask for approval yet (Request approval refuses it), so it is queued.
     const queued = remote && action === 'approval' && instance.stage.id !== instance.currentStageId
     const outcome = saveOutcome({ stages: stagesList, currentStageId: instance.stage.id, targetStageId: target, startStageId: runStart, action, queued })
@@ -667,12 +684,12 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         return true
       }
       updateRun(instance.slug, { phase: outcome.finished ? 'done' : outcome.advances || outcome.requestsApproval ? 'running' : 'paused', at: instance.stage.id })
-      const saved = { phase: 'saved', check: result.check ?? null, finished: outcome.finished, approval: outcome.requestsApproval ? (queued ? 'queued' : 'requested') : null }
+      const saved = { phase: 'saved', check: result.check ?? null, finished: outcome.finished, approval: outcome.requestsApproval ? (queued ? 'queued' : 'requested') : null, willReRender }
       setSaving(saved)
       if (outcome.advances) await carryOn(saved)
       else if (outcome.requestsApproval && !queued) {
-        // The content and its log are saved; now the Pull Request. A refusal leaves the Save as it is and says why, with a button to ask again.
-        const asked = await requestApproval()
+        // The content and its log are saved; now the Pull Request (after the earlier documents the card named are re-rendered). A refusal leaves the Save as it is and says why, with a button to ask again.
+        const asked = await requestApproval({ reRender: willReRender })
         if (!asked.ok) setSaving({ ...saved, approvalError: asked.message })
       }
       return true
@@ -698,17 +715,40 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
 
   // #295: asks for the Stage's approval (a Pull Request into main) and waits for it. The AI never passes a gate and has no part in Request
   // Review: only this click, after a Save, asks; only a person's approval on the Provider lets the Stage move on. Resolves the result.
-  async function requestApproval() {
+  //
+  // `reRender` (#300, ADR-0069): the stage-end card said the Save re-renders the earlier approved documents this Stage's changes touch. Request
+  // approval names those it will not go ahead without; each is rendered onto this Stage's branch (the approved copy is kept in out/approved/)
+  // and approval is asked for again, so the Pull Request opens with the re-rendered documents already in it. Without `reRender` the refusal is
+  // shown as it is, for the architect to render from the editor.
+  async function requestApproval({ reRender = false } = {}) {
     setApproval({ phase: 'requesting', message: '' })
     let result
+    const rendered = []
     try {
       result = await onRequestApproval()
+      if (!result.ok && reRender && result.reRenderRequired?.length && onReRenderEarlier) {
+        let failure = null
+        for (const item of result.reRenderRequired) {
+          setApproval({ phase: 'requesting', message: `Re-rendering ${item.artefactTitle} (${item.stageTitle}) onto this Stage…` })
+          const done = await onReRenderEarlier(item)
+          if (!done?.ok) {
+            failure = { ok: false, message: done?.message || `${item.artefactTitle} could not be re-rendered.` }
+            break
+          }
+          rendered.push(item)
+        }
+        if (failure) result = failure
+        else {
+          setApproval({ phase: 'requesting', message: '' })
+          result = await onRequestApproval()
+        }
+      }
     } catch (err) {
       result = { ok: false, message: err.message }
     }
     if (result.ok) {
-      setSaving((was) => (was ? { ...was, approvalError: '' } : was))
-      setApproval({ phase: 'idle', message: `Approval requested: Pull Request #${result.pullRequestId}.` })
+      setSaving((was) => (was ? { ...was, approvalError: '', reRendered: rendered.map((r) => r.artefactTitle), reRenderedStages: rendered.map((r) => r.stageTitle) } : was))
+      setApproval({ phase: 'idle', message: `Approval requested: Pull Request #${result.pullRequestId}.${rendered.length ? ` Re-rendered ${rendered.map((r) => r.artefactTitle).join(', ')} first, so it is re-approved with this Stage.` : ''}` })
     } else {
       setApproval({ phase: 'idle', message: '' })
       setSaving((was) => (was?.phase === 'saved' ? { ...was, approvalError: result.message || 'Approval could not be requested.' } : was))
@@ -1029,6 +1069,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         ${awaiting.url ? html`<a href=${awaiting.url} target="_blank" rel="noopener noreferrer" data-testid="interview-pr-link">Pull Request #${awaiting.id}</a>` : html`<span data-testid="interview-pr-link">Pull Request #${awaiting.id}</span>`}.
         The AI never approves it, and a Stage moves on only when a person does. The session waits here; nothing checks on its own, so press Check status once the Owner has reviewed it.
       </p>
+      ${saving?.reRendered?.length ? html`<p data-testid="interview-rerendered">Re-rendered ${saving.reRendered.join(', ')} onto this Stage's branch before asking, with the approved ${saving.reRendered.length === 1 ? 'copy' : 'copies'} kept in out/approved/. The Pull Request also re-approves ${[...new Set(saving.reRenderedStages ?? [])].join(', ') || 'the earlier Stage'}.</p>` : null}
       ${goesOn
         ? html`<p class="kick-note" data-testid="interview-awaiting-next">Once it is approved, the run goes on to ${followingStage.title}${target === followingStage.id ? ', its target' : `, then to ${stageTitleOf(target)}`}.</p>`
         : html`<p class="kick-note" data-testid="interview-awaiting-last">This is the last Stage of the run. Once it is approved, the Instance moves on.</p>`}
@@ -1040,7 +1081,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   }
 
   const askAgain = async () => {
-    const asked = await requestApproval()
+    const asked = await requestApproval({ reRender: saving?.willReRender === true })
     if (asked.ok) setSaving((was) => (was ? { ...was, approval: 'requested' } : was))
   }
 
@@ -1052,6 +1093,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         <p class="qhead">${approval.phase === 'requesting' ? 'Saved. Asking for approval…' : 'Saved'}</p>
         <p>${stage?.title ?? instance.stage.title} is saved as one Stage Save. The Modules stay <strong>draft</strong>: a person marks them agreed.</p>
         ${saving.check ? html`<p class="gate-ok" data-testid="interview-saved-gate">${saving.check.pass ? `The ${instance.stage.gate} Gate check passes.` : `The Gate check still reports: ${saving.check.outstanding?.join(', ') || 'see the editor'}.`}</p>` : null}
+        ${saving.reRendered?.length ? html`<p data-testid="interview-rerendered">Re-rendered ${saving.reRendered.join(', ')} onto this Stage's branch before asking, with the approved ${saving.reRendered.length === 1 ? 'copy' : 'copies'} kept in out/approved/.</p>` : null}
         ${saving.approval === 'queued'
           ? html`<p data-testid="interview-approval-queued">Approval is queued. ${stage?.title ?? instance.stage.title} is not the Instance's current Stage, so its Pull Request opens by itself once Check status sees the earlier Stage merge.</p>`
           : null}
@@ -1101,6 +1143,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         : null}
       ${remote
         ? html`<p class="kick-note" data-testid="interview-approval-note">A Stage moves on only when its Pull Request is approved by a person. Saving asks for that approval, then the session waits for the Owner: the AI never passes a gate.</p>`
+        : null}
+      ${earlierToRender.length
+        ? html`<p class="kick-note rerender-note" data-testid="interview-rerender-note">${reRenderCardLine(earlierToRender)} The approved copies are kept in out/approved/. Choosing <strong>Save and stop here</strong> saves the content and leaves the documents as they are.</p>`
         : null}
       <div class="round-actions">
         ${remote
@@ -1207,6 +1252,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
                 <span class="dot"></span><span class="rp-title">${row.title}</span>
                 ${row.outOfDate
                   ? html`<span class="rp-ood" data-testid="run-plan-out-of-date" title="Fields on this Stage drew on a Source document that has since changed">${row.outOfDate} Out of date</span>`
+                  : null}
+                ${row.changedSinceApproval
+                  ? html`<span class="rp-ood rp-changed" data-testid="run-plan-changed-since-approval" title=${`${fieldCountLabel(row.changedSinceApproval.count)} this Stage's documents print changed after it was approved. The current Stage's approval re-approves it.`}>changed since approval</span>`
                   : null}
                 ${rowTokens(row.id)}
                 <span class="rp-note">${row.note}</span>

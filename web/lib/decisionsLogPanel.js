@@ -31,6 +31,12 @@ export function describeEntry(entry, { fieldTitle = (key) => key } = {}) {
     case 'hand-edit':
       return `The architect edited ${fieldTitle(entry.field)} by hand: “${entry.words}”`
     case 'saved-content':
+      if (asList(entry.reapproves).length) {
+        // #300: approved content, which a change sends back for approval with the Stage it was made on.
+        const names = asList(entry.reapproves).map((s) => s.title ?? s.stageId).join(', ')
+        const outcome = entry.choice === 'keep' ? 'kept the approved wording' : entry.choice === 'merge' ? 'merged the two, needing re-approval' : "replaced it with the AI's version, needing re-approval"
+        return `Approved content in ${fieldTitle(entry.field)} (printed by ${names}): ${outcome}${entry.choice === 'keep' ? '' : ` of ${names} with this Stage`}`
+      }
       if (entry.handEdit) return `Their own edit of ${fieldTitle(entry.field)}: ${HAND_CHOICES[entry.choice] ?? entry.choice}`
       return `Saved content in ${fieldTitle(entry.field)}: ${CHOICES[entry.choice] ?? entry.choice}`
     case 'open-question':

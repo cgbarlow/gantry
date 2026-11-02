@@ -5110,7 +5110,7 @@ function OutOfDatePanel({ instance }) {
 }
 
 // #286 (map #238): the Interview page for a local or server workspace Instance, handed what only this file can reach: the Instance's Source document store, the Definition it follows, the other Stages' saved content (the AI is told what is already settled) and the stage Save.
-function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequestApproval, onCheckApproval }) {
+function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequestApproval, onReRenderEarlier, onCheckApproval }) {
   const store = useSourceStore(instance)
   const outOfDate = useOutOfDate(instance)
   const decisionsStore = useDecisionsStore(instance)
@@ -5157,6 +5157,7 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequ
     onSaveDrafts=${onSaveDrafts}
     onAdvance=${onAdvance}
     onRequestApproval=${onRequestApproval}
+    onReRenderEarlier=${onReRenderEarlier}
     onCheckApproval=${onCheckApproval}
   />`
 }
@@ -6308,6 +6309,8 @@ function ModuleEditorPage({ slug: routeRef }) {
       }
       return { ok: false, message: stageSave.peek().message || 'The Save was cancelled, so nothing was saved.', settledIds: settledEntriesRef.current.map((e) => e.id) }
     }
+    // #300: a Save can raise "changed since approval" on an earlier approved Stage, and the run plan shows it, so look at it again.
+    if (inst.workspaceBacked) await refreshChangedSinceApproval(inst)
     let check = null
     try {
       const latest = instanceData.peek()
@@ -6351,13 +6354,30 @@ function ModuleEditorPage({ slug: routeRef }) {
       })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) {
-        if (Array.isArray(body.reRenderRequired) && body.reRenderRequired.length > 0) return { ok: false, message: reRenderRefusalLine(body.reRenderRequired) }
+        // #300: the refusal names the earlier documents to re-render; the stage-end card that said it would do so renders them and asks again.
+        if (Array.isArray(body.reRenderRequired) && body.reRenderRequired.length > 0) return { ok: false, message: reRenderRefusalLine(body.reRenderRequired), reRenderRequired: body.reRenderRequired }
         return { ok: false, message: `Request approval failed: ${body.message ?? body.error ?? res.status}` }
       }
       instanceData.value = await loadInstance(inst.slug, null)
-      return { ok: true, pullRequestId: body.pullRequestId, webUrl: body.webUrl ?? null }
+      return { ok: true, pullRequestId: body.pullRequestId, webUrl: body.webUrl ?? null, alsoReapproves: body.alsoReapproves ?? [] }
     } catch (err) {
       return { ok: false, message: `Request approval failed: ${err.message}` }
+    }
+  }
+
+  // #300 (docs/adr/0069): renders one earlier approved Stage's document onto this Stage's branch, keeping the approved copy in out/approved/
+  // (the editor's "Render onto this stage"). The stage-end Save does this for every document Request approval would refuse over, before
+  // it asks. Never throws: resolves `{ ok: true, approvedCopyPath }` or `{ ok: false, message }`.
+  async function reRenderEarlierForInterview(item) {
+    const inst = instanceData.peek()
+    if (!inst?.stage || isEditingBlocked()) return { ok: false, message: 'This Instance cannot be written to right now.' }
+    try {
+      const res = await apiFetchForInstance(inst.slug, `/api/instance/rerender-earlier/${encodeURIComponent(item.artefactId)}?slug=${encodeURIComponent(inst.slug)}`, { method: 'POST' })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) return { ok: false, message: `Rendering ${item.artefactTitle} onto this Stage failed: ${body.message ?? body.error ?? `HTTP ${res.status}`}` }
+      return { ok: true, approvedCopyPath: body.approvedCopyPath ?? null }
+    } catch (err) {
+      return { ok: false, message: `Rendering ${item.artefactTitle} onto this Stage failed: ${err.message}` }
     }
   }
 
@@ -6467,6 +6487,7 @@ function ModuleEditorPage({ slug: routeRef }) {
         onSaveDrafts=${saveInterviewDrafts}
         onAdvance=${advanceInterviewStage}
         onRequestApproval=${requestInterviewApproval}
+        onReRenderEarlier=${reRenderEarlierForInterview}
         onCheckApproval=${checkInterviewApproval}
       />${dialogs}`
   }

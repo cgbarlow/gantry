@@ -61,6 +61,7 @@ import { currentLogEntries, findArchitectMessage, logSummary } from './decisions
 import { tokensOfModels } from './tokenUsage.js'
 import { resumeOpening } from './interviewResume.js'
 import { conflictKey, conflictText, conflictValueFromText } from './stageVersion.js'
+import { reapprovalNames, reapprovalOf } from './interviewReapproval.js'
 import { CLASH_OPTIONS, CHANGE_OPTIONS, acceptRecommendation, answersText, changeCard, choose, chooseOther, clashCard, followsRecommendation, isAnswered, isAutoId, otherWords, releaseHeld, shapeCard, sortRound, splitReady, termChoice, withMerged } from './interviewRounds.js'
 
 export { fieldsInScope }
@@ -311,6 +312,8 @@ export function createInterviewSession(config = {}) {
 
     const saved = normalizeSavedContent(context.saved)[parsed.moduleId]?.fields?.[parsed.fieldId]
     const holdsSaved = saved !== undefined && !isBlankValue(saved)
+    // #300 (ADR-0069): a Field an approved earlier Stage prints is approved content, held back like saved content even when it is empty.
+    const approvedBy = reapprovalOf(context.approvedPrinted, key)
     const knownSourceIds = (context.sources ?? []).filter((s) => s && !s.removedAt).map((s) => s.id)
     const check = checkDraft(entry.field, rawValue, { size: context.size, architectText: architectText(), knownSourceIds, markAssumptions: state.finish !== null })
     // #291: a draft of the Glossary, Key decisions or Open questions is also checked against what the interview settled.
@@ -325,18 +328,22 @@ export function createInterviewSession(config = {}) {
     // change, and an unsaved draft of this session, may be written freely. A Field the architect edited by hand (#289) is theirs in the
     // same way: what they typed stands in for the saved content, and the card says so.
     const mine = handOwned.has(key) || editing.has(key)
-    if (mine || (holdsSaved && !authorised.has(key))) {
-      const current = mine ? (handOwned.get(key)?.text ?? asText(state.drafts[key]?.value)) : saved
-      const what = mine ? "the architect's own wording (they edited it by hand)" : 'saved content'
+    if (mine || ((holdsSaved || approvedBy.length > 0) && !authorised.has(key))) {
+      const current = mine ? (handOwned.get(key)?.text ?? asText(state.drafts[key]?.value)) : holdsSaved ? saved : ''
+      const stages = reapprovalNames(approvedBy)
+      const what = mine ? "the architect's own wording (they edited it by hand)" : approvedBy.length ? `approved content (${stages} prints it)` : 'saved content'
       if (keptFields.has(key)) return { ok: false, content: `${key} already holds ${what} and the architect chose to keep it as it is. Do not propose a change to it again${mine ? ' unless they ask you to in chat' : ''}.` }
       if (asText(check.value) === asText(current)) return { ok: false, content: `${key} already holds ${what}, and your version is the same as it, so there is nothing to change.` }
       const existing = pendingChanges.get(key)
-      pendingChanges.set(key, { saved: current, proposed: check.value, words: check.words, inputs, warnings: check.problems.map((p) => p.message), uncovered, moduleId: parsed.moduleId, fieldId: parsed.fieldId, shown: existing?.shown ?? false, handEdit: mine })
+      pendingChanges.set(key, { saved: current, proposed: check.value, words: check.words, inputs, warnings: check.problems.map((p) => p.message), uncovered, moduleId: parsed.moduleId, fieldId: parsed.fieldId, shown: existing?.shown ?? false, handEdit: mine, reapproves: approvedBy })
+      const approvalNote = approvedBy.length ? ` Changing it changes approved content, so the card tells the architect that ${stages} needs re-approval with this Stage.` : ''
       return {
         ok: false,
         content: mine
-          ? `${key} is ${what}, so it is not changed. If the architect asked you in chat to change it, call ${LOG_TOOL_NAME} first (kind "fact", a quote copied exactly from their request, fields ["${key}"]) and then draft it again. Otherwise Gantry will show them a keep / use your version / merge card for it: do not draft ${key} again until they have answered.${inputNote}`
-          : `${key} already holds saved content, so it is not changed. Gantry will show the architect a keep / use your version / merge card for it. Do not draft ${key} again until they have answered.${inputNote}`,
+          ? `${key} is ${what}, so it is not changed. If the architect asked you in chat to change it, call ${LOG_TOOL_NAME} first (kind "fact", a quote copied exactly from their request, fields ["${key}"]) and then draft it again. Otherwise Gantry will show them a keep / use your version / merge card for it: do not draft ${key} again until they have answered.${approvalNote}${inputNote}`
+          : approvedBy.length
+            ? `${key} is printed by ${stages}, which is already approved, so it is not changed.${approvalNote} Gantry will show the architect a keep / use your version / merge card for it. Do not draft ${key} again until they have answered.${inputNote}`
+            : `${key} already holds saved content, so it is not changed. Gantry will show the architect a keep / use your version / merge card for it. Do not draft ${key} again until they have answered.${inputNote}`,
       }
     }
 
@@ -545,7 +552,7 @@ export function createInterviewSession(config = {}) {
     for (const [key, change] of pendingChanges) {
       if (change.shown) continue
       change.shown = true
-      changes.push(changeCard({ key, fieldTitle: fieldTitle(key), saved: change.saved, proposed: change.proposed, handEdit: change.handEdit === true }))
+      changes.push(changeCard({ key, fieldTitle: fieldTitle(key), saved: change.saved, proposed: change.proposed, handEdit: change.handEdit === true, reapproves: change.reapproves ?? [] }))
     }
     const all = [...cards, ...released.filter((r) => !cards.some((c) => c.id === r.id)), ...changes]
     if (all.length === 0) {
@@ -582,21 +589,23 @@ export function createInterviewSession(config = {}) {
       pendingChanges.delete(key)
       const choice = card.selected[0]
       const mine = card.change?.handEdit === true
+      // #300: a choice on approved content is logged with the Stages it would send back for approval.
+      const reapproves = card.change?.reapproves ?? change?.reapproves ?? []
       if (choice === CHANGE_OPTIONS.keep) {
         keptFields.add(key)
-        log.addSavedContent(key, 'keep', { handEdit: mine })
+        log.addSavedContent(key, 'keep', { handEdit: mine, reapproves })
         say('sys', mine ? `Kept ${fieldTitle(key)} as you edited it` : `Kept ${fieldTitle(key)} as saved`)
       } else if (choice === CHANGE_OPTIONS.use && change) {
         authorised.add(key)
         handOwned.delete(key)
-        log.addSavedContent(key, 'replace', { handEdit: mine })
+        log.addSavedContent(key, 'replace', { handEdit: mine, reapproves })
         state.drafts[key] = { value: change.proposed, words: change.words, warnings: change.warnings, uncovered: change.uncovered, inputs: change.inputs ?? [], moduleId: change.moduleId, fieldId: change.fieldId }
         state.fieldInputs[key] = change.inputs ?? []
         say('sys', `Using the AI's version of ${fieldTitle(key)}`, { drafted: key })
       } else if (choice === CHANGE_OPTIONS.merge) {
         authorised.add(key)
         handOwned.delete(key)
-        log.addSavedContent(key, 'merge', { handEdit: mine })
+        log.addSavedContent(key, 'merge', { handEdit: mine, reapproves })
         say('sys', `Merging ${fieldTitle(key)}`)
       }
     }
@@ -679,6 +688,7 @@ export function createInterviewSession(config = {}) {
       contextWindow: provider.contextWindow,
       readerTool: true,
       sourceAccess: accessForBrief(plan),
+      approvedPrinted: context.approvedPrinted ?? {},
     })
     // The catalogue is only offered with a way to read it.
     const reader = brief.sources.mode === 'catalogue'

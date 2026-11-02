@@ -12,6 +12,8 @@
 //
 // No DOM, no network: tests/interviewRounds.test.js drives all of it.
 
+import { reapprovalNames, reapprovalSentence } from './interviewReapproval.js'
+
 /** Cards shown at a time. */
 export const PAGE_SIZE = 4
 
@@ -109,28 +111,54 @@ export function shapeCard(card, entry) {
   return { ...card, options, recommended, multiSelect, allowOther, selected: [...recommended], otherOn: false, otherText: '' }
 }
 
-/** A card about saved content the AI would change: keep, use the AI's version, or merge. The recommendation is to keep. */
-export function changeCard({ key, fieldTitle, saved, proposed, handEdit = false }) {
+/**
+ * A card about saved content the AI would change: keep, use the AI's version, or merge. The recommendation is to keep.
+ * `reapproves` (#300, ADR-0069) is the approved earlier Stages that print the Field (`[{ stageId, title }]`): the card then says that
+ * changing it changes approved content that needs re-approval with this Stage, and it is asked even when the Field is empty.
+ */
+export function changeCard({ key, fieldTitle, saved, proposed, handEdit = false, reapproves = [] }) {
+  const approved = reapproves.length > 0
+  const stages = reapprovalNames(reapproves)
+  const keepWords = handEdit ? 'Leave your edit exactly as it is.' : approved ? 'Leave the approved wording exactly as it is. Nothing needs re-approving.' : 'Leave what is saved exactly as it is.'
+  const useWords = handEdit
+    ? 'Put the AI’s version in the preview in place of your edit. Nothing is written until you save the Stage.'
+    : approved
+      ? `Put the AI’s version in the preview. Saving it changes approved content, so ${stages} is re-approved with this Stage. Nothing is written until you save the Stage.`
+      : 'Put the AI’s version in the preview in place of what is saved. Nothing is written until you save the Stage.'
+  const mergeWords = handEdit
+    ? 'The AI writes one version that keeps what is good in your edit and in its own.'
+    : approved
+      ? `The AI writes one version that keeps what is good in both. Saving it changes approved content, so ${stages} is re-approved with this Stage.`
+      : 'The AI writes one version that keeps what is good in both.'
+  const question = approved
+    ? `${fieldTitle} is printed by ${stages}, which is already approved. The AI would change it. ${reapprovalSentence(reapproves)} What should happen?`
+    : handEdit
+      ? `${fieldTitle} is your own wording: you edited it by hand. The AI would change it. What should happen?`
+      : `${fieldTitle} already holds content. The AI would change it. What should happen?`
   return {
     id: `change:${key}`,
     type: 'change',
-    header: handEdit ? 'Your edit' : 'Saved content',
-    question: handEdit ? `${fieldTitle} is your own wording: you edited it by hand. The AI would change it. What should happen?` : `${fieldTitle} already holds content. The AI would change it. What should happen?`,
+    header: approved ? 'Needs re-approval' : handEdit ? 'Your edit' : 'Saved content',
+    question,
     options: [
-      { label: CHANGE_OPTIONS.keep, description: handEdit ? 'Leave your edit exactly as it is.' : 'Leave what is saved exactly as it is.', draft: '' },
-      { label: CHANGE_OPTIONS.use, description: handEdit ? 'Put the AI’s version in the preview in place of your edit. Nothing is written until you save the Stage.' : 'Put the AI’s version in the preview in place of what is saved. Nothing is written until you save the Stage.', draft: '' },
-      { label: CHANGE_OPTIONS.merge, description: handEdit ? 'The AI writes one version that keeps what is good in your edit and in its own.' : 'The AI writes one version that keeps what is good in both.', draft: '' },
+      { label: CHANGE_OPTIONS.keep, description: keepWords, draft: '' },
+      { label: CHANGE_OPTIONS.use, description: useWords, draft: '' },
+      { label: CHANGE_OPTIONS.merge, description: mergeWords, draft: '' },
     ],
     multiSelect: false,
     recommended: [CHANGE_OPTIONS.keep],
-    why: handEdit ? 'Your own wording changes only when you say so, so keeping it is the safe default.' : 'Saved content changes only when you say so, so keeping it is the safe default.',
+    why: approved
+      ? `Approved content changes only when you say so, and a change sends ${stages} back for approval with this Stage, so keeping it is the safe default.`
+      : handEdit
+        ? 'Your own wording changes only when you say so, so keeping it is the safe default.'
+        : 'Saved content changes only when you say so, so keeping it is the safe default.',
     source: null,
     field: key,
     allowOther: false,
     selected: [CHANGE_OPTIONS.keep],
     otherOn: false,
     otherText: '',
-    change: { saved, proposed, ...(handEdit ? { handEdit: true } : {}) },
+    change: { saved, proposed, ...(handEdit ? { handEdit: true } : {}), ...(approved ? { reapproves } : {}) },
   }
 }
 

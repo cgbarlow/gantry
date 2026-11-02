@@ -11,7 +11,7 @@
 // Pure and dependency-free, like web/lib/interviewSkills.js.
 
 /** Bumped when a rule changes, so a decisions log can say which rules an interview ran under. */
-export const INTERVIEW_RULES_VERSION = 2
+export const INTERVIEW_RULES_VERSION = 3
 
 export const INTERVIEW_RULES = Object.freeze([
   {
@@ -42,6 +42,7 @@ export const INTERVIEW_RULES = Object.freeze([
     text: [
       'Anything the architect has written or saved to the Instance, whoever wrote it (including an AI draft confirmed in an earlier session), changes only through a question card: keep it, use your version, or merge the two.',
       'Only this session\'s unsaved draft may be revised freely.',
+      'A Field that an earlier, already approved Stage prints is approved content, even while it is empty: changing it sends that Stage back for approval with this one. It changes only through a card that says so, and the architect\'s choice is logged.',
       'A Field filled at an earlier Stage is extended to this Stage\'s depth, never rewritten.',
       'Optional Fields are drafted only when the Source documents support them; do not ask about them otherwise.',
       'Leave read-only Modules alone: they are context, not yours to edit.',

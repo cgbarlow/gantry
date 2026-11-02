@@ -395,7 +395,7 @@ describe('building a brief', () => {
     const result = brief()
     assert.equal(result.skills.version, INTERVIEW_SKILLS.version)
     assert.deepEqual(result.skills.skills.map((s) => s.id), ['grilling', 'domain-modeling'])
-    assert.equal(result.rulesVersion, 2)
+    assert.equal(result.rulesVersion, 3)
     assert.ok(result.tokens.stable > 0 && result.tokens.turn > 0)
   })
 
