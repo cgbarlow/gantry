@@ -35,7 +35,7 @@ import { LocalDefinitionEditorPage } from './pages/local-definition-editor.js'
 import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, workspaceRepoUrl } from './pages/settings.js'
 // Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79, #374) visual/split/markdown toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
-import { unrepresentedWorkspaceGroups, describeInstanceRowWorkspace, workspaceNewInstanceHref } from './lib/dashboardWorkspaces.js'
+import { unrepresentedWorkspaceGroups, unrepresentedServerWorkspaceGroups, describeInstanceRowWorkspace, workspaceNewInstanceHref } from './lib/dashboardWorkspaces.js'
 import { workItemParentRef, describeWorkItemLink } from './lib/provider.js'
 import { loadWorkspaceScopedInstances, setWorkspaceDiscoveryRetryHandler } from './lib/workspaceDiscovery.js'
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
@@ -5599,6 +5599,19 @@ async function loadWorkspaces() {
   return res.json()
 }
 
+// #268: every server workspace on the server's disk (`GET /api/server-workspaces`, no credential needed),
+// so one with no instance yet - such as a workspace just made in the "+ New Workspace" wizard - still
+// gets a dashboard row (web/lib/dashboardWorkspaces.js's `unrepresentedServerWorkspaceGroups`). It only
+// adds rows, so a failure here is swallowed rather than failing the dashboard.
+async function loadServerWorkspaces() {
+  try {
+    const res = await apiFetch('/api/server-workspaces', {}, { silent: true })
+    return res.ok ? await res.json() : []
+  } catch {
+    return []
+  }
+}
+
 // Registry `status` is only ever 'complete'/'incomplete' (the current stage's requirements) — a different, coarser vocabulary than a module's own draft/review/agreed frontmatter status. Reuses the same `.stamp` tokens (agreed = done, draft = still in progress) rather than inventing a third visual language, since the Gate Ledger only defines those three.
 function statusStampClass(status) {
   return status === 'complete' ? 'agreed' : 'draft'
@@ -6669,6 +6682,7 @@ function ArchivedWorkspacesPanel({ onRestored }) {
 function DashboardPage() {
   const [instances, setInstances] = useState(null)
   const [workspaces, setWorkspaces] = useState(null)
+  const [serverWorkspaces, setServerWorkspaces] = useState([])
   // #131: rows from the per-workspace credentialed listings, kept separate from `instances` (the
   // unscoped listing) so a reload of one never discards the other.
   const [workspaceScopedInstances, setWorkspaceScopedInstances] = useState([])
@@ -6688,10 +6702,11 @@ function DashboardPage() {
   // nothing for, merged in below. It issues no request at all when nothing qualifies, and at most one
   // per qualifying workspace per page-session — see web/lib/workspaceDiscovery.js for those bounds.
   function reloadInstances() {
-    Promise.all([loadInstances(), loadWorkspaces()])
-      .then(([instancesData, workspacesData]) => {
+    Promise.all([loadInstances(), loadWorkspaces(), loadServerWorkspaces()])
+      .then(([instancesData, workspacesData, serverWorkspacesData]) => {
         setInstances(instancesData)
         setWorkspaces(workspacesData)
+        setServerWorkspaces(serverWorkspacesData)
         setError(null)
         return loadWorkspaceScopedInstances(instancesData, workspacesData)
       })
@@ -6741,7 +6756,11 @@ function DashboardPage() {
   // fetching them.
   const workspaceGroups =
     allInstances && workspaces
-      ? unrepresentedWorkspaceGroups(allInstances, workspaces).filter((group) => advancedMode.value || !group.isAzureDevOps)
+      ? [
+          ...unrepresentedWorkspaceGroups(allInstances, workspaces).filter((group) => advancedMode.value || !group.isAzureDevOps),
+          // #268: a server workspace with nothing in it yet.
+          ...unrepresentedServerWorkspaceGroups(allInstances, serverWorkspaces),
+        ]
       : []
 
   return html`

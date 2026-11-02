@@ -160,7 +160,7 @@ test('the "+ New Workspace" wizard registers a workspace, creates an instance, a
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
 
       // ---------- Step 1: register a brand new workspace ----------
-      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+      await page.getByRole('button', { name: 'New remote workspace', exact: true }).click()
       // #9 (ADR-0038): filled before Owner below — its own search is PAT-backed (against the
       // organization/project just entered), and a brand-new workspace has no id yet to resolve a
       // stored PAT against, so the wizard's own PAT field is what search (and, later, Register
@@ -241,7 +241,7 @@ test('the "+ New Workspace" wizard\'s pick-existing-workspace path adds a second
       // First pass: register the workspace and create the first instance.
       await page.goto(`${gantryBase}/new-workspace`)
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
-      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+      await page.getByRole('button', { name: 'New remote workspace', exact: true }).click()
       await page.locator('#ws-organization').fill(ORGANIZATION)
       await page.locator('#ws-project').fill(PROJECT)
       await page.locator('#ws-repository').fill(REPOSITORY)
@@ -267,7 +267,7 @@ test('the "+ New Workspace" wizard\'s pick-existing-workspace path adds a second
       // workspace instead of registering another one.
       await page.goto(`${gantryBase}/new-workspace`)
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
-      // "Pick existing workspace" is the default mode.
+      // "An existing workspace" is the default mode.
       await page.waitForSelector('#workspace-picker', { timeout: 10_000 })
       await page.locator('#workspace-picker .definition-card', { hasText: `${ORGANIZATION}/${PROJECT}/${REPOSITORY}` }).click()
       await page.getByRole('button', { name: 'Continue' }).click()
@@ -317,7 +317,7 @@ test('#137: empty pick-mode offers a control to switch to Register', async () =>
       await hint.waitFor({ timeout: 10_000 })
       const linkBtn = hint.locator('.btn-link')
       assert.equal(await linkBtn.count(), 1, 'empty state contains a clickable control')
-      assert.match(await linkBtn.textContent(), /switch to "Register new workspace"/)
+      assert.match(await linkBtn.textContent(), /switch to "New remote workspace"/)
       await linkBtn.click()
       // Should now be in register mode — the register form fields appear.
       await page.waitForSelector('#ws-organization', { timeout: 5_000 })
@@ -343,7 +343,7 @@ test('#137: Back from Instance step returns to workspace picker with values inta
       // Register a workspace so the pick list has at least one entry.
       await page.goto(`${gantryBase}/new-workspace`)
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
-      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+      await page.getByRole('button', { name: 'New remote workspace', exact: true }).click()
       await page.locator('#ws-organization').fill(ORGANIZATION)
       await page.locator('#ws-project').fill(PROJECT)
       await page.locator('#ws-repository').fill(REPOSITORY)
@@ -364,7 +364,7 @@ test('#137: Back from Instance step returns to workspace picker with values inta
 
       // workspaceMode is still 'register' (preserved from the registration
       // flow) — switch to pick mode to see the workspace list.
-      await page.getByRole('button', { name: 'Pick existing workspace', exact: true }).click()
+      await page.getByRole('button', { name: 'An existing workspace', exact: true }).click()
       await page.waitForSelector('#workspace-picker', { timeout: 5_000 })
       await page.locator('#workspace-picker .definition-card').first().click()
       await page.getByRole('button', { name: 'Continue' }).click()
@@ -392,7 +392,7 @@ test('#137: Back from Link step returns to Instance step with values intact', as
 
       await page.goto(`${gantryBase}/new-workspace`)
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
-      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+      await page.getByRole('button', { name: 'New remote workspace', exact: true }).click()
       await page.locator('#ws-organization').fill(ORGANIZATION)
       await page.locator('#ws-project').fill(PROJECT)
       await page.locator('#ws-repository').fill(REPOSITORY)
@@ -436,7 +436,7 @@ test('#137: mid-flow revisit of /new-workspace persists step; Back reaches works
       // Register a workspace and advance to Instance step.
       await page.goto(`${gantryBase}/new-workspace`)
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
-      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+      await page.getByRole('button', { name: 'New remote workspace', exact: true }).click()
       await page.locator('#ws-organization').fill(ORGANIZATION)
       await page.locator('#ws-project').fill(PROJECT)
       await page.locator('#ws-repository').fill(REPOSITORY)
@@ -461,7 +461,7 @@ test('#137: mid-flow revisit of /new-workspace persists step; Back reaches works
       await page.getByRole('button', { name: '← Back' }).click()
       await page.waitForSelector('.wizard-mode-toggle', { timeout: 5_000 })
       // workspaceMode was 'register' — switch to pick to verify the list.
-      await page.getByRole('button', { name: 'Pick existing workspace', exact: true }).click()
+      await page.getByRole('button', { name: 'An existing workspace', exact: true }).click()
       await page.waitForSelector('#workspace-picker', { timeout: 5_000 })
     } finally {
       await browser.close()
@@ -483,7 +483,7 @@ test('#138: Instance step renders "New Instance" heading between Workspace card 
 
       await page.goto(`${gantryBase}/new-workspace`)
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
-      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+      await page.getByRole('button', { name: 'New remote workspace', exact: true }).click()
       await page.locator('#ws-organization').fill(ORGANIZATION)
       await page.locator('#ws-project').fill(PROJECT)
       await page.locator('#ws-repository').fill(REPOSITORY)
@@ -533,7 +533,7 @@ test('#316: the version changelog is collapsed behind "Show release notes" by de
 
       await page.goto(`${gantryBase}/new-workspace`)
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
-      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+      await page.getByRole('button', { name: 'New remote workspace', exact: true }).click()
       await page.locator('#ws-organization').fill(ORGANIZATION)
       await page.locator('#ws-project').fill(PROJECT)
       await page.locator('#ws-repository').fill(REPOSITORY)
@@ -600,7 +600,7 @@ test('#25: the "+ New Workspace" wizard registers a brand new GitLab workspace e
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
 
       // ---------- Step 1: register a brand new GitLab workspace ----------
-      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+      await page.getByRole('button', { name: 'New remote workspace', exact: true }).click()
       // GitLab is a real, selectable Provider choice (#25) — no longer the disabled "Coming soon" row.
       const gitlabRadio = page.locator('input[name="ws-provider"][value="gitlab"]')
       assert.equal(await gitlabRadio.isDisabled(), false)
@@ -692,7 +692,7 @@ test('#48: the "+ New Workspace" wizard registers a brand new Atlassian workspac
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
 
       // ---------- Step 1: register a brand new Atlassian workspace ----------
-      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+      await page.getByRole('button', { name: 'New remote workspace', exact: true }).click()
       // Atlassian is a real, selectable Provider choice (#48) — no longer the disabled "Coming soon" row.
       const atlassianRadio = page.locator('input[name="ws-provider"][value="atlassian"]')
       assert.equal(await atlassianRadio.isDisabled(), false)

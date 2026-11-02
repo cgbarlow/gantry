@@ -67,9 +67,9 @@ test('dashboard: titled "Workspaces", master-detail is the default view, and its
         // instances it holds show up as their own cards in the detail column, sorted by slug.
         await page.waitForSelector('.instance-card', { timeout: 10_000 })
         assert.equal(await page.locator('.detail-pane h2').textContent(), 'default')
-        // A server directory workspace can't be created into from the New Instance step, so it gets no
-        // "+ New Instance" button (the topbar's "+ New Workspace" is the way in).
-        assert.equal(await page.locator('.workspace-detail-head').getByRole('link', { name: '+ New Instance' }).count(), 0)
+        // A server workspace (#268) can be created into from the New Instance step, so it gets a
+        // "+ New Instance" button (only the bundled Examples workspace does not).
+        assert.equal(await page.locator('.workspace-detail-head').getByRole('link', { name: '+ New Instance' }).count(), 1)
         assert.equal(await page.locator('.instance-card').count(), 2)
         const card = page.locator('.instance-card').filter({ hasText: 'alpha-initiative' })
         assert.equal(await card.locator('.name').textContent(), 'alpha-initiative')

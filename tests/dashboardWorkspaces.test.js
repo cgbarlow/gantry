@@ -7,6 +7,7 @@ import {
   workspacesNeedingOwnListing,
   describeInstanceRowWorkspace,
   workspaceNewInstanceHref,
+  unrepresentedServerWorkspaceGroups,
 } from '../web/lib/dashboardWorkspaces.js'
 
 // #122 (parent #109, docs/adr/0047): the dashboard's client-side join between `GET /api/workspaces`
@@ -284,8 +285,33 @@ test('workspaceNewInstanceHref: a local workspace links with ?local= once its fo
   for (const state of ['loading', 'prompt', 'denied', 'missing']) assert.equal(workspaceNewInstanceHref(group(state)), null, state)
 })
 
-test('workspaceNewInstanceHref: no button for a server directory workspace such as the bundled Examples', () => {
+test('workspaceNewInstanceHref: no button for the bundled Examples server workspace, but one for any other server workspace', () => {
   const group = { key: 'workspace:examples', instances: [{ slug: 'gantry', workspace: { kind: 'directory', id: 'examples', name: 'Examples' } }] }
   assert.equal(workspaceNewInstanceHref(group), null)
   assert.equal(workspaceNewInstanceHref({ key: 'local:legacy', instances: [{ slug: 'legacy' }] }), null)
+  const mine = { key: 'workspace:payments', instances: [{ slug: 'cards', workspace: { kind: 'directory', id: 'payments', name: 'Payments' } }] }
+  assert.equal(workspaceNewInstanceHref(mine), '/new-instance?workspace=payments')
+})
+
+// #268: a server workspace just created in the wizard has no instance yet, so no dashboard row.
+test('unrepresentedServerWorkspaceGroups: an empty server workspace gets a blank placeholder with a New Instance link', () => {
+  const groups = unrepresentedServerWorkspaceGroups([], [{ id: 'payments', name: 'Payments Team', description: null }])
+  assert.equal(groups.length, 1)
+  assert.equal(groups[0].kind, 'placeholder')
+  assert.equal(groups[0].state, 'blank')
+  assert.equal(groups[0].title, 'Payments Team')
+  assert.equal(groups[0].subtitle, 'Server workspace')
+  assert.equal(workspaceNewInstanceHref(groups[0]), '/new-instance?workspace=payments')
+})
+
+test('unrepresentedServerWorkspaceGroups: skips a workspace with a row and an empty reserved default, and takes the description as subtitle', () => {
+  const instances = [{ slug: 'a', workspace: { kind: 'directory', id: 'examples' } }]
+  const groups = unrepresentedServerWorkspaceGroups(instances, [
+    { id: 'examples', name: 'Examples' },
+    { id: 'default', name: 'default' },
+    { id: 'ledger', name: 'Ledger', description: 'Ledger team' },
+  ])
+  assert.deepEqual(groups.map((g) => g.workspaceId), ['ledger'])
+  assert.equal(groups[0].subtitle, 'Ledger team')
+  assert.deepEqual(unrepresentedServerWorkspaceGroups(undefined, undefined), [])
 })

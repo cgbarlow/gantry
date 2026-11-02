@@ -81,7 +81,7 @@ test('real Firefox: showDirectoryPicker is genuinely absent, and gantry degrades
       // Server-hosted still works — Firefox is a fully supported browser
       // for every part of gantry that isn't File-System-Access-API-gated.
       await page.getByRole('button', { name: 'Server-hosted', exact: true }).click()
-      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+      await page.getByRole('button', { name: 'New remote workspace', exact: true }).click()
       await page.waitForSelector('#ws-organization')
     } finally {
       await browser.close()

@@ -275,7 +275,7 @@ async function seedExtraLocalContent(page, { folderName, slug, marker, assetCont
 async function openImportSourcePanel(page, gantryBase) {
   await page.goto(`${gantryBase}/new-workspace`)
   await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
-  await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+  await page.getByRole('button', { name: 'New remote workspace', exact: true }).click()
   await page.getByRole('button', { name: 'Import from local workspace', exact: true }).click()
 }
 
@@ -302,7 +302,7 @@ async function chooseNewDestination(page, { organization, project, repository })
 }
 
 async function chooseExistingDestination(page, { organization, project, repository }) {
-  await page.getByRole('button', { name: 'An already-registered server workspace', exact: true }).click()
+  await page.getByRole('group', { name: 'Import destination' }).getByRole('button', { name: 'An existing workspace', exact: true }).click()
   await page.waitForSelector('#import-workspace-picker', { timeout: 10_000 })
   await page
     .locator('#import-workspace-picker .definition-card', { hasText: `${organization}/${project}/${repository}` })

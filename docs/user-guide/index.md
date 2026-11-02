@@ -10,9 +10,9 @@ Start at the **Workspaces** landing page. It shows the instances that Gantry kno
 
 ![Workspaces landing page showing grouped instances, search filter and creation controls](/user-guide-images/workspaces-landing.png)
 
-Choose **+ New Workspace** to begin. By default this takes you straight into the **Local** flow — see **Local workspaces** below — with no remote-provider step at all. Turn on **Advanced mode** in **Settings** first if you need a Server-hosted Workspace instead; that adds a **Workspace location** choice, **Server-hosted** or **Local**, to the top of the wizard. With **Server-hosted** chosen, you can pick a workspace already registered with this Gantry server, or register a new one. Registering a new one starts by picking its **Provider** — see **Choosing a Provider** below — which decides which location fields come next (Organization/Project/Repository for Azure DevOps, Owner/Repository for GitHub) and which work-item fields the final step offers. Provide the location, the Workspace Owner, and a Personal Access Token that proves you can actually reach that repository — Gantry checks it before registering anything, and the PAT you typed becomes that workspace's own PAT once registration succeeds.
+Choose **+ New Workspace** to begin. By default this takes you straight into the **Local** flow — see **Local workspaces** below — with no remote-provider step at all. Turn on **Advanced mode** in **Settings** first if you need a Server-hosted Workspace instead; that adds a **Workspace location** choice, **Server-hosted** or **Local**, to the top of the wizard. With **Server-hosted** chosen, you pick one of three: **An existing workspace** already registered with this Gantry server, a **New remote workspace** on a Provider, or a **New server workspace** kept on the Gantry server's own disk (see **Server workspaces** below). Registering a new remote workspace starts by picking its **Provider** — see **Choosing a Provider** below — which decides which location fields come next (Organization/Project/Repository for Azure DevOps, Owner/Repository for GitHub) and which work-item fields the final step offers. Provide the location, the Workspace Owner, and a Personal Access Token that proves you can actually reach that repository — Gantry checks it before registering anything, and the PAT you typed becomes that workspace's own PAT once registration succeeds.
 
-Next choose a Definition, such as `design`, then provide the Instance's name, directory and initial Assignee. The directory defaults from the name, but you can change it. If the Workspace's Provider tracks work items, the final step can link the Instance to a parent work item (a GitHub workspace's version of this step has no work-item-type field, since GitHub issues are untyped). A Local-workspace Instance (or a legacy local Instance) skips that step entirely — neither has a Provider.
+Next choose a Definition, such as `design`, then provide the Instance's name, directory and initial Assignee. The directory defaults from the name, but you can change it. If the Workspace's Provider tracks work items, the final step can link the Instance to a parent work item (a GitHub workspace's version of this step has no work-item-type field, since GitHub issues are untyped). An Instance in a Local workspace or a server workspace skips that step entirely — neither has a Provider.
 
 ### Choosing a Provider
 
@@ -44,17 +44,29 @@ After creation, open the Instance from the landing page. Its header identifies t
 
 ## Workspaces & Instances
 
-A **Workspace** is where an Instance's data lives — shared storage for one or more Instances — and comes in two kinds: **Server-hosted**, either a repository on a **Provider** (Azure DevOps, GitHub or GitLab — see **Choosing a Provider** above) or a directory on the Gantry server itself, both registered with Gantry, or **Local**, a folder on your own machine picked in the browser (see **Local workspaces** below). For example, a team can keep several `design` initiatives in separate directories in one Server-hosted Workspace while retaining one repository history and access boundary.
+A **Workspace** is where an Instance's data lives — shared storage for one or more Instances — and comes in three kinds: a **remote** workspace, a repository on a **Provider** (Azure DevOps, GitHub or GitLab — see **Choosing a Provider** above); a **server** workspace, a folder on the Gantry server itself (see **Server workspaces** below); or a **local** workspace, a folder on your own machine picked in the browser (see **Local workspaces** below). Remote and server workspaces are both **Server-hosted**: the Gantry server holds them. For example, a team can keep several `design` initiatives in separate directories in one Server-hosted Workspace while retaining one repository history and access boundary.
 
 An **Instance** is one run of a Definition against one initiative. It has its own module files, current Stage and Assignee. A `design` Instance might represent one system change; another `design` Instance can represent a different change in the same Workspace.
 
-Instances can live in one of three places:
+An Instance lives in a workspace, so it lives in one of three kinds of place:
 
-- A **local Instance** stores its files in the Gantry server's own `instances/` directory. It is useful for individual work or offline authoring.
-- A **Workspace-backed Instance** stores its `instance.yaml` and modules inside a Server-hosted Workspace's repository on its Provider, under `gantry-workspace/<instance-slug>/`. Its changes are made on a Stage branch and reviewed through a Pull Request (a **Merge Request** on GitLab) on that Provider — Azure DevOps, GitHub or GitLab. The mechanics are the same either way; where they differ (how sign-off and review appear, and what a linked work item looks like) is called out in **Approval workflow** below.
-- A **Local-workspace Instance** stores its files the same way, under `gantry-workspace/<instance-slug>/`, but inside a Local workspace's folder on your own machine rather than a Provider's repository — see **Local workspaces** below. It is a different thing from the local Instance above, even though both get called "local" in everyday speech: one lives on the machine running the Gantry server, the other lives on yours, and the server never sees it.
+- A **remote** workspace's Instance stores its `instance.yaml` and modules inside a repository on a **Provider**, under `gantry-workspace/<instance-slug>/`. Its changes are made on a Stage branch and reviewed through a Pull Request (a **Merge Request** on GitLab) on that Provider — Azure DevOps, GitHub or GitLab. The mechanics are the same either way; where they differ (how sign-off and review appear, and what a linked work item looks like) is called out in **Approval workflow** below.
+- A **server** workspace's Instance stores its files in a folder on the Gantry server's own disk, with no Provider at all — see **Server workspaces** below. It is useful for individual work, and for a team that wants one shared place on the server without a repository.
+- A **local** workspace's Instance stores its files the same way, under `gantry-workspace/<instance-slug>/`, but inside a folder on your own machine rather than on the server — see **Local workspaces** below. The server never sees it.
 
-The storage choice changes how stage advancement and ticketing work, but not what a Module or Field means. All three kinds of Instance use the same Definition and the same authoring experience.
+"Server" and "local" are easy to mix up because both skip the Provider: a server workspace lives on the machine running Gantry and is shared by everyone who uses that server, while a local workspace lives on yours alone.
+
+The kind changes how stage advancement and ticketing work, but not what a Module or Field means. All three kinds of Instance use the same Definition and the same authoring experience.
+
+### Server workspaces
+
+A **server workspace** is a folder on the Gantry server's disk that holds one or more Instances. Nothing is registered with a Provider, so there is no repository to create, no Personal Access Token to paste and no work item to link.
+
+To create one, turn on **Advanced mode** in **Settings**, choose **+ New Workspace**, keep **Server-hosted** selected and choose **New server workspace**. Give it a **Name** and choose where to keep it under **Store in**. **Server disk** is the only choice today; it stays behind Advanced mode, along with the Provider options. Click **Create workspace** and the wizard carries straight on to the Instance step inside it, where you pick a Definition and name the first Instance. The workspace then appears on the Workspaces landing page, and an empty one shows there too, with a **+ New Instance** button, so you can add Instances later without going back through the wizard. A workspace's name must be different from every other server workspace's.
+
+A server workspace has no branches, Pull Requests or approvals. Changes you save go straight into the Instance's files, with no review step, and nothing checks who may approve them. It advances like a Local workspace: once the current Stage's gate passes, use **Advance to next stage** to move it on yourself. See **Approval workflow** below.  Rendering a document downloads it to your browser; nothing is written back into the workspace.
+
+The folder uses the same layout as a Local workspace, a `workspace.json` marker plus one subfolder per Instance, so an operator can copy a folder between the server and a Local workspace unchanged. Gantry's own bundled **Examples** workspace is a server workspace too, and has no **+ New Instance** button because it ships with Gantry.
 
 ### Local workspaces
 
@@ -66,7 +78,7 @@ By default the wizard skips the Workspace-location question altogether and takes
 
 Editing and saving modules works entirely offline — every change goes straight to the folder through the browser, with no server involved. Checking the gate and rendering an artefact both still need the Gantry server (rendering a `.docx` in particular happens there); if the server isn't reachable, those actions say so rather than failing silently. A rendered artefact is written straight into the folder's own `out/`, the same way a Workspace-backed Instance writes into its Provider's repository.
 
-A Local-workspace Instance has no ticketing at all — no linked work item, no Review or Sign-off, no Stage branch or Pull Request. It advances the same way a local Instance does: once the current Stage's gate passes, use **Advance to next stage** to move it on yourself. See **Approval workflow** below.
+A Local-workspace Instance has no ticketing at all — no linked work item, no Review or Sign-off, no Stage branch or Pull Request. It advances the same way a server workspace's Instance does: once the current Stage's gate passes, use **Advance to next stage** to move it on yourself. See **Approval workflow** below.
 
 ### Numeric references
 
@@ -157,7 +169,7 @@ A **Stage** is an ordered phase of a Definition. It makes the relevant modules a
 
 A **Gate** is the decision point at the end of a Stage. A gate checks the artefact requirements declared by the Definition. Passing a gate permits the next action; it does not advance an Instance by itself. Local Instances — including Local-workspace Instances (see **Local workspaces** above) — advance explicitly, while Workspace-backed Instances advance when their approved Pull Request is merged.
 
-For a Workspace-backed Instance the gate is checked as part of the Work Item Detail card's **Check status** action; a local Instance with a linked work item checks it with **Check gate & sync work item**. A Local-workspace Instance has no linked work item at all, so its gate is checked as part of **Advance to next stage** itself, with no separate check step. See *Approval workflow* for the full sequence.
+For a Workspace-backed Instance the gate is checked as part of the Work Item Detail card's **Check status** action. An Instance in a server workspace or a Local workspace has no linked work item at all, so its gate is checked as part of **Advance to next stage** itself, with no separate check step. See *Approval workflow* for the full sequence.
 
 A definition lists its stages, and the gate each one ends at, in its `definition.yaml`. The `design` definition, for instance, runs from initial shaping through high-level and detailed design to operational handover, each stage ending at its own gate.
 
@@ -349,7 +361,7 @@ Use the **Render** button in the view-mode bar to open the Render dialog. It lis
 
 ![Render dialog showing selectable artefacts for the current stage](/user-guide-images/render-dialog.png)
 
-Toggle the artefacts you want, then press **Render**. Gantry renders each selected artefact in sequence and reports the output path (and, for Workspace-backed instances, the Provider URL) in the dialog. For a Workspace-backed instance the rendered `.docx` is pushed to `gantry-workspace/<instance>/out/` in the repository; for a local instance it appears under `instances/<slug>/out/`; for a Local-workspace instance it is written straight into that same `gantry-workspace/<instance>/out/` path, but inside your own folder rather than a repository.
+Toggle the artefacts you want, then press **Render**. Gantry renders each selected artefact in sequence and reports the output path (and, for Workspace-backed instances, the Provider URL) in the dialog. For a Workspace-backed instance the rendered `.docx` is pushed to `gantry-workspace/<instance>/out/` in the repository; for a server-workspace instance it downloads to your browser; for a Local-workspace instance it is written straight into that same `gantry-workspace/<instance>/out/` path, but inside your own folder rather than a repository.
 
 ### Document Control and Review & sign-off tables
 
@@ -454,7 +466,7 @@ A couple of things worth knowing if a filename looks different from what you exp
 
 A gate passing permits the next action; it does not advance an Instance by itself.
 
-For a local Instance, such as a local run of the `design` Definition, use **Advance to next stage** once the current gate has passed. Clicking it re-checks the gate and, if it passes, opens a confirmation dialog — confirm to move the Instance on to its next Stage, or decline to leave it where it is. A local Instance with a linked work item also keeps a separate **Check gate & sync work item** button, which re-checks the current gate and, if it passes, offers to push a state update to that work item. A Local-workspace Instance (see **Local workspaces** above) works the same way but has no linked work item and so no separate check button — **Advance to next stage** is the only action needed.
+For an Instance in a server workspace (see **Server workspaces** above), such as a run of the `design` Definition kept on the Gantry server, use **Advance to next stage** once the current gate has passed. Clicking it re-checks the gate and, if it passes, opens a confirmation dialog — confirm to move the Instance on to its next Stage, or decline to leave it where it is. An Instance in a Local workspace (see **Local workspaces** above) works the same way. Neither has a linked work item, so there is no separate check button — **Advance to next stage** is the only action needed.
 
 For a Workspace-backed Instance, such as a `design` initiative stored on Azure DevOps, GitHub or GitLab, everything to do with review and sign-off happens in the **Work Item Detail card** at the top of the Stage screen. There is no separate section further down the page. The card behaves the same way whichever Provider the workspace uses; the differences in what each Provider shows you are called out where they arise below.
 
