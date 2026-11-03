@@ -85,7 +85,10 @@ documents render as before; re-render an Instance to pick up the new Field bookm
   taken off a Stage.
 - **New Workspace no longer flashes a stale "New Instance" step** (#76) after an Instance Switcher
   visit.
-- **Flaky browser tests** (#72) were fixed at their shared cause.
+- **Flaky browser tests** (#72). Explicit waits in the browser tests now stretch with the machine's
+  load in CI instead of overriding it, and the fake Provider servers no longer drop idle
+  connections. Two `editor-local-workspace` tests can still time out on a machine that is
+  overloaded several times over. This only affects people running Gantry's own test suite.
 
 ## 0.12.1 — 2026-10-28
 
