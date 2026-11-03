@@ -17,6 +17,76 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.13.0 — 2026-11-03
+
+The AI interview. An architect can now start from Source documents (briefs, contracts, scanned
+pages, previous designs), and an AI of their choosing drafts the current Stage with them: it asks
+questions in rounds, shows which Fields are done, and the architect edits, saves and carries on.
+Nothing the AI writes can pass an approval or review Gate, and AI-written Modules stay `draft`
+until a person agrees them. The release also adds server workspaces stored in Azure Blob Storage,
+a Field-by-Field check on every Save, and re-approval when a later Stage changes an earlier one.
+
+**What you need to do:** nothing to keep working. To use the AI interview, add an AI Provider in
+Global Settings; the key stays in your browser and is never kept by the server. To keep server
+workspaces in Blob Storage, the operator declares the containers (see the user guide). v1 and v2
+documents render as before; re-render an Instance to pick up the new Field bookmarks in Word.
+
+### Added
+
+- **The AI interview** (#285, #286, #287, #288, #289, #290, #291, #292, #293, #294). Open it from
+  the module editor: pick an AI Provider and an Artefact, drop in Source documents, and watch the
+  AI draft every Field the documents support into a live preview. It asks question cards in
+  rounds, settles preferred terms, offers Key decisions and records open questions. Pause and it
+  resumes where it stopped, in any browser. "Run until" carries one interview across Stages. Token
+  use is shown, prompt caching is always on, and each Stage's decisions log is committed with the
+  Save.
+- **AI Providers in Global Settings** (#277, #278): add, edit and delete them, with a Test
+  connection that checks the key, model, question cards and image reading.
+- **Source documents** (#279, #280, #281, #263): add, list, rename and remove them on local, server
+  and Provider-backed workspaces. Cite them in Module content, with an optional Sources appendix.
+  GitHub and Azure DevOps now read, overwrite and delete binary files up to 100 MB.
+- **Interview instructions and standard modules** (#282, #283, #284): a Definition can carry
+  instructions for the AI, and can mount Gantry's Glossary, Open questions and Key decisions
+  modules. design v3 and recruitment-onboarding v4 are published with them (#308, #309); the
+  bundled kiwi-cover-mutual example shows Source documents, decisions logs and a Reviewed copy
+  (#310).
+- **Keeping drafts current** (#295, #296, #297, #298, #299, #300): the interview works on GitHub
+  and Azure DevOps workspaces and requests approval in Stage order; the AI drafts ahead while an
+  earlier Stage waits; Fields that drew on a changed Source document are flagged Out of date and
+  brought up to date with the architect; when an Owner sends a Stage back, the AI revises it with
+  you from the Pull Request comments.
+- **Reviewed copies** (#301, #302, #303, #304): every Word render is tagged with a bookmark around
+  each printed Field. Bring a reviewed copy back in and its comment threads come up by Field as a
+  focused interview round, then download a Review response list.
+- **Server workspaces in Azure Blob Storage** (#267, #268, #269, #265, #271): the operator declares
+  containers, Settings shows whether each can be reached, the New Workspace wizard creates a real
+  server workspace, and a Save to Blob is all-or-nothing across servers.
+- **The Gantry MCP server** (#305, #306, #307): an outside agent can read and upload Source
+  documents, read decisions logs and Reviewed copies, and run a whole AI interview session, held
+  to the same rules as the in-app AI. Every content write is checked Field by Field.
+- **Changed since approval** (#273, #274, #275, #276): an approved Stage is flagged wherever status
+  shows when a later Stage edits a Field it prints; "Restore approved text" puts the wording back;
+  a later Stage's Pull Request re-approves the earlier Stage it changed; and you re-render before
+  re-approving, with the earlier approved documents kept.
+
+### Changed
+
+- **Saves check what changed since you read the Stage, Field by Field** (#270, #272). A colleague's
+  save is merged, and a dialog asks only when you both changed the same Field. Over MCP, pass the
+  Stage version you read; a stale one is refused and names the Fields that differ.
+- **Approvals go in Stage order** (#266, #144): Request approval and Check status refuse a Stage
+  that isn't current. A Stage whose Pull Request merged on the Provider now says so and offers to
+  record the approval; it never records it by merely opening the page.
+
+### Fixed
+
+- **A Module a Stage doesn't mount is refused** (#168) with a 400 naming the Stage.
+- **The local Definition editor no longer keeps a stale read-only entry** (#171) when a Module is
+  taken off a Stage.
+- **New Workspace no longer flashes a stale "New Instance" step** (#76) after an Instance Switcher
+  visit.
+- **Flaky browser tests** (#72) were fixed at their shared cause.
+
 ## 0.12.1 — 2026-10-28
 
 The design v3 documents now read as matched sets: the As-built follows the Solution Architecture
