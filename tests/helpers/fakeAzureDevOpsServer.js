@@ -1000,6 +1000,11 @@ export function withFakeAzureDevOpsServer(
       canWrite,
       contentLog,
     })
+    // #72: never close an idle keep-alive connection from this side. The gantry server under test
+    // calls this fake from the same process through fetch(), which pools sockets; on a starved CPU
+    // the default 5s idle timer fires before the client notices, and the next request reuses a
+    // socket that has just been closed (ECONNRESET / "other side closed" -> a spurious 500).
+    server.keepAliveTimeout = 0
     server.listen(0, async () => {
       const { port } = server.address()
       try {
