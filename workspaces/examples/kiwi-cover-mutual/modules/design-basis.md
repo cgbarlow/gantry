@@ -9,14 +9,14 @@ owner: p.natarajan
 
 - Policy Data Management stays on the mainframe as the policy system of record. All policy reads and writes go through CICS transactions exposed over MQ.
 - The CRM System and the Financial Application change only through their published extension points.
-- Everything runs in KCM's Wellington data centre; no cloud landing zone is approved for member data yet.
+- Everything runs in KCM's Wellington data centre; no cloud landing zone is approved for member data yet [Client brief, p. 2](source:client-brief).
 - The BIBIT gateway must go live within the current gateway contract term.
-- Claims data stays in New Zealand.
+- Claims data stays in New Zealand [Client brief, p. 2](source:client-brief).
 
 ## Assumptions
 
 - Consent captured at policy inception covers sharing data between KCM's own systems (confirmed by the Privacy Officer).
-- The mainframe team can expose two CICS services per monthly window.
+- The mainframe team can expose two CICS services per monthly window [Design workshop notes](source:design-workshop-notes).
 - Claim volumes stay within 20 percent of today's for the design horizon.
 - The BIBIT gateway keeps supporting the bank's real-time payment API (confirmed in writing).
 

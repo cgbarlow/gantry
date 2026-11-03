@@ -14,5 +14,6 @@ owner: p.natarajan
 | Q3: Are liability claims routed to senior handlers by default, or only above a threshold? | Hana Te Rangi, Claims Operations | Increment 2 design | Open |
 | Q4: Are documents for claims closed beyond their retention period migrated or disposed of? | Karen Doyle, Records Management | Before migration design | Open |
 | Q5: Does the claims data mart feed need its own privacy impact assessment? | Elena Rossi, Privacy Office | HLD submission | Open |
+| Q6: Review comment (Reviewer 2): when will the bank’s payment API sandbox be ready? | Anaru Pihema, Treasury | Before increment 3 | Open |
 
-Q1 and Q2 are also tracked as risks R2 and R1.
+Q1 to Q5 were raised at the design workshop [Design workshop notes](source:design-workshop-notes); Q6 came out of a review comment. Q1 and Q2 are also tracked as risks R2 and R1.

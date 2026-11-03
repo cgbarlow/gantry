@@ -5420,6 +5420,7 @@ function SourceDocumentsSection({ instance }) {
       commitNote=${instance.workspaceBacked ? "Each upload, rename, new text read and removal is saved straight away as its own commit on this Stage's branch. It does not wait for Save." : ''}
       onList=${onList}
       newSince=${newSinceIds}
+      archiveName=${`${String(instance.name || instance.slug || 'Instance').replace(/[\\/:*?"<>|]/g, ' ').trim()} - Source documents.zip`}
     />
     ${notice ? html`<p class="inline-error" role="alert" data-testid="source-document-open-error">${notice}</p>` : null}
   </div>`

@@ -9,7 +9,7 @@ owner: p.natarajan
 
 Kiwi Cover Mutual's claims handling is slow because it runs across four systems never integrated after the ArchiSurance merger. This design replaces the manual hand-offs with a single Handle Claim process and shared services: the Customer Information Service (CIS), the Claims Information Service (Claims InfoServ) and payment through the BIBIT gateway. Policy Data Management stays on the mainframe as the policy system of record.
 
-The Design Authority is asked to approve the design as build-ready. Delivery is three increments over nine months. The principal risks are mainframe integration capacity and the BIBIT contract, both with mitigations in hand.
+The Design Authority is asked to approve the design as build-ready. Delivery is three increments over nine months [Design workshop notes](source:design-workshop-notes). The principal risks are mainframe integration capacity and the BIBIT contract, both with mitigations in hand.
 
 ## Overview
 

@@ -417,6 +417,8 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .review-list li { display: flex; gap: 10px; justify-content: space-between; align-items: baseline; font-size: 13px; }
 .review-reviewer { overflow-wrap: anywhere; }
 .review-meta { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+/* #310: the Review comments panel reuses the name for a line of plain text (which Reviewed copy, how many comments, who from); it wraps, where the sign-off list's meta stays on one line. */
+.review-copy .review-meta { display: block; white-space: normal; overflow-wrap: anywhere; }
 .review-status { color: var(--text-muted); }
 .signoff-pr-ref { margin: 8px 0 0; font-size: 13px; }
 .signoff-actions { display: flex; align-items: center; gap: 8px; }

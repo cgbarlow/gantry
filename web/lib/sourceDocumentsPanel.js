@@ -18,6 +18,7 @@ import {
 import { extractSourceText, noTextNote } from './sourceExtract.js'
 import { sourceCitationFor } from './sourceCitations.js'
 import { sourceListTick } from './outOfDateState.js'
+import { storedZip } from './storedZip.js'
 
 function formatWhen(iso) {
   if (!iso) return ''
@@ -76,9 +77,9 @@ export async function openSourceDocument(store, entry) {
 /**
  * #297: `newSince` is the set of document ids marked **New since last interview** (worked out from the decisions logs by the caller). Each document that a newer one replaces shows "replaced by <new>", and the upload has a "This replaces…" picker that records the link in the manifest.
  *
- * `store` is described above. `actor` is the name stamped on uploads and removals ('' when unknown). `readOnly` hides every control that changes the list (an archived Instance). `commitNote` is shown under the introduction when each change is committed to a repository as it is made (an Azure DevOps or GitHub workspace, #280). `extract(filename, bytes)` is the text reader; tests and the app use the default. `compact` draws the list as the Interview page's narrow rail does (#286): titles, a "+ Add Source document" button and a drop zone, with no table; `onList(list)` is told whenever the list has been read (after a load or a change).
+ * `store` is described above. `actor` is the name stamped on uploads and removals ('' when unknown). `readOnly` hides every control that changes the list (an archived Instance). `commitNote` is shown under the introduction when each change is committed to a repository as it is made (an Azure DevOps or GitHub workspace, #280). `extract(filename, bytes)` is the text reader; tests and the app use the default. `archiveName` is the file **Download all** saves (#310). `compact` draws the list as the Interview page's narrow rail does (#286): titles, a "+ Add Source document" button and a drop zone, with no table; `onList(list)` is told whenever the list has been read (after a load or a change).
  */
-export function SourceDocumentsPanel({ store, actor = '', readOnly = false, commitNote = '', extract = extractSourceText, onList = null, compact = false, newSince = null }) {
+export function SourceDocumentsPanel({ store, actor = '', readOnly = false, commitNote = '', extract = extractSourceText, onList = null, compact = false, newSince = null, archiveName = 'Source documents.zip' }) {
   const [list, setList] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [message, setMessage] = useState(null)
@@ -207,6 +208,19 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
       download(bytes, entry.filename)
     })
 
+  // #310: every live document in one zip (the originals, not their text), so a set of evidence, such as the bundled example's pack, can be taken to another Instance and uploaded there.
+  const downloadAll = () =>
+    run(async () => {
+      const files = []
+      for (const entry of live) {
+        const { bytes } = await store.readOriginal(entry.id)
+        if (!bytes) throw new Error(`The file for "${entry.title}" is missing from this Instance's sources folder.`)
+        files.push({ name: entry.filename, bytes })
+      }
+      download(storedZip(files), archiveName)
+      setMessage({ kind: 'ok', text: `Saved ${files.length} ${files.length === 1 ? 'document' : 'documents'} in ${archiveName}. Upload them to another Instance to start it with the same evidence.` })
+    })
+
   const copyCitation = (entry) =>
     run(async () => {
       const citation = sourceCitationFor(entry)
@@ -318,6 +332,9 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
               </label>
               ${replacesPicker()}
             </div>`}
+        ${live.length > 0
+          ? html`<div class="source-documents-pack"><button type="button" class="btn small ghost" disabled=${busy} data-testid="source-documents-download-all" onClick=${downloadAll} title="Save every document, as uploaded, in one zip">Download all (.zip)</button></div>`
+          : null}
         <p class=${`source-documents-message ${message ? message.kind : ''}`} role="status" aria-live="polite" data-testid="source-documents-message">${message ? message.text : ''}</p>
         ${list === null && !loadError ? html`<p class="loading">Loading…</p>` : null}
         ${list !== null && live.length === 0

@@ -7,7 +7,7 @@ owner: p.natarajan
 
 ## Dependencies
 
-Increment 1 can't be tested end to end until Mainframe Integration exposes the first two Policy Data Management transactions, across two monthly change windows. Treasury must complete the BIBIT contract variation for real-time claims payment, and Records Management must confirm retention rules before the document migration is designed.
+Increment 1 can't be tested end to end until Mainframe Integration exposes the first two Policy Data Management transactions, across two monthly change windows [Design workshop notes](source:design-workshop-notes). Treasury must complete the BIBIT contract variation for real-time claims payment, and Records Management must confirm retention rules by 15 May 2026, before the document migration is designed.
 
 Downstream, the Contact Centre's desktop refresh and the Digital Channels website plan to consume the shared customer and policy services.
 

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { loadDefinition } from '../../lib/definition.js'
+import { withoutCitationsAtAll } from './uncite.js'
 
 const EXAMPLE_DIR = join('workspaces', 'examples', 'kiwi-cover-mutual')
 
@@ -8,7 +9,8 @@ const EXAMPLE_DIR = join('workspaces', 'examples', 'kiwi-cover-mutual')
 // by WI #358) carries diagrams as `![…](asset:<id>)` references backed by that instance's own
 // `assets/manifest.yaml`. Tests that borrow a fixture module's text to seed some *other* instance (a
 // fake Azure DevOps repo, a local-workspace payload, a scratch instance) have no such manifest, and a
-// render would fail resolving the reference. This returns the module text with the image references
+// render would fail resolving the reference. The same goes for a `[text](source:<id>)` citation of one of
+// the example's Source documents (#310): the borrowing instance has none, so each is taken out whole. This returns the module text with the image references
 // and their citation lines removed — the prose, headings, tables and lists are untouched, so gate
 // checks and renders see the same content shape without a dangling asset lookup.
 //
@@ -16,7 +18,7 @@ const EXAMPLE_DIR = join('workspaces', 'examples', 'kiwi-cover-mutual')
 // version. An instance file finds each Field by its title, so a Field v3 retitled with its id kept
 // (#233's "Operational accounts and licences") gets back the title of the `definitionVersion` seeded.
 export function exampleModuleText(moduleId, { definitionVersion = 2 } = {}) {
-  const text = withVersion2Sections(moduleId, definitionVersion, readFileSync(join(EXAMPLE_DIR, 'modules', `${moduleId}.md`), 'utf8'))
+  const text = withVersion2Sections(moduleId, definitionVersion, withoutCitationsAtAll(readFileSync(join(EXAMPLE_DIR, 'modules', `${moduleId}.md`), 'utf8')))
   const retitled = retitledHeadings(moduleId, definitionVersion)
   return text
     .split('\n')

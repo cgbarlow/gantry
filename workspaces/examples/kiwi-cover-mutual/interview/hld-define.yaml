@@ -1,0 +1,132 @@
+version: 1
+stage: hld-define
+status:
+  - session: kcm-hld-1
+    who: p.natarajan
+    target: hld-define
+    state: saved
+    artefact: hld
+    lastAiSave: 2026-04-14T14:10:00.000Z
+    saves:
+      - 2026-04-14T14:10:00.000Z
+    models: []
+    instructions: design@3
+    skills:
+      grilling: 1.2.3
+      domain-modeling: 1.2.3
+fields:
+  nfrs.scalability-and-capacity:
+    drafted: 2026-04-14T14:10:00.000Z
+    inputs:
+      - source: requirements-register
+        title: Requirements register
+        range: Volumes and targets
+        fingerprint: 1c7387735c6764
+    entries:
+      - kcm-hld-1-2
+  risks.risk-register:
+    drafted: 2026-04-14T14:10:00.000Z
+    inputs:
+      - source: design-workshop-notes
+        title: Design workshop notes
+        fingerprint: 1fb30c4910c7c8
+    entries:
+      - kcm-hld-1-3
+  alternatives-considered.alternatives:
+    drafted: 2026-04-14T14:10:00.000Z
+    inputs:
+      - field: solution-definition.alternatives-sketch
+        title: Solution Definition · Alternatives sketch
+        fingerprint: 10718d694216dc
+    entries:
+      - kcm-hld-1-4
+entries:
+  - id: kcm-hld-1-1
+    at: 2026-04-14T13:02:00.000Z
+    session: kcm-hld-1
+    who: p.natarajan
+    kind: artefact
+    artefact: hld
+    title: High-Level Design
+    candidates:
+      - hld
+  - id: kcm-hld-1-2
+    at: 2026-04-14T13:15:00.000Z
+    session: kcm-hld-1
+    who: p.natarajan
+    kind: answer
+    round: 1
+    card: c1
+    header: Capacity
+    question: What sizes the shared services?
+    options:
+      - Five times the peak day (target assumption)
+      - The yearly volume
+    recommendation:
+      - Five times the peak day (target assumption)
+    why: The Requirements register gives 600 claims a day after a weather event; the headroom is a target, not a measurement, so it is marked as one.
+    sources:
+      - requirements-register, Volumes and targets
+    answer:
+      - Five times the peak day (target assumption)
+    followed: true
+    fields:
+      - nfrs.scalability-and-capacity
+  - id: kcm-hld-1-3
+    at: 2026-04-14T13:28:00.000Z
+    session: kcm-hld-1
+    who: p.natarajan
+    kind: answer
+    round: 1
+    card: c2
+    header: Risk owner
+    question: Who owns R4, documents migrated past their retention period, until Records Management confirms the rules?
+    options:
+      - Karen Doyle, marked interim
+      - Priya Natarajan
+    recommendation:
+      - Karen Doyle, marked interim
+    why: The owner of a risk is the person who can act on it, and an owner who has not agreed yet is marked (interim).
+    answer:
+      - Karen Doyle, marked interim
+    followed: true
+    fields:
+      - risks.risk-register
+  - id: kcm-hld-1-4
+    at: 2026-04-14T13:41:00.000Z
+    session: kcm-hld-1
+    who: p.natarajan
+    kind: answer
+    round: 1
+    card: c3
+    header: Alternatives
+    question: Why is a dedicated claims product deferred, not rejected?
+    options:
+      - It needs the same integrations plus a licence, and adds about two quarters
+      - Its cost alone
+    recommendation:
+      - It needs the same integrations plus a licence, and adds about two quarters
+    why: It stays an option if the CRM System’s workflow extension proves limiting (R3).
+    answer:
+      - It needs the same integrations plus a licence, and adds about two quarters
+    followed: true
+    fields:
+      - alternatives-considered.alternatives
+  - id: kcm-hld-1-5
+    at: 2026-04-14T13:52:00.000Z
+    session: kcm-hld-1
+    who: p.natarajan
+    kind: open-question
+    question: Are liability claims routed to senior handlers by default, or only above a threshold?
+    why: Hana Te Rangi decides; it sets the routing rules for increment 2.
+    fields:
+      - risks.open-issues
+  - id: kcm-hld-1-6
+    at: 2026-04-14T13:52:00.000Z
+    session: kcm-hld-1
+    who: p.natarajan
+    kind: open-question
+    question: Does the claims data mart feed need its own privacy impact assessment?
+    why: The Privacy Office has to answer before the HLD is submitted.
+    fields:
+      - risks.open-issues

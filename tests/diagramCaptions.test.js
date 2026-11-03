@@ -10,6 +10,7 @@ import { findDefinitionProblemsInStructure, loadDefinition } from '../lib/defini
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
 import { numberDiagrams } from '../web/lib/diagramCaptions.js'
 import { stripFieldTags } from '../lib/wordFieldTags.js'
+import { removeCitations, withoutCitations } from './helpers/uncite.js'
 
 // #195 (spec #192, ADR-0053): a Diagram caption. An author captions a Mermaid block on its fence
 // (```mermaid {caption="…"}) or an image with its alt text (![…](asset:id)), and the Word document
@@ -55,6 +56,7 @@ async function withExample(edit, fn, { version = OPTED_IN } = {}) {
     )
     cpSync(EXAMPLE, join(instancesDir, SLUG), { recursive: true })
     rmSync(join(instancesDir, SLUG, 'out'), { recursive: true, force: true })
+    removeCitations(join(instancesDir, SLUG))
     writeFileSync(join(instancesDir, SLUG, 'instance.yaml'), instanceYamlOn(version))
     for (const [moduleId, change] of Object.entries(edit)) {
       const path = join(instancesDir, SLUG, 'modules', `${moduleId}.md`)
@@ -228,7 +230,7 @@ test('an opted-in document with no captioned diagram renders exactly as before: 
 function exampleModuleFiles() {
   const moduleFiles = {}
   for (const name of readdirSync(join(EXAMPLE, 'modules'))) {
-    moduleFiles[name.replace(/\.md$/, '')] = readFileSync(join(EXAMPLE, 'modules', name), 'utf8')
+    moduleFiles[name.replace(/\.md$/, '')] = withoutCitations(readFileSync(join(EXAMPLE, 'modules', name), 'utf8'))
   }
   moduleFiles.background = withSecurityDiagram(moduleFiles.background)
   // A local workspace ships its own image bytes; this compile only needs the references.

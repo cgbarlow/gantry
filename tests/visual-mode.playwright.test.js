@@ -558,8 +558,9 @@ test('an archived instance is read-only in Visual view: no toolbar, no editable 
       assert.equal(await grid.locator('.vgrid-handle').count(), 0)
       assert.equal(await grid.locator('[contenteditable]').count(), 0)
       const field = page.locator('.field-markdown').first()
-      const before = await field.locator('.cm-content').textContent()
+      // The caret's line shows its Markdown (a citation of a Source document, #310, among it), so the text is read once the click has put the caret there.
       await field.locator('.cm-content').click()
+      const before = await field.locator('.cm-content').textContent()
       await page.keyboard.type('nope')
       assert.equal(await field.locator('.cm-content').textContent(), before)
       assert.equal(await page.locator('.md-toolbar').count(), 0)

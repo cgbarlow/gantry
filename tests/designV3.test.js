@@ -1591,10 +1591,11 @@ describe('the v3 SSAD follows the SAD\'s order and headings (#213)', () => {
   ]
 
   const requiresOf = (definition, id) => definition.artefacts.find((a) => a.id === id).requires
+  // #310: the example cites its Source documents, so each document ends with a generated Sources chapter, which is not part of the outline under test.
   const outlineOf = (id) =>
     renderArtefact('kiwi-cover-mutual', id, { instancesDir: EXAMPLES_DIR, dryRun: true })
       .markdown.split('\n')
-      .filter((line) => /^#{1,2} /.test(line) && !/\{\.unnumbered\}/.test(line))
+      .filter((line) => /^#{1,2} /.test(line) && !/\{\.unnumbered\}/.test(line) && line !== '# Sources')
 
   test('the SSAD\'s requires list is the new outline, in render order', () => {
     assert.deepEqual(requiresOf(v3(), 'ssad'), SSAD_REQUIRES)
@@ -1880,7 +1881,8 @@ describe('the v3 As-built follows the SAD\'s order and headings (#231)', () => {
   const slug = 'kiwi-cover-mutual'
   const requiresOf = (definition) => definition.artefacts.find((a) => a.id === 'as-built').requires
   const render = (id, instancesDir = EXAMPLES_DIR) => renderArtefact(slug, id, { instancesDir, dryRun: true }).markdown
-  const outlineOf = (markdown) => markdown.split('\n').filter((line) => /^#{1,2} /.test(line) && !/\{\.unnumbered\}/.test(line))
+  // #310: the example cites its Source documents, so each document ends with a generated Sources chapter, which is not part of the outline under test.
+  const outlineOf = (markdown) => markdown.split('\n').filter((line) => /^#{1,2} /.test(line) && !/\{\.unnumbered\}/.test(line) && line !== '# Sources')
   const text = (line) => line.replace(/^#+ /, '')
 
   // A scratch copy of the bundled example, and a way to write over some of a Module's Fields in it.
@@ -2023,6 +2025,7 @@ describe('the v3 As-built follows the SAD\'s order and headings (#231)', () => {
     for (const [i, entry] of toc.entries.entries()) assert.equal(bookmarks.get(entry.anchor)?.heading, expected[i].heading, entry.text)
 
     const chapters = AS_BUILT_OUTLINE.filter((line) => line.startsWith('# ')).map((line, i) => `${i + 1}\t${text(line)}`)
+    chapters.push(`${chapters.length + 1}\tSources`) // #310: the example cites its Source documents, so each document ends with the Sources chapter.
     assert.deepEqual(toc.entries.filter((e) => e.style === 'TOC1').map((e) => e.text), chapters, 'one numbered entry per chapter, in the new order')
     assert.deepEqual(toc.entries.slice(0, 4).map((e) => e.text), ['Document Control', 'Review & sign-off', '1\tOverview', '1.1\tExecutive summary'])
   })
@@ -2104,7 +2107,8 @@ describe('the v3 SOAP follows the Full SOAP\'s order and headings (#232)', () =>
   const requiresOf = (definition, id) => definition.artefacts.find((a) => a.id === id).requires
   const render = (id, { example = slug, instancesDir = EXAMPLES_DIR } = {}) =>
     renderArtefact(example, id, { instancesDir, dryRun: true }).markdown
-  const outlineOf = (markdown) => markdown.split('\n').filter((line) => /^#{1,2} /.test(line) && !/\{\.unnumbered\}/.test(line))
+  // #310: the example cites its Source documents, so each document ends with a generated Sources chapter, which is not part of the outline under test.
+  const outlineOf = (markdown) => markdown.split('\n').filter((line) => /^#{1,2} /.test(line) && !/\{\.unnumbered\}/.test(line) && line !== '# Sources')
   const text = (line) => line.replace(/^#+ /, '')
 
   // A scratch copy of a bundled example, a way to write over some of a Module's Fields in it, and a
@@ -2167,9 +2171,11 @@ describe('the v3 SOAP follows the Full SOAP\'s order and headings (#232)', () =>
     // is read from its first section, after the front matter.
     test(`${example}: the SOAP and Full SOAP show the same content as on v2, under the new headings`, () => {
       withExample((dir, setFields, pinTo) => {
+        // #310: the example cites its Source documents, so a v3 document ends with a generated Sources chapter, which v2 has no setting for.
         const body = (markdown, first) =>
           markdown
             .slice(markdown.indexOf(`\n${first}\n`))
+            .split('\n# Sources\n')[0]
             .split('\n')
             .filter((line) => line.trim() !== '' && !/^#{1,2} /.test(line))
             .sort()
@@ -2222,6 +2228,7 @@ describe('the v3 SOAP follows the Full SOAP\'s order and headings (#232)', () =>
     for (const [id, outline] of [['soap', SOAP_OUTLINE], ['soap-full', FULL_SOAP_OUTLINE]]) {
       const toc = tableOfContents(renderWord(slug, id).documentXml)
       const chapters = outline.filter((line) => line.startsWith('# ')).map((line, i) => `${i + 1}\t${text(line)}`)
+      chapters.push(`${chapters.length + 1}\tSources`) // #310: the example cites its Source documents, so each document ends with the Sources chapter.
       assert.deepEqual(toc.entries.filter((e) => e.style === 'TOC1').map((e) => e.text), chapters, id)
     }
   })

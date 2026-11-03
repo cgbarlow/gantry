@@ -10,6 +10,7 @@ import { renderArtefact } from '../lib/render.js'
 import { checkGate } from '../lib/check.js'
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
 import { STANDARD_MODULES } from '../web/lib/standardModules.js'
+import { removeCitations } from './helpers/uncite.js'
 
 // #308 (v0.13.0, #258, #252): design v3 is published with Gantry's Glossary, Open questions and Key
 // decisions standard modules (ADR-0065), its own Interview instructions (ADR-0062) and the Sources
@@ -132,6 +133,7 @@ function withCitingExample({ cite = true, version = 3 } = {}, fn) {
       const file = join(root, EXAMPLE, 'instance.yaml')
       writeFileSync(file, readFileSync(file, 'utf8').replace(/^definitionVersion: \d+$/m, `definitionVersion: ${version}`))
     }
+    if (!cite) removeCitations(join(root, EXAMPLE))
     if (cite) {
       for (const [module, heading] of [['background', '\n## Affected domains'], ['introduction', '\n## Purpose']]) {
         const path = join(root, EXAMPLE, 'modules', `${module}.md`)

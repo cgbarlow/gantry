@@ -20,4 +20,4 @@ owner: p.natarajan
 
 - I1 — Whether the claims data mart feed needs its own PIA (Q5). Owner: Elena Rossi.
 - I2 — The senior-handler routing threshold for liability claims (Q3). Owner: Hana Te Rangi.
-- I3 — The bank's payment API sandbox isn't yet provisioned. Owner: Anaru Pihema.
+- I3 — The bank's payment API sandbox isn't yet provisioned (Q6). Owner: Anaru Pihema.

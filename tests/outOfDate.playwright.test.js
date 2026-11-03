@@ -8,6 +8,7 @@ import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { serializeDecisionsLog } from '../web/lib/decisionsLog.js'
 import { wordDocument } from './helpers/sourceFixtures.js'
+import { removeCitations } from './helpers/uncite.js'
 
 // #297 (map #238, decided in #249): Fields that drew on a Source document that has since changed are flagged Out of date. The rules are
 // covered under node --test in tests/outOfDate.test.js; this is the screen: the "This replaces..." picker, the "replaced by" and "New
@@ -47,6 +48,9 @@ test('server workspace: a replaced, re-read or removed Source document flags exa
   try {
     cpSync(EXAMPLE, join(instancesDir, SLUG), { recursive: true })
     rmSync(join(instancesDir, SLUG, 'out'), { recursive: true, force: true })
+    // #310: the example brings its own Source documents, citations and decisions logs; this test starts from none of them.
+    for (const folder of ['sources', 'interview', 'reviews']) rmSync(join(instancesDir, SLUG, folder), { recursive: true, force: true })
+    removeCitations(join(instancesDir, SLUG))
 
     await withRunningServer({ slug: SLUG, instancesDir }, (base) =>
       withPage(async (page) => {

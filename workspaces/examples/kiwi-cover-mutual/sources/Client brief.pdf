@@ -1,0 +1,54 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [5 0 R 7 0 R 9 0 R] /Count 3 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Length 989 >>
+stream
+BT /F1 12 Tf 72 720 Td 14 TL (Kiwi Cover Mutual \(KCM\) - Claims handling modernisation) Tj T* (Client brief) Tj T* () Tj T* (Prepared by Hana Te Rangi, Head of Claims. 9 March 2026.) Tj T* (\(Fictitious example document, written for the Gantry example.\)) Tj T* () Tj T* (1. Why now) Tj T* () Tj T* (A member who makes a straightforward home or motor claim waits a median of 12.4 working days) Tj T* (from notification to payment. Members expect five.) Tj T* () Tj T* (Every claim touches four separately operated systems: Policy Data Management on the) Tj T* (mainframe, the CRM System, the Home & Away Financial Application and the document) Tj T* (management system. A handler keys the claim into each of them.) Tj T* () Tj T* (Around 18 percent of claims are re-keyed at least once.) Tj T* (Only two contractors still hold mainframe skills, so the risk grows every year.) Tj T* () Tj T* (The platform was inherited from the 2014 ArchiSurance merger and was never integrated.) Tj T* ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+6 0 obj
+<< /Length 1014 >>
+stream
+BT /F1 12 Tf 72 720 Td 14 TL (2. What good looks like) Tj T* () Tj T* (- Median notification-to-payment time for standard claims at or below five working days,) Tj T* (  within two quarters of go-live.) Tj T* (- Claim re-key rate below three percent.) Tj T* (- Ninety-five percent of approved claims paid within one working day.) Tj T* (- No increase in the fraud referral rate, and no loss of audit trail, checked at the first) Tj T* (  post-go-live audit.) Tj T* () Tj T* (3. Boundaries) Tj T* () Tj T* (- Policy Data Management stays the system of record for policies and the claims ledger.) Tj T* (- Claims data stays in New Zealand. Everything runs in the Wellington data centre; no cloud) Tj T* (  landing zone is approved for member data yet.) Tj T* (- The CRM System and the Financial Application are extended, not replaced.) Tj T* (- Out of scope: underwriting, pricing and product configuration; broker, partner and mobile) Tj T* (  channels; fraud analytics beyond the existing referral rules.) Tj T* ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+8 0 obj
+<< /Length 939 >>
+stream
+BT /F1 12 Tf 72 720 Td 14 TL (4. Timing and money) Tj T* () Tj T* (- Three increments over about nine months: Register and Accept, then Valuate, then Pay.) Tj T* (- The BIBIT payment gateway must go live within its current contract term.) Tj T* (- Delivery is funded from the 2026 operating budget; there is no contingency for a) Tj T* (  separate platform purchase.) Tj T* () Tj T* (5. People) Tj T* () Tj T* (- Sponsor and process owner: Hana Te Rangi, Head of Claims.) Tj T* (- Delivery lead: Priya Natarajan, Solution Architect.) Tj T* (- Treasury \(BIBIT contract\): Anaru Pihema.) Tj T* (- Records Management \(retention rules\): Karen Doyle.) Tj T* (- Privacy Office \(member consent and PIA\): Elena Rossi.) Tj T* () Tj T* (6. What we are asking of the design) Tj T* () Tj T* (One Handle Claim process on shared customer, policy and claim data, so a member reports a) Tj T* (claim once and is paid the day it is approved.) Tj T* ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 8 0 R /Resources << /Font << /F1 3 0 R >> >> >>
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000127 00000 n 
+0000000197 00000 n 
+0000001237 00000 n 
+0000001363 00000 n 
+0000002429 00000 n 
+0000002555 00000 n 
+0000003545 00000 n 
+trailer
+<< /Size 10 /Root 1 0 R >>
+startxref
+3671
+%%EOF

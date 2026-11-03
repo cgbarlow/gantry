@@ -1,0 +1,158 @@
+version: 1
+stage: detailed-design
+status:
+  - session: kcm-dd-1
+    who: p.natarajan
+    target: detailed-design
+    state: saved
+    artefact: sad
+    lastAiSave: 2026-06-02T11:02:00.000Z
+    saves:
+      - 2026-06-02T11:02:00.000Z
+    models: []
+    instructions: design@3
+    skills:
+      grilling: 1.2.3
+      domain-modeling: 1.2.3
+fields:
+  glossary.terms:
+    drafted: 2026-06-02T11:02:00.000Z
+    inputs: []
+    entries:
+      - kcm-dd-1-2
+      - kcm-dd-1-3
+  key-decisions.decisions:
+    drafted: 2026-06-02T11:02:00.000Z
+    inputs:
+      - source: design-workshop-notes
+        title: Design workshop notes
+        fingerprint: 1fb30c4910c7c8
+      - field: solution-definition.high-level-solution-overview
+        title: Solution Definition · High level solution overview
+        fingerprint: 12cf784a92c35e
+    entries:
+      - kcm-dd-1-4
+      - kcm-dd-1-5
+entries:
+  - id: kcm-dd-1-1
+    at: 2026-06-02T09:20:00.000Z
+    session: kcm-dd-1
+    who: p.natarajan
+    kind: artefact
+    artefact: sad
+    title: Solution Architecture Document
+    candidates:
+      - sad
+      - ssad
+  - id: kcm-dd-1-2
+    at: 2026-06-02T09:35:00.000Z
+    session: kcm-dd-1
+    who: p.natarajan
+    kind: term
+    round: 1
+    card: t1
+    header: Name
+    question: Which name do the documents use for the payment service?
+    options:
+      - BIBIT gateway
+      - Payment provider
+      - Bibit
+    recommendation:
+      - BIBIT gateway
+    why: The BIBIT contract and the Treasury team both use "BIBIT gateway".
+    preferred: BIBIT gateway
+    avoid:
+      - Payment provider
+      - Bibit
+    meaning: The third-party payment gateway for premium collection and claims payment
+    followed: true
+    fields:
+      - glossary.terms
+  - id: kcm-dd-1-3
+    at: 2026-06-02T09:38:00.000Z
+    session: kcm-dd-1
+    who: p.natarajan
+    kind: term
+    round: 1
+    card: t2
+    header: Name
+    question: Which name do the documents use for the shared customer service?
+    options:
+      - CIS
+      - Customer Master
+      - Customer hub
+    recommendation:
+      - CIS
+    why: CIS is the name on the architecture diagrams, and the Glossary already carries it.
+    preferred: CIS
+    avoid:
+      - Customer Master
+      - Customer hub
+    meaning: "Customer Information Service: the new shared service for customer, contact and policy-summary data"
+    followed: true
+    fields:
+      - glossary.terms
+  - id: kcm-dd-1-4
+    at: 2026-06-02T10:05:00.000Z
+    session: kcm-dd-1
+    who: p.natarajan
+    kind: answer
+    round: 2
+    card: d1
+    header: Shared services
+    question: Do applications share customer and claim data through services, or copy it?
+    options:
+      - Shared services (CIS and Claims InfoServ)
+      - Point-to-point copies
+    recommendation:
+      - Shared services (CIS and Claims InfoServ)
+    why: The workshop settled it, and it is the decision most other decisions rest on.
+    sources:
+      - design-workshop-notes
+    answer:
+      - Shared services (CIS and Claims InfoServ)
+    followed: true
+    keyDecision: true
+    significance:
+      hardToReverse: Every application would have to be rebuilt to change it.
+      surprising: Point-to-point looks quicker for one application.
+      tradeOff: Every application depends on two new services.
+    fields:
+      - key-decisions.decisions
+  - id: kcm-dd-1-5
+    at: 2026-06-02T10:12:00.000Z
+    session: kcm-dd-1
+    who: p.natarajan
+    kind: answer
+    round: 2
+    card: d2
+    header: System of record
+    question: Does Policy Data Management stay the system of record?
+    options:
+      - Yes, behind four CICS transactions (PDM-01 to PDM-04)
+      - Move it off the mainframe first
+    recommendation:
+      - Yes, behind four CICS transactions (PDM-01 to PDM-04)
+    why: Moving it is the largest and least certain piece of work on the roadmap, and would defer the benefit by at least eighteen months.
+    sources:
+      - design-workshop-notes
+    answer:
+      - Yes, behind four CICS transactions (PDM-01 to PDM-04)
+    words: Keep it. We are changing how people work, not where the policies live.
+    followed: true
+    keyDecision: true
+    significance:
+      hardToReverse: Services built on the transactions assume the mainframe stays.
+      surprising: The mainframe is what makes the process slow.
+      tradeOff: Delivery follows the mainframe change windows.
+    fields:
+      - key-decisions.decisions
+  - id: kcm-dd-1-6
+    at: 2026-06-02T10:30:00.000Z
+    session: kcm-dd-1
+    who: p.natarajan
+    kind: open-question
+    question: Are documents for claims closed beyond their retention period migrated or disposed of?
+    why: Records Management has to confirm the retention rules before the migration is designed.
+    fields:
+      - risks.risk-register

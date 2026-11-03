@@ -18,6 +18,7 @@ import { runLocalWorkspaceCompute, LocalWorkspaceRequestError } from '../lib/loc
 import { createAsset, listAssets } from '../lib/assets.js'
 import { findDefinitionProblemsInStructure, loadDefinition, buildDefinitionYamlObject } from '../lib/definition.js'
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
+import { removeCitations } from './helpers/uncite.js'
 
 // #281 (map #238, decided in #245): Source documents cited from module content as `[text](source:<id>)`, printed as plain "(text)" in Word, and an optional Sources appendix an Artefact's Definition opts into with `source-appendix: true`.
 
@@ -233,6 +234,8 @@ async function withCitingExample({ appendix, manifest = MANIFEST }, fn) {
       assert.notEqual(edited, without)
       writeFileSync(defPath, edited)
     }
+    // #310: the example brings its own Source documents; an Instance "with no Source documents" has none.
+    if (!manifest) rmSync(join(instancesDir, SLUG, 'sources'), { recursive: true, force: true })
     if (manifest) {
       mkdirSync(join(instancesDir, SLUG, 'sources'), { recursive: true })
       writeFileSync(join(instancesDir, SLUG, 'sources', 'manifest.yaml'), stringifyYAML(manifest))
@@ -321,6 +324,7 @@ describe('rendering', () => {
       cpSync(EXAMPLE, join(instancesDir, SLUG), { recursive: true })
       rmSync(join(instancesDir, SLUG, 'out'), { recursive: true, force: true })
       writeFileSync(join(instancesDir, SLUG, 'instance.yaml'), readFileSync(join(instancesDir, SLUG, 'instance.yaml'), 'utf8').replace(/^definitionVersion: \d+$/m, 'definitionVersion: 3'))
+      removeCitations(join(instancesDir, SLUG))
       const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir: 'definitions', dryRun: true, wordTags: false })
       assert.doesNotMatch(result.docxMarkdown, /# Sources/)
       assert.equal(result.docxMarkdown.includes('source:'), false)
